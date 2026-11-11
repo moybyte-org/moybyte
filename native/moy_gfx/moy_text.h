@@ -96,6 +96,9 @@ int moy_font_load(const uint8_t *src, size_t n, uint32_t *id);
 // Free a loaded font's row; its id is refused from then on. 1, or 0 for an id
 // that names no loaded font (petme128 is never freed).
 int moy_font_free(uint32_t font);
+// A loaded font's file as it was loaded, its length into *n; NULL (and 0)
+// for petme128 or an id no font holds. Valid until the font is freed.
+const uint8_t *moy_font_bytes(uint32_t font, size_t *n);
 
 // Free every loaded font. The slots are the process's and outlive a VM.
 void moy_font_reset(void);

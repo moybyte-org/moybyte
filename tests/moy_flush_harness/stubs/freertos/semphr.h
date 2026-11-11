@@ -8,7 +8,12 @@
 typedef struct h_sem *SemaphoreHandle_t;
 
 SemaphoreHandle_t xSemaphoreCreateBinary(void);
+// A mutex is a binary semaphore that starts given (no priority inheritance:
+// the harness is cooperative).
+SemaphoreHandle_t xSemaphoreCreateMutex(void);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t sem);
+BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken);
+void vSemaphoreDelete(SemaphoreHandle_t sem);
 
 #endif // H_STUB_FREERTOS_SEMPHR_H

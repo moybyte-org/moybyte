@@ -94,7 +94,7 @@ shows -- cut to its window or the content under the bar, less the hint band
 is held to 4.5:1, a part to 3:1, the structure ramp's hairlines
 (`STRUCTURE_TOKENS`) to 1.5:1 and an Off or a rest track to 1.6:1 (D-05);
 a toggle's knob is measured on its track; a current
-mark by the look's `current.style`, a faint plate passing on its label's
+mark by the cell's declared `on` mark, a faint plate passing on its label's
 ink; a swatch only has to show, and a preview card is measured by its ring.
 A measure with a known, filed gap (`KNOWN`) names it in the CSV's owner
 column and is no FLAG; the run and each index.txt count the FLAGs and the
@@ -277,7 +277,7 @@ class _Keep:
 
 
 def _badges(ws, state):
-    ws.ach.unlocked = {k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]}
+    ws.ach.seed({k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]})
     ws.ach.toast = None
 
 
@@ -305,23 +305,24 @@ def _achievements(config, state, focus, pop=False, scroll=False):
         sl = ws.settings_layer
         sl.open_page("achievements")
         page = sl.achievements
-        page._focus = "Badge " + focus
+        page._focus = "Badge system " + focus
         _settle(g, ws, 3)
         if pop:
-            page._open(page._by_id["Badge " + focus])
+            page._open(page._by_id["Badge system " + focus])
     return setup
 
 
 def _unlock(config, badge, game=False, secret=False):
     def setup(g, ws):
         _badges(ws, "many" if not secret else "few")
-        ws.ach.unlocked.pop(badge, None)
+        found = ws.ach.doc().get("system", {}).get("found", {})
+        ws.ach.seed({k: v[0] for k, v in found.items() if k != badge})
         if game:
             ws.go_home()
             if getattr(ws.wm, "mode", None) is not None:
                 ws.open_library()
             ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             for _ in range(PAUSE_FRAMES):
                 g._quiesce(ws)
                 ws.frame(g._DT)
@@ -480,14 +481,14 @@ def _stopped(compiled=False):
         if getattr(ws.wm, "mode", None) is not None:
             ws.open_library()
         ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-        ws.run(ws.project, ws.launcher_layer)
+        ws.play(ws.launcher_layer)
         for _ in range(PAUSE_FRAMES):
             g._quiesce(ws)
             ws.frame(g._DT)
         if compiled:
             ws.cart["runtime"] = "wasm"
-        ws.player._capture_frame_error(ws, TypeError(_STOP_ERROR[11:]))
-        ws.player.crash_line = 42
+        ws.run.player._capture_frame_error(ws, TypeError(_STOP_ERROR[11:]))
+        ws.run.player.crash_line = 42
     return setup
 
 
@@ -496,10 +497,10 @@ def _notice(g, ws):
     from runtime import chrome_ops
     _home(g, ws)
     ws._open_workspace(g._cart_by_title(ws, "Sky Run"))
-    p = ws.player
+    p = ws.run.player
     p._notice = p.cart_error = chrome_ops.newer_text(["tilemap2"])
     p._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 def _see_why(g, ws):
@@ -551,7 +552,6 @@ def _saver(g, ws):
 
 def _web(g, ws):
     _settings(g, ws)
-    ws.system.set("web_pin", "4821")
     if ws.webhost is None:
         ws.webhost = _LookWebHost()
     if not ws.webhost_serving():
@@ -574,7 +574,7 @@ class _LookWebHost:
         return "http://192.168.1.42/"
 
     def paired_url(self):
-        return "http://192.168.1.42/?pin=4821"
+        return "http://192.168.1.42/#t=Mk9yQ3hTbFdQSEV4dkZq&b=xZ7aKq2bYEo"
 
 
 _SCRIPT = ("print(\"Hello! I'm Ada's first script.\")\n"
@@ -601,7 +601,7 @@ def _perf(detail):
             # the HUD's numbers, set after the goldens' quiesce turns it off
             ws.show_fps = True
             ws.perf_hud = detail
-            ws._fps, ws._flush_ms, ws._draw_ms, ws._upd_ms = 30.0, 9.6, 19.3, 5.1
+            ws.frame_state.fps, ws._flush_ms, ws._draw_ms, ws._upd_ms = 30.0, 9.6, 19.3, 5.1
             return frame(dt)
         ws.frame = held
     return setup
@@ -648,7 +648,7 @@ def _tool_cart(g, ws):
     made = moy_catalogue.create("Egg Timer", ws.carts_root, src=EGG_TIMER, type="tool")
     ws.carts.rescan()
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 # The Editor's theme mode (GAPS 56, rounds/round17.py's theme_*): the door,
@@ -1253,12 +1253,12 @@ def _notes(g, ws, state, window):
         ws.pointer.visible = False        # the T-Deck's targets: no pointer rests
     ws.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Notes"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     _settle(g, ws, 3)
     if window:
         _place(ws, "desktop", 112, 52, 900, 536)
         _settle(g, ws, 3)
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     if state == "list":
         ns["cur"] = 2
     elif state == "new":
@@ -1444,7 +1444,7 @@ def _tool_xy(ws, ns, name):
     """The middle of tool `name`'s box as the Notes cart drew it last, in the
     desk's pixels."""
     from runtime import ui_draw
-    b = ui_draw._C.api_box(ws.player._ui[0], name)
+    b = ui_draw._C.api_box(ws.run.player._ui[0], name)
     gx, gy, _s = ws.wm.viewport()
     return gx + b[0] + b[2] // 2, gy + b[1] + b[3] // 2
 
@@ -1627,7 +1627,7 @@ def _pause(g, ws):
     if getattr(ws.wm, "mode", None) is not None:
         ws.open_library()                 # the windowed tier plays in console mode
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     for _ in range(PAUSE_FRAMES):
         g._quiesce(ws)
         ws.frame(g._DT)
@@ -3091,10 +3091,13 @@ def _tab_ink(img, r, plate):
 
 def _current_pairs(ws, probe, img):
     """The open tab's current mark against the ground beside it, by the
-    look's `current.style`: a bar under the tab, else a plate -- and where
-    a plate is faint, its second cue, the label's ink against a plain
-    tab's, which is flagged only when both miss."""
-    style = (_theme_look(ws).get("current") or {}).get("style", "bar")
+    cell's declared `on` mark (`marks.cell.on`): an underline under the
+    tab, else a plate -- and where a plate is faint, its second cue, the
+    label's ink against a plain tab's, which is flagged only when both
+    miss."""
+    import moy_ui
+    mark = moy_ui.theme_marks(ws.look.theme_name, ws.look.theme_variant == "light")[2][4][0]
+    style = "bar" if mark == 7 else "plate"           # MOY_UI_MK_UNDERLINE
     tabs = probe.last["tabs"]
     out = []
     for r, active in tabs:
@@ -3178,7 +3181,7 @@ def _mark_pairs(ws, img, box, view, kind=None):
     th = ws.theme_colors
     focus = _token_rgbs(ws, ("focus",))
     px = img.load()
-    reach = max(2, ui_draw.mark_reach("part"))
+    reach = max(2, ui_draw.mark_reach("cell"))
     # the row's leading edge: where an edge, a bar beside a row, a ring and
     # a plate all lie, and a field's own ring inside the row does not
     x0, x1 = max(0, r[0] - reach), min(img.width, r[0] + reach + 4)
@@ -3214,12 +3217,18 @@ def _code_pairs(ws, img):
     """The Code tab's one inset (design review R3-10): the status line and
     the symbol keys start on the layout's `x0`, a line's number right-aligned
     in the gutter that starts there and its code on the text column after
-    it (D-03.1), a bearing's pixel aside; the worst of them is the measure."""
+    it (D-03.1), a bearing's pixel aside; the worst of them is the measure.
+    What an open system menu's card covers is not sampled."""
     if ws.screen != "menu" or getattr(ws, "menu_view", None) != "code":
         return []
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
     if lay is None:
         return []
+    mu = getattr(ws, "menu_ui", None)
+    card = mu._host.box("System") if mu is not None and ws.sysmenu.open else None
+
+    def shows(x, y, w, h):
+        return card is None or not _meets(card, (x, y, w, h))
     ed = ws.editor
     fs, x0 = lay.fs, lay.x0
     cl = ws.code_layer
@@ -3229,8 +3238,9 @@ def _code_pairs(ws, img):
     edges = []
     for i in range(lay.rows):
         n = ed.top + i
-        if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha():
-            y = oy + lay.y0 + i * lay.lh
+        y = oy + lay.y0 + i * lay.lh
+        if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha() \
+                and shows(ox + lay.cx, y, lay.cw, lay.lh):
             if gc:
                 at = x0 + (gc - 1 - len(str(n + 1))) * lay.cell
                 e = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
@@ -3239,7 +3249,8 @@ def _code_pairs(ws, img):
             edges.append((e, tx0))
             break
     sx, sy, _sw, sh = lay.status_band
-    edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
+    if shows(ox + sx, oy + sy, 200, sh):
+        edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
     if getattr(lay, "sym_h", 0):
         ky = oy + lay.sym_y + lay.sym_h // 2
         edges.append((_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1), x0))
@@ -3369,7 +3380,9 @@ def _rim_pairs(ws, probe, img):
     """A lifted card's rim hugs its cover (design review R3-05): between
     the hero's cover and its rim no run of the card's plate (Moy's lift)."""
     look = _theme_look(ws)
-    if (look.get("focus") or {}).get("card") != "lift" or ws.screen != "launcher" \
+    lift = [lk.get("marks", {}).get("card", {}).get("focus", {}).get("lift")
+            for lk in (look, look.get(ws.look.theme_variant, {}))]
+    if not any(lift) or ws.screen != "launcher" \
             or ws.sysmenu.open or ws.pause.open or ws.confirm.open:
         return []           # a menu or a dialog over the home takes the hero's lift
     covers = probe.last["covers"]

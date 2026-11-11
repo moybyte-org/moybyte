@@ -19,6 +19,10 @@ name    = "guition_jc3248w535"
 chip    = "esp32s3"
 ota     = "guition_s3"      # the board id inside a signed OTA manifest (#53)
 tier    = "handheld"
+# The handheld's faces and the tap floor's (tools/make_font.py's TAP): the
+# floor stands on this glass (the [panel] diagonal below), and a bubble reads
+# in them (runtime/toolkit/fontset.py's TAP_ROLES).
+font_tier = ["handheld", "tap"]
 tier_why = """
 Fullscreen tier, like the T-Deck, but with TWO canvases: the system surface is
 the LANDSCAPE 480x320 glass (the panel is portrait-native with a dead MADCTL
@@ -228,7 +232,11 @@ otadata_size   = "0x2000"
 # took the image near the floor, and to 7 MiB (owner, 2026-10-26) when the
 # look's theme mode took it back there: the theme fonts stay in the image, and
 # the vfs (the store's fallback without a card) gives the room.
-headroom_floor_kib = 512
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. This board's USB-Serial/JTAG is ON the SoC, which
@@ -269,6 +277,71 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class` (with the device API it names), `lease`,
+# `never` -- or in `unused`. The pins are README.md's "Hardware facts". The
+# pins it does not name are `unused`, not leased: the speaker's amp pins are
+# among them and unverified (stage 5), and no header is recorded.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = [2, 6, 7, 9, 14, 15, 16, 17, 18, 38, 41, 42, 43, 44]
+
+[[hardware.resource]]
+name = "panel"
+class = "os"
+pins = {clk = 47, d0 = 21, d1 = 48, d2 = 40, d3 = 39, cs = 45}
+why = "the AXS15231B's QSPI on SPI2, fed by the kernel's banded present"
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 4, scl = 8, touch_int = 3}
+why = "the AXS15231 touch, read by the kernel's input task"
+
+[[hardware.resource]]
+name = "spi3"
+class = "os"
+pins = {cs = 10, mosi = 11, sclk = 12, miso = 13}
+why = "the TF card, the cart store; the bus is initialised once and never torn down"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 1}
+
+[[hardware.resource]]
+name = "radio"
+class = "class"
+api = ["http", "ble"]
+pins = []
+
+[[hardware.resource]]
+name = "battery"
+class = "never"
+pins = {adc = 5}
+why = "the cell's divider (~1.72x); this image stages no battery reader for it"
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = {boot = 0, vdd_spi = 46}
+why = "strapping; GPIO0 is the BOOT button"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG the console, its dev channel and the flasher are reached through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "the flash and the octal PSRAM"
+
 [native]
 dest = "native/.staged"
 
@@ -283,6 +356,13 @@ stage that revisits it. moy_sd crosses: the TF card on SPI3 is opened by it
 and read through native/moy_store's card volume."""
 
 [[native.shared.deny]]
+module = "moy_usbdisk"
+why = """
+USB mass storage is the P4s' and the T-Deck's (docs/os_2026-11/between_apps.md
+section 2). This board's USB is its dev channel alone, and its internal RAM
+is the tightest of the boards; taking it is a decision of its own."""
+
+[[native.shared.deny]]
 module = "moy_audio"
 why = """
 Audio is stage 5 and OPEN: the board family ships a speaker header, but which
@@ -290,6 +370,16 @@ amp (if any) is populated and on which I2S pins is unverified -- the ESPHome
 definition drives no audio. moy_audio's synth half is board-agnostic; its I2S
 plumbing wants pins nobody has measured (mpconfigboard.h names none). Take it
 at stage 5 with the pins in mpconfigboard.h."""
+
+[[native.shared.deny]]
+module = "moy_media"
+why = """
+The media service plays into moy_audio's mix, which this board denies until
+its speaker header's amp and pins are verified (audio, stage 5 above). Its
+MEDIA row in THE SHARES (native/moy_play/moy_play.h) is absent with it, so
+`moybyte.media` is None here. RAM is not what stops it: after a Brick Siege
+run the desk is 507 KB above the 4 MiB cart floor (#246, 2026-11-04), so the
+row is the T-Deck's 192 KiB once audio is taken."""
 
 [[native.shared.take]]
 module = "moy_wasm"
@@ -300,6 +390,15 @@ ships on every console board or on none, so this board takes it. It is the
 floor board for memory, and the on-glass suite's wasm checks are the gate on
 it. The run stack's size and placement are this board's MOY_WASM_* settings in
 mpconfigboard.h, with the measurement that chose them."""
+
+[[native.shared.take]]
+module = "moy_elf"
+why = """
+The native tier (native/moy_elf/README.md): the vendored elf_loader, the
+process model a module runs under and the OS table it calls by ordinal. A
+module's text and data live in PSRAM, loaded when it runs and freed when it
+ends, so what the tier costs at rest is its code in both OTA slots. The tier
+ships on every console board or on none, so this board takes it."""
 
 [[native.shared.take]]
 module = "moy_play"
@@ -354,6 +453,16 @@ The links' native home (docs/history/kernel_survival_2026-10.md section 6): WiFi
 link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
 nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
 takes it."""
+
+[[native.shared.take]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md, docs/os_2026-11/system.md
+section 1): dash, the session, the C built-ins, the board's host table and the
+serial face, the dev channel's `sh` word. It answers with the VM stopped, so
+it is the kernel's, and a console takes it where its image has the room. Its writable data is one word
+(tests/test_moy_sh.py); a session is PSRAM, made when a face first runs."""
+
 
 
 # ---------------------------------------------------------------------------

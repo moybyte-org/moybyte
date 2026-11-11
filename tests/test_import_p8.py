@@ -775,26 +775,26 @@ def test_the_imported_cart_runs_its_own_code_under_the_player(tmp_path):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._lua is not None, "the lua runtime seam never started"
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._lua is not None, "the lua runtime seam never started"
 
     # 30 console frames at the cart's own 1/30 dt -> 30 p8 ticks. The driver
     # normally opens each frame's input window; there is no driver here.
     for _ in range(30):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player._lua.get_global("ticks") == 30, \
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player._lua.get_global("ticks") == 30, \
         "the cart's own _update did not run 30 times"
 
     # ...and the cart's own state moved when a button was held, through the
     # shim's numeric btn() over the console's named one.
-    before = ws.player._lua.get_global("x")
+    before = ws.run.player._lua.get_global("x")
     ws.input.set_held("right", True)
     for _ in range(10):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-    assert ws.player._lua.get_global("x") == before + 10, \
+    assert ws.run.player._lua.get_global("x") == before + 10, \
         "btn(1) did not reach the cart through the shim"
 
 
@@ -1082,13 +1082,13 @@ def test_a_button_code_reads_the_same_by_every_route(tmp_path):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(4):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
-    canvas = ws.canvas
+    canvas = ws.run.canvas
     rows = [[canvas.pix(x, y0 + dy) for dy in range(5) for x in range(4)]
             for y0 in (0, 8, 16)]
     assert rows[0] == rows[2], "the escape must draw what the letter draws"
@@ -1151,11 +1151,11 @@ def _run_p8(tmp_path, body, frames=60, dt=1.0 / 60):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(frames):
         ws.input.begin_frame()
         ws.frame(dt)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     return ws
 
 
@@ -1172,7 +1172,7 @@ def test_a_cart_that_defines_update60_actually_updates(tmp_path):
                            "function _update60() ticks = ticks + 1 end\n"
                            "function _draw() cls(0) end\n",
                  frames=60, dt=1.0 / 60)
-    assert ws.player._lua.get_global("ticks") == 60, \
+    assert ws.run.player._lua.get_global("ticks") == 60, \
         "_update60 must run once per frame at 60fps"
 
 
@@ -1184,8 +1184,8 @@ def test_update60_beats_update_when_a_cart_defines_both(tmp_path):
                            "function _update60() fast = fast + 1 end\n"
                            "function _draw() cls(0) end\n",
                  frames=60, dt=1.0 / 60)
-    assert ws.player._lua.get_global("fast") == 60
-    assert ws.player._lua.get_global("slow") == 0
+    assert ws.run.player._lua.get_global("fast") == 60
+    assert ws.run.player._lua.get_global("slow") == 0
 
 
 def test_a_plain_update_cart_still_ticks_at_thirty(tmp_path):
@@ -1195,7 +1195,7 @@ def test_a_plain_update_cart_still_ticks_at_thirty(tmp_path):
                            "function _update() ticks = ticks + 1 end\n"
                            "function _draw() cls(0) end\n",
                  frames=30, dt=1.0 / 30)
-    assert ws.player._lua.get_global("ticks") == 30
+    assert ws.run.player._lua.get_global("ticks") == 30
 
 
 def test_rnd_of_a_table_returns_an_element_of_it(tmp_path):
@@ -1213,9 +1213,9 @@ def test_rnd_of_a_table_returns_an_element_of_it(tmp_path):
                            "end\n"
                            "function _draw() cls(0) end\n",
                  frames=4, dt=1.0 / 30)
-    assert ws.player._lua.get_global("picked") == 7, "must pick an element"
-    assert ws.player._lua.get_global("empty") == -1, "an empty table is nil"
-    assert ws.player._lua.get_global("num") == 0, "the numeric form still works"
+    assert ws.run.player._lua.get_global("picked") == 7, "must pick an element"
+    assert ws.run.player._lua.get_global("empty") == -1, "an empty table is nil"
+    assert ws.run.player._lua.get_global("num") == 0, "the numeric form still works"
 
 
 _BTNP_PROBE = ("edges, held, ticks = 0, 0, 0\n"
@@ -1241,7 +1241,7 @@ def _tap(tmp_path, lifecycle, host_dt, hold_frames):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(3):
         ws.input.begin_frame()
         ws.frame(host_dt)
@@ -1253,8 +1253,8 @@ def _tap(tmp_path, lifecycle, host_dt, hold_frames):
     for _ in range(3):
         ws.input.begin_frame()
         ws.frame(host_dt)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    lua = ws.player._lua
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    lua = ws.run.player._lua
     return (lua.get_global("edges"), lua.get_global("held"),
             lua.get_global("ticks"))
 
@@ -1318,9 +1318,9 @@ def test_releasing_resets_the_repeat(tmp_path):
         for _ in range(20 if held else 5):
             ws.input.begin_frame()
             ws.frame(1.0 / 60)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     per_hold = 1 + (20 - 15 - 1) // 4 + 1
-    assert ws.player._lua.get_global("edges") == 2 * per_hold, \
+    assert ws.run.player._lua.get_global("edges") == 2 * per_hold, \
         "each hold must start its repeat clock from zero"
 
 
@@ -1345,7 +1345,7 @@ def test_a_transparent_fillp_does_not_paint_the_screen_black(tmp_path):
                  " fillp()\n"
                  "end\n",
                  frames=6, dt=1.0 / 30)
-    cv = ws.canvas
+    cv = ws.run.canvas
     lit = sum(1 for y in range(0, 100, 7) for x in range(0, 100, 7)
               if cv.pix(x, y) != 0)
     assert lit > 100, ("the transparent overlay painted the scene out -- "
@@ -1365,7 +1365,7 @@ def test_an_opaque_fillp_still_fills(tmp_path):
                  " fillp()\n"
                  "end\n",
                  frames=6, dt=1.0 / 30)
-    cv = ws.canvas
+    cv = ws.run.canvas
     lit = sum(1 for y in range(0, 100, 7) for x in range(0, 100, 7)
               if cv.pix(x, y) != 0)
     assert lit > 100, "an opaque fillp must still draw (%d lit)" % lit
@@ -1390,7 +1390,7 @@ def test_a_glyph_works_as_a_value_and_as_a_variable(tmp_path):
                  "end\n"
                  "function _draw() cls(0) end\n",
                  frames=4, dt=1.0 / 30)
-    lua = ws.player._lua
+    lua = ws.run.player._lua
     assert lua.get_global("btnval") == 1, "the right arrow is button 1"
     assert lua.get_global("shade") == 0x87, \
         "a non-button glyph carries its own P8SCII code"
@@ -1492,7 +1492,7 @@ def test_a_bit_operator_and_the_verb_of_its_name_are_one_lane(tmp_path):
                  "op_shl, vb_shl = 3<<1, shl(3,1)\n"
                  "op_and, vb_and = 12.75&0.5, band(12.75,0.5)\n"
                  "function _draw() cls(0) end\n", frames=1)
-    g = ws.player._lua.get_global
+    g = ws.run.player._lua.get_global
     for name in ("shr", "lshr", "not", "shl", "and"):
         assert g("op_" + name) == g("vb_" + name), (
             "the `%s` operator and its verb answer differently: %r vs %r"
@@ -1515,7 +1515,7 @@ def test_the_bit_operators_answer_on_the_16_16_image(tmp_path):
                  "frac = 1>>1\n"
                  "whole = 4>>1\n"
                  "function _draw() cls(0) end\n", frames=1)
-    g = ws.player._lua.get_global
+    g = ws.run.player._lua.get_global
     assert g("half") == 1.5
     assert g("comp") == -3 - 1 / 65536
     assert g("top") == -32768
@@ -1590,7 +1590,7 @@ def test_a_px9_bit_cache_reads_the_stream_the_compressor_wrote(tmp_path):
         "end\n"
         "function _draw() cls(0) end\n")
     ws = _run_p8(tmp_path, body, frames=1)
-    g = ws.player._lua.get_global
+    g = ws.run.player._lua.get_global
     assert g("bad") == 0, (
         "px9's bit reader disagrees with 32-bit fixed point in %d of %d reads; "
         "first at %d: got %r, want %r"
@@ -1801,7 +1801,7 @@ def test_a_tabbed_cart_runs_with_its_globals_crossing_the_files(tmp_path):
                  "--helpers\n"
                  "function bump(v) return v + 2 end\n",
                  frames=10, dt=1.0 / 30)
-    g = ws.player._lua.get_global
+    g = ws.run.player._lua.get_global
     assert g("seed") == 42, "_init could not reach a function its own tab lacks"
     assert g("ticks") == 10
     man = json.loads((Path(ws.carts_root) / "probe.moy" / "manifest.json")

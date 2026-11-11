@@ -1,0 +1,256 @@
+> sh mkdir -p /sd/moybyte/system
+SH end 0
+> sh printf 'theme = "dusk"\n' > /sd/moybyte/system/settings
+SH end 0
+> sh edit /sd/moybyte/system/settings
+SH edit settings
+SH theme = "dusk"
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH ^S save  ^X exit                                                             1/2
+SH app edit
+> sh ^[[Bvolume = 3
+SH edit settings *
+SH theme = "dusk"
+SH volume = 3
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH ^S save  ^X exit                                                             2/2
+SH app edit
+> sh ^M^S
+SH edit settings
+SH theme = "dusk"
+SH volume = 3
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH saved, 26 bytes                                                              3/3
+SH app edit
+> sh ^[[A^[[F, "x"^?^?^?^?^?
+SH edit settings *
+SH theme = "dusk"
+SH volume = 3
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH ^S save  ^X exit                                                             2/3
+SH app edit
+> sh ^X
+SH edit settings *
+SH theme = "dusk"
+SH volume = 3
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH Save the changes? y yes, n no                                                2/3
+SH app edit
+> sh y
+SH end 0
+> sh cat /sd/moybyte/system/settings
+SH theme = "dusk"
+SH volume = 3
+SH end 0
+> sh edit /notes.txt
+SH edit notes.txt
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH a new file                                                                   1/1
+SH app edit
+> sh hello there^X
+SH edit notes.txt *
+SH hello there
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH Save the changes? y yes, n no                                                1/1
+SH app edit
+> sh ^[
+SH edit notes.txt *
+SH hello there
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH ^S save  ^X exit                                                             1/1
+SH app edit
+> sh ^X
+SH edit notes.txt *
+SH hello there
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH 
+SH Save the changes? y yes, n no                                                1/1
+SH app edit
+> sh n
+SH end 0
+> sh ls /
+SH bin/  dev/  etc/  proc/  sd/
+SH end 0
+> sh edit /sd
+SH edit: /sd: is a folder
+SH end 1
+> sh edit /dev/null
+SH edit: /dev/null: not a file in the store
+SH end 1
+[exit 0]

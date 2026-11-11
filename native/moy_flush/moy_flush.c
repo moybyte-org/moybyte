@@ -19,6 +19,85 @@ moy_flush_state_t moy_flush = { .frame_clean = true, .feed_us = -1,
 
 static const moy_flush_ops_t *s_ops;
 
+// THE BAND-GAP GATE (moy_flush.h): a mutex the feeder holds for its frame
+// and steps out of between bands while another device's transaction waits,
+// made when a device first opens it.
+typedef struct {
+    SemaphoreHandle_t mx;
+    volatile uint32_t want;
+    volatile uint32_t held;             // frames the feeder ran holding it
+    volatile uint32_t n, us;
+} gate_t;
+static gate_t *volatile s_gate;
+
+static void gate_wake(void) {
+    TaskHandle_t t = (TaskHandle_t)moy_flush.task;
+    if (t != NULL) {
+        xTaskNotifyGive(t);
+    }
+}
+
+bool moy_flush_gate_open(void) {
+    if (s_gate != NULL) {
+        return true;
+    }
+    if (moy_flush.task == NULL) {
+        return false;
+    }
+    gate_t *g = heap_caps_calloc(1, sizeof(*g), MALLOC_CAP_SPIRAM);
+    if (g == NULL || (g->mx = xSemaphoreCreateMutex()) == NULL) {
+        heap_caps_free(g);
+        return false;
+    }
+    MOY_FLUSH_HANDOFF_BARRIER();
+    s_gate = g;
+    // A frame the feeder began before the gate existed runs without it: wait
+    // for it to end, or for a frame that holds the gate to begin.
+    for (int i = 0; i < 200 && moy_flush.frame_busy && g->held == 0; i++) {
+        vTaskDelay(1);
+    }
+    return true;
+}
+
+void moy_flush_gate_take(void) {
+    gate_t *g = s_gate;
+    if (g == NULL) {
+        return;
+    }
+    __atomic_add_fetch(&g->want, 1u, __ATOMIC_SEQ_CST);
+    gate_wake();
+    xSemaphoreTake(g->mx, portMAX_DELAY);
+}
+
+void moy_flush_gate_give(void) {
+    gate_t *g = s_gate;
+    if (g == NULL) {
+        return;
+    }
+    xSemaphoreGive(g->mx);
+    __atomic_sub_fetch(&g->want, 1u, __ATOMIC_SEQ_CST);
+    gate_wake();
+}
+
+void moy_flush_gate_stats(uint32_t *n, uint32_t *us) {
+    gate_t *g = s_gate;
+    *n = g != NULL ? g->n : 0;
+    *us = g != NULL ? g->us : 0;
+}
+
+// The feeder steps aside, every band it queued done: the waiters run their
+// transactions, then it takes the bus back.
+static void gate_yield(gate_t *g, int64_t deadline) {
+    uint32_t t0 = (uint32_t)esp_timer_get_time();
+    xSemaphoreGive(g->mx);
+    while (g->want != 0 && esp_timer_get_time() < deadline) {
+        ulTaskNotifyTake(pdTRUE, 1);
+    }
+    xSemaphoreTake(g->mx, portMAX_DELAY);
+    g->n++;
+    g->us += (uint32_t)esp_timer_get_time() - t0;
+}
+
 // ---------------------------------------------------------------------------
 // The feeder
 // ---------------------------------------------------------------------------
@@ -83,6 +162,11 @@ static void moy_flush_pump(void) {
 // or waiting out a timer -- then wait the tail out, then release.
 static void moy_flush_run_frame(void) {
     bool ok = true;
+    gate_t *g = s_gate;                 // this frame's: one made mid-frame waits for the next
+    if (g != NULL) {
+        xSemaphoreTake(g->mx, portMAX_DELAY);
+        g->held++;
+    }
     esp_err_t err = s_ops->frame_begin();
     if (err != ESP_OK) {
         moy_flush.tx_err = err;
@@ -102,6 +186,20 @@ static void moy_flush_run_frame(void) {
     // runs: already-queued bands are unaffected and still reading a slot.
     while (moy_flush.bnc_next < moy_flush.bnc_total
             && moy_flush.tx_err == ESP_OK) {
+        if (g != NULL && g->want != 0) {
+            // A transaction waits for the bus: queue nothing more, let the
+            // bands in flight finish, then step aside.
+            if (moy_flush.done >= moy_flush.target) {
+                gate_yield(g, deadline);
+                continue;
+            }
+            if (esp_timer_get_time() > deadline) {
+                ok = false;
+                break;
+            }
+            ulTaskNotifyTake(pdTRUE, 2);
+            continue;
+        }
         int before = moy_flush.bnc_next;
         moy_flush_pump();
         if (moy_flush.bnc_next == before && moy_flush.tx_err == ESP_OK) {
@@ -159,6 +257,9 @@ static void moy_flush_run_frame(void) {
 done:
     // Runs on EVERY handoff, including a failed frame_begin.
     s_ops->frame_end(ok);
+    if (g != NULL) {
+        xSemaphoreGive(g->mx);
+    }
     moy_flush.bnc_total = 0;
     moy_flush.bnc_next = 0;
     moy_flush.bnc_src = NULL;

@@ -245,7 +245,7 @@ class AppearanceLayout:
     FOOT = 44            # the desk's foot (the target's): the rule to the frame's bottom
     # Where a desk row's label starts in the body: style.json's `group` `pad`
     # (held to it by tests/test_appearance_app.py), the foot's status's x.
-    LABEL_X = 10
+    LABEL_X = 12
 
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
@@ -567,7 +567,7 @@ class AppearanceAppLayer:
         return True
 
     def handle_pointer(self, px, py, click):
-        if self._ui.point(px, py, click, bool(getattr(self._surf.pointer(), "down", False))):
+        if self._ui.point(px, py, click):
             self._damage.all()
         return True
 

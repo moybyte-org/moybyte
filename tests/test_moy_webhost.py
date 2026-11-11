@@ -32,6 +32,7 @@ sys.path.insert(0, str(MODULES))
 import moy_webhost as wh                                       # noqa: E402
 from runtime import net_binding as nb                           # noqa: E402
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +126,38 @@ def test_the_bundle_is_the_shape_the_page_already_consumes(tmp_path):
     assert b["sky.moy/main.lua"].startswith("function")
     assert all("/" in k for k in b), "a key without a cart prefix"
     assert _pull(tmp_path / "carts") == b, "the dev server and the wire differ"
+
+
+def test_pulls_packed_on_several_threads_answer_as_one_at_a_time(tmp_path):
+    """serve.py's board twin is a THREADED server, and a page boots by asking
+    for /carts.json, /files.json and /apps.json at once. The C packs through
+    one scratch (a board serves one connection at a time), so the binding
+    serialises the calls: unserialised, two packs answered with each other's
+    bytes or crashed the twin, which the page saw as a boot fetch that failed."""
+    carts = str(_store(tmp_path))
+    apps = tmp_path / "apps" / "local.x"
+    apps.mkdir(parents=True)
+    for i in range(3):
+        (apps / ("f%d.sav" % i)).write_bytes(bytes((7 * j + i) & 0xFF
+                                                   for j in range(3000)))
+    pulls = [lambda: wh.pack_store(carts),
+             lambda: wh.pack_store(str(tmp_path / "apps"), binary=True)]
+    want = [pull() for pull in pulls]
+    wrong = []
+
+    def run(k):
+        for _ in range(40):
+            try:
+                if pulls[k]() != want[k]:
+                    wrong.append(k)
+            except ValueError as e:
+                wrong.append(e)
+    threads = [threading.Thread(target=run, args=(k,)) for k in (0, 1)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not wrong, wrong[:4]
 
 
 def test_thumbs_do_not_cross_the_wire(tmp_path):
@@ -266,8 +299,8 @@ def test_the_stream_escapes_what_json_requires(tmp_path):
 
 
 def _host(tmp_path, **kw):
-    """A host over the `_store` tree, OPEN (the LAN dev-loop shape) unless a
-    test passes a pin. Assets come from the firmware image, so a test that
+    """A host over the `_store` tree, OPEN (no sign-in: the host's dev-loop
+    shape; tests/test_web_signin.py signs in). Assets come from the firmware image, so a test that
     wants one installs it with the `baked` fixture. Port 0: a start binds
     nothing, so a test needs no free port to switch it on and off."""
     kw.setdefault("port", 0)
@@ -287,6 +320,28 @@ def _assets():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_web_blob
     return gen_web_blob.asset_names()
+
+
+@pytest.mark.parametrize("root", ["carts", "files", "apps"])
+def test_a_root_past_the_path_limit_is_refused_never_cut(tmp_path, root):
+    """A cut root names another folder: every tmp_path under one long TMPDIR
+    cuts to the same prefix, so one store served another's files. A start
+    past MOY_WEB_PATH_MAX (a board's 96 bytes, the host library's 4096) is
+    refused instead."""
+    roots = {"carts": str(tmp_path / "carts"), "files": None, "apps": None}
+    roots[root] = "/" + "d/" * 2100 + root
+    with pytest.raises(OSError) as e:
+        nb.web_start(0, roots["carts"], roots["files"], [], None, [], roots["apps"])
+    assert e.value.errno == 22
+
+
+def test_a_root_a_board_could_not_hold_is_served_on_the_host(tmp_path):
+    """The host library takes a developer machine's folders, however long
+    its TMPDIR."""
+    deep = tmp_path / ("d" * 120)
+    (deep / "carts" / "hop.moy").mkdir(parents=True)
+    (deep / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
+    assert _pull(deep / "carts") == {"hop.moy/main.py": "x = 1\n"}
 
 
 def test_the_root_serves_the_console_page(tmp_path, baked):
@@ -555,14 +610,13 @@ def test_a_host_the_kernel_kept_serving_is_adopted(serving):
 # ---------------------------------------------------------------------------
 # POST /sync -- the push half (moycore plan 3.4; moy_sync carries the batch
 # semantics and its own suites; what belongs HERE is the endpoint's wiring:
-# routing, the pin gate, the feeder drain, and the shelf-refresh event).
+# routing, the feeder drain, and the shelf-refresh event; the sign-in's
+# gate is tests/test_web_signin.py).
 # ---------------------------------------------------------------------------
 
-def _batch(*ops, pin=None, root=None):
+def _batch(*ops, root=None):
     doc = ({"v": 1, "ops": list(ops)} if root is None else
            {"v": 2, "root": root, "ops": list(ops)})
-    if pin is not None:
-        doc["pin"] = pin
     return json.dumps(doc).encode()
 
 
@@ -588,137 +642,23 @@ def test_sync_refuses_a_bad_batch_and_a_bad_path(tmp_path):
     assert not (tmp_path / "wifi.json").exists()
 
 
-def test_sync_pin_gate(tmp_path):
-    """pin=None keeps the desk's open dev loop; a host built WITH a pin
-    refuses a batch that does not carry it, before any op is looked at."""
-    root = _store(tmp_path)
-    h = wh.WebHost(str(root), pin="4321")
-    op = {"p": "hop.moy/main.py", "t": "x = 9\n"}
-    r = h.handle_http("POST", "/sync", _batch(op))
-    assert b"403" in r.split(b"\r\n")[0]
-    assert (root / "hop.moy" / "main.py").read_text() != "x = 9\n"
-    r = h.handle_http("POST", "/sync", _batch(op, pin="4321"))
-    assert b"200" in r.split(b"\r\n")[0]
-    assert (root / "hop.moy" / "main.py").read_text() == "x = 9\n"
-
-
-# ---------------------------------------------------------------------------
-# THE PIN GATES EVERYTHING (owner call 2026-08-25). Everything except the boot
-# assets and the capability marker, and each of those two is open for its own
-# stated reason -- so both the refusals and the exemptions are pinned here.
-# ---------------------------------------------------------------------------
-
-
-def _pinned(tmp_path):
-    h = _host(tmp_path)
-    h.pin = "4321"
-    return h
-
-
-def test_a_pinned_board_refuses_its_store_to_a_page_with_no_pin(tmp_path):
-    """The reversal. This used to be open on the reasoning that a read changes
-    nothing -- what it reads is a child's work off their console, to anyone who
-    can reach the port."""
-    h = _pinned(tmp_path)
-    for path in ("/carts.json", "/files.json"):
-        r = h.handle_http("GET", path, b"")
-        assert isinstance(r, bytes), path
-        assert b"403" in r.split(b"\r\n")[0], path
-        # A JSON body, and a status the page can tell apart from a 404: the
-        # worker branches on exactly this to raise its pin prompt.
-        assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
-        assert b"application/json" in r
-
-
-def test_the_pin_rides_the_query_because_a_get_has_nowhere_else(tmp_path):
-    h = _pinned(tmp_path)
-    r = h.handle_http("GET", "/carts.json?pin=4321", b"")
-    assert _json(r)["hop.moy/main.py"]
-    # Wrong, empty and prefix-lookalike are all refusals.
-    for q in ("?pin=0000", "?pin=", "?pinned=4321", "?dev=1", "?pin=43210"):
-        r = h.handle_http("GET", "/carts.json" + q, b"")
-        assert b"403" in h_status(r), q
-    # ...and the pin survives company on the query.
-    r = h.handle_http("GET", "/carts.json?dev=1&pin=4321", b"")
-    assert b"200" in h_status(r)
-
-
-def test_a_post_wants_its_pin_in_the_body_and_ignores_the_query(tmp_path):
-    """The asymmetry, pinned because it cost a wrong instruction in the Zero's
-    README: a GET carries the pin on the QUERY (it has nowhere else) and POST
-    /sync carries it in the BODY, which is what the protocol envelope declares
-    and what `doc["pin"]` reads. Writing `POST /sync?pin=NNNN` looks obviously
-    right, is refused, and the refusal says `{"error":"pin"}` -- which reads as
-    a wrong pin rather than a misplaced one."""
-    h = _pinned(tmp_path)
-    op = {"p": "hop.moy/main.py", "t": "x = 1\n"}
-
-    r = h.handle_http("POST", "/sync?pin=4321", _batch(op))
-    assert b"403" in r.split(b"\r\n")[0], "a query pin must not authorize a POST"
-    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
-
-    r = h.handle_http("POST", "/sync", _batch(op, pin="4321"))
-    assert b"200" in r.split(b"\r\n")[0], "the body pin is the one that works"
-
-
 def test_a_whole_cart_delete_takes_the_cart_and_its_journal(tmp_path):
     """`{"p": "<cart>.moy", "dc": 1}` is the documented way to remove a
     built-in that shipped broken from a board whose seed reads PRESENCE and will
     not overwrite it (the Zero). Over HTTP, so the recovery needs no cable and
     cannot wedge that board's USB the way an mpremote session can."""
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), pin="4321")
+    h = wh.WebHost(str(root))
     (root / "hop.moy" / "journal").mkdir(parents=True, exist_ok=True)
     (root / "hop.moy" / "journal" / "journal.jsonl").write_text("{}\n")
     assert (root / "hop.moy").is_dir()
 
     r = h.handle_http("POST", "/sync",
-                      _batch({"p": "hop.moy", "dc": 1}, pin="4321"))
+                      _batch({"p": "hop.moy", "dc": 1}))
     assert b"200" in r.split(b"\r\n")[0]
     assert not (root / "hop.moy").exists(), (
         "the cart survived -- and a journal left behind is what makes the next "
         "boot's re-seed land on top of stale history")
-
-
-def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path, baked):
-    """The one exemption that is a NECESSITY, not a judgement: the page is what
-    shows the pin prompt, so a board that gated its own console behind the pin
-    would have nothing left to ask the question with. These are the same bytes
-    every build ships and say nothing about this board."""
-    baked({n + ".gz": b"\x1f\x8b" + n.encode() for n in _assets()})
-    h = _pinned(tmp_path)
-    for path in ("/", "/index.html", "/worker.js", "/micropython.wasm"):
-        assert b"200" in h_status(h.handle_http("GET", path, b"")), path
-
-
-def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
-    """GET /sync is the page's MODE decision (board store vs browser store),
-    made before it has any pin to offer -- and all it reveals is that a board
-    lives here: no cart, no name, no file."""
-    h = _pinned(tmp_path)
-    r = h.handle_http("GET", "/sync", b"")
-    assert b"200" in r.split(b"\r\n")[0]
-    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"sync": 1}
-
-
-def test_an_open_host_is_open_end_to_end(tmp_path):
-    """pin=None -- a test, the dev server -- keeps the LAN dev loop free of a
-    password."""
-    h = _host(tmp_path)
-    assert b"200" in h_status(h.handle_http("GET", "/carts.json", b""))
-    assert b"200" in h_status(h.handle_http(
-        "POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x\n"})))
-
-
-def test_a_refused_read_never_touches_the_store(tmp_path):
-    """Refusing AFTER the walk would leak its timing and, on the T-Deck, wait
-    on the panel feeder to do it -- the gate comes first."""
-    h = _pinned(tmp_path)
-    before = nb._drains()
-    h.handle_http("GET", "/carts.json", b"")
-    h.handle_http("GET", "/files.json", b"")
-    h.handle_http("POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x"}))
-    assert nb._drains() == before, "a refused request touched the store"
 
 
 # ---------------------------------------------------------------------------
@@ -777,7 +717,7 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
     """The kernel raises an event; the VM's poll turns it into the rescan."""
     root = _store(tmp_path)
     hits = []
-    h = wh.WebHost(str(root), on_sync=lambda: hits.append(1))
+    h = wh.WebHost(str(root), on_sync=hits.append)
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
     h.poll()
@@ -785,12 +725,34 @@ def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/manifest.json", "t": '{"title":"H2"}'}))
     h.poll()
-    assert hits == [1]
+    assert hits == [("hop.moy",)], "the event names the folder it changed"
     h.handle_http("POST", "/sync", _batch({"p": "new.moy/main.py", "t": "y"}))
     h.poll()
-    assert hits == [1, 1], "a cart born is a shelf change"
+    assert hits[1:] == [("new.moy",)], "a cart born is a shelf change"
     h.poll()
-    assert hits == [1, 1], "an event fires once"
+    assert len(hits) == 2, "an event fires once"
+
+
+def test_a_sync_names_each_folder_once_and_every_one_past_the_list(tmp_path):
+    """The shelf re-reads only the folders a batch changed; batches between two
+    polls add up, a folder named twice is read once, and folders past the
+    kernel's list (MOY_WEB_SHELF_BYTES) ask for every one (None)."""
+    root = _store(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), on_sync=hits.append)
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "a.moy/manifest.json", "t": "{}"},
+        {"p": "a.moy/cover.png", "t": "x"}))
+    h.handle_http("POST", "/sync", _batch({"p": "b.moy/main.py", "t": "y"}))
+    h.poll()
+    assert hits == [("a.moy", "b.moy")]
+    many = [{"p": "c%03d.moy/main.py" % i, "t": "z"} for i in range(40)]
+    h.handle_http("POST", "/sync", _batch(*many))
+    h.poll()
+    assert hits[1:] == [None]
+    h.handle_http("POST", "/sync", _batch({"p": "d.moy/main.py", "t": "y"}))
+    h.poll()
+    assert hits[2:] == [("d.moy",)], "the overflow clears with its event"
 
 
 def test_the_pull_drains_the_feeder_once_not_per_file(tmp_path):
@@ -815,14 +777,14 @@ def _files(tmp_path):
     """The #108 files root beside the carts one, holding both things that must
     never leave the board."""
     root = Path(wh.moy_sync.files_root(str(tmp_path / "carts")))
-    (root / "drawings").mkdir(parents=True)
-    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
-    (root / "recordings" / "take_1").mkdir(parents=True)
-    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / "Pictures").mkdir(parents=True)
+    (root / "Pictures" / "sunset.moyimg").write_text("0,1,")
+    (root / "Recordings" / "take_1").mkdir(parents=True)
+    (root / "Recordings" / "take_1" / "part0.json").write_text("[1]")
     (root / ".history" / "drawings").mkdir(parents=True)
     (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
-    (root / "trash" / "drawings").mkdir(parents=True)
-    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    (root / ".Trash" / "drawings").mkdir(parents=True)
+    (root / ".Trash" / "drawings" / "gone.moyimg").write_text("9,")
     return root
 
 
@@ -834,8 +796,8 @@ def test_files_json_serves_the_kinds_and_nothing_else(tmp_path):
     h = _host(tmp_path)
     r = h.handle_http("GET", "/files.json", b"")
     assert "application/json" in _head(r)
-    assert _json(r) == {"drawings/sunset.moyimg": "0,1,",
-                        "recordings/take_1/part0.json": "[1]"}
+    assert _json(r) == {"Pictures/sunset.moyimg": "0,1,",
+                        "Recordings/take_1/part0.json": "[1]"}
 
 
 def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
@@ -855,7 +817,7 @@ def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
     h = wh.WebHost(str(_store(tmp_path)))
     assert b"404" in h_status(h.handle_http("GET", "/files.json", b""))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/x.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/x.moyimg", "t": "0,"}, root="files"))
     assert b"400" in h_status(r)
 
 
@@ -872,11 +834,11 @@ def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
     files = _files(tmp_path)
     h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/sunset.moyimg", "t": "7,"}, root="files"))
+        {"p": "Pictures/sunset.moyimg", "t": "7,"}, root="files"))
     assert b"200" in r.split(b"\r\n")[0]
     assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 1, "err": []}
-    assert (files / "drawings" / "sunset.moyimg").read_text() == "7,"
-    assert not (root / "drawings").exists(), "it must not land among the carts"
+    assert (files / "Pictures" / "sunset.moyimg").read_text() == "7,"
+    assert not (root / "Pictures").exists(), "it must not land among the carts"
 
 
 def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
@@ -884,11 +846,11 @@ def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
     files = _files(tmp_path)
     h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
-        {"p": "trash/drawings/gone.moyimg", "t": "stolen"},
+        {"p": ".Trash/drawings/gone.moyimg", "t": "stolen"},
         {"p": ".history/drawings/sunset.jsonl", "t": "stolen"}, root="files"))
     body = json.loads(r.split(b"\r\n\r\n", 1)[1])
     assert body["ok"] == 0 and len(body["err"]) == 2
-    assert (files / "trash" / "drawings" / "gone.moyimg").read_text() == "9,"
+    assert (files / ".Trash" / "drawings" / "gone.moyimg").read_text() == "9,"
 
 
 def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
@@ -897,10 +859,9 @@ def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
     root = _store(tmp_path)
     _files(tmp_path)
     hits = []
-    h = wh.WebHost(str(root),
-                   on_sync=lambda: hits.append(1))
+    h = wh.WebHost(str(root), on_sync=hits.append)
     h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/new.moyimg", "t": "0,"}, root="files"))
     assert not hits
 
 
@@ -912,8 +873,75 @@ def test_the_files_apply_drains_the_feeder_too(tmp_path):
     h = wh.WebHost(str(root))
     before = nb._drains()
     h.handle_http("POST", "/sync", _batch(
-        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+        {"p": "Pictures/new.moyimg", "t": "0,"}, root="files"))
     assert nb._drains() == before + 1
+
+
+def _apps(tmp_path):
+    """The apps' private folders beside the carts root: one app's key, the
+    staged half of a write in flight beside it, and a text-looking key."""
+    root = Path(wh.moy_sync.apps_root(str(tmp_path / "carts")))
+    (root / "pong").mkdir(parents=True)
+    (root / "pong" / "hiscore").write_bytes(b"\x00\xff7")
+    (root / "pong" / "notes.txt").write_bytes(b"plain")
+    (root / "pong" / "save~part").write_bytes(b"half")
+    return root
+
+
+def test_apps_json_serves_every_file_as_bytes_and_no_staged_write(tmp_path):
+    """Every file of the apps root crosses as bytes, whatever its name, and a
+    write staged on its way to its key stays home."""
+    _apps(tmp_path)
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/apps.json", b"")
+    assert "application/json" in _head(r)
+    assert _json(r) == {"pong/hiscore": {"b": "AP83"},
+                        "pong/notes.txt": {"b": "cGxhaW4="}}
+
+
+def test_sync_routes_an_apps_batch_into_the_apps_root(tmp_path):
+    root = _store(tmp_path)
+    apps = _apps(tmp_path)
+    h = wh.WebHost(str(root))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "b": "AQI="}, {"p": "tetris/lines", "b": "Kg=="},
+        root="apps"))
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 2, "err": []}
+    assert (apps / "pong" / "hiscore").read_bytes() == b"\x01\x02"
+    assert (apps / "tetris" / "lines").read_bytes() == b"*"
+    assert not (root / "pong").exists(), "it must not land among the carts"
+    r = h.handle_http("POST", "/sync", _batch({"p": "tetris", "dc": 1},
+                                              root="apps"))
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1])["ok"] == 1
+    assert not (apps / "tetris").exists()
+
+
+def test_sync_refuses_an_apps_op_that_is_not_one_apps_bytes(tmp_path):
+    """Text, a staged name, a path deeper than an app's flat folder and a
+    whole-folder delete of anything but one app are each refused."""
+    root = _store(tmp_path)
+    apps = _apps(tmp_path)
+    h = wh.WebHost(str(root))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "t": "text"}, {"p": "pong/save~part", "b": "AA=="},
+        {"p": "pong/deep/key", "b": "AA=="}, {"p": "pong/hiscore", "dc": 1},
+        root="apps"))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and len(body["err"]) == 4
+    assert (apps / "pong" / "hiscore").read_bytes() == b"\x00\xff7"
+    assert (apps / "pong" / "save~part").read_bytes() == b"half"
+
+
+def test_a_host_with_no_apps_root_404s_its_pull_and_refuses_its_batch(
+        tmp_path, monkeypatch):
+    """A board flashed before the apps root answers so: the page then builds
+    no apps watcher, and a batch that reaches it anyway is refused whole."""
+    monkeypatch.setattr(wh.moy_sync, "apps_root", lambda root: None)
+    h = wh.WebHost(str(_store(tmp_path)))
+    assert b"404" in h_status(h.handle_http("GET", "/apps.json", b""))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "pong/hiscore", "b": "AA=="}, root="apps"))
+    assert b"400" in h_status(r)
 
 
 def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
@@ -984,7 +1012,7 @@ def test_the_row_is_appended_so_existing_row_indices_do_not_move(tmp_path):
     ws.webhost = _FakeHost()
     after = _row_keys(ws)
     assert after[:len(before)] == before
-    assert after[-1] == "webhost"
+    assert after[-2:] == ["webhost", "paired"]
 
 
 def test_the_row_shows_the_ADDRESS_not_just_ON(tmp_path):
@@ -1021,76 +1049,7 @@ def test_the_verbs_are_safe_with_no_service(tmp_path):
 
 
 
-# -- the link wait, and the board parity it exists to protect -----------------
-
-
-class _Wifi:
-    """Just enough of the injected wifi service: status() -> (up, ssid, ip)."""
-
-    def __init__(self, up=False, ip="192.168.1.50"):
-        self.up = up
-        self.ip = ip
-        self.connects = 0
-
-    def status(self):
-        return (self.up, "net" if self.up else "", self.ip if self.up else "")
-
-
-def test_ensure_online_waits_for_a_link_that_arrives_late():
-    """The whole reason this helper exists: `connect()` gives up at 4s and a
-    saved network measured 1.5s slower than that, so a good network read as
-    "no wifi". Here autoconnect brings the link up and the IP comes back."""
-    w = _Wifi(up=False)
-
-    def _auto(wifi):
-        wifi.connects += 1
-        wifi.up = True                    # the link arrives during the wait
-
-    assert wh.ensure_online(w, _auto, wait_ms=50, step_ms=5) == "192.168.1.50"
-    assert w.connects == 1
-
-
-def test_ensure_online_reports_a_link_that_never_arrives():
-    w = _Wifi(up=False)
-    with pytest.raises(OSError):
-        wh.ensure_online(w, lambda wifi: None, wait_ms=10, step_ms=5)
-
-
-def test_ensure_online_without_a_wifi_service_is_an_error_not_a_crash():
-    with pytest.raises(OSError):
-        wh.ensure_online(None)
-
-
-def test_an_already_connected_board_neither_reconnects_nor_sleeps():
-    w = _Wifi(up=True)
-    called = []
-    assert wh.ensure_online(w, lambda wifi: called.append(1)) == "192.168.1.50"
-    assert not called, "a connected board was made to reconnect"
-
-
-def test_the_link_wait_is_moy_otas_one_body_with_moy_otas_bounds(monkeypatch):
-    """It was the same 25 lines twice -- here and in `moy_ota.ensure_online` --
-    with `12000` and `250` written out in both. One body now, and the bounds
-    have one home; what stays local is what each caller needs on top (a bool for
-    the updater, the STA IP for the WEB CONSOLE row)."""
-    import moy_ota
-
-    seen = {}
-
-    def _spy(online, autoconnect=None, wait_ms=None, step_ms=None):
-        seen["bounds"] = (wait_ms, step_ms)
-        if autoconnect is not None:
-            autoconnect()
-        return online()
-
-    monkeypatch.setattr(moy_ota, "wait_online", _spy)
-    w = _Wifi(up=False)
-
-    def _auto(wifi):
-        wifi.up = True
-
-    assert wh.ensure_online(w, _auto) == "192.168.1.50"
-    assert seen["bounds"] == (moy_ota.ONLINE_WAIT_MS, moy_ota.ONLINE_STEP_MS)
+# -- the board parity the shared webhost exists to protect -------------------
 
 
 def test_make_webhost_reads_the_wifi_service_lazily():
@@ -1156,146 +1115,100 @@ def test_every_board_injects_the_web_console(board):
 
 
 
-def test_the_link_wait_is_shared_and_not_recopied_per_board():
+def test_no_board_grows_a_private_link_wait():
     """It was a 25-line closure in the P4's run_desktop. Writing it per board is
-    precisely how the T-Deck went without the feature, so the helper is shared
-    and the boards must not grow private copies of it again."""
+    precisely how the T-Deck went without the feature; the link is moy_ota's
+    one polled dial, and the boards must not grow private copies of it."""
     for board in BOARDS:
         src = runtime_text(ROOT / "firmware" / board / "modules" / "moy_runtime.py")
-        assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
+        assert "DIAL_MS" not in src, "%s re-grew a private link budget" % board
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
 
 
 # ---------------------------------------------------------------------------
-# WASM MODE (#197): the pairing pin, the parked connection screen, and
+# WASM MODE (#197): the pairing link, the parked connection screen, and
 # PLAY ON DEVICE. A SWITCH and not a session -- see runtime/system/web_console_ui.py.
 # ---------------------------------------------------------------------------
 
 
 class _ModeHost(_FakeHost):
-    """_FakeHost plus the two members wasm mode reads: a paired url, and a pin
-    the host resolves at start() the way the real one does."""
+    """_FakeHost plus the member wasm mode reads: a paired url, a fresh token
+    after its `#` as the kernel's (moy_wc_url) carries one."""
 
-    def __init__(self, fail=None, pin_source=None):
-        _FakeHost.__init__(self, fail=fail)
-        self.pin = None
-        self._pin_source = pin_source
-
-    def start(self):
-        if self._pin_source is not None:
-            self.pin = self._pin_source()
-        _FakeHost.start(self)
+    QR = "#t=Mk9yQ3hTbFdQSEV4dkZq&b=xZ7aKq2bYEo"
 
     def paired_url(self):
-        return wh.WebHost.paired_url(self)
+        return self.url() + self.QR if self.serving else ""
 
 
 def _mode_ws(tmp_path):
-    """A workstation wired the way make_webhost wires a board: the pin comes
-    off the LIVE ws, at start."""
     ws = _ws(tmp_path)
-    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
+    ws.webhost = _ModeHost()
     return ws
 
 
-# -- the pin -----------------------------------------------------------------
+# -- the sign-in's folder and the paired link --------------------------------
 
-def test_the_pin_is_minted_once_and_persisted(tmp_path):
-    """Four digits, kept in system.json beside every other Settings choice. A
-    pin that changed per boot would mean re-scanning after every power cycle,
-    and a phone holding the old url would look like a broken board."""
-    ws = _ws(tmp_path)
-    pin = ws.web_pin()
-    assert len(pin) == 4 and pin.isdigit()
-    assert ws.web_pin() == pin, "a second call minted a second pin"
-    assert ws.system.get("web_pin") == pin
-    assert _ws(tmp_path).web_pin() == pin, "it did not survive a fresh console"
-
-
-def test_a_board_that_never_serves_never_writes_a_pin(tmp_path):
-    """Lazy on purpose: a console whose owner never turns the row on has no
-    business having written a secret into its store."""
-    ws = _ws(tmp_path)
-    assert ws.system.text("web_pin") is None
-    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
-    assert ws.system.text("web_pin") is None, "constructing the host minted a pin"
-    ws.toggle_webhost()
-    assert ws.system.get("web_pin")
-
-
-def test_the_pin_is_read_at_START_not_at_construction():
-    """THE ORDERING BUG THIS EXISTS TO PREVENT. Boards build the webhost before
-    system.json is loaded, so a pin captured at construction is one minted
-    against an empty store -- the QR would show a pin the store does not agree
-    with, and every batch the page sent would come back 403."""
+def test_the_sign_in_folder_is_read_at_START_not_at_construction(tmp_path):
+    """Boards build the webhost before the store is mounted, so a folder
+    captured at construction could name the internal store's system folder on
+    a console that then booted on its card. make_webhost reads it at start, as
+    `passwd` does (ssh_service.system_dir)."""
     seen = []
+    carts = tmp_path / "sd" / "moybyte" / "carts"
+    carts.mkdir(parents=True)
 
     class _WS:
         wifi = None
+        carts_root = None
 
-        def web_pin(self):
-            seen.append(1)
-            return "1234"
-
-        def rescan_carts(self):
+        def rescan_carts(self, folders=None):
             pass
 
         def launch_named(self, name):
             return None
 
-    # port=0 (the ephemeral-port idiom test_moy_webserver.py already uses),
-    # because start() BINDS: since 2026-08-29 the default is 80, which a board's
-    # lwIP hands out freely and a CPython test process running as a normal user
-    # is refused. The port is not what this test is about.
-    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", port=0)
-    assert not seen, "make_webhost read the pin at construction"
-    assert host.pin is None
+    w = _WS()
+    real = wh._system_dir
+    wh._system_dir = lambda ws: (seen.append(1), real(ws))[1]
     try:
+        host = wh.make_webhost(w, str(carts), port=0)
+        assert not seen and host.auth is None, "make_webhost read the folder at construction"
+        w.carts_root = str(carts)
         host.start(ip="10.0.0.7")
-        assert seen == [1] and host.pin == "1234"
+        assert seen and host.auth == str(tmp_path / "sd" / "moybyte" / "system")
+        assert len(nb.web_auth(host.auth)) == 32, "the sign-in has no board id"
     finally:
+        wh._system_dir = real
         host.stop()
 
 
-def test_an_explicit_pin_still_wins_over_the_consoles():
-    """A host built with its own policy (a test, the dev server) must not have
-    it silently replaced."""
-    class _WS:
-        wifi = None
-
-        def web_pin(self):
-            raise AssertionError("the explicit pin was ignored")
-
-        def rescan_carts(self):
-            pass
-
-        def launch_named(self, name):
-            return None
-
-    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", pin="0000", port=0)
-    try:
-        host.start(ip="10.0.0.7")
-        assert host.pin == "0000"
-    finally:
-        host.stop()
-
-
-def test_the_paired_url_is_the_address_plus_the_pin(tmp_path):
-    """What the QR encodes and SHOW ADDRESS reveals. The page forwards its own
-    `?pin=` into every batch it posts, so this string IS the pairing gesture."""
-    ws = _mode_ws(tmp_path)
-    assert ws.web_console_url() == "", "an address while nothing is serving"
-    ws.toggle_webhost()
-    assert ws.web_console_url() == (
-        "http://192.168.1.151/?pin=" + ws.web_pin())
+def test_the_paired_url_carries_a_fresh_token_and_the_board_id(serving, tmp_path):
+    """What the QR encodes and SHOW ADDRESS reveals: the address, then after
+    its `#` a single-use token and the first 8 bytes of the board's id, both
+    base64url (a version-4 QR, moy_qr's limit). A fragment never reaches a
+    server or a log, and the page drops it on load."""
+    import re
+    system = tmp_path / "system"
+    system.mkdir()
+    h = serving(auth=str(system))
+    for _ in range(200):
+        h.poll()
+        if h.paired_url() != h.url():
+            break
+        time.sleep(0.005)
+    one, two = h.paired_url(), h.paired_url()
+    shape = r"^http://127\.0\.0\.1:%d/#t=[A-Za-z0-9_-]{22}&b=[A-Za-z0-9_-]{11}$" % h.port
+    assert re.match(shape, one) and re.match(shape, two), (one, two)
+    assert one.split("#")[1].split("&")[0] != two.split("#")[1].split("&")[0]
+    assert one.split("&b=")[1] == two.split("&b=")[1]
+    assert len(one) <= 78, "past the QR's version-4 bytes"
 
 
-def test_a_host_without_a_pin_pairs_with_a_bare_url(tmp_path):
+def test_a_host_without_a_sign_in_pairs_with_a_bare_url(tmp_path):
     host = wh.WebHost(str(tmp_path / "carts"))
     host.ip = "10.0.0.5"
     assert host.paired_url() == "http://10.0.0.5/"
-    host.pin = "4821"
-    assert host.paired_url() == "http://10.0.0.5/?pin=4821"
 
 
 def test_the_url_spells_the_port_unless_it_is_the_default(tmp_path):
@@ -1314,9 +1227,7 @@ def test_the_url_spells_the_port_unless_it_is_the_default(tmp_path):
     other = wh.WebHost(str(tmp_path / "carts"),
                        port=8321)
     other.ip = "10.0.0.5"
-    other.pin = "4821"
     assert other.url() == "http://10.0.0.5:8321/"
-    assert other.paired_url() == "http://10.0.0.5:8321/?pin=4821"
 
 
 # -- the switch --------------------------------------------------------------
@@ -1382,7 +1293,7 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(tmp_path):
     `make_webhost` wires the release to the host's own `on_stop`, which the
     kernel's STOPPED event fires."""
     ws = _ws(tmp_path)
-    h = wh.WebHost(str(_store(tmp_path)), pin="4321", port=0,
+    h = wh.WebHost(str(_store(tmp_path)), port=0,
                    on_stop=lambda: ws.wifi_release("web"))
     h.update = None
     ws.webhost = h
@@ -1421,7 +1332,7 @@ def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
     """ORDER, not just outcome. `go_home` is what routes to the connection
     screen and it decides by reading the flag, so a park that called it first
     would leave the glass on the launcher with the mode on. The screen's entry
-    state (a revealed pin) is cleared here too -- nothing in the router calls a
+    state is cleared here too -- nothing in the router calls a
     Layer's `on_enter`."""
     ws = _mode_ws(tmp_path)
     seen = []
@@ -1480,6 +1391,7 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     ws.toggle_webhost()
     ws.frame(1 / 30.0)
     ws._splash_until = None                  # the boot logo animates on its own
+    settle_badges(ws)
     ws._toast_until = 0
     ws._dirty = False
     ws.pointer.visible = False
@@ -1518,9 +1430,10 @@ def _turn_off_by_its_button(ws):
         ui_draw.input_kind("keys")
 
 
-def test_the_page_always_shows_the_address_and_the_pin(tmp_path, monkeypatch):
-    """The look's type fits the address and the pin beside the code, so the
-    page shows them always (docs/history/look_2026-10.md step 33), the pin large."""
+def test_the_page_always_shows_the_address_and_how_to_sign_in(tmp_path, monkeypatch):
+    """The look's type fits the address and the sign-in's one sentence beside
+    the code, so the page shows them always (docs/history/look_2026-10.md step
+    33). The token stays in the code: it is a credential, never shown as text."""
     from runtime import ui
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
@@ -1531,9 +1444,10 @@ def test_the_page_always_shows_the_address_and_the_pin(tmp_path, monkeypatch):
     ws._dirty = True
     ws.frame(1 / 30.0)
     url = ws.web_console_url()
-    host, _sep, pin = url.replace("http://", "").partition("?pin=")
+    host = url.replace("http://", "").split("#")[0]
     assert (host.rstrip("/"), "mono") in said
-    assert (pin, "result") in said
+    assert (ws.web.sign_in_hint(), "caption") in said
+    assert not any("#t=" in t for t, _f in said if isinstance(t, str))
 
 
 def test_back_and_the_turn_off_button_turn_it_off(tmp_path):
@@ -1575,7 +1489,7 @@ def test_the_qr_encodes_the_paired_url(tmp_path):
     first = ws.web.ui.matrix(url)
     assert first == moy_qr.encode(url)
     assert ws.web.ui.matrix(url) is first, "re-encoded an unchanged url"
-    assert ws.web.ui.matrix("http://10.0.0.9/?pin=0000") != first
+    assert ws.web.ui.matrix("http://10.0.0.9/#t=AAAAAAAAAAAAAAAAAAAAAA&b=AAAAAAAAAAA") != first
 
 
 def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
@@ -1585,7 +1499,7 @@ def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
     behind another window."""
     from ws_helpers import build_desktop_ws
     ws = build_desktop_ws(tmp_path)
-    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
+    ws.webhost = _ModeHost()
     ws.open_desk()
     assert ws.wm.desk_open() is True
     ws.toggle_webhost()
@@ -1609,20 +1523,6 @@ def test_run_plays_the_named_cart_on_the_glass(tmp_path):
     assert b"200" in r.split(b"\r\n")[0]
     assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"run": "Star Catcher"}
     assert seen == ["star_catcher"]
-
-
-def test_run_takes_the_same_pin_gate_as_sync(tmp_path):
-    """Starting code on a kid's console is a WRITE by any reading of the word,
-    and the gate closes before the name is even looked at."""
-    launched = []
-    host = wh.WebHost(str(tmp_path / "carts"),
-                      pin="4321", on_run=lambda n: (launched.append(n), "X")[1])
-    r = host.handle_http("POST", "/run", b'{"cart": "hop"}')
-    assert b"403" in r.split(b"\r\n")[0]
-    assert not launched, "a pinless request reached the launcher"
-    r = host.handle_http("POST", "/run", b'{"cart": "hop", "pin": "4321"}')
-    assert b"200" in r.split(b"\r\n")[0]
-    assert launched == ["hop"]
 
 
 def test_run_answers_404_for_a_cart_this_board_does_not_have(tmp_path):
@@ -1820,11 +1720,14 @@ def test_a_stop_with_a_reason_keeps_answering_to_give_it(tmp_path):
                                                      "why": "off"}
 
 
-def test_the_goodbye_outranks_the_pin(tmp_path):
-    """Deliberately ahead of the gate. A page that was never given a pin still
-    deserves to know the console was switched off rather than be left to decide
-    it vanished -- and this says nothing except that somebody turned it off."""
-    h = _pinned(tmp_path)
+def test_the_goodbye_outranks_the_sign_in(tmp_path):
+    """Deliberately ahead of the gate. A page that never signed in still
+    deserves to know the console was switched off rather than be left to
+    decide it vanished -- and this says nothing except that somebody turned it
+    off."""
+    system = tmp_path / "system"
+    system.mkdir()
+    h = _host(tmp_path, auth=str(system))
     h.start(ip="10.0.0.5")
     h.stop(why="off")
     r = h.handle_http("GET", "/carts.json", b"")
@@ -1910,56 +1813,11 @@ def test_turning_the_row_off_still_stops_a_host_that_cannot_take_a_reason():
     assert seen["why"] == "off", "a host that CAN take a reason must get one"
 
 
-def test_update_wants_its_pin_on_the_query_for_BOTH_methods(tmp_path):
-    """The mirror of the /sync rule above, and the pair is the whole trap.
-
-    /sync and /run read the pin from the BODY. /update reads it from the QUERY
-    on both methods -- deliberately, because a GET has nowhere else and one
-    endpoint spending the credential in two places is a rule nobody holds. Two
-    endpoints, two rules, and the page has to know which is which.
-
-    It did not. The worker put the update POST's pin in the body only, so on
-    every pinned board -- which is every real one -- the first POST came back
-    403; the worker's 403 branch calls update_off(), which latches the link
-    dead; and UPDATE ONLINE reported "the console stopped answering" instantly,
-    before any offer, on a board answering perfectly.
-    """
-    h = _pinned(tmp_path)
-    h.update = _StubUpdate()
-
-    # Body-only: refused, exactly as it was in the wild.
-    r = h.handle_http("POST", "/update", b'{"action":"check","pin":"4321"}')
-    assert b"403" in r.split(b"\r\n")[0], (
-        "a body pin authorized /update -- then the page's bug would be "
-        "invisible here too")
-    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
-
-    # On the query: accepted, both methods.
-    r = h.handle_http("POST", "/update?pin=4321", b'{"action":"check"}')
-    assert b"200" in r.split(b"\r\n")[0], r[:80]
-    r = h.handle_http("GET", "/update?pin=4321", b"")
-    assert b"200" in r.split(b"\r\n")[0], r[:80]
-
-
-class _StubUpdate:
-    """The smallest thing /update will talk to: it only has to be present and
-    answer, since what is under test is the GATE in front of it."""
-
-    def status(self):
-        return {"running": {"board": "test", "version": 1}, "state": "none"}
-
-    def request(self, action, channel=None):
-        return True, "queued"
-
-    def step(self):
-        return False
-
-
-def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
+def test_keep_alive_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
         monkeypatch):
-    """A WEB CONSOLE start with no reachable network holds the frame for the
-    whole link wait; unfed, the kernel's task watchdog reset the Guition S3.
-    Fed only when the frame loop armed it: the first feed would subscribe."""
+    """A wait that holds the frame on purpose (a connect's poll), unfed past
+    the kernel's task watchdog, reset the Guition S3. Fed only when the
+    frame loop armed it: the first feed would subscribe."""
     import types
     sys.path.insert(0, str(MODULES))
     import moy_ota
@@ -1968,15 +1826,16 @@ def test_the_link_wait_feeds_an_armed_watchdog_and_leaves_an_unarmed_one(
         k = types.SimpleNamespace(watchdog=lambda: (armed, 5000, 0, 0),
                                   feed=lambda: fed.append(1))
         monkeypatch.setitem(sys.modules, "moy_kernel", k)
-        moy_ota.wait_online(lambda: False, None, wait_ms=40, step_ms=10)
-        assert (len(fed) >= 4) is armed, (armed, fed)
+        for _ in range(4):
+            moy_ota.keep_alive()
+        assert (len(fed) == 4) is armed, (armed, fed)
 
 
 # -- the switch never waits (native/moy_net/moy_webconsole.c) -------------------
 
 
 def test_a_start_with_no_link_returns_at_once_and_the_poll_brings_it_on(tmp_path):
-    """ensure_online used to hold the frame until the link came, past the task
+    """A start used to hold the frame until the link came, past the task
     watchdog on a board with no reachable network. The switch returns JOINING,
     and the frame's poll binds once the kernel's link has an address."""
     seen = []

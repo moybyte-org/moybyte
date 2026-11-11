@@ -42,50 +42,37 @@ static void yield(void) {
 // weak, so an image or a host with no session thread calls the row in place.
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
 
-// How a native's row runs: hopped to the VM's task, or read in place under
-// the seqlock.
-enum { HOP = 0, SEQ = 1 };
+// How a native's row runs: hopped to the VM's task, read in place under the
+// seqlock, or run in place over state that locks itself (a row that answers
+// NEEDS_VM there is hopped).
+enum { HOP = 0, SEQ = 1, HERE = 2 };
 
-static moy_appabi_t *volatile s_a;
-static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads with no run
-static volatile uint32_t s_g, s_roles;
-static uint32_t s_hops, s_hop_us, s_hop_work_us;
+static moy_appabi_t *volatile s_live;   // the console's state: what the theme reads
+static uint32_t s_hops, s_hop_us, s_hop_work_us, s_here;
 
-void moy_app_wasm_bind(moy_appabi_t *a, uint32_t g, uint32_t roles) {
+void moy_app_wasm_live(moy_appabi_t *a) {
     if (a != NULL) {
         s_live = a;
-    }
-    a = g != 0u ? a : NULL;
-    s_a = a;
-    s_g = a != NULL ? g : 0u;
-    s_roles = a != NULL ? roles : 0u;
-}
-
-void moy_app_wasm_end(void) {
-    moy_appabi_t *a = s_a;
-    uint32_t g = s_g;
-    moy_app_wasm_bind(NULL, 0u, 0u);
-    if (a != NULL && g != 0u) {
-        moy_app_end(a, g);
     }
 }
 
 void moy_app_wasm_forget(const moy_appabi_t *a) {
-    if (a != NULL && s_a == a) {
-        moy_app_wasm_bind(NULL, 0u, 0u);
-    }
     if (a != NULL && s_live == a) {
         s_live = NULL;
     }
 }
 
-uint32_t moy_app_wasm_grant(void) {
-    return s_g;
+// The run the engine's handle on a call is for: the engine glue's.
+const moy_app_run_t *moy_app_wasm_run_of(void *e) __attribute__((weak));
+
+static const moy_app_run_t *run_of(void *e) {
+    const moy_app_run_t *r = moy_app_wasm_run_of != NULL ? moy_app_wasm_run_of(e) : NULL;
+    return moy_app_run_live(r) ? r : NULL;
 }
 
 uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
                             uint32_t cap) {
-    moy_appabi_t *a = s_a != NULL ? s_a : s_live;
+    moy_appabi_t *a = s_live;
     if (a == NULL) {
         return 0u;
     }
@@ -107,10 +94,11 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *na
     }
 }
 
-void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us) {
+void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us, uint32_t *here) {
     *count = s_hops;
     *us = s_hop_us;
     *work_us = s_hop_work_us;
+    *here = s_here;
 }
 
 // -- running a row -----------------------------------------------------------------
@@ -145,39 +133,43 @@ static void le32(uint8_t *q, uint32_t v) {
     q[3] = (uint8_t)(v >> 24);
 }
 
-// Row `row` with its text fields `s` and, where `num` is not NULL, one number
-// field first: packed as moy_app_role's fields, then run as `how` says.
-static int32_t run(int how, int row, const int32_t *num, const span_t *s, int ns,
-                   uint8_t *ans, uint32_t cap) {
-    moy_appabi_t *a = s_a;
-    uint32_t g = s_g;
-    if (a == NULL || row < 0) {
+// A number as a field: its four bytes, little-endian, in `q`.
+#define NUM(q, v) { (le32((q), (uint32_t)(v)), (q)), 4u }
+
+// Row `row` with its fields `f` (a text, a blob or a NUM each, in the row's
+// order) packed as moy_app_role's, then run as `how` says.
+static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *ans,
+                   uint32_t cap) {
+    const moy_app_run_t *rn = run_of(e);
+    if (rn == NULL || row < 0) {
         return -MOY_APP_STALE;
     }
+    moy_appabi_t *a = rn->a;
+    uint32_t g = rn->g;
     uint8_t stack[320];
-    size_t n = num != NULL ? 8u : 0u;
-    for (int i = 0; i < ns; i++) {
-        n += 4u + s[i].n;
+    size_t n = 0;
+    for (int i = 0; i < nf; i++) {
+        n += 4u + f[i].n;
     }
     uint8_t *buf = n <= sizeof stack ? stack : malloc(n);
     if (buf == NULL) {
         return -MOY_APP_NOMEM;
     }
     size_t at = 0;
-    if (num != NULL) {
-        le32(buf, 4u);
-        le32(buf + 4, (uint32_t)*num);
-        at = 8;
-    }
-    for (int i = 0; i < ns; i++) {
-        le32(buf + at, s[i].n);
-        if (s[i].n) {
-            memcpy(buf + at + 4, s[i].p, s[i].n);
+    for (int i = 0; i < nf; i++) {
+        le32(buf + at, f[i].n);
+        if (f[i].n) {
+            memcpy(buf + at + 4, f[i].p, f[i].n);
         }
-        at += 4u + s[i].n;
+        at += 4u + f[i].n;
     }
-    int32_t r;
-    if (how == SEQ) {
+    int32_t r = -MOY_APP_NEEDS_VM;
+    if (how == HERE) {
+        r = moy_app_role_here(a, g, (uint32_t)row, buf, n, ans, cap);
+    }
+    if (how == HERE && r != -MOY_APP_NEEDS_VM) {
+        s_here++;
+    } else if (how == SEQ) {
         for (unsigned spins = 0;; spins++) {
             uint32_t q = moy_app_seq_begin(a);
             if (!(q & 1u)) {
@@ -213,180 +205,8 @@ static int32_t run(int how, int row, const int32_t *num, const span_t *s, int ns
 //
 // Each is the engine's calling shape: the engine's handle on the call first
 // (a WAMR exec env, or the browser's binding), then the row's arguments, a
-// '*~' a pointer the engine has checked and translated and its length.
-
-enum {
-    N_THEME_TOKEN, N_THEME_GEN, N_THEME_LIGHT, N_THEME_NAME, N_THEME_VARIANT,
-    N_THEME_SET, N_THEME_SET_VARIANT, N_THEME_EDIT_FILE,
-    N_FILES_READABLE, N_FILES_READY, N_FILES_LIST, N_FILES_COUNT, N_FILES_LOAD,
-    N_FILES_SAVE, N_FILES_DELETE,
-    N_NAV_OPEN_APP,
-    N_PREFS_GET, N_PREFS_SET, N_PREFS_CLEAR,
-    N_CLIPBOARD_PUT_TEXT, N_CLIPBOARD_TEXT, N_CLIPBOARD_KIND, N_CLIPBOARD_SEQ,
-    N_UI_PAGE, N_UI_LABEL, N_UI_BUTTON, N_UI_TOGGLE, N_UI_SLIDER, N_UI_LIST, N_UI_PART,
-    N_UI_FOCUS, N_UI_KEYS_TAKEN, N_UI_AT, N_UI_GROUP, N_UI_INFO, N_UI_LINK, N_UI_CYCLE,
-    N_UI_SEG, N_UI_SWATCHES, N_UI_HINTS, N_UI_ICON, N_UI_PROGRESS, N_UI_TABLE, N_UI_SCROLL,
-    N_UI_FIELD, N_UI_DIALOG, N_UI_TABS, N_UI_GRID, N_UI_CARD, N_UI_POPOVER, N_UI_MENU,
-    N_UI_TOOL, N_UI_BAR, N_UI_RULE, N_UI_TEXT_VIEW, N_UI_TABLE_PART, N_UI_PART_AT, N_UI_SPLIT,
-    N_UI_TABLE_DIST, N_UI_TABLE_FLOOR, N_UI_HELD, N_UI_SLOTS, N_UI_SLOT, N_UI_SLOT_NEXT,
-    N_UI_HELD_LAST, N_UI_HELD_ALL,
-    N_COUNT
-};
-
-// Each native's "role.verb", in the table's order.
-static const char *const ROW_OF[N_COUNT] = {
-    "theme.token", "theme.gen", "theme.light", "theme.name", "theme.variant",
-    "theme.set", "theme.set_variant", "theme.edit_file",
-    "files.readable", "files.ready", "files.list", "files.count", "files.load",
-    "files.save", "files.delete",
-    "nav.open_app",
-    "prefs.get", "prefs.set", "prefs.clear",
-    "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
-    "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
-    "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
-    "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
-    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
-    "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part", "ui.part_at",
-    "ui.split", "ui.table_dist", "ui.table_floor", "ui.held", "ui.slots", "ui.slot",
-    "ui.slot_next", "ui.held_last", "ui.held_all",
-};
-
-static int16_t s_rows[N_COUNT];
-static int s_rows_made;
-
-int moy_app_wasm_row(uint32_t i) {
-    if (i >= N_COUNT) {
-        return -1;
-    }
-    if (!s_rows_made) {
-        for (int k = 0; k < N_COUNT; k++) {
-            s_rows[k] = -1;
-            for (uint32_t r = 0; r < MOY_APP_TABLE_N; r++) {
-                if (strcmp(moy_app_table_name(r), ROW_OF[k]) == 0) {
-                    s_rows[k] = (int16_t)r;
-                    break;
-                }
-            }
-        }
-        s_rows_made = 1;
-    }
-    return s_rows[i];
-}
-
-#define R(k) moy_app_wasm_row(k)
-
-static int32_t w_theme_token(void *e, int32_t role) {
-    (void)e;
-    return run(SEQ, R(N_THEME_TOKEN), &role, NULL, 0, NULL, 0);
-}
-static int32_t w_theme_gen(void *e) {
-    (void)e;
-    return run(SEQ, R(N_THEME_GEN), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_theme_light(void *e) {
-    (void)e;
-    return run(SEQ, R(N_THEME_LIGHT), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_theme_name(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_THEME_NAME), NULL, NULL, 0, buf, cap);
-}
-static int32_t w_theme_variant(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_THEME_VARIANT), NULL, NULL, 0, buf, cap);
-}
-static int32_t w_theme_set(void *e, const uint8_t *nm, uint32_t nn, const uint8_t *v,
-                           uint32_t vn) {
-    (void)e;
-    span_t s[2] = { { nm, nn }, { v, vn } };
-    return run(HOP, R(N_THEME_SET), NULL, s, 2, NULL, 0);
-}
-static int32_t w_theme_set_variant(void *e, const uint8_t *v, uint32_t vn) {
-    (void)e;
-    span_t s[1] = { { v, vn } };
-    return run(HOP, R(N_THEME_SET_VARIANT), NULL, s, 1, NULL, 0);
-}
-static int32_t w_theme_edit_file(void *e) {
-    (void)e;
-    return run(HOP, R(N_THEME_EDIT_FILE), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_files_readable(void *e) {
-    (void)e;
-    return run(HOP, R(N_FILES_READABLE), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_files_ready(void *e) {
-    (void)e;
-    return run(HOP, R(N_FILES_READY), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_files_list(void *e, const uint8_t *k, uint32_t kn, uint8_t *buf,
-                            uint32_t cap) {
-    (void)e;
-    span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_FILES_LIST), NULL, s, 1, buf, cap);
-}
-static int32_t w_files_count(void *e, const uint8_t *k, uint32_t kn) {
-    (void)e;
-    span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_FILES_COUNT), NULL, s, 1, NULL, 0);
-}
-static int32_t w_files_load(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
-                            uint32_t nn, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    span_t s[2] = { { k, kn }, { nm, nn } };
-    return run(HOP, R(N_FILES_LOAD), NULL, s, 2, buf, cap);
-}
-static int32_t w_files_save(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
-                            uint32_t nn, const uint8_t *d, uint32_t dn, uint8_t *out,
-                            uint32_t cap) {
-    (void)e;
-    span_t s[3] = { { k, kn }, { nm, nn }, { d, dn } };
-    return run(HOP, R(N_FILES_SAVE), NULL, s, 3, out, cap);
-}
-static int32_t w_files_delete(void *e, const uint8_t *k, uint32_t kn, const uint8_t *nm,
-                              uint32_t nn, uint8_t *out, uint32_t cap) {
-    (void)e;
-    span_t s[2] = { { k, kn }, { nm, nn } };
-    return run(HOP, R(N_FILES_DELETE), NULL, s, 2, out, cap);
-}
-static int32_t w_nav_open_app(void *e, const uint8_t *id, uint32_t n) {
-    (void)e;
-    span_t s[1] = { { id, n } };
-    return run(HOP, R(N_NAV_OPEN_APP), NULL, s, 1, NULL, 0);
-}
-static int32_t w_prefs_get(void *e, const uint8_t *k, uint32_t kn, uint8_t *buf,
-                           uint32_t cap) {
-    (void)e;
-    span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_PREFS_GET), NULL, s, 1, buf, cap);
-}
-static int32_t w_prefs_set(void *e, const uint8_t *k, uint32_t kn, const uint8_t *j,
-                           uint32_t jn) {
-    (void)e;
-    span_t s[2] = { { k, kn }, { j, jn } };
-    return run(HOP, R(N_PREFS_SET), NULL, s, 2, NULL, 0);
-}
-static int32_t w_prefs_clear(void *e, const uint8_t *k, uint32_t kn) {
-    (void)e;
-    span_t s[1] = { { k, kn } };
-    return run(HOP, R(N_PREFS_CLEAR), NULL, s, 1, NULL, 0);
-}
-static int32_t w_clipboard_put_text(void *e, const uint8_t *t, uint32_t n) {
-    (void)e;
-    span_t s[1] = { { t, n } };
-    return run(HOP, R(N_CLIPBOARD_PUT_TEXT), NULL, s, 1, NULL, 0);
-}
-static int32_t w_clipboard_text(void *e, uint8_t *buf, uint32_t cap) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_TEXT), NULL, NULL, 0, buf, cap);
-}
-static int32_t w_clipboard_kind(void *e) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_KIND), NULL, NULL, 0, NULL, 0);
-}
-static int32_t w_clipboard_seq(void *e) {
-    (void)e;
-    return run(SEQ, R(N_CLIPBOARD_SEQ), NULL, NULL, 0, NULL, 0);
-}
+// '*~' a pointer the engine has checked and translated and its length. The
+// natives and their table rows are generated from native/os_calls.json.
 
 #if defined(__GNUC__)
 #define FN(f) (__extension__ (void *)(f))
@@ -398,154 +218,20 @@ static int32_t w_clipboard_seq(void *e) {
 // image carries the toolkit: weak here, so an image without it answers NULL
 // for them.
 #define UI_WEAK __attribute__((weak))
-int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_label(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_button(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
-                           uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_toggle(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
-                           uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_slider(void *, const uint8_t *, uint32_t, int32_t, int32_t, int32_t,
-                           const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_list(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
-                         const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_part(void *, const uint8_t *, uint32_t, int32_t, int32_t, const uint8_t *,
-                         uint32_t, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_focus(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_keys_taken(void *) UI_WEAK;
-int32_t moy_ui_wasm_at(void *, int32_t, int32_t, int32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_group(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_info(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_link(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_cycle(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
-                          const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_seg(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
-                        const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_swatches(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                             int32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_hints(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_icon(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_progress(void *, const uint8_t *, uint32_t, int32_t, int32_t, const uint8_t *,
-                             uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_table(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                          const uint8_t *, uint32_t, int32_t, const uint8_t *, uint32_t, uint8_t *,
-                          uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_scroll(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_text_view(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                              const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
-                              uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_table_part(void *, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_part_at(void *, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_table_dist(void *) UI_WEAK;
-int32_t moy_ui_wasm_table_floor(void *, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_held(void *, const uint8_t *, uint32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_slots(void *, int32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_slot(void *, const uint8_t *, uint32_t, int32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_slot_next(void *) UI_WEAK;
-int32_t moy_ui_wasm_held_last(void *, const uint8_t *, uint32_t, int32_t) UI_WEAK;
-int32_t moy_ui_wasm_held_all(void *) UI_WEAK;
-int32_t moy_ui_wasm_split(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t, const uint8_t *,
-                          uint32_t, const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_field(void *, const uint8_t *, uint32_t, uint8_t *, uint32_t, int32_t,
-                          const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_dialog(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
-                           const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_tabs(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
-                         const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_grid(void *, const uint8_t *, uint32_t, int32_t, int32_t, const uint8_t *,
-                         uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_card(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         const uint8_t *, uint32_t, uint8_t *, uint32_t) UI_WEAK;
 
-int32_t moy_ui_wasm_popover(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
-                            uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_menu(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         const uint8_t *, uint32_t, const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_tool(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                         const uint8_t *, uint32_t) UI_WEAK;
-int32_t moy_ui_wasm_bar(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
-                        int32_t) UI_WEAK;
-int32_t moy_ui_wasm_rule(void *) UI_WEAK;
+#include "moy_app_wasm_rows.h"
 
-// The rows, roles.json's wasm types: what tests/test_roles.py holds equal.
-static const moy_app_native_t NATIVES[N_COUNT] = {
-    { "theme_token", FN(w_theme_token), "(i)i", NULL },
-    { "theme_gen", FN(w_theme_gen), "()i", NULL },
-    { "theme_light", FN(w_theme_light), "()i", NULL },
-    { "theme_name", FN(w_theme_name), "(*~)i", NULL },
-    { "theme_variant", FN(w_theme_variant), "(*~)i", NULL },
-    { "theme_set", FN(w_theme_set), "(*~*~)i", NULL },
-    { "theme_set_variant", FN(w_theme_set_variant), "(*~)i", NULL },
-    { "theme_edit_file", FN(w_theme_edit_file), "()i", NULL },
-    { "files_readable", FN(w_files_readable), "()i", NULL },
-    { "files_ready", FN(w_files_ready), "()i", NULL },
-    { "files_list", FN(w_files_list), "(*~*~)i", NULL },
-    { "files_count", FN(w_files_count), "(*~)i", NULL },
-    { "files_load", FN(w_files_load), "(*~*~*~)i", NULL },
-    { "files_save", FN(w_files_save), "(*~*~*~*~)i", NULL },
-    { "files_delete", FN(w_files_delete), "(*~*~*~)i", NULL },
-    { "nav_open_app", FN(w_nav_open_app), "(*~)i", NULL },
-    { "prefs_get", FN(w_prefs_get), "(*~*~)i", NULL },
-    { "prefs_set", FN(w_prefs_set), "(*~*~)i", NULL },
-    { "prefs_clear", FN(w_prefs_clear), "(*~)i", NULL },
-    { "clipboard_put_text", FN(w_clipboard_put_text), "(*~)i", NULL },
-    { "clipboard_text", FN(w_clipboard_text), "(*~)i", NULL },
-    { "clipboard_kind", FN(w_clipboard_kind), "()i", NULL },
-    { "clipboard_seq", FN(w_clipboard_seq), "()i", NULL },
-    { "ui_page", FN(moy_ui_wasm_page), "(*~*~*~)i", NULL },
-    { "ui_label", FN(moy_ui_wasm_label), "(*~*~)i", NULL },
-    { "ui_button", FN(moy_ui_wasm_button), "(*~i*~)i", NULL },
-    { "ui_toggle", FN(moy_ui_wasm_toggle), "(*~i*~)i", NULL },
-    { "ui_slider", FN(moy_ui_wasm_slider), "(*~iii*~)i", NULL },
-    { "ui_list", FN(moy_ui_wasm_list), "(*~*~i*~)i", NULL },
-    { "ui_part", FN(moy_ui_wasm_part), "(*~ii*~*~)i", NULL },
-    { "ui_focus", FN(moy_ui_wasm_focus), "(*~*~)i", NULL },
-    { "ui_keys_taken", FN(moy_ui_wasm_keys_taken), "()i", NULL },
-    { "ui_at", FN(moy_ui_wasm_at), "(iiii)i", NULL },
-    { "ui_group", FN(moy_ui_wasm_group), "(*~*~)i", NULL },
-    { "ui_info", FN(moy_ui_wasm_info), "(*~*~*~)i", NULL },
-    { "ui_link", FN(moy_ui_wasm_link), "(*~*~*~)i", NULL },
-    { "ui_cycle", FN(moy_ui_wasm_cycle), "(*~*~i*~)i", NULL },
-    { "ui_seg", FN(moy_ui_wasm_seg), "(*~*~i*~)i", NULL },
-    { "ui_swatches", FN(moy_ui_wasm_swatches), "(*~*~i*~)i", NULL },
-    { "ui_hints", FN(moy_ui_wasm_hints), "(*~*~)i", NULL },
-    { "ui_icon", FN(moy_ui_wasm_icon), "(*~*~)i", NULL },
-    { "ui_progress", FN(moy_ui_wasm_progress), "(*~ii*~)i", NULL },
-    { "ui_table", FN(moy_ui_wasm_table), "(*~*~*~i*~*~)i", NULL },
-    { "ui_scroll", FN(moy_ui_wasm_scroll), "(*~*~)i", NULL },
-    { "ui_field", FN(moy_ui_wasm_field), "(*~*~i*~)i", NULL },
-    { "ui_dialog", FN(moy_ui_wasm_dialog), "(*~*~i*~)i", NULL },
-    { "ui_tabs", FN(moy_ui_wasm_tabs), "(*~*~i*~)i", NULL },
-    { "ui_grid", FN(moy_ui_wasm_grid), "(*~ii*~)i", NULL },
-    { "ui_card", FN(moy_ui_wasm_card), "(*~*~*~*~)i", NULL },
-    { "ui_popover", FN(moy_ui_wasm_popover), "(*~i*~)i", NULL },
-    { "ui_menu", FN(moy_ui_wasm_menu), "(*~*~*~*~)i", NULL },
-    { "ui_tool", FN(moy_ui_wasm_tool), "(*~*~*~)i", NULL },
-    { "ui_bar", FN(moy_ui_wasm_bar), "(*~*~i)i", NULL },
-    { "ui_rule", FN(moy_ui_wasm_rule), "()i", NULL },
-    { "ui_text_view", FN(moy_ui_wasm_text_view), "(*~*~*~*~*~)i", NULL },
-    { "ui_table_part", FN(moy_ui_wasm_table_part), "(*~)i", NULL },
-    { "ui_part_at", FN(moy_ui_wasm_part_at), "(*~)i", NULL },
-    { "ui_split", FN(moy_ui_wasm_split), "(*~*~*~*~*~)i", NULL },
-    { "ui_table_dist", FN(moy_ui_wasm_table_dist), "()i", NULL },
-    { "ui_table_floor", FN(moy_ui_wasm_table_floor), "(*~)i", NULL },
-    { "ui_held", FN(moy_ui_wasm_held), "(*~i)i", NULL },
-    { "ui_slots", FN(moy_ui_wasm_slots), "(ii)i", NULL },
-    { "ui_slot", FN(moy_ui_wasm_slot), "(*~ii)i", NULL },
-    { "ui_slot_next", FN(moy_ui_wasm_slot_next), "()i", NULL },
-    { "ui_held_last", FN(moy_ui_wasm_held_last), "(*~i)i", NULL },
-    { "ui_held_all", FN(moy_ui_wasm_held_all), "()i", NULL },
-};
+int moy_app_wasm_row(uint32_t i) {
+    return i < MOY_APP_WASM_N ? NATIVE_ROWS[i] : -1;
+}
 
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count) {
-    *count = N_COUNT;
+    *count = MOY_APP_WASM_N;
     return NATIVES;
 }
 
 int moy_app_wasm_row_named(const char *name, size_t n) {
-    for (int k = 0; k < N_COUNT; k++) {
+    for (int k = 0; k < MOY_APP_WASM_N; k++) {
         if (strlen(NATIVES[k].symbol) == n && memcmp(NATIVES[k].symbol, name, n) == 0) {
             return moy_app_wasm_row((uint32_t)k);
         }
@@ -638,6 +324,7 @@ int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, vo
 }
 
 typedef struct {
+    const moy_app_run_t *r;
     char *err;
     size_t errlen;
 } admit_t;
@@ -653,7 +340,8 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
         return 0;
     }
     int row = moy_app_wasm_row_named((const char *)name, nn);
-    if (s_a == NULL) {
+    const moy_app_run_t *r = c->r;
+    if (r == NULL) {
         snprintf(c->err, c->errlen, "imports %s.%.*s, and this run has no app grant",
                  MOY_APP_EXT, (int)nn, (const char *)name);
         return 1;
@@ -667,8 +355,13 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
     if (role == MOY_ROLE_UI) {
         return 0;                   // the toolkit's rows: every compiled app's, no grant
     }
-    int ungated = role == MOY_ROLE_THEME && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL;
-    if ((!ungated && !(s_roles & (1u << role))) || moy_app_holds(s_a, s_g, role) != MOY_APP_OK) {
+    // The console calls are every grant's (MOY_ROLE_FLOOR), each answered under
+    // the permission it names; the theme's reads need none.
+    int ungated = ((MOY_ROLE_FLOOR >> role) & 1u)
+                  || (role == MOY_ROLE_THEME
+                      && moy_app_table_c_row((uint32_t)row) != MOY_APP_SHELL);
+    if ((!ungated && !(r->roles & (1u << role)))
+        || moy_app_holds(r->a, r->g, role) != MOY_APP_OK) {
         const char *perm = moy_app_perm_of(role);
         snprintf(c->err, c->errlen,
                  "imports %s.%.*s, and the manifest grants no %s (permission \"%s\")",
@@ -679,8 +372,9 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
     return 0;
 }
 
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen) {
-    admit_t c = { err, errlen };
+int moy_app_wasm_admit(const moy_app_run_t *run, const uint8_t *head, size_t n, char *err,
+                       size_t errlen) {
+    admit_t c = { moy_app_run_live(run) ? run : NULL, err, errlen };
     if (errlen) {
         err[0] = 0;
     }

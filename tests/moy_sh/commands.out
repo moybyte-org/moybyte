@@ -1,0 +1,21 @@
+$ # installed commands on the PATH (/bin) and by <id>/<name>
+$ ls /bin
+count  daemon  fail  hello  py
+$ hello one "two three"
+hello: [one] [two three]
+$ echo piped | count
+piped
+count: 1 lines
+$ fail; echo fail=$?
+fail=3
+$ moybyte.demo/hello by-id
+hello: [by-id]
+$ other.cart/hello x; echo other=$?
+sh: 1: other.cart/hello: not found
+other=127
+$ py; echo py=$?
+sh: 1: py: needs the console
+py=126
+$ type hello
+hello is a tracked alias for /bin/hello
+[exit 0]

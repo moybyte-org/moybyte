@@ -68,18 +68,21 @@ class AppHost:
     answer whether the app owes a frame, a page of it moving on its own
     included (`moving`; its `damage.all()` is the caller's);
     `begin` begins the frame. A tap is a press frame then a release frame
-    where it went down; a host that passes `point` the pointer's `down` on
+    where it went down; a host whose `point` knows the pointer's `down` on
     every sample also drags (the press held while it moves, released where
-    it comes up), which a page scrolls by. A frame that was not settled
-    owes one more, so the rest state a press or a move leaves is painted,
-    then nothing. `app` is the app's id (its buttons take the theme's
-    `app_buttons[app]`)."""
+    it comes up), which a page scrolls by and a release flings. A frame
+    that was not settled owes one more, so the rest state a press or a
+    move leaves is painted, then nothing. `app` is the app's id (its
+    buttons take the theme's `app_buttons[app]`); `surface`, the app's
+    surface role, is where `point` reads `down` when its caller names none
+    (the console builds a shipped app's `ctx.ui` with it)."""
 
     # split_frame's answers (moy_ui_api.h's MOY_UI_SF_*)
     SPLIT_WHOLE, SPLIT_ALONE, SPLIT_LAGS = 0, 1, 2
 
-    def __init__(self, app=None):
+    def __init__(self, app=None, surface=None):
         self.app = app
+        self.surface = surface
         self.ctx = ui_context()
         self.inp = array("i", [0] * UI_IN_LEN)
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
@@ -164,8 +167,11 @@ class AppHost:
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.
-        With `down` (the pointer held), the press stays held while it moves
-        and is released where it comes up."""
+        With `down` (the pointer held; with none, the host's surface's
+        pointer says), the press stays held while it moves and is released
+        where it comes up."""
+        if down is None and self.surface is not None:
+            down = bool(getattr(self.surface.pointer(), "down", False))
         self.px = int(x)
         self.py = int(y)
         if click:
@@ -275,7 +281,8 @@ class AppHost:
 
     def begin(self, cv, th, rect, desk=False, window=False, elsewhere=False):
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
-        window's body when `window`): whether it is settled. `elsewhere`:
+        window's body when `window`, on a popover's panel when it is
+        "panel"): whether it is settled. `elsewhere`:
         the keys are a part's the app drives itself (a story's slide), so no
         stop holds focus this frame, as while the keys are on the shell's
         bar (`on_bar`): one focus mark a screen."""
@@ -292,12 +299,14 @@ class AppHost:
             self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         return r
 
-    def run(self, cv, th, rect, a, desk=False, window=False, away=False, edge=False, tap=0):
+    def run(self, cv, th, rect, a, desk=False, window=False, away=False, edge=False, tap=0,
+            deaf=False):
         """Begin the frame on input `a` (the run snapshot's shape, its
         pointer's flags as the app's own host made them: a run's Player),
         as `begin` does: whether it is settled. `away`: no stop holds focus;
         `edge`: the key in `a` is a press edge already; `tap`: the pointer's
-        tap state (`begin`'s), 0 none."""
+        tap state (`begin`'s), 0 none; `deaf`: the keys are another window's,
+        so the frame does not take them (`steps_dead` asks the one that does)."""
         ctx = self.ctx
         u = UI_TARGET
         u[0] = ctx
@@ -332,19 +341,25 @@ class AppHost:
             self._canvas(cv)
             fs = _fs(cv)
         hp[_HP_TAP] = tap
-        flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
-                 | (_ELSEWHERE if away else 0) | (_KEY_EDGE if edge else 0))
-        self._t3 = u[3] = flags & (_DESK | _WINDOW)
+        flags = ((_DESK if desk else 0) | (_PANEL if window == "panel" else _WINDOW if window else 0)
+                 | (_ELSEWHERE if away else 0) | (_KEY_EDGE if edge else 0)
+                 | (_TAP if _TAP_FLOOR[0] else 0))
+        self._t3 = u[3] = flags & (_DESK | _WINDOW | _PANEL)
         if self.app is not None:
             flags |= (_app_row(self.app) + 1) << _APP_SHIFT
         # The frame begun last noted, this one begun, and the shift frame it
         # may be planned (moy_ui_api_host_begin): the canvas makes the moves
         # its plan names, then the pass draws the floor alone. A dialog's
         # rows frame is the host's to allow (`held`).
+        paste = a[5] == KEY_PASTE and not away
         r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
         if r & _HB_DUP:
             print("ui: two stops share the id %r; the later is no stop" % _C.api_dup(ctx))
             r = _C.api_host_begin(ctx, a, rect, flags, fs, _PF, hp)
+        if paste:
+            t = paste_text()            # the console's Paste: the focused field takes it
+            if t:
+                _C.api_paste(ctx, t)
         self.shifting = False
         self._dy = 0
         if r & _HB_SHIFT and (not r & _HB_HELD or self._held(hp)):
@@ -367,8 +382,8 @@ class AppHost:
             _EDGE[0] = True
         self._began = _PAINT[0]
         self._console = _PAINT[2]
-        self._keys = not away
-        if not away:
+        self._keys = not (away or deaf)
+        if self._keys:
             _KEYS_HOST[0] = self
         settled = r & _HB_SETTLED != 0
         self.owed = not settled
@@ -745,14 +760,14 @@ class Hold:
         alone = getattr(ws.wm, "content_alone", None)
         ok = (still and not getattr(cv, "covered", False) and alone is not None
               and alone() and not ws._animating(dt) and _whole_retained(cv))
-        self._shown = ws._frames_drawn if ok else -1
+        self._shown = ws.frame_state.frames_drawn if ok else -1
 
     def opened(self, ws):
         """A dialog opened over the page from an input that changed nothing
         else in it: its first frame may take the page from the last frame
         (`last`), where that frame drew it (`shown`) and no change was
         reported since (the console's `_dirty_in`)."""
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
@@ -764,7 +779,7 @@ class Hold:
         over = self._over
         self._over = -1
         self._src = None
-        if over != ws._frames_drawn or ws._animating(dt) or not _whole_retained(cv):
+        if over != ws.frame_state.frames_drawn or ws._animating(dt) or not _whole_retained(cv):
             return False
         if cv.RETAINED_FRAMES == 1:
             return True
@@ -954,15 +969,17 @@ try:
     from ui_draw import (
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
+        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
+        _WHOLE, _WINDOW, KEY_PASTE,
+        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
         window_frame, within)
     from ui_scroll import PaintRing
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import (
         UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
         _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _WHOLE, _WINDOW,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, rows_drawn, ui_context,
+        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
+        _WHOLE, _WINDOW, KEY_PASTE,
+        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
         window_frame, within)
     from runtime.ui_scroll import PaintRing

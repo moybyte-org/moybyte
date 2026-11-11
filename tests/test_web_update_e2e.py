@@ -51,7 +51,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @contextlib.contextmanager
-def _twin(tmp_path, mode, close_after=None, pin=None):
+def _twin(tmp_path, mode, close_after=None):
     """serve.py's board twin with a faked /update of the given shape.
 
     Yields `(base_url, process)`. The process is handed out because one test
@@ -70,8 +70,6 @@ def _twin(tmp_path, mode, close_after=None, pin=None):
             "--carts", str(store), "--update", mode]
     if close_after is not None:
         argv += ["--close-after", str(close_after)]
-    if pin:
-        argv += ["--pin", pin]
     server = subprocess.Popen(argv, cwd=RUNNER, stdout=subprocess.DEVNULL,
                               stderr=subprocess.STDOUT)
     base = "http://127.0.0.1:%d" % port

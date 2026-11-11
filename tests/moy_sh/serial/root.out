@@ -1,0 +1,15 @@
+> sh pwd
+SH /
+SH end 0
+> sh echo hi > /asdf.txt; mkdir /notes
+SH end 0
+> sh ls /
+SH asdf.txt  bin/  dev/  etc  notes/  proc/  sd
+SH end 0
+> sh cat /asdf.txt
+SH hi
+SH end 0
+> sh cd; pwd
+SH /
+SH end 0
+[exit 0]

@@ -175,7 +175,7 @@
 #define MOY_LCD_PIN_BL       42
 #define MOY_LCD_PIN_POWERON  10          // board power rail (peripherals + panel)
 #define MOY_LCD_PIN_SD_CS    39
-#define MOY_LCD_PIN_RADIO_CS 9           // unused LoRa module; park it high
+#define MOY_LCD_PIN_RADIO_CS 9           // the SX1262 off the bus until moy_lora adds its device
 
 // The light's driver state (moy_lcd_kbacklight).
 static int s_bl_step;               // 0 off, 1..16
@@ -278,6 +278,15 @@ static uint8_t s_madctl;
 // and an inner sd_guard(False) that cleared the bracket would leave the OUTER
 // session running unserialized against the feeder -- the panic above, with
 // nothing to point at it.
+//
+// BUS: a program's own task (a compiled or Lua service) reaches the card too,
+// through the store's gate, which takes the store's lock before this guard
+// (native/moy_store/moy_vol.h, THE STORE'S LOCK). Its card transactions run
+// on its task, not the VM's, so a drain after the kick cannot keep them off
+// the feeder: every kick takes the store's lock, so no frame starts while
+// a task holds the card, and the guard's drain at the session's start waits
+// out a frame already in flight. The lock is held across the kick alone,
+// never across a drain that lets the GIL go.
 static volatile int s_sd_guard;
 static void moy_lcd_sd_gate(int on);
 
@@ -519,7 +528,9 @@ int moy_lcd_kpresent(void) {
     moy_flush_kdrain();
     (void)moy_flush_take_err();
     moy_fold_consume();
+    moy_store_lock();               // no frame while a task holds the card (BUS)
     moy_flush_kick(s_fbs[0], MOY_LCD_H);
+    moy_store_unlock();
     bool ok = moy_flush_kdrain();
     esp_err_t e = moy_flush_take_err();
     return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
@@ -762,7 +773,9 @@ int moy_lcd_kkick(int n) {
     // The fold's one-shot latch, consumed with the feeder IDLE (the drain above
     // is what makes that true) so a band can never read a half-set arm.
     moy_fold_consume();
+    moy_store_lock();               // no frame while a task holds the card (BUS)
     moy_flush_kick(s_fbs[n], MOY_LCD_H);
+    moy_store_unlock();
     if (s_sd_guard) {
         moy_flush_drain();          // SD session live: no overlap (see the guard)
     }
@@ -780,7 +793,9 @@ int moy_lcd_kship(int n) {
     moy_flush_drain();
     (void)moy_flush_take_err();     // show reports its OWN frame's errors
     moy_fold_consume();
+    moy_store_lock();               // no frame while a task holds the card (BUS)
     moy_flush_kick(s_fbs[n], MOY_LCD_H);
+    moy_store_unlock();
     bool ok = moy_flush_drain();
     esp_err_t e = moy_flush_take_err();
     return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
@@ -802,19 +817,38 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick)
 // start.
 // The same body is the store's bus gate (moy_vol_set_gate), which a store
 // op made in C -- a compiled cart's files -- takes around its card access.
-static void moy_lcd_sd_gate(int on) {
+// The store's gate runs under the store's lock, on whichever task makes the
+// op, so its drain lets no GIL go: a VM thread that took the GIL meanwhile
+// and then waited for the lock would hold the drained task off the GIL.
+static portMUX_TYPE s_guard_mux = portMUX_INITIALIZER_UNLOCKED;   // two tasks count it
+
+static void sd_gate(int on, bool gil) {
     if (on) {
+        portENTER_CRITICAL(&s_guard_mux);
         s_sd_guard++;
+        portEXIT_CRITICAL(&s_guard_mux);
         if (s_panel != NULL) {
-            moy_flush_drain();
+            if (gil) {
+                moy_flush_drain();
+            } else {
+                moy_flush_kdrain();
+            }
         }
-    } else if (s_sd_guard > 0) {
-        s_sd_guard--;
+    } else {
+        portENTER_CRITICAL(&s_guard_mux);
+        if (s_sd_guard > 0) {
+            s_sd_guard--;
+        }
+        portEXIT_CRITICAL(&s_guard_mux);
     }
 }
 
+static void moy_lcd_sd_gate(int on) {
+    sd_gate(on, false);
+}
+
 static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
-    moy_lcd_sd_gate(mp_obj_is_true(on_in));
+    sd_gate(mp_obj_is_true(on_in), true);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_sd_guard_obj, moy_lcd_sd_guard);

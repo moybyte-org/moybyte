@@ -31,8 +31,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-uint32_t moy_net_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+uint64_t moy_net_ms64(void) {
+    return (uint64_t)(esp_timer_get_time() / 1000);
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
@@ -59,18 +59,24 @@ void moy_net_free(void *p) {
     }
     heap_caps_free(p);
 }
+
+#include "mbedtls/sha256.h"
+
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
+    mbedtls_sha256(p, n, out, 0);
+}
 #elif MOY_NET_POSIX
 #include <stdlib.h>
 #include <time.h>
 
-// What the host's tests move the clock by, so a window can run out in one.
-uint32_t moy_net_ms_skew;
+// What the host's tests move the clock by, so a window can run out in one
+// (modulo 2^64: a skew back is its two's complement).
+uint64_t moy_net_ms_skew;
 
-uint32_t moy_net_ms(void) {
+uint64_t moy_net_ms64(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)((uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u)
-           + moy_net_ms_skew;
+    return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u + moy_net_ms_skew;
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
@@ -85,6 +91,89 @@ void *moy_net_alloc(size_t n) {
 void moy_net_free(void *p) {
     free(p);
 }
+
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
+    moy_sha256_t h;
+    moy_sha256_init(&h);
+    moy_sha256_update(&h, p, n);
+    moy_sha256_final(&h, out);
+}
+
+// The machine's own clock, which its system keeps.
+int moy_clock_state(int64_t *at) {
+    if (at != NULL) {
+        *at = (int64_t)time(NULL);
+    }
+    return MOY_CLOCK_SYNCED;
+}
+
+int moy_clock_server(const char *name) {
+    return name != NULL && strlen(name) > MOY_CLOCK_SERVER_MAX ? -1 : 0;
+}
+#endif
+
+// -- the clock a certificate's dates are read against ---------------------------
+
+#if defined(ESP_PLATFORM) || MOY_NET_POSIX
+#include <stdlib.h>
+
+uint32_t moy_net_ms(void) {
+    return (uint32_t)moy_net_ms64();
+}
+
+// THE NETWORK'S GATE (moy_net.h): the station's where the image has one.
+int moy_net_online(void) __attribute__((weak));
+
+static int offline(void) {
+    return moy_net_online != NULL && !moy_net_online();
+}
+
+int moy_net_await(uint32_t *since) {
+    if (!offline()) {
+        return 1;
+    }
+    uint32_t now = moy_net_ms() | 1u;
+    if (*since == 0) {
+        *since = now;
+    }
+    return now - *since < MOY_NET_DIAL_MS ? 0 : -MOY_NET_ENET;
+}
+
+static int trusted(int64_t floor, int64_t answer) {
+    return answer != 0 && answer >= floor && answer - floor <= MOY_CLOCK_LEAP_MAX;
+}
+
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int64_t answer) {
+    if (trusted(floor, answer)) {
+        return now >= floor ? now : floor;
+    }
+    return answer == 0 && now >= floor ? now : floor;
+}
+
+int moy_clock_future_counts(int64_t now, int64_t floor, int64_t answer) {
+    return trusted(floor, answer) || (answer == 0 && now >= floor);
+}
+
+int64_t moy_clock_civil(int year, int month, int day, int hour, int min, int sec) {
+    // Days from 1970-01-01 (the civil-from-days inverse).
+    int m = month - 1;
+    int yy = year - (m < 2), era = (yy >= 0 ? yy : yy - 399) / 400, yoe = yy - era * 400;
+    int doy = (153 * (m + (m < 2 ? 10 : -2)) + 2) / 5 + day - 1;
+    int64_t days = (int64_t)era * 146097 + (int64_t)yoe * 365 + yoe / 4 - yoe / 100 + doy
+                   - 719468;
+    return days * 86400 + (int64_t)hour * 3600 + (int64_t)min * 60 + sec;
+}
+
+int64_t moy_clock_build_day(void) {
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *d = __DATE__;                   // "Mmm dd yyyy"
+    int m = 0;
+    while (m < 12 && strncmp(mon + 3 * m, d, 3) != 0) {
+        m++;
+    }
+    int day = (d[4] == ' ' ? 0 : d[4] - '0') * 10 + (d[5] - '0');
+    return moy_clock_civil(atoi(d + 7), m + 1, day, 0, 0, 0);
+}
 #endif
 
 // -- the listener -----------------------------------------------------------------
@@ -98,6 +187,8 @@ void moy_net_free(void *p) {
 #include <unistd.h>
 #if defined(ESP_PLATFORM)
 #include "lwip/sockets.h"
+#else
+#include <sys/select.h>
 #endif
 
 #ifndef MSG_NOSIGNAL
@@ -131,11 +222,15 @@ int moy_http_listen(uint16_t port) {
     return fd;
 }
 
-int moy_http_accept(int lfd) {
-    int fd = accept(lfd, NULL, NULL);
+int moy_http_accept(int lfd, uint32_t *peer) {
+    struct sockaddr_in a;
+    socklen_t an = sizeof(a);
+    memset(&a, 0, sizeof(a));
+    int fd = accept(lfd, (struct sockaddr *)&a, &an);
     if (fd < 0) {
         return -1;
     }
+    *peer = a.sin_family == AF_INET ? a.sin_addr.s_addr : 0u;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) & ~O_NONBLOCK);
     timeout(fd, SO_RCVTIMEO, MOY_HTTP_RECV_MS);
     timeout(fd, SO_SNDTIMEO, MOY_HTTP_SEND_MS);
@@ -282,6 +377,13 @@ int moy_gpio_drive(int pin, int level) {
     return gpio_set_level((gpio_num_t)pin, level ? 1 : 0) == ESP_OK ? 0 : -1;
 }
 
+void moy_gpio_reset(int pin) {
+    int i = gpio_slot(pin);
+    if (i >= 0) {
+        s_gpio_mode[i] = 0;
+    }
+}
+
 int moy_gpio_sense(int pin) {
     int i = gpio_slot(pin);
     if (i < 0) {
@@ -302,15 +404,25 @@ int moy_gpio_sense(int pin) {
 #if defined(ESP_PLATFORM)
 #include <netdb.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "esp_flash_partitions.h"
 #include "esp_image_format.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
-#include "esp_random.h"
 #include "mbedtls/net_sockets.h"
+#include "mbedtls/platform_time.h"
 #include "mbedtls/ssl.h"
+#include "moy_seal.h"
+#include "nvs.h"
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_USE_PSA_CRYPTO)
 #include "psa/crypto.h"
+#endif
+#if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+#include "esp_crt_bundle.h"
+// The bundle's own check, which esp_crt_bundle_attach installs and the
+// image's verify callback below wraps.
+extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth,
+                                   uint32_t *flags);
 #endif
 
 // The kernel's task watchdog, fed while the frame loop has it armed: a
@@ -336,13 +448,135 @@ typedef struct {
     int tls;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
+    int64_t seen;                   // the verified leaf's start date, Unix time
 } conn_t;
 
 static int rng(void *ctx, unsigned char *out, size_t n) {
     (void)ctx;
-    esp_fill_random(out, n);
+    moy_seal_random(out, n);
     return 0;
 }
+
+int moy_conn_verifies(void) {
+    #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+    return 1;
+    #else
+    return 0;
+    #endif
+}
+
+#if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+// A certificate's dates read the clock by moy_net.h's rule
+// (moy_clock_cert_time): NTP's answer while it sits between the floor and
+// MOY_CLOCK_LEAP_MAX past it, else the floor. Before NTP answers a board's
+// clock is the uptime, so it reads as the floor: a certificate that expired
+// before the floor is refused, and one issued after it is not held to its
+// start date (the usual case for 90-day certificates).
+//
+// THE FLOOR is the newest of the day this image was built and SEEN: the
+// newest start date of a leaf certificate whose handshake verified, kept in
+// NVS. A CA signed that date, so the time was past it when the board saw it,
+// and the floor follows the real time to within a certificate's age; NVS is
+// written only when SEEN rises by a day or more.
+extern int moy_clock_state(int64_t *at) __attribute__((weak));
+
+#define CLOCK_WAIT_MS 3000          // a first answer a handshake waits for
+#define SEEN_NS "moy_net"
+#define SEEN_KEY "cert_seen"
+#define SEEN_STEP 86400
+
+static mbedtls_time_t (*s_clock)(mbedtls_time_t *);
+static int64_t s_floor, s_seen_kept;
+
+static int64_t answer(void) {
+    int64_t at = 0;
+    if (moy_clock_state == NULL || moy_clock_state(&at) != MOY_CLOCK_SYNCED) {
+        return 0;
+    }
+    return at;
+}
+
+static void seen_load(void) {
+    nvs_handle_t h;
+    int64_t t = 0;
+    if (nvs_open(SEEN_NS, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_i64(h, SEEN_KEY, &t) != ESP_OK) {
+            t = 0;
+        }
+        nvs_close(h);
+    }
+    s_seen_kept = t;
+    int64_t b = moy_clock_build_day();
+    s_floor = t > b ? t : b;
+}
+
+static void seen_raise(int64_t t) {
+    if (t <= s_floor) {
+        return;
+    }
+    s_floor = t;
+    nvs_handle_t h;
+    if (t - s_seen_kept >= SEEN_STEP && nvs_open(SEEN_NS, NVS_READWRITE, &h) == ESP_OK) {
+        if (nvs_set_i64(h, SEEN_KEY, t) == ESP_OK && nvs_commit(h) == ESP_OK) {
+            s_seen_kept = t;
+        }
+        nvs_close(h);
+    }
+}
+
+// The station is up for this handshake, so a request NTP has out is waited
+// for, briefly: its answer is what makes the dates exact.
+static void await_clock(void) {
+    if (moy_clock_state == NULL) {
+        return;
+    }
+    uint32_t t0 = moy_net_ms();
+    while (moy_clock_state(NULL) == MOY_CLOCK_ASKING && moy_net_ms() - t0 < CLOCK_WAIT_MS) {
+        moy_net_sleep_ms(50);
+        tick();
+    }
+}
+
+static mbedtls_time_t tls_now(mbedtls_time_t *t) {
+    mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
+    n = (mbedtls_time_t)moy_clock_cert_time(n, s_floor, answer());
+    if (t != NULL) {
+        *t = n;
+    }
+    return n;
+}
+
+// Each certificate of the chain, the leaf last (depth 0): a leaf that checks
+// leaves its start date for the handshake's end to raise the floor by.
+static int verify(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+    conn_t *c = ctx;
+    mbedtls_time_t n = s_clock != NULL ? s_clock(NULL) : 0;
+    if (!moy_clock_future_counts(n, s_floor, answer())) {
+        *flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_FUTURE;
+    }
+    int r = esp_crt_verify_callback(NULL, crt, depth, flags);
+    if (depth == 0 && r == 0 && *flags == 0) {
+        const mbedtls_x509_time *f = &crt->valid_from;
+        c->seen = moy_clock_civil(f->year, f->mon, f->day, f->hour, f->min, f->sec);
+    }
+    return r;
+}
+
+static int verify_setup(conn_t *c) {
+    await_clock();
+    if (mbedtls_time != tls_now) {
+        seen_load();
+        s_clock = mbedtls_time;
+        mbedtls_platform_set_time(tls_now);
+    }
+    if (esp_crt_bundle_attach(&c->conf) != ESP_OK) {
+        return -1;
+    }
+    mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_verify(&c->conf, verify, c);
+    return 0;
+}
+#endif
 
 static int bio_send(void *ctx, const unsigned char *b, size_t n) {
     int k = send(((conn_t *)ctx)->fd, b, n, 0);
@@ -375,6 +609,12 @@ static void conn_free(conn_t *c) {
 
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
+    if (offline()) {
+        return -MOY_NET_ENET;
+    }
+    if (tls == MOY_CONN_TLS && !moy_conn_verifies()) {
+        return -MOY_HTTPC_ETLS;
+    }
     char ps[8];
     snprintf(ps, sizeof(ps), "%u", (unsigned)port);
     struct addrinfo hints, *ai = NULL;
@@ -433,7 +673,7 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     fcntl(c->fd, F_SETFL, fcntl(c->fd, F_GETFL, 0) & ~O_NONBLOCK);
     timeout(c->fd, SO_RCVTIMEO, CONN_WAIT_MS);
     timeout(c->fd, SO_SNDTIMEO, MOY_HTTPC_IO_MS);
-    if (!tls) {
+    if (tls == MOY_CONN_PLAIN) {
         *out = c;
         return 0;
     }
@@ -441,13 +681,24 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     psa_crypto_init();
     #endif
     c->tls = 1;
+    c->seen = 0;
     mbedtls_ssl_init(&c->ssl);
     mbedtls_ssl_config_init(&c->conf);
     rc = mbedtls_ssl_config_defaults(&c->conf, MBEDTLS_SSL_IS_CLIENT,
                                      MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (rc == 0) {
-        // No certificate is verified: the manifest's signature decides (moy_ota.h).
-        mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
+        if (tls == MOY_CONN_TLS_SIGNED) {
+            // The updater's: no certificate is verified, the manifest's
+            // signature decides what installs (moy_ota.h).
+            mbedtls_ssl_conf_authmode(&c->conf, MBEDTLS_SSL_VERIFY_NONE);
+        }
+        #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+        else if (verify_setup(c) != 0) {
+            rc = -1;
+        }
+        #endif
+    }
+    if (rc == 0) {
         mbedtls_ssl_conf_rng(&c->conf, rng, NULL);
         rc = mbedtls_ssl_setup(&c->ssl, &c->conf);
     }
@@ -465,9 +716,17 @@ int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
         if ((rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE)
             || moy_net_ms() - t0 >= MOY_HTTPC_IO_MS) {
             conn_free(c);
-            return rc == MBEDTLS_ERR_SSL_WANT_READ ? -ETIMEDOUT : -ECONNABORTED;
+            return rc == MBEDTLS_ERR_SSL_WANT_READ ? -ETIMEDOUT
+                   : rc == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED
+                     || rc == MBEDTLS_ERR_X509_FATAL_ERROR ? -MOY_HTTPC_ECERT
+                   : -ECONNABORTED;
         }
     }
+    #if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+    if (c->seen != 0 && mbedtls_ssl_get_verify_result(&c->ssl) == 0) {
+        seen_raise(c->seen);
+    }
+    #endif
     *out = c;
     return 0;
 }
@@ -506,6 +765,32 @@ int moy_conn_read(void *conn, void *p, size_t n) {
             return -ETIMEDOUT;
         }
     }
+}
+
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    conn_t *c = conn;
+    if (c->tls && mbedtls_ssl_get_bytes_avail(&c->ssl) > 0) {
+        return moy_conn_read(conn, p, n);
+    }
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(c->fd, &r);
+    struct timeval tv = {(long)(ms / 1000u), (long)(ms % 1000u) * 1000L};
+    int k = select(c->fd + 1, &r, NULL, NULL, &tv);
+    if (k == 0) {
+        return -MOY_HTTPC_EAGAIN;
+    }
+    if (k < 0) {
+        return -errno;
+    }
+    if (c->tls) {
+        return moy_conn_read(conn, p, n);   // a record's bytes have begun to arrive
+    }
+    k = recv(c->fd, p, n, 0);
+    if (k >= 0) {
+        return k;
+    }
+    return errno == EAGAIN || errno == EWOULDBLOCK ? -MOY_HTTPC_EAGAIN : -errno;
 }
 
 int moy_conn_write(void *conn, const void *p, size_t n) {
@@ -622,9 +907,16 @@ typedef struct {
     int fd;
 } conn_t;
 
+int moy_conn_verifies(void) {
+    return 0;
+}
+
 int moy_conn_open(const char *host, uint16_t port, int tls, void **out) {
     *out = NULL;
-    if (tls) {
+    if (offline()) {
+        return -MOY_NET_ENET;
+    }
+    if (tls != MOY_CONN_PLAIN) {
         return -EPROTONOSUPPORT;
     }
     char ps[8];
@@ -661,6 +953,22 @@ int moy_conn_read(void *conn, void *p, size_t n) {
     return (int)k;
 }
 
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    int fd = ((conn_t *)conn)->fd;
+    fd_set r;
+    FD_ZERO(&r);
+    FD_SET(fd, &r);
+    struct timeval tv = {(long)(ms / 1000u), (long)(ms % 1000u) * 1000L};
+    int k = select(fd + 1, &r, NULL, NULL, &tv);
+    if (k == 0) {
+        return -MOY_HTTPC_EAGAIN;
+    }
+    if (k < 0) {
+        return -errno;
+    }
+    return moy_conn_read(conn, p, n);
+}
+
 int moy_conn_write(void *conn, const void *p, size_t n) {
     return moy_http_send(((conn_t *)conn)->fd, p, n) == 0 ? 0 : -EPIPE;
 }
@@ -673,8 +981,10 @@ void moy_conn_close(void *conn) {
 }
 
 // The host's slot: memory the tests read back, `moy_slot_host_cap` bytes,
-// checked at close as a board's is in its first byte alone.
+// checked at close as a board's is in its first byte alone. A write past
+// `moy_slot_host_room` bytes fails ENOSPC as a flash that will not take them.
 uint32_t moy_slot_host_cap = 4u << 20;
+uint32_t moy_slot_host_room = 0xffffffffu;
 uint8_t *moy_slot_host_data;
 uint32_t moy_slot_host_n;
 char moy_slot_host_booted[16];
@@ -694,7 +1004,8 @@ int moy_slot_write(const void *p, size_t n) {
     if (!s_open || s_closed) {
         return -EBADF;
     }
-    if (n > moy_slot_host_cap - moy_slot_host_n) {
+    if (n > moy_slot_host_cap - moy_slot_host_n
+        || moy_slot_host_n + n > moy_slot_host_room) {
         return -ENOSPC;
     }
     memcpy(moy_slot_host_data + moy_slot_host_n, p, n);

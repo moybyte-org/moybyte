@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from ws_helpers import build_desktop_ws, open_cart  # noqa: E402
+from ws_helpers import build_desktop_ws, open_cart, settle_badges  # noqa: E402
 
 DT = 1 / 30
 _TAP_FLOOR = 32
@@ -41,6 +41,7 @@ def _frames(ws, n=3):
     for _ in range(n):
         if ws.pointer is not None:
             ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         ws.show_fps = False
         ws._dirty = True
@@ -294,7 +295,7 @@ def test_a_desk_play_is_full_screen_the_game_alone(tmp_path, size, scale):
     ox, oy, s = wm._player_view(win)
     assert s == scale
     assert wm._strip_buttons(win) == []
-    gw, gh = ws.canvas.w * s, ws.canvas.h * s
+    gw, gh = ws.run.canvas.w * s, ws.run.canvas.h * s
     sc = wm._root_canvas
     for x, y in ((2, 2), (size[0] - 3, 2), (2, size[1] - 3),
                  (ox - 1 if ox else 0, size[1] // 2)):
@@ -314,7 +315,7 @@ def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
     _frames(ws)
     wm = ws.wm
     win = wm._wins["desktop"]
-    assert ws.app_window_canvas and not win.full()
+    assert ws.run.app_window_canvas and not win.full()
     drv = _drv(ws)
     _tap(ws, drv, *_centre(_btn(ws, win, "max")))
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
@@ -334,8 +335,9 @@ def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
 
 
 def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path):
-    """Minimised, an app cart's run is held as a game's is, and shown again
-    it goes on: the pause menu a game's restore lands on (D-25) is a game's."""
+    """Minimised, an app cart's run is minimised as a game's is -- not
+    held -- and shown again it goes on, with no pause menu
+    (docs/os_2026-11/processes.md §1)."""
     ws = _desk(tmp_path)
     open_cart(ws, "Notes")
     _frames(ws)
@@ -345,7 +347,7 @@ def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path
     _frames(ws)
     wm._minimize(win, True)
     _frames(ws)
-    assert ws.player.paused and win.held
+    assert win.minimized and not ws.run.player.paused
     wm._minimize(win, False)
     _frames(ws)
-    assert not ws.pause.open and not ws.player.paused and win.full()
+    assert not ws.pause.open and not ws.run.player.paused and win.full()

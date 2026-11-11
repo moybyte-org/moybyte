@@ -152,7 +152,7 @@ def test_opening_finishes_what_a_power_loss_left(tmp_path):
     for side in ("py", "c"):
         root = tmp_path / side
         cart = _store(root)
-        written = root / "written" / "game"
+        written = root / "apps" / "game"
         written.mkdir(parents=True)
         (written / "save").write_bytes(b"old")
         (written / "save~done").write_bytes(b"new")
@@ -164,7 +164,7 @@ def test_opening_finishes_what_a_power_loss_left(tmp_path):
     held = moy_play.files_live()
     c = moy_play.Files(c_cart)
     assert _snapshot(py_root) == _snapshot(c_root)
-    assert (py_root / "written" / "game" / "save").read_bytes() == b"new"
+    assert (py_root / "apps" / "game" / "save").read_bytes() == b"new"
     assert sorted(py.written) == [b"other", b"save"]
     for p in (b"save", b"other", b"half"):
         assert _where(py, p, py_root) == _where(c, p, c_root), p

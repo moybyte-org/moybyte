@@ -76,14 +76,14 @@ are the shared DRAW TOOLKIT (doc 4 keeps that on the kernel by decision), and
 bar_layer's own header already says so. `set_icon_sheet` clears it, the one
 kernel field this object writes besides the tokens.
 
-`_fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `_show_wallpaper`
-reads it through `ws` to decide whether a compiled wallpaper cart may be
+`ws.run.fat_cart` is the OPEN WORKSPACE's cart, not a look setting; `_show_wallpaper`
+reads it to decide whether a compiled wallpaper cart may be
 re-slimmed.
 
 ## Reading late-injected things through `ws`, per call
 
 Same rule the other four collaborators follow (doc 3c). This object is built in
-`Workstation.__init__`, before the store is wired, before `system.json` is
+`Workstation.__init__`, before the store is wired, before `system/settings` is
 read, before the layer stack exists -- so `carts_store`, `carts_root`,
 `_with_sd`, `launcher`, `projects_grid` and `bar_layer` are all reached through `ws`
 at the moment of use and never captured here.
@@ -146,6 +146,7 @@ def _ui_text_w(t):
 
 
 _FONT_ROLES = ("ui", "title", "mono", "caption", "key", "op", "result")
+_TAP_ROLES = ("tap", "tap_caption")         # the engine's own, past the theme's
 # The type scale's weight steps a look moves to its family's own
 # (THEMES.md's type group; fontset.ROLES names the steps).
 _WEIGHT_STEPS = ((500, "w_med"), (600, "w_semi"), (700, "w_bold"))
@@ -197,14 +198,15 @@ def _fam(name, variant, desk=False):
     return fam, steps, sizes
 
 
-def role_fonts(name, variant, desk=False, own=()):
+def role_fonts(name, variant, desk=False, own=(), tap=False):
     """{role: (package, file)}: the font each role of theme `name` takes in
     `variant` on the metric class (`desk`), package None for a face the image
     carries. The files the theme's chain names; then `own`, the installed
     package's own (role, file) pairs; then, where the look sets a family
     (`fam`) and `own` names no `ui`, that family's face for each role of
-    `fontset.ROLES` and `fontset.CALC_ROLES` no file named. A role it leaves
-    out draws in petme128."""
+    `fontset.ROLES` and `fontset.CALC_ROLES` no file named, and where the
+    board's tap floor stands (`tap`), each of `fontset.TAP_ROLES`. A role it
+    leaves out draws in petme128 (a tap role in `ui`'s and `caption`'s)."""
     files = {}
     for role, f in _ui_draw.theme_fonts(name):
         files[role] = (None, f)
@@ -212,7 +214,8 @@ def role_fonts(name, variant, desk=False, own=()):
         files[role] = (name, f)
     fam, steps, sizes = _fam(name, variant, desk)
     if fam is not None and "ui" not in dict(own):
-        for role in tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES):
+        for role in (tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES)
+                     + (tuple(_fontset.TAP_ROLES) if tap else ())):
             if role in files:
                 continue
             face = _fontset.role_face(fam, role, desk, steps, sizes)
@@ -276,7 +279,7 @@ class Appearance:
     # -- system font scale (#39) ---------------------------------------------
     #
     # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
-    # persisted in system.json and applied live.
+    # persisted in system/settings and applied live.
     # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
     # canvas + the responsive Layout, so a cart is never affected.
 
@@ -561,7 +564,7 @@ class Appearance:
                 # re-slims -- unless it IS the open project's cart (stays fat).
                 ws.carts.rehydrate(cart)
                 ws.wallpaper.compile(cart)   # compile into the backdrop component (#28)
-                if cart is not getattr(ws, "_fat_cart", None):
+                if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
         ws._dirty = True
 
@@ -655,7 +658,7 @@ class Appearance:
                     guard.forgive(value)
             ach = getattr(ws, "ach", None)
             if ach is not None:
-                ach.note("wallpaper_change")   # "Home Decorator" (#21)
+                ach.award("decorator")
         return 0
 
     def _take(self, c, look, over, kind, pic):
@@ -1345,6 +1348,14 @@ class Appearance:
         stored choice can lose."""
         return max(self.effective_font_scale(), self.chrome_size() * _layout_base.unit())
 
+    def tap_floor(self):
+        """Whether the board's tap floor stands over the text (#203): on the
+        handheld's metrics, the chrome scale in force is over the font scale,
+        so the rows a finger aims at grow to meet it while the text stays
+        (`ui_draw.tap_floor`, which every ui frame begins with)."""
+        return (getattr(self.ws, "metric_class", None) != _layout_base.DESK
+                and self.effective_chrome_scale() > self.effective_font_scale())
+
     def chrome_size(self):
         """The chrome SIZE in force, as CHROME SIZE shows it: the requested
         one, never under the board's tap floor. `effective_chrome_scale` is
@@ -1794,7 +1805,8 @@ class Appearance:
             got = package(name)
             own = got[5] if got is not None and got[0] == 0 else ()
         desk = getattr(self.ws, "metric_class", None) == _layout_base.DESK
-        files = role_fonts(name, self.theme_variant, desk, own)
+        tap = not desk and getattr(self.ws, "chrome_floor", 1) > 1
+        files = role_fonts(name, self.theme_variant, desk, own, tap)
         was = {role: _ui_draw.font(role)[0] for role in _FONT_ROLES + ("hero",)}
         want = set(files.values())
         for key in list(_FONTS):
@@ -1806,7 +1818,7 @@ class Appearance:
             # empty slots.
             _FULL[0] = False
             ids = {}
-            for role in _FONT_ROLES + ("hero",):
+            for role in _FONT_ROLES + ("hero",) + _TAP_ROLES:
                 f = files.get(role)
                 ids[role] = self._font_id(f) if f else 0
             if not _FULL[0]:
@@ -1819,6 +1831,8 @@ class Appearance:
         if was["hero"] != (ids["hero"] or ids["title"]):
             changed = True
         _ui_draw.use_hero(ids["hero"])
+        for role in _TAP_ROLES:
+            _ui_draw.use_font(role, ids[role])
         _ui_draw.print_font(ids["ui"])
         keep = set(ids.values())
         for key in list(_FONTS):
@@ -1925,6 +1939,11 @@ class Appearance:
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
         _ui_draw.look_moved()
+        # A run's looks are the live theme's from here on: the looks a run's
+        # page and a copy of the toolkit linked into a program draw in (moy_ui.h).
+        near = self.live.near
+        _ui_draw.run_look(near if near is not None else self.ws.theme_colors,
+                          self.ws.theme_colors)
 
     def _go_live(self, name):
         """Make theme `name` (in the live variant) the colours the shell
@@ -1939,7 +1958,7 @@ class Appearance:
         if moved and getattr(self.ws, "bar_layer", None) is not None:
             self.ws.bar_layer.invalidate()
             self._bars_moved = True
-        put = getattr(getattr(self.ws, "canvas", None), "theme_block", None)
+        put = getattr(self.ws.run.canvas, "theme_block", None)
         if put is not None:
             put(live.block)
         _ui_draw._C.theme_block(live.block, live.used)

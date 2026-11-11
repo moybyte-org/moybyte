@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 14,
   "title": "Notes",
   "id": "moybyte.notes",
   "runtime": "python",
@@ -18,10 +18,17 @@
     "permissions": [
       "graphics",
       "input",
-      "files:docs",
+      "files:documents",
       "clipboard",
       "prefs",
       "editor"
+    ],
+    "handles": [
+      "text/markdown",
+      "text/plain",
+      "application/json",
+      "text/x-python",
+      "text/x-lua"
     ],
     "config": {},
     "edit": []

@@ -210,6 +210,15 @@ constraints. Read it before changing the board.
 | `docs/` | cart API, shell UX, architecture and design docs |
 | `CLAUDE.md` | the most complete map of the repo. It is written for AI tools, but it is a good first read for people too. |
 
+## Security
+
+Each app asks for its permissions by name when it installs, Lua and wasm apps
+are confined to what they were granted, firmware updates are
+signed, and so is the cart index a store publishes. A Python app is trusted rather than sandboxed, a C app on an
+ESP32-S3 has full access, and nothing guards a board against whoever holds it.
+The threat model, what the console protects against and what it does not, is
+[`docs/os_2026-11.md`](docs/os_2026-11.md) §4.
+
 ## Contributing
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md): open an issue before starting a

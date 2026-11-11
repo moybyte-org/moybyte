@@ -83,16 +83,16 @@ def test_lua_cart_runs_under_the_player(tmp_path):
     _need_lua()
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
-    assert ws.player.cart_error is None
-    assert ws.player._lua is not None                    # started via the seam
-    assert ws.player._update is not None and ws.player._draw is not None
+    assert ws.run.player.cart_error is None
+    assert ws.run.player._lua is not None                    # started via the seam
+    assert ws.run.player._update is not None and ws.run.player._draw is not None
     for _ in range(30):
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     # the cart world lives in the LUA state: 120 petals falling
     # Read through the run's own accessor, never an embedding's internals: a
     # test that reaches into one VM's guts only ever tested that VM.
-    assert ws.player._lua.get_global_len("petals") == 120
+    assert ws.run.player._lua.get_global_len("petals") == 120
 
 
 def test_lua_cart_exit_closes_the_state(tmp_path):
@@ -100,9 +100,9 @@ def test_lua_cart_exit_closes_the_state(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
     ws.frame(1 / 30)
-    lua = ws.player._lua
+    lua = ws.run.player._lua
     ws._exit_to_caller()
-    assert ws.player._lua is None                        # closed with the run
+    assert ws.run.player._lua is None                        # closed with the run
     assert lua.update is None                            # handle torn down
 
 
@@ -116,14 +116,14 @@ def test_lua_error_routes_to_the_cart_panel(tmp_path):
     assert bad["runtime"] == "lua"
     ws.launcher.items.append(bad)
     _open(ws, "Bad Lua")
-    assert ws.player.cart_error is None                  # loads fine
+    assert ws.run.player.cart_error is None                  # loads fine
     ws.frame(1 / 30)                                     # first _update raises
-    assert ws.player.cart_error is not None
-    assert "boom" in ws.player.cart_error
+    assert ws.run.player.cart_error is not None
+    assert "boom" in ws.run.player.cart_error
     # #67 Phase 5: the error position maps to the cart line (error() on line 2)
     # and any traceback block is trimmed to the device-parity one-liner.
-    assert ws.player.crash_line == 2
-    assert "stack traceback" not in ws.player.cart_error
+    assert ws.run.player.crash_line == 2
+    assert "stack traceback" not in ws.run.player.cart_error
 
 
 def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
@@ -141,13 +141,13 @@ def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
                             runtime="lua", main="main.lua")
     ws.launcher.items.append(cart)
     _open(ws, "Clock Lua")
-    assert ws.player.cart_error is None
-    assert ws.player._play is not None, "the run's frame is not the kernel's Player's"
+    assert ws.run.player.cart_error is None
+    assert ws.run.player._play is not None, "the run's frame is not the kernel's Player's"
     img = [0] * 256
 
     def clock():
         ws.frame(1 / 30)
-        assert ws.player.cart_error is None
+        assert ws.run.player.cart_error is None
         moycore.pmem_image(img)
         return img[0]
 
@@ -175,7 +175,7 @@ def test_lua_crash_line_is_the_deepest_frame(tmp_path):
     ws.launcher.items.append(bad)
     _open(ws, "Deep Lua")
     ws.frame(1 / 30)
-    assert ws.player.crash_line == 3
+    assert ws.run.player.crash_line == 3
 
 
 def test_lua_load_error_drops_on_the_line(tmp_path):
@@ -189,9 +189,9 @@ def test_lua_load_error_drops_on_the_line(tmp_path):
                            runtime="lua", main="main.lua")
     ws.launcher.items.append(bad)
     _open(ws, "Broken Lua")
-    assert ws.player.cart_error is not None
-    assert "cart:2" in ws.player.cart_error
-    assert ws.player.crash_line == 2
+    assert ws.run.player.cart_error is not None
+    assert "cart:2" in ws.run.player.cart_error
+    assert ws.run.player.crash_line == 2
     ws.frame(1 / 30)                                     # panel frame must not raise
 
 
@@ -238,20 +238,20 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
         pytest.skip("host lua binding not built")
     ws = _ws(tmp_path)
     _open(ws, "Bullet Storm")
-    assert ws.player.cart_error is None
-    assert type(ws.player._lua).__name__ == "MoycoreRun", \
+    assert ws.run.player.cart_error is None
+    assert type(ws.run.player._lua).__name__ == "MoycoreRun", \
         "the cart is not on the glue's MoycoreRun"
     for _ in range(300):
         ws.frame(1 / 60)
-        assert ws.player.cart_error is None
+        assert ws.run.player.cart_error is None
     # The swarm is live, read through the runtime-agnostic global reader.
-    assert ws.player._lua.get_global("nb") > 30
+    assert ws.run.player._lua.get_global("nb") > 30
 
 
 def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):
     ws = _ws(tmp_path)
     ws.runtimes.pop("lua", None)                       # a device-shaped build
     _open(ws, "Sakura Lua")
-    assert ws.player.cart_error is not None
-    assert "Lua runtime" in ws.player.cart_error
+    assert ws.run.player.cart_error is not None
+    assert "Lua runtime" in ws.run.player.cart_error
     ws.frame(1 / 30)                                     # panel frame must not raise

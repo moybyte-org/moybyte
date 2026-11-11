@@ -371,6 +371,9 @@ static struct {
     bool secret;
     uint32_t toast_at, toast_until;
     bool toast_up;
+    char note_head[48], note_name[48], note_icon[16];
+    uint32_t note_until;
+    bool note_up;
 } K;
 
 void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t until_ms) {
@@ -392,20 +395,42 @@ void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, 
     K.toast_up = true;
 }
 
+void moy_chrome_note(const char *head, const char *name, const char *icon, uint32_t until_ms) {
+    snprintf(K.note_head, sizeof(K.note_head), "%s", head ? head : "");
+    snprintf(K.note_name, sizeof(K.note_name), "%s", name ? name : "");
+    snprintf(K.note_icon, sizeof(K.note_icon), "%s", icon ? icon : "");
+    K.note_until = until_ms;
+    K.note_up = until_ms != 0;
+}
+
 static moy_ui_span_t span(const char *s) {
     return (moy_ui_span_t){(const uint8_t *)s, (uint16_t)strlen(s)};
 }
 
-bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
+// The microphone's holder (native/moy_audio/moy_mic.h); an image without the
+// microphone's driver has this one, and no recording.
+__attribute__((weak)) uint32_t moy_mic_owner(void) {
+    return 0;
+}
+
+bool moy_chrome_overlay_up(uint32_t now) {
     if (K.up && (int32_t)(K.until - now) <= 0) {
         K.up = false;
     }
     if (K.toast_up && (int32_t)(K.toast_until - now) <= 0) {
         K.toast_up = false;
     }
-    if (!K.up && !K.toast_up) {
+    if (K.note_up && (int32_t)(K.note_until - now) <= 0) {
+        K.note_up = false;
+    }
+    return K.up || K.toast_up || K.note_up || moy_mic_owner() != 0;
+}
+
+bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
+    if (!moy_chrome_overlay_up(now)) {
         return false;
     }
+    bool rec = moy_mic_owner() != 0;
     // the run's canvas lent as a row of the shell's look: its palette below,
     // the theme's block above, the theme's faces (a cart's boundary put aside
     // for the banner, which is the system's)
@@ -421,7 +446,8 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
     memcpy(row.pal, pal, MOY_CANVAS_BLOCK * sizeof(uint16_t));
     memcpy(&row.pal[MOY_CANVAS_BLOCK], moy_canvas_block_words(),
            MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    moy_ui_sink_t s = {MOY_UI_SINK_ROW, 1, MOY_UI_LOOK_KERNEL, &row};
+    moy_ui_sink_t s = {MOY_UI_SINK_ROW, 1, MOY_UI_LOOK_KERNEL, &row, 0,
+                       (uint8_t)moy_ui_marks_shown()};
     int was = moy_ui_cart_text(0);
     if (K.up) {
         static const char ok[] = "check", warn[] = "warn";
@@ -439,6 +465,15 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
         moy_ui_unlock(&s, w / 2, 6, span(K.head), span(K.name),
                       moy_ui_icon_slot((const uint8_t *)K.icon, n),
                       moy_ui_icon_glyph((const uint8_t *)K.icon, n), burst, 1, 0, NULL);
+    }
+    if (K.note_up) {
+        size_t n = strlen(K.note_icon);
+        moy_ui_unlock(&s, w / 2, 6, span(K.note_head), span(K.note_name),
+                      moy_ui_icon_slot((const uint8_t *)K.note_icon, n),
+                      moy_ui_icon_glyph((const uint8_t *)K.note_icon, n), 0, 1, 0, NULL);
+    }
+    if (rec) {
+        moy_ui_rec(&s, w - 2, 2, 1, 0, NULL);
     }
     moy_ui_cart_text(was);
     return true;

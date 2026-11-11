@@ -25,7 +25,7 @@ def test_the_kernel_epoch_reads_as_dirty_for_every_retained_frame(tmp_path):
         drv.frame(1 / 60)
     assert not ws._needs_redraw(1 / 60)
     g.kernel_bump()
-    retained = max(1, getattr(ws._sys_canvas or ws.canvas, "RETAINED_FRAMES", 1))
+    retained = max(1, getattr(ws._sys_canvas or ws.run.canvas, "RETAINED_FRAMES", 1))
     for _ in range(retained):
         assert ws._needs_redraw(1 / 60)
         ws._dirty = False
@@ -100,6 +100,8 @@ def test_desk_still_offers_system_apps(tmp_path):
     for app, _t in getattr(ws, "_apps", ()):
         if app.id in ws.wm._backdrop_layer.HIDDEN_APPS:
             continue
+        if not getattr(app, "DESK_TILE", True):
+            continue                     # reached from the home's Apps
         assert app.id in ids, "%s must stay reachable from the desk" % app.id
     # ...and each claimed cart still supplies its icon art to that column.
     arts = [row[2] for row in ws.wm._backdrop_layer._icon_catalog() if row[2] is not None]
@@ -136,7 +138,7 @@ def test_hover_repaints_the_shell(tmp_path):
     the frame hover feedback needs (the desk icon highlight reads pointer x/y).
 
     Measured in PAINTS rather than in shipped command streams -- the recording
-    tier this was written against is gone, and `_frames_drawn` is the same
+    tier this was written against is gone, and `frame_state.frames_drawn` is the same
     signal the wasm head's step_frame reports to its page.
     """
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
@@ -146,9 +148,9 @@ def test_hover_repaints_the_shell(tmp_path):
         ws.frame(1 / 30.0)
 
     def painted():
-        before = ws._frames_drawn
+        before = ws.frame_state.frames_drawn
         ws.frame(1 / 30.0)
-        return ws._frames_drawn != before
+        return ws.frame_state.frames_drawn != before
 
     assert not painted(), "a still pointer must stay free"
     ws.pointer.place(300, 320)                 # the browser's hover event

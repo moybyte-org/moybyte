@@ -21,6 +21,7 @@ MicroPython, which is where `deflate.DeflateIO` is (CPython's path is zlib).
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -202,11 +203,15 @@ def test_a_document_that_is_not_an_index_is_refused(doc):
     assert exc.value.text == ci.UNREACHABLE
 
 
-def test_an_indexes_file_beside_the_carts_folder_replaces_the_defaults(tmp_path):
+def test_system_sources_replaces_the_defaults_and_a_legacy_indexes_file_is_absent(tmp_path):
     root = _store(tmp_path)
     assert ci.load_indexes(root) == list(ci.DEFAULT_INDEXES)
-    (Path(root).parent / ci.INDEXES_NAME).write_text(json.dumps(
-        {"indexes": ["http://192.168.1.5:8000/index.json", "not a url"]}))
+    (Path(root).parent / "indexes.json").write_text(json.dumps(
+        {"indexes": ["http://192.168.1.5:8000/index.json"]}))
+    assert ci.load_indexes(root) == list(ci.DEFAULT_INDEXES)
+    (Path(root).parent / "system").mkdir()
+    (Path(root).parent / ci.SOURCES_NAME).write_text(
+        "# the LAN mirror\nhttp://192.168.1.5:8000/index.json\nnot a url\n\n")
     assert ci.load_indexes(root) == ["http://192.168.1.5:8000/index.json"]
 
 
@@ -607,6 +612,12 @@ def test_a_full_store_says_so_and_keeps_nothing(tmp_path):
     _untouched(root, "jet.moy")
 
 
+def _staged(job, n):
+    """`job` stepped until its staging folder holds `n` entries."""
+    while not (os.path.isdir(job.stage) and len(os.listdir(job.stage)) >= n):
+        assert job.step()
+
+
 def test_a_cancelled_install_keeps_nothing(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
@@ -614,10 +625,42 @@ def test_a_cancelled_install_keeps_nothing(tmp_path):
     cart = _cart(repo, "jet")
     p = ci.plan(cart, "esp32s3", 2)
     job = ci.Install(cart, p, MemNet(repo.routes()), root, _session, step_ms=0)
-    assert job.step() and job.step()
+    _staged(job, 2)
     job.cancel()
+    # The build goes a store op a step, never in one: on the T-Deck a folder
+    # deleted in one op is a frame held for as long as the card takes.
+    assert job.dropping and not job.finished
+    sessions = [0]
+
+    def counted(fn):
+        sessions[0] += 1
+        return fn()
+    job.session = counted
+    calls = 1
+    while job.step():
+        calls += 1
+    assert calls > 3 and sessions[0] == calls, (calls, sessions[0])
     assert job.finished and job.error is None and job.path is None
     assert not job.step()
+    _untouched(root, "jet.moy")
+
+
+def test_a_build_cut_mid_delete_is_finished_by_recover(tmp_path):
+    """A cut while a stopped build is being deleted leaves part of it in
+    install/, and the next recover finishes it, a store op a step."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet", extra={"big.bin": os.urandom(300000)})
+    cart = _cart(repo, "jet")
+    job = ci.Install(cart, ci.plan(cart, "esp32s3", 2), MemNet(repo.routes()),
+                     root, _session, step_ms=0)
+    _staged(job, 2)
+    job.cancel()
+    job.step()
+    job.step()                                    # one entry gone, then the cut
+    assert os.path.isdir(job.stage)
+    steps = list(ci.recover_steps(root))
+    assert len(steps) > 1
     _untouched(root, "jet.moy")
 
 
@@ -637,8 +680,10 @@ def test_the_pipeline_writes_in_whole_buffers(tmp_path):
     job = _install(cart, root, MemNet(repo.routes()), session=session)
     assert job.error is None
     n_files = len(ci.plan(cart, "esp32s3", 2)["files"])
-    # one per full buffer of big.bin, one per file's end, the staging and the swap
-    assert calls[0] <= n_files + len(big) // ci.WRITE_CHUNK + 3
+    # one per full buffer of big.bin, one per file's end, the staging's two
+    # (the folder looked for, then made) and the landing's three (the rename,
+    # the record's backup, its publish)
+    assert calls[0] <= n_files + len(big) // ci.WRITE_CHUNK + 6
 
 
 # -- UPDATING AND REMOVING ----------------------------------------------------------
@@ -664,7 +709,7 @@ def test_an_update_keeps_the_saves_and_an_edited_config(tmp_path):
     folder = Path(root) / "jet.moy"
     (folder / "pmem.json").write_text('{"0": 900}')
     (folder / "config.json").write_text('{"speed": 9}')         # the kid's own
-    written = Path(root).parent / "written" / "jet"
+    written = Path(root).parent / "apps" / "jet"
     written.mkdir(parents=True)
     (written / "saves%2fslot1.sav").write_bytes(b"level 3")    # what the cart wrote
     repo.add("jet", version=2, config=b'{"speed": 2}')
@@ -748,6 +793,28 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
     assert os.listdir(stage) == []
 
 
+def test_an_old_copy_cut_mid_delete_never_comes_back(tmp_path):
+    """An old copy whose replacement is in place goes as a `.gone`, so half of
+    one a cut leaves is never put back as a cart once the new copy is removed
+    -- the `.old` rule (put back when nothing replaced it) is for whole ones."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    stage = Path(root).parent / ci.STAGE_DIR
+    old = stage / "jet.moy.old"
+    shutil.copytree(Path(root) / "jet.moy", old)
+    steps = ci.recover_steps(root)
+    while old.exists():
+        next(steps)
+    next(steps)                                   # renamed, one entry deleted: the cut
+    assert (stage / "jet.moy.gone").is_dir()
+    ci.remove(root, "jet.moy")
+    ci.recover(root)
+    assert not (Path(root) / "jet.moy").exists()
+    assert os.listdir(stage) == []
+
+
 def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     root = _store(tmp_path)
     repo = Repo(BASE)
@@ -755,7 +822,7 @@ def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     repo.add("doom")
     _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
     _install(_cart(repo, "doom"), root, MemNet(repo.routes()))
-    base = Path(root).parent / "written"
+    base = Path(root).parent / "apps"
     for cid in ("jet", "doom"):
         (base / cid).mkdir(parents=True)
         (base / cid / "options.cfg").write_bytes(b"x")
@@ -777,6 +844,95 @@ def test_remove_takes_the_folder_its_record_and_what_it_wrote(tmp_path):
     assert not (base / "jet").exists()
     assert (base / "doom" / "options.cfg").exists()       # another cart's stay
     assert keep.said == [("record",), ("erased", "jet", None)]
+
+
+def test_the_record_a_remove_writes_is_what_json_dumps_writes(tmp_path):
+    """The C makes the record without the cart (moy_shelf.h): byte for byte
+    what record_text made of the record with the cart popped, the text the
+    keeper is handed the same as the file."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    for cid in ("jet", "doom", "zed"):
+        repo.add(cid)
+        _install(_cart(repo, cid), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    rec = json.loads(path.read_text())["carts"]
+    rec["doom.moy"]["name"] = "Doom été \"2\""     # an escape and non-ASCII
+    path.write_text(ci.record_text(rec))
+    want = dict(rec)
+    want.pop("doom.moy")
+
+    class Keep:
+        said = []
+
+        def record(self, text):
+            self.said.append(text)
+    ci.remove(root, "doom.moy", Keep())
+    assert path.read_text() == ci.record_text(want) == Keep.said[0]
+    ci.remove(root, "jet.moy")
+    ci.remove(root, "zed.moy")
+    assert path.read_text() == ci.record_text({})
+
+
+def test_a_cart_the_record_does_not_hold_goes_and_the_record_stays(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    before = path.read_bytes()
+    mine = Path(root) / "mine.moy"
+    mine.mkdir()
+    (mine / "main.py").write_text("x")
+    ci.remove(root, "mine.moy")
+    assert not mine.exists() and path.read_bytes() == before
+    with pytest.raises(OSError):
+        ci.remove(root, "mine.moy")                       # no folder to rename
+
+
+def test_the_record_reads_its_backup_when_the_file_is_torn(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    path = Path(root).parent / ci.RECORD_NAME
+    good = path.read_text()
+    path.write_text(good[:len(good) // 2])                # a publish cut short
+    assert "jet.moy" in ci.load_record(root)
+    assert path.read_text() == good                       # healed in place
+    path.write_text('{"version": 1, "carts": []}')       # the wrong shape
+    (Path(str(path) + ".bak")).unlink()
+    assert ci.load_record(root) == {}
+
+
+def test_an_installed_cart_is_found_by_its_folder_or_its_id(tmp_path):
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+    cid = ci.load_record(root)["jet.moy"]["id"]
+    assert ci.find_installed(root, "jet.moy") == "jet.moy"
+    assert ci.find_installed(root, cid) == "jet.moy"
+    assert ci.find_installed(root, "nope") is None
+
+
+def test_the_record_and_the_removal_are_the_c_shelf(tmp_path, monkeypatch):
+    """cart_index keeps no reader of the record and no removal of its own:
+    with native/moy_store/moy_shelf.h's calls taken away, none of them works."""
+    root = _store(tmp_path)
+    repo = Repo(BASE)
+    repo.add("jet")
+    _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
+
+    def gone(*_a):
+        raise RuntimeError("the C shelf")
+    for name in ("shelf_record", "shelf_without", "shelf_remove", "shelf_find"):
+        monkeypatch.setattr(ci._shelf, name, gone)
+    for call in (lambda: ci.load_record(root), lambda: ci.find_installed(root, "jet.moy"),
+                 lambda: ci.remove(root, "jet.moy")):
+        with pytest.raises(RuntimeError):
+            call()
+    assert (Path(root) / "jet.moy").exists()
 
 
 def test_room_is_counted_in_the_stores_blocks():
@@ -864,29 +1020,6 @@ def test_the_board_transport_reports_a_missing_file_and_a_cut_body(tmp_path, ser
     _untouched(root, "jet.moy")
 
 
-def test_the_board_transport_waits_for_a_late_link(monkeypatch):
-    wire_links, _net = _board_net()
-    import moy_ota
-    state = {"up": False, "dials": 0}
-
-    class Wifi:
-        def status(self):
-            return (state["up"], None, None)
-
-    def dial(w):
-        state["dials"] += 1
-        return False
-
-    def fake_wait(online, autoconnect=None, **kw):
-        autoconnect()
-        state["up"] = True
-        return online()
-    monkeypatch.setattr(moy_ota, "wait_online", fake_wait)
-    assert wire_links.CartNet(Wifi(), dial).online() is True
-    assert state["dials"] == 1
-    assert wire_links.CartNet(None).online() is False
-
-
 def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
     """`out_of_memory` reads the internal DMA-capable heap -- where the TLS
     crypto's DMA and the radio's buffers come from -- against TLS_SRAM_MIN;
@@ -952,7 +1085,7 @@ def _app_ws(tmp_path, net, indexes=None):
     from ws_helpers import no_unlock_banner
     ws = no_unlock_banner(host_app.build_workstation(str(carts)))
     if indexes is not None:
-        (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
+        ci.save_sources(str(tmp_path / "carts"), indexes)
     ws.cart_net = net
     return ws, ws._apps_by_id["getcarts"]
 
@@ -963,7 +1096,7 @@ def _frames(ws, app, n=40):
         ws.frame(1 / 30)
         # ...and the covers the shelf fetches once it shows.
         if app.phase not in ("checking", "licence_fetch", "connecting", "getting") \
-                and not app._covers:
+                and not app._covers and app._tail is None:
             ws._dirty = True
             ws.frame(1 / 30)
             return
@@ -1038,7 +1171,7 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     _tap(ws, app, "btn", "GET")
     held = []
     for _ in range(40):
-        if app.phase == "getting":
+        if app.phase == "getting" and not app.job.finished:
             held.append("carts" in ws.leases.holders())
         ws._dirty = True
         ws.frame(1 / 30)
@@ -1226,13 +1359,93 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     ws.frame(1 / 30)                              # the job starts
     assert app.phase == "getting" and "carts" in ws.leases.holders()
     app.job.step_ms = 0
+    job = app.job
     app.close()
-    assert app.job.finished and app.job.path is None
+    # The build is left to the next open's recover rather than deleted in the
+    # close's one frame.
+    assert job.dropping and job.path is None
     assert "carts" not in ws.leases.holders()
     assert not (tmp_path / "carts" / "jet.moy").exists()
+    _open(ws, app)
+    _untouched(str(tmp_path / "carts"), "jet.moy")
 
 
-def test_remove_asks_first(tmp_path):
+def test_open_finishes_what_install_held_a_store_op_a_frame(tmp_path):
+    """What a cut or a closed app left in install/ goes at open as a sweep:
+    one store op a frame, the shelf's check after it, and no key held -- a
+    key meanwhile lands, and the frames go on with nothing forcing them."""
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    stage = tmp_path / ci.STAGE_DIR
+    stage.mkdir(exist_ok=True)
+    (stage / "jet.moy").mkdir()
+    for i in range(6):
+        (stage / "jet.moy" / ("f%d" % i)).write_text("x")
+    ops = [0]
+    op = app._inst.op
+
+    def counted(fn):
+        ops[0] += 1
+        return op(fn)
+    app._inst.op = counted
+    ws.open_app(app)
+    assert app._sweep is not None and app._tail is None
+    frames = 0
+    while app._sweep is not None and frames < 40:
+        before = ops[0]
+        ws.frame(1 / 30)
+        assert ops[0] - before <= 1, "more than one store op in a frame"
+        assert app.phase == "checking"
+        frames += 1
+    assert frames >= 8 and not (stage / "jet.moy").exists()
+    for _ in range(40):
+        if app.phase == "list":
+            break
+        ws.frame(1 / 30)
+    assert app.phase == "list" and app.rows
+
+
+def test_a_key_during_opens_sweep_lands(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    stage = tmp_path / ci.STAGE_DIR
+    stage.mkdir(exist_ok=True)
+    (stage / "jet.moy").mkdir()
+    for i in range(6):
+        (stage / "jet.moy" / ("f%d" % i)).write_text("x")
+    ws.open_app(app)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app._sweep is not None and app.phase == "checking"
+    app.handle_input(_In("b"))                    # the check stopped, mid-sweep
+    assert app.phase == "list" and app.toast[0] == "Stopped"
+    for _ in range(40):
+        if app._sweep is None:
+            break
+        ws.frame(1 / 30)
+    assert app._sweep is None and not (stage / "jet.moy").exists()
+
+
+def test_open_with_install_empty_sweeps_nothing(tmp_path):
+    gpl, mit, net = _shelves(tmp_path)
+    ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
+    (tmp_path / ci.STAGE_DIR).mkdir(exist_ok=True)
+    ws.open_app(app)
+    assert app._sweep is None and app._tail is None
+
+
+def test_remove_asks_first(tmp_path, monkeypatch):
+    """...and Get Carts' Get and Remove step pkg's own `landed` and
+    `removed`, a frame a step, holding every key meanwhile."""
+    from runtime import pkg
+    stepped = []
+    for name in ("landed", "removed"):
+        def wrap(*a, _fn=getattr(pkg, name), _name=name):
+            for _ in _fn(*a):
+                stepped.append(_name)
+                assert app._tail is not None and app.handle_input(_In("b"))
+                yield
+        monkeypatch.setattr(pkg, name, wrap)
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
     _open(ws, app)
@@ -1254,9 +1467,11 @@ def test_remove_asks_first(tmp_path):
     _tap(ws, app, "btn", "REMOVE")
     b = app._ui.box("Remove")                     # the dialog's
     _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    _frames(ws, app)                          # the removal, a store op a frame
     assert app.phase == "list" and not (tmp_path / "carts" / "jet.moy").exists()
     assert app.rows[0]["state"] == "get"
     assert not any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
+    assert stepped.count("landed") >= 2 and stepped.count("removed") >= 5, stepped
 
 
 def test_a_cart_too_big_to_run_is_refused_before_its_download(tmp_path):
@@ -1470,8 +1685,7 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
         d = tmp_path / ("s%d" % len(kw))
         d.mkdir()
         ws = host_app.build_workstation(str(d / "carts"), **kw)
-        (d / ci.INDEXES_NAME).write_text(json.dumps(
-            {"indexes": [gpl.url("index.json"), mit.url("index.json")]}))
+        ci.save_sources(str(d / "carts"), [gpl.url("index.json"), mit.url("index.json")])
         ws.cart_net = net
         app = ws._apps_by_id["getcarts"]
         _open(ws, app)
@@ -1659,6 +1873,9 @@ job = ci.Install(bad, ci.plan(bad, "esp32p4", "2"), Net(), root, lambda fn: fn()
 while job.step():
     pass
 print("refused", job.error == ci.MISMATCH, "bad.moy" in os.listdir(root))
+ci.remove(root, "jet.moy")
+print("removed", ci.find_installed(root, "jet"), sorted(ci.load_record(root)),
+      "jet.moy" in os.listdir(root))
 '''
 
 
@@ -1699,6 +1916,7 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     # an InstallError raised and caught on MicroPython, which has no
     # Exception.__init__ for a subclass to call
     assert lines[4] == "refused True False", out.stdout
+    assert lines[5] == "removed None ['dm.moy', 'wm.moy'] False", out.stdout
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
     assert (Path(root) / "wm.moy" / "level.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []
@@ -1742,6 +1960,7 @@ def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
         _tap(ws, app, "btn", "REMOVE")
         b = app._ui.box("Remove")                 # the dialog's
         _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+        _frames(ws, app)                          # the removal, a store op a frame
         assert not (tmp_path / "carts" / "dusk.moy").exists()
         assert ws.look.theme_name == chrome.DEFAULT_THEME
         assert ws.system.get("theme") == chrome.DEFAULT_THEME

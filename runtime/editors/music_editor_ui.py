@@ -88,12 +88,12 @@ class MusicEditorUI:
         """Build the MusicEditor over the open cart's live AudioBank (#50): the
         SAME bank the running cart plays through, so an edit is heard immediately
         by the preview AND by the cart on resume. The bank is the run's audio
-        session's (ws.audio.bank); SFX/MusicTrack are injected as
+        session's (ws.run.audio.bank); SFX/MusicTrack are injected as
         factories so the editor core stays import-free. Called from
         Workstation.set_menu_view("music")."""
         ws = self.ws
-        if self.musicedit is None and ws.audio is not None:
-            bank = ws.audio.bank
+        if self.musicedit is None and ws.run.audio is not None:
+            bank = ws.run.audio.bank
             self.musicedit = MusicEditor(bank, sfx_factory=SFX,
                                          track_factory=MusicTrack)
 
@@ -113,7 +113,7 @@ class MusicEditorUI:
         ticks the mixer + redraws while a preview is up."""
         ws = self.ws
         me = self.musicedit
-        au = ws.audio
+        au = ws.run.audio
         if me is None or au is None:
             return
         au.focus()
@@ -129,9 +129,9 @@ class MusicEditorUI:
     def _stop_music_preview(self):
         """Stop any music-editor preview + clear the preview flag."""
         ws = self.ws
-        if ws.audio is not None:
-            ws.audio.sound_stop()
-            ws.audio.music_stop()
+        if ws.run.audio is not None:
+            ws.run.audio.sound_stop()
+            ws.run.audio.music_stop()
         self.music_preview = None
         ws._dirty = True
 
@@ -141,7 +141,7 @@ class MusicEditorUI:
         session answers from the kernel, which holds the sequencers."""
         if self.music_preview is None:
             return False
-        au = self.ws.audio
+        au = self.ws.run.audio
         return au is not None and au.is_active()
 
     # -- input -------------------------------------------------------------------

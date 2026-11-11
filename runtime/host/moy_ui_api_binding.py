@@ -274,6 +274,25 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = bytes(lines)
         return int(lib.moy_ui_api_empty(p, c.byref(s), t, u, b, len(b)))
 
+    def api_note(ctx, cv, look, icon, lines):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(icon)
+        b = bytes(lines)
+        return int(lib.moy_ui_api_note(p, c.byref(s), t, b, len(b)))
+
+    def api_bubble(ctx, cv, look, text, head, status, opt, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(text)
+        h, keep2 = _span0(head)
+        u, keep3 = _span0(status)
+        words = (c.c_int32 * len(opt))(*opt)
+        ov, ok = _over(o)
+        out = (c.c_int32 * 5)()
+        lib.moy_ui_api_bubble(p, c.byref(s), t, h, u, words, len(opt), ov, out)
+        return tuple(out)
+
     def api_month(ctx, cv, look, title, days, first, n, today):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -331,6 +350,38 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_bar_tap(p, int(i))
 
+    def api_back(ctx, take):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_back(p, 1 if take else 0))
+
+    def api_run_back(take):
+        return bool(lib.moy_ui_run_back(1 if take else 0))
+
+    def api_run_bar_lent():
+        title = c.c_char_p()
+        slots = (c.c_int16 * 6)()
+        n = _I()
+        off = c.c_uint32()
+        chip = c.c_char_p()
+        if not lib.moy_ui_run_bar_lent(c.byref(title), slots, c.byref(n), c.byref(off),
+                                       c.byref(chip)):
+            return None
+        return ((title.value or b"").decode("utf-8", "replace"),
+                tuple(slots[i] for i in range(n.value)), off.value,
+                (chip.value or b"").decode("utf-8", "replace"))
+
+    def api_run_bar_tap(i):
+        lib.moy_ui_run_bar_tap(int(i))
+
+    def api_paste(ctx, text):
+        p, _k = _ctx(ctx)
+        b = bytes(text)
+        lib.moy_ui_api_paste(p, b, len(b))
+
+    def api_run_paste(text):
+        b = bytes(text)
+        lib.moy_ui_run_paste(b, len(b))
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -352,7 +403,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return int(lib.moy_ui_api_offset(p, int(x), int(y)))
 
     def api_fades(reset):
-        return int(lib.moy_ui_api_fades(1 if reset else 0))
+        return int(lib.moy_ui_api_fades(None, 1 if reset else 0))
 
     def api_shift_plan(ctx, out):
         p, _k = _ctx(ctx)
@@ -439,7 +490,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return int(lib.moy_ui_api_keep(p, c.byref(sink(cv, look)), t, int(h)))
 
     def api_audit(on):
-        return int(lib.moy_ui_api_audit(int(on)))
+        return int(lib.moy_ui_api_audit(None, int(on)))
 
     def api_end(ctx, cv, look):
         p, _k = _ctx(ctx)
@@ -518,19 +569,19 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     def api_block_set(name, field, value):
         t, _keep = _block(name)
-        return bool(lib.moy_ui_api_block_set(t, int(field), int(value) & 0xffffffff))
+        return bool(lib.moy_ui_api_block_set(None, t, int(field), int(value) & 0xffffffff))
 
     def api_block_gen(name):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_gen(t))
+        return int(lib.moy_ui_api_block_gen(None, t))
 
     def api_block_since(name, gen):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_since(t, int(gen)))
+        return int(lib.moy_ui_api_block_since(None, t, int(gen)))
 
     def api_block_key(name):
         t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_key(t))
+        return int(lib.moy_ui_api_block_key(None, t))
 
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
@@ -736,8 +787,15 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
         return list(w[:4 * k])
 
+    def api_native(ctx, cv, look):
+        """(context, sink, keep): the frame's context pointer and the sink of
+        canvas `cv` in `look`, for another C module that draws on this frame
+        through the engine (moy_sh's Face); `keep` holds what they point into."""
+        p, k = _ctx(ctx)
+        return p, sink(cv, look), k
+
     for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, api_text_reveal,
-              text_tones, text_words, text_runs):
+              text_tones, text_words, text_runs, api_native):
         setattr(m, f.__name__, f)
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
@@ -760,8 +818,9 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_grid,
               api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
               api_split_toward, api_popover, api_menu, api_menu_danger,
-              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
-              api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
+              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_note, api_bubble, api_month, api_toast,
+              api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_run_bar_lent,
+              api_run_bar_tap, api_paste, api_run_paste, api_rule,
               api_focus, api_focus_ahead, api_keys_taken, api_edge, api_tap_armed, api_at,
               api_dup, api_lost):
         setattr(m, f.__name__, f)
@@ -896,6 +955,21 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = _b(name)
         return int(lib.moy_theme_modes(b, len(b)))
 
+    class _Mark(c.Structure):
+        _fields_ = [("mark", c.c_int8), ("w", c.c_int8), ("gap", c.c_int8),
+                    ("key_w", c.c_int8), ("c", c.c_int16), ("ink", c.c_int16),
+                    ("alpha", c.c_uint8), ("declared", c.c_uint8), ("key_c", c.c_int32)]
+
+    def theme_marks(name, light):
+        b = _b(name)
+        row = (c.c_int32 * n_roles)()
+        lib.moy_theme_resolve(b, len(b), 1 if light else 0, row, None)
+        out = (_Mark * 9)()
+        warn = c.c_int()
+        failed = lib.moy_theme_marks(b, len(b), 1 if light else 0, row, out, c.byref(warn))
+        return (int(failed), bool(warn.value),
+                tuple((m.mark, m.c, m.ink, m.w, m.gap, m.alpha, m.key_w, m.key_c) for m in out))
+
     def theme_install(src):
         b = bytes(src)
         notes = c.c_uint8()
@@ -906,6 +980,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         s = lib.moy_theme_installed()
         return None if s is None else s.decode()
 
+    _TAP_FONTS = ("tap", "tap_caption")
     font_roles = _names(lib, "moy_theme_font_roles",
                         c.c_int.in_dll(lib, "moy_theme_n_font_roles").value)
 
@@ -1128,8 +1203,9 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return None if was < 0 else was
 
     def cart_text(on):
-        lib.moy_canvas_cart(1 if on else 0)     # the canvases' colour mask with it
-        return bool(lib.moy_ui_cart_text(1 if on else 0))
+        m = int(on)
+        lib.moy_canvas_cart(1 if m else 0)      # the canvases' colour mask with it
+        return lib.moy_ui_cart_text(m)
 
     def font_load(src):
         b = bytes(src)
@@ -1138,7 +1214,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return rc, (fid.value if rc == 0 else None)
 
     def font_free(font):
-        return bool(lib.moy_font_free(int(font) & 0xFFFFFFFF))
+        return bool(lib.moy_ui_font_free(int(font) & 0xFFFFFFFF))
 
     def font_info(font):
         out = (c.c_int * 8)()           # moy_font_info_t
@@ -1147,6 +1223,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         return tuple(out[:6])
 
     def font_role(role):
+        if role in _TAP_FONTS:          # moy_ui.h's MOY_UI_FONT_TAP_*, past the theme's
+            return len(font_roles) + _TAP_FONTS.index(role)
         if role not in font_roles:
             raise ValueError("font role")
         return font_roles.index(role)
@@ -1156,11 +1234,12 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     def font(role):
         out = (c.c_int * 8)()
-        fid = lib.moy_ui_font(font_role(role), out)
+        fid = lib.moy_ui_font(lib.moy_ui_cart_on(), font_role(role), out)
         return (fid, out[0], out[2], out[3])
 
     m.theme = theme
     m.theme_modes = theme_modes
+    m.theme_marks = theme_marks
     m.theme_install = theme_install
     m.theme_installed = theme_installed
     m.theme_resolve = theme_resolve
@@ -1180,7 +1259,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.theme_home = theme_home
     m.font_load = font_load
     m.font_file = font_file
-    m.font_reset = lib.moy_font_reset
+    m.font_reset = lib.moy_ui_font_reset
 
     def text_wire(*swapped):
         was = bool(lib.moy_text_wire_swapped())

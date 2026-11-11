@@ -123,7 +123,7 @@ static void h_feed(void) {
 }
 
 static void h_say(const char *line) {
-    char b[160];
+    char b[336];                        // a whole PERF line (MOY_PERF_LINE_MAX) and its brackets
     snprintf(b, sizeof(b), "say[%s]", line);
     for (char *p = b; *p; p++) {
         if (*p == ' ') {

@@ -95,7 +95,7 @@ def test_the_build_strips_the_worker_modules_comments_and_nothing_else():
     calls = re.findall(r'"\$\{TERSER\}"[^\n]*\\\n[^\n]*', sh)
     assert len(calls) == 2, "build.sh no longer strips the worker modules and the loader"
     assert "--format comments=false,beautify=true,indent_level=0" in calls[0]
-    assert "build-moybyte/micropython.mjs" in calls[1]
+    assert "${WASM_BUILD}/micropython.mjs" in calls[1]
     assert "--format comments=false " in calls[1]
     for call in calls:
         for flag in ("--compress", "--mangle", " -c", " -m"):

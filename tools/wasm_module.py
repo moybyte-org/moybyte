@@ -40,12 +40,14 @@ or a path to one, else the key `make ota-keygen` writes), over a text naming
 the chip and the module's length and sha256 -- so the signature covers every
 byte of the module, its key section included. The signature rides after the
 module in the same file; the layout and the text are native/moy_wasm/
-moy_wasm_key.h's, which this tool reads, and the board checks it with
-moy_ota.verify_sig against the keys its image trusts before the runtime sees
-a byte. `--unsigned` builds a module with no signature, which a board runs
-only while its owner has Settings -> UNKNOWN SOURCES on -- the way to run a
-cart you rebuilt from its source on your own console; a module signed with a
-key the board does not trust is refused whatever that switch says.
+moy_wasm_key.h's (the magic native/moy_net/moy_ota.h's), which this tool
+reads, and the board admits it with moy_ota_admit_module against the keys
+its image trusts before the runtime sees a byte (`verify` here is that call,
+through the host's binding). `--unsigned` builds a module with no signature,
+which a board runs natively only for a cart whose consent grants "full_access" --
+the way to run a cart you rebuilt from its source on your own console; a
+module signed with a key the board does not trust is refused whatever the
+consent says.
 
 THE COMPILERS are fixed binaries, pinned by sha256 below: one wamrc for both
 targets, built by experiments/wasm_aot/toolchain/build_wamrc_xtensa.sh
@@ -82,7 +84,7 @@ if TOOLS not in sys.path:
 import ota_sign  # noqa: E402
 
 KEY_HEADER = os.path.join(ROOT, "native", "moy_wasm", "moy_wasm_key.h")
-MOY_OTA = os.path.join(ROOT, "device", "moy_ota.py")
+OTA_HEADER = os.path.join(ROOT, "native", "moy_net", "moy_ota.h")
 VENDOR_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wamr_vendor.json")
 FORMAT_STAMP = os.path.join(ROOT, "native", "moy_wasm", "wasm_format_version.json")
 SPIKE = os.path.join(ROOT, "experiments", "wasm_aot")
@@ -217,16 +219,18 @@ def _define(name, header=KEY_HEADER):
 
 
 def sig_magic():
-    return _define("MOY_WASM_SIG_MAGIC").encode()
+    return _define("MOY_OTA_MODULE_MAGIC", OTA_HEADER).encode()
 
 
 def sig_scheme():
     return _define("MOY_WASM_SIG_SCHEME")
 
 
-def signed_text(module, chip):
-    """What a module's signature covers (moy_wasm_key.h)."""
-    return ("%s\n%s\n%d\n%s" % (sig_scheme(), chip, len(module),
+def signed_text(module, chip, scheme=None):
+    """What a module's signature covers (moy_wasm_key.h): `scheme` names the
+    kind of module, an AOT module's by default (a native module's is
+    native/moy_elf/moy_elf.h's)."""
+    return ("%s\n%s\n%d\n%s" % (scheme or sig_scheme(), chip, len(module),
                                  hashlib.sha256(module).hexdigest())).encode()
 
 
@@ -259,40 +263,27 @@ def signing_key(source=None):
     return key
 
 
-def sign(module, chip, key):
+def sign(module, chip, key, scheme=None):
     """The signed module file for `module` (bytes) built for `chip`. `key` is
     the signing key as PEM bytes, or a callable taking the signed text and
     returning the signature's bytes (how a test signs with a throwaway key)."""
-    text = signed_text(module, chip)
+    text = signed_text(module, chip, scheme)
     sig = key(text) if callable(key) else bytes.fromhex(ota_sign._sign_bytes(text, key))
     return attach(module, sig)
 
 
-def _verifier():
-    """device/moy_ota.py's verify_sig: the body and the keys a board checks a
-    module with."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("moy_ota_wasm_module", MOY_OTA)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.verify_sig
-
-
-def verify(data, chip, keys=None, unknown_sources=False):
+def verify(data, chip, keys=None, consented=False, scheme=None):
     """None when `data` is a module file a board of `chip` trusting `keys`
-    (default: the image's OTA_PUBLIC_KEYS) lets through to its provenance
-    check, otherwise the refusal the board gives -- `verify_module` in
-    native/moy_wasm/modmoy_wasm.c. `unknown_sources` is the owner's setting:
-    on, a module with no signature passes; a signature that is present must
+    (as (modulus_hex, exponent) pairs; default: the image's own) admits,
+    otherwise the refusal the board gives: the board's own call,
+    moy_ota_admit_module (native/moy_net/moy_ota.h), through the host's
+    binding. `consented` is the cart's consent to `full_access`: with it, a
+    module with no signature is admitted; a signature that is present must
     verify either way."""
-    module, sig = split(data)
-    if sig is None:
-        return None if unknown_sources else "unsigned module"
-    if not sig:
-        return "malformed signature"
-    if not _verifier()(signed_text(module, chip), sig.hex(), keys):
-        return "bad signature"
-    return None
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from runtime import net_binding
+    return net_binding.ota_admit_module(data, scheme or sig_scheme(), chip, consented, keys)[0]
 
 
 def wamrc_flags(chip, override=None):
@@ -417,16 +408,16 @@ def build(wasm, chip, out, key=True, format=None, override=None, sign_with=None,
     `format` and `override` build a module this tree's boards must REFUSE: a
     key naming another compiled-code format version, or flags (and a key
     saying so) the board's build does not want. `signed=False` leaves the
-    signature off: a module a board runs only while its owner has Unknown
-    sources on."""
+    signature off: a module a board runs natively only for a cart whose
+    consent grants "full_access"."""
     pem = None
     if signed:
         pem = sign_with or signing_key()
         if pem is None:
             raise ToolError("no signing key: set $%s or pass --key (a board "
                             "trusts only the keys its image carries), or build "
-                            "--unsigned, a module a board runs only with "
-                            "Unknown sources on" % ota_sign.ENV_KEY)
+                            "--unsigned, a module a board runs only for a cart "
+                            "granted \"full_access\"" % ota_sign.ENV_KEY)
     target = dict(fields(chip, override))["target"]
     text = key_text(wasm, chip, format, override)
     src = with_custom_section(wasm, KEY_SECTION, text.encode()) if key else wasm
@@ -528,14 +519,14 @@ def main(argv):
                        "%s)" % (ota_sign.ENV_KEY, ota_sign.DEFAULT_KEY))
         p.add_argument("--unsigned", action="store_true",
                        help="leave the signature off (a module a board runs "
-                       "only with Unknown sources on)")
+                       "only for a cart granted \"full_access\")")
     k = sub.add_parser("key", help="print the key tail a chip's build wants")
     k.add_argument("--chip", required=True, choices=sorted(targets()))
     v = sub.add_parser("verify", help="check a module's signature as a board would")
     v.add_argument("aot")
     v.add_argument("--chip", required=True, choices=sorted(targets()))
-    v.add_argument("--unknown-sources", action="store_true",
-                   help="answer as a board with Unknown sources on")
+    v.add_argument("--consented", action="store_true",
+                   help="answer for a cart whose consent grants \"full_access\"")
     sub.add_parser("compilers", help="locate and verify the pinned compilers")
     fs = sub.add_parser("format-stamp", help="print or refresh the compiled-code "
                         "format version's stamp (wasm_format_version.json)")
@@ -564,9 +555,9 @@ def main(argv):
         if args.cmd == "verify":
             with open(args.aot, "rb") as f:
                 data = f.read()
-            why = verify(data, args.chip, unknown_sources=args.unknown_sources)
+            why = verify(data, args.chip, consented=args.consented)
             ok = ("signed, trusted" if split(data)[1] else
-                  "unsigned, loads with Unknown sources on")
+                  "unsigned, loads for a cart granted \"full_access\"")
             print("%s: %s" % (args.aot, ok if why is None
                               else "REFUSED: %s" % why))
             return 0 if why is None else 1

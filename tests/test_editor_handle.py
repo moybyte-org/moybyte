@@ -44,8 +44,8 @@ DT = 1.0 / 30
 def _handle(ws, name, kind="docs", mode=None):
     """A handle built the way a cart's `open_editor` builds one."""
     ctx = ws.app_context("probe", ("files", "clipboard"))
-    return ws.player._open_cart_editor(ctx.files, kind, name, mode,
-                                       ws.canvas, ctx.clipboard)
+    return ws.run.player._open_cart_editor(ctx.files, kind, name, mode,
+                                       ws.run.canvas, ctx.clipboard)
 
 
 def _doc(tmp_path, name, body):
@@ -55,9 +55,9 @@ def _doc(tmp_path, name, body):
 
 
 def _draw(ws, ed, rect=(0, 0, 320, 200)):
-    ws.canvas.cls(0)
+    ws.run.canvas.cls(0)
     ed.draw(*rect)
-    return ws.canvas
+    return ws.run.canvas
 
 
 def _rows_of(ed, line):
@@ -137,7 +137,6 @@ def _device_ws(tmp_path):
 
     ws = build_ws(tmp_path)
     inp = DeviceInputState()
-    inp.cart_start_ms = 0
     ws.input = inp
     select_on_home(ws, "Notes")
     ws.open()
@@ -147,7 +146,7 @@ def _device_ws(tmp_path):
 def test_the_t_deck_keyboard_types_into_the_focused_handle(tmp_path):
     ws, src = _device_ws(tmp_path)
     _dframe(ws, 2)
-    ed = ws.player.ns["open_editor"]("typed")
+    ed = ws.run.player.ns["open_editor"]("typed")
     ed.focus()
     assert ws.input.text_mode is True          # the keyboard went to ASCII
     for ch in "hi":
@@ -165,7 +164,7 @@ def test_taking_the_keyboard_swallows_the_key_that_took_it(tmp_path):
     ws, src = _device_ws(tmp_path)
     _dframe(ws, 2)
     src.last_key = ord("k")                    # the key that opens the note
-    ed = ws.player.ns["open_editor"]("seeded")
+    ed = ws.run.player.ns["open_editor"]("seeded")
     ed.focus()
     _dframe(ws, 2)
     assert ed.text() == ""
@@ -180,7 +179,7 @@ def test_taking_the_keyboard_swallows_the_key_that_took_it(tmp_path):
 def test_a_focused_handle_owns_the_keyboard_and_the_cart_reads_nothing(tmp_path):
     ws, src = _device_ws(tmp_path)
     _dframe(ws, 2)
-    ed = ws.player.ns["open_editor"]("owned")
+    ed = ws.run.player.ns["open_editor"]("owned")
     ed.focus()
     src.last_key = ord("q")
     _dframe(ws)
@@ -286,8 +285,8 @@ def test_without_the_clipboard_role_the_handle_keeps_its_own_buffer(tmp_path):
     ws = build_ws(tmp_path)
     moy_carts.save_file("docs", "solo", "mine", ws.carts_root)
     ctx = ws.app_context("nolisp", ("files",))
-    ed = ws.player._open_cart_editor(ctx.files, "docs", "solo", None,
-                                     ws.canvas, None)
+    ed = ws.run.player._open_cart_editor(ctx.files, "docs", "solo", None,
+                                     ws.run.canvas, None)
     ed.select_all()
     ed.copy()
     ed.key(ord("!"))
@@ -355,7 +354,7 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
     ws.open()
     ws.input.begin_frame()
     ws.frame(DT)
-    ed = ws.player.ns["open_editor"]("unsaved")
+    ed = ws.run.player.ns["open_editor"]("unsaved")
     ed.set_text("do not lose me")
     assert ed.dirty() is True
     ws._exit_to_caller()

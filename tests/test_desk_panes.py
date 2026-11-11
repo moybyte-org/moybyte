@@ -13,7 +13,7 @@ import pytest
 
 from runtime import host_app
 from runtime import moy_input as mi
-from ws_helpers import no_unlock_banner, quiesce
+from ws_helpers import no_unlock_banner, quiesce, settle_badges
 
 DT = 1 / 30
 _NOW = [100000]
@@ -81,6 +81,7 @@ class Pair:
         for _ in range(6):
             self.frame(check=False)
         for ws in (self.a, self.b):
+            settle_badges(ws)
             ws._toast_until = 0
             ws._dirty = True
         for _ in range(3):
@@ -90,10 +91,10 @@ class Pair:
     def frame(self, check=True):
         _NOW[0] += 33
         a, b = self.a, self.b
-        n = a._frames_drawn
+        n = a.frame_state.frames_drawn
         self.da.frame(DT)
         self.db.frame(DT)
-        if a._frames_drawn == n:
+        if a.frame_state.frames_drawn == n:
             return
         root = a.wm._root_canvas
         shot = bytes(root._buf)
@@ -105,7 +106,7 @@ class Pair:
                 xs = [q % w for q in px]
                 ys = [q // w for q in px]
                 raise AssertionError("frame %d (%d buffers) differs from a whole draw in "
-                                     "x %d-%d, y %d-%d" % (a._frames_drawn, self.bufs, min(xs),
+                                     "x %d-%d, y %d-%d" % (a.frame_state.frames_drawn, self.bufs, min(xs),
                                                            max(xs), min(ys), max(ys)))
         ch = self.d.changed()
         self.own.append(ch is not None and ch != [0, 0, root.w, root.h])

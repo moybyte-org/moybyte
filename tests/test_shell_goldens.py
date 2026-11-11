@@ -132,6 +132,15 @@ keeps the matrix a clean product instead of a pile of special cases.
                            system menu; on the T-Deck, console mode's
                            fullscreen container for each -- the calendar page,
                            Settings at the WIFI panel, Settings at VOLUME.
+  p4_1024x600_fs2_desk_popovers
+                           every desk popover at font scale 2, the scale
+                           the P4's desk can run at, over the desk with a
+                           window: the calendar (a five-week month, then a
+                           six-week one, its weeks tightened into the
+                           glass's room), Wi-Fi (the host's networks, then
+                           more than the card holds, scrolling), the
+                           battery's rows, a compiled program's status menu
+                           (four rows, then eight, scrolling) and Music's.
   tdeck_320x240_fs1_homegrid, p4_1024x600_cs2_fs1_homegrid
                            the home in its GRID arrangement (the layout's
                            `home`, docs/theme_and_shell_2026-11.md §8.10), one
@@ -224,7 +233,7 @@ from pathlib import Path
 import pytest
 
 from cart_store_fixtures import INDEX_URL, MemNet, snapshot
-from ws_helpers import open_cart
+from ws_helpers import open_cart, settle_badges
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
@@ -276,7 +285,8 @@ GOLDEN_EXCLUDE = {}
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts")
+APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcarts", "jukebox",
+        "terminal")
 
 # Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
 # so what these hash is the app bar over a cart's own 320x240 raster, composited
@@ -288,6 +298,11 @@ APPS = ("artwork", "myart", "appearance", "storybook", "files", "calc", "getcart
 # game is the spec's domain and free to use rnd(). An app cart draws a settled
 # surface out of stored content, which is what every other row here does.
 APP_CARTS = (("notes", "Notes"),)
+
+# Moy Mesh, an installable app (moybyte-org/carts' carts/moymesh/, its copy the
+# fixture): a Lua window over a Lua service, installed into the store last,
+# so every surface before it draws the seed set alone.
+MESH_APP = str(Path(__file__).resolve().parent / "fixtures" / "apps" / "moymesh.moy")
 
 # The public UI API's fixture page (docs/ui_api_2026-10.md), the Python app's
 # (tests/test_ui_public.py holds the Lua and compiled ones to its pixels): its
@@ -308,7 +323,7 @@ PARTS_PAGES = ("settings", "appearance")
 # Both the pin and the address are FIXED here. They are not decoration -- they
 # are the QR's input, and a minted pin would re-encode a different matrix on
 # every run, which is the one way this surface could be non-deterministic.
-GOLDEN_PIN = "4821"
+GOLDEN_LINK = "#t=q1w2e3r4t5y6u7i8o9p0aa&b=zxcvbnmasdf"
 GOLDEN_URL = "http://192.168.1.151/"
 
 # The TEXT CONSOLE (docs/history/text_editing_2026-09.md step 6), rendered as a real
@@ -344,7 +359,7 @@ class _GoldenWebHost:
         return GOLDEN_URL
 
     def paired_url(self):
-        return GOLDEN_URL + "?pin=" + GOLDEN_PIN
+        return GOLDEN_URL + GOLDEN_LINK
 
 
 # `diagonal_in` is the board fact behind the #203 tap-target floor; None is
@@ -422,6 +437,9 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_popovers": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, plan="popovers"),
+    "p4_1024x600_fs2_desk_popovers": dict(
+        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="desk_popovers"),
     "tdeck_320x240_fs1_widget_pages": dict(
         sys_size=None, font_scale=1, windowed=False, variant="dark",
         diagonal_in=None, plan="widget_pages"),
@@ -437,6 +455,36 @@ CONFIGS = {
     "p4_1024x600_cs2_fs1_moy_night": dict(
         sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
         diagonal_in=7.0, theme="moy"),
+    "tdeck_320x240_fs1_status": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="status"),
+    "p4_1024x600_cs2_fs1_status": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="status"),
+    "tdeck_320x240_fs1_music": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="music"),
+    "p4_1024x600_cs2_fs1_music": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="music"),
+    "guition_480x320_fs1_music": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="music_noaudio"),
+    "p4_1024x600_cs2_fs1_procs": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="procs"),
+    "tdeck_320x240_fs1_tasks": dict(
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="tasks"),
+    "guition_480x320_fs1_tasks": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None, plan="tasks"),
+    "p4_1024x600_cs2_fs1_tasks": dict(
+        sys_size=(1024, 600), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=7.0, plan="tasks"),
+    "guition_p4_1280x800_tasks": dict(
+        sys_size=(1280, 800), font_scale=1, windowed=True, variant="dark",
+        diagonal_in=10.1, plan="tasks"),
     "tdeck_320x240_fs1_moy_menus": dict(
         sys_size=None, font_scale=1, windowed=False, variant="light",
         diagonal_in=None, theme="moy", plan="menus"),
@@ -514,6 +562,7 @@ def _quiesce(ws):
         ws.pointer.visible = False
         ws.pointer.hovers = True
     if not getattr(ws, "_golden_toast", False):
+        settle_badges(ws)
         ws._toast_until = 0
     ws.show_fps = False
     ws.perf_hud = False
@@ -579,6 +628,14 @@ def _cart_by_title(ws, title):
 
 def _build(cfg, carts_dir):
     from runtime import host_app
+    from runtime.status_items import ITEMS
+    from runtime import music_app
+    music_app.STREAM._end()             # nor what Music played
+    music_app.STREAM.face = None
+    music_app.STREAM.stations = music_app.STATIONS
+    for it in ITEMS.slots:              # no app's status item outlives its config
+        if it.pid:
+            ITEMS._free(it)
     if cfg.get("plan") == "ui_page":
         host_app.moy_carts.ensure_dirs(str(carts_dir))
         shutil.copytree(UI_PAGE[0], os.path.join(str(carts_dir), os.path.basename(UI_PAGE[0])))
@@ -631,6 +688,8 @@ def _surface_plan(ws, cfg):
     plan = []
     if cfg.get("plan") == "popovers":
         return _popover_plan(ws)
+    if cfg.get("plan") == "desk_popovers":
+        return _desk_popover_plan(ws)
     if cfg.get("plan") == "widget_pages":
         return _widget_page_plan(ws)
     if cfg.get("plan") == "home":
@@ -641,6 +700,14 @@ def _surface_plan(ws, cfg):
         return _parts_plan(ws)
     if cfg.get("plan") == "menus":
         return _menus_plan(ws, cfg)
+    if cfg.get("plan") == "procs":
+        return _procs_plan(ws)
+    if cfg.get("plan") == "tasks":
+        return _tasks_plan(ws, cfg)
+    if cfg.get("plan") in ("music", "music_noaudio"):
+        return _music_plan(ws, cfg)
+    if cfg.get("plan") == "status":
+        return _status_plan(ws, cfg)
     desktop = cfg["windowed"] and not cfg.get("console")
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
@@ -669,7 +736,11 @@ def _surface_plan(ws, cfg):
     # home; then the unlock banner over the home, a secret's with its confetti
     # out whole.
     def achievements():
-        ws.ach.unlocked = dict(GOLDEN_BADGES)
+        ws.ach.seed(dict(GOLDEN_BADGES))
+        ws.system.set(ws.ach.key, dict(ws.system.get(ws.ach.key), **{
+            "moybyte.harpoon_pop": {"name": "Harpoon Pop", "value": {"high_tide": 3},
+                                    "found": {"first_clear": [20261020, "Bubble Buster",
+                                                              "star", "Clear level 1"]}}}))
         ws.open_settings()
         ws.settings_layer.open_page("achievements")
 
@@ -682,6 +753,20 @@ def _surface_plan(ws, cfg):
         page.entry = page._ids["MicroPython"]
         page._focus = "MicroPython"
 
+    def syslog():
+        # The ring as a board's first minute leaves it, on a pinned clock:
+        # the shell, a game's start, its log calls and its crash.
+        import moy_log
+        moy_log.init(16384)
+        pids = {"kernel": moy_log.KERNEL, "shell": moy_log.SHELL}
+        for t, level, who, text in GOLDEN_LOG:
+            if who not in pids:
+                pids[who] = moy_log.spawn(who)
+            moy_log.pin_clock(t)
+            moy_log.write(level, pids[who], text)
+        moy_log.pin_clock(0)
+        ws.settings_layer.open_page("log")
+
     def about():
         home()
         ws._golden_about = True
@@ -690,20 +775,25 @@ def _surface_plan(ws, cfg):
     def unlock():
         ws._golden_about = False
         ws._about = False
-        ws.ach.unlocked.pop("konami", None)
+        ws.ach.seed({k: d for k, d in GOLDEN_BADGES if k != "konami"})
         ws._golden_toast = True
         ws.ach.award("konami")
+        settle_badges(ws)
         ws._toast_at -= 10000
 
     plan.append(("settings_achievements", achievements))
     plan.append(("settings_licences", licences))
     plan.append(("settings_licence", licence))
+    plan.append(("settings_log", syslog))
+    plan.append(("settings_permissions",
+                 lambda: ws.settings_layer.open_page("permissions")))
     plan.append(("about", about))
     plan.append(("unlock_banner", unlock))
     cart = _cart_by_title(ws, _EDITOR_CART)
     for tab in TABS:
         def enter(tab=tab):
             ws._golden_toast = False
+            settle_badges(ws)
             ws._toast_until = 0
             # Re-open per tab. That alone does NOT buy independence -- the layouts
             # are ws singletons another tab can bind (#216); what pins it is
@@ -716,6 +806,8 @@ def _surface_plan(ws, cfg):
         plan.append(("editor_" + tab, enter))
     pages = False
     for app in APPS:
+        if app == "terminal":
+            continue                     # last: its session's lines are its own
         enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
         if app == "getcarts":
             enter = _open_get_carts(ws)
@@ -723,6 +815,8 @@ def _surface_plan(ws, cfg):
             enter = _after_appearance(ws, enter)
             pages = False
         plan.append(("app_" + app, enter))
+        if app == "getcarts":
+            plan.append(("app_getcarts_consent", _get_carts_consent(ws)))
         if app == "appearance" and cfg.get("appearance"):
             plan.append(("app_appearance_walls", _walls_page(ws)))
             plan.append(("app_appearance_name",
@@ -733,13 +827,15 @@ def _surface_plan(ws, cfg):
         if surface == "notes":
             enter = _notes_vault(ws, enter)
         plan.append(("app_" + surface, enter))
-    # Notes with a note open: its page of tools, the note in the look
-    plan.append(("app_notes_note", lambda: ws.player.ns["_open"](NOTES_VAULT[0][0])))
-    # ...and a program open: the same tools and Run
-    plan.append(("app_notes_script", lambda: ws.player.ns["_open"](NOTES_VAULT[1][0])))
+        if surface == "notes":
+            # Notes with a note open: its page of tools, the note in the look
+            plan.append(("app_notes_note",
+                         lambda: ws.run.player.ns["_open"](NOTES_VAULT[0][0])))
+            # ...and a program open: the same tools and Run
+            plan.append(("app_notes_script",
+                         lambda: ws.run.player.ns["_open"](NOTES_VAULT[1][0])))
 
     def park():
-        ws.system.set("web_pin", GOLDEN_PIN)
         if ws.webhost is None:
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():
@@ -759,6 +855,237 @@ def _surface_plan(ws, cfg):
 
     plan.append(("script_console", run_script))
     plan.append(("web_console", park))
+    from runtime import ui_draw
+    kind = ui_draw.input_kind(), ui_draw.hint_kind()
+    if cfg.get("appearance") and not cfg["windowed"]:
+        kind = ("tdeck", "tdeck")       # the handheld rows run on the T-Deck's keys
+    plan += _terminal_plan(ws, cfg)
+    plan.append(("open_with", lambda: (_input_as_built(kind), _open_with(ws, home))))
+    plan.append(("pick", lambda: _pick(ws, home)))
+    plan.append(("app_files_document", lambda: _files_document(ws)))
+    plan.append(("app_moymesh", _mesh_installed(ws, desktop)))
+    plan += [(name, _mesh_page(ws, lua)) for name, lua in MESH_PAGES]
+    if desktop:
+        plan.append(("desk_two_windows", _two_windows(ws)))
+    return plan
+
+
+def _two_windows(ws):
+    """Two windows on the desk: Notes on a note, the Terminal over it with a
+    line typed. Each strip names its own window, and Notes, drawn under the
+    Terminal every frame, leaves the Terminal's strip as it drew it."""
+    def run():
+        ws.go_home()                     # the desk's windows close
+        ws.open_desk()
+        open_cart(ws, "Notes")
+        ws.run.player.ns["_open"](NOTES_VAULT[0][0])
+        app = ws._apps_by_id["terminal"]
+        ws.open_app(app)
+        f = app.face
+        f.clear_cands()
+        f.set_line("clear")
+        f.submit()
+        f.set_line("ls")
+        app._damage.all()
+        # apart enough that Notes' strip shows and its page lies under the
+        # Terminal's strip
+        wm = ws.wm
+        wm._sync_windows()
+        fs = wm._fs()
+        dx, dy, dw, dh = wm._desk_rect()
+        wm._move_window(wm._wins["desktop"], dx + dw // 8, dy + 8 * fs)
+        term = wm._wins["terminal"]
+        wm._resize_window(term, dw * 3 // 5, dh * 3 // 5)
+        wm._move_window(term, dx + dw // 3, dy + dh // 3)
+    return run
+
+
+def _input_as_built(kind):
+    """The input the config's console was built under, back after the
+    Terminal's rows left touch in use: under touch no focus mark and no hint
+    strip draws, so the surfaces after them would show none."""
+    from runtime import ui_draw
+    ui_draw.input_kind(kind[0])
+    ui_draw.hint_kind(kind[1])
+
+
+def _open_with(ws, home):
+    """The intents' "open with" menu (runtime/system/intents.py) over the
+    home: a note two apps open, a user app beside Notes, none chosen yet."""
+    import moybyte
+    from runtime import host_app, intents
+    from ws_helpers import shelf
+    if ws.webhost_serving():
+        ws.toggle_webhost()              # the web console's page goes with it
+    home()
+    root = str(ws.carts_root)
+    cart = host_app.moy_carts.create("Jot", root, src="def _draw():\n    cls(1)\n",
+                                     type="app")
+    path = os.path.join(cart["path"], "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man["moybyte"]["handles"] = ["text/markdown"]
+    with open(path, "w") as f:
+        json.dump(man, f)
+    ws.carts.apply(shelf(root))
+    ws.carts_store.save_file("docs", "todo", "# milk\n", root)
+    intents.INTENTS.reset()
+    assert moybyte.open_with("Documents/todo.md", True)
+
+
+def _pin_file_times(ws):
+    """Every user file at one mtime, so a listing's newest-first order is
+    its names' and no second boundary a plan's saves straddle moves it."""
+    top = ws.carts_store.files_root(str(ws.carts_root))
+    for d, dirs, files in os.walk(top):
+        for n in dirs + files:
+            os.utime(os.path.join(d, n), (1_000_000, 1_000_000))
+
+
+def _pick(ws, home):
+    """The picker (runtime/system/intents.py): a running app asks for a
+    picture, and the drawings and sprite sheets the user has are the rows,
+    more than the card holds."""
+    from runtime import intents
+    ws.confirm.cancel()
+    home()
+    root = str(ws.carts_root)
+    for i in range(9):
+        ws.carts_store.save_file("drawings", "sky_%d" % i, "0,", root)
+    ws.carts_store.save_file("sprites", "hero", "0,", root)
+    _pin_file_times(ws)
+    ws.open(_cart_by_title(ws, "Jot"))
+    intents.INTENTS.reset()
+    assert intents.INTENTS.pick(ws.run.player.pid, "image/*")
+
+
+def _files_document(ws):
+    """Files on Documents, a note current: its verbs at the foot, Open
+    with among them."""
+    from runtime import files_app
+    ws.confirm.cancel()
+    _pin_file_times(ws)
+    ws.open_app(ws._apps_by_id["files"])
+    app = ws.files_app
+    app._refresh_counts()
+    app.open_place(files_app.DOCUMENTS, keep="todo")
+    app.level = "files"
+
+
+def _terminal_plan(ws, cfg):
+    """The Terminal (runtime/apps/terminal_app.py): its prompt on a fresh
+    session, and where a config pins an app's pages, a long listing at the
+    log's foot, a completion's candidates and the key row. The T-Deck's
+    configs run under its keyboard (its row: Tab and the symbols it has no
+    key for), and add the touch-only handheld's rows; the desk's draws no
+    row, under touch either."""
+    from runtime import ui_draw
+    app = ws._apps_by_id["terminal"]
+    tdeck = bool(cfg.get("appearance")) and not cfg["windowed"]
+
+    def typed(text, tab=False):
+        def enter():
+            app.face.set_line(text)
+            if tab:
+                app.face.complete()
+            else:
+                app.face.submit()
+        return enter
+
+    def open_it():
+        # on the desk, a window on the desk alone (the plan before left
+        # console mode and its windows behind)
+        if cfg["windowed"] and not cfg.get("console"):
+            ws.open_desk()
+        if tdeck:
+            ui_draw.input_kind("tdeck")
+            ui_draw.hint_kind("tdeck")
+        ws.open_app(app)
+
+    def line(kind, in_row=False):
+        def enter():
+            if kind is not None:
+                ui_draw.input_kind(kind)
+                ui_draw.hint_kind(kind)
+            app.face.clear_cands()
+            app.face.set_in_row(in_row)
+            app.face.set_line("ls /c")
+            app._damage.all()
+        return enter
+
+    def text_app(cmd, keys=(), still=False):
+        # a text app over a known file, under the board's own keys; `still`
+        # empties the process-wide scheduler (what tests before this one in
+        # the process left), so top's rows are the console's own
+        def enter():
+            if still:
+                from runtime import scheduler
+                scheduler.SCHED.reset()
+            if tdeck:
+                ui_draw.input_kind("tdeck")
+                ui_draw.hint_kind("tdeck")
+            f = app.face
+            if f.app() is not None:
+                for k in (b"\x18n" if f.app() == "edit" else b"q"):
+                    f.key(k)
+            f.clear_cands()
+            f.set_in_row(False)
+            for ln in ("mkdir -p /sd/moybyte/system",
+                       "printf 'theme = \"dusk\"\\nvolume = 3\\n' > /sd/moybyte/system/settings",
+                       cmd):
+                f.set_line(ln)
+                f.submit()
+            for k in keys:
+                f.key(k)
+            app._damage.all()
+        return enter
+
+    def neofetch():
+        # the store's figures are the host disk's: fixed here, so the page
+        # is the same on every machine
+        from runtime import sh_door
+        f = app.face
+        if f.app() is not None:
+            for k in (b"\x18n" if f.app() == "edit" else b"q"):
+                f.key(k)
+        f.clear_cands()
+        f.set_in_row(False)
+        was = sh_door.ShellDoor.v_df
+        sh_door.ShellDoor.v_df = lambda self, path: "%d %d" % (31 << 30, 19 << 30)
+        try:
+            f.set_line("clear; neofetch")
+            f.submit()
+        finally:
+            sh_door.ShellDoor.v_df = was
+        app._damage.all()
+
+    def colours():
+        # the grounds and the half blocks neofetch's logo and palette draw
+        # with: the sixteen base colours in two rows (48;5), then Moy's
+        # colours as RGB inks and grounds over the upper, lower and whole
+        # blocks (38;2 and 48;2)
+        f = app.face
+        f.clear_cands()
+        f.set_in_row(False)
+        f.set_line("clear; for r in 0 8; do for i in 0 1 2 3 4 5 6 7; do "
+                   "printf '\\033[48;5;%dm   ' $((r + i)); done; printf '\\033[0m\\n'; done; "
+                   "printf '\\033[38;2;131;118;156;48;2;0;0;0m\\342\\226\\200\\342\\226\\204"
+                   "\\033[49m\\342\\226\\210 \\033[38;2;126;37;83mlegs\\033[0m\\n'")
+        f.submit()
+        app._damage.all()
+
+    plan = [("app_terminal", open_it)]
+    if cfg.get("appearance"):
+        plan.append(("app_terminal_listing", typed("help")))
+        plan.append(("app_terminal_completion", typed("e", tab=True)))
+        plan.append(("app_terminal_keys", line(None, True) if tdeck else line("touch")))
+        if tdeck:
+            plan.append(("app_terminal_touch", line("touch")))
+        plan.append(("app_terminal_edit", text_app("edit /sd/moybyte/system/settings",
+                                                   b"font_scale = 2\r")))
+        plan.append(("app_terminal_top", text_app("top", still=True)))
+        plan.append(("app_terminal_neofetch", neofetch))
+        plan.append(("app_terminal_colours", colours))
     return plan
 
 
@@ -774,6 +1101,68 @@ def _notes_vault(ws, enter):
         for name, body in NOTES_VAULT:
             ws.carts_store.save_file("docs", name, body, ws.carts_root)
         enter()
+    return run
+
+
+# Moy Mesh's node, pinned: its service draws one at random where prefs hold none.
+MESH_NODE = "!0a1b2c3d"
+# The window's clock, pinned (2026-11-10 12:00 UTC, the zone UTC): its ages
+# and day heads read against it.
+MESH_NOW = 1794312000
+# What it heard and sent, oldest first as its service keeps them.
+MESH_LOG = [
+    {"from": "!5e6f7a8b", "text": "Anyone on the hill tonight?", "rssi": -98, "snr": 6.5,
+     "t": MESH_NOW - 900},
+    {"from": "", "text": "On my way up", "t": MESH_NOW - 800},
+    {"from": "", "text": "Bring the blue tent", "failed": True, "t": MESH_NOW - 700},
+    {"from": "!9c0d1e2f", "text": "Clear skies up here, wind from the north. Bring a warm layer.",
+     "rssi": -112, "snr": -3.5, "t": MESH_NOW - 600},
+    {"from": "!5e6f7a8b", "text": "See you at the top", "rssi": -104, "snr": 2.0,
+     "t": MESH_NOW - 400},
+    {"from": "!5e6f7a8b", "dm": "!5e6f7a8b", "text": "Bring the spare headlamp",
+     "rssi": -104, "snr": 2.0, "t": MESH_NOW - 300},
+]
+MESH_NODES = {
+    "!5e6f7a8b": {"long": "Ana Ridge", "short": "ANA", "key": "cd" * 32, "rssi": -104,
+                  "snr": 2.0, "heard": MESH_NOW - 300, "ch": 0},
+    "!9c0d1e2f": {"rssi": -112, "snr": -3.5, "heard": MESH_NOW - 600, "ch": 0},
+}
+# The window's pages over its home, as its page stack holds them, and the Lua
+# that opens each: the surfaces after the home.
+MESH_PAGES = (
+    ("app_moymesh_thread", 'stack = {{kind="home"}, {kind="thread", key="ch0"}}'),
+    ("app_moymesh_details",
+     'stack[2].pop, stack[2].pop_fresh = threads.ch0.msgs[3], 2'),
+    ("app_moymesh_radio", 'stack = {{kind="home"}, {kind="radio"}}'),
+)
+
+
+def _mesh_installed(ws, desktop):
+    """Moy Mesh installed and open on the stand-in radio (it requires `lora`),
+    its node and its messages pinned: from the home, or alone on the desk."""
+    def run():
+        from runtime.host import lora_sim
+        ws.go_home()                     # the desk's windows close
+        if desktop:
+            ws.open_desk()
+        shutil.copytree(MESH_APP, os.path.join(str(ws.carts_root), "moymesh.moy"))
+        ws.carts.rescan()
+        lora_sim.install()
+        open_cart(ws, "Moy Mesh")
+        pl = ws.run.player
+        assert pl.ns is not None, pl.cart_error
+        pl.ns["prefs"].set("node", MESH_NODE)
+        pl.ns["prefs"].set("log", MESH_LOG)
+        pl.ns["prefs"].set("nodes", MESH_NODES)
+        wall = "wall = function() return %d, 0, true end; _reload()" % MESH_NOW
+        assert pl._lua.exec(wall, "golden") is None
+    return run
+
+
+def _mesh_page(ws, lua):
+    def run():
+        pl = ws.run.player
+        assert pl._lua.exec(lua + "; fresh = true; _reload()", "golden") is None
     return run
 
 
@@ -825,6 +1214,21 @@ def _after_appearance(ws, enter):
 _PAUSE_CART, _PAUSE_FRAMES = "Star Catcher", 30
 MENU_SURFACES = ("sysmenu", "pause", "pause_options")
 # The badges the About surfaces show found, with the targets' two days.
+# The System log page's ring: (t_us, level, process, text), levels syslog's.
+GOLDEN_LOG = (
+    (412000, 2, "kernel", "crash kind=abort task=mp_task app=- pc=4037a1c2 reset=panic what=heap"),
+    (1830500, 6, "shell", "STAGE desktop int_free=61k big=31k int_tot=180k ps_free=5120k"),
+    (2264100, 6, "shell", "wifi autoconnected: home"),
+    (9001250, 6, "moybyte.brick_siege", "start moybyte.brick_siege"),
+    (9420000, 7, "moybyte.brick_siege", "score: level 1 bricks=48"),
+    (12880400, 4, "kernel", "HITCH ms=96 inputs=0.4 present=12.1 frame=81.3"),
+    (15102900, 3, "moybyte.brick_siege", "score: lives ran out"),
+    (15103300, 2, "moybyte.brick_siege",
+     "Traceback (most recent call last):\n  File \"<cart>\", line 88, in _update\n"
+     "TypeError: unsupported types for +: 'int', 'NoneType'"),
+    (15103900, 5, "shell", "the run stopped: Brick Siege"),
+)
+
 GOLDEN_BADGES = (("first_open", 20261001), ("first_run", 20261001), ("first_paint", 20261001),
                  ("first_map", 20261012), ("first_code", 20261001), ("play_five", 20261009),
                  ("toolbox", 20261001), ("konami", 20261001), ("clock_tinker", 20261001))
@@ -854,7 +1258,7 @@ def _menus_plan(ws, cfg):
                 ws.open_library()
             random.seed(25)
             ws._open_workspace(_cart_by_title(ws, _PAUSE_CART))
-            ws.run(ws.project, ws.launcher_layer)
+            ws.play(ws.launcher_layer)
             for _ in range(_PAUSE_FRAMES):
                 _quiesce(ws)
                 ws.frame(_DT)
@@ -865,6 +1269,493 @@ def _menus_plan(ws, cfg):
         return enter
 
     return [("sysmenu", sysmenu), ("pause", pause(False)), ("pause_options", pause(True))]
+
+
+PROCS_SURFACES = ("desk_two_games", "desk_close_refusal")
+_PROCS_CARTS = ("Star Catcher", "Brick Siege")
+
+
+def _procs_plan(ws):
+    """Several games at once (runtime/shell/procs.py): two games in windows
+    on the desk -- Brick Siege the focused front, Star Catcher throttled
+    beside it -- each held after a fixed run of frames from a seeded `rnd`;
+    then the admission's refusal over them, naming what to close."""
+    import random
+
+    def two():
+        ws.open_desk()
+        for i, title in enumerate(_PROCS_CARTS):
+            random.seed(25 + i)
+            cart = _cart_by_title(ws, title)
+            assert ws.procs.launch(cart)       # the first game joins the running set
+            ws._open_workspace(cart)
+            ws.play(ws.launcher_layer)
+            ws.frame(_DT)
+            win = ws.wm._wins["desktop"]
+            if win.saved is not None:
+                ws.wm._toggle_max(win)
+            ws.wm._resize_window(win, 344, 289)   # the game at 1x
+            ws.wm._move_window(win, 150 + 360 * i, 90 + 120 * i)
+            for _ in range(_PAUSE_FRAMES):
+                _quiesce(ws)
+                ws.frame(_DT)
+        assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
+        assert ws.wm._focus == "desktop" and ws.procs.list[0].state == "throttled"
+        ws.run.player._paused_at = 1               # both held where they are
+        ws.procs.list[0].player._paused_at = 1
+
+    def refusal():
+        ws.procs.refuse(_cart_by_title(ws, "Coin Quest"), ["run:1"])
+        assert ws.confirm.open
+
+    return [("desk_two_games", two), ("desk_close_refusal", refusal)]
+
+
+STATUS_HANDHELD = ("status_bar_music", "status_bar_focus", "status_cc", "status_cc_scrolled",
+                   "status_vmstop", "status_paused_bar", "status_battery_low",
+                   "status_battery_charging", "status_cc_panel")
+STATUS_DESK = ("status_desk_bar", "status_desk_menu", "status_desk_panel")
+
+# A compiled program's described panel (status_items.Panel): every kind of row.
+_PANEL = ("text Now playing\tGroove Salad\n"
+          "button skip Skip\n"
+          "toggle shuffle Shuffle 1\n"
+          "slider vol Volume 0 10 6")
+
+
+class _StatusSection:
+    """A status item's section as an app draws one (`moybyte.status`): what
+    plays, then two verbs, its rows the public UI verbs', their ids its
+    app's own (`ns`)."""
+
+    def __init__(self, ns="music"):
+        self.ids = ({"id": ns + ".pause"}, {"id": ns + ".stop"})
+
+    def height(self, w, desk, fs):
+        from runtime import ui_draw
+        row = ui_draw.metrics("row")
+        return 3 * (row[6 if desk else 5] + row[7]) * fs
+
+    def draw(self, desk):
+        from runtime import ui
+        ui.info("Dayvan Cowboy", "Groove Salad")
+        ui.link("Pause", "", self.ids[0])
+        ui.link("Stop", "", self.ids[1])
+
+
+def _status_item(ws, state=0):
+    """Music's item, on a pid the kernel handed out: a made-up one is a real
+    process's by the count of spawns before it, and that process's end sweeps
+    the item."""
+    from runtime import moy_log
+    from runtime.status_items import ITEMS
+    for it in ITEMS.slots:
+        if it.pid:
+            ITEMS._free(it)
+    it = ITEMS.add(moy_log.spawn("Music"), "music", _StatusSection(), 0)
+    it.app = "Music"
+    it.show(state)
+    return it
+
+
+def _panel_item(ws):
+    """A compiled program's item alone in the bar, its panel `_PANEL`, as
+    `moybyte.status_show` and `status_panel` make it."""
+    from runtime import moy_log
+    from runtime.status_items import ITEMS, parse
+    for it in ITEMS.slots:
+        if it.pid:
+            ITEMS._free(it)
+    h = ITEMS.show_compiled(moy_log.spawn("Radio"), "music", 0, 0)
+    it = ITEMS.slots[h - 1]
+    it.app = "Radio"
+    it.section.set(parse(_PANEL))
+    it.changed()
+    return it
+
+
+def _status_plan(ws, cfg):
+    """The apps' status items (docs/theme_and_shell_2026-11.md §8.6): on the
+    desk, Music's item in the bar's right zone and its menu open; on a
+    handheld, the bar with its icon, the status cluster focused, the control
+    center at rest and scrolled, the Stop & play question, the bar over a
+    paused game, and the battery low and charging."""
+    from runtime import host_app
+    drv = host_app.ConsoleDriver(ws)
+
+    def press(name, n=1):
+        for _ in range(n):
+            drv.press(name)
+            drv.frame(_DT)
+            drv.frame(_DT)
+
+    if cfg["windowed"]:
+        def desk_bar():
+            ws.open_desk()
+            _status_item(ws)
+
+        def desk_menu():
+            from runtime.status_items import ITEMS
+            ws._golden_popover = True
+            ws.open_status_menu(ITEMS.at(0))
+            assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+
+        def desk_panel():
+            ws.close_popover()
+            it = _panel_item(ws)
+            ws.open_status_menu(it)
+            assert ws.sysmenu.open and ws.status_open is it
+        return [("status_desk_bar", desk_bar), ("status_desk_menu", desk_menu),
+                ("status_desk_panel", desk_panel)]
+
+    def music():
+        ws.go_home()
+        _status_item(ws)
+
+    def focus():
+        bl = ws.bar_layer
+        items = bl.focus_items("home")
+        k = [j for j, it in enumerate(items) if it[2] == "cluster"][0]
+        assert bl.focus_enter("home", "row", k=k)
+
+    def cc():
+        ws.bar_layer.focus_leave()
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
+    def scrolled():
+        from runtime import moy_log
+        from runtime.status_items import ITEMS
+        it = ITEMS.add(moy_log.spawn("Radio"), "pulse", _StatusSection("radio"), 1)
+        it.app = "Radio"
+        it.show()
+        press("down", 10)
+
+    def vmstop():
+        ws.close_popover()
+        ws._golden_popover = False
+        ws.ask_stop_music({"title": "Doom"})
+        assert ws.confirm.open
+
+    def paused():
+        ws.confirm.cancel()
+        open_cart(ws, "Sky Run")
+        for _ in range(3):
+            ws.frame(_DT)
+        ws.pause.show()
+        ws.run.player._paused_at = 1
+
+    def low():
+        ws.pause.close()
+        ws.go_home()
+        ws.battery_level = lambda: 9
+        ws.bar_layer.invalidate()
+
+    def charging():
+        ws.battery_charging = lambda: True
+        ws.bar_layer.invalidate()
+
+    def cc_panel():
+        ws.battery_charging = lambda: False
+        ws.battery_level = lambda: 80
+        _panel_item(ws)
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
+    return [("status_bar_music", music), ("status_bar_focus", focus), ("status_cc", cc),
+            ("status_cc_scrolled", scrolled), ("status_vmstop", vmstop),
+            ("status_paused_bar", paused), ("status_battery_low", low),
+            ("status_battery_charging", charging), ("status_cc_panel", cc_panel)]
+
+
+MUSIC_HANDHELD = ("music_radio", "music_radio_connecting", "music_files", "music_files_empty",
+                  "music_files_nosd", "music_nowifi", "music_now_radio", "music_now_list",
+                  "music_now_failed", "music_add", "music_add_https", "music_cc",
+                  "music_bar_paused")
+MUSIC_DESK = ("music_desk", "music_desk_files", "music_desk_menu", "music_desk_failed")
+
+
+class _MusicFace:
+    """The media face as Music reads it, faked: one moment's answers."""
+
+    def __init__(self, n):
+        self.n = dict(n) if n else None
+
+    def now(self):
+        return self.n
+
+    def play(self, src):
+        pass
+
+    def pause(self):
+        self.n["paused"] = True
+
+    def resume(self):
+        self.n["paused"] = False
+
+    def stop(self):
+        self.n = None
+
+    def next(self):
+        return True
+
+    prev = next
+
+    def volume(self, v=None):
+        return self.n["volume"]
+
+
+_MUSIC_RADIO = {"state": "playing", "paused": False, "src": "http://ice1.somafm.com/x",
+                "station": "", "title": "Boards of Canada - Dayvan Cowboy", "entry": 0,
+                "entries": 1, "volume": 60}
+_MUSIC_LIST = {"state": "playing", "paused": True, "src": "/m/a.mp3", "station": "",
+               "title": "Sunny day drive", "entry": 2, "entries": 12, "volume": 40,
+               "at": 72, "len": 221}
+_MUSIC_FILES = ((("Beach trip", "/m/Beach trip.mp3", "3:41"), ("Birthday song", "/m/b.mp3", "2:05"),
+                 ("Dragon theme", "/m/d.mp3", "4:12"), ("Grandma's piano", "/m/g.mp3", "1:58"),
+                 ("Space walk", "/m/s.mp3", "5:20")),
+                (("Road trip mix", "/m/r.m3u", "12 songs"), ("Sleepy time", "/m/s.m3u", "8 songs")))
+
+
+def _music(ws, now, what, page="list", tab=0, cur=None, files=None):
+    """Music open on `page` while the faked face answers `now` for `what`
+    (kind, name, src); the stream's wake cancelled, so the frame is still."""
+    from runtime import music_app as M
+    import moybyte
+    s = M.STREAM
+    s._end()
+    app = ws._apps_by_id["jukebox"]
+    s.face = _MusicFace(now)
+    if what is not None:
+        s.what = what
+        s.poll()
+        if s.wake is not None:
+            moybyte.cancel(s.wake)
+            s.wake = None
+    ws.open_app(app)
+    app.tab = tab
+    if files is not None:
+        app.files = files
+        app.idle_owed = False
+    if cur is not None:
+        app.cur[tab] = cur
+    if page != "list":
+        app._go(page)
+    return app
+
+
+def _music_plan(ws, cfg):
+    """Music (#110, docs/media/music_2026-11/README.md) over a faked media
+    face: on the T-Deck its Radio, My music (a list, empty, no SD card),
+    Radio without Wi-Fi, Now playing (a station, a paused list, a station
+    that failed), Add a station (and an https address it refuses), the
+    control center with Music's card and the bar with it paused; on the
+    desk its window on Radio and My music, Music's status menu and a
+    station that failed; on the Guition S3, which has no audio, its
+    no-audio page."""
+    from runtime import music_app as M
+    groove = ("radio", "Groove Salad", M.STATIONS[0][2])
+    road = ("list", "Road trip mix", "/m/r.m3u")
+    if cfg.get("plan") == "music_noaudio":
+        def noaudio():
+            M.STREAM.face = False           # the Guition S3's: no media service
+            ws.open_app(ws._apps_by_id["jukebox"])
+        return [("music_noaudio", noaudio)]
+    if cfg["windowed"]:
+        def desk():
+            ws.open_desk()
+            _music(ws, _MUSIC_RADIO, groove, cur=3)
+
+        def desk_files():
+            _music(ws, _MUSIC_LIST, road, tab=1, files=_MUSIC_FILES)
+
+        def desk_menu():
+            from runtime.status_items import ITEMS
+            ws.open_desk()
+            ws.open_app(ws._apps_by_id["files"])
+            _music_wake_off()
+            ws._golden_popover = True
+            ws.open_status_menu(ITEMS.at(0))
+            assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+
+        def desk_failed():
+            ws.close_popover()
+            _music(ws, dict(_MUSIC_RADIO, state="failed", title=""),
+                   ("radio", "Secret Agent", M.STATIONS[5][2]))
+            ws.open_status_menu(ws.status_open)
+        return [("music_desk", desk), ("music_desk_files", desk_files),
+                ("music_desk_menu", desk_menu), ("music_desk_failed", desk_failed)]
+
+    def connecting():
+        _music(ws, dict(_MUSIC_RADIO, state="opening", title=""),
+               ("radio", "Drone Zone", M.STATIONS[1][2]), cur=2)
+
+    def nowifi():
+        app = _music(ws, None, None)
+        app._has_wifi = lambda: False
+        app.wifi = False
+
+    def cc():
+        _music(ws, _MUSIC_RADIO, groove)
+        ws.go_home()
+        ws._golden_popover = True
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
+
+    def paused():
+        ws.close_popover()
+        ws._golden_popover = False
+        _music(ws, dict(_MUSIC_RADIO, paused=True), groove)
+        ws.go_home()
+
+    def add_https():
+        app = _music(ws, None, None, page="add")
+        app.url = "https://stream.example.org/live.mp3"
+        app.err = M._check(app.url, False)
+
+    def add():
+        app = _music(ws, None, None, page="add")
+        app.url = "http://ice1.somafm.com/lush-128-mp3"
+    return [("music_radio", lambda: _music(ws, _MUSIC_RADIO, groove, cur=3)),
+            ("music_radio_connecting", connecting),
+            ("music_files", lambda: _music(ws, _MUSIC_LIST, road, tab=1, cur=2,
+                                           files=_MUSIC_FILES)),
+            ("music_files_empty", lambda: _music(ws, None, None, tab=1, files=((), ()))),
+            ("music_files_nosd", lambda: _music(ws, None, None, tab=1, files=False)),
+            ("music_nowifi", nowifi),
+            ("music_now_radio", lambda: _music(ws, _MUSIC_RADIO, groove, page="now")),
+            ("music_now_list", lambda: _music(ws, _MUSIC_LIST, road, page="now")),
+            ("music_now_failed", lambda: _music(ws, dict(_MUSIC_RADIO, state="failed", title=""),
+                                                ("radio", "Secret Agent", M.STATIONS[5][2]),
+                                                page="now")),
+            ("music_add", add), ("music_add_https", add_https), ("music_cc", cc),
+            ("music_bar_paused", paused)]
+
+
+def _music_wake_off():
+    from runtime import music_app as M
+    import moybyte
+    s = M.STREAM
+    if s.wake is not None:
+        moybyte.cancel(s.wake)
+        s.wake = None
+
+
+TASKS_SURFACES = ("tasks_empty", "tasks_two_games", "tasks_crashed_service",
+                  "note_banner", "tasks_notes", "rec_indicator")
+
+
+def _tasks_plan(ws, cfg):
+    """The task manager (runtime/system/tasks_ui.py): with nothing running;
+    with two games -- on a handheld Star Catcher minimised from its pause
+    card and Brick Siege in front, held under it, on the desk both in
+    windows -- their CPU and memory figures fixed; then a crashed service's
+    row current, its Details and Close."""
+    import random
+    from runtime import scheduler as S
+    windowed = cfg["windowed"]
+    ws.procs.account = lambda now: None        # the figures below stay
+
+    def empty():
+        if windowed:
+            ws.open_desk()
+        ws.open_tasks()
+
+    def two():
+        ws.close_tasks()
+        if windowed:
+            ws.open_desk()
+        for i, title in enumerate(_PROCS_CARTS):
+            random.seed(25 + i)
+            cart = _cart_by_title(ws, title)
+            if windowed:
+                assert ws.procs.launch(cart)
+            ws._open_workspace(cart)
+            ws.play(ws.launcher_layer)
+            ws.frame(_DT)
+            if windowed:
+                win = ws.wm._wins["desktop"]
+                if win.saved is not None:
+                    ws.wm._toggle_max(win)
+                ws.wm._resize_window(win, 344, 289)
+                ws.wm._move_window(win, 60 + 120 * i, 60 + 60 * i)
+            for _ in range(_PAUSE_FRAMES):
+                _quiesce(ws)
+                ws.frame(_DT)
+            if not windowed and i == 0:
+                ws.system_key()
+                ws.pause.choose(ws.pause.rows.index(ws.pause.MINIMISE))
+        assert [p.title() for p in ws.procs.list] == [_PROCS_CARTS[0]]
+        for pl, cpu, mem in ((ws.run.player, 412, 431 << 10),
+                             (ws.procs.list[0].player, 38, 287 << 10)):
+            pl.cpu, pl.mem = cpu, mem
+        ws.procs.gen += 1
+        ws.open_tasks()
+        if windowed:
+            ws.run.player._paused_at = 1           # the games held where they are
+            ws.procs.list[0].player._paused_at = 1
+            ws.wm._sync_windows()
+            win = ws.wm._wins["tasks"]
+            ws.wm._move_window(win, 420, 120)
+
+    def crashed():
+        S.SCHED.reset()
+        S.SCHED.start({"id": "moybyte.weather", "title": "Weather", "permissions": [],
+                       "src": "raise ValueError('no network')\n"})
+        ws.procs.gen += 1
+        ws.tasks_layer.cur = 2
+        ws.tasks_layer.host.reset()
+
+    def banner():
+        # A service's notification over the game in front, its banner held
+        # up through the render (a deadline far off the test's clock).
+        from runtime import notifications as N
+        from runtime import moybyte
+        import moy_log
+        ws.close_tasks()
+        # The game in front draws every frame and moves nothing: the banner
+        # over it is over a frame drawn anew, as a playing game's is.
+        ws.run.player._paused_at = 0
+        ws.run.player._update = lambda *a: None
+        N.NOTES.reset()
+        pid = S.SCHED.start({"id": "moybyte.mesh", "title": "Mesh",
+                             "permissions": ["notifications"],
+                             "src": "import moybyte\nmoybyte.every(60000, lambda: None)\n"})
+        was = moy_log.current()
+        moy_log.current(pid)
+        try:
+            moybyte.notify("Weather", "Rain from 4 pm", "warn", (), N.LOW)
+            moybyte.notify("Ana: are you coming?", "We start at eight, by the lake.",
+                           "heart", ("default", "Open", "reply", "Reply"))
+        finally:
+            moy_log.current(was)
+        N.NOTES.until = N.NOTES.banner.at + 3600 * 1000
+        if windowed:
+            ws.wm.bring_forward("desktop")
+
+    def notes():
+        # The console's key held over it: the task manager on its
+        # Notifications tab, the banner's notification current.
+        ws.open_tasks()
+        if windowed:
+            ws.wm._sync_windows()
+            ws.wm._move_window(ws.wm._wins["tasks"], 420, 120)
+
+    def rec():
+        # A process holds the microphone: the recording indicator, kernel
+        # chrome at the glass's top right, over the game in front and the
+        # banner still up.
+        from runtime import devices
+        ws.close_tasks()
+        if windowed:
+            ws.wm.bring_forward("desktop")
+        devices.MIC[0] = ws.run.player.pid or 2
+
+    return [("tasks_empty", empty), ("tasks_two_games", two),
+            ("tasks_crashed_service", crashed), ("note_banner", banner),
+            ("tasks_notes", notes), ("rec_indicator", rec)]
 
 
 def _popover_plan(ws):
@@ -886,6 +1777,77 @@ def _popover_plan(ws):
     for w in WIDGETS:
         plan.append(("popover_" + w, popover(w)))
     return plan
+
+
+DESK_POPOVERS = ("popover_clock", "popover_clock_six", "popover_wifi", "popover_wifi_many",
+                 "popover_battery", "status_desk_panel", "status_desk_panel_full",
+                 "music_desk_menu")
+
+# A compiled program's panel at its most rows (status_items.ROWS_MAX).
+_PANEL_FULL = _PANEL + "".join("\nbutton b%d Preset %d" % (k, k) for k in range(1, 5))
+
+# A day of November 2026, whose six weeks the calendar's card opens at.
+_NOVEMBER = (_DATE[0], _DATE[1] + 1, _DATE[2])
+
+# More networks than a card at font scale 2 holds on the P4's glass.
+_NETS_MANY = [("Network %d" % k, -40 - k, k % 2 == 0) for k in range(1, 11)]
+
+
+def _desk_popover_plan(ws):
+    """Every desk popover over the desk with a Calc window, at the config's
+    font scale: each must fit the glass (`DESK_POPOVERS`)."""
+    def popover(widget, then=None, day=_DATE):
+        def enter():
+            ws.close_popover()
+            if widget == "clock":
+                ws.open_desk()
+                ws.open_app(ws._apps_by_id["calc"])
+            ws.bar_layer._today = lambda: day       # the card sizes as it opens
+            ws._golden_popover = True
+            ws.widget_tap(widget)
+            assert ws.sysmenu.open and ws.sysmenu.widget == widget, widget
+            if then is not None:
+                then()
+        return enter
+
+    def six():
+        # November 2026's six weeks, the card opened at their height (a
+        # month paged to keeps the card it opened in): `_quiesce` pins the
+        # day back to October's, a month before
+        ws.sysmenu.comp.off = 1
+
+    def many():
+        ws.settings_layer.wifi_nets = list(_NETS_MANY)
+
+    def panel(text):
+        def enter():
+            from runtime.status_items import parse
+            ws.close_popover()
+            it = _panel_item(ws)
+            it.section.set(parse(text))
+            it.changed()
+            ws.open_status_menu(it)
+            assert ws.sysmenu.open and ws.status_open is it
+        return enter
+
+    def music():
+        from runtime.status_items import ITEMS
+        ws.close_popover()
+        for it in ITEMS.slots:          # the panels' program is gone: Music's item alone
+            if it.pid:
+                ITEMS._free(it)
+        _music(ws, _MUSIC_LIST, ("list", "Road trip mix", "/m/r.m3u"), tab=1,
+               files=_MUSIC_FILES)
+        ws.open_app(ws._apps_by_id["calc"])
+        _music_wake_off()
+        ws.open_status_menu(ITEMS.at(0))
+        assert ws.sysmenu.open and ws.sysmenu.widget == "status"
+
+    return [("popover_clock", popover("clock")), ("popover_clock_six",
+                                                 popover("clock", six, _NOVEMBER)),
+            ("popover_wifi", popover("wifi")), ("popover_wifi_many", popover("wifi", many)),
+            ("popover_battery", popover("battery")), ("status_desk_panel", panel(_PANEL)),
+            ("status_desk_panel_full", panel(_PANEL_FULL)), ("music_desk_menu", music)]
 
 
 def _home_plan(ws, cfg):
@@ -963,11 +1925,27 @@ def _open_get_carts(ws):
     return enter
 
 
+def _get_carts_consent(ws):
+    """The install prompt over Get Carts' shelf's first cart, its lines the
+    permission table's for a cart that asks for the network, its own
+    settings and nearby consoles."""
+    def enter():
+        from runtime import app_perms
+        app = ws._apps_by_id["getcarts"]
+        app.cur = app.rows[0]
+        app.question = app_perms.prompt(
+            {"runtime": "lua", "permissions": ["graphics", "network", "prefs", "multiplayer"]})
+        app._go("consent")
+    return enter
+
+
 def surface_names(config_name):
     """The surfaces a config covers -- the key set its goldens must carry."""
     cfg = CONFIGS[config_name]
     if cfg.get("plan") == "popovers":
         return ["desk_window_calc"] + ["popover_" + w for w in WIDGETS]
+    if cfg.get("plan") == "desk_popovers":
+        return list(DESK_POPOVERS)
     if cfg.get("plan") == "widget_pages":
         return ["page_" + w for w in WIDGETS]
     if cfg.get("plan") == "home":
@@ -978,21 +1956,46 @@ def surface_names(config_name):
         return ["parts_" + p for p in PARTS_PAGES]
     if cfg.get("plan") == "menus":
         return list(MENU_SURFACES)
+    if cfg.get("plan") == "procs":
+        return list(PROCS_SURFACES)
+    if cfg.get("plan") == "tasks":
+        return list(TASKS_SURFACES)
+    if cfg.get("plan") == "music":
+        return list(MUSIC_DESK if cfg["windowed"] else MUSIC_HANDHELD)
+    if cfg.get("plan") == "music_noaudio":
+        return ["music_noaudio"]
+    if cfg.get("plan") == "status":
+        return list(STATUS_DESK if cfg["windowed"] else STATUS_HANDHELD)
     names = []
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
     names += ["launcher", "settings"]
-    names += ["settings_achievements", "settings_licences", "settings_licence", "about",
-              "unlock_banner"]
+    names += ["settings_achievements", "settings_licences", "settings_licence",
+              "settings_log", "settings_permissions", "about", "unlock_banner"]
     names += ["editor_" + t for t in TABS]
     for a in APPS:
+        if a == "terminal":
+            continue
         names.append("app_" + a)
+        if a == "getcarts":
+            names.append("app_getcarts_consent")
         if a == "appearance" and cfg.get("appearance"):
             names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]
-    names += ["app_" + a for a, _title in APP_CARTS]
+    for a, _title in APP_CARTS:
+        names.append("app_" + a)
     names += ["app_notes_note", "app_notes_script"]
-    names += ["web_console"]
+    names += ["web_console", "app_terminal"]
+    if cfg.get("appearance"):
+        names += ["app_terminal_listing", "app_terminal_completion", "app_terminal_keys"]
+        if not cfg["windowed"]:
+            names.append("app_terminal_touch")
+        names += ["app_terminal_edit", "app_terminal_top", "app_terminal_neofetch",
+                  "app_terminal_colours"]
+    names += ["open_with", "pick", "app_files_document", "app_moymesh"]
+    names += [name for name, _lua in MESH_PAGES]
+    if cfg["windowed"] and not cfg.get("console"):
+        names.append("desk_two_windows")
     return names
 
 
@@ -1007,6 +2010,8 @@ def capture(config_name, carts_dir):
     ws = _build(cfg, carts_dir)
     expect_bytes = ws.glass_canvas.w * ws.glass_canvas.h * 2  # RGB565
     out = {}
+    from runtime import ui_draw
+    kind = ui_draw.input_kind(), ui_draw.hint_kind()
     try:
         for name, enter in _surface_plan(ws, cfg):
             enter()
@@ -1015,8 +2020,23 @@ def capture(config_name, carts_dir):
                 % (config_name, name, len(bytes(ws.glass_canvas._buf)), expect_bytes))
             out[name] = _render(ws, name, config_name)
     finally:
+        ws.go_home()                   # the run in front ends: its canvas is the glass's
+        from runtime import scheduler
+        scheduler.SCHED.reset()        # a service a plan started is process-wide too
+        from runtime import notifications
+        notifications.NOTES.reset()    # ...and so is what it posted
+        from runtime import devices
+        devices.MIC[0] = 0             # ...and the microphone's holder
+        from runtime import moy_lora, moybyte
+        while moy_lora.owner():        # ...and the radio, Moy Mesh's service's
+            moybyte.end(moy_lora.owner())
+        from runtime.host import lora_sim
+        lora_sim.remove()
         _ui().use_shape(None)          # the shape is process-wide: leave none behind
         _ui().theme_uninstall()        # ...as is the installed package
+        ui_draw.input_kind(kind[0])    # ...and the input in use
+        ui_draw.hint_kind(kind[1])     # ...and the keys its hints name
+        ws.terminal_app.close_session()   # ...and the shell's session
     return out
 
 
@@ -1210,7 +2230,7 @@ def test_every_axis_is_actually_exercised():
 
 
 # A running APP CART on the fixed 320x240 GAME raster would draw its minimal
-# bar there too -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
+# bar there too -- `bar_layer._bar_canvas("tool")` IS `ws.run.canvas` and its
 # height the flat `_STATUS_H` -- and hash the same on both sides of the
 # declared diagonal, #203 working rather than missing. No golden surface does
 # since Notes, the one app cart here, became responsive (it takes the whole

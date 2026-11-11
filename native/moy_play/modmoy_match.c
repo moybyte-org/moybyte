@@ -8,6 +8,10 @@
 //   start(mac), stop(), announce(cart, state), set_config(cfg|None),
 //   offer(cart, now[, seed]) -> bool, poll(now), drain(now, budget), end(),
 //   broadcast(b), send_msg(b) -> 0|-1|-2, take_msg() -> bytes|None,
+//   port_open(port, from) -> 0|code, port_close(port) -> 0|code,
+//   port_send(port, b, now) -> 0|code, port_take(port, cap) -> (mac, bytes)|None|code,
+//   port_drops(port), port_sent(port), port_refused(port), port_waiting(port)
+//   -> n|-1, ports_open() -> n,
 //   action() -> title|None, dispatch(mac, msg, now), peers(),
 //   candidate(cart, now), begin(index, seed, session, cfg), close(),
 //   pending(now), due(now), advance(held[, now]) -> 1|0|-1, resend(),
@@ -85,6 +89,18 @@ static mp_obj_t mt_set_config(mp_obj_t self, mp_obj_t cfg) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mt_set_config_obj, mt_set_config);
 
+static mp_obj_t mt_set_rate(size_t n, const mp_obj_t *a) {
+    moy_match_set_rate(M(a[0]), mp_obj_get_int(a[1]), n > 2 && mp_obj_is_true(a[2]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_set_rate_obj, 2, 3, mt_set_rate);
+
+static mp_obj_t mt_rate(mp_obj_t self, mp_obj_t hz) {
+    moy_lockstep_rate(M(self), mp_obj_get_int(hz));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_rate_obj, mt_rate);
+
 static mp_obj_t mt_offer(size_t n, const mp_obj_t *a) {
     bool has = n > 3 && a[3] != mp_const_none;
     return mp_obj_new_bool(moy_match_offer_seeded(
@@ -130,6 +146,72 @@ static mp_obj_t mt_take_msg(mp_obj_t self) {
     return n < 0 ? mp_const_none : mp_obj_new_bytes(buf, (size_t)n);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mt_take_msg_obj, mt_take_msg);
+
+static uint16_t port_arg(mp_obj_t o) {
+    mp_int_t p = mp_obj_get_int(o);
+    return p > 0 && p <= 0xFFFF ? (uint16_t)p : 0;
+}
+
+static mp_obj_t mt_port_open(mp_obj_t self, mp_obj_t port, mp_obj_t from) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_open(M(self), port_arg(port),
+                                                    mp_obj_get_int(from)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_port_open_obj, mt_port_open);
+
+static mp_obj_t mt_port_close(mp_obj_t self, mp_obj_t port) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_close(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_close_obj, mt_port_close);
+
+static mp_obj_t mt_port_send(size_t n, const mp_obj_t *a) {
+    (void)n;
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[2], &b, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_send(M(a[0]), port_arg(a[1]), b.buf, b.len,
+                                                    now_of(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_port_send_obj, 4, 4, mt_port_send);
+
+static mp_obj_t mt_port_take(mp_obj_t self, mp_obj_t port, mp_obj_t cap) {
+    uint8_t mac[6], buf[MOY_MATCH_MSG_MAX];
+    mp_int_t c = mp_obj_get_int(cap);
+    size_t room = c < 0 ? 0u : (c > MOY_MATCH_MSG_MAX ? MOY_MATCH_MSG_MAX : (size_t)c);
+    int n = moy_match_port_take(M(self), port_arg(port), mac, buf, room);
+    if (n == -1) {
+        return mp_const_none;
+    }
+    if (n < 0) {
+        return MP_OBJ_NEW_SMALL_INT(n);
+    }
+    mp_obj_t t[2] = {mp_obj_new_bytes(mac, 6), mp_obj_new_bytes(buf, (size_t)n)};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_port_take_obj, mt_port_take);
+
+static mp_obj_t mt_port_drops(mp_obj_t self, mp_obj_t port) {
+    return mp_obj_new_int(moy_match_port_drops(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_drops_obj, mt_port_drops);
+
+static mp_obj_t mt_port_sent(mp_obj_t self, mp_obj_t port) {
+    return mp_obj_new_int(moy_match_port_sent(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_sent_obj, mt_port_sent);
+
+static mp_obj_t mt_port_refused(mp_obj_t self, mp_obj_t port) {
+    return mp_obj_new_int(moy_match_port_refused(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_refused_obj, mt_port_refused);
+
+static mp_obj_t mt_port_waiting(mp_obj_t self, mp_obj_t port) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_port_waiting(M(self), port_arg(port)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_port_waiting_obj, mt_port_waiting);
+
+static mp_obj_t mt_ports_open(mp_obj_t self) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_ports_open(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_ports_open_obj, mt_ports_open);
 
 static mp_obj_t mt_action(mp_obj_t self) {
     char cart[MOY_MATCH_CART + 1];
@@ -209,6 +291,11 @@ static mp_obj_t mt_advance(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_advance_obj, 2, 3, mt_advance);
 
+static mp_obj_t mt_gate(mp_obj_t self, mp_obj_t now, mp_obj_t due) {
+    return mp_obj_new_bool(moy_lockstep_gate(M(self), now_of(now), mp_obj_is_true(due)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_gate_obj, mt_gate);
+
 static mp_obj_t mt_resend(mp_obj_t self) {
     moy_lockstep_resend(M(self));
     return mp_const_none;
@@ -223,6 +310,38 @@ static mp_obj_t mt_packet(size_t n, const mp_obj_t *a) {
                                                timed ? now_of(a[2]) : 0u, timed));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_packet_obj, 2, 3, mt_packet);
+
+static mp_obj_t mt_hz_at(mp_obj_t self, mp_obj_t f) {
+    return MP_OBJ_NEW_SMALL_INT(moy_lockstep_hz_at(M(self), (int32_t)mp_obj_get_int(f)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_hz_at_obj, mt_hz_at);
+
+static mp_obj_t mt_ms(mp_obj_t self, mp_obj_t f) {
+    return mp_obj_new_int(moy_lockstep_ms(M(self), (int32_t)mp_obj_get_int(f)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_ms_obj, mt_ms);
+
+static mp_obj_t mt_world_check(mp_obj_t self, mp_obj_t on) {
+    moy_match_world_check(M(self), mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_world_check_obj, mt_world_check);
+
+static mp_obj_t mt_world_due(mp_obj_t self) {
+    return mp_obj_new_bool(moy_lockstep_world_due(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_world_due_obj, mt_world_due);
+
+// The tier's world digest for the checkpoint about to be stamped: the bytes
+// (a str or a buffer) hashed here, so a Python tier never hashes by hand.
+static mp_obj_t mt_world(mp_obj_t self, mp_obj_t data) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    uint32_t d = moy_lockstep_hash(MOY_LOCKSTEP_HASH0, b.buf, b.len);
+    moy_lockstep_world(M(self), M(self)->s.frame, d ? d : 1u);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_world_obj, mt_world);
 
 static mp_obj_t mt_tps(mp_obj_t self, mp_obj_t now) {
     return mp_obj_new_int_from_uint(moy_lockstep_tps(M(self), now_of(now)));
@@ -247,6 +366,8 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_tx: dest[0] = mp_obj_new_int_from_uint(m->tx); return;
         case MP_QSTR_drops: dest[0] = mp_obj_new_int_from_uint(m->drops); return;
         case MP_QSTR_recovers: dest[0] = mp_obj_new_int_from_uint(m->recovers); return;
+        case MP_QSTR_ch: dest[0] = MP_OBJ_NEW_SMALL_INT(m->ch); return;
+        case MP_QSTR_pinned: dest[0] = mp_obj_new_bool(m->pinned); return;
         case MP_QSTR_session_id: dest[0] = MP_OBJ_NEW_SMALL_INT(m->session_id); return;
         case MP_QSTR_start_len: dest[0] = MP_OBJ_NEW_SMALL_INT(m->start_len); return;
         case MP_QSTR_cart: dest[0] = str_of(m->cart); return;
@@ -257,11 +378,24 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_seed: dest[0] = mp_obj_new_int_from_uint(s->seed); return;
         case MP_QSTR_session: dest[0] = MP_OBJ_NEW_SMALL_INT(s->session); return;
         case MP_QSTR_tick_ms: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_ms); return;
+        case MP_QSTR_tick_hz: dest[0] = MP_OBJ_NEW_SMALL_INT(s->tick_hz); return;
+        case MP_QSTR_delay_max: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay_max); return;
+        case MP_QSTR_peer_margin:
+            dest[0] = s->peer_margin == 255 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(s->peer_margin);
+            return;
+        case MP_QSTR_step_from:
+            dest[0] = s->step_hz == 0 ? mp_const_none : mp_obj_new_int(s->step_from);
+            return;
+        case MP_QSTR_raises: dest[0] = mp_obj_new_int_from_uint(s->raises); return;
+        case MP_QSTR_lowers: dest[0] = mp_obj_new_int_from_uint(s->lowers); return;
         case MP_QSTR_frame: dest[0] = mp_obj_new_int(s->frame); return;
         case MP_QSTR_delay: dest[0] = MP_OBJ_NEW_SMALL_INT(s->delay); return;
         case MP_QSTR_redundancy: dest[0] = MP_OBJ_NEW_SMALL_INT(s->redundancy); return;
         case MP_QSTR_stalls: dest[0] = mp_obj_new_int_from_uint(s->stalls); return;
         case MP_QSTR_stall_ticks: dest[0] = mp_obj_new_int_from_uint(s->stall_ticks); return;
+        case MP_QSTR_late_ms: dest[0] = mp_obj_new_int_from_uint(s->late_ms); return;
+        case MP_QSTR_stall_ms: dest[0] = mp_obj_new_int_from_uint(s->stall_ms); return;
+        case MP_QSTR_slew_ms: dest[0] = mp_obj_new_int(s->slew_ms); return;
         case MP_QSTR_packets_in: dest[0] = mp_obj_new_int_from_uint(s->packets_in); return;
         case MP_QSTR_packets_out: dest[0] = mp_obj_new_int_from_uint(s->packets_out); return;
         case MP_QSTR_waiting: dest[0] = mp_obj_new_bool(s->waiting); return;
@@ -269,6 +403,10 @@ static void match_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_last_peer_frame: dest[0] = mp_obj_new_int(s->last_peer_frame); return;
         case MP_QSTR_peer_need: dest[0] = mp_obj_new_int(s->peer_need); return;
         case MP_QSTR_frame_seed: dest[0] = mp_obj_new_int_from_uint(s->frame_seed); return;
+        case MP_QSTR_world_check: dest[0] = mp_obj_new_bool(m->world_check); return;
+        case MP_QSTR_desync: dest[0] = mp_obj_new_int(s->desync); return;
+        case MP_QSTR_desync_kind: dest[0] = MP_OBJ_NEW_SMALL_INT(s->desync_kind); return;
+        case MP_QSTR_checks: dest[0] = mp_obj_new_int_from_uint(s->checks); return;
         case MP_QSTR_config:
             dest[0] = s->config[0] ? str_of(s->config) : mp_const_none;
             return;
@@ -291,6 +429,8 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mt_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_announce), MP_ROM_PTR(&mt_announce_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_config), MP_ROM_PTR(&mt_set_config_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_rate), MP_ROM_PTR(&mt_set_rate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rate), MP_ROM_PTR(&mt_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_offer), MP_ROM_PTR(&mt_offer_obj) },
     { MP_ROM_QSTR(MP_QSTR_poll), MP_ROM_PTR(&mt_poll_obj) },
     { MP_ROM_QSTR(MP_QSTR_drain), MP_ROM_PTR(&mt_drain_obj) },
@@ -298,6 +438,15 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_broadcast), MP_ROM_PTR(&mt_broadcast_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_msg), MP_ROM_PTR(&mt_send_msg_obj) },
     { MP_ROM_QSTR(MP_QSTR_take_msg), MP_ROM_PTR(&mt_take_msg_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_open), MP_ROM_PTR(&mt_port_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_close), MP_ROM_PTR(&mt_port_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_send), MP_ROM_PTR(&mt_port_send_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_take), MP_ROM_PTR(&mt_port_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_drops), MP_ROM_PTR(&mt_port_drops_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_sent), MP_ROM_PTR(&mt_port_sent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_refused), MP_ROM_PTR(&mt_port_refused_obj) },
+    { MP_ROM_QSTR(MP_QSTR_port_waiting), MP_ROM_PTR(&mt_port_waiting_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ports_open), MP_ROM_PTR(&mt_ports_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_action), MP_ROM_PTR(&mt_action_obj) },
     { MP_ROM_QSTR(MP_QSTR_dispatch), MP_ROM_PTR(&mt_dispatch_obj) },
     { MP_ROM_QSTR(MP_QSTR_peers), MP_ROM_PTR(&mt_peers_obj) },
@@ -310,6 +459,12 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_resend), MP_ROM_PTR(&mt_resend_obj) },
     { MP_ROM_QSTR(MP_QSTR_packet), MP_ROM_PTR(&mt_packet_obj) },
     { MP_ROM_QSTR(MP_QSTR_tps), MP_ROM_PTR(&mt_tps_obj) },
+    { MP_ROM_QSTR(MP_QSTR_world_due), MP_ROM_PTR(&mt_world_due_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_worlds), MP_ROM_PTR(&mt_world_check_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hz_at), MP_ROM_PTR(&mt_hz_at_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gate), MP_ROM_PTR(&mt_gate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ms), MP_ROM_PTR(&mt_ms_obj) },
+    { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },
 };
 static MP_DEFINE_CONST_DICT(match_locals, match_locals_table);

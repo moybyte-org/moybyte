@@ -48,6 +48,10 @@ class WindowPaint:
     """The window buffers, the backdrop cache, the game's composite, the
     windows' draw and the shown ring of `WindowedWM` (its first base)."""
 
+    # play_viewport's wait on the desk: the frame the game's full-screen
+    # window took its rect at, and the rect (-1: none taken).
+    _pv_since = -1
+    _pv_x = _pv_y = _pv_w = _pv_h = 0
 
     # -- window buffer lifetime ------------------------------------------------
     #
@@ -164,7 +168,7 @@ class WindowPaint:
             return self._drag
         if self._resize is not None:
             return self._resize
-        if self._rest is not None and self.ws._frames_drawn >= self._rest_end:
+        if self._rest is not None and self.ws.frame_state.frames_drawn >= self._rest_end:
             self._rest = None
         return self._rest
 
@@ -196,7 +200,7 @@ class WindowPaint:
         back to the full copy when the canvas lacks blit_strip_rect (the web
         RecordingLayer) or via the `union` A/B knob."""
         self._restored = False
-        self._restored_f = self.ws._frames_drawn
+        self._restored_f = self.ws.frame_state.frames_drawn
         if self._backdrop is None:
             return
         rc = self._root_canvas
@@ -275,8 +279,15 @@ class WindowPaint:
 
     def _win_extent(self, win):
         """Everything a window's draw touches: body, border and shadow, padded
-        like _gesture_extent."""
-        return self._pad_extent(win, win.x, win.y, win.w, win.h)
+        like _gesture_extent; the answer kept while the window and the look
+        stand (the window loop asks it every frame)."""
+        k = getattr(win, "_ext", None)
+        g = self.ws.look.look_gen
+        if (k is None or k[0] != win.x or k[1] != win.y or k[2] != win.w or k[3] != win.h
+                or k[4] != win.title_h or k[5] is not win.saved or k[6] != g):
+            k = win._ext = [win.x, win.y, win.w, win.h, win.title_h, win.saved, g,
+                            self._pad_extent(win, win.x, win.y, win.w, win.h)]
+        return k[7]
 
     def _hand_damage(self, touched):
         """Close this frame's damage description: hand the backdrop's rects and
@@ -344,7 +355,7 @@ class WindowPaint:
     def _view_src(self):
         """A window-bound app cart's window shows its canvas's top left, its
         content rect's size; else the cart view rule (wm.py)."""
-        if self.ws.app_window_canvas and self.mode == "desktop":
+        if self.ws.run.app_window_canvas and self.mode == "desktop":
             w, h = self.app_window_content()
             v = self._app_src
             if v is None or v[2] != w or v[3] != h:
@@ -358,10 +369,10 @@ class WindowPaint:
         h)`) scales ITS region here exactly like the fullscreen composite, so
         celeste's 128x128 fills the window at 4x instead of the container's 2x.
         A window-bound app cart's canvas lies at the content's top left, 1x."""
-        if self.ws.app_window_canvas:
+        if self.ws.run.app_window_canvas:
             cx, cy, _cw, _ch = win.content_rect()
             return (cx, cy, 1)
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         view = self._view_src()
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         cx, cy, cw, ch = win.content_rect()
@@ -404,7 +415,7 @@ class WindowPaint:
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
         self._play_bezel(sc, ox, oy, scale, src)
-        return pf(cf, view, ws.canvas, ox, oy, scale, src)
+        return pf(cf, view, ws.run.canvas, ox, oy, scale, src)
 
     def _window_frame(self, gc, ox, oy, scale, defer, src):
         """The player window's composite of a compiled cart's frame: shown
@@ -413,7 +424,7 @@ class WindowPaint:
         canvas took it; otherwise the frame is settled into the game canvas,
         which the window composites as ever (Workstation._composite_game's
         rule)."""
-        cf = self.ws.cart_frame
+        cf = self.ws.run.cart_frame
         if cf is None:
             return False
         view = cf.take()
@@ -439,7 +450,7 @@ class WindowPaint:
         if self.mode == "desktop":
             return
         ws = self.ws
-        gc = ws.canvas
+        gc = ws.run.canvas
         sc = ws.sys_canvas
         if gc is not self._fb_for:     # the parent's cached flush_batch probe
             self._fb_for = gc
@@ -463,13 +474,35 @@ class WindowPaint:
         self._blit_game(sc, gc, ox, oy, scale, src=src)
 
     def play_viewport(self):
-        """Console mode's fullscreen game rect, (ox, oy, scale): what a run
-        the kernel drives in front composes (native/moy_play's front). None in
-        the desk world and for a cart-declared view, which the console
+        """The game rect, (ox, oy, scale), a run the kernel drives in front
+        composes (native/moy_play's front): console mode's fullscreen game,
+        or on the desk a game full screen at the top of the windows, once
+        the console has drawn the glass around it into every buffer it
+        scans (the front keeps that glass and draws only the game). None
+        otherwise, and for a cart-declared view, which the console
         composes."""
-        if self._order or self._view_src() is not None:
+        if self._view_src() is not None:
             return None
-        return FullscreenStackWM.viewport(self)
+        if self.mode != "desktop":
+            return None if self._order else FullscreenStackWM.viewport(self)
+        win = self._wins.get("desktop")
+        order = self._order
+        if (win is None or self.ws.run.app_window_canvas or not self.game_full()
+                or not order or order[-1] != "desktop"):
+            self._pv_since = -1
+            return None
+        drawn = self.ws.frame_state.frames_drawn
+        if (self._pv_since < 0 or self._pv_x != win.x or self._pv_y != win.y
+                or self._pv_w != win.w or self._pv_h != win.h):
+            self._pv_since = drawn
+            self._pv_x = win.x
+            self._pv_y = win.y
+            self._pv_w = win.w
+            self._pv_h = win.h
+            return None
+        if drawn - self._pv_since <= self._retained_n():
+            return None
+        return self._player_view(win)
 
     def _play_bezel(self, sc, ox, oy, scale, src):
         """Console mode's letterbox bezel, at most once a frame.
@@ -483,7 +516,7 @@ class WindowPaint:
         Library frames rotate/flicker behind the game (P4, 2026-08-01,
         measured as 0/32/24 bytes differing between the three
         framebuffers)."""
-        drawn = self.ws._frames_drawn
+        drawn = self.ws.frame_state.frames_drawn
         if drawn == getattr(self, "_bezel_frame", -2):
             return              # a declined frame's composite, same frame
         bkey = (ox, oy, scale, sc.w, sc.h, src)
@@ -570,20 +603,22 @@ class WindowPaint:
         return n                          # every window is settled: draw none
 
     def _covers_player(self):
-        """Whether a shown window above the game window reaches it, its
+        """Whether a shown window above a game window reaches it, its
         shadow included (read once a shape change, by draw_stack's quiet
-        path)."""
+        path): the front's, or a running set's (another game's window
+        over it included)."""
         order = self._order
-        if "desktop" not in order:
-            return False
-        win = self._wins["desktop"]
-        if win.minimized:
-            return False
-        for k in order[order.index("desktop") + 1:]:
-            up = self._wins[k]
-            if not up.minimized and _overlap(self._pad_extent(up, up.x, up.y, up.w, up.h),
-                                             (win.x, win.y, win.w, win.h)):
-                return True
+        n = len(order)
+        for i in range(n):
+            win = self._wins[order[i]]
+            if win.minimized or win.kind != "desktop":
+                continue
+            for k in order[i + 1:]:
+                up = self._wins[k]
+                if not up.minimized and _overlap(
+                        self._pad_extent(up, up.x, up.y, up.w, up.h),
+                        (win.x, win.y, win.w, win.h)):
+                    return True
         return False
 
     def _frame_is_quiet(self, dt):
@@ -616,9 +651,11 @@ class WindowPaint:
         # redrawing them is pure waste. Measured on P4 glass during a picker
         # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
         # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
-        self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
+        quiet = self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
         touched = []
         self._under_hit = False
+        below = self._below
+        below[0] = below[1] = below[2] = below[3] = 0
         top = self._wins[self._order[-1]] if n else None
         for i in range(n):
             key = self._order[i]
@@ -632,15 +669,41 @@ class WindowPaint:
             self._win_touched = False
             self._chrome_drew = False
             self._part[4] = 0
-            if win is not top and not self._under_hit \
-                    and _overlap(self._win_extent(win), top.content_rect()):
-                self._under_hit = True    # the top window's retained pixels are hit
+            ext = None
+            if win is not top and not self._under_hit:
+                ext = self._win_extent(win)
+                if _overlap(ext, top.content_rect()):
+                    self._under_hit = True    # the top window's retained pixels are hit
+            # A window drawn under this one this frame may have drawn over its
+            # strip and border, which a quiet frame's chrome would leave: its
+            # chrome draws, and its content stamps whole.
+            if quiet and below[2] > below[0]:
+                if ext is None:
+                    ext = self._win_extent(win)
+                self._chrome_quiet = not (
+                    ext[0] < below[2] and below[0] < ext[0] + ext[2]
+                    and ext[1] < below[3] and below[1] < ext[1] + ext[3])
+            if win is not top:
+                if ext is None:
+                    ext = self._win_extent(win)
+                if below[2] > below[0]:
+                    below[0] = min(below[0], ext[0])
+                    below[1] = min(below[1], ext[1])
+                    below[2] = max(below[2], ext[0] + ext[2])
+                    below[3] = max(below[3], ext[1] + ext[3])
+                else:
+                    below[0], below[1] = ext[0], ext[1]
+                    below[2], below[3] = ext[0] + ext[2], ext[1] + ext[3]
             u = self._under_gesture(win, focused, top)
             if u is not None:
                 if u:
                     touched.append(self._draw_under_gesture(win, i, u))
                 continue
-            if win.kind == "desktop":
+            if key != "desktop" and win.kind == "desktop":
+                # A running set's game: its last frame and its chrome; its
+                # frames are Procs.frame's (runtime/shell/procs.py).
+                self._proc_paint(win, key, focused, dt)
+            elif win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
                 # game keeps running while the editor beside it is typed in or
@@ -654,13 +717,14 @@ class WindowPaint:
                 self._draw_app_window(win, focused, dt)
             self._cast_onto(i)
             if self._win_touched and not focused:
-                self._outside_f = self.ws._frames_drawn
+                self._outside_f = self.ws.frame_state.frames_drawn
             if self._win_touched:
                 pt = self._part
                 if pt[4] and not self._chrome_drew and pt[2] > pt[0] and pt[3] > pt[1]:
                     touched.append((pt[0], pt[1], pt[2] - pt[0], pt[3] - pt[1]))
                 else:
                     touched.append(self._win_extent(win))
+        self._chrome_quiet = quiet
         # The chips live on the OS bar, whose strip the compositor carries
         # when the chip draw says it moved; the resize outline lies inside the
         # gesture union. Neither is a rect of its own.
@@ -691,7 +755,7 @@ class WindowPaint:
         changed, its focus mark), a full-screen one, a restore of the whole
         glass."""
         r = self._restored
-        if not r or self._restored_f != self.ws._frames_drawn or win is top:
+        if not r or self._restored_f != self.ws.frame_state.frames_drawn or win is top:
             return None
         g = self._gesture()
         if g is None or self._wins.get(g[0]) is not top:
@@ -718,7 +782,7 @@ class WindowPaint:
         ws = self.ws
         bar = ws.bar_layer
         t = bar._clock_text()
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         h = self._clock_held
         r = self._restored if self._restored_f == f else False
         over = r is None
@@ -741,7 +805,7 @@ class WindowPaint:
         first of the RETAINED_FRAMES frames that hold its text."""
         h = self._clock_held
         h[0] = self.ws.bar_layer._clock_text()
-        h[1] = self.ws._frames_drawn
+        h[1] = self.ws.frame_state.frames_drawn
         h[2] = 1
 
     def _chips_untouched(self, dt):
@@ -749,7 +813,7 @@ class WindowPaint:
         gesture's restore laid the desk away from it, and no cursor or
         animation draws over it."""
         r = self._restored
-        if not r or self._restored_f != self.ws._frames_drawn:
+        if not r or self._restored_f != self.ws.frame_state.frames_drawn:
             return False
         if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt, False):
             return False
@@ -817,7 +881,7 @@ class WindowPaint:
             # ring's word for it, else the window's buffer stamped into it
             # (the page, but for the buffer's own lag).
             u[0] = u[1] = u[2] = u[3] = 0
-            f = ws._frames_drawn
+            f = ws.frame_state.frames_drawn
             if self._shown_ok(win) and self._shown_chain(win, f, u):
                 known = 1
                 chain = True
@@ -936,7 +1000,7 @@ class WindowPaint:
         per region)."""
         if not self._shown_ok(win):
             return False
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[(f - 1) % (_SHOWN + 1)]
         if e[0] != f - 1 or e[1] is not win or e[11] != self.ws.look.look_gen:
             return False
@@ -1016,7 +1080,7 @@ class WindowPaint:
                 win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
         if self._chip_streak < n:
             self._chip_streak += 1
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         h = self._clock_held              # ...and the desk clock's text
         if h[1] == f - 1:
             h[1] = f
@@ -1049,7 +1113,7 @@ class WindowPaint:
         focused window's content rect changed on the glass (no other window,
         clock, tile or chip drew), so what the frame changed is the page's
         part alone (`_debt_rows`)."""
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[f % (_SHOWN + 1)]
         if e[0] == f:
             e[12] = 1 if e[1] is not None and self._outside_f != f else 0
@@ -1064,7 +1128,7 @@ class WindowPaint:
         r[0] = r[1] = 0
         r[2] = 1
         n = self._pop_n()
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         if n > _SHOWN:
             return r
         ring = self._shown
@@ -1116,7 +1180,7 @@ class WindowPaint:
         buf = win.buf
         if cli is None or buf is None:
             return False
-        last = self.ws._frames_drawn - 1
+        last = self.ws.frame_state.frames_drawn - 1
         e = self._shown[last % (_SHOWN + 1)]
         gen = self.ws.look.look_gen
         if e[0] != last or e[1] is not win or e[11] != gen:
@@ -1165,7 +1229,7 @@ class WindowPaint:
             return False
         c = self._sc
         c[0] = c[1] = c[2] = c[3] = 0
-        if not self._shown_chain(win, self.ws._frames_drawn, c):
+        if not self._shown_chain(win, self.ws.frame_state.frames_drawn, c):
             return False
         t = getattr(content, "takes_lag", None)
         return t is None or bool(t(c))
@@ -1177,7 +1241,7 @@ class WindowPaint:
         over it and nothing lagging (the shown ring)."""
         if not self._content_static(win, False) or not self._shown_ok(win):
             return False
-        f = self.ws._frames_drawn
+        f = self.ws.frame_state.frames_drawn
         e = self._shown[(f - 1) % (_SHOWN + 1)]
         if e[0] != f - 1 or e[11] != self.ws.look.look_gen:
             return False
@@ -1259,6 +1323,10 @@ class WindowPaint:
             return False
         if k == "settings" and ws.settings_layer.bluetooth_animating():
             return False
+        if k == "settings" and ws.settings_layer.usb_moved():
+            return False
+        if k == "tasks" and ws.tasks_layer.moved():
+            return False
         if k == "menu" and ws.menu_view == "music" \
                 and ws.music_ui.music_preview is not None:
             return False
@@ -1321,7 +1389,7 @@ class WindowPaint:
                     own = self._own
                     own[0] = own[1] = own[2] = own[3] = 0
                     own[4] = 1
-                    self._shown_note(win, self.ws._frames_drawn, True, False)
+                    self._shown_note(win, self.ws.frame_state.frames_drawn, True, False)
                     self._win_chrome(win, focused, quiet=self._chrome_quiet)
                     return
                 if self._direct_render(win, dt):
@@ -1331,7 +1399,7 @@ class WindowPaint:
                         own = self._own
                         if ok and own[4]:
                             self._shown_part(win, own[0], own[1], own[2], own[3])
-                        self._shown_note(win, self.ws._frames_drawn, ok, held)
+                        self._shown_note(win, self.ws.frame_state.frames_drawn, ok, held)
                     self._win_chrome(win, focused, quiet=self._chrome_quiet)
                     return
             # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
@@ -1379,7 +1447,7 @@ class WindowPaint:
             # buffer this frame paints, the stamp copies only what the page
             # changed since that buffer last held it -- nothing at all on a
             # frame that changed nothing.
-            f = self.ws._frames_drawn
+            f = self.ws.frame_state.frames_drawn
             ok = (held or speaks) and self._shown_ok(win)
             if ok and own[4]:
                 sc = self._sc
@@ -1457,12 +1525,12 @@ class WindowPaint:
         show_fps AND the player is the process on top (a game under Settings
         keeps its chip hidden, as before)."""
         return (self.ws.show_fps and self.stack.top() == "desktop"
-                and not self.ws.app_window_canvas)
+                and not self.ws.run.app_window_canvas)
 
     def _draw_player_window(self, win, running, focused, dt, full=True,
                             defer=None):
         ws = self.ws
-        gc = ws.canvas
+        gc = ws.run.canvas
         # Geometry FIRST (it does not depend on the cart's draw): on a recording
         # target with a command-only game canvas we place the cart's draw span with
         # a WM view bracket (#175) instead of compositing its pixels afterwards --
@@ -1477,7 +1545,7 @@ class WindowPaint:
         # first cut of this shipped.) `scale` is the same integer magnification the
         # pixel path would have used, so the game FILLS its window.
         use_view = _view is not None and getattr(gc, "buf", None) is None
-        if full and not ws.app_window_canvas:
+        if full and not ws.run.app_window_canvas:
             self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         if running:
             # The Player ticks while it's the STACK top (the running process),
@@ -1511,7 +1579,7 @@ class WindowPaint:
         src = self._view_src()
         if defer is None:
             defer = not full
-        if (ws.app_window_canvas and running and ws.cart_frame is None
+        if (ws.run.app_window_canvas and running and ws.run.cart_frame is None
                 and self._player_rows(win, gc, ox, oy, scale)):
             if full and win.docked is None:
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
@@ -1532,9 +1600,9 @@ class WindowPaint:
         at 1:1 (`blit_game` crops the canvas first). Records the frame's change either way; whether
         it composited."""
         ws = self.ws
-        p = ws.player
+        p = ws.run.player
         ch = p.change
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         own = self._own
         ok = self._shown_ok(win)
         cx, cy, _cw, _ch = win.content_rect()

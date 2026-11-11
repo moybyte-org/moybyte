@@ -1,0 +1,19 @@
+$ # a command that goes on past a line answers MORE and waits for the rest
+$ if true
+> then
+>   echo inside
+> fi
+inside
+$ echo "open
+> quote"
+open
+quote
+$ echo back\
+> slash
+backslash
+$ for i in 1 2
+> do echo i=$i
+> done
+i=1
+i=2
+[exit 0]

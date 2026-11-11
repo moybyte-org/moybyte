@@ -124,7 +124,7 @@ and adopt) and the leaf `cart_listing` (how a manifest's description, genre
 and tags read, SPEC.md 3.7) -- imported and re-exported, so the umbrella
 cannot load without them. The user-files layer behind its
 other names (list, save, the trash, the sidecars) is native/moy_store's, built
-with `moy_app`, which this board denies: it syncs `files/<kind>/` by path and
+with `moy_app`, which this board denies: it syncs the shared folders of `files/` by path and
 runs no app that edits one."""
 
 [[modules.shared.group]]
@@ -145,6 +145,17 @@ Leaves the transport import by name: `moy_webhost` imports `ticks` (the
 wrap-safe ms clock its closing grace window is written against). `web_view_ws`
 was the other name here until 2026-09, when the WebSocket half of the transport
 went with it -- the RPC it was kept for shipped as plain HTTP."""
+
+[[modules.shared.group]]
+files = ["ssh_service.py"]
+why = """
+The SSH server's Python side (native/moy_ssh), the one every console runs:
+the password's record in the store's system folder (`/moy/system`), the server
+started while one is set, `passwd`'s command. On this board the radio and the
+mDNS name are the board's, up while it serves its webhost, so the server holds
+no lease and announces nothing of its own (`wifi_hold` is None in the
+`zero_shell` console it is handed); its park wake, a console's way to let the
+radio go after a session's `passwd -d`, has nothing to let go here."""
 
 # What is DECLARED ABSENT rather than merely unlisted -----------------------
 
@@ -170,6 +181,15 @@ same kind of ladder (`import cover_png` / `from runtime import cover_png`), and
 their only caller is Paint, opening and saving a cart's cover.png -- which this
 board does not freeze, having no console. The covers themselves are served as
 the files they are; the browser console decodes them."""
+
+[[modules.shared.lazy]]
+module = "ssh_service"
+why = """
+`moy_webhost.make_webhost()` reads a console's sign-in folder through
+`ssh_service.system_dir` (the one place that names it, beside the password
+`passwd` writes), in a ladder like the two above. Its only callers are the
+console boards' runtimes: this board builds its WebHost in `zero_host.serve`
+with its own folder and runs no SSH server, so the 10 KB module stays out."""
 
 # ---------------------------------------------------------------------------
 
@@ -201,8 +221,8 @@ why = """
 The Settings contract over the kernel's webhost (native/moy_net): the store,
 the sync apply, /gpio over this board's pin table and the setup form's
 transport are C. On the console boards it is one Settings row; here it IS the
-board. native/moy_net/moy_webhost.c's header is the authority on the pin
-gate."""
+board. native/moy_net/moy_webhost.c's header is the authority on the
+sign-in."""
 
 [[modules.device.group]]
 files = ["moy_ota.py", "moy_ota_health.py"]
@@ -220,6 +240,28 @@ slot); moy_ota.py is its Settings face and the identity, moy_ota_health.py the
 boot verdict and the rollback confirm the frame loop drives."""
 
 # ---------------------------------------------------------------------------
+
+[roster]
+# The system carts the image's seed roster leaves out (build.sh, and
+# provision.sh's --carts), cut to the 896 KiB store beside the seed's reserve
+# (zero_host.SEED_RESERVE; owner, 2026-11-07). The roster keeps every app and
+# service, one desktop (Ocean Desktop) beside the Wallpaper app, and five games:
+# Brick Siege, Letter Blitz, Tap Game, Harpoon Pop and Star Catcher. Out: the
+# other games, the other wallpapers, the Lua twins, the perf and test fixtures,
+# and Pin Light, a demo of the pins a browser cart drives (README.md's
+# checklist pushes it). A
+# new system cart joins the roster unless it is named here.
+#
+# `first`: the shell's own carts lead the roster, so a seed the reserve cuts
+# short leaves out a game or a wallpaper, never the Terminal or Files.
+first = ["service", "app"]
+skip = [
+  "moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest", "moybyte.tap_only_red",
+  "moybyte.brick_siege_lua", "moybyte.sakura_lua",
+  "moybyte.bullet_storm", "moybyte.hop_quest", "moybyte.pixel_pet", "moybyte.sky_run",
+  "moybyte.tiny_runner", "moybyte.pin_light",
+  "moybyte.space_desktop", "moybyte.sakura", "moybyte.moy_night", "moybyte.open_machine",
+]
 
 [flash]
 # Read by tools/board_flash.py (#202 Phase A). S3 bootloader offset 0x0, and
@@ -261,8 +303,14 @@ otadata_size   = "0x2000"
 # blocks with the seed roster, gives up no more slot bytes; when the console's
 # scroll and text work crossed the floor (2026-10-28) the baked bundle was
 # trimmed (its cold C built for size, the VM's loader without comments) and
-# the floor stayed.
-headroom_floor_kib = 200
+# the floor stayed. The floor is DROPPED since 2026-11-03 (owner): the OS
+# work's shell code (#246) took the image under it step after step, and the
+# Zero's way out is a card-backed Zero or one without OTA, not a trim per
+# step. Only the slot-fit guard (#168) holds this image now. The slots grew by
+# 256 KiB each to 3.5 MiB (owner, 2026-11-07) for the C shell, the SSH server
+# and SFTP (the moy_sh, moy_tty and moy_ssh takes below), leaving an 896 KiB
+# store; the partition CSV carries the arithmetic.
+headroom_floor_kib = 0
 
 [serial]
 # USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board
@@ -307,6 +355,55 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class`, `lease`, `never` -- or in `unused`.
+# The `lease` row is the pin allowlist (`MOY_NET_GPIO_PINS` in
+# boards/MOYBYTE_ZERO/mpconfigboard.h, README.md's "Pins"), which
+# tests/test_board_toml.py holds equal to it; `unused` is the pads the XIAO
+# does not bring out. The `lora` row is the Wio-SX1262 on the XIAO's
+# board-to-board connector (the XIAO ESP32-S3 & Wio-SX1262 kit), which takes
+# the D8-D10 SPI pads with it.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = [10, 11, 12, 13, 14, 15, 16, 17, 18, 47, 48]
+
+[[hardware.resource]]
+name = "gpio"
+class = "lease"
+pins = [1, 2, 4, 5, 6, 21]
+
+[[hardware.resource]]
+name = "lora"
+class = "class"
+api = "lora"
+pins = {sck = 7, miso = 8, mosi = 9, cs = 41, rst = 42, busy = 40, irq = 39, rxen = 38}
+
+[[hardware.resource]]
+name = "uart0"
+class = "os"
+pins = {tx = 43, rx = 44}
+why = "D6/D7: MicroPython's REPL, the recovery path"
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = [0, 3, 45, 46]
+why = "strapping: boot mode, VDD_SPI, and 3 (D2) the JTAG source"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG this board is reached and flashed through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "the flash and the octal PSRAM"
+
 [native]
 dest = "native/.staged"
 
@@ -333,8 +430,15 @@ hook, MOY_INDEX_IMPL in tools/moy_index_spike.py, is `c` unless a build says
 `py`), and `moy_spine`, the kernel's spine, is native here as on every image;
 this board is one of the five targets both must link into.
 
+The terminal (`moy_sh`, `moy_tty`, `moy_ssh`) crossed on 2026-11-07, its
+faces SSH and the web terminal, when the slots grew for it (`[image]`).
+
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
+
+[[native.shared.deny]]
+module = "moy_usbdisk"
+why = "No card: the store is the internal flash, and USB is the board's link."
 
 [[native.shared.deny]]
 module = "moy_play"
@@ -397,6 +501,12 @@ console does its own audio through an AudioWorklet, on the machine the kid is
 sitting at."""
 
 [[native.shared.deny]]
+module = "moy_media"
+why = """
+The media service, which plays into moy_audio's mix: this board denies the
+mix (no speaker) and has no shares line, so a stream has nowhere to play."""
+
+[[native.shared.deny]]
 module = "moy_lua"
 why = """
 libmoy's Lua binding -- the #67 auto-native cart tier. Carts run in the
@@ -433,6 +543,14 @@ in the browser console it serves, whose compiled tier is the browser's own
 WebAssembly engine running a cart's main.wasm (native/moy_wasm_web) -- so the
 runtime would be flash spent in both OTA slots for code nothing calls."""
 
+[[native.shared.deny]]
+module = "moy_elf"
+why = """
+The native tier (native/moy_elf/README.md): the loader and the process model
+a native app runs under. This board runs no app and no command of its own --
+its shell is the browser console's -- so the loader would be flash spent in
+both OTA slots for code nothing calls."""
+
 [[native.shared.take]]
 module = "moy_kernel"
 why = """
@@ -462,6 +580,43 @@ The links (docs/history/kernel_survival_2026-10.md section 6): the webhost and t
 RPC this board serves are what the module is for. It is the batch codec and
 the HTTP parser and response writer the webserver, the sync stack and the GPIO
 routes import; its JSON scanner is moy_store's, which this board takes."""
+
+[[native.shared.take]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md). A console's faces are the
+screen and the dev channel; this board has neither (no glass, and its serial
+is a bare REPL), so its faces are the network's (docs/os_2026-11/system.md
+section 3): the browser console's Terminal on the page this board serves,
+and `ssh` from a laptop, the C built-ins until WASI commands arrive. A
+session's arena is PSRAM, made when a face opens. What crosses the door into
+Python is `zero_shell.py`'s: `passwd`, `df`, `mem`, `ps`; the console's
+processes, /proc's and /dev's rows and the other role commands are the
+console's, which this board has not got, so they answer as on a console with
+its VM stopped."""
+
+[[native.shared.take]]
+module = "moy_tty"
+why = """
+The shell's face over a stream (native/moy_tty/README.md), the one SSH and
+the web terminal open, and SFTP (moy_tty_sftp.c) into this board's store. The
+browser is this board's only screen, so its Terminal is the shell's first face
+here (owner, 2026-11-07): GET /term is sealed to a browser paired with the
+board's password, the one SSH signs in with. The console's task that serves
+the face's hops is the VM's poll loop (zero_host.serve, `moy_tty.tail`): this
+board has no frame."""
+
+[[native.shared.take]]
+module = "moy_ssh"
+why = """
+The SSH server (native/moy_ssh/README.md), Dropbear with its own crypto, and
+with it SFTP: this board's way in for a terminal and for a computer that
+mounts its files (docs/os_2026-11/system.md sections 3 and 4). It serves
+while the board's password is set (the setup form's, `provision.sh
+--password`'s, `passwd` over SSH), over the station this board keeps up for its webhost and the mDNS
+name it already answers to: there is no `ssh` lease here (runtime/system/
+ssh_service.py)."""
+
 
 [[native.shared.deny]]
 module = "moy_png"

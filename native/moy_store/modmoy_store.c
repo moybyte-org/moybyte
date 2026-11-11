@@ -5,13 +5,14 @@
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
 //
-// THE BORROW (native/moy_store/moy_vol.h). moy_vol_at resolves a
-// path through MicroPython's mount table to the VM's own instance: a VfsFat's
-// FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout this file
-// mirrors stops matching), or POSIX under a VfsPosix at "/". A sector read
-// through a Python block device can raise, so every call runs under nlr_push
-// and an exception closes the files the call opened and frees its scratch
-// before it goes on. Scratch and the marker cache are PSRAM on a board,
+// THE BORROW (native/moy_store/moy_vol.h). On the VM's task moy_vol_at
+// resolves a path through MicroPython's mount table to the VM's own instance:
+// a VfsFat's FATFS, a VfsLfs2's lfs2_t (refused loudly when the private layout
+// this file mirrors stops matching), or POSIX under a VfsPosix at "/"; on any
+// other task through the volume table, which it fills from that mount table.
+// A sector read through a Python block device can raise, so every call runs
+// under nlr_push and the store's lock, and an exception closes the files the
+// call opened, frees its scratch and lets go of the lock before it goes on. Scratch and the marker cache are PSRAM on a board,
 // malloc elsewhere, never the gc heap.
 
 #include <string.h>
@@ -54,16 +55,19 @@
 #include "moy_load.h"
 #include "moy_pack.h"
 #include "moy_seed.h"
+#include "moy_shelf.h"
 
 // -- the allocator -------------------------------------------------------------
 //
-// Every block carries a header; a scratch block is also on a list, which an
-// exception frees whole.
+// Every block carries a header; a scratch block is also on a list, with the
+// task that made it, and an exception frees that task's whole. The list is
+// worked under the store's lock: any task allocates.
 
 typedef struct blk {
     struct blk *prev, *next;
     size_t n;
     size_t keep;
+    uintptr_t who;
 } blk_t;
 
 static blk_t *scratch;
@@ -116,7 +120,9 @@ static void *alloc_blk(size_t n, int keep) {
     }
     b->n = n;
     b->keep = (size_t)keep;
+    moy_store_lock();
     if (!keep) {
+        b->who = moy_store_me();
         b->next = scratch;
         if (scratch != NULL) {
             scratch->prev = b;
@@ -127,6 +133,7 @@ static void *alloc_blk(size_t n, int keep) {
     if (mem_now > mem_high) {
         mem_high = mem_now;
     }
+    moy_store_unlock();
     return b + 1;
 }
 
@@ -145,6 +152,9 @@ extern void moy_kernel_feed(void) __attribute__((weak));
 
 void moy_store_tick(void) {
     #if MOY_STORE_PSRAM
+    if (!moy_store_on_vm()) {
+        return;
+    }
     static mp_uint_t last;
     uint32_t t, g, f;
     mp_uint_t now = mp_hal_ticks_ms();
@@ -166,6 +176,7 @@ void moy_store_free(void *p, size_t n) {
         return;
     }
     blk_t *b = (blk_t *)p - 1;
+    moy_store_lock();
     if (!b->keep) {
         if (b->prev != NULL) {
             b->prev->next = b->next;
@@ -177,29 +188,43 @@ void moy_store_free(void *p, size_t n) {
         }
     }
     mem_now -= b->n;
+    moy_store_unlock();
     raw_free(b);
 }
 
-// What a raised call leaves: its open files closed, its scratch freed.
+// What a raised call leaves: its open files closed, its working folders left
+// and its scratch freed, the calling task's alone.
 static void unwind(void) {
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         moy_vol_unwind();
         nlr_pop();
     }
-    while (scratch != NULL) {
-        moy_store_free(scratch + 1, scratch->n);
+    uintptr_t me = moy_store_me();
+    moy_store_lock();
+    for (blk_t *b = scratch; b != NULL;) {
+        blk_t *next = b->next;
+        if (b->who == me) {
+            moy_store_free(b + 1, b->n);
+        }
+        b = next;
     }
+    moy_store_unlock();
 }
 
 // The same, for a store call made from another module's binding (moy_net's
-// webhost) whose own nlr frame caught the raise.
+// webhost, a compiled cart's files) whose own nlr frame caught the raise, at
+// the outside of its store calls: every hold the task has is let go.
 void moy_store_unwind(void) {
     unwind();
+    moy_store_unlock_to(0);
 }
 
-#define GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
-#define GUARD_END nlr_pop(); } else { unwind(); nlr_jump(nlr_.ret_val); } }
+// A call from Python holds the store's lock whole; a raise drops what it took.
+#define GUARD_BEGIN { nlr_buf_t nlr_; int depth_ = moy_store_lock_depth(); \
+    moy_store_lock(); if (nlr_push(&nlr_) == 0) {
+#define GUARD_END nlr_pop(); moy_store_unlock(); } else { unwind(); \
+    moy_store_unlock_to(depth_); nlr_jump(nlr_.ret_val); } }
 
 // -- the borrow ------------------------------------------------------------------
 
@@ -221,48 +246,95 @@ extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
 extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
                            uint32_t *bsize) __attribute__((weak));
 
-// While no VM runs (its mount table is gone: docs/history/kernel_cartpath_2026-10.md
-// section 5.3) the kernel's own volumes answer: the card's FATFS at /sd, held
-// open across the stop (moy_card.c), and the internal flash's littlefs at /.
-void *moy_store_card_fatfs(void);
-#if MICROPY_VFS_LFS2
-extern lfs2_t *moy_kvol_lfs(void) __attribute__((weak));
-#endif
+// The card's FATFS while it is mounted over its native driver, or NULL
+// (moy_card.c); a task other than the VM's never reaches any other FAT.
+void *moy_store_card_native(void);
 
-static int vol_at_kernel(const char *path, moy_vol_t *v, const char **rest) {
-    if (path[0] != '/') {
-        return MP_ENODEV;
+// The VM's task: a thread of the VM's while its mount table stands. Every
+// other task (a program's, a service's, the kernel's frame while no VM runs)
+// resolves through the volume table and never enters the VM.
+int moy_store_on_vm(void) {
+    #if MICROPY_PY_THREAD
+    if (mp_thread_get_state() == NULL) {
+        return 0;
     }
-    #if MICROPY_VFS_FAT
-    if (strncmp(path, "/sd", 3) == 0 && (path[3] == '/' || path[3] == 0)) {
-        void *fs = moy_store_card_fatfs();
-        if (fs == NULL) {
-            return MP_ENODEV;
+    #endif
+    return MP_STATE_VM(vfs_mount_table) != NULL;
+}
+
+// The volume table as the VM's mount table holds it (moy_vol.h, THE VOLUME
+// TABLE): a KVfs, the card's VfsFat over its native driver, VfsPosix at "/".
+// Rebuilt when the mount table changed since the last look, which every
+// resolve on the VM's task takes, and at the console's ask after a mount
+// (vol_sync).
+static uintptr_t s_mounts_seen;
+
+static void table_sync(int force) {
+    uintptr_t sig = 0;
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        sig = sig * 31u + (uintptr_t)m + (uintptr_t)m->obj * 7u + m->len;
+    }
+    if (!force && sig == s_mounts_seen) {
+        return;
+    }
+    moy_store_lock();
+    s_mounts_seen = sig;
+    moy_vol_table_clear();
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        if (m->len == 0 || m->len >= MOY_VOL_TABLE_AT) {
+            continue;
         }
-        v->kind = MOY_VOL_KIND_FAT;
-        v->fs = fs;
-        *rest = path[3] ? path + 3 : "/";
-        return 0;
+        char at[MOY_VOL_TABLE_AT];
+        memcpy(at, m->str, m->len);
+        at[m->len] = 0;
+        #if MICROPY_VFS_LFS2
+        if (moy_kvfs_lfs != NULL) {
+            void *k = moy_kvfs_lfs(m->obj);
+            if (k != NULL) {
+                moy_vol_table_set(at, MOY_VOL_KIND_LFS2, k);
+                continue;
+            }
+        }
+        #endif
+        const mp_obj_type_t *t = mp_obj_get_type(m->obj);
+        #if MICROPY_VFS_FAT
+        if (t == &mp_fat_vfs_type) {
+            void *fs = &((fs_user_mount_t *)MP_OBJ_TO_PTR(m->obj))->fatfs;
+            if (fs == moy_store_card_native()) {
+                moy_vol_table_set(at, MOY_VOL_KIND_FAT, fs);
+                continue;
+            }
+        }
+        #endif
+        #if MICROPY_VFS_POSIX
+        if (t == &mp_type_vfs_posix && m->len == 1) {
+            moy_vol_table_set(at, MOY_VOL_KIND_POSIX, NULL);
+            continue;
+        }
+        #endif
+        (void)t;
+        moy_vol_table_set(at, MOY_VOL_KIND_VM, NULL);   // the VM's alone
     }
-    #endif
-    #if MICROPY_VFS_LFS2
-    lfs2_t *k = moy_kvol_lfs != NULL ? moy_kvol_lfs() : NULL;
-    if (k != NULL) {
-        v->kind = MOY_VOL_KIND_LFS2;
-        v->fs = k;
-        *rest = path;
-        return 0;
-    }
-    #endif
-    return MP_ENODEV;
+    moy_store_unlock();
 }
 
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
-    if (MP_STATE_VM(vfs_mount_table) == NULL) {
-        return vol_at_kernel(path, v, rest);
+    if (!moy_store_on_vm()) {
+        return moy_vol_table_at(path, v, rest);
     }
+    table_sync(0);
     const char *r = path;
     mp_vfs_mount_t *m = mp_vfs_lookup_path(path, &r);
+    if (m == MP_VFS_ROOT) {
+        // the root itself: the volume mounted at "/", where one is
+        for (mp_vfs_mount_t *x = MP_STATE_VM(vfs_mount_table); x != NULL; x = x->next) {
+            if (x->len == 1) {
+                m = x;
+                r = "/";
+                break;
+            }
+        }
+    }
     if (m == MP_VFS_NONE || m == MP_VFS_ROOT) {
         return MP_ENODEV;
     }
@@ -309,6 +381,26 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest) {
     #endif
     (void)t;
     return MP_ENODEV;
+}
+
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) {
+    if (!moy_store_on_vm()) {
+        return moy_vol_table_mounts(fn, arg);
+    }
+    for (mp_vfs_mount_t *m = MP_STATE_VM(vfs_mount_table); m != NULL; m = m->next) {
+        char name[32];
+        size_t n = 0;
+        while (n + 1 < m->len && n < sizeof name - 1 && m->str[n + 1] != '/') {
+            name[n] = m->str[n + 1];
+            n++;
+        }
+        name[n] = 0;
+        int r = n > 0 ? fn(arg, name) : 0;
+        if (r != 0) {
+            return r;
+        }
+    }
+    return 0;
 }
 
 // -- arguments and results ----------------------------------------------------------
@@ -383,6 +475,33 @@ static mp_obj_t mod_publish(mp_obj_t path, mp_obj_t data) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_obj, mod_publish);
+
+// publish_bak(path, data) then publish_mark(path, data): publish's save in
+// two store ops (moy_fs.h).
+static mp_obj_t publish_half(mp_obj_t path, mp_obj_t data,
+                             int (*half)(const char *, const char *, size_t)) {
+    const char *p = path_arg(path);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(data, &bi, MP_BUFFER_READ);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = half(p, bi.buf, bi.len);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+
+static mp_obj_t mod_publish_bak(mp_obj_t path, mp_obj_t data) {
+    return publish_half(path, data, moy_fs_publish_bak);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_bak_obj, mod_publish_bak);
+
+static mp_obj_t mod_publish_mark(mp_obj_t path, mp_obj_t data) {
+    return publish_half(path, data, moy_fs_publish_mark);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_publish_mark_obj, mod_publish_mark);
 
 static mp_obj_t mod_write(mp_obj_t path, mp_obj_t data) {
     const char *p = path_arg(path);
@@ -716,12 +835,15 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
     put(d, MP_QSTR_memory, e->compiled ? int_or(&e->memory, mp_const_none) : mp_const_none);
     put(d, MP_QSTR_writable, e->compiled && e->writable_ok ? json_or(e->writable, mp_const_none)
                                                           : mp_const_none);
+    put(d, MP_QSTR_audio_ring, int_or(&e->audio_ring, mp_const_none));
     put(d, MP_QSTR_version, int_or(&e->version, MP_OBJ_NEW_SMALL_INT(0)));
     put(d, MP_QSTR_format, json_or(e->format, mp_obj_new_str(MOY_CAT_FORMAT,
                                                              strlen(MOY_CAT_FORMAT))));
     put(d, MP_QSTR_graduated, mp_obj_new_bool(e->graduated));
     put(d, MP_QSTR_glass, mp_obj_new_bool(e->glass));
+    put(d, MP_QSTR_wasi, mp_obj_new_bool(e->wasi));
     put(d, MP_QSTR_pictures, json_or(e->pictures, mp_const_none));
+    put(d, MP_QSTR_native, json_or(e->native, mp_const_none));
     put(d, MP_QSTR_fps, json_or(e->fps, MP_OBJ_NEW_SMALL_INT(e->spec ? 30 : 0)));
     put(d, MP_QSTR_palette, json_or(e->palette, mp_const_none));
     put(d, MP_QSTR_extensions, json_or(e->extensions, mp_obj_new_list(0, NULL)));
@@ -735,6 +857,11 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
     }
     put(d, MP_QSTR_edit, json_or(e->edit, mp_obj_new_list(0, NULL)));
     put(d, MP_QSTR_permissions, json_or(e->permissions, mp_obj_new_list(0, NULL)));
+    put(d, MP_QSTR_required, json_or(e->required, mp_obj_new_list(0, NULL)));
+    put(d, MP_QSTR_handles, json_or(e->handles, mp_obj_new_list(0, NULL)));
+    put(d, MP_QSTR_receives, json_or(e->receives, mp_const_none));
+    put(d, MP_QSTR_entries, json_or(e->entries, mp_const_none));
+    put(d, MP_QSTR_achievements, json_or(e->achievements, mp_const_none));
     if (e->input_n == MOY_CAT_NO_INPUT) {
         put(d, MP_QSTR_input, mp_const_none);
     } else {
@@ -1177,6 +1304,109 @@ static mp_obj_t mod_copy_files(mp_obj_t src, mp_obj_t dst, mp_obj_t main) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_copy_files_obj, mod_copy_files);
 
+// -- the shelf's record (moy_shelf.h) ---------------------------------------------------
+
+// shelf_record(root) -> the record's text, or None when there is none.
+static mp_obj_t mod_shelf_record(mp_obj_t root) {
+    const char *r = path_arg(root);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_record(r, &b);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_shelf_record_obj, mod_shelf_record);
+
+// shelf_without(root, folder) -> the record without `folder`, or None when it
+// does not hold it.
+static mp_obj_t mod_shelf_without(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_without(r, f, &b);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_without_obj, mod_shelf_without);
+
+// shelf_remove(root, folder, text) -> None: `folder` off the shelf, `text`
+// (or None) the record without it.
+static mp_obj_t mod_shelf_remove(mp_obj_t root, mp_obj_t folder, mp_obj_t text) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder), *t = NULL;
+    size_t n = 0;
+    if (text != mp_const_none) {
+        t = mp_obj_str_get_data(text, &n);
+    }
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_remove(r, f, t, n);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_shelf_remove_obj, mod_shelf_remove);
+
+// shelf_take(root, folder) -> the path `folder` was renamed to under install/.
+static mp_obj_t mod_shelf_take(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    char gone[MOY_SHELF_PATH];
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_take(r, f, gone, sizeof gone);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(gone, strlen(gone));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_take_obj, mod_shelf_take);
+
+// shelf_written(root, folder) -> the folder of the files that cart wrote.
+static mp_obj_t mod_shelf_written(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    char out[MOY_SHELF_PATH];
+    int rc = moy_shelf_written(r, f, out, sizeof out);
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(out, strlen(out));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_written_obj, mod_shelf_written);
+
+// shelf_find(root, ident) -> the folder of the entry `ident` names, or None.
+static mp_obj_t mod_shelf_find(mp_obj_t root, mp_obj_t ident) {
+    const char *r = path_arg(root), *i = mp_obj_str_get_str(ident);
+    char folder[MOY_SHELF_PATH];
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_shelf_find(r, i, folder, sizeof folder);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_obj_new_str(folder, strlen(folder));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_find_obj, mod_shelf_find);
+
 // canon(text): what json.dumps(json.loads(text)) writes, the C's way.
 static mp_obj_t mod_canon(mp_obj_t text) {
     size_t n;
@@ -1294,9 +1524,189 @@ static mp_obj_t mod_mem(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_mem_obj, mod_mem);
 
+// lock_stats(reset=False) -> (holds, longest hold, longest wait, the VM's task's
+// longest wait, waits), the times in microseconds: the store's lock's meter
+// (moy_vol.h, THE STORE'S LOCK).
+static mp_obj_t mod_lock_stats(size_t n_args, const mp_obj_t *args) {
+    moy_store_lock_stats_t st;
+    moy_store_lock_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    mp_obj_t t[5] = { mp_obj_new_int_from_uint(st.holds), mp_obj_new_int_from_uint(st.hold_us),
+                      mp_obj_new_int_from_uint(st.wait_us), mp_obj_new_int_from_uint(st.vm_wait_us),
+                      mp_obj_new_int_from_uint(st.waits) };
+    return mp_obj_new_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_stats);
+
+#if defined(__unix__) && !defined(__EMSCRIPTEN__) && MICROPY_PY_THREAD
+// THE TESTS' TASK: a thread of no VM working the store as a program's own task
+// does, each op inside the store's gate (tests/test_store_tasks.py).
+// task(dir, rounds) starts it: each round publishes <dir>/t<i>.txt, reads it
+// back, renames it <dir>/r<i>.txt and reads that, and lists the folder.
+// task(dir, -ms) walks instead: one op inside the gate that stats the folder
+// entry after entry for `ms` milliseconds, yielding between entries
+// (moy_store_yield), as a free-name search in a big folder does. A third
+// argument picks one of two slots, so two tasks run at once.
+// task_join([slot]) -> (rounds whole, the first failure's round, its errno,
+// the gate's -1s): waits for it.
+#include <pthread.h>
+#include <stdio.h>
+#include <time.h>
+
+typedef struct {
+    pthread_t t;
+    char dir[96];
+    int rounds, ok, bad_at, bad_rc, refused, running;
+} task_t;
+
+static task_t s_task[2];
+
+static int task_count(void *ctx, const char *name, size_t len, int is_dir, uint32_t size) {
+    (void)name;
+    (void)len;
+    (void)is_dir;
+    (void)size;
+    (*(int *)ctx)++;
+    return 0;
+}
+
+static int task_round(task_t *k, int i) {
+    char a[128], b[128], text[48];
+    snprintf(a, sizeof a, "%s/t%d.txt", k->dir, i);
+    snprintf(b, sizeof b, "%s/r%d.txt", k->dir, i);
+    int n = snprintf(text, sizeof text, "task round %d", i);
+    int g = moy_vol_gate_enter(a);
+    if (g < 0) {
+        k->refused++;
+        return MP_ENODEV;
+    }
+    moy_buf_t got = { NULL, 0 };
+    int rc = moy_fs_publish(a, text, (size_t)n);
+    if (rc == 0) {
+        rc = moy_fs_read(a, NULL, &got);
+    }
+    if (rc == 0 && (got.n != (size_t)n || memcmp(got.p, text, (size_t)n) != 0)) {
+        rc = MP_EIO;
+    }
+    moy_buf_free(&got);
+    if (rc == 0) {
+        moy_fs_remove(b);
+        rc = moy_fs_rename(a, b);
+    }
+    if (rc == 0) {
+        rc = moy_fs_read_file(b, 4096, &got);
+        if (rc == 0 && (got.n != (size_t)n || memcmp(got.p, text, (size_t)n) != 0)) {
+            rc = MP_EIO;
+        }
+        moy_buf_free(&got);
+    }
+    if (rc == 0) {
+        moy_vol_t v;
+        const char *rest;
+        int seen = 0;
+        rc = moy_vol_at(k->dir, &v, &rest);
+        if (rc == 0) {
+            rc = moy_vol_list(&v, rest, task_count, &seen);
+        }
+        if (rc == 0 && seen < 1) {
+            rc = MP_ENOENT;
+        }
+    }
+    moy_vol_gate_leave(g);
+    return rc;
+}
+
+static int64_t task_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void task_walk(task_t *k, int ms) {
+    int g = moy_vol_gate_enter(k->dir);
+    if (g < 0) {
+        k->refused++;
+        return;
+    }
+    int64_t end = task_now_ms() + ms;
+    while (task_now_ms() < end) {
+        moy_store_yield();
+        moy_vol_stat_t st;
+        if (moy_fs_stat(k->dir, &st) == 0) {
+            k->ok++;
+        }
+        struct timespec nap = { 0, 1000000 };
+        nanosleep(&nap, NULL);
+    }
+    moy_vol_gate_leave(g);
+}
+
+static void *task_run(void *arg) {
+    task_t *k = arg;
+    if (k->rounds < 0) {
+        task_walk(k, -k->rounds);
+        return NULL;
+    }
+    for (int i = 0; i < k->rounds; i++) {
+        int rc = task_round(k, i);
+        if (rc == 0) {
+            k->ok++;
+        } else if (k->bad_rc == 0) {
+            k->bad_at = i;
+            k->bad_rc = rc;
+        }
+    }
+    return NULL;
+}
+
+static task_t *task_slot(size_t n_args, const mp_obj_t *args, size_t at) {
+    mp_int_t k = n_args > at ? mp_obj_get_int(args[at]) : 0;
+    if (k < 0 || k >= (mp_int_t)MP_ARRAY_SIZE(s_task)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("task slot"));
+    }
+    return &s_task[k];
+}
+
+static mp_obj_t mod_task(size_t n_args, const mp_obj_t *args) {
+    task_t *k = task_slot(n_args, args, 2);
+    if (k->running) {
+        mp_raise_OSError(MP_EBUSY);
+    }
+    memset(k, 0, sizeof *k);
+    snprintf(k->dir, sizeof k->dir, "%s", mp_obj_str_get_str(args[0]));
+    k->rounds = mp_obj_get_int(args[1]);
+    k->bad_at = -1;
+    if (pthread_create(&k->t, NULL, task_run, k) != 0) {
+        mp_raise_OSError(MP_EAGAIN);
+    }
+    k->running = 1;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_task_obj, 2, 3, mod_task);
+
+static mp_obj_t mod_task_join(size_t n_args, const mp_obj_t *args) {
+    task_t *k = task_slot(n_args, args, 0);
+    if (k->running) {
+        MP_THREAD_GIL_EXIT();
+        pthread_join(k->t, NULL);
+        MP_THREAD_GIL_ENTER();
+        k->running = 0;
+    }
+    mp_obj_t t[4] = { MP_OBJ_NEW_SMALL_INT(k->ok), MP_OBJ_NEW_SMALL_INT(k->bad_at),
+                      MP_OBJ_NEW_SMALL_INT(k->bad_rc), MP_OBJ_NEW_SMALL_INT(k->refused) };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_task_join_obj, 0, 1, mod_task_join);
+#define MOY_STORE_TASK 1
+#endif
+
 #if MICROPY_VFS_FAT
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_obj);
 MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_stats_obj);
+MP_DECLARE_CONST_FUN_OBJ_VAR_BETWEEN(moy_store_card_hold_obj);
+#if defined(__unix__) && !defined(__EMSCRIPTEN__)
+MP_DECLARE_CONST_FUN_OBJ_1(moy_store_card_ram_obj);
+#define MOY_STORE_CARD_RAM 1
+#endif
 #endif
 
 // The kernel's internal volume's VFS type (moy_kvfs.c), where it compiles.
@@ -1363,10 +1773,21 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     #if MICROPY_VFS_FAT
     { MP_ROM_QSTR(MP_QSTR_card), MP_ROM_PTR(&moy_store_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_card_stats), MP_ROM_PTR(&moy_store_card_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_card_hold), MP_ROM_PTR(&moy_store_card_hold_obj) },
+    #if defined(MOY_STORE_CARD_RAM)
+    { MP_ROM_QSTR(MP_QSTR_card_ram), MP_ROM_PTR(&moy_store_card_ram_obj) },
+    #endif
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
+    { MP_ROM_QSTR(MP_QSTR_lock_stats), MP_ROM_PTR(&mod_lock_stats_obj) },
+    #if defined(MOY_STORE_TASK)
+    { MP_ROM_QSTR(MP_QSTR_task), MP_ROM_PTR(&mod_task_obj) },
+    { MP_ROM_QSTR(MP_QSTR_task_join), MP_ROM_PTR(&mod_task_join_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_set_publish_root), MP_ROM_PTR(&mod_set_publish_root_obj) },
     { MP_ROM_QSTR(MP_QSTR_publish), MP_ROM_PTR(&mod_publish_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish_bak), MP_ROM_PTR(&mod_publish_bak_obj) },
+    { MP_ROM_QSTR(MP_QSTR_publish_mark), MP_ROM_PTR(&mod_publish_mark_obj) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mod_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_write_bytes), MP_ROM_PTR(&mod_write_bytes_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_recover), MP_ROM_PTR(&mod_read_recover_obj) },
@@ -1399,6 +1820,12 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_journal_restore), MP_ROM_PTR(&mod_journal_restore_obj) },
     { MP_ROM_QSTR(MP_QSTR_graduate), MP_ROM_PTR(&mod_graduate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rmtree), MP_ROM_PTR(&mod_rmtree_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_record), MP_ROM_PTR(&mod_shelf_record_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_without), MP_ROM_PTR(&mod_shelf_without_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_remove), MP_ROM_PTR(&mod_shelf_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_take), MP_ROM_PTR(&mod_shelf_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_written), MP_ROM_PTR(&mod_shelf_written_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shelf_find), MP_ROM_PTR(&mod_shelf_find_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_files), MP_ROM_PTR(&mod_copy_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_canon), MP_ROM_PTR(&mod_canon_obj) },
     { MP_ROM_QSTR(MP_QSTR_seed), MP_ROM_PTR(&mod_seed_obj) },

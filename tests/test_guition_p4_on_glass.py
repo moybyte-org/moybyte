@@ -101,8 +101,50 @@ TF_CARD_SRAM = 756
 # scratch, the splash palette, the faces' lent scratch and the screens'
 # PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
 # 2026-10-26; the scratch and the band themselves are PSRAM.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270
-WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
+# And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
+# session's pointer; every session is PSRAM), 4 bytes of .bss by the
+# link map, 2026-11-05.
+# Less the floor's state (native/moy_kernel: the recovery view and its
+# geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
+# by the link map.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270 + 4 - 640
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the kernel's table of loaded
+# modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and the panic's registers,
+# frames, ELF notes and flash config, with the flash, port and log functions
+# the writer calls with the cache off, 809 by the objects' sizes.
+# 4016 bytes by the heap's start against dev eb0498275 less the other objects'
+# growth, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag,
+# 70 bytes of .bss, and 10 bytes of IRAM the compiler's output moved: 80 by
+# the link map against dev eb0498275, 2026-11-09.
+CORE_DUMP_SRAM = 4016
+BATCH6_SRAM = 80
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
+# And TAP_FONTS_SRAM, the tap floor's two font roles in the UI's font tables
+# (native/moy_ui/moy_ui.c's `s_font`, 8, and the main instance's `font_from`
+# and `font_local`, native/moy_ui/moy_ui_api.h, 16): ids the draw path reads
+# every row, so they stay internal. 24 bytes of .bss by the link map against
+# dev 57dfc2d20, 2026-11-11.
+TAP_FONTS_SRAM = 24
+WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM - CORE_DUMP_SRAM - BATCH6_SRAM
+                      + MOVED_SRAM - TAP_FONTS_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 
 
@@ -125,8 +167,8 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
-def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
-    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+def test_consent_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_consent_lets_only_a_missing_signature_through(
         board, wasm)
 
 
@@ -206,8 +248,8 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
-def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
-    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
+def test_an_unsigned_cart_runs_natively_only_with_native_granted(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_its_consent(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
@@ -216,6 +258,14 @@ def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_cart
 
 def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts):
     on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_trap_in_init_is_the_carts_own_error(board, wasm_carts):
+    on_glass.wasm_init_trap_is_the_carts_own_error(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_cart_out_of_native_stack_traps_with_its_numbers(board, wasm_carts):
+    on_glass.wasm_deep_recursion_traps_with_its_numbers(board, WASM_BOARD_DIR)
 
 
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
@@ -255,6 +305,14 @@ def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
         board, on_glass.JET_TITLE, glass=False)
 
 
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# same scale and snapshot, in C (moy_glass.front's frame op), and the glass
+# holds the scale of the copy the front kept, byte for byte.
+def test_a_compiled_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "rot")
+
+
 # Doom, built by the recipe (experiments/wasm_aot/doom/): skips until the
 # developer has built the cart, which is never in the repository or CI.
 def test_doom_frames_match_the_host(board):
@@ -272,7 +330,7 @@ def test_the_system_canvas_is_landscape_on_portrait_glass(board):
     panel that scans PORTRAIT (800x1280) -- the rotated compositor paints one
     landscape buffer and rotates it onto the glass -- over the same 320x240
     game canvas."""
-    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.canvas.w, ws.canvas.h)",
+    line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.run.canvas.w, ws.run.canvas.h)",
                      wait_for="PY ")
     assert line == "PY (1280, 800, 320, 240)", line
     line = board.cmd("py (comp.rotated, comp.angle, comp._pw, comp._ph, ws.sys_canvas.RETAINED_FRAMES)",
@@ -353,6 +411,66 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_log_word_reads_the_ring(board):
+    on_glass.the_log_word_reads_the_ring(board)
+
+
+def test_the_shell_answers_over_serial(board):
+    on_glass.the_shell_answers_over_serial(board)
+
+
+def test_wasi_commands_run_in_the_shell(board):
+    on_glass.wasi_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_elf_commands_run_in_the_shell(board):
+    on_glass.elf_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_elf_modules_run_isolated_in_u_mode(board):
+    on_glass.elf_umode_isolates(board, WASM_BOARD_DIR)
+
+
+def test_pkg_installs_a_cart_from_the_carts_repo(board):
+    on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
+
+
+def test_the_clock_syncs_when_the_network_comes_up(board):
+    on_glass.the_clock_syncs_when_the_network_comes_up(board)
+
+
+def test_an_alarm_wakes_the_screen_and_at_logs(board):
+    on_glass.an_alarm_wakes_the_screen_and_at_logs(board)
+
+
+def test_the_event_rings_keep_their_records(board):
+    on_glass.the_event_rings_keep_their_records(board)
+
+
+def test_a_gpio_lease_loses_no_tap(board):
+    on_glass.a_gpio_lease_loses_no_tap(board, "guition_jc8012p4a1c")
+
+
+def test_a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board):
+    on_glass.a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, "guition_jc8012p4a1c")
+
+
+def test_the_scheduler_stops_a_runaway_service(board):
+    on_glass.the_scheduler_stops_a_runaway_service(board)
+
+
+def test_a_lua_service_runs_on_a_task_of_its_own(board):
+    on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
+
+
+def test_an_asyncio_service_runs_beside_the_desk(board):
+    on_glass.an_asyncio_service_runs_beside_the_desk(board)
+
+
+def test_an_on_crash_service_restarts_after_a_forced_crash(board):
+    on_glass.an_on_crash_service_restarts_after_a_forced_crash(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
@@ -386,7 +504,7 @@ def test_the_theme_font_is_installed(board):
 
 
 def test_the_font_set_is_the_tiers(board):
-    on_glass.the_font_set_is_the_tiers(board, 'desktop')
+    on_glass.the_font_set_is_the_tiers(board, 'guition_jc8012p4a1c')
 
 
 def test_the_glyph_lane_draws_the_hosts_bytes(board):
@@ -485,6 +603,20 @@ def stuck_carts(board):
 @pytest.mark.parametrize("runtime", ("lua", "wasm"))
 def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
     on_glass.a_stuck_run_is_ended(board, runtime)
+
+
+# The timed lanes (native/moy_wasm/moy_wasm_session.h): moy_audio and moy_timer
+# run on their own core, AOT and interpreted, and a lane that spins is struck
+# at its deadline, the ring muted, the cart running on.
+@pytest.fixture(scope="module")
+def lanes_carts(board):
+    on_glass.lanes_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runaway", (False, True))
+@pytest.mark.parametrize("tier", ("aot", "interp"))
+def test_a_cart_s_timed_lanes_run_and_a_runaway_is_struck(board, lanes_carts, tier, runaway):
+    on_glass.timed_lanes_run(board, tier, runaway)
 
 
 def test_a_quiet_game_frame_rotates_one_rect(board):
@@ -598,15 +730,13 @@ def test_loop_is_the_kernels_line_with_every_stage(board):
     on_glass.loop_line_is_the_kernels(board)
 
 
-# The rotated compositor gives the kernel no front: the console's frame
-# drives the same C Player, and its CONSOLE crossing is the only one.
 @pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
 def test_a_front_run_makes_no_crossing(board, spec, title):
-    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3, front=False)
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3)
 
 
 def test_a_ctrl_c_ends_a_front_run_and_reaches_the_repl(board):
-    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3, front=False)
+    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3)
 
 
 def test_bluetooth_stops_and_starts_again(board):

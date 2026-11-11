@@ -257,7 +257,7 @@ def test_settings_shows_volume_brightness_and_name(tmp_path):
 
 def test_the_volume_row_sets_the_console_level(tmp_path):
     """Volume is the console's level: a step on its slider stores it in
-    system.json and reaches the audio kernel's level, the one every session
+    system/settings and reaches the audio kernel's level, the one every session
     mixes at (`audio_session.console_volume`)."""
     from runtime import audio_session
     if audio_session.native() is None:
@@ -315,7 +315,7 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
 
 def test_brightness_and_name_are_stored(tmp_path):
     """Brightness and Name apply nothing yet, but what they are set to is in
-    system.json: a fresh session reads it back. Name is typed (the keyboard
+    system/settings: a fresh session reads it back. Name is typed (the keyboard
     in text mode while it holds focus), Brightness stepped in 0..7."""
     from runtime import host_app
     ws, drv = _settings_page(tmp_path)
@@ -422,7 +422,7 @@ def test_going_home_stores_a_name_being_typed(tmp_path):
 
 def test_a_reboot_stores_a_name_being_typed_first(tmp_path):
     """The system menu's Reboot resets the board through its hook: the Name
-    being typed is in system.json before it runs."""
+    being typed is in system/settings before it runs."""
     ws, drv = _settings_page(tmp_path)
     _type_name(ws, drv, "Kit")
     seen = []
@@ -731,7 +731,7 @@ def test_the_pause_menus_quit_exits_a_game_to_the_caller(tmp_path):
     drv.system_key()
     drv.frame(1 / 30)
     assert ws.pause.open and ws.screen == "desktop"
-    ws.pause.choose(3)                 # Quit
+    ws.pause.choose(ws.pause.rows.index("Quit"))
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -920,7 +920,7 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     drv.frame(1 / 30)
     drv.system_key()                   # the console's key: the pause menu
     drv.frame(1 / 30)
-    ws.pause.choose(3)                 # Quit
+    ws.pause.choose(ws.pause.rows.index("Quit"))
     drv.frame(1 / 30)
     assert ws.screen == "menu"         # exit returned to the EDITOR...
     assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)
@@ -970,7 +970,7 @@ def test_launcher_grid_runs_to_the_canvas_floor(tmp_path):
 
 def test_ota_channel_toggle_persists(tmp_path):
     # #53 two-channel OTA: when an OTA-capable updater with WiFi is wired, Settings gains
-    # a CHANNEL toggle (STABLE <-> BETA). Toggling persists to system.json so a fresh
+    # a CHANNEL toggle (STABLE <-> BETA). Toggling persists to system/settings so a fresh
     # boot remembers it. (build_workstation injects no updater on the host, so fake one.)
     from runtime import host_app
     carts_dir = str(tmp_path / "carts")
@@ -1142,7 +1142,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     a = ws.cart
     assert a.get("lazy") is False and "src" in a
     assert ws.cart_error is None
-    ws.player.tick(1 / 30)
+    ws.run.player.tick(1 / 30)
     assert ws.cart_error is None
     # switching to a different cart re-slims the previous one
     other = next(c for c in ws.carts.all if c.get("path") and c is not a)
@@ -1155,7 +1155,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
         slug = wp[0]["path"].rsplit("/", 1)[-1][:-len(".moy")]
         ws.look.select_wallpaper(slug, persist=False)
         assert ws.wallpaper._wp_draw is not None, "wallpaper must compile from a slim cart"
-        assert wp[0] is ws._fat_cart or wp[0].get("lazy") is True
+        assert wp[0] is ws.run.fat_cart or wp[0].get("lazy") is True
 
 
 def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):

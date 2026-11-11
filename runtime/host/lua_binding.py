@@ -94,25 +94,29 @@ PART = native_build.Part("lua", list(_RASTER) + [
     "moy_ui_api_text.c", "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c",
     "moy_ui_api_host.c",
     "moy_ui_text.h", "moy_ui_text.c",
-    "moy_ui_wasm.h", "moy_ui_wasm.c",
+    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy_ui_wasm.c",
     "moy_theme.h", "moy_theme.c",
     "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
     "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
     "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
     "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
+    "moy_proc.h", "moy_proc_exit.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c", "moy_app_lua_rows.h",
 ] + _lua_names(), (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
-                   _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI), shim=_SHIM)
+                   _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI,
+                   os.path.join(_NATIVE, "moy_app")), shim=_SHIM)
 
 # ...and the compiled-cart run's, where WAMR builds for the host
 # (runtime/wasm_binding.wamr): runtime/host/moyhost_wasm.c over libmoy's wasm
 # binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
-# its written files.
+# its written files, and a WASI command's table (native/moy_wasm/moy_wasi.c).
 WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
-    "moy_ui_wasm.h", "moy.h", "moy_pixel.h"),
-    (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI,
-     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_AUDIO, "libmoy")))
+    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
+    "moy_wasi.c", "moy_wasi.h", "moy_wasi_os_rows.h", "moy_evq.h", "moy_screen_slot.h", "moy_vmq.h", "moy_super.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc_exit.h"),
+    (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI, _KERNEL,
+     os.path.join(_NATIVE, "moy_wasm"), os.path.join(_NATIVE, "moy_sh"), os.path.join(_AUDIO, "libmoy"),
+     os.path.join(_NATIVE, "moy_app")))
 
 
 def build(verbose=False):
@@ -125,11 +129,32 @@ def build(verbose=False):
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 _U32 = ctypes.c_uint32
 
+class SvcChunk(ctypes.Structure):
+    """moycore_svc_chunk_t (native/moycore/moycore_svc.h)."""
+    _fields_ = [("src", ctypes.c_char_p), ("n", ctypes.c_size_t), ("name", ctypes.c_char_p)]
+
+
+class SvcInfo(ctypes.Structure):
+    """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
+    _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
+                ("heap", ctypes.c_uint32), ("cpu_us", ctypes.c_uint32), ("pid", ctypes.c_uint32),
+                ("why", ctypes.c_char * 96), ("wakes", ctypes.c_uint8), ("mail", ctypes.c_uint8)]
+
+
 _SIGS = (
+    ("moycore_svc_start", [_U32, _C, ctypes.POINTER(SvcChunk), ctypes.c_size_t, _C,
+                           ctypes.c_size_t, _C, ctypes.POINTER(_U32)], _I),
+    ("moycore_svc_stop", [_U32], _I),
+    ("moycore_svc_info", [_U32, ctypes.POINTER(SvcInfo)], _I),
+    ("moycore_svc_reap", [_U32], _I),
+    ("moycore_svc_at", [_U32], _U32),
+    ("moycore_svc_tasks", [], ctypes.c_bool),
+    ("moycore_svc_step", [_U32], _U32),
+    ("moycore_svc_reset", [], None),
     ("hl_kernel", [_I, _P], None),
     ("hl_img_decoder", [_P], None),
     ("hl_new", [_P, _I, _I, _I, _P, _P, _P, _I], _P),
-    ("hl_open", [_P, _P, _I], _I),
+    ("hl_open", [_P, _P, _P, _I], _I),
     ("hl_set_sheet", [_P, _P, _I], None),
     ("hl_set_map", [_P, _P, _I, _I, _I], None),
     ("hl_set_flags", [_P, _P, _I], None),
@@ -145,7 +170,8 @@ _SIGS = (
     ("hl_layer_pixels", [_P, _I, ctypes.POINTER(_P), ctypes.POINTER(_I), ctypes.POINTER(_I)], _I),
     ("hl_exec", [_P, _C, _I, _C, _P, _I], _I),
     ("hl_load", [_P, ctypes.POINTER(_C), ctypes.POINTER(_I), ctypes.POINTER(_C), _I,
-                 _P, _I], _I),
+                 _P, _P, _I], _I),
+    ("hl_layout", [_P, _I, _I, _I, _P, _I], _I),
     ("hl_tick", [_P, _F, _I, _P, _I], _I),
     ("hl_pmem_image", [_P, _P, _I], _I),
     ("hl_pmem_load", [_P, _P, _I], None),
@@ -154,6 +180,9 @@ _SIGS = (
     ("hl_get_global_len", [_P, _C], _I),
     ("hl_heap_bytes", [_P], _I),
     ("hl_heap_peak_bytes", [_P], _I),
+    ("hl_heap_live", [_P], _I),
+    ("hl_handle", [_P], _U32),
+    ("hl_runs", [], _I),
     ("hl_get_view", [_P, ctypes.POINTER(_I), ctypes.POINTER(_I)], _I),
     ("hl_split", [ctypes.POINTER(_U32), ctypes.POINTER(_U32)], None),
     ("hl_free", [_P], None),
@@ -161,7 +190,8 @@ _SIGS = (
     ("hl_play_launch", [_C, _I, ctypes.POINTER(_U32)], _I),
     ("hl_play_bind", [_U32, _P, _U32, _P], _I),
     ("hl_play_open", [_U32], _I),
-    ("hl_play_frame", [_U32, _I, _F, _I, _I, _I, _I, _I, ctypes.POINTER(_U32)], _I),
+    ("hl_play_frame", [_U32, _I, _F, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                       ctypes.POINTER(_U32)], _I),
     ("hl_play_end", [_U32, _I], _I),
     ("hl_play_info", [_U32, _P], _I),
     ("hl_play_last", [], _U32),
@@ -235,12 +265,13 @@ def _lib():
     return _LIB[0] or None
 
 
-SNAP_LEN = 15
+SNAP_LEN = 19
 SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1, SNAP_BTNP_P1 = 0, 1, 2, 3
 SNAP_PLAYERS, SNAP_TIME_MS = 4, 5
 SNAP_TOUCH_X, SNAP_TOUCH_Y, SNAP_TOUCH_DOWN, SNAP_TOUCH_MS = 6, 7, 8, 9
 SNAP_KEY, SNAP_KEY_DOWN, SNAP_TEXTMODE, SNAP_QUIT = 10, 11, 12, 13
-SNAP_WINDOW = 14
+SNAP_FACE = 14
+SNAP_ROOM_X, SNAP_ROOM_Y, SNAP_ROOM_W, SNAP_ROOM_H = 15, 16, 17, 18
 AQ_SLOTS = 4
 AQ_MAX = 32
 AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
@@ -260,8 +291,8 @@ class PlayInfo(ctypes.Structure):
 
 
 class HostLuaRun:
-    """The host's one Lua cart run, in the C a board runs (the module's
-    docstring). `buf` is the canvas's RGB565 framebuffer, borrowed and never
+    """A Lua cart run on the host, in the C a board runs (the module's
+    docstring), beside the others open. `buf` is the canvas's RGB565 framebuffer, borrowed and never
     copied; `wire` its 64-entry index -> word table (None: libmoy's canonical
     palette). The sheet, map, flags and config are set before the VM opens,
     because the p8 machine seeds from them as it opens."""
@@ -273,7 +304,9 @@ class HostLuaRun:
         return _lib() is not None
 
     def __init__(self, buf, w, h, sheet=None, tilemap=None, wire=None,
-                 indexed=None, flags=None, cfg=None, snap=None, aq=None):
+                 indexed=None, flags=None, cfg=None, snap=None, aq=None, app=None):
+        """`app` is the app's run, moy_app's `run()` bytes, whose role names
+        the state opens (native/moy_app/moy_app_lua.h), or None."""
         d = _lib()
         if d is None:
             raise RuntimeError("no host lua binding")
@@ -330,7 +363,8 @@ class HostLuaRun:
         if blob:
             d.hl_set_cfg(self._r, ctypes.c_char_p(blob), len(blob))
         err = ctypes.create_string_buffer(128)
-        if d.hl_open(self._r, ctypes.cast(err, _P), 128):
+        app = None if app is None else ctypes.c_char_p(bytes(app))
+        if d.hl_open(self._r, app, ctypes.cast(err, _P), 128):
             msg = err.value.decode("utf-8", "replace")
             self.close()
             raise RuntimeError("host lua: %s" % (msg or "no VM"))
@@ -466,8 +500,9 @@ class HostLuaRun:
         return self._err(self._d.hl_exec(self._r, b, len(b), name.encode(),
                                          ctypes.cast(err, _P), 256), err)
 
-    def load(self, chunks):
-        """The cart's chunks in order, then `_init`: None, or the error.
+    def load(self, chunks, layout=None):
+        """The cart's chunks in order, then `_layout(*layout)` where `layout`
+        is given and the cart defines one, then `_init`: None, or the error.
         `chunks` is [(src, chunkname), ...], SPEC.md 4's `sources`."""
         n = len(chunks)
         bufs = [s.encode("utf-8") if isinstance(s, str) else bytes(s)
@@ -476,8 +511,17 @@ class HostLuaRun:
         lens = (_I * n)(*[len(b) for b in bufs])
         names = (_C * n)(*[nm.encode() for _, nm in chunks])
         err = ctypes.create_string_buffer(256)
+        lay = (_I * 3)(*layout) if layout is not None else None
         return self._err(self._d.hl_load(self._r, srcs, lens, names, n,
+                                         ctypes.cast(lay, _P) if lay is not None else None,
                                          ctypes.cast(err, _P), 256), err)
+
+    def layout(self, w, h, fs):
+        """The cart's `_layout(w, h, fs)`: True called, False none, or the
+        error text (moycore's `layout`)."""
+        err = ctypes.create_string_buffer(256)
+        rc = self._d.hl_layout(self._r, int(w), int(h), int(fs), ctypes.cast(err, _P), 256)
+        return err.value.decode("utf-8", "replace") if rc < 0 else rc > 0
 
     def tick(self, dt, draw=True):
         """One frame: _update, then _draw unless `draw` is False (a logic-only
@@ -539,6 +583,15 @@ class HostLuaRun:
         """The length of a table global (Lua's #t), or None."""
         n = self._d.hl_get_global_len(self._r, name.encode())
         return None if n < 0 else n
+
+    def handle(self):
+        """The run's handle, a row of the runs open at once
+        (native/moycore/moycore_lua.h), or 0 once it has closed."""
+        return self._d.hl_handle(self._r) if getattr(self, "_r", None) else 0
+
+    def heap(self):
+        """The run's Lua heap in bytes, Lua's own count: exact, no collect."""
+        return self._d.hl_heap_live(self._r) if getattr(self, "_r", None) else 0
 
     def close(self):
         if getattr(self, "_r", None):

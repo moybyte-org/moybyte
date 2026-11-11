@@ -25,6 +25,8 @@ dev = [
   "pyflakes",     # the undefined-name gate (tests/test_undefined_names.py):
                   # a moved body naming a symbol its new namespace never
                   # imported NameErrors only when the line runs, on glass
+  "cryptography", # the AES the LoRaWAN network stand-in checks moy_aes against
+                  # (runtime/host/lora_sim.py, tests/test_dev_lora.py)
 ]
 sim = [
   "pygame>=2.5",  # the live simulator window (tools/simulate_desktop.py, moybyte run)
@@ -38,7 +40,10 @@ sim = [
 # Flashing/monitoring a real board. NOT installed by `make setup` -- it needs
 # hardware, and the T-Deck targets use the ESP-IDF toolchain's python instead.
 device = [
-  "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
+  # 4.13: the newest 4.x, whose second-generation flasher stub a board's
+  # `[flash] stub` selects (tools/board_flash.py). <5: tools/esptool_no_modem.py
+  # patches esptool 4.x internals.
+  "esptool>=4.13,<5",
   "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
 ]
 # A page in headless Chrome (tools/web.py shot). Not in `make setup`: no test
@@ -55,8 +60,17 @@ release = [
   "cryptography>=41",
 ]
 
+# `moy-app`, moy-spec's `moy app` (sdk/README.md): the plugin's package is
+# sdk/moybyte_sdk, which reads the tree it sits in (`pip install -e .`).
+[project.scripts]
+moy-app = "moybyte_sdk.cli:main"
+
 [tool.setuptools.packages.find]
-include = ["runtime*"]
+where = [".", "sdk"]
+include = ["runtime*", "moybyte_sdk*"]
+
+[tool.setuptools.package-data]
+moybyte_sdk = ["stubs/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

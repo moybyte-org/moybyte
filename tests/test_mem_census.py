@@ -81,7 +81,7 @@ class _FakeGc:
 
 
 def test_cut_drops_late_attributes_last_and_charges_each_drop(monkeypatch):
-    held = {"launcher": 300, "carts": 500, "audio": 40, "zz": 7}
+    held = {"launcher": 300, "carts": 500, "run": 40, "zz": 7}
     fgc = _FakeGc(held)
     monkeypatch.setattr(mc, "gc", fgc)
 
@@ -95,7 +95,7 @@ def test_cut_drops_late_attributes_last_and_charges_each_drop(monkeypatch):
         object.__setattr__(ws, k, k)
     rows = mc.cut(ws, modules={})
     names = [r[0] for r in rows]
-    assert names == ["start", "ws.audio", "ws.zz", "ws.launcher", "ws.carts",
+    assert names == ["start", "ws.run", "ws.zz", "ws.launcher", "ws.carts",
                      "left"]
     assert [r[1] for r in rows] == [847, 40, 7, 300, 500, 0]
     assert mc.CUTS is rows

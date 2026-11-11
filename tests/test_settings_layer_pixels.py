@@ -49,6 +49,7 @@ import pytest
 # than the silent divergence a copied dict would give.
 from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 # The sub-surfaces are rendered on every config that renders the whole
 # surface list; a `plan` config holds a few named surfaces alone, and a
@@ -138,6 +139,19 @@ class _Updater(object):
 
     def online_available(self):
         return True
+
+
+class _UsbLever(object):
+    st = 0
+
+    def start(self):
+        self.st = 1
+
+    def stop(self):
+        self.st = 0
+
+    def state(self):
+        return self.st
 
 
 _UPDATE_PHASES = ("checking", "nopublish", "uptodate", "confirm_online",
@@ -258,12 +272,33 @@ def capture(cfg, carts_dir):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
     sl.close_bluetooth()
 
-    from runtime.settings_layer import KEEP_OFF, TOGGLE_CONFIRMS
-    for key in sorted(TOGGLE_CONFIRMS):
-        sl.open_confirm(key)
-        for sel, label in enumerate((KEEP_OFF, TOGGLE_CONFIRMS[key][2])):
-            out["confirm_%s_%d" % (key, sel)] = page(sl._sub, say(label))
-        sl.close_confirm()
+    ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    sl.open_tz()
+    out["tz_picker"] = page(sl._sub)
+    sl.close_tz()
+    ws.set_time_zone(None, persist=False)
+
+    sl._draw_page()
+
+    # USB DRIVE: a board's row (absent on the host), its page off -- with the
+    # T-Deck's dev-channel line and a refusal -- and on, in each state.
+    from runtime import usb_drive as _usb
+    drive = _usb.UsbDrive(_UsbLever(), lambda: None, lambda: None,
+                          lambda: True, dev_channel=True)
+    ws.usb_drive = drive
+    sl._draw_page()
+    out["row_usb_drive"] = page(focus=say("USB DRIVE"))
+    sl.open_usb()
+    out["usb_off"] = page(sl._sub, "Turn on")
+    drive.why = _usb.NO_CARD
+    out["usb_refused"] = page(sl._sub, "Turn on")
+    drive.turn_on(ws)
+    for st in (_usb.WAITING, _usb.MOUNTED, _usb.EJECTED):
+        drive.lever.st = st
+        out["usb_on_%d" % st] = page(sl._sub, "Turn off")
+    drive.turn_off(ws)
+    sl.close_usb()
+    ws.usb_drive = None
     sl._draw_page()
 
     ws.go_home()
@@ -281,21 +316,31 @@ def capture(cfg, carts_dir):
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
     ws._about = False
 
-    # The Achievements page (locked AND found cards) with a badge opened,
-    # the unlock banner (a secret's, its confetti out whole) and the notice.
-    ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
+    # The Achievements page (locked AND found cards, the console's and a
+    # game's, a goal under way) with a badge opened and a goal's bar, the
+    # unlock banner (a secret's, its confetti out whole) and the notice.
+    ws.ach.seed({"first_open": 20261012, "secret_door": 0})
+    ws.system.set(ws.ach.key, dict(ws.system.get(ws.ach.key), **{
+        "moybyte.harpoon_pop": {"name": "Harpoon Pop", "value": {"high_tide": 3}}}))
     ws.open_settings()
     sl.open_page("achievements")
     out["ach_page"] = page(sl._sub)
     pg = sl.achievements
-    pg._open(pg._by_id["Badge first_open"])
+    pg._open(pg._by_id["Badge system first_open"])
     out["ach_popover"] = page(sl._sub)
+    pg.back()
+    pg._focus = "Badge moybyte.harpoon_pop high_tide"
+    sl._draw_page()
+    sl._draw_page()
+    pg._open(pg._by_id["Badge moybyte.harpoon_pop high_tide"])
+    out["ach_goal"] = page(sl._sub)
     sl.close_page()
     sl.open_page("licences")
     out["licences"] = page(sl._sub)
     sl.close_page()
     ws.go_home()
     ws.ach.award("konami")
+    settle_badges(ws)
     ws._toast_at -= 10000
     out["banner"] = _shot(ws, lambda: ws._draw_toast())
     ws._notice = ("Moybyte updated", "Now 0.8", "ok")
@@ -458,22 +503,23 @@ def test_a_settled_settings_page_paints_nothing(tmp_path):
     ws.open_settings()
     for _ in range(4):
         drv.frame(_DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn, "an idle Settings page painted"
+    assert ws.frame_state.frames_drawn == drawn, "an idle Settings page painted"
     before = bytes(ws.sys_canvas._buf)
     drv.press("left")                   # on a row with nothing beside it
     for _ in range(6):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
+    assert ws.frame_state.frames_drawn == drawn + 1, "one frame for the press, then none"
     assert bytes(ws.sys_canvas._buf) == before
 
 
 @pytest.mark.parametrize("variant", ["dark", "light"])
-def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant):
+def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path, variant):
     """Where nothing types (touch alone) the Name row is read-only: with no
-    name saved its value reads "Not set", and the note that a keyboard
+    name saved its value is the console's default name (`moybyte-XXXX`, the
+    host's stand-in MAC), and the note that a keyboard
     changes it stands under the General group's card on the page's ground,
     in the captions' dim ink, with no divider -- not a row of the group
     (design review R5-11)."""
@@ -484,7 +530,9 @@ def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     ws.use_inputs([("local", "touch")])
-    ws.settings_layer.show_row("name")
+    # the next group's first row in view puts the note and the Name row
+    # above it on the screen too
+    ws.settings_layer.show_row("steady")
     infos = []
     ui = settings_layer._ui
     real = ui.info
@@ -495,7 +543,7 @@ def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant)
             drv.frame(_DT)
     finally:
         ui.info = real
-    assert ("Name", settings_layer.NAME_UNSET) in infos, infos
+    assert ("Name", settings_layer._ssh.default_name()) in infos, infos
     cv = ws.sys_canvas
     buf = bytes(cv._buf)
 

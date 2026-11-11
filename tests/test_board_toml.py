@@ -351,6 +351,17 @@ def test_every_native_take_names_a_module_and_says_why(board):
         assert name not in board_config.native_denials(BOARDS[board]), name
 
 
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_the_ssh_server_comes_with_its_face_and_the_face_with_its_shell(board):
+    """SSH opens the stream face (native/moy_tty) and the face runs moy_sh's
+    session: a board that takes one takes what it stands on."""
+    staged = set(board_config.native_modules(BOARDS[board], ROOT))
+    if "moy_ssh" in staged:
+        assert "moy_tty" in staged, board
+    if "moy_tty" in staged:
+        assert "moy_sh" in staged, board
+
+
 # The WebAssembly tier ships on every console board or on none
 # (native/moy_wasm/README.md), so its engine is the one shared module
 # whose default "yes" is not enough: every board file decides it in writing.
@@ -366,8 +377,8 @@ def test_every_board_with_an_ota_slot_carries_its_headroom_floor():
         if not board_config.load(toml.parent).get("board", {}).get("ota"):
             continue
         ota, floor = board_config.headroom_floor(toml.parent)
-        assert floor >= 64 * 1024, "%s: a floor of %d bytes guards nothing" % (
-            ota, floor)
+        assert floor == 0 or floor >= 64 * 1024, (
+            "%s: a floor of %d bytes guards nothing" % (ota, floor))
         found[ota] = floor
     assert set(found) >= {"tdeck", "p4", "guition_s3", "guition_p4",
                           "xiao_zero"}, sorted(found)
@@ -381,8 +392,17 @@ def test_a_board_without_a_floor_is_refused(tmp_path):
     (tmp_path / "board.toml").write_text(
         '[board]\nota = "x"\n[image]\nheadroom_floor_kib = "512"\n',
         encoding="utf-8")
-    with pytest.raises(ValueError, match="positive integer"):
+    with pytest.raises(ValueError, match="non-negative integer"):
         board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = -1\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="non-negative integer"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 0\n',
+        encoding="utf-8")
+    assert board_config.headroom_floor(tmp_path) == ("x", 0)
     (tmp_path / "board.toml").write_text(
         '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 512\n',
         encoding="utf-8")
@@ -617,8 +637,11 @@ def test_the_p4_denies_exactly_its_missing_hardware():
     # The Guition's denial is a bring-up staging decision (audio is stage 5 --
     # docs/board_ports_2026-08.md), named with its stage in board.toml; its
     # card opens through moy_sd (the store's card volume). Update there first,
-    # this pin second.
-    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio"]
+    # this pin second. The media service plays into that mix, and THE SHARES
+    # give this board no MEDIA row, so it denies moy_media too. USB mass
+    # storage is the P4s' and the T-Deck's (docs/os_2026-11/between_apps.md §2).
+    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_media",
+                                                             "moy_usbdisk"]
 
 
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------
@@ -640,6 +663,7 @@ def test_flash_facts_are_declared_and_shaped(board):
     int(str(fl["otadata_offset"]), 16)
     int(str(fl["otadata_size"]), 16)
     assert not str(fl["image"]).startswith("/")
+    assert fl.get("stub", 2) in (1, 2), "%s [flash] stub is 1 or 2" % board
     assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
 
 
@@ -1006,3 +1030,167 @@ def test_every_board_decides_the_survival_modules(board, module):
         "%s/board.toml neither takes nor denies %s" % (board, module))
     if board in CONSOLE_BOARDS:
         assert module in takes, "%s does not take %s" % (board, module)
+
+
+# -- the hardware (docs/os_2026-11/hardware.md section 1) -------------------------
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_puts_each_pad_of_its_chip_in_exactly_one_row(board):
+    """board_config.hardware checks the table: each GPIO of the chip in one
+    row or `unused`, a why on every os and never row, a device API on every
+    class row, no strapping, flash, PSRAM or USB pad leased."""
+    chip, unused, rows = board_config.hardware(BOARDS[board])
+    assert chip == board_config.load(BOARDS[board])["board"]["chip"]
+    assert rows
+
+
+def test_the_browser_has_no_hardware_of_its_own():
+    assert board_config.hardware(ROOT / "firmware" / "web_runner") is None
+
+
+def _hw(tmp_path, body):
+    (tmp_path / "board.toml").write_text('[hardware]\nchip_gpio = "esp32s3"\n'
+                                         'unused = []\n' + body)
+    return tmp_path
+
+
+_ALL_S3 = ", ".join(str(p) for p in board_config.CHIP_GPIO["esp32s3"]["gpio"]
+                    if p not in (0, 21))
+
+
+@pytest.mark.parametrize("body, says", [
+    # a pad in no row
+    ('[[hardware.resource]]\nname = "gpio"\nclass = "lease"\npins = [21]\n', "in no row"),
+    # a pad twice
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s, 0, 21, 21]\n'
+     % _ALL_S3, "is in"),
+    # a pad the chip lacks
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s, 0, 21, 22]\n'
+     % _ALL_S3, "not a pad"),
+    # an os row with no why
+    ('[[hardware.resource]]\nname = "x"\nclass = "os"\npins = [%s, 0, 21]\n' % _ALL_S3,
+     "says no why"),
+    # a class row naming no device API
+    ('[[hardware.resource]]\nname = "x"\nclass = "class"\napi = "teleport"\npins = [%s, 0, 21]\n'
+     % _ALL_S3, "not a device API"),
+    # a strapping pad leased
+    ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s]\n'
+     '[[hardware.resource]]\nname = "g"\nclass = "lease"\npins = [0, 21]\n' % _ALL_S3,
+     "strapping"),
+    # a class no one knows
+    ('[[hardware.resource]]\nname = "x"\nclass = "maybe"\npins = []\n', "class"),
+])
+def test_a_table_that_breaks_a_rule_is_refused(tmp_path, body, says):
+    with pytest.raises(ValueError, match=says):
+        board_config.hardware(_hw(tmp_path, body))
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_a_class_row_names_a_device_api_the_image_stages(board):
+    staged = board_config.staged_modules(BOARDS[board])
+    for row in board_config.hardware(BOARDS[board])[2]:
+        for api in row["api"]:
+            module = board_config.DEVICE_APIS[api]
+            if module is not None:
+                assert module in staged, (board, row["name"], api)
+
+
+def test_the_zeros_lease_is_its_pin_allowlist():
+    """The Zero's `/gpio` allowlist (MOY_NET_GPIO_PINS) is its lease row."""
+    text = (ZERO / "boards" / "MOYBYTE_ZERO" / "mpconfigboard.h").read_text()
+    m = re.search(r"#define MOY_NET_GPIO_PINS\s+\{([^}]*)\}", text)
+    allow = sorted(int(p) for p in m.group(1).split(","))
+    lease = [r for r in board_config.hardware(ZERO)[2] if r["class"] == "lease"]
+    assert [sorted(r["pins"]) for r in lease] == [allow]
+
+
+@pytest.mark.parametrize("board", ("p4", "guition-p4"))
+def test_a_p4_readme_lists_its_free_pins_as_its_lease_row(board):
+    lease = sorted(p for r in board_config.hardware(BOARDS[board])[2]
+                   if r["class"] == "lease" and not r.get("bus") for p in r["pins"])
+    text = (BOARDS[board] / "README.md").read_text()
+    m = re.search(r"^## Free pins\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    assert m, "%s/README.md has no Free pins section" % board
+    listed = sorted({int(p) for p in re.findall(r"GPIO(\d+)", m.group(1))})
+    assert listed == lease
+
+
+_GPIO_ROW = ('[[hardware.resource]]\nname = "x"\nclass = "never"\nwhy = "w"\npins = [%s]\n'
+             '[[hardware.resource]]\nname = "gpio"\nclass = "lease"\npins = [1, 2, 21]\n'
+             % ", ".join(str(p) for p in board_config.CHIP_GPIO["esp32s3"]["gpio"]
+                         if p not in (1, 2, 21)))
+
+
+@pytest.mark.parametrize("row, says", [
+    ('name = "i2c0"\nclass = "lease"\nbus = "gpio"\npins = {sda = 1, scl = 2}\n',
+     "not gpio, uart<n> or spi<n>"),
+    ('name = "uart1"\nclass = "lease"\npins = {tx = 1, rx = 2}\n', "rides a bus"),
+    ('name = "uart1"\nclass = "lease"\nbus = "gpio"\npins = {rx = 1, tx = 2}\n', "rides a bus"),
+    ('name = "spi2"\nclass = "lease"\nbus = "gpio"\npins = {sck = 1, mosi = 2, miso = 4}\n',
+     "holding its pins"),
+    ('name = "uart1"\nclass = "lease"\nbus = "nope"\npins = {tx = 1, rx = 2}\n',
+     "holding its pins"),
+    ('name = "spi2"\nclass = "os"\nwhy = "the panel"\npins = []\n'
+     '[[hardware.resource]]\nname = "spi2"\nclass = "lease"\nbus = "gpio"\n'
+     'pins = {sck = 1, mosi = 2, miso = 21}\n', "a unit an os row drives"),
+    ('name = "spi1"\nclass = "lease"\nbus = "gpio"\npins = {sck = 1, mosi = 2, miso = 21}\n',
+     "the flash's SPI host"),
+])
+def test_a_unit_lease_row_rides_the_gpio_row_and_names_its_pins(tmp_path, row, says):
+    with pytest.raises(ValueError, match=says):
+        board_config.hardware(_hw(tmp_path, _GPIO_ROW + "[[hardware.resource]]\n" + row))
+
+
+def test_the_lease_rows_are_the_boards_offer_spec(tmp_path):
+    body = _GPIO_ROW + ('[[hardware.resource]]\nname = "uart1"\nclass = "lease"\nbus = "gpio"\n'
+                        'pins = {tx = 2, rx = 1}\n')
+    assert board_config.lease_spec(_hw(tmp_path, body)) == "gpio:1,2,21/uart1:2,1"
+    assert board_config.lease_spec(BOARDS["tdeck"]) is None
+
+
+def test_the_class_rows_are_the_drivers_defines():
+    """A class row's API and the named pins of a class or os row reach the C
+    (board_config.hw_defines, staged into the board's cmake): the T-Deck's
+    SX1262 and ES7210, the Zero's SX1262, a P4's mic sharing the speaker's
+    clocks."""
+    d = dict(board_config.hw_defines(BOARDS["tdeck"]))
+    assert d["MOY_API_LORA"] == d["MOY_API_MIC"] == d["MOY_API_HTTP"] == d["MOY_API_BLE"] == 1
+    assert (d["MOY_HW_LORA_RST"], d["MOY_HW_LORA_BUSY"], d["MOY_HW_LORA_IRQ"]) == (17, 13, 45)
+    assert d["MOY_HW_SPI2_RADIO_CS"] == 9
+    assert (d["MOY_HW_MIC_MCLK"], d["MOY_HW_MIC_SCK"], d["MOY_HW_MIC_LRCK"],
+            d["MOY_HW_MIC_DIN"]) == (48, 47, 21, 14)
+    for b in ("p4", "guition-p4"):
+        p4 = dict(board_config.hw_defines(BOARDS[b]))
+        assert p4["MOY_HW_MIC_DIN"] == 11 and "MOY_HW_MIC_SCK" not in p4
+        assert "MOY_API_LORA" not in p4
+    assert "MOY_API_MIC" not in dict(board_config.hw_defines(BOARDS["guition-s3"]))
+    # The Zero's Wio-SX1262 names its own SPI pins, so its driver owns the bus
+    # (no panel, no band-gap gate) and switches the RX path itself.
+    z = dict(board_config.hw_defines(BOARDS["zero"]))
+    assert z["MOY_API_LORA"] == 1 and "MOY_HW_SPI2_RADIO_CS" not in z
+    assert (z["MOY_HW_LORA_SCK"], z["MOY_HW_LORA_MISO"], z["MOY_HW_LORA_MOSI"],
+            z["MOY_HW_LORA_CS"], z["MOY_HW_LORA_RST"], z["MOY_HW_LORA_BUSY"],
+            z["MOY_HW_LORA_IRQ"], z["MOY_HW_LORA_RXEN"]) == (7, 8, 9, 41, 42, 40, 39, 38)
+    assert "MOY_HW_LORA_SCK" not in d
+
+
+# -- THE SHARES' lines (native/moy_play/moy_play.h) ----------------------------------
+
+def _shares_lines():
+    text = (ROOT / "native" / "moy_play" / "moy_play.h").read_text()
+    return re.findall(r'X\("(\w+)",', text)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_each_console_image_names_its_shares_line_by_its_ota_id(board):
+    """A console's mpconfigboard.h names its line (MOY_SHARES_BOARD) by its
+    OTA id, and moy_play.h has that line; the Zero names none."""
+    cfg = board_config.load(BOARDS[board])
+    ota = cfg["board"]["ota"]
+    headers = list((BOARDS[board] / "boards").glob("*/mpconfigboard.h"))
+    named = re.findall(r'#define MOY_SHARES_BOARD\s+"(\w+)"', headers[0].read_text())
+    if board in CONSOLE_BOARDS:
+        assert named == [ota]
+        assert ota in _shares_lines()
+    else:
+        assert named == [] and ota not in _shares_lines()

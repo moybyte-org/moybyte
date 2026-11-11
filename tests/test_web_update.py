@@ -2,7 +2,7 @@
 
 The Zero has no screen, so the browser console it serves IS its screen -- and
 "update this board" therefore has to live there. What that turned into is two
-pin-gated JSON routes on the SHARED webhost plus two backends behind them, and
+sealed JSON routes on the SHARED webhost plus two backends behind them, and
 the split between those two is the whole design:
 
   * a board WITH GLASS hands the glass back. `moy_webhost.ConsoleUpdate` turns
@@ -84,14 +84,15 @@ class _Gate:
         return fn()
 
 
-def _host(ws, tmp_path, pin="1234", gate=None):
-    # The kernel's webhost is one per process: a host another test on this
-    # worker left serving would keep this one from configuring its own store
-    # and pin, so each test starts from a stopped one.
+def _host(ws, tmp_path, gate=None):
+    """An open host (no sign-in): what is under test here is the backend
+    behind /update. Its seal is tests/test_web_signin.py's. The kernel's
+    webhost is one per process: a host another test on this worker left
+    serving would keep this one from configuring its own store, so each test
+    starts from a stopped one."""
     moy_webhost.moy_net.web_stop()
     h = moy_webhost.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
-                            pin=pin, with_sd=gate,
-                            update=moy_webhost.ConsoleUpdate(ws))
+                            with_sd=gate, update=moy_webhost.ConsoleUpdate(ws))
     return h
 
 
@@ -155,20 +156,9 @@ def test_the_route_is_the_shared_hosts_and_not_one_boards(tmp_path):
     browser can update the board that serves it" true on exactly one board of
     four. A plain WebHost answers them now."""
     h = _host(_ws(tmp_path), tmp_path)
-    code, payload = _reply(h.handle_http("GET", "/update?pin=1234", None))
+    code, payload = _reply(h.handle_http("GET", "/update", None))
     assert code == 200
     assert json.loads(payload)["screen"] is True
-
-
-def test_both_methods_need_the_pin(tmp_path):
-    """No read-half exemption. A GET says which firmware a specific board on
-    somebody's home network is running -- a shopping list for whoever wants to
-    hand it an image -- and the write half replaces the board."""
-    h = _host(_ws(tmp_path), tmp_path)
-    for method, body in (("GET", None), ("POST", '{"action":"check"}')):
-        code, payload = _reply(h.handle_http(method, "/update", body))
-        assert code == 403, method
-        assert json.loads(payload) == {"error": "pin"}
 
 
 def test_a_board_that_cannot_update_says_so_differently_from_one_that_cannot_hear(
@@ -177,24 +167,24 @@ def test_a_board_that_cannot_update_says_so_differently_from_one_that_cannot_hea
     collapse: 404 = not a board that speaks this (a static host, an older
     image), 503 = a board, with nothing to update."""
     h = _host(_ws(tmp_path, ota=False), tmp_path)
-    code, payload = _reply(h.handle_http("GET", "/update?pin=1234", None))
+    code, payload = _reply(h.handle_http("GET", "/update", None))
     assert code == 503
     assert json.loads(payload) == {"error": "no updater"}
-    assert _reply(h.handle_http("GET", "/updates?pin=1234", None))[0] == 404
+    assert _reply(h.handle_http("GET", "/updates", None))[0] == 404
 
 
 def test_the_update_route_does_not_shadow_the_store(tmp_path):
     h = _host(_ws(tmp_path), tmp_path)
     code, _ = _reply(h.handle_http("GET", "/carts.json", None))
-    assert code == 403, "the store's own gate still applies"
+    assert code == 200, "the store's own route still answers"
     assert h.handle_http("GET", "/sync", None) is not None
 
 
 def test_junk_and_the_wrong_verb_are_refused_distinctly(tmp_path):
     h = _host(_ws(tmp_path), tmp_path)
-    code, _ = _reply(h.handle_http("POST", "/update?pin=1234", "not json"))
+    code, _ = _reply(h.handle_http("POST", "/update", "not json"))
     assert code == 400
-    code, payload = _reply(h.handle_http("PUT", "/update?pin=1234", "{}"))
+    code, payload = _reply(h.handle_http("PUT", "/update", "{}"))
     assert code == 405
     # The refusal NAMES the write paths: a bare 405 reads like a wrong url.
     assert "/update" in payload
@@ -205,7 +195,7 @@ def test_a_body_with_no_action_looks_rather_than_installs(tmp_path):
     replaces the board."""
     ws = _ws(tmp_path)
     h = _host(ws, tmp_path)
-    code, payload = _reply(h.handle_http("POST", "/update?pin=1234", "{}"))
+    code, payload = _reply(h.handle_http("POST", "/update", "{}"))
     assert code == 200
     assert json.loads(payload)["ok"] is True
 
@@ -244,7 +234,7 @@ def test_the_post_answers_and_the_hand_off_happens_after(tmp_path):
     ws = _ws(tmp_path)
     h = _host(ws, tmp_path)
     _parked(ws, h)
-    code, payload = _reply(h.handle_http("POST", "/update?pin=1234",
+    code, payload = _reply(h.handle_http("POST", "/update",
                                          '{"action":"check"}'))
     assert code == 200
     doc = json.loads(payload)
@@ -260,7 +250,7 @@ def test_the_hand_off_gives_the_glass_back_and_opens_the_update_screen(tmp_path)
     ws = _ws(tmp_path)
     h = _host(ws, tmp_path)
     _parked(ws, h)
-    h.handle_http("POST", "/update?pin=1234", '{"action":"check"}')
+    h.handle_http("POST", "/update", '{"action":"check"}')
     h.update.step()
     assert not h.serving, "wasm mode is still on"
     assert not ws.web.parked, "the glass never came back"
@@ -299,7 +289,7 @@ def test_cancel_belongs_to_whoever_is_holding_the_board(tmp_path):
     h = _host(ws, tmp_path)
     ok, msg = h.update.request("cancel")
     assert ok is False and "screen" in msg
-    code, _ = _reply(h.handle_http("POST", "/update?pin=1234",
+    code, _ = _reply(h.handle_http("POST", "/update",
                                    '{"action":"cancel"}'))
     assert code == 409
 
@@ -333,7 +323,7 @@ def test_a_failed_hand_off_is_readable_and_never_breaks_the_frame(tmp_path):
     h.update.step()                       # must not raise
     assert h.update.state == "error"
     assert "no screen today" in (h.update.error or "")
-    code, payload = _reply(h.handle_http("GET", "/update?pin=1234", None))
+    code, payload = _reply(h.handle_http("GET", "/update", None))
     assert code == 200
     assert "no screen today" in json.loads(payload)["error"]
 
@@ -347,7 +337,7 @@ def test_the_hand_off_keeps_the_radio_for_the_update_screen(tmp_path):
     h = _host(ws, tmp_path)
     ws.wifi_hold("web")                     # what toggle did when the row went on
     _parked(ws, h)
-    h.handle_http("POST", "/update?pin=1234", '{"action":"check"}')
+    h.handle_http("POST", "/update", '{"action":"check"}')
     h.update.step()
     assert ws.wm.top_kind() == "update"
     assert ws.leases.holders() == ["update"]
@@ -397,14 +387,14 @@ def test_the_console_path_never_takes_the_storage_gate(tmp_path):
     h = _host(ws, tmp_path, gate=gate)
     _parked(ws, h)
     gate.entries = 0                        # the start's own look at the volume
-    h.handle_http("GET", "/update?pin=1234", None)
-    h.handle_http("POST", "/update?pin=1234", '{"action":"install"}')
+    h.handle_http("GET", "/update", None)
+    h.handle_http("POST", "/update", '{"action":"install"}')
     h.update.step()
     assert gate.entries == 0, "the update endpoint reached storage"
     # ...and nothing under it touched the store by the kernel's route either.
     from runtime import net_binding as nb
     before = nb._drains()
-    h.handle_http("GET", "/update?pin=1234", None)
+    h.handle_http("GET", "/update", None)
     assert nb._drains() == before
 
 
@@ -439,8 +429,7 @@ def test_a_backend_that_raises_cannot_take_the_poll_down(tmp_path):
 
 
 def test_every_board_is_wired_by_make_webhost(tmp_path):
-    """The injection is written ONCE. `ensure_online`'s docstring records what
-    the alternative costs: the web console shipped on the P4 with every shared
+    """The injection is written ONCE. The alternative's cost: the web console shipped on the P4 with every shared
     piece in place and the T-Deck still did not have it, because the one
     per-board line was never written there."""
     ws = _ws(tmp_path)
@@ -511,24 +500,16 @@ def test_binding_an_updater_late_still_grows_the_settings_rows(tmp_path):
     assert update_rows() == []
 
 
-def test_the_page_puts_the_update_pin_on_the_query_for_both_methods():
-    """ROUTING, and the one grep worth keeping in this file.
-
-    The board's rule is behavioural and pinned in test_moy_webhost.py: /update
-    reads the pin off `?pin=` for GET and POST alike. What no host test can see
-    is whether the PAGE obeys it, because the caller is JavaScript in a worker
-    -- and it did not, sending the POST's pin in the body only. Every pinned
-    board 403'd the first update POST and latched the link dead.
-
-    So: the update POST must go through `withPin`, the same helper the GET uses.
-    """
+def test_the_page_seals_both_update_methods():
+    """ROUTING, and the one grep worth keeping in this file. The board answers
+    /update to a sealed session alone (tests/test_web_signin.py); what no host
+    test can see is whether the PAGE seals it, because the caller is
+    JavaScript in a worker. An unsealed fetch is refused 401 on every board
+    with a sign-in, which latches the link dead."""
     worker = (ROOT / "firmware" / "web_runner" / "worker.js").read_text(
         encoding="utf-8")
-    body = worker.split("function updatePump()", 1)[1].split("\nfunction ", 1)[0]
-    posts = [l for l in body.splitlines()
-             if "fetch(" in l and "update" in l]
-    assert posts, "updatePump no longer fetches /update -- this grep is stale"
-    for line in posts:
-        assert 'withPin("update")' in line, (
-            "an /update fetch that does not carry the pin on the query: %s"
-            % line.strip())
+    for fn in ("function updatePump()", "async function probeUpdate()"):
+        body = worker.split(fn, 1)[1].split("\nfunction ", 1)[0]
+        assert 'sealed("GET", "/update")' in body or 'sealed("POST", "/update"' in body, fn
+        assert not [l for l in body.splitlines() if "fetch(" in l and "update" in l], (
+            "an /update fetch that is not sealed in " + fn)

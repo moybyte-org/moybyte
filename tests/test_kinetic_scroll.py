@@ -215,7 +215,7 @@ def test_gate_recloses_after_the_fling_rests(tmp_path):
             break
     assert not ws.launcher.flinging
     drv.frame(1 / 30)                      # settle the last requested frame
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(5):
         drv.frame(1 / 30)                  # quiet frames: nothing repaints
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn

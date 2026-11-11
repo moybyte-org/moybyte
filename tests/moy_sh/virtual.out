@@ -1,0 +1,15 @@
+$ # /dev and /proc are the OS's, the root lists them beside the store
+$ ls /
+bin/  dev/  proc/
+$ ls /dev
+null  tty  uart1
+$ cat /proc/1/status | grep kind
+kind: shell
+$ echo ping > /dev/uart1; cat /dev/uart1
+ping
+$ echo x > /bin/new; echo bin=$?
+sh: 1: cannot create /bin/new: Read-only file system
+bin=2
+$ cat /dev/null; echo null=$?
+null=0
+[exit 0]

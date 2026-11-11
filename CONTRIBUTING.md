@@ -68,6 +68,9 @@ the parity checks run under, the paths the docs claim — so they are exactly th
 steps a source change invalidates without anything going red locally. Run
 preflight before pushing; `tools/preflight.sh`'s header says why its order
 matters, and `make preflight-web` adds the browser suites in real Chrome.
+Preflight runs the host suite in CI's OS, an ubuntu 26.04 container
+(`tools/ci_image/run.sh`), so it needs Docker; `tools/preflight.sh --native`
+runs it on your own OS instead.
 
 `make setup` installs everything the tests and the simulator need. Flashing a
 board needs more: `.venv/bin/python -m pip install -e '.[device]'` (esptool,

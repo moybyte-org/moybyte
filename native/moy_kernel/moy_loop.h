@@ -161,13 +161,18 @@ typedef struct {
 
 // The services a frame's tail calls up into while they are live: the
 // webhost's Python routes while it serves or says goodbye, the OTA confirm's
-// marker once. One upcall a frame carries every bit; none while no bit is
-// set. (The radio link's drain is C, moy_match: no bit.)
+// marker once, the background scheduler while any wake is registered
+// (runtime/system/scheduler.py), and the scheduler's `woken` while a process
+// on a task of its own wants the VM (a board's, moy_evq.h's THE VM'S WAKE).
+// One upcall a frame carries every bit; none while no bit is set. (The
+// radio link's drain is C, moy_match: no bit.)
 enum {
     MOY_SVC_WEB = 1u << 0,
     MOY_SVC_UPDATE = 1u << 2,
     MOY_SVC_HEALTHY = 1u << 3,
     MOY_SVC_DIAG = 1u << 4,
+    MOY_SVC_SCHED = 1u << 5,
+    MOY_SVC_TASKS = 1u << 6,
 };
 
 // The binding's upcall dispatcher: run upcall `which` (MOY_UP_*), with `arg`
@@ -177,7 +182,7 @@ typedef int (*moy_loop_up_fn)(int which, uint32_t arg, const char *line);
 
 // THE ROLE DOOR (native/moy_app/README.md): the upcall that
 // carries arguments. A compiled app's call of a role row the Python console
-// serves: the calling grant, the row (native/moy_app/roles.json's index), the
+// serves: the calling grant, the row (the role table's index, native/os_calls.json), the
 // row's arguments packed in `arg` (n bytes, native/moy_app/moy_app.h's field
 // encoding) and a buffer for its answer (cap bytes). The binding's dispatcher
 // answers >= 0 (the row's number, or the length of the text or blob it wrote
@@ -242,6 +247,22 @@ void moy_loop_say(const char *fmt, ...);
 void moy_loop_say_line(const char *line);
 void *moy_loop_alloc(size_t n);
 
+// Jobs in C the frame runs at its tail, each once a frame while it answers
+// true (the shell's runs that wait on the console: native/moy_sh/
+// moy_sh_board.h; the compiled services' watchdogs, modmoy_wasm.c and
+// modmoy_elf.c; the media service's file, native/moy_media/moy_media.h; the
+// kernel's timers and notifications, which a program's own task arms).
+// Any task may ask for one; asking for a job already there is idempotent, and
+// one asked for while it runs stays though that run answers false. False
+// when the MOY_LOOP_JOBS slots are taken.
+#define MOY_LOOP_JOBS 8
+typedef bool (*moy_loop_job_fn)(void *arg);
+bool moy_loop_job(moy_loop_job_fn fn, void *arg);
+void moy_loop_job_drop(moy_loop_job_fn fn, void *arg);
+// Each job run once now, as the frame's tail runs them: a harness that steps
+// no frames (the host's tests) pumps them so. Answers how many remain.
+int moy_loop_jobs(void);
+
 // -- what the console tells the loop ------------------------------------------
 
 // The loop's own cadence: frames a second while nothing is paced.
@@ -304,5 +325,10 @@ typedef struct {
 void moy_loop_pump(moy_loop_pump_t *out);
 // The pump's pacing arithmetic on an injected elapsed: how long to sleep.
 uint32_t moy_loop_pace(uint32_t elapsed);
+// The frame's slack so far: the microseconds the pace would still sleep if
+// the frame ended now (its slot less the time since its top and the debt),
+// 0 while the Player paces a game (that frame does not sleep). What the
+// background scheduler may spend at the tail (runtime/system/scheduler.py).
+uint32_t moy_loop_slack_us(void);
 
 #endif // MOY_LOOP_H

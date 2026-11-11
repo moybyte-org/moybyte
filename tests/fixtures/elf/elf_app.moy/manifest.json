@@ -1,0 +1,36 @@
+{
+  "title": "App Calls",
+  "id": "elf.app",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "full_access",
+      "prefs",
+      "clipboard",
+      "files:documents",
+      "notifications",
+      "alarms",
+      "lease:gpio",
+      "lease:uart1",
+      "lease:spi2",
+      "ble",
+      "usb",
+      "multiplayer"
+    ],
+    "achievements": [
+      {
+        "id": "first",
+        "title": "First Call",
+        "icon": "star",
+        "hint": "Run it"
+      },
+      {
+        "id": "far",
+        "title": "Far Call",
+        "icon": "run",
+        "hint": "Call five times",
+        "goal": 5
+      }
+    ]
+  }
+}

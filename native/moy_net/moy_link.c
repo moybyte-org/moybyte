@@ -75,6 +75,20 @@ int moy_link_rate(int rate) {
     return esp_wifi_config_espnow_rate(WIFI_IF_STA, (wifi_phy_rate_t)rate);
 }
 
+int moy_link_channel(int set) {
+    wifi_ap_record_t ap;
+    bool assoc = esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+    if (set > 0 && !assoc) {
+        (void)esp_wifi_set_channel((uint8_t)set, WIFI_SECOND_CHAN_NONE);
+    }
+    uint8_t ch = 0;
+    wifi_second_chan_t second;
+    if (esp_wifi_get_channel(&ch, &second) != ESP_OK) {
+        return 0;
+    }
+    return assoc ? -(int)ch : (int)ch;
+}
+
 int moy_link_add_peer(const uint8_t mac[6]) {
     if (esp_now_is_peer_exist(mac)) {
         return ESP_OK;

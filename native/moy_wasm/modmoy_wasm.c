@@ -12,9 +12,9 @@
 //
 // The Python side reads the module FILE (through the VFS, so the T-Deck's SD
 // and the P4s' flash store look the same) into a PSRAM buffer, checks its
-// signature (moy_wasm_key.h) -- a module whose signature does not verify never
-// reaches the runtime, and one with no signature reaches it only when the
-// caller allows unsigned modules (the owner's Unknown sources setting) --
+// admission (moy_ota_admit_module) -- a module whose signature does not verify
+// never reaches the runtime, and one with no signature reaches it only when
+// the cart's consent admits it (app_perms.admits_unsigned) --
 // starts the thread, and collects a report when it ends. One run at a time.
 //
 // A cart the Player runs is a SESSION (phase 3, moy_wasm_session.h): the same
@@ -44,26 +44,39 @@
 #include "esp_heap_caps.h"
 #include "esp_task.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/idf_additions.h"   // pxTaskGetStackStart
 
-#include "mbedtls/sha256.h"
-
 #include "wasm_export.h"
 #include "moy_wasm_footprint.h"
+
+// WAMR's allocator over a block (wamr/core/shared/mem-alloc/mem_alloc.h):
+// a session's pool.
+typedef void *mem_allocator_t;
+mem_allocator_t mem_allocator_create(void *mem, uint32_t size);
+int mem_allocator_destroy(mem_allocator_t allocator);
+void *mem_allocator_malloc(mem_allocator_t allocator, uint32_t size);
+void *mem_allocator_realloc(mem_allocator_t allocator, void *ptr, uint32_t size);
+void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 #include "moy_wasm_key.h"
 #include "moy_wasm_session.h"
 #include "moy_wasm_thread.h"
+#include "moy_wasi.h"
+#include "moy_sh.h"
+#include "moy_log.h"
+#include "moy_evq.h"
+#include "moy_vmq.h"
+#include "moy_loop.h"
+#include "moy_proc_exit.h"
+#include "../moy_net/moy_ota.h"
 #include "../moy_store/moy_vol.h"
 
 // A VM runs (native/moy_kernel's loop): weak, so an image without the kernel
 // always has one.
 bool moy_loop_vm(void) __attribute__((weak));
-// The kernel's RSA check (native/moy_net/moy_ota.h), where the image has it.
-int moy_ota_verify(const void *payload, size_t n, const char *sig_hex, size_t sig_n,
-                   const void *keys, int nkeys) __attribute__((weak));
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
 
@@ -136,7 +149,11 @@ typedef struct {
     size_t sram_before;            // internal free when the run was started
 } run_t;
 
-static run_t g_run;
+// PSRAM, taken by the first start: an idle console holds none of it in
+// internal SRAM.
+static run_t *g_run;
+// Every open cart session (below), which a run is never started beside.
+static struct sess *g_sessions;
 static SemaphoreHandle_t g_lock;
 static StaticSemaphore_t g_lock_buf;
 
@@ -520,91 +537,18 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
     *out_len = (uint32_t)size;
 }
 
-// The module's signature (moy_wasm_key.h): NULL when the file may load, with
-// *module_len set to the module's length without any trailer; otherwise the
-// refusal. The RSA check is moy_ota.verify_sig -- the body and the keys every
-// OTA manifest is checked with -- so this runs on the MicroPython task, before
-// the run's thread exists.
-//
-// A file with no trailer loads only when `unsigned_ok`, the owner's Unknown
-// sources setting as the caller read it; its provenance key is checked on the
-// thread as every module's is. A trailer that is present must verify whatever
-// `unsigned_ok` says: a signature that does not is a module changed after it
-// was signed, or one signed with a key this image does not trust, and neither
-// is a module somebody built without signing.
-static const char *verify_module(const uint8_t *file, uint32_t len, bool unsigned_ok,
-                                 uint32_t *module_len)
+// The module's admission (moy_ota_admit_module, native/moy_net/moy_ota.h):
+// NULL when the file may load, with *module_len set to the module's length
+// without any trailer; otherwise the refusal. `consented` is the cart's
+// consent as the caller read it (app_perms.admits_unsigned); its provenance
+// key is checked on the thread as every module's is.
+static const char *admit(const uint8_t *file, uint32_t len, bool consented,
+                         uint32_t *module_len)
 {
-    const uint32_t magic = sizeof(MOY_WASM_SIG_MAGIC) - 1;
-    if (len < magic + 4 || memcmp(file + len - magic, MOY_WASM_SIG_MAGIC, magic) != 0) {
-        *module_len = len;
-        return unsigned_ok ? NULL : "unsigned module";
-    }
-    const uint8_t *lp = file + len - magic - 4;
-    uint32_t k = lp[0] | (uint32_t)lp[1] << 8 | (uint32_t)lp[2] << 16 | (uint32_t)lp[3] << 24;
-    if (k < 64 || k > 1024 || k > len - magic - 4) {
-        return "malformed signature";
-    }
-    uint32_t n = len - magic - 4 - k;
-
-    uint8_t digest[32];
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);
-    for (uint32_t at = 0; at < n; at += 65536) {
-        mbedtls_sha256_update(&ctx, file + at, n - at < 65536 ? n - at : 65536);
-    }
-    mbedtls_sha256_finish(&ctx, digest);
-    mbedtls_sha256_free(&ctx);
-
-    static const char hex[] = "0123456789abcdef";
-    char text[sizeof(MOY_WASM_SIG_SCHEME) + sizeof(KEY_CHIP) + 16 + 64];
-    int tl = snprintf(text, sizeof(text), MOY_WASM_SIG_SCHEME "\n%s\n%u\n", KEY_CHIP,
-                      (unsigned)n);
-    for (int i = 0; i < 32; i++) {
-        text[tl++] = hex[digest[i] >> 4];
-        text[tl++] = hex[digest[i] & 15];
-    }
-    const char *why = "bad signature";
-    if (moy_ota_verify != NULL) {
-        char *sig = heap_caps_malloc(2 * k, PSRAM_CAPS);
-        if (sig == NULL) {
-            why = "the signature could not be checked";
-        } else {
-            const uint8_t *sp = lp - k;
-            for (uint32_t i = 0; i < k; i++) {
-                sig[2 * i] = hex[sp[i] >> 4];
-                sig[2 * i + 1] = hex[sp[i] & 15];
-            }
-            if (moy_ota_verify(text, (size_t)tl, sig, 2 * k, NULL, 0)) {
-                why = NULL;
-            }
-            heap_caps_free(sig);
-        }
-        *module_len = n;
-        return why;
-    }
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        vstr_t sig;
-        vstr_init(&sig, 2 * k);
-        const uint8_t *sp = lp - k;
-        for (uint32_t i = 0; i < k; i++) {
-            vstr_add_byte(&sig, hex[sp[i] >> 4]);
-            vstr_add_byte(&sig, hex[sp[i] & 15]);
-        }
-        mp_obj_t ota = mp_import_name(MP_QSTR_moy_ota, mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
-        mp_obj_t ok = mp_call_function_2(mp_load_attr(ota, MP_QSTR_verify_sig),
-                                         mp_obj_new_bytes((const byte *)text, tl),
-                                         mp_obj_new_str_from_vstr(&sig));
-        if (mp_obj_is_true(ok)) {
-            why = NULL;
-        }
-        nlr_pop();
-    } else {
-        why = "the signature could not be checked";
-    }
-    *module_len = n;
+    size_t n = len;
+    const char *why = moy_ota_admit_module(file, len, MOY_WASM_SIG_SCHEME, KEY_CHIP,
+                                           consented, NULL, 0, &n);
+    *module_len = (uint32_t)n;
     return why;
 }
 
@@ -621,8 +565,8 @@ static void read_file(run_t *r, mp_obj_t path)
 // `psram_stack` and `pool` override the board's settings and the pool's
 // sizing rule for this run (a measurement, not a product knob: result()'s
 // `pool_peak` under a pool bigger than the rule's is what the rule must
-// hold). `allow_unsigned` lets a module with no signature load, as the Unknown
-// sources setting does for a cart. done() says when it ended, result()
+// hold). `allow_unsigned` lets a module with no signature load, as a cart's
+// consent to `full_access` does. done() says when it ended, result()
 // collects it; a module refused for its signature ends at once, with no
 // thread.
 static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args)
@@ -642,11 +586,17 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     mp_arg_val_t a[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, a);
 
-    run_t *r = &g_run;
+    if (g_run == NULL) {
+        g_run = heap_caps_calloc(1, sizeof(run_t), PSRAM_CAPS);
+        if (g_run == NULL) {
+            mp_raise_type(&mp_type_MemoryError);
+        }
+    }
+    run_t *r = g_run;
     if (r->started) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a run is live; collect it with result()"));
     }
-    if (moy_wasm_session_live()) {
+    if (g_sessions != NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a cart's session is live"));
     }
     if (!g_lock) {
@@ -689,8 +639,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
                          ? MOY_WASM_STACK_PSRAM : mp_obj_is_true(a[ARG_psram_stack].u_obj);
     r->pool_asked = (uint32_t)pool;
     read_file(r, a[ARG_path].u_obj);
-    const char *why = verify_module(r->file, r->file_len, a[ARG_allow_unsigned].u_bool,
-                                    &r->file_len);
+    const char *why = admit(r->file, r->file_len, a[ARG_allow_unsigned].u_bool, &r->file_len);
     if (why) {
         fail(r, "refused", why);
         r->started = true;
@@ -719,7 +668,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(mod_start_obj, 2, mod_start);
 
 static mp_obj_t mod_done(void)
 {
-    return mp_obj_new_bool(!g_run.started || g_run.finished);
+    return mp_obj_new_bool(g_run == NULL || !g_run->started || g_run->finished);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_done_obj, mod_done);
 
@@ -728,9 +677,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_done_obj, mod_done);
 // notices it.
 static mp_obj_t mod_terminate(void)
 {
-    run_t *r = &g_run;
+    run_t *r = g_run;
     bool told = false;
-    if (r->started && g_lock) {
+    if (r != NULL && r->started && g_lock) {
         xSemaphoreTake(g_lock, portMAX_DELAY);
         if (r->live) {
             wasm_runtime_terminate(r->live);
@@ -769,7 +718,7 @@ typedef struct {
 } lane_stats_t;
 static lane_stats_t g_lane_stats[LANES_MAX + 1];
 
-typedef struct {
+typedef struct sess {
     // the MicroPython side's
     bool live;
     bool interp;                    // running main.wasm on the interpreter --
@@ -793,13 +742,93 @@ typedef struct {
     void *volatile vm_arg;
     volatile bool waiting;          // the task is in sess_wait and can serve
     TaskHandle_t thread;            // the session's task, once it runs
+    uint8_t *stack_lo;              // its stack's low end when the boundary was set
     wasm_module_inst_t volatile inst;   // what moy_wasm_session_terminate stops
     lane_t lane[LANES_MAX + 1];     // [1..]: the par lanes, started on demand
+    // its share of the runtime: the pool its load, instance and exec envs
+    // are allocated from (rt_malloc), and whether what is allocated now is
+    // the runtime's own (PSRAM's heap): the runtime being made, or a const
+    // table's registration (moy_wasm_register_rows)
+    uint8_t *pool;
+    size_t pool_size;
+    mem_allocator_t alloc;
+    volatile bool rt_heap;
+    struct sess *next;              // the next open session
 } sess_t;
 
-// The live session, or NULL. Allocated per session, from PSRAM, so an idle
-// desk carries a pointer and not the struct.
+// The session the calls act on (moy_wasm_session_use), or NULL; g_sessions
+// above lists every open one. Allocated per session, from PSRAM, so an idle
+// desk carries two pointers and not the structs.
 static sess_t *g_sess;
+
+// -- the runtime's allocator ---------------------------------------------------
+//
+// One runtime serves every open session (WAMR counts its inits): it is made
+// by the first session's thread and goes with the last's. Each session keeps
+// its own pool, sized by moy_wasm_footprint.h's rule for its module, and what
+// the runtime allocates for a session -- its module, instance and exec envs
+// -- comes from that session's pool, freed with it. The runtime's own
+// structures, made while the first session brings it up, and the import
+// tables' registrations (moy_wasm_register_rows) come from PSRAM's heap, so
+// they outlive the session that made them. A free goes to the pool the block
+// lies in. The session being served is the
+// current one: the VM's task calls one session at a time.
+
+static sess_t *pool_of(const void *p)
+{
+    for (sess_t *s = g_sessions; s != NULL; s = s->next) {
+        if (s->pool != NULL && (const uint8_t *)p >= s->pool
+            && (const uint8_t *)p < s->pool + s->pool_size) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+// The session whose thread this is, else the current one: a command's
+// session runs its module while the VM's task serves another's (a WASI
+// command, below), so what its thread allocates or asks of the VM is its own.
+static sess_t *sess_here(void)
+{
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    for (sess_t *s = g_sessions; s != NULL; s = s->next) {
+        if (s->thread == me) {
+            return s;
+        }
+    }
+    return g_sess;
+}
+
+static void *rt_malloc(unsigned int n)
+{
+    sess_t *s = sess_here();
+    if (s != NULL && s->alloc != NULL && !s->rt_heap) {
+        return mem_allocator_malloc(s->alloc, n);
+    }
+    return heap_caps_malloc(n, PSRAM_CAPS);
+}
+
+static void *rt_realloc(void *p, unsigned int n)
+{
+    if (p == NULL) {
+        return rt_malloc(n);
+    }
+    sess_t *s = pool_of(p);
+    return s != NULL ? mem_allocator_realloc(s->alloc, p, n) : heap_caps_realloc(p, n, PSRAM_CAPS);
+}
+
+static void rt_free(void *p)
+{
+    if (p == NULL) {
+        return;
+    }
+    sess_t *s = pool_of(p);
+    if (s != NULL) {
+        mem_allocator_free(s->alloc, p);
+    } else {
+        heap_caps_free(p);
+    }
+}
 
 // On the task: wait for the thread's answer, serving every VM request that
 // arrives first. The caller set `waiting` before it woke the thread, so a
@@ -819,9 +848,22 @@ static void sess_wait(sess_t *s)
     s->waiting = false;
 }
 
+int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n)
+{
+    sess_t *s = sess_here();
+    if (s != NULL) {
+        s->rt_heap = true;
+    }
+    bool ok = wasm_runtime_register_natives_sorted(module, rows, n);
+    if (s != NULL) {
+        s->rt_heap = false;
+    }
+    return ok ? 1 : 0;
+}
+
 int moy_wasm_on_vm(void (*fn)(void *arg), void *arg)
 {
-    sess_t *s = g_sess;
+    sess_t *s = sess_here();
     if (!s || !s->live || !s->waiting || xTaskGetCurrentTaskHandle() != s->thread) {
         return -1;
     }
@@ -945,6 +987,32 @@ static int sess_fail(sess_t *s, const char *what, const char *detail)
     return 1;
 }
 
+// A "native stack overflow" carries the numbers the check compared, from
+// this thread's stack's low end at the open: where that end is now (the
+// RISC-V port moves it up as it carves coprocessor save areas), the boundary
+// the env holds and the one handed to it (MOY_WASM_STACK_GUARD), the least
+// this thread has had free, the largest frame an AOT entry check asks for,
+// and whether the env was last entered here.
+static void stack_note(sess_t *s, wasm_exec_env_t env)
+{
+    if (env == NULL || strstr(s->err, "native stack overflow") == NULL) {
+        return;
+    }
+    void *bound, *user;
+    pthread_t by;
+    uint32_t size_max;
+    moy_wasm_env_stack(env, &bound, &user, &by, &size_max);
+    uint8_t *lo = s->stack_lo;
+    size_t n = strlen(s->err);
+    snprintf(s->err + n, sizeof(s->err) - n,
+             " [stack %p%+d bound %+d set %+d free %u frame %u %s]", (void *)lo,
+             (int)(pxTaskGetStackStart(NULL) - lo), (int)((uint8_t *)bound - lo),
+             (int)((uint8_t *)user - lo),
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+             (unsigned)size_max, pthread_equal(by, pthread_self()) ? "here" : "elsewhere");
+    printf("moy_wasm: %s\n", s->err);
+}
+
 static void *sess_thread(void *arg)
 {
     sess_t *s = arg;
@@ -968,12 +1036,23 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         goto opened;
     }
+    s->alloc = mem_allocator_create(pool, (uint32_t)pool_size);
+    if (s->alloc == NULL) {
+        rc = sess_fail(s, "runtime init", "the pool would not take an allocator");
+        goto opened;
+    }
+    s->pool_size = pool_size;
+    s->pool = pool;
     RuntimeInitArgs init;
     memset(&init, 0, sizeof(init));
-    init.mem_alloc_type = Alloc_With_Pool;
-    init.mem_alloc_option.pool.heap_buf = pool;
-    init.mem_alloc_option.pool.heap_size = pool_size;
-    if (!wasm_runtime_full_init(&init)) {
+    init.mem_alloc_type = Alloc_With_Allocator;
+    init.mem_alloc_option.allocator.malloc_func = (void *)rt_malloc;
+    init.mem_alloc_option.allocator.realloc_func = (void *)rt_realloc;
+    init.mem_alloc_option.allocator.free_func = (void *)rt_free;
+    s->rt_heap = true;
+    bool inited = wasm_runtime_full_init(&init);
+    s->rt_heap = false;
+    if (!inited) {
         rc = sess_fail(s, "runtime init", NULL);
         goto opened;
     }
@@ -1038,8 +1117,8 @@ static void *sess_thread(void *arg)
         rc = sess_fail(s, OUT_OF_MEMORY, "no pool for the exec env");
         goto opened;
     }
-    wasm_runtime_set_native_stack_boundary(
-        env, pxTaskGetStackStart(NULL) + MOY_WASM_STACK_GUARD);
+    s->stack_lo = pxTaskGetStackStart(NULL);
+    wasm_runtime_set_native_stack_boundary(env, s->stack_lo + MOY_WASM_STACK_GUARD);
     err[0] = 0;
     if (ops->bound && ops->bound(ops->user, env, err, sizeof(err))) {
         rc = sess_fail(s, "bind", err);
@@ -1057,6 +1136,9 @@ opened:
         // A failed open is closed by its opener and never called.
         s->err[0] = 0;
         s->rc = ops->call(ops->user, s->what, s->dt, s->err, sizeof(s->err));
+        if (s->rc != 0) {
+            stack_note(s, env);
+        }
         xSemaphoreGive(s->back);
     }
     if (up && ops->unbound) {
@@ -1074,7 +1156,12 @@ opened:
         wasm_runtime_unload(module);
     }
     if (up) {
-        wasm_runtime_destroy();
+        wasm_runtime_destroy();             // the last session's takes it down
+    }
+    s->pool = NULL;
+    if (s->alloc != NULL) {
+        mem_allocator_destroy(s->alloc);
+        s->alloc = NULL;
     }
     if (pool) {
         heap_caps_free(pool);
@@ -1110,10 +1197,26 @@ static void sess_free(sess_t *s)
     if (s->vm_done) {
         vSemaphoreDelete(s->vm_done);
     }
-    heap_caps_free(s);
+    for (sess_t **p = &g_sessions; *p != NULL; p = &(*p)->next) {
+        if (*p == s) {
+            *p = s->next;
+            break;
+        }
+    }
     if (g_sess == s) {
         g_sess = NULL;
     }
+    heap_caps_free(s);
+}
+
+void *moy_wasm_session_current(void)
+{
+    return g_sess;
+}
+
+void moy_wasm_session_use(void *s)
+{
+    g_sess = s;
 }
 
 void moy_wasm_session_close(void)
@@ -1132,11 +1235,12 @@ void moy_wasm_session_close(void)
     sess_free(s);
 }
 
-int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
-                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
-                          char *err, size_t errlen)
+// moy_wasm_session_open with the session's thread on `core` at `prio`.
+static int sess_open(const char *path, const char *want_sha, uint32_t memory,
+                     int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                     int core, int prio, char *err, size_t errlen)
 {
-    if (moy_wasm_session_live() || g_run.started) {
+    if (g_run != NULL && g_run->started) {
         snprintf(err, errlen, "a wasm run is already live");
         return 1;
     }
@@ -1145,6 +1249,8 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         snprintf(err, errlen, OUT_OF_MEMORY ": no PSRAM for the cart's session");
         return 1;
     }
+    s->next = g_sessions;
+    g_sessions = s;
     s->go = xSemaphoreCreateBinary();
     s->back = xSemaphoreCreateBinary();
     s->vm_done = xSemaphoreCreateBinary();
@@ -1177,10 +1283,9 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         }
     }
     // main.wasm carries no signature and needs none: the interpreter is the
-    // sandbox (moy_wasm_key.h). Everything else -- AOT modules -- still goes
-    // through the Unknown sources gate as before.
+    // sandbox (moy_wasm_key.h). An AOT module is native code, and is admitted.
     if (!s->interp) {
-        const char *why = verify_module(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
+        const char *why = admit(s->file, s->file_len, allow_unsigned != 0, &s->file_len);
         if (why) {
             snprintf(err, errlen, "refused: %s", why);
             sess_free(s);
@@ -1189,7 +1294,7 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
     }
     s->waiting = true;
     int pe = moy_wasm_spawn(&s->tid, sess_thread, s, MOY_WASM_STACK_BYTES,
-                            MOY_WASM_STACK_PSRAM, MOY_WASM_CORE, MOY_WASM_PRIO);
+                            MOY_WASM_STACK_PSRAM, core, prio);
     if (pe != 0) {
         sess_free(s);
         snprintf(err, errlen, "could not start the cart's thread");
@@ -1203,6 +1308,14 @@ int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memor
         return 1;
     }
     return 0;
+}
+
+int moy_wasm_session_open(const char *path, const char *want_sha, uint32_t memory,
+                          int allow_unsigned, int interp, const moy_wasm_ops *ops,
+                          char *err, size_t errlen)
+{
+    return sess_open(path, want_sha, memory, allow_unsigned, interp, ops, MOY_WASM_CORE,
+                     MOY_WASM_PRIO, err, errlen);
 }
 
 int moy_wasm_session_call(int what, float dt, char *err, size_t errlen)
@@ -1235,8 +1348,8 @@ static void put(mp_obj_t d, qstr k, mp_obj_t v)
 // while it waits). None when nothing was started.
 static mp_obj_t mod_result(void)
 {
-    run_t *r = &g_run;
-    if (!r->started) {
+    run_t *r = g_run;
+    if (r == NULL || !r->started) {
         return mp_const_none;
     }
     size_t sram_min = r->sram_before;
@@ -1354,10 +1467,620 @@ static mp_obj_t mod_lanes(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lanes_obj, mod_lanes);
 
+// tlanes() -> [(name, ran, calls, frames, max_us, struck, why)] per timed lane
+// of the last session (moy_wasm_session.h), [] on a board without them.
+static mp_obj_t mod_tlanes(void)
+{
+    static const qstr names[MOY_WASM_TLANES] = { MP_QSTR_moy_audio, MP_QSTR_moy_timer };
+    moy_wasm_tlane_stats_t st[MOY_WASM_TLANES];
+    int n = moy_wasm_tlanes_stats(st);
+    mp_obj_t l = mp_obj_new_list(0, NULL);
+    for (int k = 0; k < n; k++) {
+        mp_obj_t t[7] = { MP_OBJ_NEW_QSTR(names[k]), mp_obj_new_bool(st[k].ran),
+                          INT(st[k].calls), INT(st[k].frames), INT(st[k].max_us),
+                          mp_obj_new_bool(st[k].struck),
+                          mp_obj_new_str(st[k].why, strlen(st[k].why)) };
+        mp_obj_list_append(l, mp_obj_new_tuple(7, t));
+    }
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_tlanes_obj, mod_tlanes);
+
 static MP_DEFINE_STR_OBJ(mod_key_obj, "format " MOY_WASM_FORMAT_VERSION "\n" KEY_TARGET);
 static MP_DEFINE_STR_OBJ(mod_format_obj, MOY_WASM_FORMAT_VERSION);
 static MP_DEFINE_STR_OBJ(mod_fork_obj, MOY_WASM_FORK_COMMIT);
 static MP_DEFINE_STR_OBJ(mod_chip_obj, KEY_CHIP);
+
+// -- a WASI command (moy_wasi.h) ----------------------------------------------------
+//
+// A command runs in steps (moy_wasi.h's "IN STEPS"), so the console's frame
+// goes on while it runs. command_start(path, want_sha, interp,
+// allow_unsigned, argv, roots, bg_pid, budget_ms) -> (status, err) runs the
+// module `path` as a command in the shell session the door's crossing runs
+// in (moy_sh_running), a session of its own opened for it and its call into
+// `_start` begun on the session's thread, whichever session was current made
+// current again: (0, None) with it running, or (-3, the reason it did not
+// run). command_step(max_ms) serves its calls for `max_ms` at most, the
+// natives' bodies hopping to this task (moy_wasm_on_vm): (-100, None) while
+// it goes on, else its end; command_stop() ends it as Ctrl-C does. Its end
+// is (the exit status, None) or (-1, the trap), its session closed. `roots`
+// is NUL-separated. One command at a time.
+
+typedef struct {
+    moy_wasi_t *w;
+    bool registered;                // moy_wasi_register's tables, while it runs
+    wasm_exec_env_t env;
+    moy_wasm_ops ops;               // the session's, read while it lives
+    sess_t *sess;
+    volatile bool returned;         // `_start` has returned on the session's thread
+    int status;
+    char err[ERR_MAX];
+} cmd_t;
+
+static cmd_t *g_cmd;
+
+static int cmd_up(void *user, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    if (moy_wasi_register() != 0) {
+        snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
+        return 1;
+    }
+    c->registered = true;
+    return 0;
+}
+
+static int cmd_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
+{
+    (void)user;
+    return moy_wasi_check(module, err, errlen);
+}
+
+static int cmd_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    (void)err;
+    (void)errlen;
+    c->env = env;
+    return 0;
+}
+
+static int cmd_call(void *user, int what, float dt, char *err, size_t errlen)
+{
+    cmd_t *c = user;
+    (void)what;
+    (void)dt;
+    (void)err;
+    (void)errlen;
+    c->status = moy_wasi_main(c->w, c->env, c->err, sizeof(c->err));
+    return 0;
+}
+
+static void cmd_unbound(void *user)
+{
+    cmd_t *c = user;
+    if (c->registered) {
+        moy_wasi_unregister();
+        c->registered = false;
+    }
+    c->env = NULL;
+}
+
+// The runner (moy_wasi_runner_t): the session's handshake, as sess_wait
+// serves it, a wait at a time.
+static bool cmd_done(void *job)
+{
+    return ((cmd_t *)job)->returned;
+}
+
+static void cmd_serve(void *job, int64_t us)
+{
+    cmd_t *c = job;
+    sess_t *s = c->sess;
+    TickType_t t = (TickType_t)((us + 999) / 1000 / portTICK_PERIOD_MS + 1);
+    if (xSemaphoreTake(s->back, t) == pdTRUE) {
+        void (*fn)(void *) = s->vm_fn;
+        if (fn == NULL) {
+            s->waiting = false;
+            c->returned = true;
+        } else {
+            s->vm_fn = NULL;
+            fn(s->vm_arg);
+            xSemaphoreGive(s->vm_done);
+        }
+    }
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
+}
+
+static void cmd_terminate(void *job)
+{
+    sess_t *s = ((cmd_t *)job)->sess;
+    if (s->inst) {
+        wasm_runtime_terminate(s->inst);
+    }
+}
+
+static const moy_wasi_runner_t cmd_runner = { cmd_done, cmd_serve, cmd_terminate };
+
+static mp_obj_t cmd_answer(int status, const char *err)
+{
+    mp_obj_t out[2] = {
+        mp_obj_new_int(status),
+        status < 0 && status != MOY_WASI_RUNNING ? mp_obj_new_str(err, strlen(err))
+                                                 : mp_const_none,
+    };
+    return mp_obj_new_tuple(2, out);
+}
+
+// The command's end, `_start` returned: its session closed, the session
+// current before made current again, its record freed. Its answer.
+static mp_obj_t cmd_end(void)
+{
+    cmd_t *c = g_cmd;
+    void *was = moy_wasm_session_current();
+    if (c->sess != NULL) {
+        moy_wasm_session_use(c->sess);
+        moy_wasm_session_close();
+        moy_wasm_session_use(was == c->sess ? NULL : was);
+    }
+    int code = moy_wasi_status(c->w, c->status);
+    int status = code == MOY_WASI_TRAPPED ? -1 : code < 0 ? -3 : code;
+    char err[ERR_MAX];
+    snprintf(err, sizeof(err), "%s", c->err);
+    g_cmd = NULL;
+    moy_wasi_free(c->w);
+    heap_caps_free(c);
+    return cmd_answer(status, err);
+}
+
+// A program's app run from its argument: the bytes of a moy_app_run_t
+// (moy_app's `run`), None for none.
+static const moy_app_run_t *run_arg(mp_obj_t o)
+{
+    if (o == mp_const_none) {
+        return NULL;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    if (b.len != sizeof(moy_app_run_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not a run"));
+    }
+    return (const moy_app_run_t *)b.buf;
+}
+
+static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
+{
+    const char *path = mp_obj_str_get_str(args[0]);
+    const char *sha = args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]);
+    int interp = mp_obj_is_true(args[2]);
+    int unsigned_ok = mp_obj_is_true(args[3]);
+    size_t argc;
+    mp_obj_t *items;
+    mp_obj_get_array(args[4], &argc, &items);
+    size_t roots_n = 0;
+    const char *roots = args[5] == mp_const_none ? NULL : mp_obj_str_get_data(args[5], &roots_n);
+    uint32_t bg_pid = (uint32_t)mp_obj_get_int(args[6]);
+    uint32_t budget = (uint32_t)mp_obj_get_int(args[7]);
+    const moy_app_run_t *run = n_args > 8 ? run_arg(args[8]) : NULL;
+    (void)roots_n;
+    moy_sh_t *s = moy_sh_running();
+    if (s == NULL) {
+        return cmd_answer(-3, "no shell session is running");
+    }
+    if (g_cmd != NULL) {
+        return cmd_answer(-3, "a command is running");
+    }
+    const char **argv = m_new(const char *, argc ? argc : 1);
+    for (size_t i = 0; i < argc; i++) {
+        argv[i] = mp_obj_str_get_str(items[i]);
+    }
+    cmd_t *c = heap_caps_calloc(1, sizeof(cmd_t), PSRAM_CAPS);
+    if (c == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    c->status = -3;
+    c->w = moy_wasi_new(s, (int)argc, argv, roots, bg_pid, budget, moy_wasm_on_vm);
+    m_del(const char *, argv, argc ? argc : 1);
+    if (c->w == NULL) {
+        heap_caps_free(c);
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    moy_wasi_set_run(c->w, run);
+    c->ops = (moy_wasm_ops){
+        .user = c, .runtime_up = cmd_up, .loaded = cmd_loaded, .bound = cmd_bound,
+        .call = cmd_call, .unbound = cmd_unbound,
+    };
+    void *was = moy_wasm_session_current();
+    g_cmd = c;
+    char err[ERR_MAX];
+    err[0] = 0;
+    int opened = 1;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        opened = moy_wasm_session_open(path, sha, 0, unsigned_ok, interp, &c->ops, err,
+                                       sizeof(err));
+        nlr_pop();
+    } else {
+        g_cmd = NULL;
+        moy_wasm_session_use(was);
+        moy_wasi_free(c->w);
+        heap_caps_free(c);
+        nlr_jump(nlr.ret_val);
+    }
+    if (opened != 0) {
+        g_cmd = NULL;
+        moy_wasm_session_use(was);
+        moy_wasi_free(c->w);
+        heap_caps_free(c);
+        return cmd_answer(-3, err);
+    }
+    sess_t *ss = moy_wasm_session_current();
+    c->sess = ss;
+    ss->op = SESS_CALL;
+    ss->what = 0;
+    ss->dt = 0.0f;
+    ss->waiting = true;
+    xSemaphoreGive(ss->go);
+    moy_wasm_session_use(was);
+    return cmd_answer(0, "");
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_command_start_obj, 8, 9, mod_command_start);
+
+static mp_obj_t mod_command_step(mp_obj_t max_ms_in)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    uint32_t max_us = (uint32_t)mp_obj_get_int(max_ms_in) * 1000u;
+    if (moy_wasi_step(c->w, &cmd_runner, c, max_us) == MOY_WASI_RUNNING) {
+        return cmd_answer(MOY_WASI_RUNNING, "");
+    }
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_command_step_obj, mod_command_step);
+
+static mp_obj_t mod_command_stop(void)
+{
+    cmd_t *c = g_cmd;
+    if (c == NULL) {
+        return cmd_answer(-3, "no command is running");
+    }
+    moy_wasi_stop(c->w, &cmd_runner, c);
+    return cmd_end();
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_command_stop_obj, mod_command_stop);
+
+// -- WASI services (moy_wasi.h, A SERVICE) ---------------------------------------------
+//
+// Each service is a session of its own (a task, its pool, its module), its
+// task at MOY_WASM_SVC_PRIO on a Lua service's core (moycore_svc.h: core 0
+// on the P4s, core 1 on the S3s), its stack in PSRAM as every session's;
+// its call into `_start` begun there and left running, its calls run in
+// place on that task (no session, no hop), so the VM's task never serves it.
+//
+// service_start(path, want_sha, interp, allow_unsigned, pid, id) -> None or
+// why; service_stop(pid) -> its exit status, or -1 for none: its descriptor
+// hung up, killed (137) past MOY_WASI_STOP_US; service_reap() -> [(pid,
+// status)] of the ended ones, the watchdog (moy_wasi_watch) run over the
+// live ones first, as the loop's job runs it once a frame while one lives
+// (an end wants the VM for its reap: moy_evq.h, THE VM'S WAKE);
+// service_info(pid) -> (linear memory bytes, its wakes'
+// time in us) or None once reaped. A service's session closes at its reap.
+#ifndef MOY_WASM_SVC_CORE
+#if CONFIG_IDF_TARGET_ESP32P4
+#define MOY_WASM_SVC_CORE 0
+#else
+#define MOY_WASM_SVC_CORE 1
+#endif
+#endif
+#ifndef MOY_WASM_SVC_PRIO
+#define MOY_WASM_SVC_PRIO 2
+#endif
+
+typedef struct wsvc {
+    struct wsvc *next;
+    uint32_t pid;
+    moy_wasi_t *w;
+    bool registered;                // moy_wasi_register's tables, while it runs
+    wasm_exec_env_t env;
+    moy_wasm_ops ops;               // the session's, read while it lives
+    sess_t *sess;
+    volatile bool returned;         // `_start` has returned on the session's thread
+    bool stopped;                   // its stop answered for it: reaped unreported
+    bool kept;                      // a Player app's run: its end is its stop's, never the reap's
+    int main;
+    char err[ERR_MAX];
+} wsvc_t;
+
+static wsvc_t *g_svcs;
+
+static int svc_up(void *user, char *err, size_t errlen)
+{
+    wsvc_t *v = user;
+    if (moy_wasi_register() != 0) {
+        snprintf(err, errlen, OUT_OF_MEMORY ": the WASI table would not register");
+        return 1;
+    }
+    v->registered = true;
+    return 0;
+}
+
+static int svc_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
+{
+    (void)err;
+    (void)errlen;
+    ((wsvc_t *)user)->env = env;
+    return 0;
+}
+
+static int svc_call(void *user, int what, float dt, char *err, size_t errlen)
+{
+    wsvc_t *v = user;
+    (void)what;
+    (void)dt;
+    (void)err;
+    (void)errlen;
+    v->main = moy_wasi_main(v->w, v->env, v->err, sizeof(v->err));
+    v->returned = true;
+    moy_evq_want(MOY_EVQ_WANT_POLL);    // its reap is the VM's
+    return 0;
+}
+
+static void svc_unbound(void *user)
+{
+    wsvc_t *v = user;
+    if (v->registered) {
+        moy_wasi_unregister();
+        v->registered = false;
+    }
+    v->env = NULL;
+}
+
+static wsvc_t *svc_of(uint32_t pid)
+{
+    for (wsvc_t *v = g_svcs; v != NULL; v = v->next) {
+        if (v->pid == pid && !v->stopped) {
+            return v;
+        }
+    }
+    return NULL;
+}
+
+// Its exit status once `_start` has returned: the call's answer taken, its
+// session closed (the current one kept), its record freed.
+static int svc_end(wsvc_t *v)
+{
+    sess_t *ss = v->sess;
+    xSemaphoreTake(ss->back, portMAX_DELAY);
+    ss->waiting = false;
+    void *was = moy_wasm_session_current();
+    moy_wasm_session_use(ss);
+    moy_wasm_session_close();
+    moy_wasm_session_use(was == ss ? NULL : was);
+    int code = moy_wasi_service_status(v->w, v->main, v->err);
+    for (wsvc_t **p = &g_svcs; *p != NULL; p = &(*p)->next) {
+        if (*p == v) {
+            *p = v->next;
+            break;
+        }
+    }
+    moy_wasi_free(v->w);
+    heap_caps_free(v);
+    return code;
+}
+
+// Waits up to `us` for `_start` to return, the task's watchdog fed: whether it has.
+// The wait runs on the VM's task, so it serves the VM's queue: a row the
+// service hops with (a device handle's read on its tick) is answered, and the
+// service reaches its poll and its end.
+static bool svc_wait(wsvc_t *v, int64_t us)
+{
+    int64_t end = esp_timer_get_time() + us;
+    while (!v->returned && esp_timer_get_time() < end) {
+        moy_vmq_serve();
+        vTaskDelay(1);
+        if (esp_task_wdt_status(NULL) == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+    }
+    return v->returned;
+}
+
+// The watchdog over live service `v` (moy_wasi_watch), a kill logged.
+static void svc_watch(wsvc_t *v)
+{
+    const char *why = v->stopped ? NULL : moy_wasi_watch(v->w);
+    if (why != NULL) {
+        char line[96];
+        int k = snprintf(line, sizeof(line), "killed: %s", why);
+        moy_log_write(MOY_LOG_ERR, v->pid, line, (size_t)k);
+        moy_wasi_kill(v->w, MOY_PROC_KILLED);
+    }
+}
+
+// The loop's job (moy_loop.h) while a service lives: the watchdog once a
+// frame on the console's task, where no VM wake is due. A kill ends `_start`,
+// whose return wants the VM for the reap (svc_call).
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+
+static bool svc_watch_job(void *arg)
+{
+    (void)arg;
+    for (wsvc_t *v = g_svcs; v != NULL; v = v->next) {
+        if (!v->returned) {
+            svc_watch(v);
+        }
+    }
+    return g_svcs != NULL;
+}
+
+static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
+{
+    const char *path = mp_obj_str_get_str(args[0]);
+    const char *sha = args[1] == mp_const_none ? NULL : mp_obj_str_get_str(args[1]);
+    int interp = mp_obj_is_true(args[2]);
+    int unsigned_ok = mp_obj_is_true(args[3]);
+    uint32_t pid = (uint32_t)mp_obj_get_int(args[4]);
+    const char *id = mp_obj_str_get_str(args[5]);
+    (void)n_args;
+    if (svc_of(pid) != NULL) {
+        return mp_obj_new_str("a service runs as that process", 30);
+    }
+    if (moy_loop_job != NULL && !moy_loop_job(svc_watch_job, NULL)) {
+        return mp_obj_new_str("no room for its watchdog", 24);
+    }
+    wsvc_t *v = heap_caps_calloc(1, sizeof(wsvc_t), PSRAM_CAPS);
+    if (v == NULL) {
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    v->pid = pid;
+    v->w = moy_wasi_service(pid, id);
+    if (v->w == NULL) {
+        heap_caps_free(v);
+        mp_raise_type(&mp_type_MemoryError);
+    }
+    moy_wasi_set_run(v->w, n_args > 6 ? run_arg(args[6]) : NULL);
+    v->ops = (moy_wasm_ops){
+        .user = v, .runtime_up = svc_up, .loaded = cmd_loaded, .bound = svc_bound,
+        .call = svc_call, .unbound = svc_unbound,
+    };
+    void *was = moy_wasm_session_current();
+    char err[ERR_MAX];
+    err[0] = 0;
+    int opened = 1;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        opened = sess_open(path, sha, 0, unsigned_ok, interp, &v->ops, MOY_WASM_SVC_CORE,
+                           MOY_WASM_SVC_PRIO, err, sizeof(err));
+        nlr_pop();
+    } else {
+        moy_wasm_session_use(was);
+        moy_wasi_free(v->w);
+        heap_caps_free(v);
+        nlr_jump(nlr.ret_val);
+    }
+    if (opened != 0) {
+        moy_wasm_session_use(was);
+        moy_wasi_free(v->w);
+        heap_caps_free(v);
+        return mp_obj_new_str(err, strlen(err));
+    }
+    sess_t *ss = moy_wasm_session_current();
+    v->sess = ss;
+    ss->op = SESS_CALL;
+    ss->what = 0;
+    ss->dt = 0.0f;
+    ss->waiting = true;
+    v->next = g_svcs;
+    g_svcs = v;
+    xSemaphoreGive(ss->go);
+    moy_wasm_session_use(was);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_start_obj, 6, 7, mod_service_start);
+
+// Live service `v` stopped: hung up, killed past MOY_WASI_STOP_US; its exit
+// status.
+static int svc_stop(wsvc_t *v)
+{
+    if (!v->returned) {
+        moy_wasi_hangup(v->w);
+        if (!svc_wait(v, MOY_WASI_STOP_US)) {
+            moy_wasi_kill(v->w, MOY_PROC_KILLED);
+            if (!svc_wait(v, 100000)) {
+                v->stopped = true;
+                return MOY_PROC_KILLED;
+            }
+        }
+    }
+    return svc_end(v);
+}
+
+static mp_obj_t mod_service_stop(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    return MP_OBJ_NEW_SMALL_INT(v == NULL ? -1 : svc_stop(v));
+}
+
+// Every service stopped as service_stop stops one, its exit logged: a soft
+// reset (moy_kernel.c), whose next VM has no record to take them back by.
+void moy_wasm_services_end(void)
+{
+    wsvc_t *next;
+    for (wsvc_t *v = g_svcs; v != NULL; v = next) {
+        next = v->next;
+        if (v->stopped) {
+            continue;
+        }
+        uint32_t pid = v->pid;
+        char line[40];
+        int k = snprintf(line, sizeof(line), "exit %d (a soft reset)", svc_stop(v));
+        moy_log_write(MOY_LOG_INFO, pid, line, (size_t)k);
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_stop_obj, mod_service_stop);
+
+static mp_obj_t mod_service_reap(void)
+{
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    wsvc_t *next;
+    for (wsvc_t *v = g_svcs; v != NULL; v = next) {
+        next = v->next;
+        if (!v->returned) {
+            svc_watch(v);
+            continue;
+        }
+        if (v->kept && !v->stopped) {
+            continue;
+        }
+        bool stopped = v->stopped;
+        uint32_t pid = v->pid;
+        int code = svc_end(v);
+        if (!stopped) {
+            mp_obj_t row[2] = { mp_obj_new_int_from_uint(pid), mp_obj_new_int(code) };
+            mp_obj_list_append(out, mp_obj_new_tuple(2, row));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_service_reap_obj, mod_service_reap);
+
+static mp_obj_t mod_service_info(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    if (v == NULL) {
+        return mp_const_none;
+    }
+    uint32_t mapped, cost;
+    moy_wasi_figures(v->w, &mapped, &cost);
+    mp_obj_t row[2] = { mp_obj_new_int_from_uint(mapped), mp_obj_new_int_from_uint(cost) };
+    return mp_obj_new_tuple(2, row);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_info_obj, mod_service_info);
+
+// service_keep(pid) -> whether service `pid` is now a Player app's run
+// (runtime/run/wasi_run.py): the reap leaves its end to its stop.
+// service_done(pid) -> whether its `_start` has returned.
+static mp_obj_t mod_service_keep(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    if (v != NULL) {
+        v->kept = true;
+    }
+    return mp_obj_new_bool(v != NULL);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_keep_obj, mod_service_keep);
+
+static mp_obj_t mod_service_done(mp_obj_t pid_in)
+{
+    wsvc_t *v = svc_of((uint32_t)mp_obj_get_int(pid_in));
+    return mp_obj_new_bool(v == NULL || v->returned);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_service_done_obj, mod_service_done);
+
 
 static const mp_rom_obj_tuple_t mod_stack_obj = {
     {&mp_type_tuple}, 2,
@@ -1372,8 +2095,18 @@ static const mp_rom_map_elem_t moy_wasm_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_terminate), MP_ROM_PTR(&mod_terminate_obj) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_lanes), MP_ROM_PTR(&mod_lanes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tlanes), MP_ROM_PTR(&mod_tlanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_footprint), MP_ROM_PTR(&mod_footprint_obj) },
     { MP_ROM_QSTR(MP_QSTR_interp_footprint), MP_ROM_PTR(&mod_interp_footprint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_start), MP_ROM_PTR(&mod_command_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_step), MP_ROM_PTR(&mod_command_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_command_stop), MP_ROM_PTR(&mod_command_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_start), MP_ROM_PTR(&mod_service_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_stop), MP_ROM_PTR(&mod_service_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_reap), MP_ROM_PTR(&mod_service_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_info), MP_ROM_PTR(&mod_service_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_keep), MP_ROM_PTR(&mod_service_keep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_service_done), MP_ROM_PTR(&mod_service_done_obj) },
     // The key tail this build wants (after the wasm line), the compiled-code
     // format version and the fork commit the engine was vendored from
     // (diagnostic only -- FORK plays no part in the key since 2026-09-30, ESP

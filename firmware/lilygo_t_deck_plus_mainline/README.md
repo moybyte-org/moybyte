@@ -39,8 +39,10 @@ not in it, and the panel is one C file. Both builds stamped OTA board id
 `tdeck` against a byte-identical partition table, so a payload from either
 installed into the other's inactive slot — which made the migration an OTA
 rather than a cable flash. The build prints the image's headroom; nothing else
-is current. The slots are 7 MiB since 2026-10-26 (the table's CSV,
-`boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why).
+is current. The slots are 7 MiB since 2026-10-26, and the 128 KiB coredump
+partition after them (2026-11-09: a panic's ESP-IDF core dump,
+`tools/coredump.py`) came off the vfs; the table's CSV,
+`boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
 
 ---
 
@@ -225,7 +227,7 @@ Moybyte sd: rounds=10 bad=0 write_max=NNms read_max=NNms
 
 **With no card in the slot** the mount fails, and the smoke deliberately keeps
 going: it flushes the panel and reports `SD = panel ok after a failed mount`.
-That is a real check, not politeness — `moy_sd.init()` calls `sdspi_host_deinit()`
+That is a real check, not politeness — `moy_sd.up()` calls `sdspi_host_deinit()`
 on a failed attach, which is the one teardown in this design, and it must not
 poison the bus.
 
@@ -342,6 +344,19 @@ Xinyuan-LilyGO/T-Deck); the protocols are its examples'.
   with. Nothing in the console drives it yet; the module talks into U0RXD
   whenever the board's power rail (GPIO10) is up.
 
+## The pins and the expansion header
+
+Every GPIO pad of this ESP32-S3 is wired, and `board.toml`'s `[hardware]`
+holds each one's row (`docs/os_2026-11/hardware.md` §1), from the vendor's
+`utilities.h`: SPI2 (the panel, the SD card and the radio's CS), I2C0 (the
+keyboard with its interrupt on GPIO46, and the touch), the trackball, the
+speaker, the power rail, the backlight, the battery, the SX1262's reset,
+busy and DIO1 (17, 13, 45), the ES7210 mic (MCLK 48, LRCK 21, SCK 47,
+DIN 14), the GPS on UART0, USB, and the octal flash and PSRAM. The one
+expansion connector is the Grove port, UART0 on 43/44, which the T-Deck Plus
+gives to its GPS. So the board has no free GPIO and no `lease` row: its
+hardware reaches apps only through device APIs.
+
 ## The serial dev channel
 
 The console answers line commands on its USB serial through the one
@@ -381,6 +396,19 @@ was deleted on 2026-08-17 — a verdict, not a TODO.
 **Do NOT use the USB product id as the RX tell.** A working board enumerates
 `303a:1001`, the USB-Serial/JTAG peripheral doing its job; `303a:4001` is
 TinyUSB CDC, the arrangement that does NOT take input here.
+
+**Settings' USB drive takes the channel while it is on.** It switches the
+S3's one internal PHY from USB-Serial/JTAG to the OTG controller, and the
+card enumerates as a drive (`303a:4008`, native/moy_usbdisk): no dev channel,
+no console, no esptool reset until it is turned off on the glass, the
+computer lets the card go (an eject, `udisksctl power-off`, the cable out),
+or no computer has configured it for 30 s (the driver's own timeout, which
+needs no VM), when the PHY switches back and `303a:1001` returns.
+A restart switches back first, the image's start puts the PHY on
+USB-Serial/JTAG before anything prints, and the trackball-in power-on below
+reaches the ROM loader either way. A tool that drives the board has to turn
+it off itself: `udisksctl unmount` and `udisksctl power-off` on the
+drive, which need no root.
 
 The channel never calls `readline()`: it registers `select.POLLIN` only (a bare
 `register()` is truthy forever, because `mphalport.c` grants `POLL_WR`
@@ -690,7 +718,10 @@ poller it served (2026-10-07): the keyboard and the GT911 are the kernel's,
 passed on its input task, and nothing opens a `machine.I2C`. A third rides
 along, the same one the P4 build reuses: **native-code-free**
 (#66), which lets a cart-compile miss reclaim the `@micropython.native` exec
-arena instead of growing it until soft reset.
+arena instead of growing it until soft reset. And one this tree adds to the
+component manager's copy of espressif/mdns, `moybyte_patch_mdns_psram`: the
+responder's scratch is a PSRAM block while it serves `<name>.local` for SSH,
+not internal .bss for the whole power-on.
 
 ---
 
@@ -737,6 +768,11 @@ Every one of these was learned by hanging or bricking a board.
   blocking flush could not overlap anything. If a first boot wedges with
   `SD > op` as the last serial line, this is the first place to look, and
   `ASYNC_FLUSH = False` is the test.
+  The LoRa radio, the host's third device, takes neither route: its driver
+  (`native/moy_net/moy_lora.c`) adds it to the live host after the panel and
+  wraps every transaction in the flush's band-gap gate
+  (`native/moy_flush/moy_flush.h`), which stops the feeder queuing bands and
+  lets the queued ones finish before the radio's command goes out.
   The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
   `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
   store read (`tests/test_cover_pipeline.py` pins the gate).

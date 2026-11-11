@@ -18,7 +18,7 @@ THE TOGGLE IS `config.json`'s `perf`, which is the cart API's existing
 "Make it mine" surface (`cfg(key, default)`, docs/moy_cart_api.md): 0 plays the
 cart normally, 1 jumps straight into the measured scene. A kid never sees it; a
 measurement session flips it in the Editor's Config tab with no re-push, and
-`host_app._SEED_PRESERVE` keeps the value across a re-seed. 0/1 rather than
+a re-seed keeps the value (`moy_seed._RESEED_PRESERVE`). 0/1 rather than
 true/false because that is what the shipped carts already use
 (`moybyte.brick_siege_lua.moy/config.json`) and what `cfg` types cleanly -- moy_lua.c's
 `l_cfg` converts a whole-string number to a Lua number, so `cfg("perf", 0) ~= 0`

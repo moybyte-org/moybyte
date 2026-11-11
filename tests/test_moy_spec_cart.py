@@ -98,12 +98,12 @@ def test_cart_palette_applied_then_restored(tmp_path):
                      type="game", palette=RED64)
     from runtime import host_app
     ws = host_app.build_workstation(root)
-    default_red = ws.canvas.palette[8]           # MOY64 idx 8 (FF004D)
+    default_red = ws.run.canvas.palette[8]           # MOY64 idx 8 (FF004D)
     _open(ws, "Reddish")
     assert not ws.cart_error
-    assert tuple(ws.canvas.palette[8]) == (255, 0, 0)   # cart table live
-    ws.player.release_world()
-    assert tuple(ws.canvas.palette[8]) == tuple(default_red)  # restored
+    assert tuple(ws.run.canvas.palette[8]) == (255, 0, 0)   # cart table live
+    ws.run.player.release_world()
+    assert tuple(ws.run.canvas.palette[8]) == tuple(default_red)  # restored
 
 
 # -- SPEC.md 3.1: a manifest survives a rewrite, and a bad field degrades ------
@@ -323,7 +323,7 @@ def test_unknown_runtime_is_refused_cleanly(tmp_path):
     _open(ws, "Forth")
     assert ws.cart_error and "forth" in ws.cart_error
     # and the refusal must not have left a half-started world behind
-    assert ws.player._lua is None
+    assert ws.run.player._lua is None
 
 
 def test_lua_runtime_still_runs(tmp_path):
@@ -628,14 +628,14 @@ def test_a_flag_edit_reaches_the_running_cart_and_its_fset_stays_the_runs(tmp_pa
 
     def got():
         if lua:
-            return int(float(ws.player._lua.get_global("F")))
-        return ws.player.ns["F"]
+            return int(float(ws.run.player._lua.get_global("F")))
+        return ws.run.player.ns["F"]
 
     for _ in range(2):
         frame()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert got() == 0
-    flags = ws.project.flags
+    flags = ws.run.project.flags
     assert flags[2] == 0, "the cart's fset is the run's, not the Editor's"
     flags[1] ^= 1 << 3                      # the Sprite tab's toggle (paint_layer)
     frame()

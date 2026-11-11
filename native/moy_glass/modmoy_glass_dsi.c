@@ -46,6 +46,18 @@ static bool dsi_ppa_done(void *ctx) {
     return dest[0] == MP_OBJ_NULL || mp_obj_is_true(mp_call_method_n_kw(0, 0, dest));
 }
 
+static void dsi_snap_wait(void *ctx) {
+    glass_dsi_obj_t *c = ctx;
+    mp_obj_t dest[2];
+    if (c->ppa == mp_const_none) {
+        return;
+    }
+    mp_load_method_maybe(c->ppa, MP_QSTR_snap_wait, dest);
+    if (dest[0] != MP_OBJ_NULL) {
+        mp_call_method_n_kw(0, 0, dest);
+    }
+}
+
 uint32_t glass_dsi_ticks(void *ctx) {
     (void)ctx;
     return (uint32_t)mp_hal_ticks_us();
@@ -110,6 +122,7 @@ static mp_obj_t dsi_make_new(const mp_obj_type_t *type, size_t n_args,
     c->ops.msync = dsi_msync;
     c->ops.ppa_sync = dsi_ppa_sync;
     c->ops.ppa_done = dsi_ppa_done;
+    c->ops.snap_wait = dsi_snap_wait;
     c->ops.ticks_us = glass_dsi_ticks;
     mp_load_method_maybe(dsi, MP_QSTR_refreshes, dest);
     c->refreshes = dest[0] == MP_OBJ_NULL ? mp_const_none

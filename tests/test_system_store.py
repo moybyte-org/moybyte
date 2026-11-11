@@ -23,7 +23,7 @@ import types
 import pytest
 
 from runtime import crash_guard, host_app, moy_carts, system_store
-from ws_helpers import build_ws
+from ws_helpers import build_ws, settle_badges
 
 DT = 1 / 30.0
 
@@ -33,6 +33,7 @@ def _ws(tmp_path):
     answering about the overlays and nothing else."""
     ws = build_ws(tmp_path)
     ws.look.select_wallpaper(None, persist=False)
+    settle_badges(ws)
     ws._toast_until = 0
     ws._splash_until = None
     return ws
@@ -58,12 +59,6 @@ class _AngryStore:
         raise OSError("card gone")
 
     def save_system(self, settings, root):
-        raise OSError("card gone")
-
-    def load_achievements(self, root):
-        raise OSError("card gone")
-
-    def save_achievements(self, doc, root):
         raise OSError("card gone")
 
 
@@ -166,7 +161,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
 
 
 def test_the_crash_guard_persists_through_the_store(tmp_path):
-    """`arm` writes a strike to system.json through the rows' save hook -- so a
+    """`arm` writes a strike to system/settings through the rows' save hook -- so a
     board that DIED holding one still knows on the next boot."""
     ws = _ws(tmp_path)
     ws.app_guard.arm("some_app")
@@ -212,9 +207,36 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
     ws._with_sd = counting
     ws.system.set("k", 1)
     ws.prefs.load()
-    ws.prefs.load_achievements()
-    ws.prefs.save_achievements(ws.ach.doc())
-    assert len(sessions) == 4
+    assert len(sessions) == 2
+
+
+def test_a_stepped_save_is_two_sessions_and_yields_to_a_newer_write(tmp_path):
+    """`save_steps` (the install prompt's consent) writes the rows in two
+    store sessions a frame apart -- the backup, then the marker and the file
+    -- and leaves them clean; a write of the rows between the two is the one
+    that lands, whole."""
+    ws = _ws(tmp_path)
+    sessions = []
+    inner = ws._with_sd
+
+    def counting(fn):
+        sessions.append(1)
+        return inner(fn)
+    ws._with_sd = counting
+    ws.system.set("k", 1, False)
+    steps = ws.prefs.save_steps()
+    next(steps)
+    assert len(sessions) == 1 and ws.system.dirty()
+    assert next(steps, None) is None
+    assert len(sessions) == 2 and not ws.system.dirty()
+    assert moy_carts.load_system(ws.carts_root)["k"] == 1
+    ws.system.set("k", 2, False)
+    steps = ws.prefs.save_steps()
+    next(steps)
+    ws.system.set("other", 3)               # a toggle saves the rows meanwhile
+    assert next(steps, None) is None and not ws.system.dirty()
+    got = moy_carts.load_system(ws.carts_root)
+    assert got["k"] == 2 and got["other"] == 3
 
 
 def test_a_read_only_console_attempts_no_write(tmp_path):
@@ -225,7 +247,6 @@ def test_a_read_only_console_attempts_no_write(tmp_path):
     ws._with_sd = lambda fn: attempts.append(1)
     ws.can_manage = False
     ws.system.set("k", 1)
-    ws.prefs.save_achievements(ws.ach.doc())
     assert attempts == []
     assert ws.system.get("k") == 1 and not ws.system.dirty()   # not a failure
 
@@ -243,15 +264,6 @@ def test_a_failing_write_is_not_fatal(tmp_path):
     assert moy_carts.load_system(ws.carts_root)["theme"] == "berry"
 
 
-def test_achievements_round_trip_through_the_handle(tmp_path):
-    ws = _ws(tmp_path)
-    doc = {"found": {"first_open": 20261012, "konami": 0}, "count": {}}
-    ws.prefs.save_achievements(doc)
-    assert ws.prefs.load_achievements() == doc
-    ws.carts_store = _AngryStore()
-    assert ws.prefs.load_achievements() is None    # a bad card is none, never a raise
-
-
 # ---------------------------------------------------------------------------
 # 4. the event push (rev 3): every arm site -> one flat kernel field
 # ---------------------------------------------------------------------------
@@ -260,8 +272,9 @@ def test_an_unlock_arms_the_toast_deadline(tmp_path):
     ws = _ws(tmp_path)
     assert ws._toast_until == 0
     assert ws.ach.award("first_open") is True
+    settle_badges(ws)                       # the achievements process's post
     assert ws._toast_until, "the unlock hook did not arm the banner"
-    assert ws.ach.toast[0] == "first_open"
+    assert ws.ach.toast[1] == "First Steps"
     assert ws._animating(DT) is True
 
 
@@ -271,10 +284,12 @@ def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
     second banner would inherit the first one's remaining time."""
     ws = _ws(tmp_path)
     ws.ach.award("first_open")
+    settle_badges(ws)
     first = ws._toast_until
     ws._toast_until = first - 1000          # as if 1s of it had elapsed
     ws.ach.award("konami")
-    assert ws.ach.toast[0] == "konami"
+    settle_badges(ws)
+    assert ws.ach.toast[1] == "Secret Coder"
     assert ws._toast_until >= first
 
 
@@ -296,10 +311,13 @@ def test_the_three_eggs_arm_the_banner_once(tmp_path):
                 for name in au._KONAMI:
                     au._konami_step(name)
         run()
+        settle_badges(ws)
         assert ws._toast_until and ws.ach.toast[3], trigger     # a secret's banner
         assert ws._animating(DT) is True, trigger
+        settle_badges(ws)
         ws._toast_until = 0
         run()
+        settle_badges(ws)
         assert ws._toast_until == 0, trigger
 
 
@@ -347,6 +365,7 @@ def test_the_toast_still_draws_while_its_deadline_is_up(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.pointer.visible = False
     ws.ach.award("first_open")
+    settle_badges(ws)
     assert ws._toast_layer in ws.wm.overlay_stack()
     drv.frame(DT)                           # draws it -- an unset payload raises
     ws._toast_until = host_app.console._ticks_ms() - 1

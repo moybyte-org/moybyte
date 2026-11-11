@@ -130,7 +130,7 @@ class WindowRoute:
                 self._desk_streak = 0
                 if win is not None and self._gesture_hist:
                     self._rest = (kind, gdx, gdy)
-                    self._rest_end = ws._frames_drawn + self._retained_n()
+                    self._rest_end = ws.frame_state.frames_drawn + self._retained_n()
             else:
                 self._move_window(win, px - gdx, py - gdy)
                 return True

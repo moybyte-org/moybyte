@@ -389,6 +389,24 @@ def test_the_two_buffer_degrade_times_its_fence_too(stepped):
         assert comp.overlap_stats()[5] > 0
 
 
+@pytest.mark.parametrize("n", (2, 3))
+def test_the_game_fence_waits_out_the_frames_snapshot_too(stepped, n):
+    """A compiled cart's frame is read from the cart's memory by the game
+    composite AND the GDMA's snapshot beside it: the pre-frame hook's game
+    fence waits for both before the cart's next hook (moy_present_dsi.c)."""
+    _dsi, ppa, ctx = build(n=n)
+    snaps = []
+    ppa.snap_wait = lambda: snaps.append(ppa.syncs)
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        comp._composite_pending = True
+        comp.flush()
+        assert snaps == []
+        comp.present_pending()
+        assert snaps == [1], "the game fence did not wait the snapshot, after the scale"
+
+
 def test_a_stamp_pending_never_blocks_and_is_no_game_fence(stepped):
     """The stamp's SOURCE is frozen for the gesture, so its show can wait for
     the next loop. Billing that wait as a game fence would put the lever's
@@ -2010,9 +2028,9 @@ def test_the_waveshare_scales_a_565_frame_from_the_carts_memory():
     scr = cf.scr
     assert ppa.calls == [
         ("wait", 0),                       # nothing reads the last copy
-        ("snap", scr, view),               # the GDMA copy, beside the scale
         ("blit_async", cv._buf, 1024, 600, 192, 60, view, 320, 240, 2,
          0, 0, 320, 240),                  # straight from the cart's memory
+        ("snap", scr, view),               # the GDMA copy, behind the scale's kick
     ]
     assert comp._composite_pending is True, "a game show: fenced before the tick"
     assert cf.presented_with == (scr, 24)
@@ -2052,7 +2070,7 @@ def test_crisp_pixels_leave_a_direct_colour_frame_bilinear():
         assert cv.present_frame(FrameStub(), view, FGC, 192, 60, 2) is True
     finally:
         P._smooth = smooth
-    assert [c[0] for c in ppa.calls] == ["wait", "snap", "blit_scale"]
+    assert [c[0] for c in ppa.calls] == ["wait", "blit_scale", "snap"]
 
 
 def test_the_p4_declines_what_it_cannot_show_and_touches_nothing():
@@ -2128,9 +2146,12 @@ def test_the_rotated_paint_route_composites_the_snapshot_blocking():
 
 
 def test_the_frame_snapshot_fences_before_it_reuses_the_scratch():
-    """moy_ppa.snap: the last copy has landed before the scratch is written
-    or found to already hold the frame, and an engine refusal is a memcpy."""
-    body = _ppa_verb_body("snap")
+    """moy_ppa.snap (and the kernel front's moy_ppa_k_snap, one body): the
+    last copy has landed before the scratch is written or found to already
+    hold the frame, and an engine refusal is a memcpy."""
+    src = PPA_C.read_text(encoding="utf-8")
+    body = src[src.index("static long snap_do("):src.index("static mp_obj_t moy_ppa_snap(")]
+    assert "snap_do(" in _ppa_verb_body("snap")
     assert body.index("snap_wait_inner();") < body.index("dst + off")
     assert "memcpy(dst + off" in body
     assert "& ~(uintptr_t)63u" in body, "the 64-aligned span the GDMA takes"

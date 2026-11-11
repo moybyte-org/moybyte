@@ -63,9 +63,21 @@ static inline uint64_t moy_wasm_pool_bytes(uint64_t module_len)
 #define MOY_WASM_INTERP_POOL_SHARE 6
 #endif
 
+// On a board with timed lanes (moy_wasm_session.h), each of a session's two
+// lanes is a sibling instance and an exec env in the pool: an exec env's
+// stack, its structures, and the sibling's per-function tables, which grow
+// with the module. AOT's fixed part already holds them; the interpreter's
+// rule adds them.
+#ifndef MOY_WASM_TIMED_LANES
+#define MOY_WASM_TIMED_LANES 0
+#endif
+#define MOY_WASM_TLANE_POOL (12 * 1024)
+
 static inline uint64_t moy_wasm_interp_pool_bytes(uint64_t module_len)
 {
-    return MOY_WASM_INTERP_POOL_BYTES + module_len / MOY_WASM_INTERP_POOL_SHARE;
+    uint64_t lanes = MOY_WASM_TIMED_LANES
+        ? 2u * (MOY_WASM_TLANE_POOL + module_len / MOY_WASM_INTERP_POOL_SHARE) : 0u;
+    return MOY_WASM_INTERP_POOL_BYTES + module_len / MOY_WASM_INTERP_POOL_SHARE + lanes;
 }
 
 // The free block the heap needs to serve an allocation of `n` bytes: TLSF

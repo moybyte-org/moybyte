@@ -254,6 +254,8 @@ static void h_block_on(const void *obj, int64_t wake_us) {
 
 void h_yield(void) { h_dispatch(); }
 
+int h_rom_delays;
+
 void h_block_us(int64_t us) { h_block_on(&g_delay_obj, g_now + us); }
 
 void h_advance(int64_t us) {
@@ -368,6 +370,19 @@ void vTaskNotifyGiveFromISR(TaskHandle_t xTaskToNotify,
     }
 }
 
+// A task's notify from another task: no ISR latency, and the gate's waker may
+// find the feeder gone (it reads the handle once, as the done-ISR does).
+void xTaskNotifyGive(TaskHandle_t xTaskToNotify) {
+    h_task_t *t = xTaskToNotify;
+    if (t == NULL || t->state == H_DONE) {
+        return;
+    }
+    t->notify++;
+    if (t->state == H_BLOCKED && t->waiting_on == &g_notify_obj) {
+        t->state = H_RUNNABLE;
+    }
+}
+
 void mp_hal_delay_ms(uint32_t ms) { h_block_us((int64_t)ms * 1000); }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +416,14 @@ SemaphoreHandle_t xSemaphoreCreateBinary(void) {
     return s;
 }
 
+SemaphoreHandle_t xSemaphoreCreateMutex(void) {
+    SemaphoreHandle_t s = xSemaphoreCreateBinary();
+    if (s != NULL) {
+        s->count = 1;
+    }
+    return s;
+}
+
 BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks) {
     if (sem == NULL) { h_fail("take on a NULL semaphore"); }
     if (sem->count > 0) { sem->count = 0; return pdTRUE; }
@@ -412,8 +435,21 @@ BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks) {
     return pdFALSE;
 }
 
+void vSemaphoreDelete(SemaphoreHandle_t sem) {
+    if (sem == NULL || !sem->created) { h_fail("delete of a semaphore that is not live"); }
+    for (int i = 0; i < g_ntasks; i++) {
+        if (g_tasks[i].state == H_BLOCKED && g_tasks[i].waiting_on == sem) {
+            h_fail("a semaphore deleted with a task parked on it");
+        }
+    }
+    sem->created = 0;
+}
+
+bool h_sem_live(struct h_sem *sem) { return sem != NULL && sem->created; }
+
 BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
     if (sem == NULL) { h_fail("give on a NULL semaphore"); }
+    if (!sem->created) { h_fail("give on a deleted semaphore"); }
     sem->count = 1;                              // binary: never counts up
     for (int i = 0; i < g_ntasks; i++) {
         if (g_tasks[i].state == H_BLOCKED && g_tasks[i].waiting_on == sem) {
@@ -422,6 +458,19 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) {
         }
     }
     if (sem == g_switch_give) { h_yield(); }
+    return pdTRUE;
+}
+
+BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken) {
+    if (sem == NULL) { h_fail("give on a NULL semaphore"); }
+    sem->count = 1;
+    for (int i = 0; i < g_ntasks; i++) {
+        if (g_tasks[i].state == H_BLOCKED && g_tasks[i].waiting_on == sem) {
+            g_tasks[i].state = H_RUNNABLE;
+            if (woken != NULL) { *woken = pdTRUE; }
+            break;
+        }
+    }
     return pdTRUE;
 }
 
@@ -470,6 +519,14 @@ void *heap_caps_malloc(size_t size, uint32_t caps) {
     g_blocks[g_nblocks].freed = false;
     g_nblocks++;
     return p;
+}
+
+void *heap_caps_calloc(size_t n, size_t size, uint32_t caps) {
+    return heap_caps_malloc(n * size, caps);    // heap_caps_malloc zeroes
+}
+
+void vTaskDelay(TickType_t xTicksToDelay) {
+    h_block_us((int64_t)xTicksToDelay * H_TICK_US);
 }
 
 // Poisoned, remembered, NOT returned to libc -- see harness.h. A write into a
@@ -612,7 +669,7 @@ int h_task_creates(void) { return g_task_creates; }
 struct h_dma_engine { int installed; };
 
 static struct h_dma_engine g_dma_engine;
-static int g_dma_installs, g_dma_submits;
+static int g_dma_installs, g_dma_submits, g_dma_uninstalls;
 static bool g_dma_fail_install, g_dma_stall;
 static int g_dma_refuse;
 static int64_t g_dma_fixed_us = 100;
@@ -648,6 +705,21 @@ void h_dma_set_rate(int64_t fixed_us, int64_t us_per_kb) {
     g_dma_us_per_kb = us_per_kb;
 }
 int h_dma_installs(void) { return g_dma_installs; }
+int h_dma_uninstalls(void) { return g_dma_uninstalls; }
+bool h_dma_installed(void) { return g_dma_engine.installed != 0; }
+
+// The real driver refuses while a copy is queued or running.
+esp_err_t esp_async_memcpy_uninstall(async_memcpy_handle_t mcp) {
+    if (mcp != &g_dma_engine || !g_dma_engine.installed) {
+        h_fail("uninstall of an engine that is not installed");
+    }
+    if (g_dma_stall || g_now < g_dma_busy_until) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    g_dma_engine.installed = 0;
+    g_dma_uninstalls++;
+    return ESP_OK;
+}
 int h_dma_submits(void) { return g_dma_submits; }
 int64_t h_dma_lands_at(void) { return g_dma_busy_until; }
 

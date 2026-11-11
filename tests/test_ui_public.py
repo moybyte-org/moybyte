@@ -33,6 +33,7 @@ _DT = 1.0 / 30.0
 P_FRAMES, P_SOUND, P_VOL, P_CUR, P_SAVES, P_KEYS, P_PART, P_FOCUS, P_FAIL = range(9)
 P_PANE, P_SIZE, P_TAP, P_HELD = 10, 11, 12, 13     # the panes (ui.split, ui.part_at)
 P_XCUR = 14                                     # the row of parts (o.axis "x")
+P_PAGE = 15                                     # the page's top
 
 # -- one page, three runtimes ----------------------------------------------------------
 
@@ -66,9 +67,9 @@ def page_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         if name == "wasm":
             from runtime import moy_play
             _CENSUS[:] = [tuple(moy_play.info()[5]),
@@ -89,7 +90,7 @@ def _frame(drv):
 def _pixels(ws):
     """The cart's canvas below the host's strip (the bar contract's content
     rect), where the three draw alike."""
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -100,16 +101,16 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
-        return list(lua._run.pmem()[1])[:15]
+        return list(lua._run.pmem()[1])[:16]
     if lua is not None:
         import sys
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
-        return list(img)[:15]
-    pm = ws.player.ns["pmem"]
-    return [pm(i) for i in range(15)]
+        return list(img)[:16]
+    pm = ws.run.player.ns["pmem"]
+    return [pm(i) for i in range(16)]
 
 
 def _script(ws):
@@ -192,6 +193,20 @@ def test_the_page_is_one_page_in_every_runtime(page_runs):
             assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
     if "wasm" in page_runs:
         assert all(s[1][P_FAIL] == 0 for s in page_runs["wasm"]), "a ui row failed"
+
+
+def test_an_apps_page_lies_in_its_content_rect_in_every_runtime(page_runs, tmp_path):
+    """An app's `ui` frame is its content_rect() on every tier: on this
+    320x240 console the bar lies over the canvas's top rows, and each
+    runtime's page begins below it, not under it."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    try:
+        top = ws.app_content_rect()[1]
+    finally:
+        ws.exit()
+    assert top > 0
+    for name, shots in page_runs.items():
+        assert all(s[1][P_PAGE] == top for s in shots), (name, [s[1][P_PAGE] for s in shots])
 
 
 def test_the_compiled_page_runs_with_no_vm(page_runs):
@@ -298,7 +313,7 @@ def _page():
     def draw():
         ui.page("Nav")
         st["a"] = ui.button("A")
-        ui.at(200, 12, 60, 20)          # on A's line (its row: 12, 20 tall)
+        ui.at(200, 0, 60, 20)           # on A's line (its row: 0, 20 tall; the title is the bar's)
         st["side"] = ui.button("Side")
         st["b"] = ui.button("B")
         st["c"] = ui.button("C")
@@ -372,13 +387,13 @@ def test_activation_by_key_and_by_tap():
     assert got["a"] and not got["b"]
     assert not r.frame()["a"], "a button answers true the frame it is activated only"
     # a tap released inside B activates it and focuses it
-    r.frame(ptr=(20, 45, 1 | 2 | 4))
-    got = r.frame(ptr=(20, 45, 1))
+    r.frame(ptr=(20, 33, 1 | 2 | 4))
+    got = r.frame(ptr=(20, 33, 1))
     assert got["b"] and ui.focus() == "B"
     # a press dragged away from the stop is no tap
-    r.frame(ptr=(20, 45, 1 | 2 | 4))
-    r.frame(ptr=(20, 30, 1 | 2))
-    got = r.frame(ptr=(20, 30, 1))
+    r.frame(ptr=(20, 33, 1 | 2 | 4))
+    r.frame(ptr=(20, 18, 1 | 2))
+    got = r.frame(ptr=(20, 18, 1))
     assert not got["b"] and not got["a"]
 
 
@@ -635,7 +650,7 @@ def test_a_hover_owes_a_frame_only_over_a_stop():
     drawn on change owes no frame for it: wall time then never decides
     whether a settled page draws whole (the shell goldens' draw budgets)."""
     r = _Run(_page())
-    ground, on_a = (300, 230), (20, 20)
+    ground, on_a = (300, 230), (20, 8)
     r.frame()
     r.frame()
     r.frame(ptr=ground + (1,))
@@ -748,7 +763,7 @@ def _first_page(root, title, theme, variant=None):
     open_cart(ws, title)
     drv = make_drv(ws)
     drv.frame(_DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     for _ in range(3):
         _frame(drv)
     px = _pixels(ws)
@@ -830,13 +845,13 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
     for _ in range(10):
         quiesce(ws)
         drv.frame(_DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.player.animates() == every
-    n = ws.player.ns["frames"]
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    assert ws.run.player.animates() == every
+    n = ws.run.player.ns["frames"]
     for _ in range(20):
         quiesce(ws)
         drv.frame(_DT)
-    assert ws.player.ns["frames"] - n == (20 if every else 0)
+    assert ws.run.player.ns["frames"] - n == (20 if every else 0)
     ws.exit()
 
 
@@ -990,3 +1005,14 @@ def test_a_parts_press_with_no_page_to_drag_stays_its_own_through_a_drag():
     assert got["st"] & ui.PRESSED and got["at"] == (40, 70)
     r.frame(ptr=(60, 90, 1))
     assert got["st"] & ui.ACTIVATED and got["at"] == (40, 70)
+
+
+def test_the_hosts_mirror_of_the_override_block_is_the_engines_struct():
+    """The host binding parses an override block into its ctypes mirror of
+    moy_ui_over_t (runtime/host/moy_ui_binding.py's _Over), which the engine
+    writes whole: a key added to the C struct and not to the mirror writes
+    past the mirror's end."""
+    import ctypes
+    from runtime import glass_binding
+    from runtime.moy_ui_binding import _Over
+    assert ctypes.sizeof(_Over) == glass_binding._lib().moy_ui_over_size()

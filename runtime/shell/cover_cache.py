@@ -5,7 +5,7 @@
 #   CoverCache.cover_for       a cart's cover at a reduction
 #   CoverCache.tinted          a cover dimmed, made from its BASE
 #   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
-#   CoverCache.invalidate_all  drop everything a store rescan could change
+#   CoverCache.invalidate      drop what a store rescan could change
 #   CoverCache.diet_release    drop the cover pipeline before a cart runs
 #   CoverCache.prefetch_tick   warm one cart's cover file
 """The shelf's COVER + ICON pipeline (#209 landing C) -- `Workstation.covers`.
@@ -45,7 +45,7 @@ It is a plain attribute on THIS object with no `ws` mirror -- the architecture
 doc's one-author rule -- so the consumers read `ws.covers.gen`. Three sites bump
 it and they are the three ways the cache can change under a reader: a build
 finishing or definitively missing (`_finish`), the diet release, and a store
-re-scan (`invalidate_all`).
+re-scan (`invalidate`).
 
 ## The #186 free order is ONE body
 
@@ -56,7 +56,7 @@ dropped FIRST, then the payloads are freed**. Reversed, `_free_src`'s
 job-alias guard sees a live job, declines the free, and the LRU entry is then
 discarded anyway -- the file leaks for the rest of the session; and the scratch
 free, which has no guard at all, would hand a decoding job freed memory. Both
-drop paths (`invalidate_all` on a store re-scan, `diet_release` before a cart
+drop paths (`invalidate` on a store re-scan, `diet_release` before a cart
 runs on the RAM-tight tier) go through `_drop_payloads`, which is the only place
 that order exists, and `tests/test_cover_cache.py` perturbs it.
 
@@ -215,7 +215,7 @@ class CoverCache:
         # scarce). The `if` that reads it is kernel policy, in Workstation._start.
         self.diet = False
         # cart path -> desktop-icon sprite Image (or None) from the cart's
-        # SHEET. CLEARED by invalidate_all: written at one site and cleared at
+        # SHEET. CLEARED by invalidate: written at one site and cleared at
         # none, a re-seed or a browser sync kept stale desk icons and a deleted
         # cart's Image never went away.
         self.icons = {}
@@ -488,21 +488,32 @@ class CoverCache:
 
     # -- lifecycle: the #186 free order, ONE body ----------------------------
 
-    def invalidate_all(self):
-        """Drop EVERYTHING a store re-scan could have changed under us.
+    def invalidate(self, paths=None):
+        """Drop what a store re-scan could have changed under us: for the cart
+        folders `paths`, else for every cart.
 
-        The cover half of `CartManager.apply`: a create/duplicate/delete,
-        a re-seed or a browser sync can carry a new or changed cover, can
-        change a cart's icon tile, and can take a cart away entirely -- so the
-        pictures, the cover files, the cover-less set and the ICON cache all go.
+        The cover half of `CartManager.apply`: a create/duplicate/delete, an
+        install or removal, a re-seed or a browser sync can carry a new or
+        changed cover, can change a cart's icon tile, and can take a cart away
+        entirely -- so the pictures, the cover files, the cover-less mark and
+        the ICON of each such cart all go. A roster change that names its
+        folders leaves every other cart's cover warm: the shelf keeps drawing
+        it, with no pop-in.
 
         The icon cache is the one this used to miss: it was written by
         `sheet_icon` and cleared nowhere, so a re-scan kept drawing the icon
         a cart had before it was edited, and a deleted cart's Image stayed live
         forever (docs/history/console_architecture_2026-08.md rev-2 item 10)."""
-        self._drop_payloads(0)
-        self._none = {}
-        self._prune_icons()
+        if paths is None:
+            self._drop_payloads(0)
+            self._none = {}
+            self._prune_icons()
+        else:
+            gone = set(paths)
+            self._drop_payloads(0, paths=gone)
+            for p in gone:
+                self._none.pop(p, None)
+                self.icons.pop(p, None)
         self.gen += 1             # re-arm the idle prefetch: new/changed carts
         self._seen = True         # should warm before their surface opens
         self._pf_i = 0            # a fresh pass over the (possibly new) roster
@@ -529,7 +540,7 @@ class CoverCache:
                 keep[key] = self.icons[key]
         self.icons = keep
 
-    def _drop_payloads(self, keep, scratch=False):
+    def _drop_payloads(self, keep, scratch=False, paths=None):
         """THE #186 FREE ORDER, and the only copy of it.
 
         In-flight jobs go FIRST: a `_CoverJob` aliases the cover file it
@@ -542,7 +553,27 @@ class CoverCache:
         `keep` is how many NEWEST entries of each LRU survive (0 = everything
         goes). `scratch` frees the decode scratch as well, which is a
         RAM-release intent (diet_release) rather than an invalidation one: a
-        re-scan wants the scratch kept, since nothing about it went stale."""
+        re-scan wants the scratch kept, since nothing about it went stale.
+        `paths` narrows the drop to those carts' entries, their jobs first."""
+        if paths is not None:
+            jobs = self._jobs
+            for k in [k for k in jobs if k[0] in paths]:
+                del jobs[k]                   # <- FIRST. See above.
+            cache = self._cache
+            for k in [k for k in self._order if k[0] in paths]:
+                self._order.remove(k)
+                img = cache.pop(k, None)
+                if img is not None:
+                    self._bytes -= len(img.pix)
+                    self._free_img(img)
+            src = self._src
+            for p in [p for p in self._src_order if p in paths]:
+                self._src_order.remove(p)
+                gone = src.pop(p, None)
+                if gone is not None:
+                    self._src_bytes -= len(gone)
+                    self._free_src(gone)
+            return
         self._jobs = {}                       # <- FIRST. See above.
         order = self._order
         cache = self._cache
@@ -585,7 +616,7 @@ class CoverCache:
         kid returns to is still warm and only cards scrolled into view later
         rebuild -- their normal cold path, prefetch-warmed."""
         # The #186 order (jobs before frees) lives in _drop_payloads, which
-        # invalidate_all shares -- this path just keeps a few entries and
+        # invalidate shares -- this path just keeps a few entries and
         # hands back the decode scratch as well.
         self._drop_payloads(_COVER_DIET_KEEP, scratch=True)
         self.gen += 1             # any shelf band repaints from scratch

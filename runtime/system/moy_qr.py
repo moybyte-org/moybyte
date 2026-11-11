@@ -1,12 +1,12 @@
 """A QR encoder small enough to freeze into every board image (#197).
 
-WHY THIS EXISTS AT ALL. The web console's address is `http://<ip>/?pin=NNNN`
--- around 30 characters of IP and pairing pin, which a kid has to get from a
-320x240 panel into a phone. Typed, it is a transcription error waiting to
-happen; scanned, it is a camera gesture. So the connection screen draws the url
-as a QR code, and drawing one means encoding one here: there is no library on a
-board, and the whole point of the pin is that it is not a constant something
-could be baked with.
+WHY THIS EXISTS AT ALL. The web console's link is `http://<ip>/#t=TOKEN&b=ID`
+-- an IP, a single-use pairing token and the board's id, some 60 characters a
+kid would otherwise get from a 320x240 panel into a phone. Typed, it is a
+transcription error waiting to happen; scanned, it is a camera gesture. So the
+connection screen draws the link as a QR code, and drawing one means encoding
+one here: there is no library on a board, and the token is minted each time
+the screen draws it.
 
 THE SUBSET, and why each bound is where it is:
 
@@ -39,7 +39,7 @@ MicroPython shape: bytearrays and small ints throughout, no f-strings, no
 comprehension over the module grid, and the GF(256) tables are built once at
 import (512 + 256 bytes) rather than stored as source literals.
 
-    rows = moy_qr.encode("http://10.0.0.5/?pin=4821")
+    rows = moy_qr.encode("http://10.0.0.5/#t=q1w2e3r4t5y6u7i8o9p0aa&b=zxcvbnmasdf")
     size = len(rows)            # rows[r][c] is 1 for a DARK module
 
 The returned matrix carries NO quiet zone -- the caller knows what it is

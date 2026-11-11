@@ -32,10 +32,10 @@ def test_a_press_from_the_page_released_over_the_outline_lets_the_desk_rest(tmp_
     root.RETAINED_FRAMES = 3
 
     def run(n):
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(n):
             drv.frame(DT)
-        return ws._frames_drawn - drawn
+        return ws.frame_state.frames_drawn - drawn
 
     ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Coin Quest"))
     ws.editor_app.set_tab("blocks")

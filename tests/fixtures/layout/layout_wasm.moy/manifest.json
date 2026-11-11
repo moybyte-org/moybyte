@@ -1,0 +1,14 @@
+{
+  "format": "moy-1",
+  "title": "Layout Wasm",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 2,
+  "extensions": [
+    "moybyte.app"
+  ],
+  "moybyte": {
+    "type": "app",
+    "permissions": []
+  }
+}

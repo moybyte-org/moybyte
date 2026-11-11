@@ -6,6 +6,7 @@
 //   kernel(fresh)        a view of the kernel's (moy_app_kernel), whose rows
 //                        are the kernel's settings; `fresh` ends RUN grants
 //   app.grant(id, roles, kind=None, ns=None, run=False) -> handle
+//   app.regrant(id, roles, svc, kind=None) -> rows   every RUN row of `id` recomputed
 //   app.end(h), app.count(), app.damage_take(), app.damage_drop(), app.counts()
 //   app.surface_write(canvas, w, h, fs, cs, windowed, content, ox=0, oy=0)
 //   app.bind_pointer(pointer), app.theme_write(name, variant, colors) -> gen,
@@ -18,12 +19,18 @@
 //                        (moy_app_role): table row `row` with its packed
 //                        arguments, the answer and the first bytes of `cap`
 //                        it wrote
-//   app.wasm_bind(g, roles)   the run a compiled app's imports serve: its
-//                        grant and the roles its permissions name (g 0: none)
-//   app.wasm_end()       that run is over: its grant ended, unbound
+//   app.run(g, roles)    an app's run on a tier binding (moy_app_run.h): its
+//                        grant and the roles its permissions name, as the
+//                        bytes the Lua or wasm run's open copies, or None
+//                        for g 0; and this state the one the theme is read
+//                        from (moy_app_wasm_live)
+//   app.stop_hold(run)   the run a VM stop carries (None: none)
+//   app.stop_end()       the stop is over: that run's grant ended, let go,
+//                        and every other run grant (the stopped VM's)
 //   wasm_rows()          the import adapter's natives: (name, type, table row)
 //   wasm_hops()          (hops made, their microseconds end to end, the rows'
-//                        own microseconds on the VM's task)
+//                        own microseconds on the VM's task, rows answered
+//                        here on the caller's task with no hop)
 //   table()              the role table's rows, "role.verb", in its order
 //   door_bind(on)        the shell rows' door: the kernel's ROLE upcall
 //                        (moy_loop_role), or none
@@ -62,6 +69,7 @@
 
 #include "moy_app.h"
 #include "moy_app_wasm.h"
+#include "moy_crypto.h"
 
 // native/moy_spine's binding: the allocator kernel state takes, the C rows a
 // Settings holds, and what its saver raised.
@@ -244,6 +252,27 @@ static mp_obj_t app_grant(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(app_grant_obj, 3, app_grant);
 
+static mp_obj_t app_regrant(size_t n_args, const mp_obj_t *args) {
+    moy_appabi_t *a = app_of(args[0]);
+    size_t n;
+    const char *id = str_of(args[1], &n);
+    int kind = -1;
+    if (n_args > 4 && args[4] != mp_const_none) {
+        size_t kn;
+        const char *k = str_of(args[4], &kn);
+        kind = moy_app_kind_of(k, kn);
+        if (kind < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("unknown files kind"));
+        }
+    }
+    int got = moy_app_regrant(a, id, n, roles_mask(args[2]), roles_mask(args[3]), kind);
+    if (got < 0) {
+        check(-got);
+    }
+    return MP_OBJ_NEW_SMALL_INT(got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_regrant_obj, 4, 5, app_regrant);
+
 static uint32_t grant_arg(mp_obj_t h) {
     mp_int_t v = mp_obj_get_int(h);
     return v > 0 && v < ((mp_int_t)1 << 30) ? (uint32_t)v : 0u;
@@ -261,6 +290,32 @@ static mp_obj_t app_grant_id(mp_obj_t self, mp_obj_t h) {
     return mp_obj_new_str(g->id, g->id_len);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(app_grant_id_obj, app_grant_id);
+
+// grant_devs(h, perms, folder=None): grant `h` holds the device permissions
+// among `perms` (an iterable of names), what a compiled program's device
+// handles answer under (moy_app_grant_devs), and the cart folder they reach
+// its own files in (moy_app_grant_folder, an absolute path).
+static mp_obj_t app_grant_devs(size_t n_args, const mp_obj_t *args) {
+    uint32_t mask = 0;
+    mp_obj_t it = mp_getiter(args[2], NULL), x;
+    while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+        if (mp_obj_is_str(x)) {
+            size_t n;
+            const char *p = mp_obj_str_get_data(x, &n);
+            mask |= moy_app_dev_bit(p, n);
+        }
+    }
+    moy_appabi_t *a = app_of(args[0]);
+    uint32_t h = grant_arg(args[1]);
+    check(moy_app_grant_devs(a, h, mask));
+    if (n_args > 3 && args[3] != mp_const_none) {
+        size_t n;
+        const char *p = mp_obj_str_get_data(args[3], &n);
+        check(moy_app_grant_folder(a, h, p, n));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_grant_devs_obj, 3, 4, app_grant_devs);
 
 static mp_obj_t app_count(mp_obj_t self) {
     return MP_OBJ_NEW_SMALL_INT(moy_app_grants(app_of(self)));
@@ -475,26 +530,59 @@ static mp_obj_t app_role(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
 
-// wasm_bind(g, roles): the run a compiled app's imports serve.
-static mp_obj_t app_wasm_bind(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
+// run(g, roles): an app's run, as the bytes a tier's open copies.
+static mp_obj_t app_run(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t h = (uint32_t)mp_obj_get_int_truncated(g);
-    moy_app_wasm_bind(self->a, h, h ? roles_mask(roles) : 0u);
-    return mp_const_none;
+    moy_app_wasm_live(self->a);
+    if (h == 0u) {
+        return mp_const_none;
+    }
+    moy_app_run_t r;
+    moy_app_run_make(self->a, h, roles_mask(roles), &r);
+    return mp_obj_new_bytes((const byte *)&r, sizeof(r));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(app_wasm_bind_obj, app_wasm_bind);
+static MP_DEFINE_CONST_FUN_OBJ_3(app_run_obj, app_run);
 
-static mp_obj_t app_wasm_end(mp_obj_t self_in) {
-    (void)self_in;
-    moy_app_wasm_end();
+static mp_obj_t app_stop_hold(mp_obj_t self_in, mp_obj_t run) {
+    app_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (run == mp_const_none) {
+        moy_app_stop_hold(self->a, NULL);
+        return mp_const_none;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(run, &b, MP_BUFFER_READ);
+    if (b.len != sizeof(moy_app_run_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("not an app run"));
+    }
+    moy_app_run_t r;
+    memcpy(&r, b.buf, sizeof(r));
+    moy_app_stop_hold(self->a, &r);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(app_wasm_end_obj, app_wasm_end);
+static MP_DEFINE_CONST_FUN_OBJ_2(app_stop_hold_obj, app_stop_hold);
+
+// stop_end(keep=()): the RUN grants ended but those the pids in `keep` own.
+static mp_obj_t app_stop_end(size_t n_args, const mp_obj_t *args) {
+    app_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    uint32_t keep[16];
+    size_t n = 0;
+    if (n_args > 1) {
+        mp_obj_t it = mp_getiter(args[1], NULL), x;
+        while ((x = mp_iternext(it)) != MP_OBJ_STOP_ITERATION && n < MP_ARRAY_SIZE(keep)) {
+            keep[n++] = (uint32_t)mp_obj_get_int_truncated(x);
+        }
+    }
+    moy_app_stop_end(self->a, keep, n);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_stop_end_obj, 1, 2, app_stop_end);
 
 static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_role), MP_ROM_PTR(&app_role_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wasm_bind), MP_ROM_PTR(&app_wasm_bind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_wasm_end), MP_ROM_PTR(&app_wasm_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_run), MP_ROM_PTR(&app_run_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_hold), MP_ROM_PTR(&app_stop_hold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_end), MP_ROM_PTR(&app_stop_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_store_bind), MP_ROM_PTR(&app_store_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_end_all), MP_ROM_PTR(&app_files_end_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_gen), MP_ROM_PTR(&app_copy_gen_obj) },
@@ -504,8 +592,10 @@ static const mp_rom_map_elem_t app_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_theme_write), MP_ROM_PTR(&app_theme_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&app_serve_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant), MP_ROM_PTR(&app_grant_obj) },
+    { MP_ROM_QSTR(MP_QSTR_regrant), MP_ROM_PTR(&app_regrant_obj) },
     { MP_ROM_QSTR(MP_QSTR_end), MP_ROM_PTR(&app_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_grant_id), MP_ROM_PTR(&app_grant_id_obj) },
+    { MP_ROM_QSTR(MP_QSTR_grant_devs), MP_ROM_PTR(&app_grant_devs_obj) },
     { MP_ROM_QSTR(MP_QSTR_count), MP_ROM_PTR(&app_count_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_take), MP_ROM_PTR(&app_damage_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_damage_drop), MP_ROM_PTR(&app_damage_drop_obj) },
@@ -1045,7 +1135,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // -- the roles served in Python -------------------------------------------------------------
 //
 // Every row of these roles but the files role's and the wallpaper's copy is the
-// console's (roles.json's "shell" server): the binding checks the grant, counts
+// console's (native/os_calls.json's "shell" server): the binding checks the grant, counts
 // the row and calls the registered server.
 
 // -- the storage rows ---------------------------------------------------------------------
@@ -1701,21 +1791,13 @@ SERVED_ROLE(nav, Nav)
 
 // notify
 
-SERVED(notify, NOTIFY, achieve)
 SERVED(notify, NOTIFY, award)
-SERVED(notify, NOTIFY, count)
-SERVED(notify, NOTIFY, has)
-SERVED(notify, NOTIFY, found_on)
-SERVED(notify, NOTIFY, progress)
+SERVED(notify, NOTIFY, groups)
 SERVED(notify, NOTIFY, today)
 
 static const mp_rom_map_elem_t notify_locals_table[] = {
-    ROW(notify, achieve)
     ROW(notify, award)
-    ROW(notify, count)
-    ROW(notify, has)
-    ROW(notify, found_on)
-    ROW(notify, progress)
+    ROW(notify, groups)
     ROW(notify, today)
 };
 SERVED_ROLE(notify, Notify)
@@ -1796,6 +1878,7 @@ SERVED(install, INSTALL, net)
 SERVED(install, INSTALL, keep)
 SERVED(install, INSTALL, wifi)
 SERVED(install, INSTALL, wifi_open)
+SERVED(install, INSTALL, consent)
 
 static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, hold)
@@ -1817,6 +1900,7 @@ static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, keep)
     ROW(install, wifi)
     ROW(install, wifi_open)
+    ROW(install, consent)
 };
 SERVED_ROLE(install, Install)
 
@@ -1984,11 +2068,11 @@ static mp_obj_t mod_wasm_rows(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_rows_obj, mod_wasm_rows);
 
 static mp_obj_t mod_wasm_hops(void) {
-    uint32_t n, us, work;
-    moy_app_wasm_hops(&n, &us, &work);
-    mp_obj_t r[3] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
-                      mp_obj_new_int_from_uint(work) };
-    return mp_obj_new_tuple(3, r);
+    uint32_t n, us, work, here;
+    moy_app_wasm_hops(&n, &us, &work, &here);
+    mp_obj_t r[4] = { mp_obj_new_int_from_uint(n), mp_obj_new_int_from_uint(us),
+                      mp_obj_new_int_from_uint(work), mp_obj_new_int_from_uint(here) };
+    return mp_obj_new_tuple(4, r);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wasm_hops_obj, mod_wasm_hops);
 
@@ -2033,6 +2117,171 @@ static mp_obj_t mod_kinds(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_kinds_obj, mod_kinds);
 
+// -- the crypto rows (native/moy_net/moy_crypto.h) ------------------------------------
+//
+// A Python program's moybyte.random, sha256, hmac_sha256, aes_gcm_seal,
+// aes_gcm_open, aes_ctr, aes_ccm_seal, aes_ccm_open, x25519, ed25519_public,
+// ed25519_sign and ed25519_verify (runtime/system/moybyte.py): the C body every tier reaches, over a str's
+// UTF-8 or any buffer, answered as bytes (ed25519_verify as a bool).
+
+static const uint8_t *bytes_of(mp_obj_t o, size_t *n) {
+    if (mp_obj_is_str(o)) {
+        return (const uint8_t *)mp_obj_str_get_data(o, n);
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
+    *n = b.len;
+    return b.buf;
+}
+
+// `cap` bytes made, then the body's answer: bytes, None where sealed bytes
+// do not open, or its code raised.
+static mp_obj_t crypto_answer(vstr_t *v, int32_t r) {
+    if (r >= 0) {
+        v->len = (size_t)r;
+        return mp_obj_new_bytes_from_vstr(v);
+    }
+    vstr_clear(v);
+    switch (r) {
+        case MOY_CRYPTO_EFORGED:
+            return mp_const_none;
+        case MOY_CRYPTO_EPOINT:
+            mp_raise_ValueError(MP_ERROR_TEXT("a peer key of small order"));
+        case MOY_CRYPTO_EABSENT:
+            mp_raise_NotImplementedError(MP_ERROR_TEXT("a build without it"));
+        case MOY_CRYPTO_ENOMEM:
+            mp_raise_type(&mp_type_MemoryError);
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+}
+
+static mp_obj_t mod_random(mp_obj_t n_in) {
+    mp_int_t n = mp_obj_get_int(n_in);
+    if (n < 0 || n > MOY_CRYPTO_RANDOM_MAX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+    vstr_t v;
+    vstr_init_len(&v, (size_t)n);
+    return crypto_answer(&v, moy_crypto_random((int32_t)n, v.buf, (size_t)n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_random_obj, mod_random);
+
+static mp_obj_t mod_sha256(mp_obj_t data) {
+    size_t n;
+    const uint8_t *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_HASH);
+    return crypto_answer(&v, moy_crypto_sha256(p, n, v.buf, MOY_CRYPTO_HASH));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sha256_obj, mod_sha256);
+
+static mp_obj_t mod_hmac_sha256(mp_obj_t key, mp_obj_t data) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_HASH);
+    return crypto_answer(&v, moy_crypto_hmac_sha256(k, kn, p, n, v.buf, MOY_CRYPTO_HASH));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_hmac_sha256_obj, mod_hmac_sha256);
+
+static mp_obj_t mod_aes_gcm_seal(mp_obj_t key, mp_obj_t plain) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(plain, &n);
+    vstr_t v;
+    vstr_init_len(&v, n + MOY_CRYPTO_SEAL_OVER);
+    return crypto_answer(&v, moy_crypto_aes_gcm_seal(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_gcm_seal_obj, mod_aes_gcm_seal);
+
+static mp_obj_t mod_aes_gcm_open(mp_obj_t key, mp_obj_t sealed) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(sealed, &n);
+    vstr_t v;
+    vstr_init_len(&v, n > MOY_CRYPTO_SEAL_OVER ? n - MOY_CRYPTO_SEAL_OVER : 0u);
+    return crypto_answer(&v, moy_crypto_aes_gcm_open(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_gcm_open_obj, mod_aes_gcm_open);
+
+static mp_obj_t mod_aes_ctr(mp_obj_t key, mp_obj_t data) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    vstr_t v;
+    vstr_init_len(&v, n > MOY_CRYPTO_BLOCK ? n - MOY_CRYPTO_BLOCK : 0u);
+    return crypto_answer(&v, moy_crypto_aes_ctr(k, kn, p, n, v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_aes_ctr_obj, mod_aes_ctr);
+
+// A tag the body refuses sizes nothing: it answers BAD before writing.
+static size_t ccm_tag(mp_int_t tag) {
+    return tag > 0 && tag <= MOY_CRYPTO_BLOCK ? (size_t)tag : 0u;
+}
+
+static mp_obj_t mod_aes_ccm_seal(mp_obj_t key, mp_obj_t data, mp_obj_t tag_in) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(data, &n);
+    mp_int_t tag = mp_obj_get_int(tag_in);
+    vstr_t v;
+    vstr_init_len(&v, (n > MOY_CRYPTO_CCM_NONCE ? n - MOY_CRYPTO_CCM_NONCE : 0u) + ccm_tag(tag));
+    return crypto_answer(&v, moy_crypto_aes_ccm_seal(k, kn, p, n, ccm_tag(tag) ? (int32_t)tag : -1,
+                                                     v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_aes_ccm_seal_obj, mod_aes_ccm_seal);
+
+static mp_obj_t mod_aes_ccm_open(mp_obj_t key, mp_obj_t sealed, mp_obj_t tag_in) {
+    size_t kn, n;
+    const uint8_t *k = bytes_of(key, &kn), *p = bytes_of(sealed, &n);
+    mp_int_t tag = mp_obj_get_int(tag_in);
+    size_t over = MOY_CRYPTO_CCM_NONCE + ccm_tag(tag);
+    vstr_t v;
+    vstr_init_len(&v, n > over ? n - over : 0u);
+    return crypto_answer(&v, moy_crypto_aes_ccm_open(k, kn, p, n, ccm_tag(tag) ? (int32_t)tag : -1,
+                                                     v.buf, v.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_aes_ccm_open_obj, mod_aes_ccm_open);
+
+static mp_obj_t mod_x25519(size_t n_args, const mp_obj_t *args) {
+    size_t sn, pn = 0;
+    const uint8_t *sec = bytes_of(args[0], &sn), *peer = NULL;
+    if (n_args > 1 && args[1] != mp_const_none) {
+        peer = bytes_of(args[1], &pn);
+    }
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_KEY25519);
+    return crypto_answer(&v, moy_crypto_x25519(sec, sn, peer, pn, v.buf,
+                                               MOY_CRYPTO_KEY25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_x25519_obj, 1, 2, mod_x25519);
+
+static mp_obj_t mod_ed25519_public(mp_obj_t secret) {
+    size_t sn;
+    const uint8_t *sec = bytes_of(secret, &sn);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_KEY25519);
+    return crypto_answer(&v, moy_crypto_ed25519_public(sec, sn, v.buf, MOY_CRYPTO_KEY25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_ed25519_public_obj, mod_ed25519_public);
+
+static mp_obj_t mod_ed25519_sign(mp_obj_t secret, mp_obj_t msg) {
+    size_t sn, n;
+    const uint8_t *sec = bytes_of(secret, &sn), *p = bytes_of(msg, &n);
+    vstr_t v;
+    vstr_init_len(&v, MOY_CRYPTO_SIG25519);
+    return crypto_answer(&v, moy_crypto_ed25519_sign(sec, sn, p, n, v.buf, MOY_CRYPTO_SIG25519));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_ed25519_sign_obj, mod_ed25519_sign);
+
+static mp_obj_t mod_ed25519_verify(mp_obj_t pub, mp_obj_t msg, mp_obj_t sig) {
+    size_t pn, n, gn;
+    const uint8_t *k = bytes_of(pub, &pn), *p = bytes_of(msg, &n), *g = bytes_of(sig, &gn);
+    int32_t r = moy_crypto_ed25519_verify(k, pn, p, n, g, gn);
+    if (r < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("a length the call refuses"));
+    }
+    return mp_obj_new_bool(r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_ed25519_verify_obj, mod_ed25519_verify);
+
 // -- the module ----------------------------------------------------------------------------
 
 static const mp_rom_map_elem_t moy_app_globals_table[] = {
@@ -2063,6 +2312,18 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perms), MP_ROM_PTR(&mod_perms_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&mod_tokens_obj) },
+    { MP_ROM_QSTR(MP_QSTR_random), MP_ROM_PTR(&mod_random_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sha256), MP_ROM_PTR(&mod_sha256_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hmac_sha256), MP_ROM_PTR(&mod_hmac_sha256_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_gcm_seal), MP_ROM_PTR(&mod_aes_gcm_seal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_gcm_open), MP_ROM_PTR(&mod_aes_gcm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ctr), MP_ROM_PTR(&mod_aes_ctr_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ccm_seal), MP_ROM_PTR(&mod_aes_ccm_seal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_aes_ccm_open), MP_ROM_PTR(&mod_aes_ccm_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_x25519), MP_ROM_PTR(&mod_x25519_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_public), MP_ROM_PTR(&mod_ed25519_public_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_sign), MP_ROM_PTR(&mod_ed25519_sign_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ed25519_verify), MP_ROM_PTR(&mod_ed25519_verify_obj) },
     { MP_ROM_QSTR(MP_QSTR_CLIP_MAX), MP_ROM_INT(MOY_APP_CLIP_MAX) },
     { MP_ROM_QSTR(MP_QSTR_SLOTS), MP_ROM_INT(MOY_GRANT_SLOTS) },
 };

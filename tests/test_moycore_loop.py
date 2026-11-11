@@ -73,7 +73,7 @@ function _draw()
 end
 """
 
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, b"k\0v\0", None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, b"k\0v\0", None, True, None)
 print("START", moycore.load(((SRC, "@cart"),)))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
@@ -120,7 +120,7 @@ function _draw()
 end
 """
 moycore.p8_memory(bytearray(65536), bytearray(65536))
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 print("PROFARM", moycore.profile(1) > 0)
 print("PROFLOAD", moycore.load(((PROF, "@cart"),)))
 moycore.verb_reset()
@@ -169,7 +169,7 @@ LPSRC = ("-- 1 shim banner\n"                                    # 1
          "end\n"
          "function _update(dt) end\n")
 
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 # Armed BEFORE the load, which is the path a measurement session takes. The
 # first install cannot pin (`_draw` does not exist yet); load() re-installs
 # after the chunk, and that one can.
@@ -219,7 +219,7 @@ print("LPCLOSED", moycore.lua_stats(), moycore.lua_gc_mode(-1))
 
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 print("VIEW0", moycore.view())
 print("VIEWLOAD", moycore.load(((
     "function _init() view(128, 120) background(5) end\n"
@@ -232,7 +232,7 @@ moycore.close()
 
 # The superset rides the same runtime: register a Python-backed verb, then a
 # cart that calls it.
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 seen = []
 moycore.register("make_layer", lambda w, h: (seen.append((w, h)), 7)[1])
 moycore.register("draw_layer", lambda h, x, y: seen.append((h, x, y)))
@@ -249,7 +249,7 @@ moycore.close()
 # is the real runtime/run/lua_ext.py, imported and executed.
 from lua_ext import PRELUDE_HANDLES, install_handles
 
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 moycore.image_put("bg", @BG@)            # 2x2, every pixel index 8
 install_handles({}, moycore.register)
 print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
@@ -293,7 +293,7 @@ SCN = ('[{"tag": "player", "tile": 1, "x": 100, "y": 100, "flip": 0},'
        ' {"tag": "coin", "tile": 2, "x": 200, "y": 8, "flip": 0}]')
 _scenes = Scenes({"main": SCN, "two": '[{"tag": "boss", "tile": 9}]'},
                  ["main", "two"])
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None, True, None)
 for _n in _scenes.names:
     moycore.scene_put(_n, _scenes.raw(_n))
 install_handles({}, moycore.register)
@@ -347,7 +347,7 @@ moycore.close()
 # proves it is Bench Lua -- it grows a batch until the batch costs TARGET_MS,
 # measured with time(), so against a frozen clock it doubles forever (on glass:
 # a purple screen and "cls k=32768" climbing).
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 snap[moycore.SNAP_TIME_MS] = 5000
 print("TLOAD", moycore.load(((
     "function _update(dt)\n"
@@ -368,7 +368,7 @@ moycore.close()
 # of these decodings was dead code until 2026-09-12 -- nothing on either Lua
 # tier ever wrote the slot, so touch() answered nil for every Lua cart
 # everywhere while the Python twin of the same cart had a pointer.
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("TCHLOAD", moycore.load(((
     "function _update(dt)\n"
     "  local x, y, tapped, held = touch()\n"
@@ -404,7 +404,7 @@ for i in range(len(solid)):
 
 for i in range(len(fb)):
     fb[i] = 0
-moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None, None, True, None)
 print("MASKPRESENT", moycore.exec(
     "P = (__moy_map_masked ~= nil) and (__moy_map_flags ~= nil)", "@probe"),
     moycore.get_global("P"))
@@ -451,7 +451,7 @@ for i in range(len(fb)):
     fb[i] = 0
 moycore.p8_memory(bytearray(65536), bytearray(0x4300))
 moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None,
-                  FLAGS, True)
+                  FLAGS, True, None)
 print("FLOAD", moycore.load(((
     "function _init()\n"
     "  G0, G5, G6 = fget(0), fget(5), fget(6)\n"
@@ -498,7 +498,7 @@ moycore.p8_memory(None, None)
 # must survive it, because on this side a NULL deref is a board reset.
 for i in range(len(fb)):
     fb[i] = 0
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("BARE", moycore.load(((
     "function _update(dt) end\n"
     "function _draw()\n"
@@ -516,7 +516,7 @@ moycore.close()
 
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("START2", moycore.load(((BAD, "@bad"),)))
 print("ERR", moycore.tick(0.03125))
 moycore.close()
@@ -538,7 +538,7 @@ CFG = ("function _update(dt)\n"
        "function _draw() end\n")
 from lua_ext import cfg_blob
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None,
-                  cfg_blob({"n": 6, "f": 1.5, "s": "hello", "b": True}), None, True)
+                  cfg_blob({"n": 6, "f": 1.5, "s": "hello", "b": True}), None, True, None)
 print("CFGSTART", moycore.load(((CFG, "@cfg"),)))
 print("CFGTICK", moycore.tick(0.03125))
 print("CFGN", moycore.get_global("N"), moycore.get_global("T"))
@@ -565,13 +565,13 @@ snap = array("i", bytearray(4 * moycore.SNAP_LEN))
 aq = array("i", bytearray(4 * (1 + moycore.AQ_SLOTS * moycore.AQ_MAX)))
 BIN = "\x1bLua\x54\x00 not a real chunk"
 
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("BINLOAD", moycore.load(((BIN, "@cart"),)))
 moycore.close()
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("BINEXEC", moycore.exec(BIN, "glue"))
 moycore.close()
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None, True, None)
 print("TEXTLOAD", moycore.load((("function _update(dt) end", "@cart"),)))
 moycore.close()
 '''

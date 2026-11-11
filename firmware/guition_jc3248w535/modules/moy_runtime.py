@@ -64,29 +64,20 @@ OTA_UPDATE_DIR = "/moy/update"
 # VFS (device identity, not cart data). A WiFi update stages nothing: it streams
 # into the inactive slot, because this VFS cannot hold the image. The store on a
 # card is moy_carts.CARTS_DIR, so the system documents beside the carts
-# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte, not at the
+# (system/settings, wifi.json, shared.moygfx) land in /sd/moybyte, not at the
 # card's root.
-# slot=2 IS SPI3_HOST -- machine_sdcard.c's spi table lists SPI3 FIRST, so
-# SPI slot numbers map in the OPPOSITE order of the host numbers (slot 2 ->
-# SPI3, slot 3 -> SPI2). slot=3 therefore grabs the PANEL's bus and every
-# construction dies with ESP_ERR_INVALID_STATE before touching the card --
-# measured on this glass 2026-08-20, one evening of postmortem plumbing.
-SD_PINS = dict(slot=2, sck=12, mosi=11, miso=13, cs=10)
-SD_SPI_HOST = 2                 # SPI3_HOST: slot 2 (slot and host numbers run opposite)
-SD_FREQ_KHZ = 20000
 SD_CARTS_ROOT = "/sd/moybyte/carts"
 
 
 def tf_card():
     """The TF card on SPI3, as the store's own volume (native/moy_store's
-    card over moy_sd): the bus is initialised once, by `moy_sd.open`, and
-    never torn down, so the store's FATFS outlives anything the VM frees."""
+    card over moy_sd): `moy_sd.up()` initialises the bus once, from the
+    board.toml `spi3` row, and never tears it down -- native/moy_sd's C, which
+    the kernel's recovery floor calls with no VM -- so the store's FATFS
+    outlives anything the VM frees."""
     import moy_sd
     import moy_store
-    p = SD_PINS
-    sectors = moy_sd.open(SD_SPI_HOST, p["sck"], p["mosi"], p["miso"], p["cs"],
-                          SD_FREQ_KHZ)
-    return moy_store.card(sectors)
+    return moy_store.card(moy_sd.up())
 
 
 # The idle ladder's blank rung (the kernel's) -- the shared 5 minutes.

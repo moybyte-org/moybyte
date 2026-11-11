@@ -1,25 +1,26 @@
-"""A per-architecture module loads only when it is signed the way OTA images are.
+"""A per-architecture module loads only when it is admitted: signed the way OTA
+images are, or unsigned under its cart's consent to `full_access`.
 
-The board's check (`verify_module` in native/moy_wasm/modmoy_wasm.c) finds the
-signature trailer native/moy_wasm/moy_wasm_key.h states, hashes the module,
-and hands the signed text to `moy_ota.verify_sig` -- the device's own verifier,
-with the keys its image trusts. tools/wasm_module.py signs. These tests run the
-device's verifier on CPython with the throwaway key tests/test_ota_signing.py
-publishes, so the whole round trip runs in CI with no crypto library: a signed
-module verifies and comes back exactly as it was built, a byte changed anywhere
-in it -- its provenance key included -- is refused, and so is a module with no
-signature, a malformed trailer, another chip's signature or another key's. The
-on-glass suites hold the board to the same answers.
+The board's admission is one call, `moy_ota_admit_module`
+(native/moy_net/moy_ota.h), which both compiled tiers make -- an AOT module's
+load (native/moy_wasm/modmoy_wasm.c) and a native module's
+(native/moy_elf/modmoy_elf.c). It finds the signature trailer, hashes the
+module and checks the signed text with the keys the image trusts.
+tools/wasm_module.py signs, and its `verify` IS that C call, through the
+host's binding (runtime/host/net_binding.py): these tests execute the board's
+own admission with the throwaway key tests/test_ota_signing.py publishes. A
+signed module verifies and comes back exactly as it was built, a byte changed
+anywhere in it -- its provenance key included -- is refused, and so is a
+module with no signature, a malformed trailer, another chip's signature or
+another key's. The on-glass suites hold the board to the same answers.
 
-With the owner's Settings -> UNKNOWN SOURCES on, a module with NO signature
-passes this check (its provenance key is still checked, on the run's thread);
-every module that carries a trailer is held to it exactly as before, so the
-decision table below is the switch crossed with every kind of file.
+With the cart's consent given, a module with NO signature is admitted (its
+provenance key is still checked, on the run's thread); every module that
+carries a trailer is held to it exactly as before, so the decision table
+below is the consent crossed with every kind of file.
 """
 
 import hashlib
-import importlib.util
-import os
 import re
 import sys
 from pathlib import Path
@@ -102,23 +103,39 @@ def test_a_key_the_image_does_not_trust_is_refused():
     assert wm.verify(signed(), "esp32s3") == "bad signature"
 
 
-def test_the_board_checks_with_the_ota_verifier_and_the_ota_keys():
-    """The engine's check is moy_ota.verify_sig over the text the header
-    states -- the scheme, the chip, the module's length, its sha256 -- which
-    is exactly what the tool signs."""
-    src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
-    body = src[src.index("static const char *verify_module("):]
-    body = body[:body.index("\n}\n")]
-    assert 'MOY_WASM_SIG_SCHEME "\\n%s\\n%u\\n", KEY_CHIP' in body
-    assert "MP_QSTR_moy_ota" in body and "MP_QSTR_verify_sig" in body
-    assert "MOY_WASM_SIG_MAGIC" in body and "k < 64 || k > 1024" in body
+def test_the_signed_text_is_the_one_the_tool_signs():
+    """The admission checks the text the header states -- the scheme, the
+    chip, the module's length, its sha256 -- which is exactly what the tool
+    signs, and one magic ends every module file."""
     chip, n = "esp32s3", len(MODULE)
     c_text = ("%s\n%s\n%u\n" % (wm.sig_scheme(), chip, n)).encode() \
         + hashlib.sha256(MODULE).hexdigest().encode()
     assert c_text == wm.signed_text(MODULE, chip)
-    # Both halves of the engine refuse through it: the phase-1 run and the
-    # cart's session.
-    assert src.count("verify_module(") == 3
+    assert wm.sig_magic() == b"moybyte-sig1"
+    src = "".join(p.read_text() for p in (ROOT / "native").rglob("*.h")
+                  if "wamr" not in p.parts)
+    assert len(re.findall(r'#define \w+ "moybyte-sig1"', src)) == 1, \
+        "the magic is defined once, in moy_ota.h"
+
+
+def test_the_admission_strips_the_trailer_and_names_the_module_s_length():
+    from runtime import net_binding
+    data = signed()
+    assert net_binding.ota_admit_module(data, wm.sig_scheme(), "esp32s3", False,
+                                        TEST_KEYS) == (None, len(MODULE))
+    assert net_binding.ota_admit_module(MODULE, wm.sig_scheme(), "esp32s3", True,
+                                        TEST_KEYS) == (None, len(MODULE))
+
+
+def test_both_tiers_admit_through_the_one_call():
+    """No tier carries a verifier of its own: the AOT load and the native
+    load call moy_ota_admit_module, and the board, the host and the tool
+    reach the same C."""
+    for path in ("native/moy_wasm/modmoy_wasm.c", "native/moy_elf/modmoy_elf.c",
+                 "runtime/host/moyhost_elf.c"):
+        src = (ROOT / path).read_text()
+        assert src.count("moy_ota_admit_module(") == 1, path
+        assert "mbedtls_sha256" not in src and "verify_sig" not in src, path
 
 
 def _tampered():
@@ -133,9 +150,9 @@ def _malformed():
     return data[:-len(magic) - 4] + (7).to_bytes(4, "little") + magic
 
 
-# The load decision, file kind by switch: None loads (on to the provenance
-# check), anything else is the board's refusal. The switch changes exactly one
-# cell: an unsigned module. "another key" is the throwaway key's signature
+# The load decision, file kind by consent: None loads (on to the provenance
+# check), anything else is the board's refusal. The consent changes exactly
+# one cell: an unsigned module. "another key" is the throwaway key's signature
 # checked against the image's own OTA_PUBLIC_KEYS, which never signed it.
 DECISIONS = (
     ("signed", signed, TEST_KEYS, None, None),
@@ -151,42 +168,36 @@ DECISIONS = (
 
 @pytest.mark.parametrize("name,make,keys,off,on", DECISIONS,
                          ids=[d[0] for d in DECISIONS])
-def test_the_load_decision_with_unknown_sources_off_and_on(name, make, keys, off, on):
+def test_the_load_decision_without_and_with_consent(name, make, keys, off, on):
     data = make()
     assert wm.verify(data, "esp32s3", keys) == off, name
-    assert wm.verify(data, "esp32s3", keys, unknown_sources=False) == off, name
-    assert wm.verify(data, "esp32s3", keys, unknown_sources=True) == on, name
+    assert wm.verify(data, "esp32s3", keys, consented=False) == off, name
+    assert wm.verify(data, "esp32s3", keys, consented=True) == on, name
 
 
 def test_an_unsigned_module_passes_whole_and_its_key_is_left_to_the_thread():
-    """What the switch lets through is the file as it is -- no trailer to
+    """What the consent lets through is the file as it is -- no trailer to
     strip -- and it carries its provenance key into the load, where the
     board's key check (the same one every signed module meets) decides."""
-    assert wm.verify(MODULE, "esp32s3", TEST_KEYS, unknown_sources=True) is None
+    assert wm.verify(MODULE, "esp32s3", TEST_KEYS, consented=True) is None
     assert wm.split(MODULE) == (MODULE, None)
     assert KEY_TEXT in MODULE
 
 
-def test_the_board_decides_the_switch_where_it_decides_the_signature():
-    """The engine's check takes the switch as an argument, from both of its
-    callers, and lets an unsigned module through only on it; a trailer that
-    is present is verified before the switch is ever read. The switch is the
-    caller's on each load -- the cart session's comes from moycore's
-    wasm_open, which the device glue hands ws.unknown_sources."""
-    src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
-    body = src[src.index("static const char *verify_module("):]
-    body = body[:body.index("\n}\n")]
-    assert "bool unsigned_ok" in body
-    head = body[:body.index('"malformed signature"')]
-    assert 'return unsigned_ok ? NULL : "unsigned module";' in head
-    assert body.count("unsigned_ok") == 2, "the switch is read once, for a missing trailer"
-    assert "a[ARG_allow_unsigned].u_bool" in src
-    assert "verify_module(s->file, s->file_len, allow_unsigned != 0" in src
-    core = (ROOT / "native" / "moycore" / "moycore_wasm.c").read_text()
-    assert "moy_wasm_session_open(path, sha, memory, allow_unsigned," in core
-    assert "n_args > 7 && mp_obj_is_true(a[7])" in core
-    glue = (ROOT / "device" / "moycore_glue.py").read_text()
-    assert 'bool(getattr(ws, "unknown_sources", False))' in glue
+def test_the_consent_is_native_granted():
+    """The consent the admission takes is the cart's `full_access`, the install
+    prompt's "Full access to the console", on either compiled tier; a cart
+    with no consent record runs on its manifest as written, and one whose
+    `full_access` was turned off in Settings is not admitted."""
+    from runtime import app_perms as P
+    cart = {"id": "a.b", "runtime": "wasm", "permissions": ["full_access"]}
+    assert P.admits_unsigned(P.check(cart, None, ())[0])
+    assert not P.admits_unsigned(P.check(dict(cart, permissions=[]), None, ())[0])
+    assert P.line("full_access") == "Full access to the console"
+    off = {"perms": ["full_access"], "off": ["full_access"]}
+    assert not P.admits_unsigned(P.check(cart, off, ())[0])
+    native = {"id": "a.c", "native": ["host"], "permissions": ["full_access"]}
+    assert P.admits_unsigned(P.check(native, None, ())[0])
 
 
 def test_only_tamper_evidence_stays_a_hard_refusal():
@@ -194,25 +205,26 @@ def test_only_tamper_evidence_stays_a_hard_refusal():
     text for a SIGNATURE that does not verify -- the one case a WasmRun does
     not retry on the interpreter (native/moy_wasm/README.md, "A cart
     survives its firmware", 2026-09-30). "unsigned module" (no signature at
-    all, the Unknown sources case) is deliberately NOT in that tuple: it is
+    all, without the consent) is deliberately NOT in that tuple: it is
     retried, never a panel."""
     from device import moycore_glue as glue
     src = (ROOT / "native" / "moy_wasm" / "modmoy_wasm.c").read_text()
+    ota = (ROOT / "native" / "moy_net" / "moy_ota.c").read_text()
     assert 'snprintf(err, errlen, "refused: %s", why);' in src
     for text in glue._AOT_TAMPER_EVIDENCE:
-        assert ('"%s"' % text[len("refused: "):]) in src, text
+        assert ('"%s"' % text[len("refused: "):]) in ota, text
     assert not any("unsigned" in text for text in glue._AOT_TAMPER_EVIDENCE)
 
 
-def test_the_verify_command_answers_for_either_setting(tmp_path, capsys):
+def test_the_verify_command_answers_with_and_without_consent(tmp_path, capsys):
     path = tmp_path / "m.aot"
     path.write_bytes(MODULE)
-    assert wm.main(["verify", str(path), "--chip", "esp32s3",
-                    "--unknown-sources"]) == 0
-    assert "unsigned, loads with Unknown sources on" in capsys.readouterr().out
+    assert wm.main(["verify", str(path), "--chip", "esp32s3"]) == 1
+    assert "REFUSED: unsigned module" in capsys.readouterr().out
+    assert wm.main(["verify", str(path), "--chip", "esp32s3", "--consented"]) == 0
+    assert 'unsigned, loads for a cart granted "full_access"' in capsys.readouterr().out
     path.write_bytes(_tampered())
-    assert wm.main(["verify", str(path), "--chip", "esp32s3",
-                    "--unknown-sources"]) == 1
+    assert wm.main(["verify", str(path), "--chip", "esp32s3", "--consented"]) == 1
     assert "REFUSED: bad signature" in capsys.readouterr().out
 
 
@@ -244,13 +256,3 @@ def test_a_pem_key_signs_what_the_verifier_accepts(tmp_path):
     data = wm.sign(MODULE, "esp32p4", pem)
     assert wm.verify(data, "esp32p4", (("%x" % n, e),)) is None
     assert wm.verify(data, "esp32p4", TEST_KEYS) == "bad signature"
-
-
-def test_the_verifier_is_the_devices_own():
-    spec = importlib.util.spec_from_file_location("moy_ota_probe", wm.MOY_OTA)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    text = wm.signed_text(MODULE, "esp32s3")
-    assert mod.verify_sig(text, sign_with_test_key(text).hex(), TEST_KEYS)
-    assert os.path.samefile(wm.MOY_OTA, ROOT / "device" / "moy_ota.py")
-    assert re.search(r"^def verify_sig\(", (ROOT / "device" / "moy_ota.py").read_text(), re.M)

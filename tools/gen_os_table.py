@@ -1,0 +1,2006 @@
+#!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   -- the source's views      the rows read as roles, verbs, permissions and tiers
+#   TableError                 a source the rules refuse, named by its row
+#   perm_tiers                 the tiers a permission is served on, derived from its rows
+#   -- the prototype           a row's C prototype, parsed
+#   -- the source's rules      check: what the source may say
+#   -- the ELF tier            the OS function table, the kernel's rows, the SDK
+#   -- the app ABI             the C rows, the wasm and ui imports, Lua's names
+#   -- the Python console and the docs  the GENERATED splices and the doc tables
+#   -- the moy-app plugin      its table, a wasm app's header, the Lua and Python stubs
+#   outputs                    every file and its text, the one list main writes or checks
+"""Write every tier's table of Moybyte's app and OS calls from their one
+source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
+
+  the ELF tier (the OS function table, by ordinal)
+    native/moy_elf/moy_os_table.h   the rows' ordinals, the version, the table type
+    native/moy_elf/moy_os_rows.h    the kernel's prototype of each row (moy_os_<name>)
+    native/moy_elf/moy_os_table.c   the table, a retired row's typed stub, and the
+                                    body of each row the role door serves
+    sdk/include/moybyte/os.h        a program's header: the moybyte rows, the event
+                                    descriptor and its record (from
+                                    native/moy_kernel/moy_evq.h), a WASI program's
+                                    moybyte.os imports
+    sdk/src/moyos_stubs.c           a module's side of every row: the function by
+                                    its C library name, calling the table by ordinal
+    native/moy_elf/moy_os_check.c   each row's argument rule (u), checked before a
+                                    U-mode module's call runs (the P4s, moy_umode.h)
+  the WASI tier
+    native/moy_wasm/moy_wasi_os_rows.h  a WASI program's moybyte.os imports
+  the app ABI (native/moy_app)
+    native/moy_app/moy_app_rows.h   the roles, the C rows, the door's table, the
+                                    permission map
+    native/moy_app/moy_app_wasm_rows.h  the moybyte.app imports: each native
+    native/moy_ui/moy_ui_wasm_rows.h    the ui imports, served by native/moy_ui
+    native/moy_app/moy_app_lua_rows.h   the names a Lua run and a Lua service hold
+  the Python console, between GENERATED markers
+    runtime/shell/app_context.py    ROLES
+    runtime/shell/app_perms.py      TABLE, each permission's tiers derived
+    runtime/shell/shell_servers.py  DOOR_ARGS
+    runtime/system/scheduler.py     _CALLS
+    runtime/run/lua_ext.py          the Lua run's role names and console calls
+  docs/app_api_v1.md                the permission table, the call table and
+                                    the role table (three regions)
+  the moy-app plugin (sdk/moybyte_sdk, `moy app`)
+    sdk/moybyte_sdk/os_table.py         what each tier's module or script reaches, with
+                                    the permissions each answers under
+    sdk/include/moybyte/app.h       a C wasm app's moybyte.app imports
+    sdk/moybyte_sdk/stubs/              the names a Lua and a Python app reach, for editors
+
+The output is committed: no build runs this, and tests/test_os_table.py
+regenerates it and fails on any difference.
+
+    python3 tools/gen_os_table.py [--check]
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from board_config import runtime_file  # noqa: E402
+SOURCE = os.path.join(ROOT, "native", "os_calls.json")
+EVQ_H = os.path.join(ROOT, "native", "moy_kernel", "moy_evq.h")
+
+KERNEL_H = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.h")
+ROWS_H = os.path.join(ROOT, "native", "moy_elf", "moy_os_rows.h")
+KERNEL_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_table.c")
+SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "os.h")
+STUBS_C = os.path.join(ROOT, "sdk", "src", "moyos_stubs.c")
+CHECK_C = os.path.join(ROOT, "native", "moy_elf", "moy_os_check.c")
+WILD_H = os.path.join(ROOT, "tests", "fixtures", "elf", "elf_wild.moy", "src", "rows.h")
+APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
+WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
+UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
+LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
+WASI_OS_H = os.path.join(ROOT, "native", "moy_wasm", "moy_wasi_os_rows.h")
+# The module a WASI program imports a "wasi" row from.
+WASI_OS = "moybyte.os"
+APP_CONTEXT = str(runtime_file("app_context.py"))
+APP_PERMS = str(runtime_file("app_perms.py"))
+SHELL_SERVERS = str(runtime_file("shell_servers.py"))
+SCHEDULER = str(runtime_file("scheduler.py"))
+LUA_EXT = str(runtime_file("lua_ext.py"))
+APP_DOC = os.path.join(ROOT, "docs", "app_api_v1.md")
+PLUGIN_TABLE = os.path.join(ROOT, "sdk", "moybyte_sdk", "os_table.py")
+APP_WASM_SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "app.h")
+UI_SDK_H = os.path.join(ROOT, "sdk", "include", "moybyte", "ui.h")
+STUBS = os.path.join(ROOT, "sdk", "moybyte_sdk", "stubs")
+LUA_STUB = os.path.join(STUBS, "moybyte_os.lua")
+PY_STUBS = (os.path.join(STUBS, "__builtins__.pyi"), os.path.join(STUBS, "moybyte.pyi"))
+
+# The rows that run the SDK's C library's exit path (__moy_exit, sdk/libc/)
+# before the kernel's: C's exit, never _exit.
+EXIT_HOOK = ("exit",)
+
+TIERS = ("python", "lua", "wasm", "elf")
+# moy-spec's tiers: the game verbs a "spec" permission's floor names are
+# served on these (the cart verbs, which this source does not hold).
+SPEC_TIERS = ("python", "lua", "wasm")
+
+ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
+              "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
+              "u"}
+ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
+# The Python faces a row's Lua names stand beside where Python holds its
+# service as objects, not the row's verbs (a row's py_face): the device faces
+# (moybyte.lease, moybyte.lora, ...) and the status item (moybyte.status).
+PY_FACES = ("devices", "status")
+PERM_FIELDS = {"perm", "grants", "prompt", "needs", "py", "doc", "tiers", "spec"}
+# A row's argument rule (u): one token a kernel parameter. A row the door
+# serves takes its rule from its in (_door_u).
+#   -        a value: nothing to check
+#   s        a NUL-terminated string the process can read
+#   r w rw   a pointer to one of what it points at, readable / writable / both
+#   r:N      ... N of them (a parameter's name), or *N (what that parameter
+#            points at, itself checked first); void counts bytes
+#   r#N      ... N bytes, whatever it points at (a sockaddr and its length)
+#   f        a function the process's text holds
+#   k        a value the row's body matches against its own records
+#   ?        after any pointer token: NULL passes
+U_TOKEN = re.compile(r"^(?:-|k|f|s\??|(?P<perm>rw|r|w)(?P<null>\?)?(?:(?P<sep>[:#])(?P<deref>\*)?(?P<n>[A-Za-z_]\w*))?)$")
+KINDS = ("posix", "moybyte")
+# Where a row is served: a C row of native/moy_app ("c"), the Python
+# console's server for the role ("shell"), a process's ("proc:<name>"), a
+# console call answered as the calling process ("call"), the ELF kernel's
+# own ("kernel"), or a name the Python console hands its programs ("python").
+DOOR_SERVERS = ("c", "shell", "call")
+TYPES = ("int", "str", "str?", "bytes", "cart", "out")
+RETS = ("int", "len")
+HOWS = ("hop", "seq", "here", "direct")
+FLOOR_ROLE = "floor"
+
+
+class TableError(ValueError):
+    pass
+
+
+def load(path=SOURCE):
+    with open(path) as f:
+        return json.load(f)
+
+
+def dump(src):
+    """The source's text as it is kept: one row a line."""
+    o = ["{", '  "about": %s,' % json.dumps(src["about"]),
+         '  "version": %d,' % src["version"]]
+    for key in ("roles", "rows", "permissions"):
+        items = src[key]
+        o.append('  "%s": [' % key)
+        o += ["    %s%s" % (json.dumps(x), "," if i < len(items) - 1 else "")
+              for i, x in enumerate(items)]
+        o.append("  ]" + ("," if key != "permissions" else ""))
+    o += ["}", ""]
+    return "\n".join(o)
+
+
+# -- the source's views ---------------------------------------------------------
+
+def is_door(r):
+    """A row of the role table, which the ROLE door names by its index: a row
+    a role's server serves, or any row whose fields the door's Python half
+    decodes (a kernel or Python row a compiled app imports)."""
+    s = r.get("server")
+    return s in DOOR_SERVERS or (s or "").startswith("proc:") or bool(r.get("door"))
+
+
+def role_of(r):
+    return r["name"].split(".", 1)[0] if is_door(r) else None
+
+
+def verb_of(r):
+    return r["name"].split(".", 1)[1]
+
+
+def door_rows(src):
+    """The role table, in the door's order."""
+    return [r for r in src["rows"] if is_door(r)]
+
+
+def role_table(src=None):
+    """The role table as the app ABI's tests read it: each row's role, verb,
+    server, grant (its role's) and wasm (its import's WAMR signature, or
+    None), in the door's order."""
+    if src is None:
+        src = load()
+    return [{"role": role_of(r), "verb": verb_of(r), "server": r["server"],
+             "grant": grant_of(src, role_of(r)),
+             "wasm": wasm_sig(r) if r.get("wasm") is True else None} for r in door_rows(src)]
+
+
+def roles(src):
+    return [x["role"] for x in src["roles"]]
+
+
+def ctx_roles(src):
+    """The roles an AppContext builds an object for (app_context.ROLES)."""
+    return [x["role"] for x in src["roles"] if x.get("ctx")]
+
+
+def grant_of(src, role):
+    for x in src["roles"]:
+        if x["role"] == role:
+            return x["grant"]
+    raise TableError("no role %r" % role)
+
+
+def params(r):
+    """[(name, type)] of a row's neutral parameters."""
+    out = []
+    for p in r.get("in", ()):
+        name, _, typ = p.partition(":")
+        out.append((name, typ))
+    return out
+
+
+def wasm_sig(r):
+    """The WAMR signature string of a row's moybyte.app import."""
+    return "(%s)i" % "".join("i" if t == "int" else "*~" for _n, t in params(r))
+
+
+def cap_packed(r):
+    """Whether a row's answer capacity crosses as a number field: a row the
+    door's Python half may serve (not a C row's alone)."""
+    return r.get("server") != "c" or bool(r.get("door"))
+
+
+def py_twin(r):
+    """Whether a C row run where it is called has the moybyte module's verb
+    as its Python half: the kernel's answer on a compiled program's own
+    task, and, for a door row, the console call where the kernel has none
+    (the door's). A Lua program, whose calls are the VM's already, holds the
+    console call itself. A Lua tier's own form of the row (lua_own) is no
+    twin."""
+    return (r.get("server") == "c" and r.get("how") == "here" and not r.get("lua_own")
+            and bool(r.get("py")) and role_of(r) == "moybyte")
+
+
+def wasi_rows(src):
+    """The rows a WASI program imports from moybyte.os."""
+    return [r for r in src["rows"] if r.get("wasi")]
+
+
+def wasi_call(r):
+    """Whether a "wasi" row is a console call: posted on the VM's queue as a
+    JSON array of texts and numbers and answered by the scheduler's
+    `_CALLS`, not served by the kernel or in C: the moybyte module's own
+    verb, so a row Python holds by name, over texts and numbers. A row it
+    does not hold (the device handles'), or one that carries bytes or an
+    answer's buffer (share, item_read), is the door's Python half's."""
+    return ("c" not in r and role_of(r) == "moybyte" and r.get("server") != "c"
+            and bool(r.get("py")) and all(t in ("int", "str", "str?") for _n, t in params(r)))
+
+
+def wasi_role(r):
+    """Whether a "wasi" row is an app row: its role table row run for the
+    program's app run through the ROLE door, as a C program's is: any row
+    the kernel does not serve that is no console call (a row served in C,
+    and a door row, which the door's Python half serves as the program's
+    process: the shell's servers' and the console calls no console call
+    carries)."""
+    return "c" not in r and not wasi_call(r)
+
+
+def wasi_name(r):
+    """A "wasi" row's moybyte.os import name: a moybyte row's verb, a kernel
+    row named for its C function that name less its moy_, any other
+    <role>_<verb>."""
+    if "." not in r["name"]:
+        return r["name"][4:] if r["name"].startswith("moy_") else r["name"]
+    return verb_of(r) if role_of(r) in (None, "moybyte") else "%s_%s" % (role_of(r), verb_of(r))
+
+
+def console_calls(src):
+    """The console calls the VM's queue answers (the scheduler's `_CALLS`):
+    {"moybyte.<verb>": the moybyte module's function}. A call row is the verb
+    itself; a Python row a compiled program imports is the verb's message
+    half (`<verb>_message`), whose wake posts the program a message."""
+    out = {}
+    for r in door_rows(src):
+        if role_of(r) != "moybyte":
+            continue
+        if (r.get("server") == "call" or py_twin(r)) and (
+                r.get("lua") or (r.get("wasi") and wasi_call(r))):
+            out[r["name"]] = verb_of(r)
+        elif r.get("server") == "python" and r.get("wasi") and wasi_call(r):
+            out[r["name"]] = verb_of(r) + "_message"
+    return out
+
+
+def wasi_c(r):
+    """A "wasi" row's C prototype: the kernel's own, or a console call's as
+    the OS table names it (moy_<verb>)."""
+    if "c" in r:
+        return r["c"]
+    return "int32_t %s(%s)" % (c_name(r), ", ".join(c_params(r)) or "void")
+
+
+def wasi_params(r):
+    """[(name, kind, length's name)] of a "wasi" row's import: "s" a text,
+    "o" a buffer the call writes, "b" bytes (each a pointer and a length in
+    the import), "p" a word the call writes (a pointer), "i" a number; a
+    kernel row's from its C prototype, where a void pointer and the size_t
+    after it are one buffer ("b" or "o", its length's name third), any
+    other's from its in (None third)."""
+    if "c" not in r:
+        m = {"str": "s", "str?": "s", "int": "i", "out": "o", "bytes": "b"}
+        return [(n, m[t], None) for n, t in params(r)]
+    out = []
+    ps = parse(wasi_c(r))[2]
+    i = 0
+    while i < len(ps):
+        p, name = ps[i], _param_name(ps[i])
+        if p.startswith(("const void *", "void *")):
+            out.append((name, "b" if p.startswith("const ") else "o", _param_name(ps[i + 1])))
+            i += 2
+            continue
+        kind = "s" if p.startswith("const char *") else "p" if p.startswith("int *") else "i"
+        out.append((name, kind, None))
+        i += 1
+    return out
+
+
+def wasi_sig(r):
+    """The WAMR signature string of a row's moybyte.os import."""
+    m = {"i": "i", "p": "*"}
+    return "(%s)i" % "".join(m.get(k, "*~") for _n, k, _l in wasi_params(r))
+
+
+def door_kinds(r):
+    """The row's fields as the door decodes them in Python: `s` text, `o`
+    text where empty is None, `i` a number, `c` a cart, `b` bytes; an answer's
+    buffer (out) is handed over as its capacity, a number."""
+    m = {"str": "s", "str?": "o", "int": "i", "cart": "c", "bytes": "b", "out": "i"}
+    return "".join(m[t] for _n, t in params(r))
+
+
+def perms_of(r, src):
+    """The permissions a row answers under: its role's grant, unless the row's
+    own `grant` is the floor (a read every app is given, as the theme's are),
+    and the row's own `perm` (a gate its server passes, as the nav verbs pass
+    the front's)."""
+    out = []
+    role = role_of(r)
+    if (role is not None and r.get("grant") != FLOOR_ROLE
+            and grant_of(src, role) not in ("never", FLOOR_ROLE)):
+        out = [p["perm"] for p in src["permissions"] if p["grants"] == "role:" + role]
+    p = r.get("perm")
+    if p is not None:
+        out += list(p) if isinstance(p, list) else [p]
+    return out
+
+
+def row_tiers(r, src):
+    """The tiers that serve a row, from its projections."""
+    out = set()
+    if isinstance(r.get("elf"), int):
+        out.add("elf")
+    if r.get("wasm") or r.get("wasi"):
+        out.add("wasm")
+    if r.get("lua"):
+        out.add("lua")
+    if r.get("py") or (role_of(r) in ctx_roles(src)):
+        out.add("python")
+    return out
+
+
+def perm_tiers(p, src):
+    """The tiers a permission is served on: every tier for the floor (moy-spec's
+    verbs and nothing to consent to), Python for a marker (a shipped Python
+    app's cart), the stated tiers for what no row serves (a native module's
+    run, a service's start), and else the tiers of the rows it hands an app,
+    moy-spec's tiers too where its verbs are the spec's."""
+    kind = p["grants"].split(":")[0]
+    if kind == "floor":
+        return TIERS
+    if kind == "marker":
+        return ("python",)
+    if "tiers" in p:
+        return tuple(t for t in TIERS if t in p["tiers"])
+    have = set(SPEC_TIERS) if p.get("spec") else set()
+    for r in src["rows"]:
+        if p["perm"] in perms_of(r, src):
+            have |= row_tiers(r, src)
+    return tuple(t for t in TIERS if t in have)
+
+
+def c_name(r):
+    """The C name of a moybyte row a module calls: moy_<role>_<verb>, and
+    moy_<verb> for a console call."""
+    role = role_of(r)
+    if role == "moybyte":
+        return "moy_" + verb_of(r)
+    return "moy_%s_%s" % (role, verb_of(r))
+
+
+def c_params(r):
+    out = []
+    for name, typ in params(r):
+        if typ == "int":
+            out.append("int32_t %s" % name)
+        elif typ in ("str", "str?"):
+            out.append("const char *%s" % name)
+        elif typ == "bytes":
+            out += ["const void *%s" % name, "size_t %s_len" % name]
+        elif typ == "out":
+            out += ["void *%s" % name, "size_t %s_cap" % name]
+        else:
+            raise TableError("%s: a %s has no C form" % (r["name"], typ))
+    return out
+
+
+def _door_u(r):
+    """A door row's argument rule, from its in: the strings it reads, the
+    bytes it reads and the answer it writes, each by its length."""
+    u = []
+    for name, typ in params(r):
+        if typ == "int":
+            u.append("-")
+        elif typ in ("str", "str?"):
+            u.append("s" if typ == "str" else "s?")
+        elif typ == "bytes":
+            u += ["r:%s_len" % name, "-"]
+        elif typ == "out":
+            u += ["w:%s_cap" % name, "-"]
+    return u
+
+
+def elf(src):
+    """The OS function table: {version, rows} by ordinal, every row with its
+    C prototype (a moybyte row a door row serves gets its own, from its
+    neutral types) and `door`, its index in the role table, or None."""
+    index = {r["name"]: i for i, r in enumerate(door_rows(src))}
+    rows = {}
+    for r in src["rows"]:
+        o = r.get("elf")
+        if not isinstance(o, int):
+            continue
+        if o in rows:
+            raise TableError("ordinal %d twice: %s and %s" % (o, rows[o]["name"], r["name"]))
+        if "c" in r:
+            e = {k: r[k] for k in ("name", "kind", "c", "fail") if k in r}
+            e.update({k: r[k] for k in ELF_FIELDS if k in r})
+            e["name"] = parse(r["c"])[1]
+            e["kind"] = r.get("kind", "moybyte")
+            e["door"] = None
+        else:
+            e = {"name": c_name(r), "kind": "moybyte",
+                 "c": "int32_t %s(%s)" % (c_name(r), ", ".join(c_params(r)) or "void"),
+                 "fail": "-1", "door": index[r["name"]], "how": r.get("how", "hop"),
+                 "u": _door_u(r), "src": r}
+        rows[o] = e
+    if sorted(rows) != list(range(len(rows))):
+        raise TableError("the ordinals are not 0 .. %d" % (len(rows) - 1))
+    return {"version": src["version"], "rows": [rows[i] for i in range(len(rows))]}
+
+
+# -- the prototype ----------------------------------------------------------
+
+_PROTO = re.compile(r"^(?P<ret>.*?[\s*])(?P<name>[A-Za-z_]\w*)\((?P<args>.*)\)$")
+
+
+def _split(args):
+    """The parameters of a parameter list, split at its top-level commas."""
+    out, depth, cur = [], 0, ""
+    for ch in args:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def _param_name(p):
+    m = re.search(r"\(\s*\*\s*([A-Za-z_]\w*)\s*\)", p)
+    if m:
+        return m.group(1)
+    m = re.search(r"([A-Za-z_]\w*)\s*(\[[^\]]*\])?$", p)
+    if not m:
+        raise TableError("a parameter with no name: %r" % p)
+    return m.group(1)
+
+
+def parse(c):
+    """(return type, name, [parameter], variadic) of prototype `c`."""
+    m = _PROTO.match(c.strip())
+    if not m:
+        raise TableError("not a prototype: %r" % c)
+    ret = m.group("ret").strip()
+    ps = _split(m.group("args"))
+    variadic = bool(ps) and ps[-1] == "..."
+    if variadic:
+        ps = ps[:-1]
+    if ps == ["void"]:
+        ps = []
+    for p in ps:
+        _param_name(p)
+    return ret, m.group("name"), ps, variadic
+
+
+# -- the source's rules ---------------------------------------------------------
+
+def _check_elf_table(table):
+    rows = table["rows"]
+    seen = set()
+    for i, r in enumerate(rows):
+        if r["kind"] not in KINDS:
+            raise TableError("row %d's kind: %r" % (i, r["kind"]))
+        if r["kind"] == "posix" and not r.get("hdr"):
+            raise TableError("posix row %d names no header" % i)
+        if r["name"] in seen:
+            raise TableError("row twice: %s" % r["name"])
+        seen.add(r["name"])
+        ret, name, _params, variadic = parse(r["c"])
+        if name != r["name"]:
+            raise TableError("row %d's prototype names %s" % (i, name))
+        if variadic != ("va" in r):
+            raise TableError("row %d: a ... and a va go together" % i)
+        if (ret == "void") != (r["fail"] is None):
+            raise TableError("row %d: fail is null exactly when it returns nothing" % i)
+        if r.get("noreturn") and ret != "void":
+            raise TableError("row %d: a noreturn row returns nothing" % i)
+        _check_u(i, r)
+    if table["version"] != len(rows):
+        raise TableError("version %d with %d rows: an append bumps it, nothing else does"
+                         % (table["version"], len(rows)))
+
+
+def check(src):
+    """The source's own rules: fields, servers, types, the projections each
+    tier takes, Lua's names Python's, the ordinals, the permissions."""
+    role_names = roles(src)
+    if len(set(role_names)) != len(role_names):
+        raise TableError("a role twice")
+    perm_names = [p["perm"] for p in src["permissions"]]
+    if len(set(perm_names)) != len(perm_names):
+        raise TableError("a permission twice")
+    for x in src["roles"]:
+        g = x["grant"]
+        if g not in ("never", FLOOR_ROLE) and g not in perm_names:
+            raise TableError("role %s's grant %r is no permission" % (x["role"], g))
+    seen = set()
+    for i, r in enumerate(src["rows"]):
+        name = r.get("name")
+        if not name or set(r) - ROW_FIELDS:
+            raise TableError("row %d's fields: %s" % (i, sorted(r)))
+        if name in seen:
+            raise TableError("row twice: %s" % name)
+        seen.add(name)
+        if "grant" in r and (r["grant"] != FLOOR_ROLE or r.get("perm") is not None
+                             or role_of(r) is None
+                             or grant_of(src, role_of(r)) in ("never", FLOOR_ROLE)):
+            raise TableError("%s: a row's own grant is the floor, under a role a "
+                             "permission grants, and gates nothing" % name)
+        kind = r.get("kind", "moybyte")
+        if kind not in KINDS:
+            raise TableError("%s's kind: %r" % (name, kind))
+        if kind == "posix":
+            if "server" in r or not isinstance(r.get("elf"), int) or "c" not in r:
+                raise TableError("%s: a posix row is an ELF row with its C prototype" % name)
+        elif "server" not in r:
+            raise TableError("%s names no server" % name)
+        if set(r) & ELF_FIELDS and "c" not in r:
+            raise TableError("%s: ELF details with no prototype" % name)
+        if is_door(r):
+            role = role_of(r)
+            if role not in role_names or "." not in name:
+                raise TableError("%s: a door row is <role>.<verb> of a role" % name)
+        elif r.get("server") not in ("kernel", "python", None):
+            raise TableError("%s's server: %r" % (name, r.get("server")))
+        for pname, typ in params(r):
+            if typ not in TYPES or not re.match(r"^[a-z_][a-z0-9_]*$", pname):
+                raise TableError("%s's parameter %s:%s" % (name, pname, typ))
+        if "ret" in r and r["ret"] not in RETS:
+            raise TableError("%s's ret: %r" % (name, r["ret"]))
+        if "how" in r and r["how"] not in HOWS:
+            raise TableError("%s's how: %r" % (name, r["how"]))
+        if r.get("how") == "here" and r.get("server") != "c":
+            raise TableError("%s: a row run where it is called is served in C" % name)
+        outs = [n for n, t in params(r) if t == "out"]
+        if (r.get("ret") == "len") != bool(outs) and r.get("how") != "direct":
+            raise TableError("%s: a len answer is what an out parameter holds" % name)
+        if r.get("wasm") not in (None, True) or r.get("wasi") not in (None, True):
+            raise TableError("%s's wasm or wasi: %r, %r" % (name, r.get("wasm"), r.get("wasi")))
+        if r.get("wasi"):
+            kernel = "c" in r and isinstance(r.get("elf"), int) and kind == "moybyte"
+            app = "c" not in r and bool(r.get("wasm")) and r.get("how") != "direct" and (
+                r.get("server") == "c" or bool(r.get("door")))
+            if not (kernel or app):
+                raise TableError("%s: a WASI import is a moybyte row the kernel serves, or a "
+                                 "row a compiled app imports served in C or by the door" % name)
+            ps = parse(wasi_c(r))[2]
+            if kernel and (parse(wasi_c(r))[0] not in ("int", "int32_t", "uint32_t") or not all(
+                    p.startswith(("const char *", "int ", "int32_t ", "uint32_t ", "int *"))
+                    or (p.startswith("size_t ") and i > 0
+                        and ps[i - 1].startswith(("const void *", "void *")))
+                    or (p.startswith(("const void *", "void *")) and i + 1 < len(ps)
+                        and ps[i + 1].startswith("size_t "))
+                    for i, p in enumerate(ps))):
+                raise TableError("%s: a WASI import takes texts, buffers with their lengths, "
+                                 "words it writes and numbers, and answers a number" % name)
+        if r.get("wasm"):
+            if not ("in" in r and "ret" in r and "how" in r):
+                raise TableError("%s: an import needs in, ret and how" % name)
+            if (r["how"] == "direct") != (role_of(r) == "ui"):
+                raise TableError("%s: a direct import is the toolkit's" % name)
+            if r["how"] != "direct" and (len(outs) > 1 or (outs and params(r)[-1][1] != "out")):
+                raise TableError("%s: the adapter writes one answer, last" % name)
+        e = r.get("elf")
+        if e is not None and not (isinstance(e, int) or e == "linked"):
+            raise TableError("%s's elf: %r" % (name, e))
+        if isinstance(e, int) and kind == "moybyte" and "c" not in r:
+            if not is_door(r) or "in" not in r or "ret" not in r:
+                raise TableError("%s: an ELF row the door serves needs in and ret" % name)
+            if len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
+                raise TableError("%s: one answer, last" % name)
+            if [n for n, t in params(r) if t == "cart"]:
+                raise TableError("%s: a cart has no C form" % name)
+        if r.get("door"):
+            if r.get("server") == "c" and r.get("how") != "here":
+                raise TableError("%s: the door's Python half serves a C row only where it "
+                                 "runs where it is called and passes what C does not own"
+                                 % name)
+            if "in" not in r or len(outs) > 1 or (outs and params(r)[-1][1] != "out"):
+                raise TableError("%s: a door row's fields are its in, one answer last" % name)
+        lua, py = r.get("lua") or [], list(r.get("py") or [])
+        if role_of(r) in ctx_roles(src):
+            py.append(r["name"])
+        if r.get("py_face", "devices") not in PY_FACES:
+            raise TableError("%s: py_face names one of %s or is absent" % (name, PY_FACES))
+        if not set(lua) <= set(py) and not r.get("py_face"):
+            raise TableError("%s: Lua's names are Python's, verbatim: %s" % (
+                name, sorted(set(lua) - set(py))))
+        for p in perms_of(r, src):
+            if p not in perm_names:
+                raise TableError("%s's perm %r is no permission" % (name, p))
+    for p in src["permissions"]:
+        if set(p) - PERM_FIELDS:
+            raise TableError("%s's fields: %s" % (p["perm"], sorted(p)))
+        if not isinstance(p.get("doc"), str) or not p["doc"]:
+            raise TableError("%s: no doc" % p["perm"])
+        kind = p["grants"].split(":")[0]
+        if "tiers" in p and kind not in ("full_access", "boot"):
+            raise TableError("%s: only what no row serves states its tiers" % p["perm"])
+        if kind in ("full_access", "boot") and "tiers" not in p:
+            raise TableError("%s: no row serves it, so it states its tiers" % p["perm"])
+        if not perm_tiers(p, src):
+            raise TableError("%s: no tier serves it" % p["perm"])
+    for r in door_rows(src):
+        if role_of(r) == "ui" and r.get("elf") != "linked":
+            raise TableError("%s: the toolkit's rows are linked into an ELF module" % r["name"])
+    _check_elf_table(elf(src))
+
+
+def _is_pointer(p):
+    return "*" in p or "[" in p
+
+
+def _check_u(i, r):
+    """Every pointer a row takes has a rule, and every rule a parameter."""
+    params = kernel_params(r)
+    u = r.get("u", ["-"] * len(params))
+    if len(u) != len(params):
+        raise TableError("row %d's u has %d tokens for %d parameters" % (i, len(u), len(params)))
+    names = [_param_name(p) for p in params]
+    for p, tok in zip(params, u):
+        m = U_TOKEN.match(tok)
+        if not m:
+            raise TableError("row %d: %r is not an argument rule" % (i, tok))
+        if _is_pointer(p) != (tok != "-"):
+            raise TableError("row %d: %s %s a rule" % (
+                i, _param_name(p), "needs" if _is_pointer(p) else "is a value and takes no"))
+        if m.group("n") and m.group("n") not in names:
+            raise TableError("row %d: %r names no parameter" % (i, tok))
+
+
+def kernel_params(r):
+    _ret, _name, ps, variadic = parse(r["c"])
+    if variadic:
+        ps = ps + [r["va"]["arg"]]
+    return ps
+
+
+def kernel_proto(r, prefix="moy_os_"):
+    ret, name, _p, _v = parse(r["c"])
+    ps = kernel_params(r)
+    sep = "" if ret.endswith("*") else " "
+    return "%s%s%s%s(%s)" % (ret, sep, prefix, name, ", ".join(ps) or "void")
+
+
+def ident(name):
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+
+def upper(name):
+    return ident(name).upper()
+
+
+# -- the ELF tier -----------------------------------------------------------
+
+TABLE_T = """typedef struct {
+    uint32_t version;     // bumped on every append; never on anything else
+    uint32_t rows;
+    void *fn[];           // row i is the same prototype forever; retired -> a typed stub
+} moy_os_table_t;"""
+
+HEAD = "// GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit.\n"
+
+
+def _headers(rows):
+    out = []
+    for r in rows:
+        h = r.get("hdr")
+        if h and h not in out:
+            out.append(h)
+    return out
+
+
+def gen_kernel_h(table):
+    rows = table["rows"]
+    o = [HEAD,
+         "// The OS function table's ordinals (docs/os_2026-11/tiers.md section 1): row i\n"
+         "// is the same prototype forever, appended never changed, a retired one\n"
+         "// answering through a typed stub. A module records the rows it calls\n"
+         "// (sdk/src/moyos_stubs.c); one that calls a row past MOY_OS_ROWS is refused.\n",
+         "#ifndef MOY_OS_TABLE_H", "#define MOY_OS_TABLE_H", "",
+         "#include <stdint.h>", "",
+         "#define MOY_OS_VERSION %du" % table["version"],
+         "#define MOY_OS_ROWS %du" % len(rows), "",
+         TABLE_T, "",
+         "enum {"]
+    for i, r in enumerate(rows):
+        o.append("    MOY_OS_ROW_%s = %d," % (ident(r["name"]), i))
+    o += ["};", "",
+          "extern const moy_os_table_t moy_os_table;",
+          "// Each row's name, in ordinal order.",
+          "extern const char *const moy_os_row_names[MOY_OS_ROWS];", "",
+          "#endif // MOY_OS_TABLE_H", ""]
+    return "\n".join(o)
+
+
+def gen_rows_h(table):
+    rows = table["rows"]
+    o = [HEAD,
+         "// The kernel's side of each row: moy_os_<name>, at the prototype the module's\n"
+         "// C library declares (a varargs row takes its one optional argument in the\n"
+         "// place of the ...). native/moy_elf/moy_os.c defines them, but a row the role\n"
+         "// door serves, whose body moy_os_table.c has: moy_os_call over its fields.\n",
+         "#ifndef MOY_OS_ROWS_H", "#define MOY_OS_ROWS_H", "",
+         "#include <stddef.h>", "#include <stdint.h>", "#include <sys/types.h>", "",
+         "// A header a board's C library lacks (sys/mman.h) leaves its rows' types",
+         "// to sys/types.h."]
+    for h in _headers(rows):
+        o += ["#if __has_include(<%s>)" % h, "#include <%s>" % h, "#endif"]
+    o += ["", "// The calling thread's errno, set by a row that fails.",
+          "void moy_os_errno_set(int e);", "",
+          "// A field of a row the role door serves: a number, a NUL-terminated text,",
+          "// a text or NULL for none, or bytes and their length.",
+          "enum { MOY_OS_ARG_INT = 0, MOY_OS_ARG_STR, MOY_OS_ARG_OPT, MOY_OS_ARG_BYTES };",
+          "typedef struct {",
+          "    const void *p;",
+          "    size_t n;",
+          "    int32_t v;",
+          "    uint8_t kind;",
+          "} moy_os_arg_t;",
+          "// How it runs: on the task that serves the process's session; where it",
+          "// is called, under the app ABI's seqlock (native/moy_app/moy_app_wasm.h);",
+          "// or where it is called, its row's own lock its guard, hopped where it",
+          "// answers that it needs the VM.",
+          "enum { MOY_OS_HOP = 0, MOY_OS_SEQ = 1, MOY_OS_HERE = 2 };",
+          "// Role table row `row` for the calling process's run, its fields `a` and",
+          "// its answer written into `out` (cap bytes): the answer, or -1 and errno.",
+          "int32_t moy_os_call(uint32_t row, int how, const moy_os_arg_t *a, int n, void *out,",
+          "                    size_t cap);", ""]
+    for r in rows:
+        if r.get("retired"):
+            continue
+        attr = " __attribute__((noreturn))" if r.get("noreturn") else ""
+        o.append("%s%s;" % (kernel_proto(r), attr))
+    o += ["", "#endif // MOY_OS_ROWS_H", ""]
+    return "\n".join(o)
+
+
+_ARG = {"int": "MOY_OS_ARG_INT", "str": "MOY_OS_ARG_STR", "str?": "MOY_OS_ARG_OPT",
+        "bytes": "MOY_OS_ARG_BYTES"}
+
+
+def _call_body(r):
+    """A door row's body: its fields packed for the role door. A door
+    served in Python is handed an answer's capacity as a number field, as
+    the wasm adapter hands it (gen_wasm_h); the C side still writes at
+    most `cap` bytes into the buffer, which the row's `w:<name>_cap` rule
+    has proven lies in the module's memory, so the number only tells the
+    door what fits (an INT32_MAX ceiling keeps it a positive int32)."""
+    src = r["src"]
+    cap_field = cap_packed(src)
+    ins = [(n, t) for n, t in params(src) if t != "out" or cap_field]
+    out = [n for n, t in params(src) if t == "out"]
+    o = ["%s {" % kernel_proto(r)]
+    if ins:
+        o.append("    const moy_os_arg_t a[%d] = {" % len(ins))
+        for n, t in ins:
+            if t == "out":
+                o.append("        { NULL, 0u, (int32_t)(%s_cap < 0x7fffffffu ? %s_cap : 0x7fffffffu),"
+                         " MOY_OS_ARG_INT }," % (n, n))
+            elif t == "int":
+                o.append("        { NULL, 0u, %s, %s }," % (n, _ARG[t]))
+            elif t == "bytes":
+                o.append("        { %s, %s_len, 0, %s }," % (n, n, _ARG[t]))
+            else:
+                o.append("        { %s, 0u, 0, %s }," % (n, _ARG[t]))
+        o.append("    };")
+    how = "MOY_OS_" + r["how"].upper()
+    o.append("    return moy_os_call(%du, %s, %s, %d, %s, %s);   // %s" % (
+        r["door"], how, "a" if ins else "NULL", len(ins),
+        out[0] if out else "NULL", (out[0] + "_cap") if out else "0u", src["name"]))
+    o.append("}")
+    o.append("")
+    return o
+
+
+def gen_kernel_c(table):
+    rows = table["rows"]
+    o = [HEAD, '#if !__has_include("esp_heap_caps.h")    // a host (moy_os.c)', "#define _POSIX_C_SOURCE 200809L", "#define _DEFAULT_SOURCE",
+         "#endif", "", "#include <errno.h>", "#include <stddef.h>", "",
+         '#include "moy_os_table.h"', '#include "moy_os_rows.h"', ""]
+    for r in rows:
+        if r["door"] is not None and not r.get("retired"):
+            o += _call_body(r)
+    for r in rows:
+        if not r.get("retired"):
+            continue
+        params_ = kernel_params(r)
+        o.append("// Retired %s." % r["retired"])
+        o.append("static %s {" % kernel_proto(r, "moy_os_retired_"))
+        for p in params_:
+            o.append("    (void)%s;" % _param_name(p))
+        if r.get("noreturn"):
+            o.append("    moy_os__exit(127);")
+        else:
+            o.append("    moy_os_errno_set(ENOSYS);")
+            if r["fail"] is not None:
+                o.append("    return %s;" % r["fail"])
+        o.append("}")
+        o.append("")
+    o.append("const moy_os_table_t moy_os_table = {")
+    o.append("    MOY_OS_VERSION, MOY_OS_ROWS, {")
+    for r in rows:
+        fn = ("moy_os_retired_" if r.get("retired") else "moy_os_") + r["name"]
+        o.append("        (void *)%s," % fn)
+    o += ["    },", "};", "",
+          "const char *const moy_os_row_names[MOY_OS_ROWS] = {"]
+    for r in rows:
+        o.append('    "%s",' % r["name"])
+    o += ["};", ""]
+    return "\n".join(o)
+
+
+def _evq_block(path=EVQ_H):
+    """The event descriptor, its record's version, the backpressure's
+    bounds and the record, as moy_evq.h states them."""
+    with open(path) as f:
+        text = f.read()
+    out = []
+    for pat in (r"#define MOY_EVQ_FD \d+", r"#define MOY_EVQ_VERSION \d+",
+                r"#define MOY_EVQ_NAME \d+u", r"#define MOY_EVQ_APP \d+u",
+                r"#define MOY_EVQ_SENDER \d+u", r"#define MOY_EVQ_BATCH \d+u",
+                r"typedef struct \{[^}]*\} moy_evq_ev_t;"):
+        m = re.search(pat, text, re.S)
+        if not m:
+            raise TableError("moy_evq.h no longer has %r" % pat)
+        out.append(m.group(0))
+    return "\n".join(out[:-1]) + "\n\n" + out[-1]
+
+
+def _wasi_import(r):
+    """A WASI program's side of a "wasi" row: its moybyte.os import, and the
+    function by the row's C name over it (each text a pointer and a length)."""
+    ret, name, ps, _v = parse(wasi_c(r))
+    verb = wasi_name(r)
+    args, call = [], []
+    for n, k, ln in wasi_params(r):
+        if k == "s":
+            args += ["const char *%s" % n, "size_t %s_len" % n]
+            call += [n, "%s ? __builtin_strlen(%s) : 0" % (n, n)]
+        elif k == "o":
+            args += ["void *%s" % n, "size_t %s" % (ln or n + "_cap")]
+            call += [n, ln or "%s_cap" % n]
+        elif k == "b":
+            args += ["const void *%s" % n, "size_t %s" % (ln or n + "_len")]
+            call += [n, ln or "%s_len" % n]
+        elif k == "p":
+            args.append("int *%s" % n)
+            call.append(n)
+        else:
+            args.append(next(p for p in ps if _param_name(p) == n))
+            call.append(n)
+    imp = "__moy_os_%s" % verb
+    return ["int32_t %s(%s)" % (imp, ", ".join(args) or "void"),
+            '    __attribute__((import_module("%s"), import_name("%s")));' % (WASI_OS, verb),
+            "static inline %s {" % wasi_c(r),
+            "    int32_t r = %s(%s);" % (imp, ", ".join(call)),
+            "    if (r < 0) {",
+            "        errno = (int)-r;",
+            "        return %s;" % r.get("fail", "-1"),
+            "    }",
+            "    return (%s)r;" % ret,
+            "}"]
+
+
+def gen_sdk_h(table):
+    rows = table["rows"]
+    src = load()
+    o = [HEAD,
+         "// A Moybyte program's header (sdk/README.md): the OS's own functions that\n"
+         "// have no POSIX name, and the event descriptor a program reads its messages\n"
+         "// from. A native module's POSIX functions are the C library's own headers'\n"
+         "// (unistd.h, fcntl.h, poll.h, ...), served by the OS table; a WASI\n"
+         "// program's are WASI's, and the calls it shares with a native module are\n"
+         "// its moybyte.os imports, under the same names.\n",
+         "#ifndef MOYBYTE_OS_H", "#define MOYBYTE_OS_H", "",
+         "#include <stddef.h>", "#include <stdint.h>", "",
+         "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
+         "// The OS table this header was made from: a module built against it runs",
+         "// on a console whose table has every row the module calls.",
+         "#define MOY_OS_VERSION %d" % table["version"], "",
+         "// THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service",
+         "// model): the process's event queue, readable while a message is queued.",
+         "// A program blocks in poll (poll_oneoff) on it, its nearest deadline the",
+         "// timeout, and each read takes one record: a moy_evq_ev_t, then its",
+         "// arguments (a JSON array, `n` bytes), then a NUL. A read never blocks: -1",
+         "// with EAGAIN while nothing is queued, EMSGSIZE where the buffer is short",
+         "// (the record's head written, its `n` what the arguments need, the",
+         "// message kept). A native service that is stopped reads end of file (0),",
+         "// its poll answering POLLHUP, and returns from main. A message reaches",
+         "// the process only on a name it listens on (moy_on); moy_send answers",
+         "// how many processes took one, or -1 with EAGAIN where none did because",
+         "// a receiver holds MOY_EVQ_SENDER of this process's messages unread (the",
+         "// kernel's backpressure: send again later). A poll's wake reads",
+         "// MOY_EVQ_BATCH records at most (EAGAIN past that, the rest queued for the",
+         "// next poll, which returns at once): each sender's messages in its order,",
+         "// the senders in turn.",
+         _evq_block(), "",
+         "// moy_log's levels: the OS log's (native/moy_kernel/moy_log.h).",
+         "#define MOY_LOG_ERR 3", "#define MOY_LOG_WARNING 4", "#define MOY_LOG_INFO 6",
+         "#define MOY_LOG_DEBUG 7", "",
+         "// A status item's states (moy_status_show, moy_status_state): its icon in",
+         "// the accent, the paused ink or the danger ink.",
+         "#define MOY_STATUS_ON 0", "#define MOY_STATUS_PAUSED 1", "#define MOY_STATUS_ERROR 2",
+         "",
+         "#ifdef __wasm__", "",
+         "#include <errno.h>", ""]
+    for r in wasi_rows(src):
+        o += _wasi_import(r)
+        o.append("")
+    o += ["#else", "",
+          "// The table the OS hands a module at its load (sdk/src/moyos_crt.c).",
+          TABLE_T, ""]
+    for r in rows:
+        if r["kind"] == "moybyte" and r["door"] is None and not r.get("retired"):
+            o.append("%s;" % r["c"])
+    o += ["",
+          "// The app's calls (docs/app_api_v1.md, the call table): each the console's",
+          "// row of the same name, under the process's permissions. A text is",
+          "// NUL-terminated; an answer is written into the buffer given with its",
+          "// capacity. Each answers its number (a length, for an answer written),",
+          "// or -1 with errno: EACCES a permission it lacks, ERANGE a buffer too",
+          "// small, EINVAL an argument refused, ENOENT nothing of that name, EAGAIN",
+          "// no console to serve it now (its queue full, or the process ending)."]
+    for r in rows:
+        if r["door"] is not None:
+            o.append("%s;   // %s" % (r["c"], r["src"]["name"]))
+    o += ["", "#endif // __wasm__", "",
+          "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_OS_H", ""]
+    return "\n".join(o)
+
+
+def gen_wasi_h(src):
+    o = [HEAD,
+         "// A WASI program's moybyte.os imports (native/moy_wasm/moy_wasi.h): each\n"
+         "// X(verb, its WAMR signature), a text a pointer and a length, the rows of\n"
+         "// native/os_calls.json marked \"wasi\", whose C function the kernel serves an\n"
+         "// ELF module too, in their import names' order: WAMR's lookup order, so the\n"
+         "// table registers const, unsorted at run time.\n",
+         "#ifndef MOY_WASI_OS_ROWS_H", "#define MOY_WASI_OS_ROWS_H", "",
+         "#define MOY_WASI_OS_ROWS(X) \\"]
+    for r in sorted(wasi_rows(src), key=lambda r: wasi_name(r).encode()):
+        o.append('    X(%s, "%s") \\' % (wasi_name(r), wasi_sig(r)))
+    o += ["",
+          "// The rows served where they are called (how \"here\" or \"seq\"): C on the",
+          "// caller's task, no VM's queue, which a host whose module runs on the VM's",
+          "// own task can serve in place (native/moy_wasm_web/moy_wasi_web.h).",
+          "#define MOY_WASI_OS_HERE(X) \\"]
+    for r in sorted(wasi_rows(src), key=lambda r: wasi_name(r).encode()):
+        if r.get("how") in ("here", "seq"):
+            o.append("    X(%s) \\" % wasi_name(r))
+    o += ["", "#endif // MOY_WASI_OS_ROWS_H", "",
+          "// The natives of the rows the kernel does not serve, where moy_wasi.c",
+          "// defines MOY_WASI_OS_BODIES after its os_call and os_role: a console",
+          "// call packs its arguments (os_arg_t: a text, a text that may be empty, a",
+          "// number) as the JSON array the console's verb takes; an app row packs its",
+          "// fields (os_arg_t: a text or bytes, a number) for its role table row.",
+          "#if defined(MOY_WASI_OS_BODIES) && !defined(MOY_WASI_OS_BODIES_DONE)",
+          "#define MOY_WASI_OS_BODIES_DONE", ""]
+    for r in wasi_rows(src):
+        if wasi_role(r):
+            ps, packs, out = ["wasm_exec_env_t e"], [], ("NULL", "0")
+            for name, typ in params(r):
+                if typ == "int":
+                    ps.append("int32_t %s" % name)
+                    packs.append("OS_I(%s)" % name)
+                elif typ == "out":
+                    ps += ["uint8_t *%s" % name, "uint32_t %s_cap" % name]
+                    out = (name, name + "_cap")
+                    if cap_packed(r):               # a door served in Python: _call_body's
+                        packs.append("OS_CAP(%s_cap)" % name)
+                else:
+                    ps += ["const %s *%s" % ("uint8_t" if typ == "bytes" else "char", name),
+                           "uint32_t %s_n" % name]
+                    packs.append("OS_O((const char *)%s, %s_n)" % (name, name)
+                                 if typ == "bytes" else "OS_O(%s, %s_n)" % (name, name))
+            o += _c_decl("static int32_t w_os_%s" % wasi_name(r), ps, " {")
+            if packs:
+                o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
+            o.append("    return os_role(e, MOY_T_%s, %s, %s, %d, %s, %s);" % (
+                upper(r["name"]), "OS_" + r["how"].upper(),
+                "a" if packs else "NULL", len(packs), out[0], out[1]))
+            o += ["}", ""]
+            continue
+        if not wasi_call(r):
+            continue
+        ps, packs = ["wasm_exec_env_t e"], []
+        for name, typ in params(r):
+            if typ == "int":
+                ps.append("int32_t %s" % name)
+                packs.append("OS_I(%s)" % name)
+            else:
+                ps += ["const char *%s" % name, "uint32_t %s_n" % name]
+                packs.append("OS_%s(%s, %s_n)" % ("O" if typ == "str?" else "S", name, name))
+        o += _c_decl("static int32_t w_os_%s" % verb_of(r), ps, " {")
+        if packs:
+            o.append("    const os_arg_t a[%d] = { %s };" % (len(packs), ", ".join(packs)))
+        o.append('    return os_call(e, "%s", %s, %d);' % (r["name"], "a" if packs else "NULL",
+                                                       len(packs)))
+        o += ["}", ""]
+    o += ["#endif // MOY_WASI_OS_BODIES", ""]
+    return "\n".join(o)
+
+
+def gen_stubs_c(table):
+    rows = table["rows"]
+    o = [HEAD,
+         "// The module's side of the OS table: each row a function under its C library\n"
+         "// name that calls the table's row by its ordinal. Built once per row\n"
+         "// (-DMOY_OS_ONLY=<row>) into libmoyos.a, so a module links only the rows it\n"
+         "// calls, and each records its ordinal in the non-loaded section .moy.rows,\n"
+         "// which the loader reads to refuse a module that needs a newer console. A\n"
+         "// retired row has none: a module built now cannot call it.\n",
+         "#define _DEFAULT_SOURCE 1", "#define _GNU_SOURCE 1",
+         "#undef _FORTIFY_SOURCE", "",
+         "#include <stdarg.h>", "#include <stdint.h>", "#include <stddef.h>",
+         '#include "moyos_rt.h"', "",
+         "#if defined(MOY_OS_ONLY)",
+         "#define MOY_OS_ROW(n) ((n) == MOY_OS_ONLY)",
+         "#else",
+         "#define MOY_OS_ROW(n) 1",
+         "#endif", "",
+         "#define MOY_OS_STR_(x) #x",
+         "#define MOY_OS_STR(x) MOY_OS_STR_(x)",
+         "#define MOY_OS_USED(n) __asm__(\".pushsection .moy.rows,\\\"\\\",@progbits\\n"
+         ".4byte \" MOY_OS_STR(n) \"\\n.popsection\")", ""]
+    for i, r in enumerate(rows):
+        if r.get("retired"):
+            o.append("// %d %s: retired %s" % (i, r["name"], r["retired"].split(":")[0]))
+            o.append("")
+            continue
+        ret, name, ps, variadic = parse(r["c"])
+        kparams = kernel_params(r)
+        args = ", ".join(_param_name(p) for p in kparams)
+        o.append("#if MOY_OS_ROW(%d)" % i)
+        if r["kind"] == "posix":
+            o.append("#include <%s>" % r["hdr"])
+        else:
+            o.append('#include "moybyte/os.h"')
+        o.append("typedef %s;" % kernel_proto(r, "moy_os_fn_").replace(
+            "moy_os_fn_" + name + "(", "moy_os_fn_" + ident(name) + "(", 1))
+        o.append("MOY_OS_USED(%d);" % i)
+        if name in EXIT_HOOK:
+            o.append('extern void __moy_exit(void) __attribute__((weak, visibility("hidden")));')
+        sig = r["c"]
+        if r.get("glibc"):
+            o.append("#ifdef __GLIBC__")
+            o.append("%s" % sig.replace(name + "(", r["glibc"] + "(", 1))
+            o.append("#else")
+            o.append("%s" % sig)
+            o.append("#endif")
+        else:
+            o.append(sig)
+        o.append("{")
+        if variadic:
+            va = r["va"]
+            vname = _param_name(va["arg"])
+            vtype = va["arg"][:va["arg"].rfind(vname)].strip()
+            o.append("    %s = 0;" % va["arg"])
+            o.append("    if (%s) {" % va["when"])
+            o.append("        va_list ap;")
+            o.append("        va_start(ap, %s);" % _param_name(ps[-1]))
+            o.append("        %s = va_arg(ap, %s);" % (vname, vtype))
+            o.append("        va_end(ap);")
+            o.append("    }")
+        call = "((moy_os_fn_%s *)__moy_os->fn[%d])(%s)" % (ident(name), i, args)
+        if name in EXIT_HOOK:
+            # The SDK's C library runs its atexit list and flushes its
+            # streams first, when the module links it (sdk/libc/).
+            o.append("    if (__moy_exit) {")
+            o.append("        __moy_exit();")
+            o.append("    }")
+        if r.get("noreturn"):
+            o.append("    %s;" % call)
+            o.append("    __builtin_unreachable();")
+        elif ret == "void":
+            o.append("    %s;" % call)
+        else:
+            o.append("    return %s;" % call)
+        o.append("}")
+        o.append("#endif")
+        o.append("")
+    return "\n".join(o)
+
+
+# -- the app ABI --------------------------------------------------------------
+
+def _wrap(items, indent="    ", width=96):
+    """Comma-separated `items` filled to `width` columns."""
+    out, cur = [], indent
+    for it in items:
+        piece = it + ","
+        if len(cur) + len(piece) + 1 > width and cur.strip():
+            out.append(cur.rstrip())
+            cur = indent
+        cur += piece + " "
+    if cur.strip():
+        out.append(cur.rstrip())
+    return out
+
+
+def _c_decl(head, ps, tail, width=99):
+    """`head(p, p, ...)tail`, its parameters wrapped under the first."""
+    line = head + "("
+    pad = " " * len(line)
+    out = []
+    for i, p in enumerate(ps):
+        piece = p + ("," if i < len(ps) - 1 else ")" + tail)
+        if len(line) + len(piece) + 1 > width and line.strip() and not line.endswith("("):
+            out.append(line.rstrip())
+            line = pad
+        line += piece + ("" if i == len(ps) - 1 else " ")
+    if not ps:
+        line += ")" + tail
+    out.append(line)
+    return out
+
+
+def c_rows(src):
+    return [r for r in door_rows(src) if r["server"] == "c"]
+
+
+def gen_app_h(src):
+    rs = roles(src)
+    floor = [x["role"] for x in src["roles"] if x["grant"] == FLOOR_ROLE]
+    o = [HEAD,
+         "// The app ABI's tables (native/moy_app/moy_app.h): the roles, the rows served\n"
+         "// in C, the role table the ROLE door names by index, and the permission each\n"
+         "// role is granted by.\n",
+         "#ifndef MOY_APP_ROWS_H", "#define MOY_APP_ROWS_H", "",
+         "// The roles: a grant's mask is 1 << role.",
+         "enum {"]
+    o += _wrap(["MOY_ROLE_%s" % upper(r) + (" = 0" if i == 0 else "") for i, r in enumerate(rs)]
+               + ["MOY_ROLE_N"])
+    o += ["};",
+          "// The roles every grant holds: the console calls, which the console answers",
+          "// under the permission each names.",
+          "#define MOY_ROLE_FLOOR (%s)" % (" | ".join("(1u << MOY_ROLE_%s)" % upper(r)
+                                                      for r in floor) or "0u"),
+          "#define MOY_ROLE_NAMES { \\"]
+    o += [ln + " \\" for ln in _wrap(['"%s"' % r for r in rs], "    ", 92)]
+    o += ["}", "",
+          "// The rows served in C: what moy_app_count counts.",
+          "enum {"]
+    cr = c_rows(src)
+    o += _wrap(["MOY_ROW_%s" % upper(r["name"]) + (" = 0" if i == 0 else "")
+                for i, r in enumerate(cr)] + ["MOY_ROW_N"])
+    o += ["};",
+          "#define MOY_ROW_NAMES { \\"]
+    o += [ln + " \\" for ln in _wrap(['"%s"' % r["name"] for r in cr], "    ", 92)]
+    o += ["}", "",
+          "// The role table, row for row: what the ROLE door names by index.",
+          "enum {"]
+    dr = door_rows(src)
+    o += _wrap(["MOY_T_%s" % upper(r["name"]) + (" = 0" if i == 0 else "")
+                for i, r in enumerate(dr)])
+    o += ["};",
+          "#define MOY_APP_TABLE_N %du" % len(dr),
+          "// Each row's \"role.verb\", its role and its C row (-1: the Python console",
+          "// serves it).",
+          "#define MOY_APP_TABLE_ROWS { \\"]
+    for r in dr:
+        crow = "MOY_ROW_%s" % upper(r["name"]) if r["server"] == "c" else "-1"
+        o.append('    { "%s", MOY_ROLE_%s, %s }, \\' % (r["name"], upper(role_of(r)), crow))
+    o += ["}", "",
+          "// The permission each role is granted by: a role absent here is never",
+          "// granted.",
+          "#define MOY_APP_PERMS { \\"]
+    for x in src["roles"]:
+        if x["grant"] not in ("never", FLOOR_ROLE):
+            o.append('    { "%s", MOY_ROLE_%s }, \\' % (x["grant"], upper(x["role"])))
+    o += ["}", "", "#endif // MOY_APP_ROWS_H", ""]
+    return "\n".join(o)
+
+
+def _ui_c_params(r):
+    out = []
+    for _n, t in params(r):
+        if t == "int":
+            out.append("int32_t")
+        elif t == "out":
+            out += ["uint8_t *", "uint32_t"]
+        else:
+            out += ["const uint8_t *", "uint32_t"]
+    return ", ".join(["void *"] + out)
+
+
+def wasm_rows(src):
+    return [r for r in door_rows(src) if r.get("wasm") is True]
+
+
+def wasm_natives(src):
+    """The rows with a moybyte.app import in their import names' order: the
+    order WAMR looks a name up in, so the natives' table registers const,
+    never sorted at run time."""
+    return sorted(wasm_rows(src), key=lambda r: ident(r["name"]).encode())
+
+
+def gen_wasm_h(src):
+    rows = wasm_rows(src)
+    o = [HEAD,
+         "// The moybyte.app imports (native/moy_app/moy_app_wasm.h): one native per\n"
+         "// row with an import, named <role>_<verb> at its WAMR signature. A row the\n"
+         "// adapter serves packs its fields for the ROLE door and runs as its how\n"
+         "// says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,\n"
+         "// weak here, so an image without the toolkit answers NULL for it.\n",
+         "#define MOY_APP_WASM_N %d" % len(rows), ""]
+    for r in rows:
+        if r["how"] != "direct":
+            continue
+        o += _c_decl("int32_t moy_ui_wasm_%s" % verb_of(r), _ui_c_params(r).split(", "),
+                     " UI_WEAK;")
+    o.append("")
+    for r in rows:
+        if r["how"] == "direct":
+            continue
+        cps = ["void *e"]
+        nums, fields = [], []
+        for n, t in params(r):
+            if t == "int":
+                cps.append("int32_t %s" % n)
+                nums.append("q_" + n)
+                fields.append("NUM(q_%s, %s)" % (n, n))
+            elif t == "out":
+                cps += ["uint8_t *%s" % n, "uint32_t %s_cap" % n]
+                if cap_packed(r):
+                    # the door's Python half is handed the answer's capacity
+                    nums.append("q_" + n)
+                    fields.append("NUM(q_%s, %s_cap)" % (n, n))
+            else:
+                cps += ["const uint8_t *%s" % n, "uint32_t %s_n" % n]
+                fields.append("{ %s, %s_n }" % (n, n))
+        outs = [n for n, t in params(r) if t == "out"]
+        fn = "w_" + ident(r["name"])
+        o += _c_decl("static int32_t %s" % fn, cps, " {")
+        if nums:
+            o.append("    uint8_t %s;" % ", ".join("%s[4]" % q for q in nums))
+        if fields:
+            o.append("    span_t f[%d] = { %s };" % (len(fields), ", ".join(fields)))
+        o.append("    return run(e, %s, MOY_T_%s, %s, %d, %s, %s);" % (
+            r["how"].upper(), upper(r["name"]), "f" if fields else "NULL", len(fields),
+            outs[0] if outs else "NULL", (outs[0] + "_cap") if outs else "0"))
+        o.append("}")
+    o += ["", "// The natives, in their import names' order, and the table row each serves.",
+          "static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {"]
+    for r in wasm_natives(src):
+        fn = ("moy_ui_wasm_" + verb_of(r)) if r["how"] == "direct" else "w_" + ident(r["name"])
+        o.append('    { "%s", FN(%s), "%s", NULL },' % (ident(r["name"]), fn, wasm_sig(r)))
+    o += ["};", "static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {"]
+    o += _wrap(["MOY_T_%s" % upper(r["name"]) for r in wasm_natives(src)])
+    o += ["};", ""]
+    return "\n".join(o)
+
+
+def gen_ui_h(src):
+    rows = [r for r in wasm_rows(src) if r["how"] == "direct"]
+    o = [HEAD,
+         "// The toolkit's moybyte.app imports (native/moy_ui/moy_ui_wasm.h states each\n"
+         "// verb's contract): their count, each native's prototype, which must be\n"
+         "// moy_ui_wasm.h's, and the natives by import name, in the role table's order.\n",
+         "#ifndef MOY_UI_WASM_ROWS_H", "#define MOY_UI_WASM_ROWS_H", "",
+         "#include <stdint.h>", "",
+         "#define MOY_UI_WASM_ROWS %d" % len(rows), ""]
+    for r in rows:
+        o += _c_decl("int32_t moy_ui_wasm_%s" % verb_of(r), _ui_c_params(r).split(", "), ";")
+    o += ["", "#define MOY_UI_WASM_NATIVES { \\"]
+    for r in rows:
+        o.append('    { "%s", FN(moy_ui_wasm_%s) }, \\' % (ident(r["name"]), verb_of(r)))
+    o += ["}", "", "#endif // MOY_UI_WASM_ROWS_H", ""]
+    return "\n".join(o)
+
+
+def lua_names(src):
+    """[(role, table or None, name, C function, row, read)] of the names a Lua
+    run's role binding holds, in the source's order; `read` where the row is
+    a read under the seqlock, held where the run's grant holds its role. A
+    moybyte row served in C is a function of the run's `moybyte` table."""
+    out = []
+    for r in door_rows(src):
+        role = role_of(r)
+        if role == "moybyte" and (r.get("server") != "c" or r.get("lua_own") or py_twin(r)):
+            continue
+        for n in r.get("lua") or ():
+            tbl, _, fn = n.rpartition(".")
+            out.append((role, tbl or None, fn, "l_" + ident(n), r["name"],
+                        r.get("how") == "seq"))
+    return out
+
+
+def lua_calls(src):
+    """The console calls a Lua service holds as moybyte.<verb>."""
+    return [verb_of(r) for r in door_rows(src)
+            if role_of(r) == "moybyte" and (r.get("server") == "call" or py_twin(r))
+            and r.get("lua")]
+
+
+def lua_run_calls(src):
+    """The console calls a Lua app's run holds as moybyte.<verb> (runtime/run/
+    lua_ext.py): a service's, each gated where its server is, as a Python
+    app's."""
+    return lua_calls(src)
+
+
+def lua_own(src):
+    """The moybyte.<verb> names every Lua program holds that are no console
+    call: its wakes and the log, each a service's own C
+    (native/moycore/moycore_svc.c) and an app run's prelude over the moybyte
+    module (runtime/run/lua_ext.py). A row served in C is the run's role
+    binding's (lua_names), but a lua_own one's: Lua's name for it is its own
+    form (a function where the C row posts a message)."""
+    calls = set(lua_calls(src))
+    out = []
+    for r in src["rows"]:
+        if r.get("server") == "c" and not r.get("lua_own"):
+            continue
+        for n in r.get("lua") or ():
+            if n.startswith("moybyte.") and n[8:] not in calls and n[8:] not in out:
+                out.append(n[8:])
+    return out
+
+
+def gen_lua_h(src):
+    o = [HEAD,
+         "// The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role\n"
+         "// binding, each X(role, its table or NULL for a global, its name, the C\n"
+         "// function moy_app_lua.c serves it with, the table row it calls, 1 for a\n"
+         "// read), opened for the roles the run's permissions name, a read for the\n"
+         "// roles its grant holds; and the console calls a Lua service's\n"
+         "// `moybyte` table holds (native/moycore/moycore_svc.c), each answered by\n"
+         "// the console's Python as the service's process.\n",
+         "#ifndef MOY_APP_LUA_ROWS_H", "#define MOY_APP_LUA_ROWS_H", "",
+         "#define MOY_APP_LUA_NAMES(X) \\"]
+    for role, tbl, fn, cfn, row, read in lua_names(src):
+        o.append('    X(MOY_ROLE_%s, %s, "%s", %s, MOY_T_%s, %d) \\' % (
+            upper(role), '"%s"' % tbl if tbl else "NULL", fn, cfn, upper(row), read))
+    o += ["", "#define MOY_APP_LUA_CALLS(X) \\"]
+    for v in lua_calls(src):
+        o.append('    X("%s") \\' % v)
+    o += ["", "// The rows a Lua name calls that run where they are called (how \"here\"),",
+          "// on a Lua service's own task too, hopped only where they answer NEEDS_VM.",
+          "#define MOY_APP_LUA_HERE(X) \\"]
+    here = []
+    for _role, _tbl, _fn, _c, row, _read in lua_names(src):
+        if row not in here and next(r for r in door_rows(src) if r["name"] == row).get("how") == "here":
+            here.append(row)
+            o.append("    X(MOY_T_%s) \\" % upper(row))
+    o += ["", "#endif // MOY_APP_LUA_ROWS_H", ""]
+    return "\n".join(o)
+
+
+# -- the Python console and the docs -----------------------------------------
+
+PY_BEGIN = "# GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit.\n"
+PY_END = "# END GENERATED\n"
+MD_BEGIN = "<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit. -->\n"
+MD_END = "<!-- END GENERATED -->\n"
+MD_ROLES_BEGIN = ("<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json: "
+                  "the roles. Do not edit. -->\n")
+MD_PERMS_BEGIN = ("<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json: "
+                  "the permissions. Do not edit. -->\n")
+
+
+def _splice(path, body, begin=PY_BEGIN, end=PY_END, text=None):
+    """`path`'s text (or `text`, read from it) with its one generated region
+    between `begin` and `end` replaced by `body`."""
+    if text is None:
+        with open(path) as f:
+            text = f.read()
+    a = text.find(begin)
+    b = text.find(end, a + 1)
+    if a < 0 or b < 0 or text.find(begin, a + 1) >= 0:
+        raise TableError("%s has no one generated region" % os.path.relpath(path, ROOT))
+    return text[:a + len(begin)] + body + text[b:]
+
+
+def gen_app_context(src):
+    names = ctx_roles(src)
+    lines = _wrap(['"%s"' % r for r in names], "         ", 80)
+    lines[0] = "ROLES = (" + lines[0].lstrip()
+    lines[-1] = lines[-1].rstrip(",") + ")"
+    return _splice(APP_CONTEXT, "\n".join(lines) + "\n")
+
+
+def _py(v):
+    return "None" if v is None else json.dumps(v)
+
+
+def _tup(v):
+    if not v:
+        return "()"
+    if len(v) == 1:
+        return "(%s,)" % json.dumps(v[0])
+    return "(%s)" % ", ".join(json.dumps(x) for x in v)
+
+
+def gen_app_perms(src):
+    o = ["TABLE = ("]
+    for p in src["permissions"]:
+        head = "    (%s, %s, %s," % (json.dumps(p["perm"]), json.dumps(p["grants"]),
+                                     _tup(perm_tiers(p, src)))
+        tail = "%s, %s, %s)," % (_py(p["prompt"]), _py(p["needs"]), _tup(p["py"]))
+        if len(head) + 1 + len(tail) <= 99:
+            o.append(head + " " + tail)
+        else:
+            o += [head, "     " + tail]
+    o.append(")")
+    return _splice(APP_PERMS, "\n".join(o) + "\n")
+
+
+def gen_door_args(src):
+    o = ["DOOR_ARGS = {"]
+    for r in door_rows(src):
+        if r.get("door"):
+            o.append('    "%s": "%s",' % (r["name"], door_kinds(r)))
+    o.append("}")
+    return _splice(SHELL_SERVERS, "\n".join(o) + "\n")
+
+
+def gen_calls(src):
+    o = ["_CALLS = {"]
+    for name, fn in console_calls(src).items():
+        o.append('    "%s": _moybyte.%s,' % (name, fn))
+    o.append("}")
+    return _splice(SCHEDULER, "\n".join(o) + "\n")
+
+
+def gen_lua_ext(src):
+    heads = []
+    for _role, tbl, fn, _c, _row, _read in lua_names(src):
+        h = tbl or fn
+        if h not in heads and h != "moybyte":     # the run's moybyte table: PRELUDE_MOYBYTE
+            heads.append(h)
+    return _splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\nLUA_OWN = %s\n"
+                   % (_tup(heads), _tup(lua_run_calls(src)), _tup(lua_own(src))))
+
+
+def _cell(names):
+    return ", ".join("`%s`" % n for n in names) if names else ""
+
+
+def _perm_name(p):
+    """A permission as a manifest spells it: `files` also as `files:<folder>`,
+    a lease only as `lease:<resource>`."""
+    if p["grants"] == "lease":
+        return "`%s:<resource>`" % p["perm"]
+    if p["grants"] == "role:files":
+        return "`%s`, `%s:<folder>`" % (p["perm"], p["perm"])
+    return "`%s`" % p["perm"]
+
+
+def doc_perms(src):
+    """The guide's permission table: each permission, what the app holds and
+    the tiers that may hold it, consecutive rows that say the same sharing a
+    line."""
+    lines = []
+    for p in src["permissions"]:
+        tiers = ", ".join(perm_tiers(p, src))
+        if lines and lines[-1][1:] == [p["doc"], tiers]:
+            lines[-1][0] += ", " + _perm_name(p)
+        else:
+            lines.append([_perm_name(p), p["doc"], tiers])
+    return (["| permission | what the app holds | tiers |", "|---|---|---|"]
+            + ["| %s | %s | %s |" % tuple(x) for x in lines])
+
+
+def gen_doc(src):
+    """The guide's three regions: the permission table, the call table, and
+    the shipped apps' role table."""
+    roles = ["| role | what it is | granted by | verbs |", "|---|---|---|---|"]
+    for x in src["roles"]:
+        if not x.get("ctx"):
+            continue
+        verbs = ", ".join("`%s()`" % verb_of(r) for r in door_rows(src)
+                          if role_of(r) == x["role"])
+        perm = next((p["perm"] for p in src["permissions"]
+                     if p["grants"] == "role:" + x["role"]), None)
+        roles.append("| `ctx.%s` | %s | %s | %s |" % (x["role"], x.get("doc", ""),
+                                                     "`%s`" % perm if perm else "the shell",
+                                                     verbs))
+    o = ["| call | permission | Python | Lua | wasm (`moybyte.app`; a WASI program's `moybyte.os`) | C (ELF) |",
+         "|---|---|---|---|---|---|"]
+    table = elf(src)
+    cnames = {}
+    for e in table["rows"]:
+        if e["door"] is not None:
+            cnames[e["src"]["name"]] = e["name"]
+    for r in src["rows"]:
+        if r.get("kind") == "posix" or role_of(r) == "ui":
+            continue
+        if r.get("retired"):
+            continue
+        cname = cnames.get(r["name"]) or (parse(r["c"])[1] if "c" in r else None)
+        imported = ([ident(r["name"])] if r.get("wasm") else []) + (
+            ["%s.%s" % (WASI_OS, wasi_name(r))] if r.get("wasi") else [])
+        if not (cname or imported or r.get("lua")):
+            continue
+        perms = perms_of(r, src)
+        py = list(r.get("py") or ())
+        if role_of(r) in ctx_roles(src):
+            py = ["ctx.%s" % r["name"]] + py
+        o.append("| `%s` | %s | %s | %s | %s | %s |" % (
+            r["name"], _cell(perms) or "none", _cell(py), _cell(r.get("lua")),
+            _cell(imported), _cell([cname] if cname else [])))
+    text = _splice(APP_DOC, "\n".join(doc_perms(src)) + "\n", MD_PERMS_BEGIN, MD_END)
+    text = _splice(APP_DOC, "\n".join(o) + "\n", MD_BEGIN, MD_END, text)
+    return _splice(APP_DOC, "\n".join(roles) + "\n", MD_ROLES_BEGIN, MD_END, text)
+
+
+def _ptype(p):
+    """A parameter's type: its declaration without its name."""
+    name = _param_name(p)
+    return re.sub(r"\b%s\b" % name, "", p, count=1).strip()
+
+
+def _u_expr(tok, p, by_name):
+    m = U_TOKEN.match(tok)
+    name = _param_name(p)
+    if tok in ("-", "k"):
+        return None
+    if tok == "f":
+        return "U_CODE(%s)" % name
+    if tok.startswith("s"):
+        return ("U_STR0(%s)" if tok.endswith("?") else "U_STR(%s)") % name
+    perm = {"r": "MOY_U_R", "w": "MOY_U_W", "rw": "MOY_U_R | MOY_U_W"}[m.group("perm")]
+    pointee = _ptype(p).rstrip()[:-1].strip()
+    void = re.sub(r"\bconst\b", "", pointee).strip() == "void"
+    size = "1" if void or m.group("sep") == "#" else "sizeof *%s" % name
+    if m.group("n"):
+        n = m.group("n")
+        count = "(%s != NULL ? (size_t)*%s : 0)" % (n, n) if m.group("deref") else "(size_t)%s" % n
+        size = "u_n(%s, %s)" % (count, size)
+    return "%s(%s, %s, %s)" % ("U_BUF0" if m.group("null") else "U_BUF", name, size, perm)
+
+
+def gen_check_c(table):
+    rows = table["rows"]
+    o = [HEAD,
+         "// Each row's argument rule (os_calls.json's u), over a U-mode module's\n"
+         "// registers, before its call runs: every pointer it passes inside its own\n"
+         "// process (moy_umode.h). A row whose arguments are all values has none.\n",
+         "#include <stddef.h>", "#include <stdint.h>", "",
+         '#include "moy_os_rows.h"', '#include "moy_umode.h"', "",
+         "#define U_STR(p) moy_u_str(u, (const char *)(p))",
+         "#define U_STR0(p) ((p) == NULL || U_STR(p))",
+         "#define U_BUF(p, n, perm) moy_u_ok(u, (const void *)(p), (n), (perm))",
+         "#define U_BUF0(p, n, perm) ((p) == NULL || U_BUF(p, n, perm))",
+         "#define U_CODE(p) moy_u_ok(u, (const void *)(p), 4, MOY_U_X)",
+         "// Registers a parameter takes: a check sees at most 7 after its space.",
+         "#define U_REGS(t) ((sizeof(t) + 3u) / 4u)", "",
+         "static size_t u_n(size_t n, size_t each) {",
+         "    return each != 0 && n > SIZE_MAX / each ? SIZE_MAX : n * each;",
+         "}", "",
+         "typedef int u_check_fn(const moy_u_space_t *, uint32_t, uint32_t, uint32_t, uint32_t,",
+         "                       uint32_t, uint32_t, uint32_t);", ""]
+    checked = []
+    for i, r in enumerate(rows):
+        params = kernel_params(r)
+        u = r.get("u", ["-"] * len(params))
+        by_name = {_param_name(p): p for p in params}
+        exprs = []
+        # a deref'd count's own pointer first
+        order = sorted(range(len(params)), key=lambda k: bool(re.search(r"[:#]\*", u[k])))
+        for k in order:
+            e = _u_expr(u[k], params[k], by_name)
+            if e:
+                exprs.append(e)
+        if not exprs:
+            continue
+        checked.append(i)
+        o.append("// %d %s" % (i, r["name"]))
+        regs = " + ".join("U_REGS(%s)" % _ptype(p) for p in params)
+        o.append("_Static_assert(%s <= 7, \"%s's registers\");" % (regs, r["name"]))
+        o.append("static int u_check_%d(const moy_u_space_t *u, %s) {" % (i, ", ".join(params)))
+        o.append("    return %s;" % "\n        && ".join(exprs))
+        o.append("}")
+        o.append("")
+    o.append("int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {")
+    o.append("    u_check_fn *fn;")
+    o.append("    switch (row) {")
+    for i in checked:
+        o.append("    case %d: fn = (u_check_fn *)(void *)u_check_%d; break;" % (i, i))
+    o += ["    default: return 1;", "    }",
+          "    return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);", "}", ""]
+    return "\n".join(o)
+
+
+# Each argument's kind for the wild fixture's sweep: what its rule checks, or
+# the handle the row looks it up by.
+WILD_KINDS = ("A_VAL", "A_STR", "A_STR0", "A_BUF", "A_BUF0", "A_CODE", "A_LEN", "A_FD",
+              "A_THREAD", "A_DIR", "A_MAP", "A_ADDR", "A_OPAQUE")
+
+
+def _wild_kind(p, tok, row, counts):
+    """A_LEN is a pointer to another argument's count (a `*n` rule's n)."""
+    name = _param_name(p)
+    ptype = _ptype(p)
+    if name in counts:
+        return "A_LEN"
+    if tok == "-":
+        if name == "fd":
+            return "A_FD"
+        if ptype == "pthread_t":
+            return "A_THREAD"
+        return "A_VAL"
+    if tok == "k":
+        if row == "munmap":
+            return "A_MAP"
+        if ptype.startswith("DIR"):
+            return "A_DIR"
+        if "addrinfo" in ptype:
+            return "A_ADDR"
+        return "A_OPAQUE"
+    if tok == "f":
+        return "A_CODE"
+    if tok.startswith("s"):
+        return "A_STR0" if tok.endswith("?") else "A_STR"
+    return "A_BUF0" if U_TOKEN.match(tok).group("null") else "A_BUF"
+
+
+def gen_wild_h(table):
+    """The wild fixture's row list (tests/fixtures/elf/elf_wild.moy): every
+    row a module reaches with a checked pointer or a handle, each argument's
+    kind, and which argument is a buffer's count."""
+    o = [HEAD,
+         "// Every row whose arguments the kernel checks or looks up, for the wild",
+         "// fixture's sweep (tests/on_glass.py, elf_umode_isolates): its ordinal,",
+         "// its name, each argument's kind and, for a buffer, the index of the",
+         "// argument that counts it (-1: its type's size).", "",
+         "#ifndef WILD_ROWS_H", "#define WILD_ROWS_H", "",
+         "enum { %s };" % ", ".join(WILD_KINDS), "",
+         "typedef struct {",
+         "    unsigned short row;",
+         "    const char *name;",
+         "    unsigned char n;",
+         "    unsigned char kind[8];",
+         "    signed char len[8];",
+         "} wild_row_t;", "",
+         "static const wild_row_t WILD_ROWS[] = {"]
+    for i, r in enumerate(table["rows"]):
+        if r.get("retired"):
+            continue
+        params = kernel_params(r)
+        u = r.get("u", ["-"] * len(params))
+        names = [_param_name(p) for p in params]
+        counts = {U_TOKEN.match(t).group("n") for t in u
+                  if U_TOKEN.match(t) and U_TOKEN.match(t).group("deref")}
+        kinds = [_wild_kind(p, t, r["name"], counts) for p, t in zip(params, u)]
+        if all(k in ("A_VAL", "A_OPAQUE") for k in kinds):
+            continue
+        lens = []
+        for t in u:
+            m = U_TOKEN.match(t)
+            n = m.group("n") if m and t not in ("-", "k", "f") and not t.startswith("s") else None
+            lens.append(str(names.index(n)) if n and not m.group("deref") else "-1")
+        o.append('    { %d, "%s", %d, { %s }, { %s } },' % (
+            i, r["name"], len(params), ", ".join(kinds), ", ".join(lens)))
+    o += ["};", "", "#define WILD_NROWS (sizeof WILD_ROWS / sizeof WILD_ROWS[0])", "",
+          "#endif", ""]
+    return "\n".join(o)
+
+
+# -- the moy-app plugin ---------------------------------------------------------
+
+# A name a row hands a tier that is a moy-spec verb already (print draws, the
+# floor's): the plugin neither stubs it nor infers a permission from it.
+SPEC_NAMES = ("print",)
+PLUGIN_TIERS = ("python", "lua", "wasm", "elf")
+
+
+def _plugin_perms(r, src):
+    return tuple(perms_of(r, src))
+
+
+def _named(src, field):
+    """{name: the permissions it answers under} of the names `field` (py or
+    lua) lists, rows and permissions alike; a name more than one row hands
+    out answers under any of theirs."""
+    out = {}
+    for r in src["rows"]:
+        for n in r.get(field) or ():
+            if n in SPEC_NAMES:
+                continue
+            have = out.setdefault(n, [])
+            have += [p for p in _plugin_perms(r, src) if p not in have]
+    if field == "py":
+        for p in src["permissions"]:
+            for n in p["py"]:
+                have = out.setdefault(n, [])
+                if p["perm"] not in have:
+                    have.append(p["perm"])
+    return {n: tuple(ps) for n, ps in out.items()}
+
+
+def plugin_names(src):
+    """What `moy app check` infers a cart's permissions from, per tier: each
+    name a module imports or a script reaches, with the permissions it
+    answers under (any one of them; none for an ungated name)."""
+    elf_rows = {}
+    for r in src["rows"]:
+        o = r.get("elf")
+        if isinstance(o, int) and not r.get("retired"):
+            elf_rows[o] = (parse(r["c"])[1] if "c" in r else c_name(r), _plugin_perms(r, src))
+    return {"wasm_app": {ident(r["name"]): _plugin_perms(r, src) for r in wasm_rows(src)},
+            "wasm_os": {wasi_name(r): _plugin_perms(r, src) for r in wasi_rows(src)},
+            "elf": elf_rows,
+            "retired": tuple(sorted(r["elf"] for r in src["rows"]
+                                    if isinstance(r.get("elf"), int) and r.get("retired"))),
+            "py": _named(src, "py"), "lua": _named(src, "lua")}
+
+
+def _py_dict(name, d, doc):
+    o = ["# " + doc, "%s = {" % name]
+    for k in sorted(d, key=lambda k: (isinstance(k, str), k)):
+        o.append("    %r: %r," % (k, d[k]))
+    return o + ["}", ""]
+
+
+def gen_plugin_table(src):
+    t = plugin_names(src)
+    o = [PY_BEGIN.rstrip("\n"),
+         '"""The table `moy app` reads (sdk/moybyte_sdk/cli.py): what a module or a script',
+         "reaches on each tier, with the permissions each answers under (any one of",
+         'them), from native/os_calls.json."""', "",
+         "VERSION = %d" % src["version"],
+         "SPEC_NAMES = %r" % (SPEC_NAMES,), ""]
+    o += _py_dict("WASM_APP", t["wasm_app"], 'a wasm app\'s "moybyte.app" imports')
+    o += _py_dict("WASM_OS", t["wasm_os"], 'a WASI program\'s "moybyte.os" imports')
+    o += _py_dict("ELF", t["elf"], "a native module's rows by ordinal (its .moy.rows): "
+                  "(its C name, permissions)")
+    o += ["# the ordinals of the retired rows, which no module built now calls",
+          "RETIRED = %r" % (t["retired"],), ""]
+    o += _py_dict("PY", t["py"], "the names a Python app reaches")
+    o += _py_dict("LUA", t["lua"], "the names a Lua app reaches")
+    return "\n".join(o)
+
+
+def _app_c_params(r):
+    out = []
+    for n, t in params(r):
+        if t == "int":
+            out.append("int32_t %s" % n)
+        elif t == "out":
+            out += ["void *%s" % n, "uint32_t %s_cap" % n]
+        elif t == "bytes":
+            out += ["const void *%s" % n, "uint32_t %s_n" % n]
+        else:
+            out += ["const char *%s" % n, "uint32_t %s_n" % n]
+    return out or ["void"]
+
+
+def gen_app_wasm_h(src):
+    o = [HEAD,
+         "// A compiled app's moybyte.app imports (docs/app_api_v1.md section 10), for\n"
+         "// a C app built for wasm (tools/wasm_cart.py puts this folder on its include\n"
+         "// path): each row of the role table a compiled app imports, under its\n"
+         "// import name. A text or bytes is a pointer and its length, never\n"
+         "// NUL-terminated; an answer is written into the buffer given with its\n"
+         "// capacity. Each answers its number, or a negative code. A row is held\n"
+         "// where the app's permissions grant it (the comment names them).\n",
+         "#ifndef MOYBYTE_APP_H", "#define MOYBYTE_APP_H", "",
+         "#include <stdint.h>", "",
+         "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
+         "#define MOYBYTE_APP_VERSION %d" % src["version"], "",
+         '#define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), '
+         "import_name(#name)))", ""]
+    for r in wasm_rows(src):
+        perms = perms_of(r, src)
+        o.append("// %s%s" % (r["name"], (": " + ", ".join(perms)) if perms else ""))
+        o += _c_decl("int32_t %s" % ident(r["name"]), _app_c_params(r),
+                     " MOYBYTE_APP_IMPORT(%s);" % ident(r["name"]))
+    o += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_APP_H", ""]
+    return "\n".join(o)
+
+
+def gen_sdk_ui_h(src):
+    rows = [r for r in wasm_rows(src) if role_of(r) == "ui"]
+    o = [HEAD,
+         "// The public UI API for a native app (docs/ui_api_2026-10.md): the toolkit\n"
+         "// linked into the module (sdk/src/moyui_link.c, native/moy_ui), drawing on\n"
+         "// the app's own RGB565 screen. Each ui row is app.h's, the same call a\n"
+         "// compiled app imports, answered inline by the copy's RUN face\n"
+         "// (native/moy_ui/moy_ui_wasm.h). A frame is moy_ui_link_frame, the rows,\n"
+         "// then moy_ui_link_show:\n"
+         "//\n"
+         "//     moy_frame_t f;\n"
+         "//     int32_t on = 1;\n"
+         "//     while (moy_ui_link_frame(&f)) {\n"
+         "//         ui_page(\"Settings\", 8, NULL, 0, NULL, 0);\n"
+         "//         on = ui_toggle(\"Sound\", 5, on, NULL, 0);\n"
+         "//         moy_ui_link_show();\n"
+         "//     }\n",
+         "#ifndef MOYBYTE_UI_H", "#define MOYBYTE_UI_H", "",
+         "#include <stdint.h>", "",
+         '#include "moybyte/frame.h"', "",
+         "#ifdef __cplusplus", 'extern "C" {', "#endif", "",
+         "// The copy opened on the program's screen (moy_screen) with the console's",
+         "// theme: 0, or -1 for no screen or no memory. The first frame opens it.",
+         "int moy_ui_link_open(void);",
+         "// The console's next frame into *f, its input the rows' and the theme",
+         "// pulled where it moved, after the app's `_layout` where the surface it",
+         "// lays out for moved: 1, or 0 once the app is stopped.",
+         "int moy_ui_link_frame(moy_frame_t *f);",
+         "// A responsive app's layout (docs/app_api_v1.md section 3): defined, the",
+         "// app draws on its window's or the whole screen's surface instead of the",
+         "// fixed raster, and moy_ui_link_frame calls it with that surface's size",
+         "// and the font scale before the first frame it reads and again whenever",
+         "// they change. Optional, so weak; exported, so the console finds it.",
+         "#if defined(__wasm__)",
+         '#define MOY_UI_LAYOUT __attribute__((weak, export_name("_layout")))',
+         "#else",
+         '#define MOY_UI_LAYOUT __attribute__((weak, visibility("default")))',
+         "#endif",
+         "void _layout(int32_t w, int32_t h, int32_t fs) MOY_UI_LAYOUT;",
+         "// The frame's screen handed to the console (moy_present): 0, or -1.",
+         "int moy_ui_link_show(void);",
+         "// The canvas the rows draw on (a libmoy moy_canvas), NULL before the open.",
+         "void *moy_ui_link_target(void);", ""]
+    for r in rows:
+        o += _c_decl("int32_t moy_ui_wasm_%s" % verb_of(r), _ui_c_params(r).split(", "), ";")
+    o.append("")
+    for r in rows:
+        args = ["moy_ui_link_target()"]
+        for n, t in params(r):
+            if t == "int":
+                args.append(n)
+            elif t == "out":
+                args += ["(uint8_t *)%s" % n, "%s_cap" % n]
+            else:
+                args += ["(const uint8_t *)%s" % n, "%s_n" % n]
+        o.append("// %s" % r["name"])
+        o += _c_decl("static inline int32_t %s" % ident(r["name"]), _app_c_params(r), " {")
+        o += _c_decl("    return moy_ui_wasm_%s" % verb_of(r), args, ";")
+        o.append("}")
+    o += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif // MOYBYTE_UI_H", ""]
+    return "\n".join(o)
+
+
+def _stub_rows(src, field):
+    """[(name, row, permissions)] of the names `field` lists, in the source's
+    order, each once."""
+    seen, out = set(), []
+    for r in src["rows"]:
+        for n in r.get(field) or ():
+            if n in SPEC_NAMES or n in seen:
+                continue
+            seen.add(n)
+            out.append((n, r, tuple(perms_of(r, src))))
+    return out
+
+
+def _stub_doc(n, r, perms):
+    ps = ", ".join("%s: %s" % (a, t) for a, t in params(r) if t != "out")
+    return "%s(%s): the row %s%s" % (n, ps, r["name"],
+                                     ("; needs " + " or ".join(perms)) if perms else "")
+
+
+STUB_HEAD = "GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit."
+
+
+def gen_lua_stub(src):
+    o = ["---@meta", "-- " + STUB_HEAD,
+         "-- The names a Lua app reaches beyond moy-spec's verbs (moy-api.lua), for",
+         "-- the Lua language server: docs/app_api_v1.md section 10 has each call.", ""]
+    tables = []
+    for n, r, perms in _stub_rows(src, "lua"):
+        tbl = n.rpartition(".")[0]
+        if tbl and tbl not in tables:
+            tables.append(tbl)
+            o.append("%s = {}" % tbl)
+        o += ["--- " + _stub_doc(n, r, perms), "function %s(...) end" % n]
+    return "\n".join(o) + "\n"
+
+
+def gen_py_stubs(src):
+    """(__builtins__.pyi, moybyte.pyi): a Python app's globals and its
+    moybyte module's names beyond moy-spec's verbs, for an editor."""
+    head = ["# " + STUB_HEAD,
+            "# The names a Python app reaches beyond moy-spec's verbs, for an editor:",
+            "# docs/app_api_v1.md section 10 has each call, runtime/system/moybyte.py",
+            "# its signature.", "from typing import Any", ""]
+    glob, mod, objs = [], [], {}
+    for n, r, perms in _stub_rows(src, "py"):
+        doc = '    """%s"""' % _stub_doc(n, r, perms)
+        obj, _, verb = n.rpartition(".")
+        if obj == "moybyte":
+            mod += ["def %s(*args: Any, **kwargs: Any) -> Any:" % verb, doc, ""]
+        elif obj:
+            objs.setdefault(obj, []).extend(
+                ["    def %s(self, *args: Any, **kwargs: Any) -> Any:" % verb,
+                 "    " + doc, ""])
+        elif "in" in r:
+            glob += ["def %s(*args: Any, **kwargs: Any) -> Any:" % n, doc, ""]
+        else:                       # a service's object (wifi, net), not a call
+            glob += ["%s: Any   # %s" % (n, " or ".join(perms) or r["name"]), ""]
+    for obj, body in objs.items():
+        glob += ["class _%s:" % obj] + body + ["%s: _%s" % (obj, obj), ""]
+    for p in src["permissions"]:
+        for n in p["py"]:
+            if n not in objs and not any(line.startswith(("def %s(" % n, "%s: " % n))
+                                         for line in glob):
+                glob += ["%s: Any   # %s" % (n, p["perm"]), ""]
+    return "\n".join(head + glob).rstrip("\n") + "\n", "\n".join(head + mod).rstrip("\n") + "\n"
+
+
+def outputs(src=None):
+    """[(path, text)] for every generated file."""
+    if src is None:
+        src = load()
+    check(src)
+    table = elf(src)
+    return [(KERNEL_H, gen_kernel_h(table)), (ROWS_H, gen_rows_h(table)),
+            (KERNEL_C, gen_kernel_c(table)), (SDK_H, gen_sdk_h(table)),
+            (STUBS_C, gen_stubs_c(table)), (CHECK_C, gen_check_c(table)),
+            (WILD_H, gen_wild_h(table)),
+            (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
+            (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
+            (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),
+            (SHELL_SERVERS, gen_door_args(src)), (SCHEDULER, gen_calls(src)),
+            (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),
+            (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
+            (UI_SDK_H, gen_sdk_ui_h(src)),
+            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--check", action="store_true",
+                    help="write nothing; exit 1 when a generated file is stale")
+    args = ap.parse_args(argv)
+    stale = 0
+    for path, text in outputs():
+        try:
+            with open(path) as f:
+                have = f.read()
+        except OSError:
+            have = None
+        if have == text:
+            continue
+        if args.check:
+            print("%s is stale: run tools/gen_os_table.py" % os.path.relpath(path, ROOT))
+            stale = 1
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        print("wrote %s" % os.path.relpath(path, ROOT))
+    return stale
+
+
+if __name__ == "__main__":
+    sys.exit(main())

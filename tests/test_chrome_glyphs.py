@@ -103,6 +103,6 @@ def test_one_raster_and_no_pushed_copy():
                     "P8_GLYPHS", "").replace("MOY_UI_GLYPHS", "").replace(
                     "FONT_GLYPHS", ""), rel
                 assert "chrome_glyph" not in src and "glyph_put" not in src, rel
-    with open(os.path.join(ROOT, "native", "moy_app", "roles.json")) as f:
-        rows = json.load(f)["rows"]
+    from tools import gen_os_table
+    rows = gen_os_table.role_table()
     assert not [r for r in rows if r["verb"] == "glyph"]

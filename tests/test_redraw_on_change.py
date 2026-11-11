@@ -4,7 +4,7 @@ running cart still animates every frame. Driven through the SAME shared console 
 device runs (runtime.host_app + ConsoleDriver), so this asserts host==device
 behaviour, not a host-only path.
 
-`Workstation._frames_drawn` counts the frames that actually painted+flushed (idle
+`Workstation.frame_state.frames_drawn` counts the frames that actually painted+flushed (idle
 frames are skipped in frame()), so it's the witness for "did the UI redraw".
 """
 
@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import host_app  # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -25,6 +26,7 @@ def _static_launcher(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     ws.look.select_wallpaper(None, persist=False)
+    settle_badges(ws)
     ws._toast_until = 0
     return ws, drv
 
@@ -39,6 +41,7 @@ def _static_code_editor(tmp_path):
     ws.open()
     ws._open_menu()
     ws.set_menu_view("code")
+    settle_badges(ws)
     ws._toast_until = 0
     assert ws.menu_view == "code" and ws.editor is not None
     return ws, drv
@@ -49,9 +52,10 @@ def _settle(ws, drv, n=3):
     drawn-frame count to measure from."""
     for _ in range(n):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0
     drv.frame(DT)
-    return ws._frames_drawn
+    return ws.frame_state.frames_drawn
 
 
 # -- the core win: a static screen does NOT redraw ---------------------------
@@ -63,8 +67,8 @@ def test_static_code_editor_skips_idle_frames(tmp_path):
     base = _settle(ws, drv)
     for _ in range(100):
         drv.frame(DT)
-    assert ws._frames_drawn == base, (
-        "static code editor redrew %d of 100 idle frames" % (ws._frames_drawn - base))
+    assert ws.frame_state.frames_drawn == base, (
+        "static code editor redrew %d of 100 idle frames" % (ws.frame_state.frames_drawn - base))
     assert ws._dirty is False
 
 
@@ -75,8 +79,8 @@ def test_static_launcher_skips_idle_frames(tmp_path):
     base = _settle(ws, drv)
     for _ in range(100):
         drv.frame(DT)
-    assert ws._frames_drawn == base, (
-        "static launcher redrew %d of 100 idle frames" % (ws._frames_drawn - base))
+    assert ws.frame_state.frames_drawn == base, (
+        "static launcher redrew %d of 100 idle frames" % (ws.frame_state.frames_drawn - base))
 
 
 # -- an input triggers exactly one redraw ------------------------------------
@@ -86,15 +90,15 @@ def test_button_press_triggers_exactly_one_redraw(tmp_path):
     UI goes idle again (no lingering per-frame redraw)."""
     ws, drv = _static_launcher(tmp_path)
     _settle(ws, drv)
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     drv.press("up")             # one press: the keys move to the tab row
     drv.frame(DT)
-    assert ws._frames_drawn - before == 1, "press should draw exactly one frame"
+    assert ws.frame_state.frames_drawn - before == 1, "press should draw exactly one frame"
     # ...and the screen is idle again afterwards.
-    after = ws._frames_drawn
+    after = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(DT)
-    assert ws._frames_drawn == after, "screen should be static again after the press"
+    assert ws.frame_state.frames_drawn == after, "screen should be static again after the press"
 
 
 def test_a_glide_draws_until_the_row_rests_then_idles(tmp_path):
@@ -102,17 +106,17 @@ def test_a_glide_draws_until_the_row_rests_then_idles(tmp_path):
     §8.10): it draws every frame of the motion, then nothing once it rests."""
     ws, drv = _static_launcher(tmp_path)
     _settle(ws, drv)
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     drv.press("right")
     for _ in range(60):
         drv.frame(DT)
     assert not ws.launcher.moving
-    moved = ws._frames_drawn - before
+    moved = ws.frame_state.frames_drawn - before
     assert 2 <= moved <= 30, moved
-    after = ws._frames_drawn
+    after = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(DT)
-    assert ws._frames_drawn == after, "the row should be still once it rests"
+    assert ws.frame_state.frames_drawn == after, "the row should be still once it rests"
 
 
 def test_keypress_in_editor_triggers_exactly_one_redraw(tmp_path):
@@ -120,14 +124,14 @@ def test_keypress_in_editor_triggers_exactly_one_redraw(tmp_path):
     the editor is static again."""
     ws, drv = _static_code_editor(tmp_path)
     _settle(ws, drv)
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     drv.type_char(ord("x"))
     drv.frame(DT)
-    assert ws._frames_drawn - before == 1, "one keypress should draw exactly one frame"
-    after = ws._frames_drawn
+    assert ws.frame_state.frames_drawn - before == 1, "one keypress should draw exactly one frame"
+    after = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(DT)
-    assert ws._frames_drawn == after, "editor should be static again after typing"
+    assert ws.frame_state.frames_drawn == after, "editor should be static again after typing"
 
 
 # -- a running cart still redraws every frame --------------------------------
@@ -145,8 +149,8 @@ def test_running_cart_redraws_every_frame(tmp_path):
     base = _settle(ws, drv)
     for _ in range(60):
         drv.frame(DT)
-    assert ws._frames_drawn - base == 60, (
-        "running cart drew %d of 60 frames (should be 60)" % (ws._frames_drawn - base))
+    assert ws.frame_state.frames_drawn - base == 60, (
+        "running cart drew %d of 60 frames (should be 60)" % (ws.frame_state.frames_drawn - base))
 
 
 def test_live_wallpaper_keeps_launcher_animating(tmp_path):
@@ -165,11 +169,12 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
     else:
         import pytest
         pytest.skip("no live (animating) wallpaper cart seeded")
+    settle_badges(ws)
     ws._toast_until = 0
     base = _settle(ws, drv)
     for _ in range(30):
         drv.frame(DT)
-    assert ws._frames_drawn - base == 30, "live wallpaper should redraw every frame"
+    assert ws.frame_state.frames_drawn - base == 30, "live wallpaper should redraw every frame"
 
 
 # -- correctness: state changes still show (no stale screen) -----------------
@@ -212,6 +217,6 @@ def test_idle_redraw_measurement(tmp_path):
     idle_frames = 120
     for _ in range(idle_frames):
         drv.frame(DT)
-    painted = ws._frames_drawn - base
+    painted = ws.frame_state.frames_drawn - base
     # The whole point of #44: an idle static UI draws ~0 frames.
     assert painted == 0, "idle static UI painted %d/%d frames" % (painted, idle_frames)

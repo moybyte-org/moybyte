@@ -134,7 +134,7 @@ def _wrapt(obj, nm, tag):
     setattr(obj, nm, g)
     return True
 def _pframes():
-    return ws._frames_drawn
+    return ws.frame_state.frames_drawn
 def _prows():
     return [(k, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8],
              v[9], v[10]) for k, v in ws._ph.items()]
@@ -217,7 +217,7 @@ def _paintpick():
 def _content():
     # What is actually ON the surface. An empty editor is not a fast editor, it
     # is a DIFFERENT screen -- the surface sweep learned that the expensive way.
-    p = ws.project
+    p = ws.run.project
     be = getattr(ws.block_ui, 'blocks_ed', None)
     se = getattr(ws.scene_ui, 'sceneedit', None)
     tm = getattr(p, 'tilemap', None)

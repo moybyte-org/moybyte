@@ -15,6 +15,7 @@ from runtime import ui_draw
 from ws_helpers import build_desktop_ws, build_ws_with_shelf, use_theme
 
 from runtime import host_app, wm_chrome, launcher_layer
+from ws_helpers import settle_badges  # noqa: E402
 
 
 def _desk(tmp_path, variant="light"):
@@ -25,6 +26,7 @@ def _desk(tmp_path, variant="light"):
 
 def _quiet(ws):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
 
 

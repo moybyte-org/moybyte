@@ -95,6 +95,9 @@ NATIVE = os.path.join(ROOT, "native", "moy_index")
 NATIVE_SPINE = os.path.join(ROOT, "native", "moy_spine")
 NATIVE_APP = os.path.join(ROOT, "native", "moy_app")
 NATIVE_INPUT = os.path.join(ROOT, "native", "moy_input")
+# The crypto rows' C (moy_crypto.h): the door calls it; it compiles with
+# moy_seal.c over mbedTLS (runtime/host/seal_binding.py).
+NATIVE_NET = os.path.join(ROOT, "native", "moy_net")
 CACHE = os.path.join(ROOT, ".build", "host_index")
 OUT = os.path.join(ROOT, ".build", "moy_index_spike")
 WEB_DIR = os.path.join(ROOT, "firmware", "web_runner")
@@ -159,11 +162,11 @@ INDEX = Component(
 # part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
-    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE], "moy_spine_host.c",
+    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE, NATIVE_NET], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
-     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app.c", "moy_app_wasm.h",
-     "moy_app_wasm.c", "moy_input.h",
+     "moy_json.h", "moy_json.c", "moy_app.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_run.h", "moy_app_wasm.h",
+     "moy_app_wasm.c", "moy_app_lua.h", "moy_app_lua.c", "moy_input.h", "moy_crypto.h",
      "moy_ufiles.h", "moy_fs.h", "moy_vol.h"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
                       "moy_ledger.c", "moy_json.c"]),
@@ -182,7 +185,8 @@ FS = Component(
            os.path.join(MPY, "lib", "uzlib"), os.path.join(ROOT, "native", "moy_png")],
     "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
                          "moy_arena.h", "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_json.h",
-                         "moy_json.c"],
+                         "moy_json.c", "moy_shelf.h", "moy_shelf.c", "moy_files.h",
+                         "moy_files.c"],
     ("fuzz_fs.c", ["moy_cache.c", "moy_vol.c", "moy_fs.c", "moy_cat.c", "moy_seed.c", "moy_journal.c",
                    "moy_pack.c",
                    "moy_json.c", "moy_ufiles.c", "moy_img.c", "moy_png.c",
@@ -702,10 +706,8 @@ def map_summary(path, comp=INDEX):
 def build_board(name, d, env, logdir):
     import board_pass
     log = os.path.join(logdir, "%s.build.log" % name)
-    chip = _board_file(d).get("board", {}).get("chip", "")
-    with board_pass.build_slot(chip):
-        rc = board_pass.build(lambda cmd, lg: board_pass.run_logged(cmd, lg, env),
-                              d, log)
+    rc = board_pass.build(lambda cmd, lg: board_pass.run_logged(cmd, lg, env),
+                          d, log)
     return rc, log
 
 

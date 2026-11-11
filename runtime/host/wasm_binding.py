@@ -14,7 +14,7 @@ ESP-IDF subset of it (`native/moy_wasm/wamr/`), and a Linux build needs the
 interpreter and the Linux platform layer, which that subset leaves behind on
 purpose. So the first build fetches the fork AT THE PIN into
 `.build/host_wamr/` (gitignored; `fetch_sources` says from where) and builds
-its interpreter with no WASI and no builtin libc -- exactly what moy-spec's
+its interpreter with no libc-wasi and no builtin libc -- exactly what moy-spec's
 `make wasm-test` does -- and every later build reuses it. The pin is the
 boards' own, so a host and a board can never run different runtimes.
 
@@ -48,7 +48,7 @@ _PIN_H = os.path.join(_ENGINE_DIR, "wamr_pin.h")
 WAMR_DIR = os.path.join(_ROOT, ".build", "host_wamr")
 WAMR_REPO = "https://github.com/moybyte-org/wasm-micro-runtime.git"
 
-# The interpreter with nothing a cart may not import: no WASI, no builtin libc
+# The interpreter with nothing a cart may not import: no libc-wasi, no builtin libc
 # (moy-spec's wasm-test build); software bounds checks, so no SIGSEGV handler
 # lands in the Python process; and the Python process's GS register left alone.
 WAMR_CMAKE = (
@@ -239,10 +239,18 @@ def _lib():
             d.hw_set_cfg.argtypes = [_P, _P, _I]
             d.hw_set_files.argtypes = [_P, _C, _P, _I]
             d.hw_set_files.restype = _I
+            d.hw_set_ring.argtypes = [_P, ctypes.c_uint32]
+            d.hw_set_ring.restype = _I
+            d.hw_set_app.argtypes = [_P, _C, _I]
+            d.hw_set_app.restype = _I
+            d.hw_env.argtypes = [_P]
+            d.hw_env.restype = _P
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
             d.hw_load.restype = _I
             d.hw_init.argtypes = [_P, _P, _I]
             d.hw_init.restype = _I
+            d.hw_layout.argtypes = [_P, _I, _I, _I, _P, _I]
+            d.hw_layout.restype = _I
             d.hw_tick.argtypes = [_P, _F, _I, _P, _I]
             d.hw_tick.restype = _I
             d.hw_retarget.argtypes = [_P, _P]
@@ -261,6 +269,31 @@ def _lib():
             d.hw_footprint.restype = None
             d.hw_interp_footprint.argtypes = [ctypes.c_uint64, ctypes.c_uint64, _U64P, _U64P]
             d.hw_interp_footprint.restype = None
+            d.hw_wasi_start.argtypes = [_C, _I, ctypes.POINTER(_C), _C, ctypes.c_uint32,
+                                        ctypes.c_uint32, _C, _P, _I]
+            d.hw_wasi_start.restype = _I
+            d.hw_wasi_step.argtypes = [ctypes.c_uint32, _P, _I]
+            d.hw_wasi_step.restype = _I
+            d.hw_wasi_stop.argtypes = [_P, _I]
+            d.hw_wasi_stop.restype = _I
+            d.hw_wasi_live.argtypes = []
+            d.hw_wasi_live.restype = _I
+            d.hw_wasi_service.argtypes = [_C, ctypes.c_uint32, _C, _C, _P, _I]
+            d.hw_wasi_service.restype = _I
+            d.hw_wasi_service_stop.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_stop.restype = _I
+            d.hw_wasi_service_reap.argtypes = [ctypes.POINTER(ctypes.c_uint32),
+                                               ctypes.POINTER(ctypes.c_int32), _I]
+            d.hw_wasi_service_reap.restype = _I
+            d.hw_wasi_service_info.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+                                               ctypes.POINTER(ctypes.c_uint32)]
+            d.hw_wasi_service_info.restype = _I
+            d.hw_wasi_services.argtypes = []
+            d.hw_wasi_services.restype = _I
+            d.hw_wasi_service_keep.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_keep.restype = _I
+            d.hw_wasi_service_done.argtypes = [ctypes.c_uint32]
+            d.hw_wasi_service_done.restype = _I
             d.moy_wasm_natives.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
             d.moy_wasm_natives.restype = ctypes.POINTER(_NativeSymbol)
             if not d.hw_runtime():
@@ -311,12 +344,151 @@ def table():
     return tuple(rows[i].symbol.decode("utf-8") for i in range(n.value))
 
 
-SNAP_LEN = 15
+def run_command(path, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
+    """A WASI command (native/moy_wasm/moy_wasi.h): the module at `path` run
+    as `argv` in the shell session running on this thread, reaching the
+    `roots` (folders relative to the store) its permissions grant, its app
+    rows answered for `run` (the bytes of a moy_app_run_t, moy_app's `run`;
+    None for none), to its end. (its exit status, None), or (TRAPPED, why)
+    when it trapped and (REFUSED, why) when it would not run."""
+    got = start_command(path, argv, roots, bg_pid, budget_ms, run)
+    if got[1] is not None:
+        return got
+    got = (RUNNING, None)
+    while got[0] == RUNNING:
+        got = step_command(1000)
+    return got
+
+
+def start_command(path, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
+    """`run_command`'s run started, its `_start` on a thread of its own:
+    (0, None), or (REFUSED, why). `step_command` serves it and
+    `stop_command` ends it; one runs at a time."""
+    d = _lib()
+    if d is None:
+        return REFUSED, "no host wasm binding (%s)" % (why_unavailable() or "?")
+    args = (_C * max(1, len(argv)))(*[a.encode() for a in argv])
+    joined = b"".join(r.encode() + b"\0" for r in roots) + b"\0"
+    err = ctypes.create_string_buffer(256)
+    if d.hw_wasi_start(path.encode(), len(argv), args, joined, int(bg_pid), int(budget_ms),
+                       _run_bytes(run), err, len(err)) < 0:
+        return REFUSED, err.value.decode("utf-8", "replace")
+    return 0, None
+
+
+def _ended(code, err):
+    if code < 0:
+        return (TRAPPED if code == TRAPPED else REFUSED), err.value.decode("utf-8", "replace")
+    return code, None
+
+
+def step_command(max_ms):
+    """The running command's calls served for `max_ms` at most: (RUNNING,
+    None) while it goes on, else `run_command`'s answer."""
+    err = ctypes.create_string_buffer(256)
+    code = _lib().hw_wasi_step(int(max_ms) * 1000, err, len(err))
+    return (RUNNING, None) if code == RUNNING else _ended(code, err)
+
+
+def stop_command():
+    """The running command ended as Ctrl-C ends it: `run_command`'s answer,
+    130 unless it had exited."""
+    err = ctypes.create_string_buffer(256)
+    return _ended(_lib().hw_wasi_stop(err, len(err)), err)
+
+
+def command_live():
+    """Whether a command's run is live (a test's leak check)."""
+    d = _lib()
+    return bool(d is not None and d.hw_wasi_live())
+
+
+def _run_bytes(run):
+    """A moy_app_run_t's bytes for the C, or None for none."""
+    return None if run is None else bytes(run)
+
+
+def start_service(path, pid, app_id, run=None):
+    """A WASI service (native/moy_wasm/moy_wasi.h, A SERVICE): the module at
+    `path` run as process `pid`, its argv `app_id`, its `_start` on a thread
+    of its own, its app rows answered for `run` (as `run_command`'s). None,
+    or why it did not start."""
+    d = _lib()
+    if d is None:
+        return "no host wasm binding (%s)" % (why_unavailable() or "?")
+    err = ctypes.create_string_buffer(256)
+    if d.hw_wasi_service(path.encode(), int(pid), (app_id or "").encode(), _run_bytes(run),
+                         err, len(err)) < 0:
+        return err.value.decode("utf-8", "replace")
+    return None
+
+
+def stop_service(pid):
+    """Service `pid` stopped: its descriptor hung up, killed (137) past its
+    time. Its exit status, or -1 for no such service."""
+    d = _lib()
+    return -1 if d is None else d.hw_wasi_service_stop(int(pid))
+
+
+REAP_MAX = 16
+_REAPED = []                    # the reap's arrays, made once
+
+
+def reap_services():
+    """[(pid, exit status)] of the services that ended, the watchdog run over
+    the live ones first."""
+    d = _lib()
+    if d is None:
+        return []
+    if not _REAPED:
+        _REAPED[:] = [(ctypes.c_uint32 * REAP_MAX)(), (ctypes.c_int32 * REAP_MAX)()]
+    pids, codes = _REAPED
+    n = d.hw_wasi_service_reap(pids, codes, REAP_MAX)
+    return [(pids[i], codes[i]) for i in range(n)]
+
+
+def service_info(pid):
+    """(linear memory bytes, its wakes' time in us) of service `pid`, or None
+    once its end is reaped."""
+    d = _lib()
+    if d is None:
+        return None
+    mapped, cost = ctypes.c_uint32(0), ctypes.c_uint32(0)
+    if d.hw_wasi_service_info(int(pid), ctypes.byref(mapped), ctypes.byref(cost)) < 0:
+        return None
+    return mapped.value, cost.value
+
+
+def keep_service(pid):
+    """Service `pid` made a Player app's run, whose end the reap leaves to
+    its stop: whether there is one."""
+    d = _lib()
+    return d is not None and d.hw_wasi_service_keep(int(pid)) == 0
+
+
+def service_done(pid):
+    """Whether service `pid`'s `_start` has returned (True for none)."""
+    d = _lib()
+    return d is None or bool(d.hw_wasi_service_done(int(pid)))
+
+
+def services_live():
+    """How many service records are live (a test's leak check)."""
+    d = _lib()
+    return 0 if d is None else d.hw_wasi_services()
+
+
+TRAPPED, REFUSED = -1, -3                # run_command's: moy_wasi.h's MOY_WASI_TRAPPED, and the rest
+RUNNING = -100                           # moy_wasi.h's MOY_WASI_RUNNING
+
+
+SNAP_LEN = 19
 SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1, SNAP_BTNP_P1 = 0, 1, 2, 3
 SNAP_PLAYERS, SNAP_TIME_MS = 4, 5
 SNAP_TOUCH_X, SNAP_TOUCH_Y, SNAP_TOUCH_DOWN, SNAP_TOUCH_MS = 6, 7, 8, 9
 SNAP_KEY, SNAP_KEY_DOWN, SNAP_TEXTMODE, SNAP_QUIT = 10, 11, 12, 13
-SNAP_WINDOW = 14
+SNAP_FACE = 14
+SNAP_ROOM_X, SNAP_ROOM_Y, SNAP_ROOM_W, SNAP_ROOM_H = 15, 16, 17, 18
 AQ_SLOTS = 4
 AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
 
@@ -340,7 +512,7 @@ class HostWasmRun:
 
     def __init__(self, buf, w, h, cart_dir, main, pages, sheet=None,
                  tilemap=None, wire=None, wire_swapped=False, flags=None,
-                 cfg=None, files=None, writable=None):
+                 cfg=None, files=None, writable=None, ring=None, app=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
@@ -391,12 +563,35 @@ class HostWasmRun:
                               ctypes.c_char_p(joined) if joined else None, len(joined)):
                 self.close()
                 raise MemoryError("host wasm: the store opened no files session")
+        # The manifest's "audio_ring": `snd`'s queue depth; one outside the
+        # boards' range keeps moy-spec's 2,048, as on a board.
+        if ring:
+            d.hw_set_ring(self._r, int(ring))
+        # The app's run (moy_app's `run()`): what its imports from the app
+        # extension serve, and what its load is checked against.
+        if app is not None and d.hw_set_app(self._r, bytes(app), len(app)):
+            self.close()
+            raise ValueError("host wasm: not an app run")
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):
             msg = err.value.decode("utf-8", "replace")
             self.close()
             raise RuntimeError(msg)
+
+    def env(self):
+        """The engine's handle this run's imports are called with (its exec
+        env): what the app extension's natives find the run's grant by."""
+        return self._d.hw_env(self._r)
+
+    def layout(self, w, h, fs):
+        """The cart's exported `_layout(w, h, fs)`: True called, False none,
+        or the trap's text."""
+        err = ctypes.create_string_buffer(256)
+        rc = self._d.hw_layout(self._r, int(w), int(h), int(fs), ctypes.cast(err, _P), 256)
+        if rc < 0:
+            return err.value.decode("utf-8", "replace") or "the cart trapped"
+        return rc > 0
 
     def init(self):
         """The cart's _init. None, or the trap's text."""

@@ -106,7 +106,7 @@ class _Run:
 
 
 # The handheld's geometry (style.json's `group` and `value_row` metrics at fs 1).
-INSET, PAD, CAPTION, ROW, GAP = 6, 10, 19, 20, 3
+INSET, PAD, CAPTION, ROW, GAP = 6, 12, 19, 20, 3
 HINTS = 20      # the hint band a page's foot gives up
 
 
@@ -139,9 +139,8 @@ def test_a_group_is_a_caption_and_a_card_its_corners_rounded_by_the_depth():
         assert r.px(x, y) == ground, "a card corner at (%d, %d) is cut" % (x, y)
     assert r.px(INSET, top + ROW + 10) != ground, "the card's side is square between its corners"
     assert r.px(INSET + PAD + 40, top + 2 * ROW) != card, "a rule heads the third row"
-    # the focused first row's plate is the line between it and the second
-    assert r.px(INSET + PAD + 40, top + ROW) == card, "no rule under the focused row"
-    assert r.px(INSET + PAD + 40, top) != card, "the focused row is on its plate"
+    # the focused first row wears its bar alone: no plate under it
+    assert r.px(INSET + PAD + 40, top + ROW // 2) == card, "the focused row wears no plate"
 
 
 def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
@@ -151,11 +150,12 @@ def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
         last.frame()
     assert ui_draw.marks()[1] == 1, "one focus mark a frame"
     top = last.out["rect"][1] + CAPTION
-    y = top + 3 * ROW - 4                 # inside the foot's corner, on the edge bar
-    bar = last.px(INSET + 1, y)
-    mid = last.px(INSET + 1, top + 2 * ROW + 10)
-    assert bar == mid, "the edge bar runs into the rounded foot"
-    assert last.px(INSET + 1, top + ROW + 10) != mid, "only the focused row wears it"
+    y = top + 3 * ROW - 4                 # inside the foot's corner, on the bar
+    x = INSET + 1 + 2 + 1                 # the card's line, the bar's gap, into the bar
+    bar = last.px(x, y)
+    mid = last.px(x, top + 2 * ROW + 10)
+    assert bar == mid, "the bar runs into the rounded foot"
+    assert last.px(x, top + ROW + 10) != mid, "only the focused row wears it"
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
@@ -353,13 +353,11 @@ def test_a_label_on_a_current_plate_clears_it_for_text(theme, ground):
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
-    """Where a look gives the current content an ink of its own
-    (`current.ink`, the second cue beside a soft plate: Moy's plate alone is
-    1.15 to 1.32:1 on its ground), the mark answers it in front and in a
-    window behind, and it holds the theme floor's 3:1 on the plate as drawn
-    (theme.contrast; the plate's readability bit holds it too). Moy gives
-    it one. A solid plate (Contrast's) is its outline in a window behind,
-    the content there in its own ink."""
+    """Where a theme gives the on mark's content an ink of its own (`ink`,
+    the second cue beside a soft tint), the mark answers it in front and in
+    a window behind, and it holds the theme floor's 3:1 on the tint as
+    drawn (theme.contrast). Moy gives it one. A fill (Contrast's) is its
+    outline in a window behind, the content there in its own ink."""
     th = _theme(*theme)
     cv = make_system_canvas(40, 20)
     cv.rect(0, 0, 40, 20, th["surface"])
@@ -368,8 +366,7 @@ def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
         assert theme[0] != "moy", "Moy's current names an ink"
         return
     assert ink != th["ink"]
-    from runtime.chrome import theme_look
-    solid = theme_look(*theme)["current.alpha"] >= 100
+    solid = ui_draw.marks()[3]           # a cell's on mark an opaque fill
     behind = ui_draw.current(cv, th, (2, 2, 36, 16), back=True)
     assert behind == (None if solid else ink)
     cv.rect(0, 0, 40, 20, th["surface"])
@@ -410,7 +407,7 @@ def test_slider_maps_the_pointer_over_its_track_and_steps_by_arrow():
     r.frame()
     r.frame(("right",))
     assert st["v"] == 6
-    right = 320 - 4                       # the row's pad off the group
+    right = 320 - 10                      # the row's pad off the group
     r.frame(ptr=(right - 84, 10, 1 | 2 | 4))
     r.frame(ptr=(right - 84, 10, 1 | 2))
     assert st["v"] == 6, "a press that has not moved is no drag yet"
@@ -516,7 +513,7 @@ def test_a_sideways_drag_moves_a_slider_and_does_not_scroll():
     assert st["v"] == 10, "the knob followed the pointer to the track's end"
     assert _box(r, "Level")[1] == y, "the page did not scroll"
     x, y, w, h = _box(r, "Mode")[:4]
-    r.tap(x + w - 10, y + h // 2)
+    r.tap(x + w - 14, y + h // 2)         # inside the row's pad
     assert st["mode"] == 2, "a tap on a seg still takes the option tapped"
 
 
@@ -620,9 +617,9 @@ def _value_rows_page(theme, focus):
     return r
 
 
-# The seeds whose part focus mark is a plate in the theme's focus colour
-# (`look.focus` invert): the row's controls lie on it.
-_INVERT_ROWS = (("contrast", "dark"), ("contrast", "light"), ("blocks", "light"))
+# The seeds whose row focus mark is a fill in the theme's focus colour
+# (`marks.row.focus` fill): the row's controls lie on it.
+_INVERT_ROWS = (("contrast", "dark"), ("contrast", "light"))
 
 
 @pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
@@ -894,7 +891,7 @@ def _wasm_or_skip():
 
 
 def _pixels(ws):
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -905,7 +902,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:N_PMEM]
     if lua is not None:
@@ -913,7 +910,7 @@ def _pmem(ws):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:N_PMEM]
-    pm = ws.player.ns["pmem"]
+    pm = ws.run.player.ns["pmem"]
     return [pm(i) for i in range(N_PMEM)]
 
 
@@ -973,9 +970,9 @@ def parts_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -1045,6 +1042,36 @@ def test_an_icon_draws_before_the_label_and_moves_it_right():
     b = _ink_cols(iconed, top + 2, top + ROW - 2, x0, 160)
     assert a and b and b[0] < a[0] + 8, "the icon starts where the label did"
     assert b[-1] > a[-1] + 12, "the label moved right past the icon"
+
+
+def test_a_long_value_is_cut_and_leaves_its_label_whole():
+    """A value wider than the row stays inside it, cut with an ellipsis, and
+    leaves its label up to half the row: it once ran left over the label and
+    past the card (Get Carts' "Needs" row on the desk)."""
+    st = {}
+    long = "game.wad from moybyte-org.github.io and the rest of a long host"
+
+    def page(value):
+        def draw():
+            st["rect"] = ui.page("")
+            ui.group("General")
+            ui.info("Needs", value)
+            ui.group()
+            return st
+        r = _Run(draw)
+        r.frame()
+        r.frame()
+        return r
+    short, cut = page("x"), page(long)
+    top = cut.out["rect"][1] + CAPTION
+    label = _ink_cols(short, top + 2, top + ROW - 2, INSET + PAD, 120)
+    assert label
+    lend = label[-1]
+    rows = range(top + 2, top + ROW - 2)
+    assert all(cut.px(x, y) == short.px(x, y) for x in range(0, lend + 1) for y in rows), \
+        "the label is drawn whole, and nothing over it or left of it"
+    assert not _ink_cols(cut, top + 2, top + ROW - 2, lend + 2, lend + 6), \
+        "a gap between the label and the value"
 
 
 def test_an_icon_applies_to_the_next_row_only():
@@ -1226,8 +1253,8 @@ def test_a_tables_picture_column_draws_the_named_icon():
     assert pic and _ink_cols(b, y0 + 2, y0 + ROW - 2, INSET, 40) != pic
 
 
-def _band(r, y0, y1):
-    return [r.px(x, y) for y in range(y0, y1) for x in range(r.cv.w)]
+def _band(r, y0, y1, w=None):
+    return [r.px(x, y) for y in range(y0, y1) for x in range(w or r.cv.w)]
 
 
 def test_a_tables_rows_fade_where_they_run_on_past_its_rect():
@@ -1244,7 +1271,10 @@ def test_a_tables_rows_fade_where_they_run_on_past_its_rect():
     foot = top + CAPTION + HEAD + 3 * ROW
     head = top + CAPTION + HEAD
     assert _band(fits, foot - 8, foot) != _band(runs, foot - 8, foot), "no fade at its foot"
-    assert _band(fits, head, head + ROW) == _band(runs, head, head + ROW)
+    # its top rows are the same, but for the thumb inside the right edge
+    # of the one that runs on
+    assert _band(fits, head, head + ROW, 312) == _band(runs, head, head + ROW, 312)
+    assert _band(fits, head, head + ROW) != _band(runs, head, head + ROW), "no thumb"
 
 
 def test_a_scrolled_table_fades_its_head():
@@ -1475,20 +1505,17 @@ def test_a_focused_field_row_wears_the_value_rows_focus_mark(theme, last):
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
-def test_a_focused_fields_ring_is_the_focus_colour_and_reads_on_its_row(theme):
-    """Focused (being typed in), the field's ring is two pixels where its
-    rest ring is one, the second outside the box, in the focus colour (the
-    mark's ink on an invert mark), and clears what lies round it 3:1 --
-    Contrast's stayed its one pixel of border colour, so only the caret
-    told it was being typed in."""
+def test_a_focused_fields_box_keeps_its_rest_border_in_a_group(theme):
+    """In a group a focused field wears the row's focus mark, and its box
+    keeps its rest border (docs/media/focus_2026-11/README.md, change 6 and
+    L6): one mark, not the row's and a ring too. A field standing alone
+    rings its box (tests/test_settings_wifi_prompt.py)."""
     on = _row_or_field_page(theme, True)
     off = _row_or_field_page(theme, True, focus=False)
     _x, y0, _w, h = _box(on, "Name")
     y = y0 + h // 2
     x = 320 - INSET - PAD - TRACK
-    ring = on.px(x, y)
-    assert on.px(x - 1, y) == ring and off.px(x - 1, y) != off.px(x, y), "two pixels, not one"
-    assert _ratio(ring, on.px(x - 2, y)) >= 3.0, "%.2f:1" % _ratio(ring, on.px(x - 2, y))
+    assert [on.px(x + k, y) for k in (0, 1)] == [off.px(x + k, y) for k in (0, 1)]
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
@@ -1714,9 +1741,9 @@ def files_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _files_script(ws)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -1753,7 +1780,8 @@ def test_the_files_page_answers_its_script(files_runs):
 # -- a page in a window's body ---------------------------------------------------------
 #
 # A page whose host begins it in a window (`ui_frame(window=True)`; a run's
-# snapshot slot SNAP_WINDOW, which the kernel's Player writes from the console)
+# snapshot slot SNAP_FACE's window bit, which the kernel's Player writes from the
+# console)
 # lies on the window's body as the frame paints it; a fullscreen page keeps
 # its own ground.
 
@@ -1819,26 +1847,26 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         ws = host_app.build_workstation(root, **kw)
         ws.pointer.visible = False
         open_cart(ws, title)
-        host = ws.player._uh
+        host = ws.run.player._uh
         if host is not None:
             real = host.run
 
-            def spy(cv, th, rect, a, d=False, window=False, *rest, real=real):
+            def spy(cv, th, rect, a, d=False, window=False, *rest, real=real, **kw):
                 seen.append(window)
-                return real(cv, th, rect, a, d, window, *rest)
+                return real(cv, th, rect, a, d, window, *rest, **kw)
             host.run = spy
         for _ in range(2):
             make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         assert ws.windowed_chrome is desk
         if name == "python":
             assert seen and set(seen) == {desk}, seen
         else:
-            run = ws.player._lua
+            run = ws.run.player._lua
             snap = getattr(run, "snap", None)
             if snap is None:
                 snap = run._run.snap
-            assert snap[wasm_binding.SNAP_WINDOW] == (1 if desk else 0), name
+            assert snap[wasm_binding.SNAP_FACE] & 1 == (1 if desk else 0), name
         ws.exit()
 
 
@@ -1912,8 +1940,7 @@ def test_a_grid_lays_its_cards_in_centred_columns_and_rows():
     r.frame()
     st = r.frame()
     b = st["boxes"]
-    assert [c[2:4] for c in b[1:]] == [(66, 50)] * 3
-    assert b[0][2] > 66, "the focused card is lifted: grown, its picture with it"
+    assert [c[2:4] for c in b] == [(66, 50)] * 4, "a ringed card keeps its box (no lift)"
     assert b[1][1] == b[2][1] and b[3][1] > b[2][1], "three columns, then a row"
     assert b[3][0] == b[1][0] - (b[2][0] - b[1][0]), "the second row starts under the first"
     left, right = b[3][0], 320 - (b[2][0] + b[2][2])
@@ -2009,7 +2036,7 @@ def look_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2021,7 +2048,7 @@ def look_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2174,7 +2201,7 @@ def pop_runs(request, tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2186,7 +2213,7 @@ def pop_runs(request, tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2253,6 +2280,22 @@ def _card(r):
     got = ui_draw._C.api_box(r.ctx, "pause")
     assert got is not None, "the popover's card answers by its id"
     return got
+
+
+def test_buttons_one_after_another_in_a_popover_are_one_row():
+    def draw():
+        ui.page("")
+        ui.popover("ask", 220)
+        ui.info("Status", "Not sent")
+        ui.button("Delete")
+        ui.button("Send again", "primary")
+        ui.popover()
+    r = _Run(draw)
+    for _ in range(3):
+        r.frame()
+    a, b = _box(r, "Delete"), _box(r, "Send again")
+    assert a is not None and b is not None
+    assert a[1] == b[1] and a[0] + a[2] < b[0], "side by side, the primary last"
 
 
 def test_a_menu_is_a_stop_per_item_and_answers_the_one_activated():
@@ -2393,7 +2436,7 @@ def menu_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2405,7 +2448,7 @@ def menu_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 
@@ -2632,7 +2675,7 @@ def restyle_runs(tmp_path_factory):
         ws.pointer.visible = False
         open_cart(ws, title)
         make_drv(ws).frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         drv = make_drv(ws)
         shots = []
         for _ in range(3):
@@ -2644,7 +2687,7 @@ def restyle_runs(tmp_path_factory):
                 _frame(drv)
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
     return out
 

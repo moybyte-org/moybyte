@@ -104,7 +104,7 @@ class _LegacyLayer(Layer):
 
 class _PlayerLayer(Layer):
     """The running cart (Stage 2 of docs/history/shell_ux_technical_plan_v1.md): a thin
-    adapter over `ws.player` -- the run-loop black box that starts a cart, ticks it
+    adapter over `ws.run.player` -- the run-loop black box that starts a cart, ticks it
     each frame, feeds it input, and guarantees it exits. Game domain (drawn on the
     fixed 320x240 canvas, composited by the router). All the logic lives on the
     Player; this just gives it the "desktop" content-layer identity the string-keyed
@@ -115,13 +115,13 @@ class _PlayerLayer(Layer):
     ball_steps = False              # the trackball is the running cart's pointer
 
     def draw(self, dt):
-        self.ws.player.tick(dt)
+        self.ws.run.player.tick(dt)
 
     def handle_input(self, i):
-        return self.ws.player.handle_input(i)
+        return self.ws.run.player.handle_input(i)
 
     def handle_pointer(self, px, py, click):
-        return self.ws.player.handle_pointer(px, py, click)
+        return self.ws.run.player.handle_pointer(px, py, click)
 
 
 class _BlocksLayer(Layer):
@@ -411,6 +411,9 @@ class _SysMenuLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
+        p = self.ws.pause
+        if p.open and p.shows_bar():
+            return                    # over the paused game the pause draws it
         paint = getattr(self.ws.wm, "_pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu

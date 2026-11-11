@@ -31,11 +31,19 @@ class _Air:
         self.sent += 1
         if self.deaf:
             return
+        ch = _ch(self.radios.get(src))
         for mac, r in self.radios.items():
-            if mac == src:
+            if mac == src or _ch(r) != ch:
                 continue
             if dst == BROADCAST or dst == mac:
                 r.inbox.append((src, payload))
+
+
+def _ch(radio):
+    """The channel a fake radio is on: its station's (one channel for all
+    when the test gave it none)."""
+    w = getattr(radio, "wlan", None)
+    return 1 if w is None else w.ch
 
 
 class _FakeRadio:
@@ -85,15 +93,26 @@ class _FakeWlan:
     def __init__(self, mac):
         self._mac = mac
         self._pm = self.PM_PERFORMANCE
+        self.ch = 1
+        self.assoc = False              # associated: pinned to the AP's channel
 
     def active(self, on=None):
         return True
+
+    def isconnected(self):
+        return self.assoc
 
     def config(self, *a, **kw):
         if kw:
             if "pm" in kw:
                 self._pm = kw["pm"]
+            if "channel" in kw:
+                if self.assoc:
+                    raise OSError("the station is associated")
+                self.ch = int(kw["channel"])
             return None
+        if a and a[0] == "channel":
+            return self.ch
         if a and a[0] == "mac":
             return self._mac
         if a and a[0] == "pm":
@@ -131,9 +150,10 @@ class _Ws:
 
 
 def _link(air, clock, mac, board="tdeck", name="A", launch=None):
+    radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+    radio.wlan = wlan
     lk = moy_espnow.EspNowLink(board=board, name=name, ticks_ms=clock,
-                               radio=_FakeRadio(air, mac), wlan=_FakeWlan(mac),
-                               launch=launch)
+                               radio=radio, wlan=wlan, launch=launch)
     lk.start()
     return lk
 
@@ -270,6 +290,71 @@ def test_a_full_handshake_gives_each_console_the_other_half_of_one_game():
     assert a.status()[2] is True and b.status()[2] is True
 
 
+def test_the_host_names_the_tick_and_the_guest_takes_it():
+    """START carries the host's tick and the guest takes it: 60 when both
+    consoles say they hold it (a cart paced 60 or "free"; the guest says it in
+    its beacon), else 30. `link rate` on the host forces its own."""
+    for fps, force, theirs, hz in ((None, None, "free", 30), ("free", None, "free", 60),
+                                   (60, None, 60, 60), ("free", None, 30, 30),
+                                   (None, 60, 30, 60), ("free", 30, "free", 30)):
+        air, clock, a, b = _pair(lambda ws, title: True)
+        a.rate_force = force
+        a.announce("Brick Siege", 0, fps=fps)
+        b.announce("Brick Siege", 0, fps=theirs)
+        clock.advance(10)
+        a.poll()
+        b.poll()
+        a.state = b.state = 1
+        wsa, wsb = _Ws(), _Ws()
+        assert a.offer(wsa, "Brick Siege")
+        b.poll(wsb)
+        assert wsa.netplay.tick_hz == wsb.netplay.tick_hz == hz, (fps, force, theirs)
+        assert abs(wsb.netplay.dt - 1.0 / hz) < 1e-9
+        assert a.stats()["match"]["hz"] == hz
+
+
+def test_a_free_console_finds_a_peer_pinned_to_its_aps_channel():
+    """SSH holds a console's station on its AP, and ESP-NOW is heard only on
+    the channel it is sent on: the pinned console cannot move, so the free
+    one, hearing no peer on its cart at home, probes the channels a tick at a
+    time, hears the pinned peer's beacon on 6 and follows it there, and the
+    match forms on 6 with the station still associated."""
+    air, clock, a, b = _pair(lambda ws, title: True)
+    a.wlan.ch, a.wlan.assoc = 6, True        # a's station is on its AP
+    wsa, wsb = _Ws(), _Ws()
+    a.announce("Brick Siege", 1)
+    b.announce("Brick Siege", 1)
+    for _ in range(40):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+        if a.session is not None and b.session is not None:
+            break
+    assert a.session is not None and b.session is not None, "the match formed"
+    assert a.wlan.ch == 6 and a.wlan.assoc, "the pinned station never moved"
+    assert b.wlan.ch == 6, "the free one followed it"
+
+
+def test_two_free_consoles_meet_at_home_and_a_match_never_tunes():
+    air, clock, a, b = _pair(lambda ws, title: True)
+    b.wlan.ch = 9                            # a station's scan left it elsewhere
+    wsa, wsb = _Ws(), _Ws()
+    a.announce("Brick Siege", 1)
+    b.announce("Brick Siege", 1)
+    for _ in range(10):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+    assert a.wlan.ch == b.wlan.ch == 1, "both free stations sit at home"
+    assert a.session is not None and b.session is not None
+    a.wlan.ch = b.wlan.ch = 3                # a live match stays where it is
+    for _ in range(3):
+        clock.advance(400)
+        a.poll(wsa)
+        b.poll(wsb)
+    assert a.session is not None and a.wlan.ch == b.wlan.ch == 3
+
+
 def test_the_guest_ends_the_match_when_it_does_not_have_the_cart():
     air, clock, a, b = _pair(lambda ws, title: False)     # "no such cart here"
     _see_each_other(a, b, clock)
@@ -340,6 +425,7 @@ def test_a_dead_link_stalls_both_consoles_and_neither_runs_ahead():
 
 def test_a_cart_message_crosses_and_is_pumped_not_delivered_mid_send():
     air, clock, a, b = _pair()
+    _see_each_other(a, b, clock)
     got = []
     b.net.on_message(got.append)
     assert a.net.send({"hi": 5}) is True
@@ -356,6 +442,7 @@ def test_net_pump_and_send_import_nothing(monkeypatch):
     Brick Siege and Harpoon Pop on every console board (#66)."""
     import builtins
     air, clock, a, b = _pair()
+    _see_each_other(a, b, clock)
     got = []
     b.net.on_message(got.append)
     assert a.net.send({"hi": 5}) is True
@@ -445,13 +532,15 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
     ANY other frame is parked for the tail poll, because a T_START can relaunch
     the cart and a T_BYE can tear down the match from inside the Player's own
     frame."""
-    air, clock, a, _b = _pair()
-
-    a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
+    air, clock, a, b = _pair(lambda ws, title: True)
+    _see_each_other(a, b, clock)
+    a.offer(_Ws(), "Brick Siege")         # a live session, bound to b
+    del a.radio.inbox[:]                  # b's beacons from the meeting
     peer_mac = b"\xaa" * 6
-    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0, 5])
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, a.session.session, 1, 0, 1, 0]
+                + [0] * 10 + [255, 255, 0, 0, 0] + [5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
-    a.radio.inbox.append((peer_mac, inp))
+    a.radio.inbox.append((b.mac, inp))
     a.radio.inbox.append((peer_mac, beacon))
     n = a.drain_input()
     assert n == 2
@@ -477,8 +566,8 @@ def test_a_stale_input_frame_from_a_previous_match_cannot_reach_a_new_one():
     _see_each_other(a, b, clock)
     a.offer(wsa, "Brick Siege")
     assert a.session.session != old, "a new match gets a new session id"
-    stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF,
-                             0, 0, 0]))
+    stale = bytes(bytearray([netplay.PROTO, netplay.T_INPUT, old, 9, 0, 0xFF, 0]
+                            + [0] * 10 + [255, 255, 0, 0, 0] + [0, 0]))
     a._dispatch(wsa, b"\x02" * 6, stale)
     assert a.session.packets_in == 0
 
@@ -573,13 +662,13 @@ def test_a_restart_for_a_forming_match_does_not_stop_the_radio():
 
     # A session is already arranged for the run about to start.
     ws.netplay = object()
-    ws.player.release_world()
+    ws.run.player.release_world()
     assert stops == [], "the radio must survive a restart that a match asked for"
     assert ws.netplay is not None, "and so must the session"
 
     # An ordinary exit, with nothing pending, still puts the radio away.
     ws.netplay = None
-    ws.player.release_world()
+    ws.run.player.release_world()
     assert stops == [1], "an ordinary exit stops the radio"
 
 
@@ -601,7 +690,7 @@ def test_the_link_rides_the_radio_lease(tmp_path):
             self.calls.append("start")
             return True
 
-        def announce(self, cart="", state=0):
+        def announce(self, cart="", state=0, fps=None):
             pass
 
         def offer(self, ws, cart, router=None, seed=None):
@@ -621,11 +710,11 @@ def test_the_link_rides_the_radio_lease(tmp_path):
     assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = object()                  # a session arranged for the next run
-    ws.player.release_world()
+    ws.run.player.release_world()
     assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = None
-    ws.player.release_world()
+    ws.run.player.release_world()
     assert ws.link.calls[-1] == "stop"
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
@@ -774,6 +863,52 @@ def test_a_peer_that_says_goodbye_leaves_the_survivor_playing_solo():
     assert a.active
 
 
+def test_a_stranger_can_neither_play_nor_end_nor_talk_into_a_match():
+    """Frames carry no signature, so the sender's address is the check: a live
+    match is bound to its peer, and an input frame carrying the match's
+    session id, a BYE or a net message from any other console is dropped,
+    whether the frame lands mid-frame (drain_input) or at the tail."""
+    air, clock, a, b, wsa, wsb = _matched()
+    a.net.on_message(lambda m: None)
+    stranger = b"\x07" * 6
+    session = a.session
+    inp = bytes([netplay.PROTO, netplay.T_INPUT, session.session, 9, 0, 0xFF, 0]
+                + [0x3F] * 10 + [255, 255, 0, 0, 0] + [0, 0])
+    before = session.packets_in
+    a.radio.inbox.append((stranger, inp))
+    a.drain_input()
+    a._dispatch(wsa, stranger, inp)
+    assert session.packets_in == before, "a stranger's input reached the match"
+    a._dispatch(wsa, stranger, bytes([netplay.PROTO, netplay.T_MSG]) + b'"hi"')
+    assert a._m._m.inbox_n == 0, "a stranger's message reached on_net"
+    a._dispatch(wsa, stranger, bytes(bytearray([netplay.PROTO, netplay.T_BYE])))
+    assert a.session is session and wsa.netplay is not None, "a stranger ended the match"
+    a._dispatch(wsa, b.mac, bytes([netplay.PROTO, netplay.T_MSG]) + b'"hi"')
+    assert a._m._m.inbox_n == 1, "the peer's message is taken"
+
+
+def _start_from(src, to, session, cart):
+    return (bytes([netplay.PROTO, netplay.T_START, session, 1, 7, 0, 0, 0]) + bytes(to)
+            + bytes([netplay.TICK_HZ]) + cart.encode() + b"\x00{}")
+
+
+def test_a_start_from_a_stranger_opens_nothing():
+    """A START addressed here used to open any installed cart by its title. It
+    is taken only from a console heard beaconing, and only for the cart this
+    console sits on: it can re-run that cart and nothing else."""
+    launched = []
+    air, clock, a, b = _pair(lambda ws, title: launched.append(title) or True)
+    _see_each_other(a, b, clock)
+    wsb = _Ws()
+    stranger = b"\x07" * 6
+    b._dispatch(wsb, stranger, _start_from(stranger, b.mac, 5, "Brick Siege"))
+    assert b.session is None and launched == [], "a console never heard is a stranger"
+    b._dispatch(wsb, a.mac, _start_from(a.mac, b.mac, 5, "Settings"))
+    assert b.session is None and launched == [], "a START names only the cart this console is on"
+    b._dispatch(wsb, a.mac, _start_from(a.mac, b.mac, 5, "Brick Siege"))
+    assert b.session is not None and launched == ["Brick Siege"], "the lobby's peer is heard"
+
+
 def test_a_run_never_adopts_a_dead_session(tmp_path):
     """The invariant at the OTHER end of the seam, where the freeze was actually
     paid for: Player.start adopts ws.netplay, and a re-run can arrive from
@@ -792,7 +927,7 @@ def test_a_run_never_adopts_a_dead_session(tmp_path):
             self.calls.append("start")
             return True
 
-        def announce(self, cart="", state=0):
+        def announce(self, cart="", state=0, fps=None):
             self.calls.append(("announce", cart, state))
 
         def offer(self, ws, cart, router=None, seed=None):
@@ -820,7 +955,7 @@ def test_a_run_never_adopts_a_dead_session(tmp_path):
 
     assert ws._start() is True
     assert ws.netplay is None, "the dead session did not survive the run boundary"
-    assert ws.player._netplay is None, "...so the run is solo"
+    assert ws.run.player._netplay is None, "...so the run is solo"
     assert "end_match" in link.calls
     assert ("offer", "Brick Siege") in link.calls, \
         "and the fresh run is free to form a new match"
@@ -893,3 +1028,316 @@ def test_an_invite_meant_for_somebody_else_is_ignored():
     c.poll(wsc)
     assert wsb.netplay is not None, "the addressee joined"
     assert wsc.netplay is None, "the bystander did not"
+
+
+def test_a_stopped_link_asks_nothing_of_the_next_run():
+    """On a board the kernel's tail polls the link in C (moy_match_poll) and
+    the console's half (sync) runs in the Python frame's tail, which a front
+    run never reaches. A START or a give-up landing in that gap leaves its
+    open-the-cart request pending, and a run ended there (`end`, a Ctrl-C,
+    the pause menu's Quit) stops the link with it still pending. It must go
+    with the stop: kept, the next multiplayer start's offer() synced it and
+    re-ran the cart from inside Player.start, whose own runtime then found
+    the nested run's open ("moycore: a run is already open", on glass on the
+    Guition S3, 2026-11-06)."""
+    launched = []
+    air, clock, a, b = _pair(lambda ws, title: launched.append(title) or True)
+    _see_each_other(a, b, clock)
+    wsa, wsb = _Ws(), _Ws()
+    assert a.offer(wsa, "Brick Siege") is True
+    b._m.poll(clock())                # the kernel tail's C poll: the START lands
+    assert launched == []
+    b.stop(wsb)                       # the run ends before the console's tail
+
+    b.start()
+    b.offer(wsb, "Brick Siege")       # the next run's start, solo here
+    assert launched == [], "a stopped link's request reached the next run"
+    assert b.session is None
+
+
+def test_a_lua_run_after_a_stopped_match_opens_once(tmp_path):
+    """The same gap, end to end on the console: a request left pending by
+    the last run's link must not re-run the next one from inside its own
+    start (a nested Player.start, whose outer half then failed on the
+    runtime the nested one had opened)."""
+    from ws_helpers import build_ws, open_cart
+
+    air, clock = _Air(), _Clock()
+    host = _link(air, clock, b"\x01" * 6, "tdeck", "Ada")
+    ws = build_ws(tmp_path)
+    ws.link = moy_espnow.EspNowLink(board="guition_s3", name="Bo", ticks_ms=clock,
+                                    radio=_FakeRadio(air, b"\x02" * 6),
+                                    wlan=_FakeWlan(b"\x02" * 6),
+                                    launch=moy_espnow.launch_cart)
+    ws.link.start()
+    _see_each_other(host, ws.link, clock, cart="Brick Siege Lua")
+    assert host.offer(_Ws(), "Brick Siege Lua") is True
+    ws.link._m.poll(clock())          # the START lands in the C poll alone
+    ws.link.stop(ws)
+    host.stop()
+
+    starts = []
+    real = ws.run.player.start
+    ws.run.player.start = lambda project: starts.append(1) or real(project)
+    open_cart(ws, "Brick Siege Lua")
+    assert ws.cart_error is None, ws.cart_error
+    assert starts == [1], "the run was started %d times" % len(starts)
+
+
+# -- two whole consoles, one cart -----------------------------------------------
+
+def _cart_world(ws):
+    """The cart's state as text: every plain global of its namespace, the
+    frame-aligned world checksum the cross-architecture hunt used
+    (docs/netplay_v1.md §5). A console's own high score (pmem) is local by
+    design and stays out."""
+    import types
+    out = []
+    ns = ws.ns
+    for k in sorted(ns):
+        v = ns[k]
+        if k.startswith("_") or k == "best" or callable(v) \
+                or isinstance(v, types.ModuleType):
+            continue
+        r = repr(v)
+        if " at 0x" not in r:
+            out.append("%s=%s" % (k, r))
+    return "\n".join(out)
+
+
+def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=17,
+                  ready=None):
+    """Two real consoles in one process over a lossy air, each kid mashing
+    buttons on their own seed, the cart's world recorded per lockstep frame.
+    Each console keeps its own random stream (two boards share nothing).
+    `ready(wss)` runs once both are built, before either opens the cart."""
+    import random
+    from ws_helpers import build_ws, open_cart
+    import runtime.player as player_mod
+
+    air, clock = _Air(), _Clock()
+    monkeypatch.setattr(player_mod, "_ticks_ms", clock)
+    drops = random.Random(99)
+    carry = air.carry
+    air.carry = lambda s, d, p: None if drops.random() < loss else carry(s, d, p)
+    wss, streams = [], []
+    # Building a console draws from the global random stream, and the match
+    # follows from what it drew: seeded here, it is the same whatever ran
+    # before it.
+    outer = random.getstate()
+    random.seed(1058)
+    for i, mac in enumerate((b"\x01" * 6, b"\x02" * 6)):
+        ws = build_ws(tmp_path / ("c%d" % i))
+        radio = _FakeRadio(air, mac)
+        radio.wlan = _FakeWlan(mac)         # the air hears by its channel
+        ws.link = moy_espnow.EspNowLink(
+            board="b%d" % i, name="n%d" % i, ticks_ms=clock,
+            radio=radio, wlan=radio.wlan, launch=moy_espnow.launch_cart)
+        ws.link.check_worlds(True)
+        wss.append(ws)
+        streams.append(random.Random(100 + i).getstate())
+    random.setstate(outer)
+    if ready is not None:
+        ready(wss)
+
+    def on(i, fn):
+        random.setstate(streams[i])
+        fn()
+        streams[i] = random.getstate()
+
+    for i in (0, 1):
+        on(i, lambda: open_cart(wss[i], title))
+    kids = random.Random(7)
+    names = ("left", "right", "up", "down", "a", "b")
+    held = [set(), set()]
+    worlds = ({}, {})
+    for k in range(frames):
+        if tamper is not None:
+            tamper(k, wss)
+        clock.advance(step)
+        for i in (0, 1):
+            ws = wss[i]
+            if kids.random() < 0.15:
+                held[i] = set(kids.sample(names, kids.randint(0, 2)))
+
+            def frame():
+                ws.input.begin_frame()
+                for n in names:
+                    ws.input.set_held(n, n in held[i])
+                ws.link._m.poll(clock())
+                ws.frame(step / 1000)
+            on(i, frame)
+            assert ws.cart_error is None, ws.cart_error
+            np = ws.run.player._netplay
+            if np is not None:
+                worlds[i].setdefault((np.session, np.frame), _cart_world(ws))
+    return worlds, wss
+
+
+def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeypatch):
+    """The owner's report (2026-11-06): a Brick Siege match "quite quickly
+    diverges". Two whole consoles on the shared console path over an air that
+    loses a third of the packets, the kids changing buttons through every
+    stall: every frame both simulated must hold the same world. A stalled
+    tick's retry resampling the frame it had already emitted parted the two
+    tanks within three seconds here."""
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 700)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert len(both) > 200, "the premise: a long match formed and advanced"
+    bad = [f for f in both if worlds[0][f] != worlds[1][f]]
+    assert bad == [], "first divergent frame %r" % (bad[:1],)
+    for ws in wss:
+        np = ws.run.player._netplay
+        assert np.checks >= 4 and np.desync < 0, \
+            "the desync check compared checkpoints and found them agreeing"
+        assert ws.ns["time"]() == np.ms(np.frame), \
+            "time() is the match's clock, never a board's wall clock"
+        ws.input.last_key = ord("x")
+        ws.run.player._tick_keys(ws)
+        assert ws.ns["key"]() == 0, "a key does not cross the air, so a match has none"
+
+
+def test_a_match_plays_while_one_console_serves_ssh(tmp_path, monkeypatch):
+    """SSH during a match (2026-11-07), as far as a host can take it: one
+    console serves SSH, so its radio is held for "ssh" and its station is
+    associated to its AP on channel 6, while the other's station is free at
+    home. The free one follows the pinned one, the match forms there and
+    plays in sync over a lossy air with the station associated throughout,
+    and when the cart ends the link lets go of the radio while SSH keeps it.
+    The airtime the session's own traffic takes, and the frame time the
+    server's hops take at the frame's tail, are glass's to measure."""
+    def serving(wss):
+        ws = wss[0]
+        ws.wifi_hold("ssh")
+        ws.link.wlan.ch, ws.link.wlan.assoc = 6, True
+
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 900,
+                                ready=serving)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert len(both) > 200, "the premise: the match formed on the AP's channel"
+    assert [f for f in both if worlds[0][f] != worlds[1][f]] == []
+    ssh, free = wss
+    assert ssh.link.wlan.ch == 6 and ssh.link.wlan.assoc, "the station never moved"
+    assert free.link.wlan.ch == 6, "the free console followed it"
+    for ws in wss:
+        np = ws.run.player._netplay
+        assert np.desync < 0 and np.checks >= 4, (np.desync, np.checks)
+        assert np.frame * 1000 / (900 * 17) > 20, "the match ticked at its rate"
+    ssh.netplay = None
+    ssh.run.player.release_world()
+    assert ssh.leases.holders() == ["ssh"] and ssh.wifi.radio is True, \
+        "the link let go and SSH still holds the radio"
+    assert ssh.link.wlan.assoc, "and the session's station is still on its AP"
+
+
+def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkeypatch):
+    """The desync check (2026-11-06): two worlds that disagree are SAID, on
+    serial and on the screen, never left to paint two plausible games. One
+    console's score is nudged mid-match -- the shape of every nondeterminism
+    the lockstep contract forbids -- and the next checkpoint both consoles
+    compare names it, as a world (not an input) disagreement. The score,
+    not a tank: a tank nudged against a wall is pushed back and the worlds
+    agree again before a checkpoint looks."""
+    def nudge(k, wss):
+        if k == 300:
+            wss[1].ns["score"] += 1
+
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 420, nudge)
+    for ws in wss:
+        np = ws.run.player._netplay
+        assert np.desync > 0 and np.desync_kind == 2, (np.desync, np.desync_kind)
+        assert ws._notice is not None and ws._notice[0] == "Out of sync"
+    assert wss[0].link.stats()["match"]["desync_kind"] == "worlds"
+
+
+def test_a_match_too_slow_for_sixty_steps_down_and_stays_in_sync(tmp_path, monkeypatch):
+    """Brick Siege paces "free", so both consoles say they hold 60 and the
+    match starts there. Two consoles whose loops run at 45 frames a second
+    (the Guition S3's matched Lua frame, 2026-11-06) tick the match under
+    STEP_BAR% of 60: the host names a frame, both step to 30 there, and the
+    match keeps ticking at the new rate with the inputs and the worlds
+    agreeing across the step, frame by frame. time() runs on across it."""
+    worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 1300, step=22)
+    both = sorted(set(worlds[0]) & set(worlds[1]))
+    assert [f for f in both if worlds[0][f] != worlds[1][f]] == []
+    nps = [ws.run.player._netplay for ws in wss]
+    f0 = nps[0].step_from
+    assert f0 is not None and nps[1].step_from == f0, "the host stepped and named the frame"
+    for ws, np in zip(wss, nps):
+        assert np.tick_hz == 30 and np.frame > f0 + 150, (np.tick_hz, np.frame, f0)
+        assert np.desync < 0 and np.checks >= 20, (np.desync, np.checks)
+        assert np.dt_at(f0 - 1) == 1 / 60 and np.dt_at(f0) == 1 / 30
+        assert ws.ns["time"]() == np.ms(np.frame) > np.frame * 1000 // 60
+
+
+def test_a_fast_loop_does_not_flood_the_air(tmp_path, monkeypatch):
+    """Two consoles looping every 4 ms (frames between ticks are cheap)
+    send at most once per LOCK_MS between ticks, plus each tick's own."""
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, step=4)
+    np = wss[0].run.player._netplay
+    secs = 1500 * 4 / 1000
+    assert np.frame > 25 * (secs - 2), "the match ticked"
+    assert np.packets_out <= secs * (1000 / netplay.LOCK_MS + 30) + 40, np.packets_out
+
+
+def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
+    """A kid's _draw keeps state as often as not (`t += 1` for a blink), and
+    two consoles agree only if each runs it once a tick. Brick Siege paces
+    "free", whose loop frames all drew in a match -- a count of loop frames,
+    which two boards never share -- and a stalled tick drew with no update
+    while its retry updated with no draw. Over a lossy air, every console
+    draws exactly the simulated ticks."""
+    seen, count = _draw_counter()
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 600, count)
+    for i, ws in enumerate(wss):
+        np = ws.run.player._netplay
+        f0, draws = seen[i]
+        assert np.stall_ticks > 5, "the premise: the match stalled"
+        assert draws == np.frame - f0, (i, draws, np.frame - f0)
+
+
+def _draw_counter():
+    """A tamper for _two_consoles counting each console's _draw calls from
+    the frame its match began: ({console: [frame0, draws]}, tamper)."""
+    seen = {}
+
+    def count(k, wss):
+        for i, ws in enumerate(wss):
+            np = ws.run.player._netplay
+            if np is None or i in seen:
+                continue
+            draw = ws.run.player._draw
+            box = seen[i] = [np.frame, 0]
+
+            def counted(draw=draw, box=box):
+                box[1] += 1
+                draw()
+            ws.run.player._draw = counted
+    return seen, count
+
+
+def test_a_tick_the_clock_reaches_after_the_plan_waits_for_a_drawn_frame(
+        tmp_path, monkeypatch):
+    """A board's clock moves between a frame's plan (frame_plan, which says
+    whether it draws) and its lockstep step. A frame planned between ticks
+    that started the tick the clock reached meanwhile simulated it and never
+    drew it: with a millisecond between the two on a 4 ms loop, a fifth of
+    the ticks went undrawn, and a _draw that keeps state parts the worlds.
+    The plan decides: such a frame only sends, and the tick waits for the
+    next frame's plan."""
+    import runtime.player as player_mod
+    plan = player_mod.Player.frame_plan
+
+    def planned(self, dt):
+        out = plan(self, dt)
+        player_mod._ticks_ms.advance(1)
+        return out
+    monkeypatch.setattr(player_mod.Player, "frame_plan", planned)
+    seen, count = _draw_counter()
+    _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, count,
+                                 step=4)
+    for i, ws in enumerate(wss):
+        np = ws.run.player._netplay
+        f0, draws = seen[i]
+        assert np.frame - f0 > 400, "the premise: the match ticked"
+        assert draws == np.frame - f0, (i, draws, np.frame - f0)

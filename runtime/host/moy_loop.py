@@ -123,6 +123,7 @@ _SIGS = (
     ("moy_loop_host_clear", [], None),
     ("moy_loop_host_note", [ctypes.c_char_p], None),
     ("moy_loop_driver_step", [_U32], _I),
+    ("moy_loop_jobs", [], _I),
 )
 
 _LIB = [None]
@@ -130,8 +131,9 @@ _LIB = [None]
 
 # This module's share of the host's one library (runtime/host/host_native.py).
 PART = native_build.Part("loop", ("moy_loop.h", "moy_idle.h", "moy_idle.c", "moy_perf.h",
-                                  "moy_perf.c", "moy_devch.h", "moy_devch.c",
-                                  "moy_loop_host.h", "moy_loop_host.c"), _KERNEL, shim=_SHIM)
+                                  "moy_perf.c", "moy_devch.h", "moy_devch.c", "moy_log.h", "moy_log.c", "moy_proc_exit.h",
+                                  "moy_sync.h", "moy_loop_host.h", "moy_loop_host.c"), _KERNEL,
+                         shim=_SHIM)
 
 
 def build(verbose=False):
@@ -294,6 +296,11 @@ def drive(handle_input, handle_pointer, frame, dt):
 
 def step():
     return _lib().moy_loop_step()
+
+
+def jobs():
+    """The frame's C jobs run once, as its tail runs them: how many remain."""
+    return _lib().moy_loop_jobs()
 
 
 def vm(up):

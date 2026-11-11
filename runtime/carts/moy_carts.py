@@ -68,7 +68,7 @@ if _store is not None and not hasattr(_store, "catalogue"):
     _store = None
 
 try:
-    from moy_store_base import (FILE_KIND_NAMES, files_root, CARTS_DIR,
+    from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root, CARTS_DIR,
                                 CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
@@ -78,9 +78,9 @@ try:
                                 _has, _cwd, _enter, _leave, CART_EXT,
                                 cart_path, cart_folder,
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                                is_cart_id, THEME_NAME_MAX, theme_name_ok)
+                                is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (FILE_KIND_NAMES, files_root,
+    from runtime.moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root,
                                         CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
                                         IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
@@ -92,7 +92,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         _cwd, _enter, _leave, CART_EXT,
                                         cart_path, cart_folder,
                                         USER_NS, BUILTIN_NS, VENDOR_KEY,
-                                        vendor, is_cart_id, THEME_NAME_MAX,
+                                        vendor, is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX,
                                         theme_name_ok)
 
 
@@ -449,7 +449,7 @@ def load_artwork(root=CARTS_DIR):
 def encode_text(body):
     """A doc body string -> the bytes its file holds.
 
-    A document IS its own text now (`files/docs/<name>.md`), so this is `str`
+    A document IS its own text now (`files/Documents/<name>.md`), so this is `str`
     and nothing else. It stays a named seam because `ctx.files.encode_text` and
     `system_api.ScopedFiles` reach it (#181): a cart writing a document goes
     through one place wherever the format lands next."""
@@ -502,16 +502,16 @@ def _compiled_sources(path):
     return out
 
 
+# The listing of the store `_each` walks (name -> is a folder), while it
+# walks it: what `_cart_id` asks whether a folder owns an id, so the scan
+# looks no name up.
+_SCAN = [None]
+
+
 def _cart_id(man, path, broken):
-    """A cart's id (#162, SPEC.md 3.1): the manifest's "id" when it is one,
-    else its folder's name without the extension -- the rule, not a
-    migration."""
-    cid = None if broken else man.get("id")
-    if is_cart_id(cid):
-        return cid
-    cut = max(path.rfind("/"), path.rfind("\\"))
-    name = path[cut + 1:] if cut >= 0 else path
-    return name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+    """A cart's id (#162, SPEC.md 3.1): its manifest's as `id_in_folder`
+    rules, a broken manifest's none -- the rule, not a migration."""
+    return id_in_folder(None if broken else man.get("id"), path, _SCAN[0])
 
 
 def _config_of(v):
@@ -655,9 +655,13 @@ def _load(path, whole, folder=None):
         # A COMPILED cart (moy-spec SPEC.md §16): its main is a module,
         # not text, so it is never read here -- the runtime loads it from the
         # folder. What text it has is its optional `src/` (the Code tab).
-        compiled = runtime == "wasm"
-        mainf = man.get("main", "main.wasm" if compiled else
-                        ("main.lua" if spec else "main.py"))
+        # A NATIVE cart (docs/os_2026-11/tiers.md section 1) is compiled too:
+        # its main is its first chip's module (tools/elf_cart.py).
+        chips = vendor(man).get("native")
+        native = isinstance(chips, list) and bool(chips) and isinstance(chips[0], str)
+        compiled = runtime == "wasm" or native
+        mainf = man.get("main", "main.%s.elf" % chips[0] if native else
+                        "main.wasm" if compiled else ("main.lua" if spec else "main.py"))
         if broken and not _has(folder, path, mainf):
             # No manifest to name the program, so take whichever is there.
             for alt in ("main.py", "main.lua"):
@@ -750,6 +754,10 @@ def _load(path, whole, folder=None):
             # list as the manifest has it, which libmoy's binding holds every
             # path to; None for every other runtime and for a cart with none.
             "writable": _str_list(man.get("writable")) if compiled else None,
+            # The render-ahead audio ring's depth in frames ("moybyte":
+            # {"audio_ring": n}, docs/os_2026-11/hardware.md section 2): a
+            # compiled cart's `snd` queue, None for the default.
+            "audio_ring": _int_or(ven.get("audio_ring"), None),
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.
@@ -791,6 +799,34 @@ def _load(path, whole, folder=None):
             # normal kid cart has just ["graphics","input"] (or none) and stays
             # network-less -- the sandbox is preserved.
             "permissions": ven.get("permissions", []),
+            # The permissions the cart cannot run without (runtime/shell/
+            # app_perms.py): one of them absent refuses its launch by name.
+            "required": ven.get("required", []),
+            # A native cart's chips (docs/os_2026-11/tiers.md section 1): a
+            # module `main.<chip>.elf` for each, beside the manifest
+            # (tools/elf_cart.py); None for every other cart.
+            "native": ven.get("native") if isinstance(ven.get("native"), list) else None,
+            # A compiled app that is a WASI command the Player runs, drawing
+            # with the toolkit it links (runtime/run/wasi_run.py).
+            "wasi": ven.get("wasi") is True,
+            # The MIME types the cart's app opens (docs/os_2026-11/
+            # between_apps.md section 1): what `open_with` and `share` route by.
+            "handles": ven.get("handles", []),
+            # The message names another app's process may send it
+            # (docs/os_2026-11/processes.md section 1, the rule), as the
+            # manifest has them; None without the field. Its queue's open
+            # takes the strings (scheduler._open).
+            "receives": ven.get("receives"),
+            # The cart's entry points beside `main` (docs/app_api_v1.md
+            # section 7): {"service": its service's program}, as the manifest
+            # has them; None without the field. scheduler.entry_of reads it
+            # strictly where it is used.
+            "entries": ven.get("entries"),
+            # The badges the cart declares (docs/moy_cart_api.md,
+            # "Achievements"), as the manifest has them; None without the
+            # field. runtime/system/achievements.py's `declared` reads it
+            # strictly where it is used.
+            "achievements": ven.get("achievements"),
             # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).
@@ -954,6 +990,7 @@ def _each(root, read, enter=False):
         return None
     here = _cwd() if enter and root[:1] == "/" else None
     carts = []
+    _SCAN[0] = names
     try:
         for name in sorted(names):
             if not (name.endswith(CART_EXT) and names[name]):
@@ -967,6 +1004,7 @@ def _each(root, read, enter=False):
             if c:
                 carts.append(c)
     finally:
+        _SCAN[0] = None
         if here is not None:
             _leave(here)
     return carts
@@ -1513,6 +1551,10 @@ def _whole_or_none(d, fn):
 
 
 def _unique_dir(root, base, ns=USER_NS):
+    """A free folder for a made cart, in `ns`; a made cart never takes the
+    built-ins' namespace (an author named after it makes USER_NS's)."""
+    if ns and slug(ns) == BUILTIN_NS:
+        ns = USER_NS
     d = cart_path(root, cart_folder(base, ns))
     if not _exists(d):
         return d
@@ -1526,7 +1568,7 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
            author=None, palette=None, extensions=None, format=None, fps=None,
            icon=None, canvas=None, listing=None, ns=USER_NS, glass=False,
-           pictures=None):
+           pictures=None, vendor_kept=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1537,18 +1579,19 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     duplicate()'s passthrough (SPEC.md 3.1): copying a spec cart must yield
     another "moy-1" cart at its declared tick, not a restamped moybyte one.
     `listing` is a cart dict whose description/genre/tags (SPEC.md 3.7) the
-    manifest keeps, the PICO-8 tag included."""
+    manifest keeps, the PICO-8 tag included; `vendor_kept` the Moybyte fields
+    a copy keeps (`COPY_KEEPS`), written into its "moybyte" object."""
     d = _unique_dir(root, slug(title), ns)
     _mkdir(d)
     return _whole_or_none(d, lambda: _create_in(
         d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
         author, palette, extensions, format, fps, icon, canvas, listing, glass,
-        pictures))
+        pictures, vendor_kept))
 
 
 def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
                scene_order, author, palette, extensions, format, fps, icon,
-               canvas, listing, glass=False, pictures=None):
+               canvas, listing, glass=False, pictures=None, vendor_kept=None):
     name = d.replace("\\", "/").rsplit("/", 1)[-1]
     manifest = {
         "format": format or CART_FORMAT, "title": title,
@@ -1556,6 +1599,7 @@ def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
         "runtime": runtime, "main": main,
     }
     ven = {"type": type, "edit": edit or []}
+    ven.update(vendor_kept or {})
     if glass:                         # a per-glass wallpaper stays one
         ven["glass"] = True
     if pictures is not None:          # and a picture wallpaper
@@ -1648,6 +1692,19 @@ def _copy_cart_files(src, dst, main):
                     raise
 
 
+# What a copy's program does, which the copy's regenerated manifest keeps:
+# the permissions it asks for (its consent is its own, under its new id), the
+# MIME types its app opens, the messages it takes, its badges, its entry
+# points and whether it draws every frame. A seed cart's own fields (`system`,
+# `order`, `targets`, `app`) do not follow a copy: the copy is the kid's.
+COPY_KEEPS = ("permissions", "required", "handles", "receives", "achievements",
+              "entries", "animates")
+
+
+def _kept(cart):
+    return {k: cart[k] for k in COPY_KEEPS if cart.get(k)}
+
+
 def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
     if cart.get("runtime") == "wasm" and cart.get("path"):
         return _duplicate_compiled(cart, root, new_title, ns)
@@ -1665,7 +1722,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
                  canvas=cart.get("canvas"),                  # spec 1/3.1 cart canvas
                  listing=cart,                               # spec 3.7 description/genre/tags
                  ns=ns, glass=cart.get("glass", False),      # a per-glass wallpaper
-                 pictures=cart.get("pictures"))              # a picture wallpaper
+                 pictures=cart.get("pictures"),              # a picture wallpaper
+                 vendor_kept=_kept(cart))                    # what its program does
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
     # blocks.json, images/, docs/ -- lives only in the source FOLDER, so a copy
@@ -1677,8 +1735,23 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
     if src_path and dup is not None:
         _whole_or_none(dup["path"], lambda: _copy_cart_files(
             src_path, dup["path"], dup["main"]))
+        if cart.get("src_before") or cart.get("src_after"):
+            _keep_sources(dup["path"], cart_sources(cart))
         return load(dup["path"])
     return dup
+
+
+def _keep_sources(path, names):
+    """A copy's manifest names its scripts in the original's load order
+    (`sources`), which create() does not write."""
+    mpath = path + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(mpath))
+    except (OSError, ValueError):
+        return
+    if isinstance(man, dict):
+        man["sources"] = list(names)
+        _write_atomic(mpath, json.dumps(man))
 
 
 def _duplicate_compiled(cart, root, new_title, ns=USER_NS):
@@ -1727,32 +1800,28 @@ def delete(cart):
 try:
     from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                           _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
-                          SYSTEM_STORE_NAME, system_store_path, load_system, save_system,
-                          ACHIEVEMENTS_STORE_NAME, ACHIEVEMENTS_FORMAT,
-                          achievements_store_path, achievements_doc, achievements_text,
-                          load_achievements, save_achievements)
+                          SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
+                          settings_text, load_system, save_system, save_system_steps)
     from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
-                          import_archive)
+                          import_archive, import_base, import_target)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                                   _wifi_networks, load_wifi, save_wifi, remember_wifi,
-                                  forget_wifi, SYSTEM_STORE_NAME, system_store_path,
-                                  load_system, save_system, ACHIEVEMENTS_STORE_NAME,
-                                  ACHIEVEMENTS_FORMAT, achievements_store_path,
-                                  achievements_doc, achievements_text, load_achievements,
-                                  save_achievements)
+                                  forget_wifi, SYSTEM_DIR, SETTINGS_NAME,
+                                  system_store_path, parse_settings, settings_text,
+                                  load_system, save_system, save_system_steps)
     from runtime.moy_pack import (save_package, rename_package, pack_skip, pack, unpack,
-                                  adopt, import_archive)
+                                  adopt, import_archive, import_base, import_target)
 try:
     from moy_seed import (
-        seed_builtins,
+        seed_builtins, seed_folders,
         _SEED_WBITS, unpack_seed, seed_packed, is_packed,
         RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_seed import (
-        seed_builtins,
+        seed_builtins, seed_folders,
         _SEED_WBITS, unpack_seed, seed_packed, is_packed,
         RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,

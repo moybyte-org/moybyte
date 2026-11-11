@@ -66,6 +66,20 @@ OVERS = ({"fill": 0x204060, "ink": 0x123456, "current": True},
          {"wash": False, "lead": True, "hint": "h", "ink": 0xffffff},
          {"ink": 0xff00ff, "fill": None, "bar": True},
          {"gen": 3, "current": False, "border": 0xff00ff, "ink": 0x0000ff})
+BUBBLES = (("in", {"head": "Ana Ridge", "signal": 2, "lines": 1, "id": "b0"}),
+           ("out", {"tone": "failed", "status": "Not sent", "max": 0.5, "anchor": True}),
+           ("out", None))
+SIGNAL = {"signal": 3}
+REGION = {"values": ("Europe", "United States", "China"), "check": True}
+POP = {"wash": "view"}
+HOME = {"values": ("2 min", "", "1 h"), "subs": ("Gate opens at seven", "Snow", ""),
+        "icons": ("bubble", "@Ana Ridge", ""), "counts": (0, 3, "12"),
+        "tags": ("Public", "", ""), "marks": ("", "lock", "lock")}
+CARD = {"card": True}
+TAG = {"tag": "Public"}
+DFOCUS = {"focus": "Cancel"}
+FOLLOW = {"snap": True, "follow": True}
+NOTE = ("Every radio on a mesh uses one preset.", "On another one you hear none.")
 SHORT = [False]
 OUT = [0] * 5
 
@@ -89,6 +103,31 @@ def page():
     for i in range(len(OVERS)):
         ui.at(4, 4 + 18 * i, 100, 16)
         ui.label(WORDS[i % 3], OVERS[i])
+    for i in range(len(BUBBLES)):
+        ui.at(4, 40 + 30 * i, 230, 30)
+        ui.bubble("a message long enough to wrap and be cut", BUBBLES[i][0], BUBBLES[i][1])
+    ui.at(4, 130, 230, 20)
+    ui.info("Signal", "-104 dBm", SIGNAL)
+    ui.at(4, 150, 230, 48)
+    ui.list("Region", WORDS, 1, REGION)
+    ui.at(40, 40, 120, 30)
+    ui.popover("pv", 200, POP)
+    ui.info("Status", "Not sent")
+    ui.popover()
+    ui.group("", CARD)
+    ui.list("Two", WORDS, -1, HOME)
+    ui.group()
+    ui.link("LongFast", "", TAG)
+    ui.at(120, 60, 110, 60)
+    ui.scroll("hist", FOLLOW)
+    for w in WORDS:
+        ui.label(w)
+        ui.label(w)
+    ui.scroll()
+    ui.note("warn", NOTE)
+    ui.dialog("Switch?", ("Cancel", "Switch"), "primary", DFOCUS)
+    ui.toggle("Keep", True)
+    ui.dialog()
     ui.end()
     return out
 
@@ -149,3 +188,47 @@ def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it()
     assert lines["PIXELS"].startswith("True"), lines["PIXELS"]
     # options that fit the module's buffer cost the frame nothing
     assert lines["ALLOC"] == "0", lines["ALLOC"]
+
+
+MORE = 1 << 29                          # moy_ui_api.h's MOY_UI_O_MORE
+
+
+def _read(lib, block):
+    """The override block's keys as the engine reads it: each field, a span
+    as its text."""
+    import ctypes
+    from runtime.moy_ui_binding import _Over, _Span
+    raw = ctypes.create_string_buffer(block, len(block))
+    ov = _Over()
+    assert lib.moy_ui_over_block(ctypes.byref(ov), raw, len(block)) == 0
+    out = {}
+    for name, _t in _Over._fields_:
+        v = getattr(ov, name)
+        out[name] = ctypes.string_at(v.p, v.n) if isinstance(v, _Span) and v.p else (
+            None if isinstance(v, _Span) else v)
+    return out
+
+
+def test_the_second_flags_word_is_the_next_keys_door():
+    """Bit 29 of the block's flags word says a second word of flags follows
+    the focus's text, its keys' words after it: a block that carries one
+    reads it, and every key before it as the block without it does; a block
+    whose bit says so and ends before the word, or whose word is below 0,
+    reads none."""
+    from runtime import glass_binding, ui     # ui binds the module's calls
+    lib = glass_binding._lib()
+    o = {"id": "row", "hint": "Message", "gen": 7, "snap": True, "values": ("a", "b"),
+         "check": True, "subs": ("one", "two"), "tag": "Public", "focus": "Cancel"}
+    block = ui._block(o)
+    at = 4 * 9 + len(b"row") + 4 + len(b"Message")      # the flags word
+    fl = int.from_bytes(block[at:at + 4], "little")
+    assert not fl & MORE
+    head = block[:at] + (fl | MORE).to_bytes(4, "little") + block[at + 4:]
+    plain = _read(lib, block)
+    assert plain["flags2"] == 0
+    got = _read(lib, head + (0x40000001).to_bytes(4, "little") + b"\x05\x00\x00\x00later")
+    assert got.pop("flags2") == 0x40000001
+    plain.pop("flags2")
+    assert got == plain
+    assert _read(lib, head)["flags2"] == 0
+    assert _read(lib, head + (-1).to_bytes(4, "little", signed=True))["flags2"] == 0

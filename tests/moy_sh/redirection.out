@@ -1,0 +1,18 @@
+$ # redirection into the files tree
+$ echo first > f.txt
+$ echo second >> f.txt
+$ cat f.txt
+first
+second
+$ wc -l < f.txt
+2
+$ cat nosuch 2> err.txt; cat err.txt
+cat: nosuch: No such file or directory
+$ echo both > o.txt 2>&1; cat o.txt
+both
+$ exec 3> g.txt; echo via3 >&3; exec 3>&-; cat g.txt
+via3
+$ echo x > /nosuchdir/f; echo status=$?
+sh: 1: cannot create /nosuchdir/f: Directory nonexistent
+status=2
+[exit 0]

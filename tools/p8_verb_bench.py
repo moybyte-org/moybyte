@@ -237,7 +237,7 @@ def main(argv=None):
             samples = []
             t0 = time.time()
             while time.time() - t0 < a.secs:
-                v = b.pyval("str(ws.player._lua.frame_split()[0])", timeout=20)
+                v = b.pyval("str(ws.run.player._lua.frame_split()[0])", timeout=20)
                 try:
                     samples.append(float(v))
                 except (TypeError, ValueError):

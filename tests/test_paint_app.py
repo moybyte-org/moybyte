@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from runtime import host_app, moy_carts
-from ws_helpers import select_on_home  # noqa: E402
+from ws_helpers import select_on_home, settle_badges  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +19,7 @@ def _open_paint(ws):
     try:
         return _opened_paint(ws)
     finally:
+        settle_badges(ws)
         ws.ach.toast = None
 
 
@@ -93,7 +94,7 @@ def test_going_home_with_paint_never_opened_writes_nothing(tmp_path):
     ws.go_home()
     assert app._doc is None
     assert not list(tmp_path.rglob("drawing_*"))
-    assert not ws.ach.has("first_paint")       # the paint_save event's award
+    assert not ws.ach.has("system", "first_paint")     # a save's award
 
 
 def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
@@ -173,7 +174,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
 
 def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    base = host_app.make_api(ws.canvas, ws.input, {})
+    base = host_app.make_api(ws.run.canvas, ws.input, {})
     assert "artwork" not in base
 
     paint_app = _open_paint(ws)
@@ -183,7 +184,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
     ws._open_workspace(other)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     assert "artwork" not in ws.ns
 
 
@@ -411,7 +412,7 @@ def _device_canvas(ws, w, h):
     install()
     from device_canvas import DeviceCanvas, _LayerComp
 
-    gfx = ws.canvas._gfx
+    gfx = ws.run.canvas._gfx
     assert gfx is not None, "no native kernel: this would not test the bake"
     return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
 
@@ -768,10 +769,10 @@ def _idle_paints(ws):
     ws._dirty = True
     for _ in range(4):
         drv.frame(1 / 30)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(1 / 30)
-    return ws._frames_drawn - drawn
+    return ws.frame_state.frames_drawn - drawn
 
 
 def test_a_settled_canvas_and_a_settled_view_paint_nothing(tmp_path):
@@ -835,9 +836,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         app.shape = shape
 
     def frame():
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if bufs > 1 and ws._frames_drawn != n:
+        if bufs > 1 and ws.frame_state.frames_drawn != n:
             held.append(bytes(root._buf))
             root._comp.last = held[-1]
             root._buf[:] = held[-bufs] if len(held) >= bufs else held[0]
@@ -882,9 +883,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         drv.hold("right", True)
         for i in range(40):
             drv.hold("down", i % 3 == 0)
-            n = ws._frames_drawn
+            n = ws.frame_state.frames_drawn
             frame()
-            shots.append(bytes((held[-1] if bufs > 1 and ws._frames_drawn != n
+            shots.append(bytes((held[-1] if bufs > 1 and ws.frame_state.frames_drawn != n
                                 else root._buf)[top:]))
         drv.hold("down", False)
         drv.hold("right", False)
@@ -897,9 +898,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     frame()
     for px, py in pts[1:]:
         drv.touch_drag(ox + px, oy + py)
-        n = ws._frames_drawn
+        n = ws.frame_state.frames_drawn
         frame()
-        shots.append(bytes((held[-1] if bufs > 1 and ws._frames_drawn != n else root._buf)[top:]))
+        shots.append(bytes((held[-1] if bufs > 1 and ws.frame_state.frames_drawn != n else root._buf)[top:]))
     drv.touch_up()
     frame()
     shots.append(bytes((held[-1] if bufs > 1 else root._buf)[top:]))
@@ -942,9 +943,11 @@ def test_a_banner_over_the_page_makes_every_frame_whole(tmp_path):
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
     ws.ach.award("first_run")
+    drv.frame(1 / 30)                   # the achievements process's slice raises it
     drv.frame(1 / 30)
     assert ws._toast_until and ws.sys_canvas.covered
     assert not app._may(ws.sys_canvas)
+    settle_badges(ws)
     ws._toast_until = 0
     drv.frame(1 / 30)
     assert not ws.sys_canvas.covered

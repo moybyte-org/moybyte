@@ -39,10 +39,12 @@ class _Esptool:
 
     def __init__(self, codes=()):
         self.calls = []
+        self.envs = []
         self._codes = list(codes)
 
-    def call(self, cmd):
+    def call(self, cmd, env=None):
         self.calls.append(list(cmd))
+        self.envs.append(env)
         return self._codes.pop(0) if self._codes else 0
 
 
@@ -107,6 +109,21 @@ def test_every_flash_argument_comes_from_the_board_file(
                           fl["otadata_size"]]
     assert write[-3:] == ["write_flash", fl["offset"],
                           str(tmp_path / fl["image"])]
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_esptool_run_takes_the_declared_stub(monkeypatch, tmp_path, board):
+    """`[flash] stub` picks the flasher stub esptool uploads, through the
+    environment variable every esptool from 4.12 reads (one that predates it
+    runs its own stub). A board that declares none gets esptool's default and
+    an untouched environment."""
+    fl = board_config.load(BOARDS[board])["flash"]
+    _rc, fake = _flash(monkeypatch, tmp_path, BOARDS[board])
+    for env in fake.envs:
+        if "stub" in fl:
+            assert env["ESPTOOL_STUB_VERSION"] == str(fl["stub"])
+        else:
+            assert env is None
 
 
 def test_the_tdeck_alone_asks_for_the_usb_reset_it_measured(
@@ -401,7 +418,7 @@ class _Board(_Esptool):
         super().__init__(codes)
         self.table = table
 
-    def call(self, cmd):
+    def call(self, cmd, env=None):
         rc = super().call(cmd)
         if "read_flash" in cmd and not rc:
             Path(cmd[-1]).write_bytes(self.table)
@@ -458,3 +475,25 @@ def test_an_image_without_a_table_is_flashed_as_before(monkeypatch, tmp_path):
     """An app-only image has no table to compare; nothing is read."""
     _rc, fake = _flash(monkeypatch, tmp_path, P4)
     assert _verbs(fake.calls) == ["erase_region", "write_flash"]
+
+
+CORE_6M = SLOTS_6M + [("coredump", 1, 3, 0xC10000, 0x20000)]
+
+
+def test_a_flash_that_adds_the_coredump_partition_erases_it_and_moves_the_store(
+        monkeypatch, tmp_path, capsys):
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(SLOTS_6M), CORE_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "erase_region",
+                                  "erase_region", "write_flash"]
+    _read, _otadata, store, core, _write = fake.calls
+    assert store[-3:] == ["erase_region", "0xc30000", "0x2000"]
+    assert core[-3:] == ["erase_region", "0xc10000", "0x20000"]
+    assert core[core.index("--after") + 1] == "no_reset"
+    assert "coredump partition at 0xc10000+0x20000" in capsys.readouterr().out
+
+
+def test_a_flash_over_the_same_coredump_partition_keeps_its_dump(monkeypatch, tmp_path):
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(CORE_6M), CORE_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "write_flash"]

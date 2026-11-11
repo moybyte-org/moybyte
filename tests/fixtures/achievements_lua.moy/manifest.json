@@ -1,0 +1,24 @@
+{
+  "format": "moy-1",
+  "version": 2,
+  "title": "Achievements",
+  "id": "moybyte.achievements",
+  "runtime": "lua",
+  "main": "main.lua",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "service",
+    "system": true,
+    "order": 370,
+    "permissions": [
+      "notifications",
+      "prefs"
+    ],
+    "receives": [
+      "award",
+      "progress"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

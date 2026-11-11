@@ -1969,6 +1969,12 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
     page_size = os_getpagesize();
     *memory_data_size = init_page_count * num_bytes_per_page;
 
+    /* A size the platform's allocation cannot hold whole is no memory */
+    if (map_size > UINTPTR_MAX - page_size
+        || *memory_data_size > UINTPTR_MAX - page_size) {
+        return BHT_ERROR;
+    }
+
     bh_assert(*memory_data_size <= GET_MAX_LINEAR_MEMORY_SIZE(is_memory64));
     *memory_data_size = align_as_and_cast(*memory_data_size, page_size);
 

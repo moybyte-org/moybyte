@@ -160,11 +160,32 @@ rasterizes from the same bytes the host draws from."""
 # board that has taken an OTA boots the slot the cable flash just wrote.
 # No `before`: the CH343 is an external USB-UART and esptool's default reset
 # is reliable on it.
+#
+# A flash is bound by the flasher stub's own write and read-back on this
+# board's 32 MB flash, not by the line: on the legacy stub a 6.6 MB image
+# wrote at ~115 KB/s whatever the rate or compression, and the MD5 read-back
+# after it took 24 s. The second-generation stub (`stub = 2`, esptool 4.12+)
+# writes ~40% faster and reads back in 14 s; at 3 Mbaud the line stops
+# mattering. Measured 2026-11-04, three flashes a setting, each booting to the
+# desk: 921600 legacy 101 s, 3 Mbaud legacy 84 s, 3 Mbaud stub 2 58 s,
+# 2 Mbaud stub 2 59 s.
 image          = "dist/p4/moybyte_p4.bin"
 offset         = "0x2000"
-baud           = 921600
+baud           = 3000000
+stub           = 2
 otadata_offset = "0xd000"
 otadata_size   = "0x2000"
+
+[input]
+# The input table's parameters, each a compile definition
+# (tools/board_config.py INPUT_PARAMS). An ISR's event ring is internal RAM
+# (native/moy_input/moy_event.h MOY_EV_ISR_DEPTH_MAX, 64 by default): a P4's
+# internal RAM has room for a ring that covers a 2 kHz source across a
+# collection (the rings spike in #246), so its ceiling is 1024 records, 16 KiB.
+isr_ring_max = 1024
+# The ISR writer's text is IRAM (moy_input.h MOY_INPUT_ISR_IRAM), so a lease
+# pin's ISR stays hot through a collection; a board without it pays none.
+isr_iram = 1
 
 [image]
 # The OTA-slot headroom this board's app image keeps, browser console baked in.
@@ -175,7 +196,11 @@ otadata_size   = "0x2000"
 # the 2026-10 look's font set took the image near the floor they grew to 8 MiB
 # on this board's 32 MB (owner, 2026-10-15): the theme fonts stay in the image,
 # and the store (the card, the internal vfs its fallback) gives the room.
-headroom_floor_kib = 1024
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. THE LINE STATE AT OPEN IS BOARD-SPECIFIC AND
@@ -239,6 +264,114 @@ baud = 115200
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os`, `class` (with the device API it names), `lease`,
+# `never` -- or in `unused`. The pins are README.md's board maps; the flash,
+# the PSRAM, the MIPI lanes and the USB 2.0 port have pads of their own,
+# outside the GPIO matrix. The `lease` row is every pin those maps assign
+# nothing (README.md's "Free pins").
+
+[hardware]
+chip_gpio = "esp32p4"
+unused = []
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 7, scl = 8}
+why = "the GT911 touch, the ES8311 and the ES7210 share it; the kernel's I2C master is its only driver"
+
+[[hardware.resource]]
+name = "speaker"
+class = "os"
+pins = {mclk = 13, bck = 12, ws = 10, dout = 9, pa = 53}
+why = "the ES8311 codec and its amp, which the console's mix plays through"
+
+[[hardware.resource]]
+name = "panel"
+class = "os"
+pins = {lcd_rst = 33}
+why = "the EK79007's reset; its DSI lanes are dedicated pads"
+
+[[hardware.resource]]
+name = "sdmmc0"
+class = "os"
+pins = {clk = 43, cmd = 44, d0 = 39, d1 = 40, d2 = 41, d3 = 42}
+why = "the TF card, the cart store, brought up once and never torn down"
+
+[[hardware.resource]]
+name = "uart0"
+class = "os"
+pins = {tx = 37, rx = 38}
+why = "the CH343 the console, its dev channel and the flasher are reached through; both are strapping pins"
+
+[[hardware.resource]]
+name = "boot"
+class = "os"
+pins = {button = 35}
+why = "the BOOT button, the kernel's recovery button and a strapping pin"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 32}
+
+[[hardware.resource]]
+name = "mic"
+class = "class"
+api = "mic"
+bus = "i2c0"
+pins = {din = 11}
+
+[[hardware.resource]]
+name = "c6"
+class = "class"
+api = ["http", "ble"]
+pins = {clk = 18, cmd = 19, d0 = 14, d1 = 15, d2 = 16, d3 = 17, reset = 54}
+
+[[hardware.resource]]
+name = "camera"
+class = "class"
+api = "camera"
+pins = []
+
+[[hardware.resource]]
+name = "usb_host"
+class = "class"
+api = "usb"
+pins = []
+
+[[hardware.resource]]
+name = "gpio"
+class = "lease"
+pins = [0, 1, 2, 3, 4, 5, 6, 20, 21, 22, 23, 28, 29, 30, 31, 45, 46, 47, 48, 49, 50, 51, 52]
+
+[[hardware.resource]]
+name = "uart1"
+class = "lease"
+bus = "gpio"
+pins = {tx = 47, rx = 48}
+
+[[hardware.resource]]
+name = "spi2"
+class = "lease"
+bus = "gpio"
+pins = {sck = 49, mosi = 50, miso = 51}
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = [34, 36]
+why = "strapping"
+
+[[hardware.resource]]
+name = "usb_phy"
+class = "never"
+pins = [24, 25, 26, 27]
+why = "the two USB 1.1 PHYs' pads (USB-Serial/JTAG and the full-speed OTG port)"
+
 [native]
 dest = "native/.staged"
 
@@ -251,6 +384,13 @@ unless denied here. The denial below is what the old hand-written cp list in
 build.sh silently encoded; now it is a decision with a reason someone can
 check. (native/p4/ has no micropython.cmake of its own, so this scan never
 sees it -- that tier is the second source, [native.p4] below.)"""
+
+[[native.shared.take]]
+module = "moy_usbdisk"
+why = """
+USB mass storage (docs/os_2026-11/between_apps.md section 2) on the
+high-speed OTG port, which the `usb` device API's host also drives: each
+refuses while the other holds it. The dev channel is the CH343 and stays."""
 
 [[native.shared.deny]]
 module = "moy_flush"
@@ -268,8 +408,10 @@ ever needs a push path is a new decision, not a flip of this one."""
 module = "moy_sd"
 why = """
 The card driver under the store's own card volume (docs/history/kernel_store_2026-10.md
-slice 8): `moy_sd.mmc` brings the TF card up on SDMMC slot 0 (GPIO39-44, LDO4
-powered; slot 1 is the C6's) once and never tears it down, and
+slice 8): `moy_sd.up()` -- native/moy_sd's C, from the `sdmmc0` row, which the
+kernel's recovery floor calls with no VM -- brings the TF card up on SDMMC
+slot 0 (GPIO39-44, LDO4 powered; slot 1 is the C6's) once and never tears it
+down, and
 native/moy_store's card -- the kernel's FATFS and read cache -- reads it
 through `moy_sd_card_io`, with each transfer's bounce in PSRAM, which this
 host's DMA reaches. `device/p4_desktop.p4_card` builds it and
@@ -285,6 +427,15 @@ ships on every console board or on none, so this board takes it. Its internal
 SRAM is not the constraint the S3 boards' is; the on-glass suite runs the same
 wasm checks. The run stack's size and placement are this board's MOY_WASM_*
 settings in mpconfigboard.h, with the measurement that chose them."""
+
+[[native.shared.take]]
+module = "moy_elf"
+why = """
+The native tier (native/moy_elf/README.md): the vendored elf_loader, the
+process model a module runs under and the OS table it calls by ordinal. A
+module's text and data live in PSRAM, loaded when it runs and freed when it
+ends, so what the tier costs at rest is its code in both OTA slots. The tier
+ships on every console board or on none, so this board takes it."""
 
 [[native.shared.take]]
 module = "moy_play"
@@ -339,6 +490,16 @@ The links' native home (docs/history/kernel_survival_2026-10.md section 6): WiFi
 link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
 nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
 takes it."""
+
+[[native.shared.take]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md, docs/os_2026-11/system.md
+section 1): dash, the session, the C built-ins, the board's host table and the
+serial face, the dev channel's `sh` word. It answers with the VM stopped, so
+it is the kernel's, and a console takes it where its image has the room. Its writable data is one word
+(tests/test_moy_sh.py); a session is PSRAM, made when a face first runs."""
+
 
 
 [native.p4]

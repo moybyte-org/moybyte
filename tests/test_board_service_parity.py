@@ -126,6 +126,9 @@ SERVICES = {
     "cart_pick": "the #124 question for the player's own copy of an external "
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
+    "media_net": "the page's bytes Music plays in the browser: a song from the "
+                 "page's store or a board's sealed /media, a station through "
+                 "the page's fetch (firmware/web_runner/media_link.py)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "battery": "the battery's gauge (#130) behind the bar's battery widget, "
                "its popover and About",
@@ -169,6 +172,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": INJECTED,
         "net": INJECTED,
@@ -211,6 +215,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
                    "system battery (the README's power notes)",
@@ -252,6 +257,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the board's README names no cell and no gauge pin",
         "net": INJECTED,
@@ -291,6 +297,7 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
                    "ESPHome example nobody has checked against a fitted cell; "
@@ -338,6 +345,7 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "media_net": "the host's media service reads its own files and URLs; media_net exists because a browser's VM cannot reach the network or its store itself",
         "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
@@ -393,6 +401,7 @@ WIRING = {
         "cart_keep": INJECTED,
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
+        "media_net": INJECTED,
         "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
@@ -413,7 +422,7 @@ WIRING = {
 # hole. Nothing may be added without saying why it is not an attachment point.
 NOT_A_SERVICE = {
     "show_fps": "a user PREFERENCE with a default in Workstation.__init__, a "
-                "Settings toggle and a persisted system.json key. web_boot sets "
+                "Settings toggle and a persisted system/settings key. web_boot sets "
                 "it from its `hud` argument so a conformance capture has no FPS "
                 "chip in the golden frame; the P4 flips it from `diag 0|1`. "
                 "Neither is a capability the other target lacks",
@@ -851,13 +860,11 @@ LIFECYCLE = {
         # getattr saying no.
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
-        ("ble_keyboard", "start"): Lazy(
-            "runtime/system/settings_layer.py", "open_bluetooth",
-            "auto_start=False on purpose -- scanning is what makes BLE "
-            "expensive and this board's keyboard already works, so the radio "
-            "comes up when a kid opens the picker. The touch-only boards start "
-            "theirs at boot because a paired keyboard is their only way out of "
-            "a cart"),
+        # At boot only for a keyboard picked in Settings (this board's own
+        # keyboard already works); otherwise when a kid opens the picker,
+        # which test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for
+        # pins.
+        ("ble_keyboard", "start"): HERE,
         ("ble_keyboard", "poll"): _KBD,
         ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/run/player.py", "start"),
@@ -1210,8 +1217,7 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     assert 'getattr(ws, "ble_keyboard", None)' in spine, (
         "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
         "stage -- a paired keyboard cannot produce a keypress (#26)")
-    start = LIFECYCLE["tdeck"][("ble_keyboard", "start")]
-    assert ("ble_keyboard", "start") in _module_handles(start.path).verbs(
-        start.func), (
+    assert ("ble_keyboard", "start") in _module_handles(
+        "runtime/system/settings_layer.py").verbs("open_bluetooth"), (
         "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
         "panel opens onto a radio that has never scanned (#26)")

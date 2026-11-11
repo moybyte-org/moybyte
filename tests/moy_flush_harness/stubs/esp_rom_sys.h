@@ -11,6 +11,10 @@
 // progress inside it. A spin that never yielded here would deadlock the
 // cooperative scheduler, which is the honest shape of the same bug on glass --
 // a fence that waits on work only the other core can do.
-static inline void esp_rom_delay_us(uint32_t us) { h_block_us((int64_t)us); }
+// h_rom_delays counts them, so a scenario can pin a wait that parks instead.
+static inline void esp_rom_delay_us(uint32_t us) {
+    h_rom_delays++;
+    h_block_us((int64_t)us);
+}
 
 #endif // H_STUB_ESP_ROM_SYS_H

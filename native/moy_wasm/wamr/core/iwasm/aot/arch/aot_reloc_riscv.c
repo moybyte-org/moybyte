@@ -235,6 +235,9 @@ rv_get_val(uint16 *addr)
     return ret;
 }
 
+/* S + A, wrapping as the target's address arithmetic does */
+#define S_PLUS_A(s, a) ((intptr_t)((uintptr_t)(s) + (uintptr_t)(a)))
+
 /* Set a val to given address */
 static void
 rv_set_val(uint16 *addr, uint32 val)
@@ -398,11 +401,11 @@ apply_relocation(AOTModule *module, uint8 *target_section_addr,
         case R_RISCV_64:
         {
             uint64 val_64 =
-                (uint64)((intptr_t)symbol_addr + (intptr_t)reloc_addend);
+                (uint64)(S_PLUS_A(symbol_addr, reloc_addend));
 
             CHECK_RELOC_OFFSET(sizeof(uint64));
             if (val_64
-                != (uint64)((intptr_t)symbol_addr + (intptr_t)reloc_addend)) {
+                != (uint64)(S_PLUS_A(symbol_addr, reloc_addend))) {
                 goto fail_addr_out_of_range;
             }
 
@@ -456,10 +459,10 @@ apply_relocation(AOTModule *module, uint8 *target_section_addr,
 
         case R_RISCV_HI20: /* S + A */
         {
-            val = (int32)((intptr_t)symbol_addr + (intptr_t)reloc_addend);
+            val = (int32)(S_PLUS_A(symbol_addr, reloc_addend));
 
             CHECK_RELOC_OFFSET(sizeof(uint32));
-            if (val != ((intptr_t)symbol_addr + (intptr_t)reloc_addend)) {
+            if (val != (S_PLUS_A(symbol_addr, reloc_addend))) {
                 goto fail_addr_out_of_range;
             }
 
@@ -502,11 +505,11 @@ apply_relocation(AOTModule *module, uint8 *target_section_addr,
         case R_RISCV_LO12_I: /* S + A */
         {
 
-            val = (int32)((intptr_t)symbol_addr + (intptr_t)reloc_addend);
+            val = (int32)(S_PLUS_A(symbol_addr, reloc_addend));
 
             CHECK_RELOC_OFFSET(sizeof(uint32));
 
-            if (val != (intptr_t)symbol_addr + (intptr_t)reloc_addend) {
+            if (val != S_PLUS_A(symbol_addr, reloc_addend)) {
                 goto fail_addr_out_of_range;
             }
 
@@ -520,10 +523,10 @@ apply_relocation(AOTModule *module, uint8 *target_section_addr,
 
         case R_RISCV_LO12_S:
         {
-            val = (int32)((intptr_t)symbol_addr + (intptr_t)reloc_addend);
+            val = (int32)(S_PLUS_A(symbol_addr, reloc_addend));
 
             CHECK_RELOC_OFFSET(sizeof(uint32));
-            if (val != ((intptr_t)symbol_addr + (intptr_t)reloc_addend)) {
+            if (val != (S_PLUS_A(symbol_addr, reloc_addend))) {
                 goto fail_addr_out_of_range;
             }
 

@@ -344,106 +344,88 @@ def _module_part(path, names):
     return ns
 
 
-@pytest.fixture
-def guition(monkeypatch):
-    """The Guition's `tf_card` over a `moy_sd` that opens its SPI3 bus once
-    and a `moy_store` whose card volume mounts or refuses."""
-    state = types.SimpleNamespace(opened=[], cards=[], error=None)
+def _sd_world(monkeypatch, state):
+    """A `moy_sd` whose `up()` brings the board's card up (native/moy_sd's C,
+    from the board's own pins) and a `moy_store` whose card volume mounts or
+    refuses."""
     moy_sd = types.ModuleType("moy_sd")
 
-    def open_(host, sck, mosi, miso, cs, khz):
-        state.opened.append((host, sck, mosi, miso, cs, khz))
+    def up():
+        state.log.append(("up",))
         return 1024
-    moy_sd.open = open_
+    moy_sd.up = up
     moy_store = types.ModuleType("moy_store")
 
     def card(sectors, driver=None):
         if state.error is not None:
             raise state.error
-        state.cards.append(sectors)
+        state.log.append(("card", sectors, driver))
         return types.SimpleNamespace(sectors=sectors)
     moy_store.card = card
     monkeypatch.setitem(sys.modules, "moy_sd", moy_sd)
     monkeypatch.setitem(sys.modules, "moy_store", moy_store)
-    state.mod = _module_part(GUITION_S3 / "modules" / "moy_runtime.py",
-                             ["SD_PINS", "SD_SPI_HOST", "SD_FREQ_KHZ",
-                              "SD_CARTS_ROOT", "tf_card"])
-    return state
 
 
-def test_the_guition_card_is_on_spi3_never_the_panels_host(guition):
-    """SPI3 is host 2 (the card's pins); host 1 is SPI2, the panel's QSPI."""
-    guition.mod["tf_card"]()
-    assert guition.opened == [(2, 12, 11, 13, 10, 20000)]
-    assert guition.cards == [1024]
-
-
-def test_a_card_with_no_filesystem_leaves_the_bus_up_and_says_so(guition):
-    """The store's volume refuses a card it cannot read; the bus stays up,
-    since nothing here tears it down, and the next try opens it again."""
-    guition.error = OSError(19)
-    assert card_store.mount(guition.mod["tf_card"], say=lambda _m: None) is False
-    assert "no card interface" in card_store.STATUS
-    guition.error = None
-    guition.mod["tf_card"]()
-    assert len(guition.opened) == 2
-
-
-@pytest.fixture
-def p4(monkeypatch):
-    """The P4 tier's `p4_card` over a `machine` whose mem32 records the LDO
-    pokes, a `moy_sd` whose SDMMC slot comes up once, and a `moy_store` whose
-    card volume mounts."""
-    state = types.SimpleNamespace(log=[])
-
-    class _Mem:
-        def __init__(self):
-            self.regs = {}
-
-        def __getitem__(self, a):
-            return self.regs.get(a, 0)
-
-        def __setitem__(self, a, v):
-            self.regs[a] = v
-            state.log.append(("mem32", a, v))
-    machine = types.ModuleType("machine")
-    machine.mem32 = _Mem()
-    moy_sd = types.ModuleType("moy_sd")
-
-    def mmc(slot, clk, cmd, data, khz=20000):
-        state.log.append(("mmc", slot, clk, cmd, tuple(data), khz))
-        return 4096
-    moy_sd.mmc = mmc
-    moy_store = types.ModuleType("moy_store")
-
-    def card(sectors, driver=None):
-        state.log.append(("card", sectors, driver))
-        return types.SimpleNamespace(sectors=sectors)
-    moy_store.card = card
-    time = types.ModuleType("time")
-    time.sleep_ms = lambda ms: state.log.append(("sleep", ms))
-    for name, mod in (("machine", machine), ("moy_sd", moy_sd),
-                      ("moy_store", moy_store), ("time", time)):
-        monkeypatch.setitem(sys.modules, name, mod)
-    state.mod = _module_part(ROOT_DIR / "device" / "p4_desktop.py",
-                             ["SD_SLOT", "SD_CLK", "SD_CMD", "SD_DATA", "SD_FREQ_KHZ",
-                              "LDO4_REG", "p4_card"])
-    return state
-
-
-def test_the_p4_card_is_the_stores_volume_on_sdmmc_slot_0(p4):
-    """Both P4s: LDO4 powered before the card's first command, then SDMMC
-    slot 0 (slot 1 is the C6's) on GPIO39-44 through moy_sd, and the store's
-    own card volume -- the kernel's FATFS and read cache -- over it, with no
+@pytest.mark.parametrize("path,fn", [
+    (GUITION_S3 / "modules" / "moy_runtime.py", "tf_card"),
+    (ROOT_DIR / "device" / "p4_desktop.py", "p4_card"),
+])
+def test_a_card_is_the_stores_volume_over_the_c_bring_up(monkeypatch, path, fn):
+    """The Guition S3's SPI3 card and both P4s' SDMMC slot 0: moy_sd's C
+    brings the card up (the one bring-up the kernel's recovery floor calls
+    with no VM) and the store's own card volume mounts over it, with no
     Python driver below it."""
-    vol = p4.mod["p4_card"]()
-    kinds = [e[0] for e in p4.log]
-    assert kinds.index("mem32") < kinds.index("sleep") < kinds.index("mmc")
-    ldo = [e[2] for e in p4.log if e[0] == "mem32"][-1]
-    assert ldo & (1 << 7) and ldo & (1 << 8) and ldo & (1 << 14)
-    assert ("mmc", 0, 43, 44, (39, 40, 41, 42), 20000) in p4.log
-    assert p4.log[-1] == ("card", 4096, None)
-    assert vol.sectors == 4096
+    state = types.SimpleNamespace(log=[], error=None)
+    _sd_world(monkeypatch, state)
+    vol = _module_part(path, [fn])[fn]()
+    assert state.log == [("up",), ("card", 1024, None)]
+    assert vol.sectors == 1024
+
+
+def test_a_card_with_no_filesystem_leaves_the_bus_up_and_says_so(monkeypatch):
+    """The store's volume refuses a card it cannot read; nothing here tears
+    the bus down, and the next try brings the card up again."""
+    state = types.SimpleNamespace(log=[], error=OSError(19))
+    _sd_world(monkeypatch, state)
+    tf_card = _module_part(GUITION_S3 / "modules" / "moy_runtime.py", ["tf_card"])["tf_card"]
+    assert card_store.mount(tf_card, say=lambda _m: None) is False
+    assert "no card interface" in card_store.STATUS
+    state.error = None
+    tf_card()
+    assert state.log.count(("up",)) == 2
+
+
+@pytest.mark.parametrize("board,want", [
+    (TDECK, {"MOY_HW_SPI2_SD_CS": 39, "MOY_HW_SPI2_RADIO_CS": 9}),
+    (GUITION_S3, {"MOY_HW_SPI3_SCLK": 12, "MOY_HW_SPI3_MOSI": 11,
+                  "MOY_HW_SPI3_MISO": 13, "MOY_HW_SPI3_CS": 10}),
+    (ROOT_DIR / "firmware" / "esp32_p4_wifi6_touch_lcd_7b",
+     {"MOY_HW_SDMMC0_CLK": 43, "MOY_HW_SDMMC0_CMD": 44, "MOY_HW_SDMMC0_D0": 39,
+      "MOY_HW_SDMMC0_D1": 40, "MOY_HW_SDMMC0_D2": 41, "MOY_HW_SDMMC0_D3": 42}),
+    (ROOT_DIR / "firmware" / "guition_jc8012p4a1c",
+     {"MOY_HW_SDMMC0_CLK": 43, "MOY_HW_SDMMC0_CMD": 44, "MOY_HW_SDMMC0_D0": 39,
+      "MOY_HW_SDMMC0_D1": 40, "MOY_HW_SDMMC0_D2": 41, "MOY_HW_SDMMC0_D3": 42}),
+])
+def test_the_card_c_reads_its_pins_from_the_boards_hardware_table(board, want):
+    """native/moy_sd/moy_sd.c picks the card's shape and pins from the
+    board.toml [hardware] rows (hw_defines): the T-Deck's `sd_cs` on the
+    panel's spi2 is an attach, with the radio's CS parked; the Guition S3's
+    spi3 a bus of its own (host 2, never the panel's SPI2); the P4s' sdmmc0
+    slot 0 -- the C6's slot 1 is never named."""
+    from tools import board_config
+    d = dict(board_config.hw_defines(str(board)))
+    assert {k: d.get(k) for k in want} == want
+    shapes = [k for k in ("MOY_HW_SDMMC0_CLK", "MOY_HW_SPI2_SD_CS", "MOY_HW_SPI3_CS") if k in d]
+    assert len(shapes) == 1, shapes
+
+
+def test_the_p4s_name_the_ldo_that_powers_their_slot():
+    """moy_sd's SDMMC bring-up switches the slot's LDO on before CMD0; without
+    it the card times out whether one is there or not."""
+    for b in ("esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
+              "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
+        text = (ROOT_DIR / "firmware" / b / "mpconfigboard.h").read_text()
+        assert "#define MOY_SD_MMC_LDO_REG                  (0x501151D8u)" in text, b
 
 
 @pytest.mark.parametrize("path,names", [

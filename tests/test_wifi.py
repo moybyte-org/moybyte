@@ -12,6 +12,8 @@ implementation (docs/theme_and_shell_2026-11.md §8.6).
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 SYSTEM_CARTS = ROOT / "system_carts"
@@ -448,7 +450,7 @@ def test_an_unverified_blank_password_is_never_remembered(tmp_path):
     assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
 
     # A typed password IS kept even though the link didn't come up inside the ~4s
-    # poll -- that is the late-association case ensure_online() waits for.
+    # poll -- that is the late association moy_ota.poll_online's budget watches for.
     assert dev.connect("Cafe", "cafepw") is False
     saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
     assert saved == {"Cafe": "cafepw", "Home": "secretpw"}
@@ -479,7 +481,7 @@ def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
 
 
 def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
-    """system.json and achievements.json are the same read-modify-write over the
+    """system/settings and wifi.json are the same read-modify-write over the
     same _write_atomic. One loader, one rule -- and the backup carries the LAST
     save, so a publish lost to a crash costs nothing (#154)."""
     import os
@@ -489,17 +491,10 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
     moy_carts.ensure_dirs(carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night"}, carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night", "theme": "outline"}, carts)
-    moy_carts.save_achievements({"found": {"first_open": 0}, "count": {}}, carts)
-    moy_carts.save_achievements({"found": {"first_open": 0, "first_run": 1}, "count": {}}, carts)
-
-    for path in (moy_carts.system_store_path(carts),
-                 moy_carts.achievements_store_path(carts)):
-        os.remove(path)                  # the crash window, again
+    os.remove(moy_carts.system_store_path(carts))      # the crash window, again
 
     assert moy_carts.load_system(carts) == {"wallpaper": "moybyte.moy_night",
                                             "theme": "outline"}
-    assert moy_carts.load_achievements(carts) == {"found": {"first_open": 0, "first_run": 1},
-                                                  "count": {}}
 
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------
@@ -578,13 +573,30 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     _open_cart(ws, "Net Cart")
     assert ws.cart_error is None
-    assert "cart" in ws.leases.holders()
+    assert ws.leases.holders() == ["cart:%d" % ws.run.player.pid]   # the run's process
     assert ws.wifi.radio is True
 
     ws.go_home()
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
+
+
+def test_a_processs_tag_names_its_process(tmp_path):
+    """`cart`, `http`, `media`, `native` and `net` are held under a pid, so the
+    holders name who holds the radio; the console's own tags are bare."""
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for tag in ("cart", "http", "media", "native", "net"):
+        with pytest.raises(ValueError):
+            ws.wifi_hold(tag)
+    assert ws.wifi_hold("http", 7) and ws.wifi_hold("settings")
+    assert sorted(ws.leases.holders()) == ["http:7", "settings"]
+    ws.wifi_release("settings")
+    assert ws.wifi.radio is True
+    ws.wifi_release("http", 7)
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_a_plain_cart_never_touches_the_radio(tmp_path):
@@ -739,3 +751,259 @@ def test_the_device_remembers_that_its_driver_came_up(tmp_path):
         assert dev.driver_up is True
     finally:
         sys.modules.pop("network", None)
+
+
+# -- the radio's slow halves are polled, never waited on -----------------------
+#
+# Through the P4's C6 a scan, a join's poll and a stream's or a request's link
+# wait each held the frame for seconds. The console asks and polls: the service's scan_poll()/join()/joined(),
+# the Settings panel's wake, the transport's dial()/ready().
+
+
+class _Clock:
+    def __init__(self):
+        self.ms = 0
+
+    def install(self, monkeypatch):
+        import time
+        monkeypatch.setattr(time, "ticks_ms", lambda: self.ms, raising=False)
+        monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b, raising=False)
+        monkeypatch.setattr(time, "sleep_ms", lambda ms: setattr(self, "ms", self.ms + ms),
+                            raising=False)
+
+
+class _Station:
+    """The kernel's station as KernelWlan shapes it: a join that associates
+    when the test says, a scan that ends when the test says."""
+
+    def __init__(self):
+        self.up = False
+        self.why = 0
+        self.nets = None
+        self.asked = []
+
+    def active(self, on=None):
+        return True
+
+    def connect(self, ssid, password=""):
+        self.asked.append((ssid, password))
+
+    def disconnect(self):
+        pass
+
+    def isconnected(self):
+        return self.up
+
+    def reason(self):
+        return self.why
+
+    def scan_poll(self):
+        return self.nets
+
+
+def _device_wifi(tmp_path, station):
+    from runtime import moy_carts
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    dev = _device_wifi_class()(moy_carts, carts)
+    dev.wlan = station
+    return dev, carts
+
+
+def test_a_join_returns_at_once_and_settles_when_the_link_comes(tmp_path, monkeypatch):
+    from runtime import moy_carts
+    clock = _Clock()
+    clock.install(monkeypatch)
+    st = _Station()
+    dev, carts = _device_wifi(tmp_path, st)
+    assert dev.join("Home", "pw1") is None
+    assert st.asked == [("Home", "pw1")]
+    clock.ms = 3000
+    assert dev.joined() is None
+    st.up = True
+    assert dev.joined() is True
+    assert dev.joined() is True                  # the verdict stays
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+
+
+def test_a_refused_password_ends_the_join_before_its_budget(tmp_path, monkeypatch):
+    clock = _Clock()
+    clock.install(monkeypatch)
+    st = _Station()
+    dev, _carts = _device_wifi(tmp_path, st)
+    assert dev.join("Home", "wrong") is None
+    st.why = 8                                   # the connect's own leave: not a refusal
+    assert dev.joined() is None
+    st.why = 15                                  # 4-way handshake timeout
+    assert dev.joined() is False
+
+
+def test_a_join_that_never_associates_fails_after_its_budget(tmp_path, monkeypatch):
+    clock = _Clock()
+    clock.install(monkeypatch)
+    st = _Station()
+    dev, _carts = _device_wifi(tmp_path, st)
+    join_ms = type(dev).__init__.__globals__["JOIN_MS"]
+    assert dev.join("Home", "") is None
+    clock.ms = join_ms - 1
+    assert dev.joined() is None
+    clock.ms = join_ms
+    assert dev.joined() is False
+
+
+def test_a_carts_connect_still_waits_its_four_seconds(tmp_path, monkeypatch):
+    """`wifi.connect` in a cart keeps its answer: the join waited out."""
+    clock = _Clock()
+    clock.install(monkeypatch)
+    st = _Station()
+    dev, _carts = _device_wifi(tmp_path, st)
+    assert dev.connect("Home", "pw") is False
+    assert 3900 <= clock.ms <= 4100
+    assert dev.joined() is False
+
+
+def test_the_polled_scan_answers_none_until_the_radio_ends_it(tmp_path):
+    st = _Station()
+    dev, _carts = _device_wifi(tmp_path, st)
+    assert dev.scan_poll() is None
+    st.nets = [(b"Home", b"", 0, -50, 3, False), (b"", b"", 0, -90, 0, False)]
+    assert dev.scan_poll() == [("Home", 100, True)]
+
+
+def test_autoconnect_asks_for_the_last_joined_network_and_returns(tmp_path, monkeypatch):
+    from runtime import moy_carts
+    clock = _Clock()
+    clock.install(monkeypatch)
+    st = _Station()
+    dev, carts = _device_wifi(tmp_path, st)
+    moy_carts.remember_wifi("Old", "a", carts)
+    moy_carts.remember_wifi("Home", "b", carts)
+    auto = type(dev).__init__.__globals__["autoconnect_wifi"]
+    assert auto(dev) is None
+    assert st.asked == [("Home", "b")] and clock.ms == 0
+
+
+class _SlowWifi(object):
+    """The Settings panel's service with the board's timing: a scan and a
+    join that each end on a later poll."""
+
+    def __init__(self):
+        self.polls = 0
+        self.verdict = None
+
+    def status(self):
+        return (bool(self.verdict), "Cafe" if self.verdict else None, None)
+
+    def known(self):
+        return ["Cafe"] if self.verdict else []
+
+    def scan_poll(self):
+        self.polls += 1
+        return None if self.polls < 3 else [("Cafe", 60, True)]
+
+    def join(self, ssid, password=""):
+        return None
+
+    def joined(self):
+        return self.verdict
+
+    def radio_on(self):
+        return True
+
+    def radio_off(self):
+        pass
+
+
+def test_the_settings_panel_polls_its_scan_and_join(tmp_path):
+    from runtime import moybyte, settings_layer
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    ws.wifi = w = _SlowWifi()
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_wifi()
+    assert sl.wifi_scanning and sl.wifi_msg == settings_layer.WIFI_LOOKING
+    wid = sl._wifi_wake
+    assert wid in moybyte.WAKES.by_id
+    sl._wifi_tick()
+    assert sl.wifi_scanning and sl.wifi_nets == []
+    sl._wifi_tick()
+    assert not sl.wifi_scanning and sl.wifi_nets == [("Cafe", 60, True)]
+    assert sl.wifi_msg == "" and sl._wifi_wake is None
+    assert wid not in moybyte.WAKES.by_id
+
+    sl._wifi_connect("Cafe", "secret", True)
+    assert sl.wifi_busy() and sl.wifi_msg.startswith("Connecting to Cafe")
+    sl._wifi_tick()
+    assert sl.wifi_busy()
+    w.verdict = True
+    sl._wifi_tick()
+    assert not sl.wifi_busy() and sl.wifi_msg == "Connected to Cafe"
+    assert sl.wifi_known == ["Cafe"] and sl._wifi_wake is None
+
+    # Leaving the panel mid-scan lets the poll go with the lease.
+    sl._wifi_rescan()
+    w.polls = 0
+    sl._wifi_rescan()
+    assert sl._wifi_wake is not None
+    sl.close_wifi()
+    assert sl._wifi_wake is None and not sl.wifi_busy()
+
+
+def test_a_saved_locked_network_that_fails_asks_for_its_password_again(tmp_path):
+    from ws_helpers import build_ws
+
+    ws = build_ws(tmp_path)
+    ws.wifi = w = _SlowWifi()
+    w.polls = 10
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_wifi()
+    sl.wifi_known = ["Cafe"]
+    sl.wifi_sel = 0
+    sl._wifi_activate()
+    assert sl.wifi_joining == ("Cafe", "", True) and sl.wifi_pick is None
+    w.verdict = False
+    sl._wifi_tick()
+    assert sl.wifi_pick == "Cafe"
+
+
+def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
+    wire_links = _wire_links()
+    import moy_ota
+    clock = _Clock()
+    clock.install(monkeypatch)
+    state = {"up": False, "dials": 0}
+
+    class Wifi:
+        def status(self):
+            return (state["up"], None, None)
+
+    def dial(w):
+        state["dials"] += 1
+        return None
+
+    net = wire_links.CartNet(Wifi(), dial)
+    assert net.ready() is None and state["dials"] == 1
+    assert net.ready() is None and state["dials"] == 1
+    state["up"] = True
+    assert net.ready() is True
+    state["up"] = False
+    assert net.ready() is None and state["dials"] == 2
+    clock.ms = 16000
+    assert net.ready() is None              # a P4's slow association: 11-16 s, sometimes 20
+    clock.ms = moy_ota.DIAL_MS
+    assert net.ready() is False
+    net.dial()
+    assert state["dials"] == 3
+    assert wire_links.CartNet(None).ready() is False
+
+
+def _wire_links():
+    from runtime import net_binding
+    net_binding.install()
+    if str(ROOT / "device") not in sys.path:
+        sys.path.insert(0, str(ROOT / "device"))
+    import wire_links
+    return wire_links

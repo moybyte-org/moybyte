@@ -26,7 +26,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
   oversized image, or one under its board's headroom floor (`[image]
-  headroom_floor_kib` in board.toml), is a build FAILURE on every board.
+  headroom_floor_kib` in board.toml), is a build FAILURE on every board. Every
+  floor is 0 since 2026-11-07 (owner): with no users the slots are still ours
+  to resize, so only the slot fit holds until the first release.
 - **What crosses into an image is board.toml DATA** (#161), staged by
   `tools/board_config.py`: a denylist over every module under `runtime/`
   (each `[[deny]]` names a kind and a `why`; subfolders stage FLAT, one
@@ -57,8 +59,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (`docs/board_ports_2026-08.md`).
 - **Flash and serial facts are board.toml data too**: `[flash]`/`[monitor]`
   (image, offset, baud, the otadata region erased FIRST so a board that has
-  taken an OTA boots the slot just written, and the reset strategy — the T-Deck
-  declares `usb_reset`) for `tools/board_flash.py`; `[serial]` (the line state
+  taken an OTA boots the slot just written, the reset strategy — the T-Deck
+  declares `usb_reset` — and the flasher stub — the Waveshare P4 declares the
+  second-generation one) for `tools/board_flash.py`; `[serial]` (the line state
   at open, `attach_only`, the `py` chunk, the `recv` window and, on the
   Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a
@@ -94,9 +97,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   manager's one git cache** (`~/.cache/Espressif/ComponentManager`) while it
   configures, so two builds configuring at the same moment race on its
   `index.lock`: "Unable to create index.lock: File exists" (two P4s
-  2026-09-22, the T-Deck and a P4 2026-10-03), and a retry passes.
-  `tools/board.py pass` builds the two P4s one at a time and runs a build that
-  lost the race again.
+  2026-09-22, the T-Deck and a P4 2026-10-03), and a retry passes. So every
+  build holds one machine-wide flock while it configures and lets go at its
+  first compiled step (`moybyte_configure_lock` in `tools/esp32_build_lib.sh`):
+  the compiles of two builds overlap, their configures never do, and
+  `tools/board.py pass` still runs a build that lost the race again.
 
 ## Settled
 
@@ -134,6 +139,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   made the tick SLOWER (the drivers starve). The VM's win in internal memory is
   instruction placement (`MOY_HOT`); its allocator is a small-object pool
   (`native/moycore/README.md`).
+- **Do NOT turn on `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY` on the S3s**
+  (A/B'd on both and declined, 2026-11-06, #246). ESP-IDF's own fragments then
+  move the .bss of lwIP, wpa_supplicant, the WiFi driver's net80211 and pp and
+  the BT host to PSRAM, which frees internal RAM at an idle desk, but the WiFi
+  driver's start then takes more internal RAM than the move freed, and the
+  driver keeps it until a reboot. A component's static scratch moves to PSRAM
+  by a patch that allocates it while the component runs instead
+  (`moybyte_patch_mdns_psram`, `tools/patch_mdns_psram.py`).
 
 ## Hard constraints — each one hung or bricked a board
 
@@ -147,29 +160,66 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   forever. The console boards among them are `attach_only`: never pulsed,
   reset through esptool.
 - **On the S3 boards the Python heap and the C side share one 8 MB PSRAM**, and
-  the Python heap grows by doubling and gives an area back only when a sweep
+  the Python heap grows by adding areas and gives one back only when a sweep
   finds it wholly empty, which one surviving object prevents
-  (`docs/history/native_kernel_2026-09.md` §1.3).
+  (`docs/history/native_kernel_2026-09.md` §1.3). The stock step doubles the
+  heap, so a 20 KB request a collect cannot place added a megabyte that stayed;
+  `MOYBYTE_GC_GROW_MAX` (`moybyte_patch_gc_grow_step`) caps a growth at 512 KB
+  on both S3s, a bigger request still getting its own size.
   `MOYBYTE_GC_SPLIT_RESERVE` (each board's `mpconfigboard.h`, applied by
   `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it; without it one
   fragmented allocation takes every byte and every big cart fails to load until
   a hard reset.
 - **The WiFi radio is a LEASE (2026-09-07)**: off unless something holds it.
-  `Workstation.wifi_hold(tag)` powers the STA up and the last
-  `wifi_release(tag)` powers it down (`esp_wifi_stop`), which keeps the S3's
-  WLAN-vs-LCD-DMA internal-RAM fight to when the network is needed. The holders
-  are `web` (released when the webhost's socket closes), `update` (taken before
+  The holds are the lease table's radio rows (`native/moy_kernel/moy_lease.h`,
+  THE RADIO), and the station's power follows them in C
+  (`native/moy_net/moy_net.h`, THE BOOK): the first holder powers the STA up
+  and the last out powers it down (`esp_wifi_stop`), from whichever task
+  changed the rows, which keeps the S3's WLAN-vs-LCD-DMA internal-RAM fight to
+  when the network is needed. Python's `Workstation.wifi_hold(tag, pid=None)`
+  and `wifi_release(tag, pid=None)` take and drop rows of that table; a
+  compiled program's http handle and the media service take theirs in C. The
+  holders are `web` (released when the webhost's socket closes), `update` (taken before
   the hand-off releases `web`), `settings` (the WIFI panel), `cart` (a run with
-  the "network" permission), `link` (a match; taken before `link.start()`)
-  and `carts` (the Get Carts app while it fetches an index or a cart).
+  the "network" permission), `link` (a match; taken before `link.start()`),
+  `carts` (the Get Carts app while it fetches an index or a cart), `http`
+  (an app's `moybyte.http` request while it runs: `runtime/system/dev_http.py`
+  for a Python app, the kernel's http handle for a compiled one),
+  `media` (the media service's run while a URL of its list may play, held
+  under the run's own pid and let go by its end in C,
+  `runtime/system/dev_media.py`), `ssh` (the SSH server while a password
+  is set, `runtime/system/ssh_service.py`) and `native` (a native command
+  from its first socket to its end, `runtime/run/elf_run.py`). `cart`,
+  `http`, `media` and `native` are a process's (`console_spine.PROC_TAGS`):
+  held under its pid in a lease row it owns, so its end (`moy_lease_sweep`)
+  lets exactly its holds go and another process's survive.
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
-  guard and `state`'s `wifi_held` names the holders. On the consoles the
+  guard and `state`'s `wifi_held` names the holders (a process's as
+  `tag:pid`). On the consoles the
   station is the kernel's driver (`native/moy_net/moy_wifi.c`, reached through
   `device_wifi.kernel_wlan`; Python never constructs the port's `network.WLAN`),
   it outlives a soft reset, and a new VM puts it down unless the kernel's
   ESP-NOW link rides it. The Zero is outside this: WiFi is its only I/O, and
   it keeps the port's station for its setup access point.
+- **A process's devices are the kernel's handle table**
+  (`native/moy_kernel/moy_dev.h`), answered on the calling program's own task:
+  leases, pins (gpio, pins, uart, spi, i2c, pwm, adc), lora, mic, midi, http,
+  usb, ble and media are C (`moy_dev.c`, `moy_dev_kinds.c`, media's
+  `native/moy_media/moy_media_dev.c`); camera and net are Python
+  (`runtime/system/dev_handles.py`).
+- **The frame never waits on the radio (2026-11-06)**: on a P4 every
+  `esp_wifi_*` call is a round trip to the C6, and a blocking scan, a join's
+  poll or a link wait held the whole desk for seconds. The console asks and
+  polls: `DeviceWifi.scan_poll()`/`join()`/`joined()` (Settings'
+  wake), `CartNet.ready()` (Get Carts) and `dial()` (an http request, a
+  stream), whose worker task waits for the link (`moy_net_dialing`, and a
+  stream's `moy_net_await`); nothing reaches lwIP before the link is up
+  (`moy_net_online`, moy_net.h's THE NETWORK'S GATE). A cart's
+  `wifi.scan()`/`connect()` still waits: its own to spend. A shell command
+  does not hold the frame either (2026-11-06): its run parks on the session's
+  runner while a role command waits, stepped across the door a frame at a
+  time (`native/moy_sh/moy_sh_board.h`, THE RUNNER).
 - **On the T-Deck SD shares the SPI host with the display, and getting it wrong
   HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
   Guition S3's cards have a host of their own, mounted by
@@ -191,7 +241,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
     the panel inside a session. `tests/test_moybyte_sd.py` pins which lifecycle
     touches which pin.
 - **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so
-  `moy_runtime.tf_card` opens it with `moy_sd.open(2, ...)` (the bus
+  `moy_runtime.tf_card` opens it with `moy_sd.up()` on host 2 (the bus
   initialised once, never torn down) and mounts the store's card volume over
   it under `device/card_store.py`, once at boot. Host 2 is SPI3; host 1 is the
   PANEL's SPI2 (as `machine.SDCard` slots, the numbers run opposite: slot 3 is
@@ -208,7 +258,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   skipping the root composite and its read-back, and no bounce slot crosses
   into Python. A compiled cart's frame folds straight from the cart's memory
   (blit's palette or blit565's byte swap resolved per band), so no canvas holds
-  it. The game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
+  it -- from the console's frame, or in C from the kernel's front, which
+  takes a fullscreen compiled play with the VM up (`moy_glass.front`). The
+  game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
   keeps the bezels. `moy_fold.h` is the authority.
 - **The panel rules live in `native/moy_lcd`'s C**: DMA only from internal
   SRAM, only the first band carries a command (what "a full-screen flush must
@@ -256,21 +308,39 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `moybyte_patch_p4_dsi_underrun` and `patches/p4_ppa_srm_mb_order_bypass.patch`
   (the SRM deadlock a rotate with a sub-FIFO last unit hits) behind
   `moybyte_patch_p4_ppa_srm_mb_order`. Status and numbers: #58, #202.
+- **A native module runs in U-mode on a P4, and the boot PMP layout and the
+  vectors are the kernel's** (`native/moy_elf/moy_umode.h`): both P4 boards
+  build with `CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n` and
+  `moy_u_layout` writes each core's PMP at start (IDF's PMA table as it is,
+  the ROM locked in entry 15, nothing else locked: a locked entry binds U-mode
+  too, and a P4 lock holds until reset, so the bootloader's own on core 0
+  could never be undone). A board whose bootloader predates that (an OTA
+  keeps the bootloader) refuses every module; a cable flash fixes it. The
+  first module's load points both cores' `mtvt` and `mtvec` at
+  `moy_umode.S`'s stubs, which hand every M-mode trap on to IDF's handler for
+  its line. No IDF file is patched for it. A change to `vectors_clic.S`'s
+  table (an IDF bump) makes every module refuse to load until the stubs
+  follow it (`u_mtvt_want`). Kernel code inside a trap runs only after
+  `moy_u_close`'s `mret`: an exception taken before the trap's `mret` (the
+  lazy FPU enable is one) locks the core up with no panic, and the interrupt
+  watchdog's reset is all that shows.
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the
   VFS shadowing rule (the internal store root is `/moy/carts`) are the
   Waveshare README's.
 - **A TF card is the P4 boards' cart store when one mounts**
-  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, then
-  `moy_sd.mmc` bringing SDMMC slot 0 up once, never torn down (slot 1 is
+  (`device/card_store.py` over `p4_desktop.p4_card`: `moy_sd.up()`, the LDO4
+  poke and then SDMMC slot 0 brought up once, never torn down (slot 1 is
   ESP-Hosted's), then the store's card volume `moy_store.card` with its read
   cache; FAT32 and exFAT, the latter being `MICROPY_FATFS_EXFAT` in each
   `mpconfigboard.h`). The store is
   `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a dead
   one or a filesystem the build cannot read all boot on the internal store with
   one line, and `card_store.STATUS` is the verdict. An EMPTY slot surfaces as
-  `moy_sd.mmc`'s `card_init` error, named the way a failed mount is.
+  `moy_sd.up()`'s `card_init` error, named the way a failed mount is. The
+  bring-up is native/moy_sd's C from each board's board.toml card row
+  (`moy_sd.h`), which the kernel's recovery floor calls with no VM.
   The OTA directory and the BLE bond store stay internal. Never format or erase
   a card from the console.
 - **A compiled cart's blit565 frame skips the game canvas**
@@ -282,7 +352,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   written into the canvas only when something needs it there (the CartFrame
   rules). A palette frame keeps the blit: ESP-IDF disables the PPA's palette
   mode. CRISP PIXELS is the canvas composite's alone; a direct-colour frame
-  is always the bilinear scale.
+  is always the bilinear scale. A fullscreen compiled play (console mode, or
+  a game full screen on the desk once the glass around it is still) runs in
+  the kernel's front with the VM up, and the same scale and snapshot are C
+  (`moy_glass.front`'s frame op, `moy_play.h`): no console Python a frame.
 - **An async PPA op must be the frame's LAST write**, and `moy_ppa` must
   C2M-writeback a CPU-painted destination before submit, because the IDF
   driver invalidates the out window at submit. Both are ROW-SCOPED
@@ -298,8 +371,11 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   driver uploads `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c` after every reset);
   its serial is the P4's own USB-Serial/JTAG (the S3 rules, and esptool needs
   no BOOT button); its backlight GPIO23 is active-HIGH where the Waveshare's is
-  active-low; its C6 runs Guition's factory slave, so BLE works and ESP-NOW
-  fails inert until the Waveshare's `c6_slave/` image is flashed to it.
+  active-low; its C6 runs Guition's ESP-Hosted 2.3.2 slave, whose OTA refuses
+  every image, so BLE works and ESP-NOW fails inert until the Waveshare's
+  `c6_slave/` image goes on over the C6's UART header (its README's C6
+  section; `tools/board.py guition_p4 c6 URL` is the SDIO route for a slave
+  that takes an OTA).
 
 ## The Zero (headless, #41)
 
@@ -310,9 +386,11 @@ stages 1–6 all absent. Its README is the authority; what bites:
 - 8 MB of flash: the console table does not fit, and the bootloader rejects an
   oversized table into a silent boot loop. Its partition CSV is authored.
 - It carries the seed roster COMPRESSED (`tools/gen_device_carts.py --packed`,
-  `CARTS_Z`), inflated one cart at a time into an EMPTY store on first boot —
-  gated on emptiness, not #47's version compare, because its store is the
-  record (the only copy of a browser-made cart), where a console's is a cache.
+  `CARTS_Z`, cut by board.toml's `[roster]`), inflated one cart at a time into
+  an EMPTY store on first boot, stopping while `zero_host.SEED_RESERVE` is
+  still free — gated on emptiness, not #47's version compare, because its
+  store is the record (the only copy of a browser-made cart), where a
+  console's is a cache: a seed cart the kid deletes stays deleted.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the

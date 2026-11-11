@@ -27,6 +27,8 @@ separate question from what is committed.
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
+| mbedTLS 3.6.4, its crypto subset (the browser sign-in, host and wasm) | `native/moy_net/mbedtls/` | [Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls), as ESP-IDF v5.5.1 carries it | Apache-2.0 OR GPL-2.0-or-later (used under Apache-2.0) | No |
+| Monocypher 4.0.3, its core and Ed25519 (the apps' Ed25519 rows, every tier) | `native/moy_net/monocypher/` | [monocypher.org](https://monocypher.org/) ([LoupVaillant/Monocypher](https://github.com/LoupVaillant/Monocypher)) | CC0-1.0 OR BSD-2-Clause | No |
 | Jet software 3D rasteriser (the compiled Jet carts) | `ports/jet/jet/` | [CubeCoders/Jet](https://github.com/CubeCoders/Jet) | MIT | No |
 | Utah teapot mesh + the scene it is lit in (the showcase cart) | `ports/jet/teapot.moy/teapot.obj`, `ports/jet/teapot.moy/src/scene.cpp` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples), from freeglut's teapot data | MIT; freeglut's X11-style notice | Converted to OBJ; the scene ported |
 | ESP 88, the neon city film: its code and artwork (the ESP 88 cart) | `ports/jet/examples/`, `ports/jet/esp88.moy/assets.bin` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples) (`esp32-neon-film`) | MIT | One line (the film's frame size); artwork repacked, glow and credits scaled |
@@ -291,6 +293,49 @@ modules; nothing in any firmware image does. A module is a build product
   not published by this repository (moybyte-org/carts publishes them); before one ships
   in a product, its `LICENSES.txt` carries those libraries' notices as well
   (`ports/jet/README.md`, "Seeding").
+
+### 2.8 mbedTLS — the browser sign-in's and the apps' crypto
+
+`native/moy_net/mbedtls/`
+
+The sign-in (`native/moy_net/moy_seal.h`) runs AES-GCM, SHA-256, HMAC, HKDF,
+PBKDF2, HMAC_DRBG and SPAKE2+ over P-256; the apps' crypto rows (`native/moy_net/moy_crypto.h`)
+AES-GCM, AES-CTR, AES-CCM, SHA-256, HMAC and X25519 over Curve25519. A board links the copy ESP-IDF builds (its hardware AES
+and SHA); the host's library and the browser's wasm compile this one, the same
+release, under the config `native/moy_net/moy_seal_mbedtls.h`.
+
+- **Upstream:** mbedTLS 3.6.4 — <https://github.com/Mbed-TLS/mbedtls>, the
+  copy in ESP-IDF v5.5.1's `components/mbedtls/mbedtls` at the commit
+  `native/moy_net/mbedtls_vendor.json` records. `tools/vendor_mbedtls.py`
+  (`make vendor-mbedtls`) copies the sources and headers the subset needs,
+  under upstream's paths.
+- **Licence:** Apache-2.0 OR GPL-2.0-or-later; Moybyte uses it under
+  Apache-2.0. Full text:
+  [`native/moy_net/mbedtls/LICENSE`](native/moy_net/mbedtls/LICENSE).
+- **Modified: no.** `tests/test_mbedtls_vendor.py` fails on any edit to the
+  copy.
+
+### 2.9 Monocypher — the apps' Ed25519
+
+`native/moy_net/monocypher/`
+
+The apps' Ed25519 rows (`native/moy_net/moy_crypto.h`: `ed25519_public`,
+`ed25519_sign`, `ed25519_verify`) run RFC 8032's Ed25519 over Monocypher's
+optional SHA-512 half; mbedTLS 3.x has no EdDSA. Every tier compiles this
+copy: each board's image, the desktop and the browser MicroPython, and the
+host's library.
+
+- **Upstream:** Monocypher 4.0.3 — <https://monocypher.org/>, the release
+  tarball `monocypher-4.0.3.tar.gz` (the GitHub release's asset is the same
+  bytes), checked against the SHA-512 monocypher.org publishes beside it and
+  recorded in `native/moy_net/monocypher_vendor.json`.
+  `tools/vendor_monocypher.py` (`make vendor-monocypher`) copies
+  `src/monocypher.{c,h}`, `src/optional/monocypher-ed25519.{c,h}` and
+  `LICENCE.md`, flat.
+- **Licence:** CC0-1.0 OR BSD-2-Clause, the user's choice. Full text:
+  [`native/moy_net/monocypher/LICENCE.md`](native/moy_net/monocypher/LICENCE.md).
+- **Modified: no.** `tests/test_monocypher_vendor.py` fails on any edit to the
+  copy.
 
 ---
 
@@ -727,10 +772,13 @@ by §2.4, not by this table.
 | MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
 | Emscripten / emsdk | <https://github.com/emscripten-core/emsdk> | MIT (with NCSA for legacy components) |
 | Lua 5.4.7 | vendored, §2.1 | MIT |
+| mbedTLS 3.6.4, its crypto subset | vendored, §2.8 | Apache-2.0 |
+| Monocypher 4.0.3, its core and Ed25519 | vendored, §2.9 | CC0-1.0 OR BSD-2-Clause |
 
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains
-MicroPython, Emscripten runtime support and Lua — all MIT — and any page
-hosting them should carry those notices.
+MicroPython, Emscripten runtime support and Lua — all MIT — mbedTLS's
+crypto under Apache-2.0 and Monocypher under CC0-1.0 (or BSD-2-Clause), and
+any page hosting them should carry those notices.
 
 ### 5.5 Guition JC3248W535, ESP32-S3 (`firmware/guition_jc3248w535/build.sh`)
 

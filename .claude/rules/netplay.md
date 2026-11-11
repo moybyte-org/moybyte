@@ -30,16 +30,24 @@ belongs here is only what a coder must not undo:
 - **The payload is INPUTS, never state**, and that is a measurement rather than a
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
-- **Input delay is ADAPTIVE and raise-only since 2026-08-25**: matches start at
-  DELAY=1 (33ms) and a session under real stall pressure raises itself to 2 --
-  never down, because a lower delay mid-match can overwrite an input frame the
-  peer already played. The 2026-08-22 "DELAY=1 measured and REJECTED (14%)"
-  verdict was the PACING's fault, not the radio's -- burst catch-up
-  self-hastened both consoles to the margin cliff; with debt-dropping,
-  loop-rate stall retries and the guest phase slew, the S3 pair measures
-  1.8-2.3% at DELAY=1 while the P4 pair (whose C6-shim transport genuinely
-  consumes the one-tick budget) escalates to 2 by ~6s and plays clean. The
-  archived campaign's "Input latency" section carries the whole measurement.
+- **Input delay is ADAPTIVE** (raise 2026-08-25, way down 2026-11-06): matches
+  start at DELAY=1 (one tick: 33 ms at 30 Hz, 16.7 ms at the 60 Hz a cart
+  paced 60 or "free" ticks at when both consoles hold it, owner 2026-11-06; a
+  60 Hz match that cannot keep it steps down to 30 at a frame the host names,
+  once and for good), a console whose PEER reports real
+  stall pressure raises itself a tick at a time to 66 ms, and it comes back
+  down a tick when the peer reports a clean window and a tick plus 8 ms to
+  spare. A console's delay sets the peer's stalls, never its own: steering it
+  by its own stalls oscillated on glass (2026-11-06).
+  Both directions are safe only because a frame is sampled ONCE: never let a
+  retry or a delay change rewrite a sampled frame. The 2026-08-22 "DELAY=1
+  measured and REJECTED (14%)" verdict was the PACING's fault, not the
+  radio's -- burst catch-up self-hastened both consoles to the margin cliff;
+  with debt-dropping, loop-rate stall retries and the guest phase slew, the S3
+  pair measures 1.8-2.3% at DELAY=1 while the P4 pair (whose C6-shim transport
+  genuinely consumes the one-tick budget) escalates to 2 by ~6s and plays
+  clean. The archived campaign's "Input latency" section carries the whole
+  measurement.
 - **The BLE keyboard's background scan owned most of a radio board's packet
   loss** -- interval==window was 100% radio duty, 5s on/5s off, costing the P4
   ~40% of inbound espnow at an idle desk while hiding from every blocking
@@ -56,6 +64,9 @@ belongs here is only what a coder must not undo:
 - **The handshake is BROADCAST, addressed in the payload.** Unicast here needs a
   peer registration that an `active()` cycle wipes and the first beacon races,
   which cost a night to find. Do not tidy it back.
+- **A frame's local input is sampled ONCE** (2026-11-06): a stalled tick's
+  retry that rewrote its already-emitted frame was the Brick Siege desync.
+  `tests/test_espnow_link.py`'s two-console lossy match is the net.
 - **Every input packet carries the frame its sender is WAITING FOR.** A fixed
   redundancy window deadlocks two stalled consoles permanently.
 - **Nothing waits forever.** An unanswered invite and a match that falls too far

@@ -15,7 +15,8 @@
     "value": "#ffffff", "value_ink": "#000000", "danger": "#e5484d",
     "sunk": "#1a1a1a", "lcd": "#000000", "lcd_ink": "#ffffff",
     "code_text": "#ffffff", "code_keyword": "#ffe600", "code_string": "#7dff9a",
-    "code_number": "#ffb070", "code_comment": "#c8c8c8", "code_builtin": "#7fd0ff"
+    "code_number": "#ffb070", "code_comment": "#c8c8c8", "code_builtin": "#7fd0ff",
+    "paused": "#c8c8c8"
   }, "light": {
     "panel": "#ffffff", "edge": "#000000", "title": "#000000", "title_ink": "#ffffff",
     "accent": "#ffe600", "hilite": "#ffe600", "dim": "#e6e6e6", "desktop": "#ffffff",
@@ -29,7 +30,8 @@
     "sunk": "#e6e6e6", "lcd": "#ffffff", "lcd_ink": "#000000",
     "surface_light": true, "bar_light": true, "band_light": true,
     "code_text": "#000000", "code_keyword": "#4b1fb8", "code_string": "#1a6b2e",
-    "code_number": "#8a4300", "code_comment": "#4d4d4d", "code_builtin": "#0b5394"
+    "code_number": "#8a4300", "code_comment": "#4d4d4d", "code_builtin": "#0b5394",
+    "paused": "#4d4d4d"
   } },
   "layout": {
     "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
@@ -39,15 +41,23 @@
     "fam": "atkinson", "w_med": 600, "w_semi": 700, "w_bold": 800,
     "sizes": { "hh": { "title": 15, "key": 18, "op": 19, "result": 30 },
       "dk": { "title": 17, "key": 26, "op": 28, "result": 50 } },
-    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3, "gap": 2 } },
-    "current": { "style": "plate", "ink": "value_ink" }, "accents": false,
+    "marks": {
+      "row": { "focus": { "mark": "fill", "c": "focus" },
+               "on": { "mark": "inset", "w": 3, "gap": 0, "c": "value" },
+               "both": { "mark": "inset", "w": 3, "gap": 0 } },
+      "cell": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "focus" },
+                "on": { "mark": "fill", "c": "value", "ink": "value_ink" } },
+      "card": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "focus" },
+                "on": { "mark": "fill", "c": "value", "ink": "value_ink" } } },
+    "accents": false,
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
       "primary": { "font": "op" } } },
+    "buttons": { "toggle": { "check": true } },
     "win_r": 4, "card_r": 4, "key_r": 4,
     "win": { "header": "fill", "rule": 2 },
     "dark": {
-      "current": { "alpha": 1 }, "disabled": "#5c5c5c",
+      "disabled": "#8f8f8f",
       "tile_outline": [2, "#ffffff"],
       "card": { "frame": [2, "#ffffff"] },
       "win": { "frame": [2, "#ffffff"], "frame_back": [2, "#ffffff"] },
@@ -55,21 +65,25 @@
                "sys_line": [2, "#ffffff"] },
       "buttons": {
         "normal": { "fill": "#000000", "border": [2, "#ffffff"] },
+        "primary": { "fill": "#000000", "ink": "#ffffff", "border": [3, "#ffffff"] },
         "tonal": { "fill": "#262626", "ink": "#ffffff", "border": [2, "#ffffff"] },
         "danger": { "ink": "#ff8f8f", "border": [2, "#ffffff"] } },
       "lcd_border": [2, "#ffffff"],
       "keycap": { "border": [1.25, "#ffffff"] }
     },
     "light": {
-      "current": { "alpha": 1 }, "disabled": "#949494",
+      "disabled": "#6b6b6b",
+      "marks": { "row": { "focus": { "key": [2, "#000000"] } },
+                 "cell": { "focus": { "key": [2, "#000000"] } },
+                 "card": { "focus": { "key": [2, "#000000"] } } },
       "tile_outline": [2, "#000000"],
       "card": { "frame": [2, "#000000"] },
-      "focus": { "outline": [2, "#000000"] },
       "win": { "frame": [2, "#000000"], "frame_back": [2, "#000000"] },
       "bar": { "fill": "#ffffff", "line": [2, "#000000"], "chip_cur": "#000000",
                "sys_line": [2, "#000000"] },
       "buttons": {
         "normal": { "fill": "#ffffff", "border": [2, "#000000"] },
+        "primary": { "fill": "#ffffff", "ink": "#000000", "border": [3, "#000000"] },
         "tonal": { "fill": "#e6e6e6", "ink": "#000000", "border": [2, "#000000"] },
         "danger": { "ink": "#b3261e", "border": [2, "#000000"] } },
       "lcd_border": [2, "#000000"],

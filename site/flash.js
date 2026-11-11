@@ -14,6 +14,7 @@
 // the file HAS to be same-origin. See tools/fetch_ci_firmware.py.
 
 import { ESPLoader, Transport } from "./vendor/esptool-js/bundle.js";
+import { playLines, restLines } from "./flash_reset.js";
 
 const blob = document.getElementById("fw-manifest");
 const MANIFEST = blob ? JSON.parse(blob.textContent) : { boards: [] };
@@ -218,8 +219,8 @@ class Card {
         },
       });
       // "I put it in the loader myself" -- the escape hatch for when the
-      // auto-reset does not take. The T-Deck is always this (its reset is
-      // no_reset already); the P4 offers it as a checkbox.
+      // auto-reset does not take, offered as a checkbox on every board whose
+      // reset the page drives.
       const manual = this.hand && this.hand.checked;
       await loader.main(manual ? "no_reset" : b.reset);
       loader.debugLogging = false;
@@ -247,20 +248,22 @@ class Card {
       });
       this.pct(1);
 
-      // Only where the board can actually be reset over the wire. The T-Deck
-      // cannot (`after: null`), so asking would log a failure for something
-      // that was never going to work -- its card says to press RST instead.
-      // Skipped when the board was put in the loader by hand: whatever stopped
+      // The board's own exit (site/flash_reset.js), not esptool-js's
+      // after("hard_reset"), which only ever releases RTS and so pulses
+      // nothing. Only where the page can reset the board at all (`after_lines`
+      // is null otherwise, and the card's finish line says what to do), and
+      // skipped when the board was put in the loader by hand: whatever stopped
       // the reset working on the way in stops it working on the way out.
-      if (b.after && !manual) {
+      if (b.after_lines && !manual) {
         try {
-          await loader.after(b.after, b.usb_otg);
+          this.say("resetting: " + b.after_lines);
+          await playLines(port, b.after_lines);
         } catch (err) {
           this.say("reset failed (" + err.message + ") — power-cycle the board");
         }
       }
-      this.finished(manual && b.after
-        ? "Written. Press <b>RESET</b> on the board to start it."
+      this.finished(manual && b.after_lines
+        ? "Written. Press the board&rsquo;s <b>reset</b> button to start it."
         : b.done);
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
@@ -269,7 +272,13 @@ class Card {
     } finally {
       busy = false;
       document.querySelectorAll(".board .go").forEach((g) => (g.disabled = false));
-      if (transport) { try { await transport.disconnect(); } catch (e) { /* gone already */ } }
+      // The lines go back to the board's resting state before the port
+      // closes, on every way out: a port left with them asserted holds the
+      // chip in reset or in the loader.
+      if (transport) {
+        try { await restLines(port, b.rest); } catch (e) { /* not open, or gone */ }
+        try { await transport.disconnect(); } catch (e) { /* gone already */ }
+      }
     }
   }
 }

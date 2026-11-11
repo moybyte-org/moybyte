@@ -181,9 +181,14 @@ void moy_dsi_present_pending(moy_dsi_t *d) {
     const moy_dsi_ops_t *o = d->ops;
     if (d->nfbs >= 3) {
         if (d->npend && queued_game(d)) {
-            // The cart's next draw overwrites the composite's SOURCE: fence.
+            // The cart's next draw overwrites the composite's SOURCE: fence,
+            // the frame's snapshot with it (a compiled cart's frame is read
+            // from the cart's memory by both).
             uint32_t t0 = o->ticks_us(o->ctx);
             drain_pending(d);
+            if (o->snap_wait != NULL) {
+                o->snap_wait(o->ctx);
+            }
             d->game_n++;
             d->game_us += o->ticks_us(o->ctx) - t0;
         } else if (d->npend && (o->ppa_done == NULL || o->ppa_done(o->ctx))) {
@@ -197,6 +202,9 @@ void moy_dsi_present_pending(moy_dsi_t *d) {
     }
     uint32_t t0 = o->ticks_us(o->ctx);
     o->ppa_sync(o->ctx);                  // fence the async composite
+    if (o->snap_wait != NULL) {
+        o->snap_wait(o->ctx);
+    }
     d->game_n++;
     d->game_us += o->ticks_us(o->ctx) - t0;
     show_fb(d, d->pending);

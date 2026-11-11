@@ -132,9 +132,9 @@ def test_code_view_renders_error_without_raising(tmp_path):
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(0)\n")
     ws.run_code()
-    blank = bytes(ws.canvas._buf)
+    blank = bytes(ws.run.canvas._buf)
     ws.frame(1 / 30)                       # draws highlight + inline marker, must not raise
-    assert bytes(ws.canvas._buf) != blank
+    assert bytes(ws.run.canvas._buf) != blank
 
 
 def test_fixing_and_saving_clears_the_marker(tmp_path):
@@ -215,7 +215,7 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     line = "n = #petals  -- count"
     assert ws.code_layer._lang() == "python"
     py_cols = _runs(line, "python")
-    ws.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
+    ws.run.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
     assert ws.code_layer._symbols() == _LUA_SYMBOLS
     assert ws.code_layer._lang() == "lua"
     lua_cols = _runs(line, "lua")
@@ -235,7 +235,7 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
     ws.set_menu_view("code")
     ws.screen = "menu"
     want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1b6e34,
-            _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5f6478, _HL_BUILTIN: 0x1662a8}
+            _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5b6074, _HL_BUILTIN: 0x1662a8}
     c = ws.look.content_colors()            # the roles the text view's tones take
     hl = {_HL_TEXT: c["code_text"], _HL_KEYWORD: c["code_keyword"],
           _HL_STRING: c["code_string"], _HL_NUMBER: c["code_number"],

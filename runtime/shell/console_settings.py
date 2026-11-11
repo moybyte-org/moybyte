@@ -1,7 +1,8 @@
 """The Workstation's SETTINGS verbs: the `SETTINGS_TOGGLES` setters
 (`set_diag_live`/`set_diag_sd`/`set_steady`/`set_two_player`/`set_crisp_pixels`/
-`set_show_fps`/`set_unknown_sources`) over the one `_set_toggle` tail, the
-second-keyboard probe local 2P rides on, and the OTA channel choice. A mixin
+`set_show_fps`) over the one `_set_toggle` tail, the
+second-keyboard probe local 2P rides on, the time zone and the OTA channel
+choice. A mixin
 of `Workstation`: each verb writes the flat mirror, marks the repaint and
 persists through `prefs`. What the settings MEAN at boot (`load_system`'s
 apply cascade) stays on the kernel.
@@ -11,6 +12,11 @@ try:                        # a VM: the kernel's frame loop (native/moy_kernel)
     import moy_loop as _loop
 except ImportError:         # host CPython: the host drives its own frames
     _loop = None
+
+try:
+    import wallclock as _wc
+except ImportError:  # pragma: no cover - host package lane
+    from runtime import wallclock as _wc
 
 
 class SettingsToggles:
@@ -52,7 +58,7 @@ class SettingsToggles:
         and persist it: how long the draw divisor remembers before it decides
         again. Relayed live into the running cart's scheduler."""
         self._set_toggle("steady", bool(on), persist)
-        pl = getattr(self, "player", None)
+        pl = self.run.player
         if pl is not None:
             pl.steady_mode(on)
 
@@ -103,7 +109,7 @@ class SettingsToggles:
         nearest-neighbour instead of the PPA's fixed-bilinear scaler, and
         leaves a compiled cart's direct-colour frame bilinear); a canvas without the hook
         never shows the row, so this setter is then only ever the boot apply
-        of a stale system.json key."""
+        of a stale system/settings key."""
         on = bool(on)
         self._set_toggle("crisp_pixels", on, persist)
         hook = getattr(self.sys_canvas, "set_crisp_scale", None)
@@ -122,20 +128,23 @@ class SettingsToggles:
             self.perf_hud = False
         self._set_toggle("show_fps", on, persist)
 
-    def set_unknown_sources(self, on, persist=True):
-        """Flip UNKNOWN SOURCES (Settings row, every tier) and persist it. ON
-        lets a compiled cart whose module carries no signature load; its
-        provenance key is still checked, and a module whose signature does
-        not verify is refused either way (native/moy_wasm/README.md). The
-        board's wasm runtime reads the flat mirror at each load, so a flip
-        applies from the next cart started. The warning before ON is the
-        Settings screen's (settings_layer.TOGGLE_CONFIRMS), not this verb's:
-        the boot apply and the dev channel come through here too."""
-        self._set_toggle("unknown_sources", bool(on), persist)
+    def set_time_zone(self, tz, persist=True):
+        """The console's time zone, a POSIX TZ string (Settings -> Time zone,
+        `wallclock.ZONES`), applied to the bar's clock from its next read
+        and persisted as `tz`; one that does not parse is UTC. The NTP
+        server, `ntp_server`, has no row: it is applied with the zone."""
+        tz = tz if isinstance(tz, str) and tz else _wc.UTC
+        if not _wc.set_zone(tz):
+            tz = _wc.UTC
+        _wc.set_server(self.system.get("ntp_server"))
+        self.bar_layer._clock_at = -1
+        self._dirty = True
+        if persist and self.system.get("tz") != tz:
+            self.system.set("tz", tz)
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
-        manifest UPDATE ONLINE checks; persisted in system.json once chosen.
+        manifest UPDATE ONLINE checks; persisted in system/settings once chosen.
 
         The default is the channel this FIRMWARE was built on, not a constant. A
         board that took a beta is running `unstable`, and defaulting it to

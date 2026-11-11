@@ -1,12 +1,13 @@
 // moy_aud_out: the board's speaker -- the I2S channel, the codec where the board
 // has one, and the feeder task that pulls the mix (moy_aud.h has the contract).
 //
-// THE FEEDER (#41's crackle fix) is a FreeRTOS task pinned to core 1 that
-// renders blocks out of moy_aud_render and writes them to I2S, blocking on the
-// DMA drain -- which is what paces it to the audio clock whatever the frame
-// loop is doing. It never touches the VM. A compiled cart's thread shares core
-// 1, so its work per block stays small: it renders in 32-frame chunks, taking
-// the lock per chunk, so a verb waits tens of microseconds, not a block.
+// THE FEEDER (#41's crackle fix) is a FreeRTOS task pinned to the board's
+// MOY_AUDIO_CORE that renders blocks out of moy_aud_render and writes them to
+// I2S, blocking on the DMA drain -- which is what paces it to the audio clock
+// whatever the frame loop is doing. It never touches the VM. It renders in
+// 32-frame chunks, taking the lock per chunk, so a verb waits tens of
+// microseconds, not a block. Its CPU comes out of whatever else shares its
+// core: on the VM's core (1) that is the frame.
 //
 // LAZY: nothing here runs, and no internal SRAM is spent (the task's stack, the
 // DMA ring, the mutex), until the first session is focused. A board whose
@@ -17,7 +18,9 @@
 // blocks into a ring of 4 x 128 (about 29 ms from mix to speaker) where the
 // synth's own is 256-frame blocks into 6 x 512 (about 150 ms): a cart's samples
 // arrive with the picture that caused them. The task swaps the channel itself,
-// between blocks.
+// between blocks. Frames here are the mix's; a STEREO output (the P4s') plays
+// each as two at twice the rate, so its ring is twice as many frames of four
+// bytes where a mono one's are two: the same time, four times the bytes.
 //
 // The board names its output in mpconfigboard.h:
 //   MOY_AUDIO_I2S_BCK, _WS, _DOUT       the I2S pins (required)
@@ -25,6 +28,10 @@
 //   MOY_AUDIO_CODEC_ES8311              the codec on the kernel's I2C bus (moy_codec_es8311.c)
 //   MOY_AUDIO_PA_GPIO                   the amplifier's enable, driven high once the codec is up
 //   MOY_AUDIO_RATE                      the output rate, 22050 unless named
+//   MOY_AUDIO_STEREO                    16-bit stereo at MOY_AUDIO_RATE, twice the
+//                                       mix's (moy_aud_render_st); mono otherwise
+//   MOY_AUDIO_DAC_MONO                  the codec reads one slot: both carry the mean
+//   MOY_AUDIO_CORE                      the feeder's core, 1 (the VM's) unless named
 
 #include <stdio.h>
 #include <string.h>
@@ -39,6 +46,7 @@
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "esp_task.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -52,19 +60,54 @@
 #ifndef MOY_AUDIO_RATE
 #define MOY_AUDIO_RATE 22050
 #endif
+#ifndef MOY_AUDIO_CORE
+#define MOY_AUDIO_CORE 1
+#endif
+// Near the top, but under the esp_timer task where the two share a core: at
+// its priority a block's render held every timer callback for its length.
+#if (MOY_AUDIO_CORE == 0 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU0)) \
+    || (MOY_AUDIO_CORE == 1 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU1))
+#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)
+#else
+#define FEEDER_PRIO (configMAX_PRIORITIES - 3)
+#endif
 #ifndef MOY_AUDIO_I2S_MCLK
 #define MOY_AUDIO_I2S_MCLK (-1)
 #endif
 
+#if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
+#define OUT_UP 2                // output frames per mix frame
+#define OUT_CH 2
+#define SLOT_MODE I2S_SLOT_MODE_STEREO
+#else
+#define OUT_UP 1
+#define OUT_CH 1
+#define SLOT_MODE I2S_SLOT_MODE_MONO
+#endif
+#define MIX_RATE (MOY_AUDIO_RATE / OUT_UP)
+
+// In the mix's frames; the DMA's are the output's.
 #define BLOCK_FRAMES 256
 #define STREAM_BLOCK 128
 #define STREAM_DESC 4
 #define MIX_CHUNK 32
-#define DMA_DESC 6
+#define DMA_DESC (6 * OUT_UP)
 #define DMA_FRAMES 512
+#define OUT_SAMPLES (BLOCK_FRAMES * OUT_UP * OUT_CH)
 #define WRITE_TIMEOUT_MS 100
 
 static i2s_chan_handle_t s_tx;
+
+// The microphone's receive half, where it shares the speaker's clocks (a
+// P4's ES7210: only DIN of its own, native/moy_audio/moy_mic.h): the channel
+// opens full duplex, its receive half enabled while the mic is held. A swap
+// remakes both under s_rx_lock, which a read holds.
+#if defined(MOY_API_MIC) && defined(MOY_HW_MIC_DIN) && !defined(MOY_HW_MIC_SCK)
+#define AUD_DUPLEX 1
+static i2s_chan_handle_t s_rx;
+static SemaphoreHandle_t s_rx_lock;
+static volatile int s_rx_on;
+#endif
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_mutex;
 static volatile int s_running;
@@ -98,6 +141,14 @@ int moy_aud_out_plays(void) {
     return s_task != NULL;
 }
 
+int moy_aud_out_rate(void) {
+    return MOY_AUDIO_RATE;
+}
+
+int moy_aud_out_channels(void) {
+    return OUT_CH;
+}
+
 void moy_aud_out_shallow(int on) {
     s_shallow_want = on;
 }
@@ -117,16 +168,24 @@ static int chan_open(int desc, int frames) {
     cc.dma_desc_num = desc;
     cc.dma_frame_num = frames;
     cc.auto_clear = true;       // silence, not stale DMA, on an under-run
+#ifdef AUD_DUPLEX
+    if (i2s_new_channel(&cc, &s_tx, &s_rx) != ESP_OK) {
+        s_tx = NULL;
+        s_rx = NULL;
+        return -1;
+    }
+#else
     if (i2s_new_channel(&cc, &s_tx, NULL) != ESP_OK) {
         s_tx = NULL;
         return -1;
     }
+#endif
     i2s_std_config_t sc = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)MOY_AUDIO_RATE),
 #if MOY_AUDIO_CODEC_ES8311
-        // Philips I2S, the sample on both slots: the codec's DAC reads the left.
+        // Philips I2S, a mono sample on both slots: the codec's DAC reads the left.
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                        I2S_SLOT_MODE_MONO),
+                                                        SLOT_MODE),
 #else
         // MSB-justified mono on the left slot: the MAX98357's mono input.
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
@@ -151,31 +210,113 @@ static int chan_open(int desc, int frames) {
         || i2s_channel_enable(s_tx) != ESP_OK) {
         i2s_del_channel(s_tx);
         s_tx = NULL;
+#ifdef AUD_DUPLEX
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+#endif
         return -1;
     }
+#ifdef AUD_DUPLEX
+    // The receive half on the same clocks, both slots: the ES7210's MIC1 and
+    // MIC2.
+    i2s_std_config_t rc = sc;
+    rc.slot_cfg = (i2s_std_slot_config_t)I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
+        I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+    rc.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    rc.gpio_cfg.din = (gpio_num_t)MOY_HW_MIC_DIN;
+    if (i2s_channel_init_std_mode(s_rx, &rc) != ESP_OK) {
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+    } else if (s_rx_on) {
+        i2s_channel_enable(s_rx);
+    }
+#endif
     return 0;
 }
 
+#ifdef AUD_DUPLEX
+static void rx_drop(void) {
+    if (s_rx != NULL) {
+        if (s_rx_on) {
+            i2s_channel_disable(s_rx);
+        }
+        i2s_del_channel(s_rx);
+        s_rx = NULL;
+    }
+}
+#endif
+
 static void chan_swap(void) {
     int want = s_shallow_want;
+#ifdef AUD_DUPLEX
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    rx_drop();
+#endif
     i2s_channel_disable(s_tx);
     i2s_del_channel(s_tx);
     s_tx = NULL;
-    if (want && chan_open(STREAM_DESC, STREAM_BLOCK) == 0) {
+    if (want && chan_open(STREAM_DESC, STREAM_BLOCK * OUT_UP) == 0) {
         s_shallow = 1;
-        return;
+    } else {
+        s_shallow = 0;
+        if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
+            s_running = 0;
+            s_state = MOY_AUD_OUT_FAILED;
+            s_why = "the I2S channel would not re-open";
+        }
     }
-    s_shallow = 0;
-    if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
-        s_running = 0;
-        s_state = MOY_AUD_OUT_FAILED;
-        s_why = "the I2S channel would not re-open";
+#ifdef AUD_DUPLEX
+    xSemaphoreGive(s_rx_lock);
+#endif
+}
+
+int moy_aud_out_rx_enable(int on) {
+#ifdef AUD_DUPLEX
+    if (s_rx_lock == NULL) {
+        return -1;
     }
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    int rc = 0;
+    if (s_rx == NULL) {
+        rc = on ? -1 : 0;
+    } else if (on && !s_rx_on) {
+        rc = i2s_channel_enable(s_rx) == ESP_OK ? 0 : -1;
+    } else if (!on && s_rx_on) {
+        i2s_channel_disable(s_rx);
+    }
+    s_rx_on = on && rc == 0;
+    xSemaphoreGive(s_rx_lock);
+    return rc;
+#else
+    (void)on;
+    return -1;
+#endif
+}
+
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms) {
+#ifdef AUD_DUPLEX
+    *got = 0;
+    if (s_rx_lock == NULL || xSemaphoreTake(s_rx_lock, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return -1;
+    }
+    int rc = -1;
+    if (s_rx != NULL && s_rx_on) {
+        rc = i2s_channel_read(s_rx, buf, bytes, got, pdMS_TO_TICKS(timeout_ms)) == ESP_OK ? 0 : -1;
+    }
+    xSemaphoreGive(s_rx_lock);
+    return rc;
+#else
+    (void)buf;
+    (void)bytes;
+    (void)timeout_ms;
+    *got = 0;
+    return -1;
+#endif
 }
 
 static void feeder(void *arg) {
     (void)arg;
-    int16_t block[BLOCK_FRAMES];    // on the task's stack: nothing static until a start
+    int16_t block[OUT_SAMPLES];     // on the task's stack: nothing static until a start
     uint32_t ovf_seen = s_ovf;
     while (s_running) {
         if (s_shallow_want != s_shallow) {
@@ -185,16 +326,26 @@ static void feeder(void *arg) {
             }
             ovf_seen = s_ovf;       // a fresh ring starts empty
         }
-        int frames = s_shallow ? STREAM_BLOCK : BLOCK_FRAMES;
+        int frames = (s_shallow ? STREAM_BLOCK : BLOCK_FRAMES) * OUT_UP;
+#if OUT_CH == 2
+        moy_aud_render_st(block, frames);
+#if MOY_AUDIO_DAC_MONO
+        for (int i = 0; i < frames; i++) {
+            block[2 * i] = block[2 * i + 1] =
+                (int16_t)(((int32_t)block[2 * i] + block[2 * i + 1]) >> 1);
+        }
+#endif
+#else
         for (int off = 0; off < frames; off += MIX_CHUNK) {
             moy_aud_render(block + off, MIX_CHUNK);
         }
+#endif
         // Blocks here while the DMA drains: that IS the pacing. NEVER abandon
         // rendered frames (the celeste 1.6x): the driver may accept
         // part of a block per call, and an abandoned tail advances the mix
         // without reaching the speaker -- the seam measured it at the audible
         // tempo error while both per-side clocks read 1.000. A timeout loops.
-        size_t done = 0, bytes = (size_t)frames * sizeof(int16_t);
+        size_t done = 0, bytes = (size_t)frames * OUT_CH * sizeof(int16_t);
         while (done < bytes && s_running) {
             size_t w = 0;
             i2s_channel_write(s_tx, (const char *)block + done, bytes - done, &w,
@@ -202,7 +353,7 @@ static void feeder(void *arg) {
             done += w;
         }
         uint32_t ovf = s_ovf;
-        moy_aud_count_out((uint32_t)(done / sizeof(int16_t)), ovf - ovf_seen);
+        moy_aud_count_out((uint32_t)(done / (OUT_CH * sizeof(int16_t))), ovf - ovf_seen);
         ovf_seen = ovf;
     }
     if (s_tx != NULL) {
@@ -217,7 +368,13 @@ int moy_aud_out_start(void) {
         return s_state;
     }
     s_state = MOY_AUD_OUT_FAILED;
-    moy_aud_set_rate(MOY_AUDIO_RATE);
+    moy_aud_set_rate(MIX_RATE);
+#ifdef AUD_DUPLEX
+    if (s_rx_lock == NULL && (s_rx_lock = xSemaphoreCreateMutex()) == NULL) {
+        s_why = "no memory for the lock";
+        return s_state;
+    }
+#endif
     if (chan_open(DMA_DESC, DMA_FRAMES) != 0) {
         s_why = "the I2S channel would not open";
         return s_state;
@@ -248,9 +405,8 @@ int moy_aud_out_start(void) {
         return s_state;
     }
     s_running = 1;
-    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + BLOCK_FRAMES * 2, NULL,
-                                configMAX_PRIORITIES - 3,
-                                &s_task, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + OUT_SAMPLES * 2, NULL,
+                                FEEDER_PRIO, &s_task, MOY_AUDIO_CORE) != pdPASS) {
         s_running = 0;
         s_task = NULL;
         s_why = "no memory for the feeder task";
@@ -318,8 +474,33 @@ void moy_aud_out_shallow(int on) {
     (void)on;
 }
 
+int moy_aud_out_rx_enable(int on) {
+    (void)on;
+    return -1;
+}
+
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms) {
+    (void)buf;
+    (void)bytes;
+    (void)timeout_ms;
+    *got = 0;
+    return -1;
+}
+
 int moy_aud_out_start(void) {
     return s_state;
+}
+
+int moy_aud_out_rate(void) {
+#if MOY_AUD_BOARD
+    return moy_aud_rate();
+#else
+    return moy_aud_out_rate_get();
+#endif
+}
+
+int moy_aud_out_channels(void) {
+    return 1;
 }
 
 int moy_aud_out_state(const char **why) {
@@ -360,7 +541,7 @@ size_t moy_aud_out_probe(char *buf, size_t cap) {
         st0_written = st.written;
         return 0;
     }
-    uint32_t rate = (uint32_t)moy_aud_rate();
+    uint32_t rate = (uint32_t)moy_aud_out_rate();
     uint32_t win_us = (uint32_t)(now - last_t);
     uint32_t eff = (uint32_t)(((uint64_t)(st.written - last_w) * 1000000u) / win_us);
     uint32_t ceff = (uint32_t)(((uint64_t)(st.written - w0) * 1000000u) / (uint32_t)(now - t0));
@@ -370,12 +551,12 @@ size_t moy_aud_out_probe(char *buf, size_t cap) {
     fixed(seam, sizeof seam, st.rendered_out - st0_rendered, st.written - st0_written, 4);
     last_w = st.written;
     last_t = now;
-    uint32_t sc[4];
+    uint32_t sc[5];
     int open = 0;
-    char snd[48] = "";
+    char snd[64] = "";
     if (moy_aud_snd_counts(sc, &open)) {
-        snprintf(snd, sizeof snd, " snd=%u/%u/%u/%u", (unsigned)sc[0],
-                 (unsigned)sc[1], (unsigned)sc[2], (unsigned)sc[3]);
+        snprintf(snd, sizeof snd, " snd=%u/%u/%u/%u/%u", (unsigned)sc[0],
+                 (unsigned)sc[1], (unsigned)sc[2], (unsigned)sc[3], (unsigned)sc[4]);
     }
     int n = snprintf(buf, cap,
                      "AUDIORATE eff=%u want=%u ratio=%s cum=%s seam=%s under=%u "

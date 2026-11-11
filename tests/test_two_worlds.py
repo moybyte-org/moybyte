@@ -9,7 +9,7 @@ from runtime import host_app, ui_draw
 
 
 from ws_helpers import build_desktop_ws as _ws, select_on_home
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -74,6 +74,7 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     ws.look.select_wallpaper("moybyte.open_machine", persist=False)
     ws.open_desk()
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
@@ -122,6 +123,32 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
+
+
+@pytest.mark.parametrize("size,fs", _WINDOWED)
+@pytest.mark.parametrize("n", (14, 40))
+def test_any_number_of_apps_keeps_every_desk_icon_on_the_canvas(tmp_path, size, fs, n):
+    """Each app a user adds is a tile: where the columns would run past the
+    desk's edge the tiles shrink until they fit, never off the canvas and
+    never over each other."""
+    ws = _desk_on_open_machine(tmp_path, size, fs)
+    desk = ws.wm._backdrop_layer
+    base = desk._icon_catalog()
+    extra = [("app%d" % i, "APP %d" % i, None) for i in range(n - len(base))]
+    monkey = desk._icon_catalog
+    desk._icon_catalog = lambda: base + extra
+    try:
+        rects = desk._icon_rects()
+    finally:
+        desk._icon_catalog = monkey
+    assert len(rects) == max(n, len(base))
+    cv = ws.sys_canvas
+    seen = []
+    for key, box, pill, _label, _cart in rects:
+        assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
+        assert not any(_overlaps(pill, p) or _overlaps(box, b) or _overlaps(box, p)
+                       for b, p in seen), key
+        seen.append((box, pill))
 
 
 def test_desk_bar_has_no_context_x(tmp_path):
@@ -181,7 +208,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     assert scale >= 1
     # pix() reads a palette INDEX on every tier (the framebuffer holds RGB565),
     # so the two surfaces are comparable without naming a colour.
-    game_px = ws.canvas.pix(160, 100)
+    game_px = ws.run.canvas.pix(160, 100)
     sys_px = ws.sys_canvas.pix(ox + 160 * scale, oy + 100 * scale)
     assert sys_px == game_px
     ws._exit_to_caller()
@@ -229,8 +256,8 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
         def cls(self, color):
             bezels.append(color)
 
-    real_game, real_sys = ws.canvas, ws._sys_canvas
-    ws.canvas = _NoBufGame(real_game)
+    real_game, real_sys = ws.run.canvas, ws._sys_canvas
+    ws.run.canvas = _NoBufGame(real_game)
     ws._sys_canvas = _RasterSys(real_sys)
     ws.wm.composite_game()
     assert blits, "the fullscreen composite bailed on a device-shaped canvas"

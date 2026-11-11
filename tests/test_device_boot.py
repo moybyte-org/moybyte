@@ -21,6 +21,7 @@ that board printed before the change.
 
 import ast
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,7 @@ class FakePlayer:
 
 class FakeWs:
     def __init__(self, frames=0, tick_ms=0):
-        self._frames_drawn = frames
+        self.frame_state = types.SimpleNamespace(frames_drawn=frames)
         self.player = FakePlayer(tick_ms)
         self.armed = 0
         self.announced = 0
@@ -223,7 +224,7 @@ def test_the_desktop_takes_the_glass_and_the_splash_stops_painting(capsys):
     before = canvas.paints
 
     assert boot.first_frame(ws) is False       # nothing painted yet
-    ws._frames_drawn = 1
+    ws.frame_state.frames_drawn = 1
     assert boot.first_frame(ws) is True
     assert boot.first_frame(ws) is False       # once, not every frame
 
@@ -738,21 +739,21 @@ PERF_CASES = {
          "home": None},
         "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
         "logic=0 render=0 chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 "
-        "fence_ms=0.0 gfence_ms=0.0 home=- gc=-"),
+        "fence_ms=0.0 gfence_ms=0.0 home=- gc=- lock=-"),
     "guition": (
         {"cart": None, "fps": (0, 61), "net": None, "busy": 4,
          "draw": 72.0, "flush": 0.0, "logic": 0.0, "render": 0.0,
          "chrome": 72.0, "home": None},
         "PERF cart=- fps=0/61 net=- tick=- miss=- busy=4ms draw=72 flush=0 "
         "logic=0 render=0 chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- "
-        "gfence_ms=- home=- gc=-"),
+        "gfence_ms=- home=- gc=- lock=-"),
     "tdeck": (
         {"cart": "Sakura Lua", "fps": (53, 55), "net": None, "busy": 18,
          "draw": 14.0, "flush": 0.0, "logic": 3.0, "render": 9.0,
          "chrome": 2.0, "home": None},
         "PERF cart=Sakura_Lua fps=53/55 net=- tick=- miss=- busy=18ms draw=14 "
         "flush=0 logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
-        "gfence_ms=- home=- gc=-"),
+        "gfence_ms=- home=- gc=- lock=-"),
     "p4_dark": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
          "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
@@ -760,7 +761,7 @@ PERF_CASES = {
          "gfence_ms": 0.0, "home": None},
         "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
         "logic=0 render=0 chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 "
-        "fence_ms=0.0 gfence_ms=0.0 home=- gc=-"),
+        "fence_ms=0.0 gfence_ms=0.0 home=- gc=- lock=-"),
 }
 
 # Every column populated and every value DISTINCT: the captures above are idle
@@ -773,10 +774,10 @@ PERF_LOUD = (
      "draw": 3.6, "flush": 1.4, "logic": 5.4, "render": 12.7, "chrome": 2.2,
      "wmr": 7, "wmw": 8, "wms": 9, "ppa": (1, 2, 3, 4, 0),
      "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1),
-     "gc": (6, 41530, 11200)},
+     "gc": (6, 41530, 11200), "lock": (12, 40, -3, 33, 9)},
     "PERF cart=Brick_Siege fps=20/31 net=30 tick=60/2 miss=3 busy=8ms draw=4 "
     "flush=1 logic=5 render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 "
-    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1 gc=6/41530/11200")
+    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1 gc=6/41530/11200 lock=12/40/-3/33/9")
 
 
 @pytest.mark.parametrize("case", sorted(PERF_CASES))

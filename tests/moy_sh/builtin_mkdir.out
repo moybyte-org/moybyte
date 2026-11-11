@@ -1,0 +1,11 @@
+$ mkdir a; ls
+a/  bin/  dev/  proc/
+$ mkdir a; echo again=$?
+mkdir: a: File exists
+again=1
+$ mkdir -p b/c/d; ls b/c
+d/
+$ mkdir x/y; echo noparent=$?
+mkdir: x/y: No such file or directory
+noparent=1
+[exit 0]

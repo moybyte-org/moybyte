@@ -105,13 +105,74 @@ TF_CARD_SRAM = 844
 # scratch, the splash palette, the faces' lent scratch and the screens'
 # PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
 # 2026-10-26; the scratch and the band themselves are PSRAM.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270
+# And the terminal's shell (native/moy_sh: moy_sh_g, the running or parked
+# session's pointer; every session is PSRAM), 4 bytes of .bss by the
+# link map, 2026-11-05.
+# Less the floor's state (native/moy_kernel: the recovery view and its
+# geometry, k_floor_t), PSRAM since 2026-11-05 where it was .bss: 640 bytes
+# by the link map.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270 + 4 - 640
 # And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
 # moy_ui_api_text.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
 # face's line cursor and the pointers to the block the views share, which
 # is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
 TEXT_SRAM = 44
-WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM, 188416)
+# And less LATE_SRAM, the statics that landed while this guard was skipped
+# (from 2026-11-06 a password on the card served SSH, which held the radio at
+# boot), by the link maps of 26fe07bc5 and of a 2026-10-20 build:
+# U-mode's (native/moy_elf/moy_umode.S and .c, a3e255c43: the trap entry, the
+# vector table and the kernel side of a U-mode call, in IRAM because a trap
+# taken with the cache off must reach them, and their statics), 5206 bytes;
+# and the USB device stack's, net: MicroPython's TinyUSB CDC device, 3130
+# bytes of statics in the module-free image, went with the `usb` host
+# (cce0e58f2, 2026-11-04), and native/moy_usbdisk's TinyUSB MSC device
+# (2ac0cbc09, 2026-11-08) keeps 1107, its endpoint buffer PSRAM
+# (tools/patch_tinyusb_msc_psram.py). A static moves the end of the internal
+# heap's low region, and the boot's allocations that no longer fit there
+# land ahead of the high region's largest block, so the largest block's
+# baseline takes them too.
+LATE_SRAM = 5206 + 1107 - 3130
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the kernel's table of loaded
+# modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and the panic's registers,
+# frames, ELF notes and flash config, with the flash, port and log functions
+# the writer calls with the cache off, 809 by the objects' sizes.
+# 4040 bytes by the heap's start against dev eb0498275 less the other objects'
+# growth, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag,
+# 70 bytes of .bss, and 2 bytes of IRAM the compiler's output moved: 72 by
+# the link map against dev eb0498275, 2026-11-09; and 48 bytes more of the
+# idle heap in use, which no allocation in the batch names: fresh boots read
+# 269731 free at eb0498275 and 265571 at 65e7e49ae, 4160 against the heap
+# start's 4112.
+CORE_DUMP_SRAM = 4040
+BATCH6_SRAM = 72 + 48
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
+# And TAP_FONTS_SRAM, the tap floor's two font roles in the UI's font tables
+# (native/moy_ui/moy_ui.c's `s_font`, 8, and the main instance's `font_from`
+# and `font_local`, native/moy_ui/moy_ui_api.h, 16): ids the draw path reads
+# every row, so they stay internal. 24 bytes of .bss by the link map against
+# dev 57dfc2d20, 2026-11-11.
+TAP_FONTS_SRAM = 24
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM - LATE_SRAM
+                      - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM,
+                      188416 - LATE_SRAM)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 
@@ -134,8 +195,8 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
-def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
-    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+def test_consent_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_consent_lets_only_a_missing_signature_through(
         board, wasm)
 
 
@@ -175,12 +236,18 @@ def wasm_carts(board):
 
 def test_a_compiled_app_reaches_its_roles_through_imports(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_reaches_its_roles(board, root)
+    try:
+        on_glass.wasm_app_reaches_its_roles(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_a_compiled_app_draws_the_toolkits_widgets(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_draws_the_toolkit(board, root)
+    try:
+        on_glass.wasm_app_draws_the_toolkit(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
@@ -225,8 +292,8 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
-def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
-    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
+def test_an_unsigned_cart_runs_natively_only_with_native_granted(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_its_consent(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
@@ -235,6 +302,14 @@ def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_cart
 
 def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts):
     on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_trap_in_init_is_the_carts_own_error(board, wasm_carts):
+    on_glass.wasm_init_trap_is_the_carts_own_error(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_cart_out_of_native_stack_traps_with_its_numbers(board, wasm_carts):
+    on_glass.wasm_deep_recursion_traps_with_its_numbers(board, WASM_BOARD_DIR)
 
 
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
@@ -271,6 +346,14 @@ def test_the_showcases_frames_go_to_the_glass_from_the_cart(board):
     on_glass.jet_push(board, WASM_BOARD_DIR)
     on_glass.p4_compiled_frames_go_to_the_glass_from_the_cart(
         board, on_glass.JET_TITLE, glass=True)
+
+
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# same scale and snapshot, in C (moy_glass.front's frame op), and the glass
+# holds the scale of the copy the front kept, byte for byte.
+def test_a_compiled_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "dsi")
 
 
 # Doom, built by the recipe (experiments/wasm_aot/doom/): its frames are the
@@ -432,6 +515,66 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_log_word_reads_the_ring(board):
+    on_glass.the_log_word_reads_the_ring(board)
+
+
+def test_the_shell_answers_over_serial(board):
+    on_glass.the_shell_answers_over_serial(board)
+
+
+def test_wasi_commands_run_in_the_shell(board):
+    on_glass.wasi_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_elf_commands_run_in_the_shell(board):
+    on_glass.elf_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_elf_modules_run_isolated_in_u_mode(board):
+    on_glass.elf_umode_isolates(board, WASM_BOARD_DIR)
+
+
+def test_pkg_installs_a_cart_from_the_carts_repo(board):
+    on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
+
+
+def test_the_clock_syncs_when_the_network_comes_up(board):
+    on_glass.the_clock_syncs_when_the_network_comes_up(board)
+
+
+def test_an_alarm_wakes_the_screen_and_at_logs(board):
+    on_glass.an_alarm_wakes_the_screen_and_at_logs(board)
+
+
+def test_the_event_rings_keep_their_records(board):
+    on_glass.the_event_rings_keep_their_records(board)
+
+
+def test_a_gpio_lease_loses_no_tap(board):
+    on_glass.a_gpio_lease_loses_no_tap(board, "esp32_p4_wifi6_touch_lcd_7b")
+
+
+def test_a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board):
+    on_glass.a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, "esp32_p4_wifi6_touch_lcd_7b")
+
+
+def test_the_scheduler_stops_a_runaway_service(board):
+    on_glass.the_scheduler_stops_a_runaway_service(board)
+
+
+def test_a_lua_service_runs_on_a_task_of_its_own(board):
+    on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
+
+
+def test_an_asyncio_service_runs_beside_the_desk(board):
+    on_glass.an_asyncio_service_runs_beside_the_desk(board)
+
+
+def test_an_on_crash_service_restarts_after_a_forced_crash(board):
+    on_glass.an_on_crash_service_restarts_after_a_forced_crash(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
@@ -465,7 +608,7 @@ def test_the_theme_font_is_installed(board):
 
 
 def test_the_font_set_is_the_tiers(board):
-    on_glass.the_font_set_is_the_tiers(board, 'desktop')
+    on_glass.the_font_set_is_the_tiers(board, 'esp32_p4_wifi6_touch_lcd_7b')
 
 
 def test_the_glyph_lane_draws_the_hosts_bytes(board):
@@ -689,7 +832,7 @@ def test_the_rollback_confirm_comes_from_the_frame_loop(board):
     assert board.pyval("ws.updater.confirmed") is True
     frames = board.pyval("__import__('moy_loop').frames()")
     assert frames >= 120, "confirmed after %s loop frames" % frames
-    assert board.pyval("ws._frames_drawn") >= 1
+    assert board.pyval("ws.frame_state.frames_drawn") >= 1
 
 
 def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
@@ -754,22 +897,6 @@ def test_the_web_console_is_baked_into_this_image(board):
     on_glass.web_console_is_baked_into_the_image(board)
 
 
-def test_the_console_is_served_out_of_the_firmware_image(board):
-    """The console this board hands a browser comes out of its own image --
-    the megabyte the page cannot boot without, read straight from flash."""
-    assert board.pyexec(
-        "import moy_webhost\n"
-        "H = moy_webhost.WebHost('/moy/carts')\n"
-        "R = H.handle_http('GET', '/worker.js', b'')\n"
-        "HEAD, BODY = R.split(bytes((13, 10, 13, 10)), 1)\n")
-    head = board.pyval("eval('HEAD', ws._g)")
-    assert b"Content-Encoding: gzip" in head, head
-    assert b"200 OK" in head and b"no-store" in head
-    assert board.pyval("eval('bytes(BODY[:3])', ws._g)") == b"\x1f\x8b\x08"
-    note = board.pyval("eval('H.source_note()', ws._g)")
-    assert "baked into this firmware" in note, note
-
-
 def test_a_lua_cart_runs_and_exits(board):
     """The Lua tier reaches every board by default; pin it with a real run."""
     on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua",
@@ -817,6 +944,20 @@ def stuck_carts(board):
 @pytest.mark.parametrize("runtime", ("lua", "wasm"))
 def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
     on_glass.a_stuck_run_is_ended(board, runtime)
+
+
+# The timed lanes (native/moy_wasm/moy_wasm_session.h): moy_audio and moy_timer
+# run on their own core, AOT and interpreted, and a lane that spins is struck
+# at its deadline, the ring muted, the cart running on.
+@pytest.fixture(scope="module")
+def lanes_carts(board):
+    on_glass.lanes_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runaway", (False, True))
+@pytest.mark.parametrize("tier", ("aot", "interp"))
+def test_a_cart_s_timed_lanes_run_and_a_runaway_is_struck(board, lanes_carts, tier, runaway):
+    on_glass.timed_lanes_run(board, tier, runaway)
 
 
 # -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------

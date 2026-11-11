@@ -1,0 +1,13 @@
+$ # variables, quoting, parameter expansion and arithmetic
+$ x=5; y="two words"; echo $x "$y" '$y'
+5 two words $y
+$ echo ${#y} ${y%% *} ${y#* } ${unset:-default} ${x:+set}
+9 two words default set
+$ echo $((x * 3 + 1)) $((7 / 2)) $((7 % 2)) $((1 << 4)) $((x > 2 ? 10 : 20))
+16 3 1 16 10
+$ set -- a "b c" d; echo $# "$2"; shift; echo "$@"
+3 b c
+b c d
+$ echo "tab	and \"quotes\"" \$HOME
+tab	and "quotes" $HOME
+[exit 0]

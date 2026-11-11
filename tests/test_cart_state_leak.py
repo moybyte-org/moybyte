@@ -35,7 +35,7 @@ def _open(ws, title):
     assert title in idx, sorted(idx)
     ws.launcher.sel = idx[title]
     ws.open()
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
 
 DIRTY_PY = """\
@@ -87,14 +87,14 @@ def _run_and_exit(tmp_path, title, src, runtime=None, main=None):
     _open(ws, title)
     for _ in range(3):
         ws.frame(1 / 60)
-        assert ws.player.cart_error is None, ws.player.cart_error
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
     ws._exit_to_caller()
     return ws
 
 
 def test_a_python_carts_draw_state_does_not_outlive_it(tmp_path):
     ws = _run_and_exit(tmp_path, "Dirty Py", DIRTY_PY)
-    _assert_canvas_is_clean(ws.canvas)
+    _assert_canvas_is_clean(ws.run.canvas)
 
 
 @pytest.mark.skipif(
@@ -108,7 +108,7 @@ def test_a_lua_carts_draw_state_does_not_outlive_it(tmp_path):
     dies with it -- but "safe by construction" is a claim, and this is the
     thing that checks it.)"""
     ws = _run_and_exit(tmp_path, "Dirty Lua", DIRTY_LUA, "lua", "main.lua")
-    _assert_canvas_is_clean(ws.canvas)
+    _assert_canvas_is_clean(ws.run.canvas)
 
 
 def test_reset_state_clears_every_copy_of_the_state_not_just_the_mirrors():
@@ -136,9 +136,9 @@ def test_the_shell_draws_clean_after_a_cart_that_never_reset(tmp_path):
     real frame. A leak here is what the kid sees -- a launcher drawn 20px left
     and clipped to a corner."""
     ws = _run_and_exit(tmp_path, "Dirty Py 2", DIRTY_PY)
-    before = probe.painted_pixels(ws.canvas)
+    before = probe.painted_pixels(ws.run.canvas)
     ws.frame(1 / 60)
-    after = probe.painted_pixels(ws.canvas)
+    after = probe.painted_pixels(ws.run.canvas)
     assert after > 0, "the shell painted nothing after the cart exited"
     del before
-    _assert_canvas_is_clean(ws.canvas)
+    _assert_canvas_is_clean(ws.run.canvas)

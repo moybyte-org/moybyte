@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   build            the C built for the host (the one library)
+#   install          this module as `moy_net`
+#   encode_batch     a sync batch's wire JSON (and decode_batch, sync_batch)
+#   sync_apply       one batch's ops applied into a store
+#   web_start        the webhost: started, polled, its parked request answered
+#   wc_on            the web-console switch
+#   web_auth         the sign-in's folder, its token and its paired browsers
+#   web_handle       the router without a socket, and its sealed VM answer
+#   ota_check        the updater
+#   http_open        the streaming client
 """The links' wire half (native/moy_net) on CPython, by ctypes: the module
 `moy_net` as the boards and the browser import it, name for name, over the
 same C built for the host.
@@ -9,14 +20,17 @@ same C built for the host.
   http_response    a complete HTTP/1.1 response, Connection: close
   encode_batch     a sync batch's wire JSON
   decode_batch     a sync batch's fields off the wire, or None when malformed
-  sync_batch       a POST /sync body -> (root id, pin, ops JSON), or None
+  sync_batch       a POST /sync body -> (root id, ops JSON), or None
   sync_apply       one batch's ops applied into a store (native/moy_store's C)
   web_*            the webhost: start, stop, poll, state, the parked request,
-                   the router without a socket (web_handle) and the pull
+                   the router without a socket (web_handle), the pull and the
+                   sign-in's state (web_auth, web_keys, web_key_drop,
+                   web_signout)
   ota_*            the updater (moy_ota.h): the manifest's check, the
                    download into the slot or the C6, the copied image's
                    install, the keys and the signature
   http_*           the streaming client Get Carts and the updater fetch through
+  clock_*          the wall clock's state and the NTP server it asks
 
 `install()` puts this module where `import moy_net` finds it. What it adds to
 the C is what ctypes cannot do by itself: JSON text for a batch's ops (the
@@ -30,6 +44,7 @@ import ctypes
 import json
 import os
 import sys
+import threading
 
 from . import host_native, native_build
 
@@ -39,7 +54,8 @@ _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _WEB = os.path.join(native_build.ROOT, "native", "moy_web")
 _SHIM = os.path.join(_NET, "moy_net_host.c")
 _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_apply.c",
-            "moy_webhost.c", "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
+            "moy_webhost.c", "moy_seal.h", "moy_webauth.h", "moy_webauth.c", "moy_seal_web.c",
+            "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
             "moy_journal.h", "moy_journal.c", "moy_store_host.c",
             "moy_web_blob.h")
@@ -60,13 +76,13 @@ class _Req(ctypes.Structure):
 
 class _Batch(ctypes.Structure):
     _fields_ = [("root", _I), ("ops", ctypes.c_void_p),
-                ("ops_end", ctypes.c_void_p), ("pin", ctypes.c_void_p),
-                ("pin_end", ctypes.c_void_p)]
+                ("ops_end", ctypes.c_void_p)]
 
 
 class _Store(ctypes.Structure):
     _fields_ = [("carts", _P), ("files", _P), ("kinds", _P), ("journal", _I),
-                ("ts", ctypes.c_int64)]
+                ("ts", ctypes.c_int64), ("shelf", ctypes.c_void_p),
+                ("shelf_cap", _Z), ("apps", _P)]
 
 
 class _Err(ctypes.Structure):
@@ -80,8 +96,7 @@ class _Result(ctypes.Structure):
 
 class _WebCfg(ctypes.Structure):
     _fields_ = [("port", ctypes.c_uint16), ("carts", _P), ("files", _P),
-                ("kinds", _P), ("pin", _P), ("defer", _P),
-                ("epoch", ctypes.c_int64)]
+                ("kinds", _P), ("system", _P), ("defer", _P), ("apps", _P)]
 
 
 class _WebState(ctypes.Structure):
@@ -107,7 +122,7 @@ class _WcState(ctypes.Structure):
 
 class _Env(ctypes.Structure):
     _fields_ = [(n, ctypes.c_void_p) for n in (
-        "v", "v_end", "root", "root_end", "ops", "ops_end", "pin", "pin_end")]
+        "v", "v_end", "root", "root_end", "ops", "ops_end")]
 
 
 _SIGS = (
@@ -117,24 +132,40 @@ _SIGS = (
     ("moy_http_head", [ctypes.c_void_p, _Z, _I, _P, _Z], _Z),
     ("moy_utf8_valid", [ctypes.c_void_p, _Z], _I),
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
-    ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z, _P, _Z],
-     _Z),
+    ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),
+    ("moy_sync_path", [_P, _Z, _I], _I),
+    ("moy_sync_song", [_P, _Z], _I),
     ("moy_sync_apply", [ctypes.POINTER(_Store), _I, ctypes.c_void_p,
                         ctypes.c_void_p, ctypes.POINTER(_Result)], None),
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
     ("moy_web_stop", [_P], None),
-    ("moy_web_set_pin", [_P], None),
+    ("moy_web_auth", [_P], _I),
+    ("moy_web_signout", [], _I),
+    ("moy_web_board_id", [ctypes.c_void_p], None),
+    ("moy_web_token", [ctypes.c_void_p], None),
+    ("moy_web_keys", [ctypes.c_void_p, _Z], _Z),
+    ("moy_web_key_drop", [_P], _I),
+    ("moy_seal_pw_record", [_P, _Z, _P, _Z, ctypes.c_uint32, ctypes.c_char_p, _Z], _I),
+    ("moy_seal_pw_check", [_P, _Z, _P, _Z], _I),
+    ("moy_seal_pw_derive", [_P, _Z, _P, _Z, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_char_p],
+     _I),
+    ("moy_seal_spake_prover", [ctypes.c_void_p, _P, _P, _P], _I),
+    ("moy_seal_spake_verifier", [ctypes.c_void_p, _P, _P, _P], _I),
+    ("moy_seal_spake_keys", [ctypes.c_void_p, _P, _Z, _P, _Z, _P, _Z, _P, ctypes.c_char_p,
+                             ctypes.c_char_p, ctypes.c_char_p], _I),
     ("moy_web_poll", [], _I),
     ("moy_web_state", [ctypes.POINTER(_WebState)], None),
     ("moy_web_events", [], ctypes.c_uint32),
+    ("moy_web_shelf", [ctypes.c_void_p, _Z], _Z),
     ("moy_web_take", [ctypes.POINTER(ctypes.c_void_p), _PZ,
                       ctypes.POINTER(ctypes.c_void_p), _PZ,
                       ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_web_answer", [ctypes.c_void_p, _Z], None),
     ("moy_web_handle", [_P, _Z, _P, _Z, ctypes.c_void_p, _Z,
                         ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
-    ("moy_web_pack", [_P, _P, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
+    ("moy_web_handle_answer", [ctypes.c_void_p, _Z, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
+    ("moy_web_pack", [_P, _P, _I, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_web_stamp_text", [], _P),
     ("moy_net_free", [ctypes.c_void_p], None),
     ("moy_net_host_bake", [ctypes.c_uint, _P, ctypes.c_void_p, ctypes.c_uint,
@@ -145,6 +176,8 @@ _SIGS = (
     ("moy_ota_key_hex", [_P, _Z, ctypes.c_void_p], _I),
     ("moy_ota_key", [_I], ctypes.c_void_p),
     ("moy_ota_verify", [ctypes.c_void_p, _Z, _P, _Z, ctypes.c_void_p, _I], _I),
+    ("moy_ota_admit_module", [_P, _Z, _P, _P, _I, ctypes.c_void_p, _I,
+                              ctypes.POINTER(_Z)], _P),
     ("moy_ota_canonical", [_P, _Z, ctypes.c_void_p, _Z], _Z),
     ("moy_ota_canonical_c6", [_P, _Z, ctypes.c_void_p, _Z], _Z),
     ("moy_ota_judge", [_P, _Z, _P, _I, ctypes.c_void_p, _I,
@@ -178,10 +211,15 @@ _SIGS = (
     ("moy_wc_off", [_P], None),
     ("moy_wc_poll", [], _I),
     ("moy_wc_state", [ctypes.c_void_p], None),
-    ("moy_wc_set_pin", [_P], None),
     ("moy_wc_park", [_I], None),
     ("moy_wc_url", [ctypes.c_void_p, _Z, _I], _Z),
     ("moy_c6_version", [], _I),
+    ("moy_clock_state", [ctypes.POINTER(ctypes.c_int64)], _I),
+    ("moy_clock_server", [_P], _I),
+    ("moy_clock_cert_time", [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64], ctypes.c_int64),
+    ("moy_clock_future_counts", [ctypes.c_int64, ctypes.c_int64, ctypes.c_int64], _I),
+    ("moy_clock_build_day", [], ctypes.c_int64),
+    ("moy_clock_civil", [_I, _I, _I, _I, _I, _I], ctypes.c_int64),
 )
 
 
@@ -220,6 +258,19 @@ def _text(raw):
 
 
 # -- WiFi ---------------------------------------------------------------------
+
+def clock_state():
+    """The wall clock's state (moy_net.h's MOY_CLOCK_*): the host's own clock,
+    synced."""
+    return _lib().moy_clock_state(None)
+
+
+def clock_server(name):
+    """The NTP server the next sync asks (None: the default); ValueError for
+    a name past the C's bound."""
+    if _lib().moy_clock_server(None if name is None else _bytes(name)) != 0:
+        raise ValueError("server name")
+
 
 def wifi_password(password, stored):
     """The password a connect to a network uses: the stored one when the one
@@ -283,13 +334,12 @@ def http_response(status, body, content_type="application/json"):
 
 # -- the sync batch -------------------------------------------------------------
 
-def encode_batch(v, root_id, ops, pin=None):
+def encode_batch(v, root_id, ops):
     """A batch's wire JSON: version `v`, its root named only when `root_id` is
-    not None, its ops and an optional pin."""
+    not None, and its ops."""
     fields = [json.dumps(v).encode()]
     fields.append(None if root_id is None else json.dumps(root_id).encode())
     fields.append(json.dumps(ops).encode())
-    fields.append(json.dumps(pin).encode() if pin else None)
     args = []
     for f in fields:
         args += [f, 0 if f is None else len(f)]
@@ -301,7 +351,7 @@ def encode_batch(v, root_id, ops, pin=None):
 
 
 def decode_batch(body):
-    """(v, root, ops, pin) off the wire, or None when the body is not UTF-8,
+    """(v, root, ops) off the wire, or None when the body is not UTF-8,
     not JSON or not an object."""
     raw = _bytes(body)
     buf = ctypes.create_string_buffer(raw, len(raw))
@@ -315,15 +365,15 @@ def decode_batch(body):
             return None
         return json.loads(raw[a - base:b - base].decode("utf-8"))
     return (field(e.v, e.v_end), field(e.root, e.root_end),
-            field(e.ops, e.ops_end), field(e.pin, e.pin_end))
+            field(e.ops, e.ops_end))
 
 
 # moy_net.h's MOY_SYNC_CARTS / _FILES / _SYSTEM, by value.
-_ROOT_NAMES = ("carts", "files", "system")
+_ROOT_NAMES = ("carts", "files", "system", "apps")
 
 
 def sync_batch(body):
-    """(root id, pin, ops JSON text) of a POST /sync body, or None when the
+    """(root id, ops JSON text) of a POST /sync body, or None when the
     batch is malformed or speaks for a root this build does not serve."""
     raw = _bytes(body)
     buf = ctypes.create_string_buffer(raw, len(raw))
@@ -331,11 +381,21 @@ def sync_batch(body):
     if _lib().moy_sync_batch(buf, len(raw), ctypes.byref(b)) != 0:
         return None
     base = ctypes.addressof(buf)
-    pin = None
-    if b.pin:
-        pin = json.loads(raw[b.pin - base:b.pin_end - base].decode("utf-8"))
     ops = raw[b.ops - base:b.ops_end - base].decode("utf-8")
-    return (_ROOT_NAMES[b.root], pin, ops)
+    return (_ROOT_NAMES[b.root], ops)
+
+
+def sync_path(rel, history):
+    """The segments of a store path the receiver takes, 0 for one it
+    refuses (moy_net.h's moy_sync_path)."""
+    raw = _bytes(rel)
+    return _lib().moy_sync_path(raw, len(raw), 1 if history else 0)
+
+
+def sync_song(name):
+    """Whether `name` is a song of the music folder (moy_sync_song)."""
+    raw = _bytes(name)
+    return bool(_lib().moy_sync_song(raw, len(raw)))
 
 
 def _names(names):
@@ -344,16 +404,18 @@ def _names(names):
     return b"".join(_bytes(n) + b"\0" for n in names) + b"\0"
 
 
-def sync_apply(carts, files, kinds, root_id, ops, journal):
+def sync_apply(carts, files, kinds, root_id, ops, journal, apps=None):
     """(applied, [(index, reason)], shelf, refused) of the ops JSON text `ops`
-    applied into `root_id` of the store whose roots are `carts` and `files`."""
+    applied into `root_id` of the store whose roots are `carts`, `files` and
+    `apps`."""
     raw = _bytes(ops)
     buf = ctypes.create_string_buffer(raw, len(raw))
     if not raw.strip().startswith(b"["):
         raise ValueError("ops")
     import time
     st = _Store(_bytes(carts), None if files is None else _bytes(files),
-                _names(kinds), 1 if journal else 0, int(time.time()))
+                _names(kinds), 1 if journal else 0, int(time.time()),
+                None, 0, None if apps is None else _bytes(apps))
     r = _Result()
     base = ctypes.addressof(buf)
     lead = len(raw) - len(raw.lstrip())
@@ -366,11 +428,11 @@ def sync_apply(carts, files, kinds, root_id, ops, journal):
     return (r.applied, errs, bool(r.shelf), r.refused)
 
 
-def web_start(port, carts, files, kinds, pin, defer):
-    """Bind and serve; OSError on a bind failure."""
+def web_start(port, carts, files, kinds, system, defer, apps=None):
+    """Bind and serve; OSError on a bind failure. `system` None: the open host."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
-                  _names(kinds), None if not pin else _bytes(pin),
-                  _names(defer), 0)
+                  _names(kinds), None if not system else _bytes(system),
+                  _names(defer), None if apps is None else _bytes(apps))
     rc = _lib().moy_web_start(ctypes.byref(cfg))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -386,12 +448,12 @@ def _ip_of(ip):
     return parts[0] | parts[1] << 8 | parts[2] << 16 | parts[3] << 24
 
 
-def wc_on(port, carts, files, kinds, pin, defer, ip):
+def wc_on(port, carts, files, kinds, system, defer, ip, apps=None):
     """The web-console switch on: never waits; OSError for a refused
     configuration."""
     cfg = _WebCfg(port, _bytes(carts), None if files is None else _bytes(files),
-                  _names(kinds), None if not pin else _bytes(pin),
-                  _names(defer), 0)
+                  _names(kinds), None if not system else _bytes(system),
+                  _names(defer), None if apps is None else _bytes(apps))
     rc = _lib().moy_wc_on(ctypes.byref(cfg), _ip_of(ip))
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -447,22 +509,80 @@ def dns_stop():
     _lib().moy_dns_stop()
 
 
-def wc_set_pin(pin):
-    _lib().moy_wc_set_pin(None if not pin else _bytes(pin))
-
-
 def wc_park(on):
     _lib().moy_wc_park(1 if on else 0)
 
 
 def wc_url(paired):
-    out = ctypes.create_string_buffer(96)
-    n = _lib().moy_wc_url(out, 96, 1 if paired else 0)
-    return out.raw[:min(n, 95)].decode("utf-8")
+    out = ctypes.create_string_buffer(160)
+    n = _lib().moy_wc_url(out, 160, 1 if paired else 0)
+    return out.raw[:min(n, 159)].decode("utf-8")
 
 
 def web_stop(why=None):
     _lib().moy_web_stop(None if why is None else _bytes(why))
+
+
+def web_auth(system):
+    """The sign-in over the system folder (serving or not): the board's id,
+    "" with no folder."""
+    rc = _lib().moy_web_auth(None if not system else _bytes(system))
+    if rc != 0:
+        raise OSError(rc, os.strerror(rc))
+    out = ctypes.create_string_buffer(33)
+    _lib().moy_web_board_id(out)
+    return out.value.decode()
+
+
+def web_token():
+    """A fresh QR token (32 hex digits; "" with the sign-in off). The host's
+    alone: a board's comes inside wc_url(True)."""
+    out = ctypes.create_string_buffer(33)
+    _lib().moy_web_token(out)
+    return out.value.decode()
+
+
+def web_keys():
+    """[(kid, created, seen, name)]: the paired browsers."""
+    out = ctypes.create_string_buffer(2048)
+    n = _lib().moy_web_keys(out, 2048)
+    rows = []
+    for line in out.raw[:n].decode("utf-8", "replace").splitlines():
+        parts = line.split(" ", 3)
+        if len(parts) >= 3:
+            rows.append((parts[0], int(parts[1]), int(parts[2]),
+                         parts[3] if len(parts) > 3 else ""))
+    return rows
+
+
+def web_key_drop(kid):
+    return _lib().moy_web_key_drop(_bytes(kid))
+
+
+def web_signout():
+    """Every session ended and a web terminal cut (the password changed):
+    how many sessions went. The paired browsers stay."""
+    return _lib().moy_web_signout()
+
+
+PW_ITER = 1 << 15                       # moy_seal.h's MOY_SEAL_PW_ITER
+
+
+def pw_hash(password, salt, iter=PW_ITER):
+    """The console password's record, `$moy2$ITER$SALT$W0$L`
+    (moy_seal_pw_record, moy_seal.h's THE PASSWORD)."""
+    p, s = _bytes(password), _bytes(salt)
+    out = ctypes.create_string_buffer(256)
+    n = _lib().moy_seal_pw_record(p, len(p), s, len(s), iter, out, len(out))
+    if n < 0:
+        raise ValueError("salt")
+    return _text(out.raw[:n])
+
+
+def pw_check(password, record):
+    """Whether `password` is the one `record` was made from (moy_seal_pw_check)."""
+    p, r = _bytes(password), _bytes(record)
+    return bool(_lib().moy_seal_pw_check(p, len(p), r, len(r)))
 
 
 def web_poll():
@@ -479,6 +599,20 @@ def web_state():
 
 def web_events():
     return _lib().moy_web_events()
+
+
+_SHELF_BYTES = 256
+_SHELF_ALL = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
+
+
+def web_shelf():
+    """The cart folders the batches since the last call changed on the shelf
+    (a tuple of names), or None for every folder; cleared."""
+    buf = ctypes.create_string_buffer(_SHELF_BYTES)
+    n = _lib().moy_web_shelf(buf, _SHELF_BYTES)
+    if n == _SHELF_ALL:
+        return None
+    return tuple(x.decode("utf-8") for x in buf.raw[:n].split(b"\0") if x)
 
 
 def web_take():
@@ -507,23 +641,57 @@ def _taken(out, n):
         d.moy_net_free(out)
 
 
+# The webhost's C keeps ONE state, its request, chunk and read scratch among
+# it, because a board serves one connection at a time. A threaded host server
+# (serve.py's board twin) calls in from several threads at once, and ctypes
+# drops the GIL for the call: two pulls packed together read files into the
+# same scratch, and each answers with the other's bytes or crashes the process.
+# The calls that work in that scratch take this lock.
+_WEB = threading.Lock()
+
+
 def web_handle(method, target, body):
-    """The whole response to one request, or None when the VM answers it."""
-    m, t, b = _bytes(method), _bytes(target), _bytes(body or b"")
+    """(response, None) when the C answered the request, else (None, its
+    body opened): a request the VM answers, whose response goes through
+    web_handle_answer."""
+    m, t = _bytes(method), _bytes(target)
+    raw = _bytes(body or b"")
+    b = ctypes.create_string_buffer(raw, len(raw) + 1)    # opened in place
     out = ctypes.c_void_p()
     n = ctypes.c_size_t()
-    done = _lib().moy_web_handle(m, len(m), t, len(t), b, len(b),
+    with _WEB:
+        done = _lib().moy_web_handle(m, len(m), t, len(t), b, len(raw),
+                                     ctypes.byref(out), ctypes.byref(n))
+    if done:
+        return _taken(out, n), None
+    plain = b.raw[:n.value]
+    _taken(out, ctypes.c_size_t(0))
+    return None, plain
+
+
+def web_handle_answer(resp):
+    """The VM's response to web_handle's parked request, sealed as the
+    request was."""
+    raw = _bytes(resp)
+    out = ctypes.c_void_p()
+    n = ctypes.c_size_t()
+    with _WEB:
+        rc = _lib().moy_web_handle_answer(raw, len(raw), ctypes.byref(out),
+                                          ctypes.byref(n))
+    got = _taken(out, n)
+    if rc:
+        raise OSError(rc, os.strerror(rc))
+    return got
+
+
+def web_pack(root, kinds, binary=False):
+    """The store under `root` as the pull's JSON text, every file as bytes
+    where `binary`."""
+    out = ctypes.c_void_p()
+    n = ctypes.c_size_t()
+    with _WEB:
+        rc = _lib().moy_web_pack(_bytes(root), _names(kinds), 1 if binary else 0,
                                  ctypes.byref(out), ctypes.byref(n))
-    raw = _taken(out, n)
-    return raw if done else None
-
-
-def web_pack(root, kinds):
-    """The store under `root` as the pull's JSON text."""
-    out = ctypes.c_void_p()
-    n = ctypes.c_size_t()
-    rc = _lib().moy_web_pack(_bytes(root), _names(kinds), ctypes.byref(out),
-                             ctypes.byref(n))
     raw = _taken(out, n)
     if rc:
         raise OSError(rc, os.strerror(rc))
@@ -580,6 +748,19 @@ def ota_verify(payload, sig, keys=None):
     got = _with_keys(keys, lambda arr, n: _lib().moy_ota_verify(
         p, len(p), s, len(s), arr, n))
     return bool(got)
+
+
+def ota_admit_module(data, scheme, chip, consented, keys=None):
+    """moy_ota_admit_module, every tier's admission of a compiled module
+    file: (None, the module's length without its trailer) when it may load,
+    else (the refusal, that length). `keys` as (modulus_hex, exponent) pairs,
+    None for the baked ones."""
+    arr, n = _keys_arg(keys)
+    b = _bytes(data)
+    got = ctypes.c_size_t(0)
+    why = _lib().moy_ota_admit_module(b, len(b), _bytes(scheme), _bytes(chip),
+                                      1 if consented else 0, arr, max(n, 0), ctypes.byref(got))
+    return (None if why is None else why.decode()), got.value
 
 
 def _canon(fn, manifest_text):
@@ -742,9 +923,10 @@ def _slot():
     return (ctypes.string_at(p, n) if p and n else b""), booted.decode("utf-8")
 
 
-def _slot_reset(cap=4 << 20):
+def _slot_reset(cap=4 << 20, room=0xFFFFFFFF):
     d = _lib()
     ctypes.c_uint32.in_dll(d, "moy_slot_host_cap").value = cap
+    ctypes.c_uint32.in_dll(d, "moy_slot_host_room").value = room
     ctypes.memset(ctypes.addressof((ctypes.c_char * 16).in_dll(
         d, "moy_slot_host_booted")), 0, 16)
 
@@ -752,6 +934,13 @@ def _slot_reset(cap=4 << 20):
 def _link(ip=None):
     """The host's stand-in for the kernel's link: its address, or None (down)."""
     ctypes.c_uint32.in_dll(_lib(), "moy_net_host_link_ip").value = _ip_of(ip) if ip else 0
+
+
+def _station(on):
+    """The host's network modelled as a station (moy_net.h's THE NETWORK'S
+    GATE): open only while `_link` gives it an address. Off, it is the
+    machine's, always open."""
+    ctypes.c_int.in_dll(_lib(), "moy_net_host_station").value = 1 if on else 0
 
 
 def _pins(pins=()):
@@ -816,5 +1005,5 @@ def _drains():
 
 def _skew_clock(ms):
     """Move the links' clock on by `ms` (a window running out in a test)."""
-    v = ctypes.c_uint32.in_dll(_lib(), "moy_net_ms_skew")
-    v.value = (v.value + ms) & 0xFFFFFFFF
+    v = ctypes.c_uint64.in_dll(_lib(), "moy_net_ms_skew")
+    v.value = (v.value + ms) & 0xFFFFFFFFFFFFFFFF

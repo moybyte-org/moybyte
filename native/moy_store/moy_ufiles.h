@@ -1,8 +1,15 @@
 // The user-files layer (#108, #111): a person's creations as real files under
-// ONE visible root beside the carts folder -- `files/<kind>/<name><ext>` --
-// and a project's own folder as a kind of its own (`project:<folder>.moy`).
-// What a PC sees on the mounted card is what the Files app shows.
+// ONE visible root beside the carts folder, in the shared folders as the OS
+// shows them (docs/os_2026-11/between_apps.md section 2) -- and a project's
+// own folder as a kind of its own (`project:<folder>.moy`). What a PC sees on
+// the mounted card is what the Files app shows.
 //
+//   the folders      a kind is the layer's name for one folder of `files/`:
+//                    drawings `Pictures/`, sprites `Pictures/Sprites/`, docs
+//                    `Documents/`, stories `Documents/Stories/`, music
+//                    `Music/`, recordings `Recordings/`. A kind's name is what
+//                    every verb and every caller takes; its folder is where it
+//                    lives on disk (moy_store_base.FILE_KIND_DIRS restates it).
 //   the kinds        drawings (.moyimg), docs (.md), sprites (.moygfx), music
 //                    (.moysong), and recordings and stories, one FOLDER an
 //                    item. Every verb validates its kind against them: another
@@ -26,7 +33,7 @@
 //                    appended to the project's journal (moy_journal.h); its
 //                    cover (`cover.png`) is bytes, published whole and never
 //                    journaled. A project has no sidecar, no trash and no names.
-//   the trash        a delete moves the item to `files/trash/<kind>/` under a
+//   the trash        a delete moves the item to `files/.Trash/<kind>/` under a
 //                    unique name, its sidecar with it; a restore moves it back;
 //                    past MOY_UF_TRASH_KEEP entries the oldest go.
 //   the sidecars     `files/.history/<kind>/<name>.jsonl`, the op history: a
@@ -104,7 +111,7 @@ const char *moy_uf_project_folder(const char *kind);
 
 enum {
     MOY_UF_PATH_FILES = 0,      // the user-files root
-    MOY_UF_PATH_KIND,           // files/<kind>
+    MOY_UF_PATH_KIND,           // the kind's folder
     MOY_UF_PATH_FILE,           // one item
     MOY_UF_PATH_HISTORY,        // its sidecar
     MOY_UF_PATH_TRASH,          // its place in the trash

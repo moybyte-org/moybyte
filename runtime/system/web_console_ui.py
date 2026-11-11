@@ -12,14 +12,14 @@ the glass can be editing it too, because the glass is showing this screen.
 The screen is a page (docs/history/look_2026-10.md step 33) and deliberately
 nothing else:
 
-  * THE QR CODE, which is the feature, on its white quiet zone. The address
-    is `http://<ip>/?pin=NNNN` -- an IP and a pairing pin, ~30 characters a
-    kid would otherwise read off a 320x240 panel and type into a phone.
-    Scanned, it is one gesture and no transcription errors. The encoder is
-    `runtime/system/moy_qr.py`.
-  * "Open in a browser", the address in the code face and the pin large,
-    always shown: the look's 12 px type fits them beside the code, where the
-    8 px print face did not, so the address is no longer a tap away.
+  * THE QR CODE, which is the feature, on its white quiet zone. The link is
+    `http://<ip>/#t=TOKEN&b=ID`: the address and, after its `#`, a single-use
+    pairing token (web_console.WebConsole.url). Scanned, it pairs the phone
+    in one gesture: the token is the first sign-in, and the browser keeps a
+    key of its own from then on. The encoder is `runtime/system/moy_qr.py`.
+  * "Open in a browser", the address in the code face, always shown, and
+    how a browser that cannot scan signs in: the console's password where
+    one is set (`passwd`), else the code is the only way in.
   * Turning it off, because the toggle that got here lives in Settings and
     Settings is behind this screen. A mode with no visible way out is a
     trap: back (K on the T-Deck, Esc on a keyboard) turns it off, and a
@@ -54,8 +54,7 @@ except ImportError:  # host: the runtime package
 _HEAD = {"face": "title"}
 _SAY = {"tone": "dim", "wrap": True, "lines": 3}
 _ADDRESS = {"face": "mono", "tone": "value"}
-_PIN_CAP = {"tone": "dim", "face": "caption"}
-_PIN = {"face": "result"}
+_CAP = {"tone": "dim", "face": "caption", "wrap": True, "lines": 2}
 _KEYS = ("back", "Turn off")
 
 
@@ -120,7 +119,7 @@ class WebConsoleUI:
     def draw(self, rect):
         """The page over `rect`, the content under the bar: the code at the
         left, what to do at its right -- "Open in a browser", how, the
-        address in the code face, the pin large -- and Turn off where a
+        address in the code face, how else to sign in -- and Turn off where a
         finger or a pointer is."""
         cv = self._surf.canvas()
         fs = self._fs = self._surf.font_scale()
@@ -130,7 +129,7 @@ class WebConsoleUI:
         _ui.page("")
         _ui.hints(_KEYS)
         url = self._web.url()
-        host, pin = _split(url)
+        host = _split(url)
         pad = (24 if desk else 14) * fs
         foot = (_ui_draw.metrics("value_row")[17 if desk else 16] * fs
                 if _ui_draw.hint_kind() != "touch" else 0)
@@ -146,10 +145,9 @@ class WebConsoleUI:
                        "ui", 2)
         y = self._line(host or "Waiting for an address", _ADDRESS if host else _SAY, x, y, w,
                        "mono")
-        if pin:
+        if host:
             y += 6 * fs
-            y = self._line("Pin", _PIN_CAP, x, y, w, "caption")
-            y = self._line(pin, _PIN, x, y, w, "result")
+            y = self._line(self._web.sign_in_hint(), _CAP, x, y, w, "caption", 2)
         if _ui.input_kind() == "touch" or desk:
             _ui.at(x, y + 8 * fs, min(w, 120 * fs), 28 * fs)
             if _ui.button("Turn off", "danger"):
@@ -207,11 +205,8 @@ class WebConsoleUI:
 
 
 def _split(url):
-    """(the address, the pin) of the console's url, "" where it has none."""
+    """The address of the console's url, its pairing token cut off; "" with
+    none."""
     if not url:
-        return "", ""
-    host = url.replace("http://", "")
-    pin = ""
-    if "?pin=" in host:
-        host, _sep, pin = host.partition("?pin=")
-    return host.rstrip("/"), pin
+        return ""
+    return url.replace("http://", "").split("#", 1)[0].rstrip("/")

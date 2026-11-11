@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 // -- HTTP ----------------------------------------------------------------------
 
@@ -51,7 +52,8 @@ int moy_http_parse(const char *buf, size_t n, moy_http_req_t *r);
 // The value of `name` in the target's query string: 1 and its span, or 0 (and
 // an empty span). Pairs split on '&' and at their first '='; a name with no
 // '=' has the empty value. No percent-decoding: what rides a query here is a
-// four-digit pin, and a decoder is code that can be wrong about a credential.
+// session id, a sequence number and a tag in hex, and a decoder is code that
+// can be wrong about a credential.
 int moy_http_query(const char *target, size_t n, const char *name,
                    size_t name_n, const char **val, size_t *val_n);
 
@@ -65,7 +67,8 @@ int moy_http_query(const char *target, size_t n, const char *name,
 // A non-blocking listener on every interface: its descriptor, or -errno.
 int moy_http_listen(uint16_t port);
 // One pending connection, blocking with the two timeouts above, or -1.
-int moy_http_accept(int lfd);
+// `*peer` is its IPv4 address (network order), 0 where there is none.
+int moy_http_accept(int lfd, uint32_t *peer);
 // Read one request off `fd` into `buf`: its head and as much of its body as
 // Content-Length names, up to `cap` bytes. MOY_HTTP_OK and `*got`, or
 // MOY_HTTP_BAD when no head arrived.
@@ -75,12 +78,75 @@ int moy_http_recv(int fd, char *buf, size_t cap, moy_http_req_t *r,
 int moy_http_send(int fd, const void *p, size_t n);
 void moy_http_close(int fd);
 
-// The platform under the links: a millisecond clock, a sleep, and memory that
-// is the kernel's (PSRAM on a board), never the VM's heap.
+// The platform under the links: a millisecond clock since boot (moy_net_ms64,
+// which never wraps, and its low 32 bits), a sleep, and memory that is the
+// kernel's (PSRAM on a board), never the VM's heap.
+uint64_t moy_net_ms64(void);
 uint32_t moy_net_ms(void);
 void moy_net_sleep_ms(uint32_t ms);
 void *moy_net_alloc(size_t n);
 void moy_net_free(void *p);
+// The SHA-256 of `n` bytes at `p`, at the platform's speed: the board's SHA
+// engine (mbedtls) on a board, moy_ota.h's software digest elsewhere. A
+// compiled module's admission hashes megabytes with it (moy_ota_admit_module).
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]);
+
+// The wall clock (docs/os_2026-11/hardware.md section 1). A board's clock
+// counts from power-on until NTP sets it: the WiFi driver asks whenever the
+// station holds an address, for whichever holder raised it, and keeps the
+// answer's mark in RTC memory, so a soft reset (the VM's, or the chip's own
+// software reset, across which its RTC keeps the time) stays synced and a
+// power-off reads unsynced until the next answer. The host, the unix port
+// and the browser read their machine's clock, synced.
+//
+// moy_net_time: the wall clock in Unix seconds on every tier, the one clock
+// the stamps the kernel takes are on (a paired browser's times, a synced
+// file's journal entry), so a board, the host and the browser stamp an
+// instant alike and the console's wallclock reads them as it reads every
+// time. A board's system clock counts from 2000, MicroPython's epoch on the
+// esp32 port (machine.RTC sets it so, and the WiFi driver sets NTP's answer
+// MOY_NET_CLOCK_EPOCH back, moy_wifi.c), so its time() takes the epoch back;
+// the unix port, the browser and the host count from 1970. A board is told by
+// the header it has: ESP_PLATFORM is not defined for a usermod's sources on
+// the esp32 port (the executable compiles them too, and its copy is linked).
+#if __has_include("esp_heap_caps.h")
+#define MOY_NET_CLOCK_EPOCH 946684800       // 1970-01-01 to 2000-01-01
+#else
+#define MOY_NET_CLOCK_EPOCH 0
+#endif
+static inline int64_t moy_net_time(void) {
+    return (int64_t)time(NULL) + MOY_NET_CLOCK_EPOCH;
+}
+#define MOY_CLOCK_UNSYNCED 0
+#define MOY_CLOCK_SYNCED 1
+#define MOY_CLOCK_ASKING 2          // unsynced, a first answer still awaited
+#define MOY_CLOCK_SERVER "pool.ntp.org"
+#define MOY_CLOCK_SERVER_MAX 63
+// The clock's state, and the Unix time of the last answer in `*at` (NULL
+// when not wanted; 0 while unsynced).
+int moy_clock_state(int64_t *at);
+// The server the next sync asks: NULL or "" for MOY_CLOCK_SERVER. 0, or -1
+// for a name longer than MOY_CLOCK_SERVER_MAX.
+int moy_clock_server(const char *name);
+// What a certificate's dates are read against (moy_net_port.c). `floor` is
+// the newest of the image's build day and the newest start date of a
+// certificate this board has seen verify, which a board keeps across power-off;
+// `answer` is the Unix time NTP last answered, 0 for none. Nothing
+// authenticates NTP, so an answer is trusted only from the floor to
+// MOY_CLOCK_LEAP_MAX past it:
+//   trusted     the clock as it reads, and a not-yet-valid date counts;
+//   no answer   the clock raised to the floor, and a not-yet-valid date counts
+//               once the clock is at or past the floor (a clock set by hand);
+//   distrusted  the floor, and a not-yet-valid date never counts.
+// The clock never reads before the floor, so a certificate that expired before
+// it is refused whatever NTP says.
+#define MOY_CLOCK_LEAP_MAX (400LL * 86400)
+int64_t moy_clock_cert_time(int64_t now, int64_t floor, int64_t answer);
+int moy_clock_future_counts(int64_t now, int64_t floor, int64_t answer);
+// The Unix time of 00:00 UTC on the day this file was compiled.
+int64_t moy_clock_build_day(void);
+// The Unix time of a UTC date and time, the month 1 to 12.
+int64_t moy_clock_civil(int year, int month, int day, int hour, int min, int sec);
 
 // The reason phrase a response's status line carries ("OK" for a status the
 // table does not name).
@@ -97,14 +163,13 @@ int moy_utf8_valid(const char *s, size_t n);
 
 // -- the sync batch's envelope -----------------------------------------------
 
-// The four fields a batch carries, each a span of the body's JSON (NULL when
+// The three fields a batch carries, each a span of the body's JSON (NULL when
 // the object has no such member; the LAST member by a name wins, as json.loads
 // keeps it).
 typedef struct {
     const char *v, *v_end;
     const char *root, *root_end;
     const char *ops, *ops_end;
-    const char *pin, *pin_end;
 } moy_sync_env_t;
 
 enum {
@@ -115,30 +180,32 @@ enum {
 int moy_sync_decode(const char *body, size_t n, moy_sync_env_t *e);
 
 // A batch's wire JSON from its fields as JSON texts: `v` and `ops` always,
-// `root` only when not NULL (the v1 shape names none), `pin` only when not
-// NULL. Writes at most `cap` bytes (no NUL) and returns the length the whole
-// needs.
+// `root` only when not NULL (the v1 shape names none). Writes at most `cap`
+// bytes (no NUL) and returns the length the whole needs. The batch carries no
+// credential: the webhost's sealed session is its sign-in.
 size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
                        const char *root, size_t root_n, const char *ops,
-                       size_t ops_n, const char *pin, size_t pin_n);
+                       size_t ops_n);
 
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
-// carts); v2 names a root whose wire is 2, "files" or "system". A system
+// carts); v2 names a root whose wire is 2, "files", "apps" or "system". A system
 // batch (the console's own documents, runtime/carts/moy_sync.py's SYSTEM_ROOT) is
 // never applied here: the webhost parks it for the VM, whose Settings decide
 // which of its keys a browser may change (moy_sync.merge_system), and
 // moy_sync_apply refuses every op of one.
+// An apps batch is the apps' private folders (`apps/<id>/<key>`,
+// runtime/carts/cart_files.py): every file of it crosses as bytes.
 enum {
     MOY_SYNC_CARTS = 0,
     MOY_SYNC_FILES = 1,
     MOY_SYNC_SYSTEM = 2,
+    MOY_SYNC_APPS = 3,
 };
 
 typedef struct {
-    int root;                       // MOY_SYNC_CARTS, _FILES or _SYSTEM
+    int root;                       // MOY_SYNC_CARTS, _FILES, _SYSTEM or _APPS
     const char *ops, *ops_end;      // the ops array
-    const char *pin, *pin_end;      // the pin's value, NULL when it has none
 } moy_sync_batch_t;
 
 // A POST /sync body read whole: OK, or BAD for anything moy_sync_decode
@@ -146,36 +213,59 @@ typedef struct {
 // serve, or `ops` that is not an array.
 int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b);
 
-// Whether the batch's pin is the string `pin` (a host with no pin, NULL, takes
-// any batch).
-int moy_sync_pin_ok(const moy_sync_batch_t *b, const char *pin);
+// The files root's folder of songs, and whether `name` (n bytes) is one of
+// its songs: a name of the folder, no dot first, ending ".mp3" in any case.
+// The media route serves these and a browser's store keeps them
+// (moy_sync.local_song).
+#define MOY_SYNC_MUSIC "Music"
+int moy_sync_song(const char *name, size_t n);
 
 // -- the sync apply (moy_sync_apply.c, over native/moy_store) ------------------
 
 #define MOY_SYNC_PART_MAX (16 * 1024)
 #define MOY_SYNC_ERRS 8
+#define MOY_SYNC_SHELF_FULL 2
 
 // The store a receiver applies into. `kinds` is the files root's allowlist
 // (moy_files.FILE_KINDS), each name NUL-terminated and an empty one last; NULL
 // when the receiver has no files layer, which refuses every files op.
+// `shelf`, when not NULL, is where the apply notes each cart folder whose
+// change reached the shelf: the names NUL-terminated, an empty one last, each
+// once, added to what it already holds (`shelf[0]` is 0 for none). `apps` is
+// the apps root, NULL when the receiver has none, which refuses every apps
+// op. An apps op names `<id>/<key>`, one file of one app's folder, as bytes
+// ("b"), never text; its dc names `<id>`, the folder whole; a name holding
+// '~' (a write's staging, moy_files.h) is refused.
 typedef struct {
     const char *carts;
     const char *files;              // NULL: no files layer
     const char *kinds;
     int journal;                    // of record: a published carts file is a commit
     int64_t ts;                     // what that commit records as its time
+    char *shelf;                    // NULL: the folders are not noted
+    size_t shelf_cap;
+    const char *apps;               // NULL: no apps root
 } moy_sync_store_t;
 
 typedef struct {
     uint32_t applied;
     uint32_t refused;
-    int shelf;                      // a cart was born or died, or a shelf file changed
+    int shelf;                      // a cart was born or died, or a shelf file changed;
+                                    // MOY_SYNC_SHELF_FULL too when a folder did not
+                                    // fit the store's `shelf`
     uint32_t nerr;                  // the refusals held below, the first MOY_SYNC_ERRS
     struct {
         uint32_t index;
         char why[40];
     } err[MOY_SYNC_ERRS];
 } moy_sync_result_t;
+
+// The segments of a store path `p` (n bytes) the receiver takes, or 0 for a
+// path it refuses. The rule is an allowlist of shape: at most 256 characters,
+// forward slashes only, no empty or dot segment, no backslash, NUL, CR or LF
+// in one, and no segment moy_store_skip(.., history) keeps home -- 0 the
+// wire's rule, 1 a store of record's, which keeps the journal.
+int moy_sync_path(const char *p, size_t n, int history);
 
 // Apply the ops array at [ops, ops_end) into `root` of `s`, one op at a time:
 // a bad op is refused with its reason and never aborts the batch. A system
@@ -185,24 +275,46 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 
 // -- the webhost (moy_webhost.c) ---------------------------------------------------
 //
-// The console's own HTTP server: the baked bundle (native/moy_web) open, the
-// capability marker open, and behind the pin the store's two pulls, the sync
-// apply, and whatever routes the VM answers (`defer`). A system batch is the
-// VM's too: it is parked, pin checked, when `defer` names its pull
-// (/console.json), and refused 400 "no such store" when it does not. It is the kernel's: its
-// listener, state and buffers are outside the VM's heap, so a soft reset leaves
-// it serving and the next VM finds it so. The poll calls no Python; a deferred
-// request is parked until the VM takes it (moy_web_take) and answers it
-// (moy_web_answer), and one nobody answers in MOY_WEB_DEFER_MS is a 503.
+// The console's own HTTP server: the baked bundle (native/moy_web) and the
+// capability marker open, the sign-in (POST /auth, moy_webauth.c) open, and
+// behind a sealed session the store's two pulls, the sync apply, the web
+// terminal and whatever routes the VM answers (`defer`). A system batch is
+// the VM's too: it is parked, its seal opened, when `defer` names its pull
+// (/console.json), and refused 400 "no such store" when it does not. It is the
+// kernel's: its listener, state and buffers are outside the VM's heap, so a
+// soft reset leaves it serving and the next VM finds it so. The poll calls no
+// Python; a deferred request is parked until the VM takes it (moy_web_take)
+// and answers it (moy_web_answer), and one nobody answers in MOY_WEB_DEFER_MS
+// is a 503.
 
 #define MOY_WEB_CLOSING_MS 5000     // the goodbye window: outlasts the page's 3 s heartbeat
 #define MOY_WEB_DEFER_MS 3000
 #define MOY_WEB_POLL_MAX 4          // new connections one poll accepts
+// The longest folder (a root or the system folder) a start takes, its NUL
+// with it: a board's are a few bytes under /sd; the host library takes a
+// developer machine's (runtime/host/host_native.py).
+#ifndef MOY_WEB_PATH_MAX
 #define MOY_WEB_PATH_MAX 96
+#endif
+#define MOY_WEB_MEDIA_PIECE 32768u  // GET /media's most bytes of a song per request
+
+// The sign-in's backoff (moy_webhost.c's header): wrong credentials a source
+// has free, wrong ones from anywhere before every source not signed in waits,
+// the first window, its cap (each wrong one past the free ones doubles it),
+// the sources remembered, the quiet that gives back one wrong one from
+// anywhere past the free ones, and the quiet that clears a count within them.
+#define MOY_WEB_AUTH_FREE 10
+#define MOY_WEB_AUTH_FREE_ALL 30
+#define MOY_WEB_AUTH_WAIT_MS 1000u
+#define MOY_WEB_AUTH_WAIT_MAX_MS 300000u
+#define MOY_WEB_AUTH_SOURCES 8
+#define MOY_WEB_AUTH_DECAY_MS 600000u
+#define MOY_WEB_AUTH_FORGET_MS 3600000u
 
 enum {
     MOY_WEB_EV_SHELF = 1,           // a batch changed the shelf: rescan
     MOY_WEB_EV_STOPPED = 2,         // the listener closed (the goodbye ran out)
+    MOY_WEB_EV_PAIRED = 4,          // a browser paired: the QR's token is spent
 };
 
 typedef struct {
@@ -210,9 +322,10 @@ typedef struct {
     const char *carts;              // the carts root
     const char *files;              // the files root, NULL when there is none
     const char *kinds;              // the files root's kinds (moy_sync_store_t's)
-    const char *pin;                // NULL or "": open end to end
+    const char *system;             // the system folder (webkeys, password); NULL: open,
+                                    // which only a host may be (a board refuses then)
     const char *defer;              // the paths the VM answers, NUL-separated, "" last
-    int64_t epoch;                  // seconds the VM's clock starts after 1970's
+    const char *apps;               // the apps root, NULL when there is none
 } moy_web_cfg_t;
 
 typedef struct {
@@ -226,18 +339,38 @@ typedef struct {
     int err;                        // the last start's errno, 0 when it bound
 } moy_web_state_t;
 
-// Bind and serve: 0, or the errno the bind failed with. A host already
-// serving takes the new configuration and keeps its socket.
+// Bind and serve: 0, the errno the bind failed with, or MOY_EINVAL for a
+// root or system folder past MOY_WEB_PATH_MAX, which is never cut short (the
+// configuration stays as it was). A host already serving takes the new
+// configuration and keeps its socket.
 int moy_web_start(const moy_web_cfg_t *cfg);
 // Stop. With `why`, answer every request with {"error":"closing","why":...}
 // for MOY_WEB_CLOSING_MS first; without, close now.
 void moy_web_stop(const char *why);
-void moy_web_set_pin(const char *pin);
 // One poll: accept and serve up to MOY_WEB_POLL_MAX connections. 1 when it
 // did any work.
 int moy_web_poll(void);
 void moy_web_state(moy_web_state_t *out);
 uint32_t moy_web_events(void);      // the pending events, cleared
+// The cart folders the batches since the last call changed on the shelf, as
+// moy_sync_store_t's `shelf` list, copied into `out` and cleared: its length,
+// or MOY_WEB_SHELF_ALL when they did not all fit (the shelf reads every one).
+#define MOY_WEB_SHELF_BYTES 256u
+#define MOY_WEB_SHELF_ALL ((size_t)-1)
+size_t moy_web_shelf(char *out, size_t cap);
+
+// The sign-in's state, kept in `system` (moy_webauth.h): the sign-in set up
+// over that folder (it need not serve), the board's id and a fresh QR token
+// (32 hex digits, "" while the sign-in is off), the paired browsers ("KID
+// CREATED SEEN NAME" a line) and dropping one ("all": every one). A password
+// changed or removed signs every browser out: its sessions end and a web
+// terminal is cut, its key kept (moy_web_signout: how many sessions went).
+int moy_web_auth(const char *system);
+void moy_web_board_id(char out[33]);
+void moy_web_token(char out[33]);
+size_t moy_web_keys(char *out, size_t cap);
+int moy_web_key_drop(const char *kid);
+int moy_web_signout(void);
 
 // The parked request: 1 and its spans (good until moy_web_answer), or 0.
 int moy_web_take(const char **method, size_t *method_n, const char **target,
@@ -251,16 +384,22 @@ void moy_web_abort(void);
 // 0, or the errno the bind failed with. A listener already on `port` stays.
 int moy_web_bind(uint16_t port);
 
-// The router without a socket: a request's whole response appended to `out`
-// (moy_net_alloc'd, grown as needed; `*out_n` its length), or 0 when the
-// request is one the VM answers. The host's tests and the dev server.
+// The router without a socket (the host's tests and seam): a request's whole
+// response appended to `out` (moy_net_alloc'd, grown as needed; `*out_n` its
+// length), or 0 when the request is one the VM answers: then `body` is opened
+// in place, `*out_n` its plain length, and the VM's response goes through
+// moy_web_handle_answer, which seals it as the request was (a plain copy on
+// the open host) into `out` the same way: 0, or MOY_ENOMEM.
 int moy_web_handle(const char *method, size_t method_n, const char *target,
-                   size_t target_n, const char *body, size_t body_n,
+                   size_t target_n, char *body, size_t body_n,
                    char **out, size_t *out_n);
+int moy_web_handle_answer(const char *resp, size_t n, char **out, size_t *out_n);
 
 // A store root as the pull's JSON object, into `out` as moy_web_handle's.
-// `kinds` restricts the top-level folders walked (NULL: every one).
-int moy_web_pack(const char *root, const char *kinds, char **out,
+// `kinds` restricts the top-level folders walked (NULL: every one); `bytes`
+// carries every file as {"b": base64} (the apps root), else a file the wire
+// carries as bytes by its name alone.
+int moy_web_pack(const char *root, const char *kinds, int bytes, char **out,
                  size_t *out_n);
 
 // The image's bundle: "<count> <bytes> <digest>", or NULL with none baked.
@@ -299,26 +438,54 @@ int moy_wc_on(const moy_web_cfg_t *cfg, uint32_t ip);
 void moy_wc_off(const char *why);
 int moy_wc_poll(void);              // 1 when the state moved
 void moy_wc_state(moy_wc_state_t *out);
-void moy_wc_set_pin(const char *pin);
 void moy_wc_park(int on);
-// "http://a.b.c.d[:port]/" (with "?pin=..." when `paired`): its length, 0 with no address.
+// "http://a.b.c.d[:port]/" (with "#t=TOKEN&b=ID" when `paired`: the QR's
+// link, a token minted for it, both base64url, ID the board id's first 8
+// bytes): its length, 0 with no address.
 size_t moy_wc_url(char *out, size_t cap, int paired);
 
 // The kernel's link where the image has one: whether it holds an address.
 int moy_net_link(uint32_t *ip);
+// Whether the kernel's station is asked for a network and has no address yet:
+// a request on the http worker's task waits for it up to MOY_NET_DIAL_MS before
+// it resolves its host, so the console asks for the link and never waits on
+// it (the media service's task waits on the gate itself, moy_net_await).
+int moy_net_dialing(void);
+#define MOY_NET_DIAL_MS 16000u
+
+// THE NETWORK'S GATE: whether a request may reach the network now. On a board
+// its station's link holds an address (moy_wifi.c): lwIP's tcpip task exists
+// only once the station's driver started, so nothing reaches lwIP before the
+// link is up. The host's twin (moy_net_host.c) models a station only when a
+// test asks for one; an image with neither (the unix port, the browser) has
+// no gate. moy_conn_open refuses MOY_NET_ENET behind it, so every client on
+// it (moy_httpc, the fetch worker, the media service, the updater) is gated.
+int moy_net_online(void);
+#define MOY_NET_ENET 101            // no network: ENETUNREACH
+
+// The gate waited for by a worker's task that polls it, the station's dial
+// given MOY_NET_DIAL_MS from `*since` (moy_net_ms, set by the first call):
+// 1 online, 0 to poll again, -MOY_NET_ENET when no link came.
+int moy_net_await(uint32_t *since);
 
 // -- the Zero's pins (moy_gpio.c) and the setup portal (moy_dns.c) ------------------
 
 // /gpio: a response document into `out` and its HTTP status. The webhost
-// routes it where the board has a pin table.
+// routes it where the board has a pin table. A pin is driven under a lease
+// (moy_gpio.c's header): one another process holds is refused busy.
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
-                     size_t bn, const char *pin, char *out, size_t cap);
+                     size_t bn, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
 // MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).
 int moy_gpio_pins(const uint8_t **pins) __attribute__((weak));
 int moy_gpio_drive(int pin, int level) __attribute__((weak));
 int moy_gpio_sense(int pin) __attribute__((weak));
+// The pin's next touch configures it afresh (its lease is new: one dropped
+// since left it safe).
+void moy_gpio_reset(int pin) __attribute__((weak));
+// Every pin lease the page holds dropped (the webhost's stop).
+void moy_gpio_release(void);
 
 #define MOY_DNS_PORT 53
 #define MOY_DNS_QUERY_MAX 512          // RFC 1035's UDP size; a real query is ~40 bytes
@@ -359,7 +526,7 @@ static inline int moy_wifi_use_stored(size_t password_n, size_t stored_n) {
 // about, so remembering it unconditionally let one unreadable load rewrite
 // wifi.json as a single empty-password entry. A non-blank password is kept
 // even on failure: the connect's short poll giving up is the late association
-// the updater's ensure_online waits for.
+// the updater's polled dial (moy_ota.poll_online) watches for.
 static inline int moy_wifi_remember(int ok, const char *password,
                                     size_t password_n, const char *stored,
                                     size_t stored_n) {
@@ -398,10 +565,30 @@ typedef struct {
 
 #define MOY_WIFI_SCAN_MAX 24
 
-// Up and down are the lease's halves: the spine's WiFi lease calls them, and
-// nothing else starts or stops the radio. A connect is asked once and kept
-// (the driver re-associates on a loss) until a disconnect or the radio goes
-// down; its result is the state, polled.
+// THE BOOK. The station's power follows the lease table's radio rows
+// (moy_lease.h's THE RADIO), the one record of who holds it: the table calls
+// moy_wifi_book with its mask after every change, under its lock, from
+// whichever task made it (the VM's Workstation.wifi_hold, a compiled
+// program's http handle, the media service). The mask's first holder powers
+// a station that is down on (moy_wifi_on), and the book is the station's one
+// start: the VM's view of it (modmoy_net's wifi_on) starts only a station
+// that is down, since on a P4 a second start crosses the join asked right
+// after it. The last out powers it off unless something keeps it up with no
+// row: the board's own station (MOY_NET_WIFI_OWN, the Zero's, which serves
+// and offers its setup access point), the ESP-NOW link riding it, or the
+// webhost serving on it until the next VM takes its "web" row back. A
+// station something else raised with no row goes down at the book's next
+// change that leaves it empty, a release of a tag nobody held included. A holder of the tags a C worker waits on the link for ("http",
+// "media") also asks for the kept network (moy_wifi_connect_kept) when
+// nothing is asked yet; the console's tags dial from Python's store
+// (device_wifi.autoconnect_wifi), and "link" never dials (a network would
+// move ESP-NOW's channel). The kernel's kstop mark ("kstop", moy_kernel.c)
+// is a record that powers nothing.
+// moy_wifi_off is otherwise called only where nothing holds the book: a VM's
+// start resting a station nobody holds, and the Zero, whose station is its
+// own. A connect is asked once and kept (the driver re-associates on a loss)
+// until a disconnect or the radio goes down; its result is the state, polled.
+void moy_wifi_book(uint32_t mask);
 int moy_wifi_on(void);
 void moy_wifi_off(void);
 int moy_wifi_connect(const char *ssid, const char *password);
@@ -413,11 +600,19 @@ void moy_wifi_state(moy_wifi_state_t *out);
 int moy_wifi_connect_kept(void);
 void moy_wifi_forget_kept(const char *ssid);
 // The provisioning access point beside the station (open; its address in
-// `*ip`), its MAC, and the mDNS name the board answers to: 0 or an ESP error.
+// `*ip`), its MAC, and the mDNS name the board answers to (an empty name
+// ends the responder and gives back its task): 0 or an ESP error.
 int moy_wifi_ap(const char *ssid, uint32_t *ip);
 int moy_wifi_ap_mac(uint8_t mac[6]);
 int moy_wifi_mdns(const char *host);
-// A blocking scan into `out`: the count, or -1 when the radio is down.
+// The scan, polled: the first call asks for one and answers MOY_WIFI_SCANNING
+// until the driver's SCAN_DONE (or MOY_WIFI_SCAN_MS) ends it, then the count
+// found into `out`; -1 when the radio is down, or refused the scan (a station
+// still associating) for all of MOY_WIFI_SCAN_MS. moy_wifi_scan waits for
+// that answer on the caller's task.
+#define MOY_WIFI_SCANNING (-2)
+#define MOY_WIFI_SCAN_MS 15000u
+int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max);
 int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);
 // The power-save mode, set first when `set` is 0 or more; -1 before the driver.

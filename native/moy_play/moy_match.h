@@ -9,10 +9,14 @@
 // p99, a 250-byte state blob in 15.0 / 17.1 ms, so the payload is the inputs
 // and both consoles run the same simulation from them.
 //   1. INPUT DELAY: frame N's input is sent during N-delay and played on N.
-//      The delay starts at one tick and raises itself to two under stall
-//      pressure (ESCALATE_*), never lower: a lower delay mid-match could
-//      overwrite a frame already emitted. Delay is each console's own
-//      sampling lead, so the two sides may run different values.
+//      The delay starts at one tick, rises a tick under the PEER's stall
+//      pressure (ESCALATE_*: this console's lead is what the peer waits on)
+//      and comes back down a tick when the peer reports a tick's slack to
+//      spare (LOWER_*). A frame is sampled once and the tape
+//      is first-write-wins, so neither direction can rewrite a frame the peer
+//      may already hold: a drop only skips one sample. Delay is each
+//      console's own sampling lead, so the two sides may run different
+//      values.
 //   2. REDUNDANCY, NOT RETRANSMIT: every packet carries the last REDUNDANCY
 //      frames of input (a byte each), and the frame its sender is waiting
 //      for, so a stalled peer is served the frame it is stuck on (the fixed
@@ -20,7 +24,13 @@
 //      lies (64 of 200 messages arrived while every send said True).
 //   3. A MISSING INPUT STALLS THE SIM. Advancing on a guess desyncs the two
 //      consoles permanently and invisibly.
-// Determinism: the tick is fixed (TICK_HZ), and each logic frame starts from
+// A DESYNC IS SAID: every CHECK_EVERY frames each console stamps the hash of
+// the inputs it applied (and its tier's world digest while the world check is
+// armed), every input packet carries the newest stamp, and the first that
+// disagrees is printed and noticed on the screen.
+// Determinism: every frame's tick is the match's (TICK_FAST when both consoles
+// say they hold it, else TICK_HZ, the host's choice in START; from a step
+// down's agreed frame on, TICK_HZ), and each logic frame starts from
 // a seed derived from (seed, frame), so drawing, which consumes the random
 // stream at each board's own rate, cannot move it. The session
 // paces itself and drops any debt of a full tick by re-basing (burst
@@ -37,6 +47,25 @@
 // the guest's first input arrives and gives up after START_TRIES; a match
 // whose session declares itself dead, a peer's BYE and an unanswered START
 // all end the match and ask the console to re-run the cart solo.
+//
+// WHO IS HEARD. Frames are neither signed nor encrypted, so the sender's
+// address is the one check: a live match is bound to its peer's MAC, and an
+// INPUT, a BYE or a net message from anyone else is dropped (outside a match
+// a net message is taken from a console heard beaconing this cart). A START
+// is taken only for the cart this console sits on (announce) and from a
+// console heard beaconing, so it can re-run that cart and open nothing else.
+// A PORT's message is taken from the console its port names: FROM_ANY any
+// console in range (a datagram socket's rule: its record carries the sender
+// for the process to judge), FROM_MATCH only the live match's peer.
+//
+// PORTS. T_MSG is port 0, the game's: the cart in front's net.send and
+// on_net. A process opens a port 1..65535 (one opener a port), and T_PORT
+// carries its number; a message for a port nobody opened is dropped, and
+// each open port keeps its own queue, PORT_DEPTH records deep, the newest
+// dropped and counted while it is full. A port never sees an INPUT frame,
+// and a port's frame never reaches the session or the game's inbox. A port
+// sends only while it is open and within its SEND BUDGET (below); port 0 has
+// none, its sends being the game's.
 //
 // THE CONSOLE'S HALF. What the link cannot do itself -- open the cart a host
 // named, re-run the cart from frame zero -- it leaves as one ACTION the
@@ -55,27 +84,66 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MOY_MATCH_PROTO 1
+#define MOY_MATCH_PROTO 3
 enum {
     MOY_MATCH_T_BEACON = 1, MOY_MATCH_T_JOIN = 2, MOY_MATCH_T_START = 3,
     MOY_MATCH_T_INPUT = 4, MOY_MATCH_T_MSG = 5, MOY_MATCH_T_BYE = 6,
+    MOY_MATCH_T_PORT = 7,               // [proto, 7, port lo, port hi, body]
 };
 
 // The lockstep clock and its levers (configuration; docs/netplay_v1.md has
 // the measurements behind each).
-#define MOY_MATCH_TICK_HZ 30
+#define MOY_MATCH_TICK_HZ 30            // a match's tick unless its host asks 60
+#define MOY_MATCH_TICK_FAST 60          // a cart paced 60 or "free"
 #define MOY_MATCH_DELAY 1
+#define MOY_MATCH_DELAY_MAX_MS 66       // the delay's ceiling: 2 ticks at 30 Hz, 4 at 60
+#define MOY_MATCH_ESCALATE_S 3          // the escalation window
+#define MOY_MATCH_ESCALATE_AT 12        // distinct stalled ticks in a window, per 30 Hz
+// At 30 Hz (the default rate) the window in ticks and the delay's ceiling.
+#define MOY_MATCH_ESCALATE_TICKS (MOY_MATCH_ESCALATE_S * MOY_MATCH_TICK_HZ)
 #define MOY_MATCH_DELAY_MAX 2
-#define MOY_MATCH_ESCALATE_TICKS 90     // the escalation window, 3 s at 30 Hz
-#define MOY_MATCH_ESCALATE_AT 12        // distinct stalled ticks in a window
 #define MOY_MATCH_REDUNDANCY 4
 #define MOY_MATCH_MAX_SPAN 24
 #define MOY_MATCH_GIVE_UP 300           // stalled advances in a row: dead
 #define MOY_MATCH_TAPE 256
+// A stalled tick's retry (until its input arrives) and the resend between
+// ticks go out at most every LOCK_MS, whatever the loop's rate: a loop whose
+// frames between ticks are cheap sent every pass and flooded the air
+// (moy_lockstep_gate).
+#define MOY_MATCH_LOCK_MS 16
 #define MOY_MATCH_SLEW_TARGET_MS 12
 #define MOY_MATCH_SLEW_BAND_MS 4
+// The desync check: every CHECK_EVERY frames each console stamps a checkpoint
+// (the hash of every input it applied, and the world digest its tier gave
+// it), and every input packet carries the sender's newest one.
+#define MOY_MATCH_CHECK_EVERY 32
+#define MOY_MATCH_CHECKS 4
+#define MOY_MATCH_IN_HDR 22             // an input packet's header
+// A 60 Hz match that cannot keep its rate steps down to 30 for the rest of
+// the match: the host decides after a settled window ticked under STEP_BAR
+// percent of the rate and names the frame the step takes, STEP_LEAD frames
+// on, in every packet. The guest cannot simulate that frame before it holds
+// the host's input for it, which travels in a packet that carries the notice,
+// so both consoles tick the same frames at the same dt.
+#define MOY_MATCH_STEP_BAR 93
+#define MOY_MATCH_STEP_LEAD 32
+// A console's delay sets the PEER's stalls, so the peer's reports steer it:
+// up a tick when the peer's last window stalled ESCALATE_AT ticks, down a
+// tick when the peer's last window was clean (a quarter of that) and every
+// margin it reported through this console's window was at least a tick plus
+// LOWER_GUARD_MS; down never within LOWER_HOLD windows of a change.
+#define MOY_MATCH_LOWER_GUARD_MS 8
+#define MOY_MATCH_LOWER_HOLD 2
 // The link's.
 #define MOY_MATCH_BEACON_MS 400
+// THE CHANNEL: ESP-NOW is heard only on the channel it is sent on, and a
+// station associated to an AP is pinned to the AP's. A console whose station
+// is free sits on HOME_CH; with no peer on its cart heard, every PROBE_EVERY-th
+// beacon tick it visits the next channel of the probe list for one tick, and a
+// pinned peer heard there is followed to its channel for as long as it is
+// heard. A pinned console never moves; a live match never tunes.
+#define MOY_MATCH_HOME_CH 1
+#define MOY_MATCH_PROBE_EVERY 3
 #define MOY_MATCH_PEER_TTL_MS 2000
 #define MOY_MATCH_DRAIN_MAX 24
 #define MOY_MATCH_START_TRIES 12
@@ -86,6 +154,48 @@ enum {
 #define MOY_MATCH_CART 120              // the title START carries
 #define MOY_MATCH_DEFER 8               // non-input frames a mid-frame drain parks
 #define MOY_MATCH_INBOX 8               // net.* messages waiting for the cart
+#define MOY_MATCH_PORTS 8               // ports open on this console at once
+#define MOY_MATCH_PORT_DEPTH 4          // records a port keeps unread
+#define MOY_MATCH_PORT_HDR 4
+// THE SEND BUDGET. A port's frame shares the air and the transport with the
+// match's inputs, and a late input stalls both consoles, so ports send from
+// token buckets refilled by the clock: each port's own (fair between
+// holders) and the console's, which every port's send also spends. A send
+// past either answers MOY_MATCH_PORT_AGAIN and nothing goes on air.
+//   Lockstep's cadence: a tick's input (30 or 60 Hz) and a stalled tick's
+// retries or the resend between ticks, together at most one per LOCK_MS:
+// 62.5 frames/s, about 45/s measured in a linked match; beacons 2.5/s.
+//   The tightest transport is the Waveshare P4's: one FIFO, 12 deep, whose
+// one consumer clears a frame per ~10 ms RPC (native/p4/moy_c6), about 100
+// frames/s, so every frame queued ahead of an input delays it ~10 ms (an
+// S3 sends in ~60 us).
+//   While a match is live the console's bucket is LIVE_RATE/s with a burst of
+// LIVE_BURST: one port frame per 100 ms, so an input waits behind at most one
+// (~10 ms on the P4, under a 60 Hz tick's 16.7 ms), and inputs, beacons and
+// ports together use at most 75 of the ~100 frames/s the P4 clears.
+//   Outside a match it is PORTS_RATE/s with a burst of PORTS_BURST, under
+// the P4 queue's 12 so a beacon or a START is never refused behind ports,
+// and kind to a match nearby: eight consoles in range at their cap add eight
+// frames a 30 Hz tick to its receive ring, which a drain takes DRAIN_MAX at
+// a time.
+//   A port's own bucket is PORT_RATE/s with a burst of PORT_BURST, the
+// receiving queue's PORT_DEPTH: a burst fills a reader's queue and no more.
+#define MOY_MATCH_PORT_RATE 10          // frames/s, each port
+#define MOY_MATCH_PORT_BURST 4
+#define MOY_MATCH_PORTS_RATE 30         // frames/s, every port together
+#define MOY_MATCH_PORTS_BURST 8
+#define MOY_MATCH_LIVE_RATE 10          // ...while a match is live
+#define MOY_MATCH_LIVE_BURST 1
+enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
+// What the port calls answer where they fail.
+enum {
+    MOY_MATCH_PORT_BAD = -1,            // port 0 or out of range, a body too big
+    MOY_MATCH_PORT_FULL = -2,           // no port free; a take's `cap` short of the record
+    MOY_MATCH_PORT_BUSY = -3,           // the port is open already
+    MOY_MATCH_PORT_ABSENT = -4,         // the port is not open
+    MOY_MATCH_PORT_DOWN = -5,           // the link is down or the radio refused the send
+    MOY_MATCH_PORT_AGAIN = -6,          // past the send budget: nothing sent, try later
+};
 
 // The transport. `recv` answers the payload's length, -1 when the ring is
 // empty, -2 on a radio error (the link then calls `recover`).
@@ -94,6 +204,10 @@ typedef struct {
     int (*recv)(void *ctx, uint8_t mac[6], uint8_t *data, uint32_t cap);
     int (*add_peer)(void *ctx, const uint8_t mac[6]);
     int (*recover)(void *ctx);          // NULL: none
+    // The radio's channel: `set` > 0 moves an unassociated station there.
+    // Answers the channel, negated while the station is associated (pinned
+    // to its AP's); 0 unknown. NULL: the link never tunes.
+    int (*channel)(void *ctx, int set);
     void (*say)(void *ctx, const char *line);   // NULL: printf
     void *ctx;
 } moy_match_io_t;
@@ -104,7 +218,31 @@ typedef struct {
     uint8_t state;                      // 0 idle (launcher), 1 in a cart, 2 matched
     uint32_t seen;
     bool used;
+    uint8_t hz;                         // the tick it says it can hold; 0 unsaid (30)
+    uint8_t ch;                         // the channel it beacons on; 0 unsaid
+    bool pinned;                        // ...an associated station's, which it cannot leave
 } moy_match_peer_t;
+
+// A send budget: `credit` in thousandths of a frame, refilled from the ms
+// since `at` (none before `has_at`).
+typedef struct {
+    uint32_t credit;
+    uint32_t at;
+    bool has_at;
+} moy_match_budget_t;
+
+// One open port's queue, oldest first.
+typedef struct {
+    uint16_t port;                      // 0: the slot is free
+    uint8_t from;                       // MOY_MATCH_FROM_*
+    uint8_t n, head;
+    uint32_t drops;
+    uint32_t sent, refused;             // frames this port sent, sends its budget refused
+    moy_match_budget_t budget;
+    uint8_t mac[MOY_MATCH_PORT_DEPTH][6];
+    uint8_t len[MOY_MATCH_PORT_DEPTH];
+    uint8_t data[MOY_MATCH_PORT_DEPTH][MOY_MATCH_MSG_MAX];
+} moy_match_port_t;
 
 typedef struct {
     bool live;
@@ -137,6 +275,59 @@ typedef struct {
     uint8_t held[2], prev[2], pressed[2];
     uint32_t frame_seed;                // the seed the last advance's frame starts from
     char config[MOY_MATCH_CFG + 1];     // the host's tuning, "" for none
+    // The desync check. `hist` folds every applied frame's inputs; a
+    // checkpoint at frame F is the state ENTERING F: hist over 0..F-1 and the
+    // world digest the tier noted for F (0: none, never compared).
+    uint32_t hist;
+    int32_t world_f;
+    uint32_t world_d;
+    int32_t ck_f[MOY_MATCH_CHECKS];
+    uint32_t ck_in[MOY_MATCH_CHECKS], ck_w[MOY_MATCH_CHECKS];
+    int32_t ck_last;                    // the newest checkpoint's frame, -1 none
+    int32_t peer_ck_f;                  // the peer's newest heard
+    uint32_t peer_ck_in, peer_ck_w;
+    int32_t peer_ck_cmp;                // the peer's newest compared
+    int32_t desync;                     // the first checkpoint that disagreed, -1 none
+    uint8_t desync_kind;                // 1 the inputs, 2 the world
+    uint32_t checks;                    // checkpoints compared and agreeing
+    // The match's rate (the host's, carried by START) and what it scales.
+    uint16_t tick_hz;
+    uint16_t tick_rem;                  // the period's fraction of a ms, in 1/hz
+    int delay_max;
+    int32_t escalate_ticks;
+    uint32_t escalate_at;
+    // The delay's way down: the peer's report of how early this console's
+    // inputs reach it (ms, its margin EMA; 255 none), the window's lowest.
+    uint8_t peer_margin, rep_min;
+    // Stalled ticks in the last settled window: mine (reported; 255 none
+    // yet) and the peer's report of its own.
+    uint8_t last_win, peer_win;
+    int32_t delay_mark;                 // the frame of the last delay change
+    uint32_t raises, lowers;
+    // The step down (STEP_*): the rate the match began at, and from frame
+    // `step_from` on `step_hz` (0: none named). The window's wall clock, for
+    // the host's rate reading; `hold` keeps the host's rate (a dev force).
+    uint16_t hz0;
+    uint8_t step_hz;
+    int32_t step_from;
+    bool stepped;                       // this console ticks at step_hz now
+    bool hold;
+    bool has_win_ms;
+    uint32_t win_ms;
+    bool has_lock;                      // the last pass that sent (LOCK_MS)
+    uint32_t lock_at;
+    // Where the tick rate goes, in ms of the tick schedule given up (the
+    // PERF line's `lock=`, LockstepSession.lock): a tick that comes due a
+    // whole period late drops its debt, `late` when nothing was stalled
+    // (this console's own frame ran long: a collection, a heavy frame); a
+    // slot that passes while a tick waits on the peer's input is `stall`;
+    // `slew` is the guest's phase moved later.
+    uint32_t late_ms, stall_ms;
+    int32_t slew_ms;
+    // The peer's MAC a link-formed match is bound to (WHO IS HEARD); a
+    // session begun alone is not bound and the link's dispatch feeds it nothing.
+    uint8_t peer_mac[6];
+    bool bound;
 } moy_lockstep_t;
 
 enum { MOY_MATCH_ACT_NONE = 0, MOY_MATCH_ACT_LAUNCH = 1 };
@@ -169,10 +360,19 @@ typedef struct {
     uint8_t inbox_len[MOY_MATCH_INBOX];
     uint8_t inbox[MOY_MATCH_INBOX][MOY_MATCH_FRAME];
     uint32_t inbox_drops;
+    moy_match_port_t ports[MOY_MATCH_PORTS];
     // The console's pending action.
     uint8_t act;
     char act_cart[MOY_MATCH_CART + 1];
     char error[48];
+    bool world_check;                   // the tiers note world digests (a diag)
+    uint8_t rate;                       // the tick this console says it can hold
+    bool hold;                          // ...and takes as is when it hosts (a dev force)
+    uint8_t ch;                         // the channel the radio is on (0 unknown)
+    bool pinned;                        // ...an associated station's
+    uint8_t probe;                      // beacon ticks since the last probe, and its place
+    uint8_t probe_at;
+    moy_match_budget_t ports_budget;    // every port's sends together
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -192,6 +392,11 @@ void moy_match_announce(moy_match_t *m, const char *cart, int state);
 // The tuning this console offers when it hosts: a JSON object of at most
 // MOY_MATCH_CFG bytes, else "{}".
 void moy_match_set_config(moy_match_t *m, const char *cfg);
+// The tick this console says it can hold (MOY_MATCH_TICK_HZ or
+// MOY_MATCH_TICK_FAST), in its beacon. A host starts the match at the lower
+// of its own and the peer's and may step it down; `hold` starts it at this
+// console's own and never steps (a dev force). The guest takes START's.
+void moy_match_set_rate(moy_match_t *m, int hz, bool hold);
 // The host's half at a cart's start: a peer stands by on `cart` -> 1, this
 // run is a match (lower MAC) or it asked the peer to host (higher MAC) -> 0.
 int moy_match_offer(moy_match_t *m, const char *cart, uint32_t now);
@@ -212,6 +417,31 @@ bool moy_match_broadcast(moy_match_t *m, const uint8_t *p, size_t n);
 int moy_match_send_msg(moy_match_t *m, const uint8_t *body, size_t n);
 // The oldest waiting net.* message into `out`: its length, or -1 with none.
 int moy_match_take_msg(moy_match_t *m, uint8_t *out, size_t cap);
+// PORTS: `port` 1..65535 opened, its sender rule `from` (MOY_MATCH_FROM_*):
+// 0, or MOY_MATCH_PORT_BAD, _FULL (every slot taken), _BUSY (open already).
+// The port stays open across the link's stop and start; its close drops
+// what waits.
+int moy_match_port_open(moy_match_t *m, uint16_t port, int from);
+int moy_match_port_close(moy_match_t *m, uint16_t port);
+// One broadcast T_PORT carrying `body` on open `port` at `now` (ms): 0, or
+// _BAD (port 0, more than MOY_MATCH_MSG_MAX bytes), _ABSENT (not open),
+// _DOWN, _AGAIN (past the send budget).
+int moy_match_port_send(moy_match_t *m, uint16_t port, const uint8_t *body, size_t n,
+                        uint32_t now);
+// The oldest record waiting on `port`: its sender into `mac`, its bytes into
+// `out`, and its length; -1 with none waiting, _FULL where `cap` is short
+// of it (it waits on), _ABSENT where the port is not open.
+int moy_match_port_take(moy_match_t *m, uint16_t port, uint8_t mac[6], uint8_t *out,
+                        size_t cap);
+// Records `port` dropped while its queue was full, and how many wait: -1
+// where it is not open.
+int32_t moy_match_port_drops(const moy_match_t *m, uint16_t port);
+// Frames `port` sent, and sends its budget refused: -1 where it is not open.
+int32_t moy_match_port_sent(const moy_match_t *m, uint16_t port);
+int32_t moy_match_port_refused(const moy_match_t *m, uint16_t port);
+int moy_match_port_waiting(const moy_match_t *m, uint16_t port);
+// How many ports are open.
+int moy_match_ports_open(const moy_match_t *m);
 // The console's pending action, taken: ACT_LAUNCH with the cart's title.
 int moy_match_action(moy_match_t *m, char *cart, size_t cap);
 int moy_match_peer_count(const moy_match_t *m, uint32_t now);
@@ -230,10 +460,22 @@ const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *ca
 int moy_lockstep_begin(moy_match_t *m, int index, uint32_t seed, uint8_t session,
                        const char *cfg);
 void moy_lockstep_close(moy_match_t *m);
+// The rate frame `f` ticks at (its dt is 1/that), and the match's clock after
+// `f` ticks, in ms: the same on both consoles across a step down. Pure.
+int moy_lockstep_hz_at(const moy_match_t *m, int32_t f);
+int32_t moy_lockstep_ms(const moy_match_t *m, int32_t f);
+// The match's tick rate in Hz (begin sets MOY_MATCH_TICK_HZ): the period, and
+// the delay's ceiling and the escalation window, which are times.
+void moy_lockstep_rate(moy_match_t *m, int hz);
 // Is a tick due? Pure: no schedule side effect.
 bool moy_lockstep_pending(const moy_match_t *m, uint32_t now);
 // Is the next fixed tick due? Consumes the schedule.
 bool moy_lockstep_due(moy_match_t *m, uint32_t now);
+// May this pass of the console's loop send: a due tick always, a stalled
+// tick whose missing input has arrived always, and any other retry or the
+// resend between ticks once MOY_MATCH_LOCK_MS has passed since the last pass
+// that sent. A true answer is that pass.
+bool moy_lockstep_gate(moy_match_t *m, uint32_t now, bool due);
 // One lockstep frame with the local console's held mask: 1 simulate (the
 // players' buttons and the frame's seed are set), 0 STALL, -1 no session.
 // `timed` false: no clock (the phase controller and arrival stamps idle).
@@ -243,6 +485,17 @@ void moy_lockstep_resend(moy_match_t *m);
 int moy_lockstep_packet(moy_match_t *m, const uint8_t *data, size_t n, uint32_t now,
                         bool timed);
 uint32_t moy_lockstep_seed_of(uint32_t seed, int32_t f);
+// The desync check's world half: true when the frame about to be simulated
+// is a checkpoint whose world digest is not noted yet; the tier then notes
+// its digest of the world ENTERING that frame (any 32-bit value but 0).
+// Only while the console's world check is armed (moy_match_world_check):
+// the input half of the check is always on.
+bool moy_lockstep_world_due(const moy_match_t *m);
+void moy_match_world_check(moy_match_t *m, bool on);
+void moy_lockstep_world(moy_match_t *m, int32_t frame, uint32_t digest);
+// FNV-1a over `n` bytes, folded into `h` (start from MOY_LOCKSTEP_HASH0).
+#define MOY_LOCKSTEP_HASH0 2166136261u
+uint32_t moy_lockstep_hash(uint32_t h, const uint8_t *p, size_t n);
 // Ticks per second since the last call (the PERF line's net=); one reader.
 uint32_t moy_lockstep_tps(moy_match_t *m, uint32_t now);
 int32_t moy_lockstep_expand(const moy_match_t *m, uint32_t f16);
@@ -260,5 +513,9 @@ moy_match_t *moy_match_kernel(void);
 moy_match_t *moy_match_kernel_make(const char *name, const char *board, uint32_t entropy);
 // The frame tail's poll of the kernel's link, when it is live.
 void moy_match_kernel_poll(uint32_t now);
+// The PERF line's net= and lock= for the kernel's match into `v` (a
+// moy_perf_values_t), while a kernel run plays it in front: no console frame
+// runs then to push them. Each consumes its window, as the console's do.
+void moy_match_kernel_perf(void *v, uint32_t now);
 
 #endif // MOY_MATCH_H

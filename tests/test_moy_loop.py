@@ -660,3 +660,31 @@ def test_loop_is_the_periods_average_frame_by_stage(loop):
     assert list(f)[:2] == ["n", "ms"] and list(f)[2:-2] == list(DIAG_STAGES)
     assert 9.5 <= float(f["frame"]) <= 11.0, line
     assert float(f["sleep"]) >= 0 and float(f["other"]) >= 0
+
+
+def test_a_job_asked_for_again_while_it_runs_outlives_its_false_answer():
+    """The kernel's timers and notifications arm their job from a program's
+    own task: an ask that lands while the job runs and answers false must
+    keep it, or what it asked for waits on a job that is gone."""
+    import ctypes
+    lib = L._lib()
+    fn_t = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p)
+    ask, drop = lib.moy_loop_job, lib.moy_loop_job_drop
+    ask.argtypes = drop.argtypes = [fn_t, ctypes.c_void_p]
+    ask.restype = ctypes.c_bool
+    runs = []
+
+    def body(arg):
+        runs.append(arg)
+        if len(runs) == 1:
+            ask(job, None)
+        return False
+
+    job = fn_t(body)
+    before = L.jobs()
+    assert ask(job, None)
+    assert ask(job, None)                   # idempotent: one row
+    assert L.jobs() == before + 1           # re-asked during its run: kept
+    assert L.jobs() == before               # not re-asked: its false drops it
+    assert len(runs) == 2
+    drop(job, None)

@@ -32,7 +32,6 @@ def _device_ws(tmp_path):
 
     ws = _ws(tmp_path)
     inp = DeviceInputState()
-    inp.cart_start_ms = 0
     ws.input = inp
     return ws, inp.source("kbd")
 
@@ -178,9 +177,9 @@ def test_the_windowed_log_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch
 
     def frame():
         now[0] += 33
-        k = ws._frames_drawn
+        k = ws.frame_state.frames_drawn
         drv.frame(DT)
-        return ws._frames_drawn != k
+        return ws.frame_state.frames_drawn != k
 
     for _ in range(6):
         frame()
@@ -227,8 +226,8 @@ def test_a_python_script_runs_through_the_real_player(tmp_path):
     assert ws.cart["runtime"] == "python"
     assert ws.cart["permissions"] == ["files", "prefs", "console"]
     assert ws.cart["title"] == "hi"
-    assert ws.player._script and ws.player._is_tool
-    assert ws.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
+    assert ws.run.player._script and ws.run.player._is_tool
+    assert ws.run.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
 
 
 def test_a_lua_script_runs_the_same_way(tmp_path):
@@ -250,7 +249,7 @@ def test_running_a_script_creates_no_folder_and_writes_nothing(tmp_path):
     root = ws.carts_root
     _seed(ws, "hi.py", "print('hi')\n")
     before_carts = sorted(os.listdir(root))
-    docs = os.path.join(os.path.dirname(root), "files", "docs")
+    docs = os.path.join(os.path.dirname(root), "files", "Documents")
     before_docs = sorted(os.listdir(docs))
     ok, _why = ws.run_script("docs", "hi.py")
     assert ok
@@ -273,7 +272,7 @@ def test_the_capability_gate_refuses_carts_and_the_network(tmp_path):
         text = con.text()
         assert "NameError" in text
         assert "a script can't use " + said in text.replace("\n", "")
-        assert ws.player.cart_error is None, "the console IS the error surface"
+        assert ws.run.player.cart_error is None, "the console IS the error surface"
     # ...and the three it DOES get are real
     con = _run(ws, "ok.py",
                "prefs.set('n', 7)\nprint(prefs.get('n'))\nprint(len(files.list()))\n")
@@ -287,7 +286,7 @@ def test_a_script_error_lands_in_the_console(tmp_path):
     con = _run(ws, "boom.py", "def _update(dt):\n    1 / 0\n")
     _frame(ws, 2)
     assert "ZeroDivisionError" in con.text()
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     assert ws.wm.top_is_player(), "the console stays up, and exitable"
     # and it stops running: one traceback, not one per frame
     once = con.text()
@@ -299,7 +298,7 @@ def test_a_script_body_that_does_not_parse_lands_there_too(tmp_path):
     ws = _ws(tmp_path)
     con = _run(ws, "bad.py", "def (\n")
     assert "SyntaxError" in con.text() or "invalid syntax" in con.text()
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
 
 
 def test_a_generator_update_is_driven_one_step_per_frame(tmp_path):
@@ -346,7 +345,7 @@ def test_files_offers_RUN_on_a_script_and_not_on_a_note(tmp_path):
     _seed(ws, "hi.py", "print('hi')\n")
     _seed(ws, "shopping", "milk\n")
     app = _files_app(ws)
-    app.open_place("docs", keep="hi.py")
+    app.open_place("documents", keep="hi.py")
     assert app._action_labels()[0] == "RUN"
     app.select("shopping")
     assert "RUN" not in app._action_labels()
@@ -356,7 +355,7 @@ def test_the_files_RUN_action_starts_the_script(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('from files')\n")
     app = _files_app(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     app._act("RUN", "hi.py")
     _frame(ws)
     assert ws.wm.top_is_player()
@@ -370,7 +369,7 @@ def test_the_router_sends_a_script_to_the_text_page_not_the_editor(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('hi')\n")
     app = _files_app(ws)
-    app.open_place("docs")
+    app.open_place("documents")
     assert app.door("hi.py", "docs") == (text_modes.CODE, "hi.py")
     assert app.route("hi.py", kind="docs") == text_modes.CODE
     # OPEN edits the script: the Player is running Notes' editor skin over it

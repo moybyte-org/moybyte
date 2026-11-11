@@ -1,5 +1,7 @@
-// The browser-local cart store (#193 mode 1), Get Carts' installs into it
-// (#124, `commitInstall` below), and the .moy zip codec.
+// The browser-local cart store (#193 mode 1) and Get Carts' installs into it
+// (#124, `commitInstall` below). Its I/O only: what is seeded, skipped and
+// named, and the .moy archive, are the VM's (docs/moycore_direction.md
+// section 3; tests/test_web_io_ratchet.py).
 //
 // TWO WEB MODES, TOTAL, NO CROSSOVER (owner call 2026-08-25). A page served
 // FROM a board edits the BOARD's store: the sweep's batches go out as
@@ -34,43 +36,38 @@
 // Everything here is deliberately free of the VM and of the Worker globals, so
 // node can drive it directly (worker_persist_test.mjs) against a fake OPFS.
 
-// What never crosses THE WIRE or goes into a zip -- the JS mirror of
-// runtime/carts/moy_sync's `_skip`, which is the ONE predicate for what stays home.
-// journal/ is the durable undo history, thumbs/ a regenerable cache, .bak/.tmp
-// moy_fs's crash-safety artifacts.
-const SKIP_DIRS = ["thumbs", "__pycache__", "journal"];
-const SKIP_FILES = ["journal.jsonl"];
-const SKIP_SUFFIXES = [".bak", ".tmp"];
+// THE VM'S RULES, handed in by the worker's `bind` before any store is
+// opened: every decision about what a path, a name or a root is.
+//   roots           the sync roots (moy_sync.roots_json): each root's id, VFS
+//                   path and served endpoint, the named files a root of them
+//                   IS (`top`), whether every file is bytes (`binary`) and
+//                   whether a site-mode page leaves it to another keeper
+//                   (`site: false`, the apps' folders: commitWritten below);
+//                   the files root names its folder of `songs`
+//   skip(name, history)
+//                   what never crosses THE WIRE (false) and what never reaches
+//                   THE LOCAL STORE (true, which keeps the journal: in mode 1
+//                   this store is of record, and the undo history lives with
+//                   it): the native store's moy_store.skip (moy_fs.h)
+//   path(root id, rel, dc)
+//                   how many segments a root's store keeps `rel` as, 0 for
+//                   none (moy_sync.local_segs: the receiving C's path rule and
+//                   the root's shape)
+//   folder(root id, rel)
+//                   whether a root's store reads folder `rel` back, one a
+//                   sweep walks (moy_sync.local_folder)
+//   song(rel)       a files store's song (moy_sync.local_song)
+//   plain(name)     a name an install may write (cart_index.plain_name)
+//   record, stage   the names of Get Carts' record and of the folder an
+//                   install is built in, beside the carts store
+//                   (cart_index.RECORD_NAME, STAGE_DIR)
+let rules = null;
 
-// ...and what never reaches THE LOCAL STORE, which since 2026-08-25 is a
-// SHORTER list: in mode 1 this OPFS store is the store of record, so the undo
-// history belongs in it (moy_sync's "the journal lives with the store of
-// record"; #193's "with its undo history"). The mirror of moy_sync's
-// SITE_SKIP_*. A zip and a wire batch keep the longer list: a board has its own
-// journal and must never be handed somebody else's.
-const SITE_SKIP_DIRS = ["thumbs", "__pycache__"];
-const SITE_SKIP_FILES = [];
+export function bind(r) { rules = r; }
 
-function skipIn(name, dirs, files) {
-    if (dirs.indexOf(name) >= 0 || files.indexOf(name) >= 0) return true;
-    return SKIP_SUFFIXES.some((s) => name.endsWith(s));
-}
+export function skipName(name) { return !!rules.skip(name, false); }
 
-export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
-
-// The binary files that cross -- a cart's cover (SPEC.md 3.6) by name, a theme
-// package's fonts and sheets by suffix -- the JS mirror of runtime/carts/moy_sync's
-// BINARY_FILES and BINARY_SUFFIXES. They travel as base64: `b` where text
-// rides as `t` in a batch op, `{b: ...}` as a value in a served bundle, and as
-// BYTES once they are in the VFS or this store.
-const BINARY_FILES = ["cover.png"];
-const BINARY_SUFFIXES = [".fnt", ".moygfx"];
-
-export function isBinary(rel) {
-    const name = String(rel).slice(String(rel).lastIndexOf("/") + 1);
-    return BINARY_FILES.indexOf(name) >= 0
-        || BINARY_SUFFIXES.some((s) => name.length > s.length && name.endsWith(s));
-}
+export function skipLocal(name) { return !!rules.skip(name, true); }
 
 export function fromBase64(b) {
     const s = atob(b);
@@ -97,60 +94,18 @@ export function fileData(v) {
     return null;
 }
 
-export function skipLocal(name) {
-    return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
-}
-
-// The SYNC ROOT REGISTRY -- the JS MIRROR of runtime/carts/moy_sync.SYNC_ROOTS, so the
-// worker and this store iterate roots instead of naming carts/files. A static
-// host has no server to ask for this, so it is a constant, pinned against the
-// Python registry by tests/test_web_store.py (a drift there fails the build).
-// The per-root behaviour the browser store needs is the whole-folder delete
-// ARITY (a cart is one segment, a files item is a kind/name or a folder below
-// it; null: no folder delete at all), and for the console's own documents the
-// named top-level files the store IS (`top`, moy_sync.SYSTEM_FILES), which a
-// board serves through its VM (`console.json`) when its firmware has the root.
-// Kinds are not validated here -- these ops are the browser's own
-// sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
-// is the kid's own undo/recovery surviving the tab, which is correct.
-export const ROOTS = [
-    { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
-    { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
-    { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
-      top: ["system.json", "achievements.json", "shared.moygfx"] },
-];
+export function roots() { return rules.roots; }
 
 export function rootById(id) {
-    for (const r of ROOTS) if (r.id === id) return r;
+    for (const r of rules.roots) if (r.id === id) return r;
     return null;
 }
 
-// A path the local store will accept: the JS half of the receiving C's path
-// rule (native/moy_net/moy_sync_apply.c).
-// An allowlist of shape, not a blocklist of tricks -- the store is a real
-// filesystem and `..` in a cart name must never resolve. `skip` defaults to the
-// WIRE's rule; every store-side caller here passes `skipLocal`, so a journal
-// path lands locally and still cannot be shipped.
-export function safeSegments(rel, skip = skipName) {
-    if (typeof rel !== "string" || !rel || rel.length > 256) return null;
-    const parts = rel.split("/");
-    for (const seg of parts) {
-        if (!seg || seg === "." || seg === "..") return null;
-        if (/[\\\0\r\n]/.test(seg)) return null;
-        if (skip(seg)) return null;
-    }
-    return parts;
-}
-
-// The segments of a path THIS root's store holds, or null: a file inside a
-// folder for carts and files (a top-level file there is system state beside
-// the store, never the kid's work in it), one of the named files for a root
-// of top-level files.
-function localParts(root, rel) {
-    const parts = safeSegments(rel, skipLocal);
-    if (!parts) return null;
-    if (root.top) return parts.length === 1 && root.top.includes(parts[0]) ? parts : null;
-    return parts.length < 2 ? null : parts;
+// The segments `rel` is in a store of `rootId`, or null when the VM's rule
+// keeps no such path there.
+function partsIn(rootId, rel, dc) {
+    if (typeof rel !== "string" || !rel || !rules.path(rootId, rel, !!dc)) return null;
+    return rel.split("/");
 }
 
 // ---------------------------------------------------------------------------
@@ -261,18 +216,10 @@ export function storageNote(p) {
 // ---------------------------------------------------------------------------
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
 // A file read back is TEXT only when it is UTF-8 throughout, byte for byte:
 // fatal, so a module or a WAD is never mangled into replacement characters,
 // and the BOM kept, so writing the string back gives the same bytes.
 const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-// The record of what Get Carts installed, and the folder an install is built
-// in, as siblings of the carts store -- runtime/carts/cart_index.py's RECORD_NAME
-// and STAGE_DIR, the same layout as beside a board's carts folder. Pinned
-// against the Python by tests/test_web_store.py.
-export const RECORD_NAME = "installed.json";
-export const STAGE_DIR = "install";
 
 // THE CHANNEL'S STORAGE ROOT. Pages that share an origin share its OPFS: the
 // stable site (/moybyte/) and the dev site (/moybyte/dev/) both live on
@@ -319,6 +266,13 @@ async function dirFor(store, segs, create) {
     let d = store.carts;
     for (const seg of segs) d = await d.getDirectoryHandle(seg, { create: !!create });
     return d;
+}
+
+// A named file of a root of named files: the directory it sits in (made when
+// `create`) and its name there.
+async function namedAt(store, key, create) {
+    const parts = key.split("/");
+    return [await dirFor(store, parts.slice(0, -1), create), parts[parts.length - 1]];
 }
 
 async function writeText(store, parts, text) {
@@ -378,34 +332,30 @@ export async function applyOps(store, ops) {
 
 async function applyOne(store, op) {
     if (!op || typeof op !== "object") return "not an op";
-    // skipLocal, not skipName: in site mode the sweep ships this store's own
-    // journal to this store, and the wire predicate would refuse every line of
-    // it -- silently, as "bad path" errors nobody reads.
-    const parts = safeSegments(op.p || "", skipLocal);
-    if (!parts) return "bad path";
+    // The local rule, not the wire's: in site mode the sweep ships this
+    // store's own journal to this store.
     const r = store.root;
     if (op.dc) {
-        // Whole-folder delete arity from the root descriptor -- a cart is one
-        // segment, a files item a kind/name or a recording folder below it.
-        const n = parts.length;
-        if (r.dcMin === null || n < r.dcMin || (r.dcMax !== null && n > r.dcMax))
-            return "bad dc target";
+        // A whole folder within the root's arity: a cart is one segment, a
+        // files item a kind/name or a recording folder below it.
+        const parts = partsIn(r.id, op.p, true);
+        if (!parts) return "bad dc target";
         try { await removeAt(store, parts, true); } catch (e) { /* already gone */ }
         return null;
     }
-    // A cart store never takes a top-level file (system.json / wifi.json are
-    // system state beside the carts, not the kid's work: moy_sync draws the
-    // same line), and the console's own store takes its named files alone.
-    if (!localParts(r, op.p)) return r.top ? "not a system file" : "not a cart file";
+    const parts = partsIn(r.id, op.p);
+    if (!parts) return "bad path";
     const key = parts.join("/");
     // The console's own documents are written so a reload at any moment finds
-    // the old copy or the new one (`commitFile`): a torn system.json would boot
+    // the old copy or the new one (`commitFile`): a torn settings file would boot
     // the console on its defaults and lose every Setting. Cart files keep the
     // plain write: a cart's undo journal is the record of its last commits.
-    const put = r.top ? (data) => commitFile(store.carts, key, data)
+    const put = r.top ? async (data) => commitFile(...await namedAt(store, key, true), data)
                       : (data) => writeText(store, parts, data);
     if (op.d) {
-        if (r.top) await dropFile(store.carts, key);
+        if (r.top) {
+            try { await dropFile(...await namedAt(store, key, false)); } catch (e) { /* none */ }
+        }
         else try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
         store.parts.delete(key);
         return null;
@@ -418,7 +368,6 @@ async function applyOne(store, op) {
         return null;
     }
     if (op.b !== undefined) {
-        if (!isBinary(key)) return "not a binary file";
         if (typeof op.b !== "string") return "no bytes";
         const bytes = fromBase64(op.b);
         if (op.part === undefined || op.part === null) {
@@ -445,91 +394,112 @@ async function applyOne(store, op) {
     return null;
 }
 
-// Every syncable file in the local store as {rel: text}, and {rel: {b: base64}}
-// for a binary one -- the served bundle's shape. This is what a site-mode boot
-// writes into the VFS INSTEAD of the served carts.json.
+// Every syncable file in the local store as {rel: text, or its bytes when it
+// is not UTF-8}: what a site-mode boot writes into the VFS before the VM
+// decides what of the served bundle to add.
 export async function readAll(store) {
     const out = {};
     if (store.root.top) {
-        // A write a reload interrupted is finished or discarded first.
-        const have = await settleFiles(store.carts);
+        // A write a reload interrupted is finished or discarded first, in
+        // each folder a named file sits in.
+        const settled = new Map();
         for (const name of store.root.top) {
-            if (!have.includes(name)) continue;
-            const fh = await store.carts.getFileHandle(name);
-            out[name] = asValue(name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
+            const cut = name.lastIndexOf("/");
+            const head = cut < 0 ? "" : name.slice(0, cut);
+            if (!settled.has(head)) {
+                let got = null;
+                try {
+                    const dir = await dirFor(store, head ? head.split("/") : [], false);
+                    got = [dir, await settleFiles(dir)];
+                } catch (e) { /* no such folder yet */ }
+                settled.set(head, got);
+            }
+            const at = settled.get(head);
+            const leaf = name.slice(cut + 1);
+            if (!at || !at[1].includes(leaf)) continue;
+            const fh = await at[0].getFileHandle(leaf);
+            out[name] = asValue(new Uint8Array(await (await fh.getFile()).arrayBuffer()));
         }
         return out;
     }
-    await walk(store.carts, "", out, 0);
+    await walk(store.root.id, store.carts, "", out, store.root.songs ? rules.song : null);
     return out;
 }
 
-// A file's bytes as the bundle value readAll hands out.
-function asValue(rel, bytes) {
-    if (isBinary(rel)) return { b: toBase64(bytes) };
+// A file's bytes as the value readAll hands out: its text when it is UTF-8
+// throughout, else the bytes.
+function asValue(bytes) {
     try { return strict.decode(bytes); } catch (e) { return bytes; }
 }
 
-async function walk(dir, prefix, out, depth) {
-    if (depth > 6) return;
+// Each file of root `rootId`'s store under `dir` the VM's rules keep: a
+// folder `rules.folder` reads, a file `rules.path` keeps (the journal comes
+// BACK too), none `leave` names.
+async function walk(rootId, dir, prefix, out, leave) {
     const entries = [];
     for await (const [name, handle] of dir.entries()) entries.push([name, handle]);
     entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     for (const [name, handle] of entries) {
-        if (skipLocal(name)) continue;      // the journal comes BACK too
         const rel = prefix ? prefix + "/" + name : name;
         if (handle.kind === "directory") {
-            await walk(handle, rel, out, depth + 1);
+            if (rules.folder(rootId, rel)) await walk(rootId, handle, rel, out, leave);
             continue;
         }
-        // Top-level files are not cart files; the sweep never ships them and
-        // the VFS must not be seeded with them either.
-        if (rel.indexOf("/") < 0) continue;
-        out[rel] = asValue(rel, new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+        if ((leave && leave(rel)) || !partsIn(rootId, rel)) continue;
+        out[rel] = asValue(new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     }
 }
 
-export async function isEmpty(store) {
-    if (store.root.top) return !Object.keys(await readAll(store)).length;
-    for await (const [name, handle] of store.carts.entries()) {
-        if (handle.kind === "directory" && !skipLocal(name)) return false;
-    }
-    return true;
-}
+// THE SONGS: a files store's music folder keeps MP3s the VFS never holds
+// (readAll leaves them out); Music reads one a range at a time
+// (media_link.py), so a library never sits in the page's memory.
 
-// The served bundle's SYSTEM carts (manifest "system": true) that the local
-// store lacks, as bundle entries. The local store wins over the bundle -- it is
-// the kid's work -- but a console that ships a system cart the store has never
-// had (a new app like Get Carts, a new seed game) must still reach a browser
-// that has kept its shelf since an older visit, the way a board seeds a
-// built-in it does not have (runtime/carts/moy_seed.py). A cart the store has is
-// never touched.
-export function missingSystemCarts(local, bundle) {
-    const have = new Set(Object.keys(local).map((k) => k.split("/")[0]));
-    const system = new Set();
-    for (const rel in bundle) {
-        const cut = rel.indexOf("/");
-        if (cut < 0 || rel.slice(cut + 1) !== "manifest.json") continue;
-        const top = rel.slice(0, cut);
-        if (have.has(top) || typeof bundle[rel] !== "string") continue;
-        try {
-            const m = JSON.parse(bundle[rel]);
-            if (m && m.moybyte && m.moybyte.system === true) system.add(top);
-        } catch (e) { /* not a manifest anything reads: not a cart to add */ }
-    }
+// {name: size} of the store's songs.
+export async function songs(store) {
     const out = {};
-    for (const rel in bundle) if (system.has(rel.split("/")[0])) out[rel] = bundle[rel];
+    const music = store.root.songs;
+    let dir;
+    try { dir = await store.carts.getDirectoryHandle(music); } catch (e) { return out; }
+    for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== "file" || !rules.song(music + "/" + name)) continue;
+        out[name] = (await handle.getFile()).size;
+    }
     return out;
+}
+
+// A song's File (a Blob to slice), or null.
+export async function songFile(store, name) {
+    const music = store.root.songs;
+    if (typeof name !== "string" || !rules.song(music + "/" + name)) return null;
+    try {
+        const dir = await store.carts.getDirectoryHandle(music);
+        return await (await dir.getFileHandle(name)).getFile();
+    } catch (e) { return null; }
+}
+
+// A dropped song kept: its name, or null for one that is not a song.
+export async function keepSong(store, name, bytes) {
+    const base = String(name).slice(String(name).lastIndexOf("/") + 1);
+    if (!rules.song(store.root.songs + "/" + base)) return null;
+    await writeText(store, [store.root.songs, base], bytes);
+    return base;
+}
+
+// One file of a cart store removed; one already gone is no error.
+export async function removeFile(store, rel) {
+    const parts = partsIn(store.root.id, rel);
+    if (!parts) return;
+    try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
 }
 
 // First visit: adopt the served carts.json as the local baseline.
 export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
-        const parts = localParts(store.root, rel);
+        const parts = partsIn(store.root.id, rel);
         const data = fileData(carts[rel]);
         if (!parts || data === null) continue;
-        if (store.root.top) await commitFile(store.carts, rel, data);
+        if (store.root.top) await commitFile(...await namedAt(store, rel, true), data);
         else await writeText(store, parts, data);
         n++;
     }
@@ -558,19 +528,14 @@ export async function seed(store, carts) {
 // marker that never finished writing does not parse, and counts as none.
 // ---------------------------------------------------------------------------
 
-function plainName(name) {
-    return typeof name === "string" && !!name && name.indexOf("/") < 0
-        && name.indexOf("\\") < 0 && name.indexOf("\0") < 0 && name[0] !== ".";
-}
-
 // `store` is the carts store (openStore(nav, "carts")); `files` is
 // [{name, data: Uint8Array}], the staged folder's whole contents; `record` is
 // the record's new text. Resolves once the install is durable; throws, having
 // changed nothing on the shelf, when it could not be made so.
 export async function commitInstall(store, folder, files, record) {
-    if (!plainName(folder)) throw new Error("bad folder " + folder);
-    for (const f of files) if (!plainName(f.name)) throw new Error("bad file " + f.name);
-    const stage = await store.dir.getDirectoryHandle(STAGE_DIR, { create: true });
+    if (!rules.plain(folder)) throw new Error("bad folder " + folder);
+    for (const f of files) if (!rules.plain(f.name)) throw new Error("bad file " + f.name);
+    const stage = await store.dir.getDirectoryHandle(rules.stage, { create: true });
     try { await stage.removeEntry(folder + ".commit"); } catch (e) { /* none */ }
     try { await stage.removeEntry(folder, { recursive: true }); } catch (e) { /* none */ }
     try {
@@ -607,7 +572,7 @@ async function rollForward(store, stage, folder) {
             if (h.kind !== "file") continue;
             await writeIn(into, name, new Uint8Array(await (await h.getFile()).arrayBuffer()));
         }
-        await writeIn(store.dir, RECORD_NAME, m.record);
+        await writeIn(store.dir, rules.record, m.record);
     }
     await stage.removeEntry(folder + ".commit");
     if (from) await stage.removeEntry(folder, { recursive: true });
@@ -619,7 +584,7 @@ async function rollForward(store, stage, folder) {
 // that never reached its marker) goes. Returns how many rolled forward.
 export async function recoverInstalls(store) {
     let stage;
-    try { stage = await store.dir.getDirectoryHandle(STAGE_DIR); } catch (e) { return 0; }
+    try { stage = await store.dir.getDirectoryHandle(rules.stage); } catch (e) { return 0; }
     const names = [];
     for await (const [name, h] of stage.entries()) names.push([name, h.kind]);
     let n = 0;
@@ -637,12 +602,12 @@ export async function recoverInstalls(store) {
 
 // The record alone (a removal), or null when there is none.
 export async function writeRecord(store, text) {
-    await writeIn(store.dir, RECORD_NAME, text);
+    await writeIn(store.dir, rules.record, text);
 }
 
 export async function readRecord(store) {
     try {
-        const fh = await store.dir.getFileHandle(RECORD_NAME);
+        const fh = await store.dir.getFileHandle(rules.record);
         return await (await fh.getFile()).text();
     } catch (e) {
         return null;
@@ -654,7 +619,7 @@ export async function readRecord(store) {
 // then says they are whole, and only then do they replace "<key>" -- so a
 // reload at any moment finds the old copy or the new one, and `settleFiles`
 // finishes or discards what one left. A compiled cart's written files and the
-// console's own documents (system.json and its siblings) are kept this way.
+// console's own documents (system/settings and its siblings) are kept this way.
 // ---------------------------------------------------------------------------
 
 const PART = "~part", DONE = "~done";
@@ -715,53 +680,34 @@ async function settleFiles(dir) {
 
 // ---------------------------------------------------------------------------
 // A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
-// carts: written/<cart>/<key>, runtime/carts/cart_files.py's layout, so the VFS the
+// carts: apps/<id>/<key>, runtime/carts/cart_files.py's layout, so the VFS the
 // console reads and this store of record hold the same names. The console
 // writes the VFS and queues the file here (carts_link's WebCartKeep), and a
 // write lands with `commitFile`'s crash-safety, so readWritten finds the old
 // copy or the new one.
 // ---------------------------------------------------------------------------
 
-export const WRITTEN_ROOT = "written";
-
-// The written store, or null with no OPFS (the console then keeps written
-// files in this tab alone, like every other edit there).
-export async function openWritten(nav) {
-    const st = nav && nav.storage;
-    if (!st || typeof st.getDirectory !== "function") return null;
-    try {
-        const dir = await st.getDirectory();
-        return { dir: await dir.getDirectoryHandle(WRITTEN_ROOT, { create: true }) };
-    } catch (e) {
-        return null;
-    }
-}
-
-// A cart id or a key as a name in one folder: what cart_files.py writes, and
-// never a path.
-function writtenName(n) {
-    return typeof n === "string" && !!n && n !== "." && n !== ".." && !/[\/\\\0]/.test(n);
-}
+// The written store is the apps root's (openStore(nav, "apps")).
 
 // Make one written file durable. Throws, with the old copy in place, when it
 // could not be.
 export async function commitWritten(w, cart, key, bytes) {
-    if (!writtenName(cart) || !writtenName(key) || key.includes("~"))
+    if (typeof cart !== "string" || !partsIn(w.root.id, cart + "/" + key))
         throw new Error("bad written file " + cart + "/" + key);
-    const dir = await w.dir.getDirectoryHandle(cart, { create: true });
+    const dir = await w.carts.getDirectoryHandle(cart, { create: true });
     await commitFile(dir, key, bytes);
 }
 
 // One written file gone, or with `key` null every file the cart wrote.
 export async function dropWritten(w, cart, key) {
-    if (!writtenName(cart)) return;
     if (key === null || key === undefined) {
-        try { await w.dir.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
+        if (!partsIn(w.root.id, cart, true)) return;
+        try { await w.carts.removeEntry(cart, { recursive: true }); } catch (e) { /* none */ }
         return;
     }
-    if (!writtenName(key)) return;
+    if (typeof cart !== "string" || !partsIn(w.root.id, cart + "/" + key)) return;
     let dir;
-    try { dir = await w.dir.getDirectoryHandle(cart); } catch (e) { return; }
+    try { dir = await w.carts.getDirectoryHandle(cart); } catch (e) { return; }
     try { await dir.removeEntry(key); } catch (e) { /* none */ }
 }
 
@@ -770,9 +716,9 @@ export async function dropWritten(w, cart, key) {
 export async function readWritten(w) {
     const out = {};
     const carts = [];
-    for await (const [name, h] of w.dir.entries()) if (h.kind === "directory") carts.push(name);
+    for await (const [name, h] of w.carts.entries()) if (h.kind === "directory") carts.push(name);
     for (const cart of carts) {
-        const dir = await w.dir.getDirectoryHandle(cart);
+        const dir = await w.carts.getDirectoryHandle(cart);
         for (const n of await settleFiles(dir)) {
             const fh = await dir.getFileHandle(n);
             out[cart + "/" + n] = new Uint8Array(await (await fh.getFile()).arrayBuffer());
@@ -781,241 +727,3 @@ export async function readWritten(w) {
     return out;
 }
 
-// ---------------------------------------------------------------------------
-// The .moy zip -- the no-account escape hatch (#193).
-//
-// A zip carries NO journal, deliberately: it is built with `skipName` (the wire
-// rule) because a .moy is meant to drop into somebody else's board store, and a
-// history of edits made on another machine is neither useful there nor theirs.
-// ---------------------------------------------------------------------------
-
-const CRC_TABLE = (() => {
-    const t = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) {
-        let c = i;
-        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-        t[i] = c >>> 0;
-    }
-    return t;
-})();
-
-export function crc32(bytes) {
-    let c = 0xffffffff;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-}
-
-// STORED (method 0) entries only. A cart is a handful of small text files, so
-// compressing them buys little and costs a DEFLATE implementation; every
-// unzipper reads stored entries, which is what "it drops into a board store"
-// requires. Reading, by contrast, must handle deflated input -- see unzip().
-export function zipStore(files) {
-    const parts = [];
-    const central = [];
-    let offset = 0;
-    for (const f of files) {
-        const name = enc.encode(f.name);
-        const data = f.data;
-        const crc = crc32(data);
-        const local = new Uint8Array(30 + name.length);
-        const lv = new DataView(local.buffer);
-        lv.setUint32(0, 0x04034b50, true);
-        lv.setUint16(4, 20, true);          // version needed
-        lv.setUint16(6, 0, true);           // flags
-        lv.setUint16(8, 0, true);           // method: stored
-        lv.setUint16(10, 0, true);          // mod time
-        lv.setUint16(12, 0x21, true);       // mod date: 1980-01-01, deterministic
-        lv.setUint32(14, crc, true);
-        lv.setUint32(18, data.length, true);
-        lv.setUint32(22, data.length, true);
-        lv.setUint16(26, name.length, true);
-        lv.setUint16(28, 0, true);
-        local.set(name, 30);
-        parts.push(local, data);
-
-        const cen = new Uint8Array(46 + name.length);
-        const cv = new DataView(cen.buffer);
-        cv.setUint32(0, 0x02014b50, true);
-        cv.setUint16(4, 20, true);          // version made by
-        cv.setUint16(6, 20, true);          // version needed
-        cv.setUint16(8, 0, true);
-        cv.setUint16(10, 0, true);
-        cv.setUint16(12, 0, true);
-        cv.setUint16(14, 0x21, true);
-        cv.setUint32(16, crc, true);
-        cv.setUint32(20, data.length, true);
-        cv.setUint32(24, data.length, true);
-        cv.setUint16(28, name.length, true);
-        cv.setUint16(30, 0, true);
-        cv.setUint16(32, 0, true);
-        cv.setUint16(34, 0, true);
-        cv.setUint16(36, 0, true);
-        cv.setUint32(38, 0, true);
-        cv.setUint32(42, offset, true);
-        cen.set(name, 46);
-        central.push(cen);
-        offset += local.length + data.length;
-    }
-    const cenStart = offset;
-    let cenLen = 0;
-    for (const c of central) cenLen += c.length;
-    const end = new Uint8Array(22);
-    const ev = new DataView(end.buffer);
-    ev.setUint32(0, 0x06054b50, true);
-    ev.setUint16(8, central.length, true);
-    ev.setUint16(10, central.length, true);
-    ev.setUint32(12, cenLen, true);
-    ev.setUint32(16, cenStart, true);
-    const all = parts.concat(central, [end]);
-    let total = 0;
-    for (const p of all) total += p.length;
-    const out = new Uint8Array(total);
-    let at = 0;
-    for (const p of all) { out.set(p, at); at += p.length; }
-    return out;
-}
-
-async function inflateRaw(bytes) {
-    if (typeof DecompressionStream !== "function")
-        throw new Error("this browser cannot read compressed zips");
-    const ds = new DecompressionStream("deflate-raw");
-    const stream = new Blob([bytes]).stream().pipeThrough(ds);
-    return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-// -> [{name, data}]. Sizes and offsets come from the CENTRAL DIRECTORY, never
-// from the local headers: an entry written with a data descriptor (flag bit 3,
-// what most streaming zippers emit) carries zeroes for crc/sizes locally, and
-// trusting those reads every file as empty.
-export async function unzip(bytes) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    let eocd = -1;
-    for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 66000; i--) {
-        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    }
-    if (eocd < 0) throw new Error("not a zip file");
-    const count = view.getUint16(eocd + 10, true);
-    let at = view.getUint32(eocd + 16, true);
-    const out = [];
-    for (let i = 0; i < count; i++) {
-        if (at + 46 > bytes.length || view.getUint32(at, true) !== 0x02014b50) break;
-        const method = view.getUint16(at + 10, true);
-        const csize = view.getUint32(at + 20, true);
-        const nameLen = view.getUint16(at + 28, true);
-        const extraLen = view.getUint16(at + 30, true);
-        const commentLen = view.getUint16(at + 32, true);
-        const local = view.getUint32(at + 42, true);
-        const name = dec.decode(bytes.subarray(at + 46, at + 46 + nameLen));
-        at += 46 + nameLen + extraLen + commentLen;
-        if (name.endsWith("/")) continue;                 // a directory entry
-        if (view.getUint32(local, true) !== 0x04034b50) continue;
-        const lNameLen = view.getUint16(local + 26, true);
-        const lExtraLen = view.getUint16(local + 28, true);
-        const start = local + 30 + lNameLen + lExtraLen;
-        const raw = bytes.subarray(start, start + csize);
-        if (method === 0) out.push({ name, data: raw });
-        else if (method === 8) out.push({ name, data: await inflateRaw(raw) });
-        else throw new Error("unsupported zip compression (" + method + ")");
-    }
-    return out;
-}
-
-// The single top-level directory every entry sits under, or null. A zip made
-// by zipStore() carries one `<cart>.moy/`; one made by hand from a cart's
-// CONTENTS has manifest.json at the root and needs no stripping.
-export function zipTopDir(entries) {
-    let top = null;
-    for (const e of entries) {
-        const slash = e.name.indexOf("/");
-        if (slash < 0) return null;
-        const seg = e.name.slice(0, slash);
-        if (top === null) top = seg;
-        else if (top !== seg) return null;
-    }
-    return top;
-}
-
-// A cart folder base from a zip's top directory or its file name: the cart's
-// id, `<author>.<name>`, each part in the id's characters (lowercase a-z, 0-9
-// and _, as moy_carts.slug() lands on), so an imported folder is one a board's
-// store would have created itself. A name with no author part is the local
-// author's (moy_store_base.USER_NS).
-export function cartBase(name, author = "local") {
-    let n = String(name || "cart").replace(/\.zip$/i, "").replace(/\.moy$/i, "");
-    const part = (s) => s.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-    const dot = n.indexOf(".");
-    const who = dot < 0 ? author : part(n.slice(0, dot)) || author;
-    return part(who) + "." + (part(dot < 0 ? n : n.slice(dot + 1)) || "cart");
-}
-
-// A theme package in an archive's entries (`top` its folder, or null), or
-// null: {name, file}, the name its folder must have and its theme.json's
-// entry name. The loader takes a theme only from `<name>.moy` whose
-// theme.json says `name` (docs/theme_and_shell_2026-11.md §2), so a theme lands under
-// its own name, never under the author-part base a cart takes. `name` is
-// theme.json's when it is the grammar's, else the folder's stem in it.
-export function themeOf(entries, top) {
-    const rel = (e) => top ? e.name.slice(top.length + 1) : e.name;
-    const text = (n) => {
-        const e = entries.find((x) => rel(x) === n);
-        if (!e) return null;
-        try { return JSON.parse(new TextDecoder().decode(e.data)); } catch (_) { return null; }
-    };
-    const man = text("manifest.json");
-    if (!man || !man.moybyte || man.moybyte.type !== "theme") return null;
-    const file = typeof man.main === "string" && man.main ? man.main : "theme.json";
-    const theme = text(file);
-    let name = theme && typeof theme.name === "string" ? theme.name : "";
-    const renamed = !themeName(name);
-    if (renamed) {
-        name = String(top || "").replace(/\.moy$/i, "").toLowerCase()
-            .replace(/[^a-z0-9_-]+/g, "_").replace(/^[_-]+/, "").slice(0, THEME_NAME_MAX);
-        if (!themeName(name)) name = "theme";
-    }
-    return { name, file, renamed };
-}
-
-// A theme's name by the loader's grammar: 1 to 24 of a-z, 0-9, `_` and `-`,
-// a letter or a digit first.
-export const THEME_NAME_MAX = 24;
-export function themeName(s) {
-    return typeof s === "string" && /^[a-z0-9][a-z0-9_-]*$/.test(s)
-        && s.length <= THEME_NAME_MAX;
-}
-
-// A theme's folder: `<name>.moy`, else the store's next `_2` stem, cut so the
-// name stays the grammar's -- {dir, name}, the theme.json `name` it must say.
-export function uniqueThemeDir(exists, name) {
-    if (!exists(name + ".moy")) return { dir: name + ".moy", name };
-    for (let i = 2; ; i++) {
-        const tail = "_" + i;
-        const n = name.slice(0, THEME_NAME_MAX - tail.length) + tail;
-        if (!exists(n + ".moy")) return { dir: n + ".moy", name: n };
-    }
-}
-
-// The theme.json bytes a theme `themeOf` read lands with under `name`: as
-// they came when theme.json already says `name` (moy_carts.import_archive's
-// rule), else `renamedTheme`'s.
-export function landedTheme(bytes, theme, name) {
-    return name === theme.name && !theme.renamed ? bytes : renamedTheme(bytes, name);
-}
-
-// theme.json bytes with `name` set to `name`; the bytes as they were when
-// they are not a JSON object.
-export function renamedTheme(bytes, name) {
-    let d;
-    try { d = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { return bytes; }
-    if (!d || typeof d !== "object" || Array.isArray(d)) return bytes;
-    d.name = name;
-    return new TextEncoder().encode(JSON.stringify(d));
-}
-
-// moy_carts._unique_dir's rule, so an imported cart is named the way a
-// duplicated one is: `base.moy`, then `base_2.moy`, `base_3.moy`...
-export function uniqueCartDir(exists, base) {
-    if (!exists(base + ".moy")) return base + ".moy";
-    let i = 2;
-    while (exists(base + "_" + i + ".moy")) i++;
-    return base + "_" + i + ".moy";
-}

@@ -4,9 +4,60 @@
 
 #include "moy_cache.h"
 
+// The held run to the card, MOY_CACHE_RUN sectors a command at most: 0, or the
+// driver's error (the run is let go either way).
+static int issue(moy_cache_t *c) {
+    int rc = 0;
+    while (c->run_n > 0 && rc == 0) {
+        uint32_t n = c->run_n < MOY_CACHE_RUN ? c->run_n : MOY_CACHE_RUN;
+        rc = c->io(c->ctx, c->run_at, (uint8_t *)c->zeros, n, 1);
+        c->run_at += n;
+        c->run_n -= n;
+        c->runs++;
+    }
+    c->run_n = 0;
+    return rc;
+}
+
 static int io(moy_cache_t *c, uint32_t start, uint8_t *buf, uint32_t n, int write) {
+    int rc = issue(c);
+    if (rc != 0) {
+        return rc;
+    }
     c->reads += !write;
     return c->io(c->ctx, start, buf, n, write);
+}
+
+static int zero(const uint8_t *b) {
+    uint8_t any = 0;
+    for (uint32_t i = 0; i < MOY_CACHE_SECTOR; i++) {
+        any |= b[i];
+    }
+    return any == 0;
+}
+
+// Whether a run takes the one-sector write of `buf` at `block`: 1 when it is
+// held, 0 when the write goes on to the card (its io() issues any run first).
+// A full run that the write continues is issued here, its error in `*rc`.
+static int run_takes(moy_cache_t *c, const uint8_t *buf, uint32_t block, int *rc) {
+    if (c->zeros == NULL || c->every == 0 || !zero(buf)) {
+        return 0;
+    }
+    if (c->run_n > 0 && block == c->run_at + c->run_n) {
+        if (c->run_n < MOY_CACHE_RUN) {
+            c->run_n++;
+            return 1;
+        }
+        *rc = issue(c);
+        if (*rc != 0) {
+            return 1;
+        }
+    } else if (c->run_n > 0 || block < c->base || (block - c->base) % c->every != 0) {
+        return 0;
+    }
+    c->run_at = block;
+    c->run_n = 1;
+    return 1;
 }
 
 static void drop(moy_cache_t *c, int s) {
@@ -14,11 +65,16 @@ static void drop(moy_cache_t *c, int s) {
     c->ref[s] = 0;
 }
 
+int moy_cache_flush(moy_cache_t *c) {
+    return issue(c);
+}
+
 void moy_cache_drop_all(moy_cache_t *c) {
     for (int s = 0; s < MOY_CACHE_SLOTS; s++) {
         drop(c, s);
     }
     c->hand = 0;
+    c->run_n = 0;
 }
 
 static int slot_of(const moy_cache_t *c, uint32_t block) {
@@ -85,5 +141,9 @@ int moy_cache_write(moy_cache_t *c, const uint8_t *buf, uint32_t block, uint32_t
             }
         }
     }
-    return c->io(c->ctx, block, (uint8_t *)buf, n, 1);
+    int rc = 0;
+    if (n == 1 && run_takes(c, buf, block, &rc)) {
+        return rc;
+    }
+    return io(c, block, (uint8_t *)buf, n, 1);
 }

@@ -379,7 +379,8 @@ def sd(rounds=SD_ROUNDS):
 
       CS PINS ARE LEFT ALONE. `TFT_CS` (12) and `SD_CS` (39) are driver-owned;
       re-creating a `Pin` on either afterwards causes the same hang. Only the
-      unused LoRa `RADIO_CS` (9) is parked high.
+      LoRa `RADIO_CS` (9) is parked high by moy_sd's attach, before moy_lora
+      takes it.
 
       NO FLUSH INSIDE A SESSION. The desktop loop is single-threaded so SD ops
       run between frames; this smoke keeps that discipline and calls `comp.sync()`
@@ -404,18 +405,6 @@ def sd(rounds=SD_ROUNDS):
     comp, canvas = _canvas()
     log = _Log(comp, canvas, "SD SMOKE")
     comp.set_backlight(True)
-
-    # The two modules each carry the bus facts, and they MUST agree: attaching
-    # the card to the wrong host id is a hang with no message, and a constant
-    # that drifted is exactly how that would happen.
-    log.say("host lcd=%d sd=%d  cs lcd_sd=%d sd=%d"
-            % (moy_lcd.SPI_HOST, moybyte_sd.SPI_HOST,
-               moy_lcd.SD_CS, moybyte_sd.SD_CS))
-    if (moy_lcd.SPI_HOST != moybyte_sd.SPI_HOST
-            or moy_lcd.SD_CS != moybyte_sd.SD_CS):
-        log.say("MISMATCH -- refusing to attach", RED)
-        print("Moybyte sd: ABORT, moy_lcd and moybyte_sd disagree about the bus")
-        return
 
     def _session(label, fn):
         """One bracketed SD session + the panel flush that proves the bus lived."""

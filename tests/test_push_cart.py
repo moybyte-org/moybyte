@@ -128,10 +128,32 @@ class _FakeFS:
         self.files[dst] = self.files.pop(src)
 
 
+class _Consent:
+    """`Consent.made` and nothing else: the ids recorded as made."""
+
+    def __init__(self):
+        self.made_ids = []
+
+    def made(self, aid):
+        self.made_ids.append(aid)
+
+
 class _WS:
-    def __init__(self, carts_root):
+    def __init__(self, carts_root, fs=None):
         self.carts_root = carts_root
         self.wm = None
+        self.fs = fs
+        self.carts = types.SimpleNamespace(all=[])
+        self.consent = _Consent()
+
+    def rescan_carts(self):
+        """The shelf: a cart per `<root>/<id>.moy` folder holding a file."""
+        root = self.carts_root.rstrip("/") + "/"
+        names = {p[len(root):].split("/", 1)[0] for p in self.fs.files
+                 if p.startswith(root) and "/" in p[len(root):]}
+        self.carts.all = [{"id": n[:-4], "path": root + n}
+                          for n in sorted(names) if n.endswith(".moy")]
+        return self.carts.all
 
 
 class _FakeConsole:
@@ -170,7 +192,7 @@ class _FakeConsole:
         self.switches = []
         self.fs = _FakeFS(files, corrupt, free)
         self.full_at = full_at          # the store runs out of room here
-        self.ws = _WS(carts_root)
+        self.ws = _WS(carts_root, self.fs)
         self.board = board
         self.has_recv = has_recv        # False = an image from before `recv`
         self.max_window = max_window
@@ -230,6 +252,8 @@ class _FakeConsole:
             return self.fs
         if name == "_ota_build":
             return types.SimpleNamespace(BOARD=self.board)
+        if name == "app_perms":
+            return types.SimpleNamespace(app_id=lambda cart: cart["id"])
         return __import__(name, *rest)
 
     def _recv(self, line, parts):
@@ -753,6 +777,31 @@ def test_the_probe_runs_once_for_the_whole_cart(monkeypatch, tmp_path):
     assert len(dev.fs.files) == 3
 
 
+# -- a cable push is consented ------------------------------------------------
+
+
+def test_a_cart_pushed_over_the_cable_is_recorded_as_made(monkeypatch, tmp_path):
+    """Anyone at the cable is the owner: after the rescan the tool records the
+    pushed cart's id as made on the console, so its first run is not asked."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+    assert dev.ws.consent.made_ids == ["demo"]
+    assert [ln for ln in dev.sent if "consent.made" in ln]
+
+
+def test_a_push_with_no_rescan_records_a_cart_the_shelf_has_not_got(
+        monkeypatch, tmp_path):
+    """The consent is the shelf's cart at the pushed folder: with no rescan a
+    new cart is not on it, and nothing is recorded for a cart that is not."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    assert push_cart.main([cart, "--board", "tdeck", "--no-rescan"]) == 0
+    assert dev.ws.consent.made_ids == []
+
+
 # -- `recv rate=`: the payload at another UART rate ---------------------------
 
 
@@ -1086,19 +1135,27 @@ def test_a_compiled_cart_with_no_main_wasm_says_to_build_it(tmp_path):
 
 
 @needs_wamrc
-@pytest.mark.parametrize("unknown_sources", [False, True])
+@pytest.mark.parametrize("native", [False, True])
 def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
-        monkeypatch, tmp_path, capsys, unknown_sources):
+        monkeypatch, tmp_path, capsys, native):
     """The board runs the cart only from a module for its chip, and a cart
     made with `moy build` carries none: the push compiles one, unsigned, and
     sends it beside main.wasm, leaving the cart folder as it was. Unsigned
-    runs only with Unknown sources on, which the tool asks the console about
-    and says plainly before the push when it is off."""
+    runs natively only for a cart that asks for "full_access", which the tool
+    reads from the manifest and says plainly before the push when it does
+    not."""
+    import json
     from tools import wasm_module as wm
     cart = _compiled_cart(tmp_path)
+    if native:
+        path = os.path.join(cart, "manifest.json")
+        with open(path, encoding="utf-8") as f:
+            man = json.load(f)
+        man.setdefault("moybyte", {}).setdefault("permissions", []).append("full_access")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(man, f)
     before = sorted(os.listdir(cart))
     dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
-    dev.ws.unknown_sources = unknown_sources
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "tdeck"]) == 0
     module = dev.fs.files["/sd/carts/demo.moy/main.esp32s3.f%s.aot"
@@ -1110,7 +1167,7 @@ def test_a_compiled_cart_without_a_module_gets_one_compiled_and_pushed(
     assert wm.split(module)[1] is None                  # unsigned
     assert sorted(os.listdir(cart)) == before           # the cart is untouched
     out = capsys.readouterr().out
-    assert ("Unknown sources off" in out) is (not unknown_sources)
+    assert ('does not ask for "full_access"' in out) is (not native)
     assert out.index("compiling one, unsigned") < out.index("demo.moy ->")
 
 
@@ -1126,7 +1183,6 @@ def test_a_module_built_for_another_main_wasm_is_replaced(monkeypatch, tmp_path,
     wm.build(b"\0asm\1\0\0\0", "esp32p4", stale,
              signed=False)
     dev = _FakeConsole(board="p4", carts_root="/moy/carts")
-    dev.ws.unknown_sources = True
     monkeypatch.setattr(p4_autotest.P4Board, "reset", lambda self, **kw: None)
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "p4"]) == 0

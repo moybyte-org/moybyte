@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   wait_online                      report the link, dialling saved credentials first
+#   poll_online                      report the link, dialling saved credentials first; never waits
 #   OtaUpdater                       the Settings screens' updater, over the kernel's
 #   C6Updater                        the companion radio's updater (the P4s)
 #   verify_sig                       does a signature sign the payload (the reference)
@@ -30,19 +30,21 @@ except ImportError:              # a host tool reading the identity or verify_si
 
 UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
 
-# How long wait_online() waits for the link AFTER the autoconnect attempt. See
-# its docstring: a saved network on the P4 came up 1.5s after connect() had
-# already given up and returned False.
-ONLINE_WAIT_MS = 12000
-ONLINE_STEP_MS = 250
+# How long poll_online() lets a dial run. `connect()` returning False does not
+# mean the association failed: on the P4 (2026-08-02, saved network, cold
+# reset) connect() gave up at 4s and the link came up 1.5s later, because the
+# radio is a separate C6 over SDIO. About one association in seven there takes
+# a slow path of 11-16s, sometimes 20s, past the driver's fourth attempt
+# (native/moy_net/moy_wifi.c's backoff). A polled dial holds no frame, so the
+# budget can outlast all of that.
+DIAL_MS = 20000
 
 
 def keep_alive():
     """Feed the kernel's task watchdog when the frame loop has armed it: a
-    wait that holds the frame (the link wait, a connect's poll) is the console
-    waiting on purpose (an update check behind its CHECKING screen, Get Carts'
-    connect), and an unfed one past the timeout resets the board. Unarmed, it
-    is left alone -- the first feed would subscribe the task."""
+    wait that holds the frame on purpose (a connect's poll, a dev channel's
+    round trip), unfed past the timeout, resets the board. Unarmed, it is
+    left alone -- the first feed would subscribe the task."""
     try:
         import moy_kernel
         if moy_kernel.watchdog()[0]:
@@ -51,47 +53,27 @@ def keep_alive():
         pass
 
 
-def wait_online(online, autoconnect=None, wait_ms=ONLINE_WAIT_MS,
-                step_ms=ONLINE_STEP_MS):
-    """Report the link, dialling saved credentials first and then WAITING.
-
-    The wait is the whole point, and it is measured: `connect()` returning False
-    does not mean the association failed. On the P4 (2026-08-02, saved network,
-    cold reset) connect() polled isconnected() for 4s and gave up -- and the link
-    came up 1.5s AFTER it did, because the radio is a separate C6 over SDIO and
-    cold association simply takes longer than the interactive budget. Without the
-    wait a perfectly good network reads as "wifi offline", which is what both the
-    online update and the WEB CONSOLE row did on their first try.
-
-    It belongs behind a caller that has already committed to a blocking round
-    trip behind a CHECKING screen, never inside `connect()`: a few more seconds
-    cost that caller nothing, while lengthening connect() would freeze the
-    desktop for every wrong password too.
-
-    `online()` answers "is the link up" and `autoconnect()` dials -- both
-    zero-argument, so each caller keeps its own idea of what a radio is and what
-    an exception from one means. The dial is best-effort: a radio that raises on
-    connect may still be associating, and the wait is what finds out.
-    """
+def poll_online(online, autoconnect, since):
+    """The link, dialling saved credentials first, for a caller that asks
+    again next frame and never waits: `(True, None)` with the link up;
+    `(None, since)` while the dial runs -- `since` None dials now
+    (`autoconnect`, best-effort: a radio that raises may still be
+    associating) and starts the budget; `(False, None)` once DIAL_MS of it
+    passed. `online()` answers "is the link up" and `autoconnect()` dials --
+    both zero-argument, so each caller keeps its own idea of a radio."""
     if online():
-        return True
-    keep_alive()
-    if autoconnect is not None:
-        try:
-            autoconnect()
-        except Exception:  # noqa: BLE001 -- the wait below decides
-            pass
+        return True, None
     import time
-    sleep_ms = getattr(time, "sleep_ms", None)
-    for _ in range(max(1, wait_ms // step_ms)):
-        if online():
-            return True
-        keep_alive()
-        if sleep_ms is not None:
-            sleep_ms(step_ms)
-        else:                              # host / CPython: no sleep_ms
-            time.sleep(step_ms / 1000.0)
-    return bool(online())
+    if since is None:
+        if autoconnect is not None:
+            try:
+                autoconnect()
+            except Exception:  # noqa: BLE001 -- the budget decides
+                pass
+        return None, time.ticks_ms()
+    if time.ticks_diff(time.ticks_ms(), since) < DIAL_MS:
+        return None, since
+    return False, None
 
 
 # Which board this image is for. An OTA payload is an APP PARTITION image, so it
@@ -155,7 +137,8 @@ def default_manifest_url(channel, board=None):
 
 # -- manifest signing (the anti-MITM measure) --------------------------------
 #
-# TLS verifies no certificate, so anyone who can answer for github.com on the
+# The updater's TLS verifies no certificate (MOY_HTTPC_SIGNED,
+# native/moy_net/moy_ota.h), so anyone who can answer for github.com on the
 # kid's network can serve any bytes they like, and the manifest's sha256 cannot
 # help when the same attacker writes the manifest. So a manifest from the BAKED
 # urls must carry a signature by a key whose public half is here: RSA-2048,
@@ -222,6 +205,14 @@ class OtaUpdater(SlotHealth):
         self.absent = False       # the channel has nothing for this board yet
         self.from_card = False    # where the last manifest url came from
         self._manifest_text = None
+        self.joining = False      # the link is being dialled; check_online asks again
+        self._dialled = None      # ticks_ms of that dial (poll_online's `since`)
+        self._url = None          # the manifest url of the check that is dialling
+
+    @property
+    def pending(self):
+        """A check that has not answered yet: its link is still being dialled."""
+        return self.joining
 
     def set_wifi(self, wifi, go_online=None):
         self._wifi = wifi
@@ -409,6 +400,8 @@ class OtaUpdater(SlotHealth):
 
     def cancel(self):
         self._close_file()
+        self.joining = False
+        self._dialled = None
         moy_net.ota_cancel()
 
     def reset(self):
@@ -477,30 +470,42 @@ class OtaUpdater(SlotHealth):
         except Exception:
             return False
 
-    def ensure_online(self):
-        """Connected, else dial saved credentials and wait (`wait_online`)."""
-        return wait_online(self.wifi_online, self._go_online)
+    def poll_online(self):
+        """The link polled (`poll_online`): True up, None while the saved
+        network is dialled (the first call dials), False once DIAL_MS passed."""
+        up, self._dialled = poll_online(self.wifi_online, self._go_online,
+                                        self._dialled)
+        return up
 
     def check_online(self, channel=None):
         """The channel's manifest, fetched and judged by the kernel (the board
         it names, then its signature), as a dict; None with `error` set, or
-        with `absent` when the channel has nothing for this board yet.
-        Blocking: the screen runs it once, behind CHECKING..."""
-        self.error = None
-        self.absent = False
-        self._manifest_text = None
-        url, from_card = self._manifest_source(channel)
-        self.from_card = from_card
-        _log("check channel=%r running=%s/%s url=%s%s" % (
-            channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION, url,
-            " (from card)" if from_card else ""))
-        if not url:
-            self.error = "no manifest url"
+        with `absent` when the channel has nothing for this board yet, or
+        with `joining` (`pending`) while the link is dialled -- the screen
+        asks again next frame, so the wait holds no frame. The manifest's
+        fetch blocks, once, behind CHECKING..."""
+        if not self.joining:
+            self.error = None
+            self.absent = False
+            self._manifest_text = None
+            url, from_card = self._manifest_source(channel)
+            self.from_card = from_card
+            self._url = url
+            _log("check channel=%r running=%s/%s url=%s%s" % (
+                channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION, url,
+                " (from card)" if from_card else ""))
+            if not url:
+                self.error = "no manifest url"
+                return None
+        up = self.poll_online()
+        self.joining = up is None
+        if self.joining:
             return None
-        if not self.ensure_online():
+        if not up:
             self.error = "wifi offline"
             return None
-        rc, text = moy_net.ota_check(url, BOARD, self._require_signature(from_card))
+        rc, text = moy_net.ota_check(self._url, BOARD,
+                                     self._require_signature(self.from_card))
         if rc == 1:
             _log("no manifest published on this channel for", BOARD)
             self.absent = True
@@ -584,7 +589,8 @@ class C6Updater:
         return moy_net.ota_c6_version()
 
     def check(self, channel=None):
-        """"offer" (self.offer set), "uptodate", "nopublish" or "error"."""
+        """"offer" (self.offer set), "uptodate", "nopublish", "error", or
+        "pending" while the link is dialled (the screen asks again next frame)."""
         self.error = None
         self.offer = None
         u = self.updater
@@ -592,6 +598,8 @@ class C6Updater:
             self.error = "no updater"
             return "error"
         m = u.check_online(channel)
+        if m is None and getattr(u, "pending", False):
+            return "pending"
         if m is None:
             if getattr(u, "absent", False):
                 return "nopublish"

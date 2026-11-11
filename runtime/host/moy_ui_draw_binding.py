@@ -46,7 +46,11 @@ def install(m, lib, tokens):
         return tuple(None if v < 0 else v for v in bs.c) + (
             bs.edge_w, bs.shape, bs.r, bs.font, bs.bevel)
 
+    btn_leaves = (c.c_int * 10).in_dll(lib, "moy_theme_look_dims")[5]
+
     def buttons_set(app, kind_, leaves):
+        if len(leaves) != btn_leaves:       # the C reads them all, as the module's own check
+            raise ValueError("buttons_set takes %d leaves" % btn_leaves)
         b = None if app is None else _b(app)
         arr = (c.c_int32 * len(leaves))(*[int(v) for v in leaves])
         _check(lib.moy_ui_buttons_set(b, 0 if b is None else len(b), int(kind_), arr))
@@ -368,6 +372,9 @@ def install(m, lib, tokens):
             n = min(n, k)
         _check(lib.moy_ui_scrim_io(c.byref(s), box_of(rect), ps, pa, n))
 
+    def scrim_alpha(a):
+        return lib.moy_ui_scrim_alpha(int(a))
+
     def _icon(name):
         b = _b(name or "")
         return lib.moy_ui_icon_slot(b, len(b)), lib.moy_ui_icon_glyph(b, len(b))
@@ -384,6 +391,12 @@ def install(m, lib, tokens):
         out = _Box()
         _check(lib.moy_ui_unlock(c.byref(sink(cv, look)), int(cx), int(y), h, n, sl, gl,
                                  int(burst), int(fs), int(desk), c.byref(out)))
+        return (out.x, out.y, out.w, out.h)
+
+    def rec(cv, look, right, top, fs, desk):
+        out = _Box()
+        _check(lib.moy_ui_rec(c.byref(sink(cv, look)), int(right), int(top), int(fs), int(desk),
+                              c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
     def month_h(weeks, fs, desk):
@@ -450,17 +463,17 @@ def install(m, lib, tokens):
                                 c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
-    def focus(cv, look, rect, cls, r, flags, fs):
+    def focus(cv, look, rect, kind, r, flags, fs):
         s = sink(cv, look)
         out, ink = _Box(), _I()
-        _check(lib.moy_ui_focus(c.byref(s), box_of(rect), int(cls), int(r), int(flags),
+        _check(lib.moy_ui_focus(c.byref(s), box_of(rect), int(kind), int(r), int(flags),
                                 fs_or(fs, s), c.byref(out), c.byref(ink)))
         return (None if ink.value < 0 else ink.value, (out.x, out.y, out.w, out.h))
 
-    def current(cv, look, rect, r, flags, fs):
+    def current(cv, look, rect, kind, r, flags, fs):
         s = sink(cv, look)
         ink = _I()
-        _check(lib.moy_ui_current(c.byref(s), box_of(rect), int(r), int(flags),
+        _check(lib.moy_ui_current(c.byref(s), box_of(rect), int(kind), int(r), int(flags),
                                   fs_or(fs, s), c.byref(ink)))
         return None if ink.value < 0 else ink.value
 
@@ -468,10 +481,10 @@ def install(m, lib, tokens):
         if active is not None:
             lib.moy_ui_marks_active(1 if active else 0)
         return (bool(lib.moy_ui_marks_shown()), lib.moy_ui_marks_drawn(1 if reset else 0),
-                lib.moy_ui_mark_reach(1))
+                lib.moy_ui_mark_reach(2), bool(lib.moy_ui_mark_solid(1)))
 
-    def mark_reach(cls):
-        return lib.moy_ui_mark_reach(int(cls))
+    def mark_reach(kind):
+        return lib.moy_ui_mark_reach(int(kind))
 
     def inset(rect, dx, dy):
         out = _R4()
@@ -504,7 +517,7 @@ def install(m, lib, tokens):
     for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock, modal, modal_band, month_h, perf,
+              scrim, scrim_alpha, tile, unlock, rec, modal, modal_band, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):

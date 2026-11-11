@@ -452,7 +452,16 @@ game full screen, or docked in the Editor's Run slot, has **Play in a window**
 after Resume (owner, 2026-10-31): the run goes on where it stood in a desk
 window of its own (`WindowedWM.play_in_window`; console mode gives the desk
 back first), whose maximise is the way back to full screen. Over a game
-already in a window the menu has no such row, and a handheld never offers it.
+already in a window the menu has no such row, and a handheld never offers it;
+a handheld's menu has **Minimise** there instead (owner, 2026-11-03): the
+game is held where it is in the running set and the console goes home.
+
+The key acts when it comes up. **Held** for half a second (`START_HOLD_MS`) on
+any board it opens the **task manager** instead (owner, 2026-11-03;
+`docs/os_2026-11/processes.md` §6), from every surface, a text field
+included, whose text it leaves as it was; the system menu's Tasks opens it
+too. From it the running games and apps are switched to or closed, and on a
+handheld Home goes home with the game that played kept minimised.
 
 Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
 mode. A **`textmode(True)` game** reaches its pause menu through the console key
@@ -495,18 +504,15 @@ play), and **DIAG SD LOG** separately gates the periodic
 diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
 stutter-free; crash/cart-exit diag flushes happen regardless.
 
-**UNKNOWN SOURCES** (owner, 2026-09-29; persisted, default OFF) is the owner's
-switch for compiled carts whose module carries no signature — a cart somebody
-rebuilt from its source. Turning it ON replaces the rows with a warning
-("Unsigned carts can do anything on this console. Only run ones you
-trust.") whose focus starts on KEEP OFF, so it takes the
-TURN ON button, or a move and a press; turning it OFF is one tap. With it on,
-an unsigned module runs at full native speed; with it off the module is
+There is no Unknown sources switch in Settings: a compiled cart whose module
+carries no signature (a cart somebody rebuilt from its source) runs at full
+native speed when its consent grants `full_access`, the install prompt's "Full
+access to the console" (`docs/os_2026-11.md` §1); without it the module is
 ignored and the cart plays on the interpreter instead, with a short system
 notice ("isn't signed") saying so (2026-09-30, "A cart survives its
 firmware") — never the blocking crash panel, either way. A module whose
 signature is present and fails is refused either way
-(`native/moy_wasm/README.md`, "Unknown sources").
+(`native/moy_wasm/README.md`, "An unsigned module").
 
 ---
 

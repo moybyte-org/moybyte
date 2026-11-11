@@ -1,7 +1,14 @@
-"""Generate the seed games' COVERS (SPEC.md 3.6, visual identity v1 Section
+"""Generate the seed carts' COVERS (SPEC.md 3.6, visual identity v1 Section
 11.4): run each game cart headless through the real console for a few seconds,
 grab its game canvas, and write it to the cart source's `cover.png` -- a
 128 x 128 indexed PNG in the console palette, the profile every host reads.
+
+An APP's cover is not a capture: an app's first screen is chrome and an empty
+state, which at a cover's size reads as nothing. It is the app's icon from the
+default theme's smooth set (native/moy_ui/icons/smooth/default, the one the
+desk's tile draws) at APP_ICON pixels, centred on the colour block the
+generated cover of its title would wear (`ui_cover.initial_block`), its
+anti-aliased edge blended between the two and mapped to MOY64.
 
 The frame becomes a cover the way moy-spec's `moy play` F7 capture makes one:
 as it is when it is already 128 x 128; otherwise its centre square, reduced by
@@ -43,6 +50,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from runtime import cover_png, gfx_binding, host_app, host_canvas  # noqa: E402
+from runtime.toolkit import iconsets  # noqa: E402
+from runtime.toolkit.ui_cover import initial_block  # noqa: E402
 
 MOY64_RGB = bytes(c for rgb in gfx_binding.moy64() for c in rgb)
 
@@ -50,6 +59,8 @@ FRAMES = 80           # ~2.5s of play: the scene develops, nobody has died yet
 SEED = 1
 COVER_TYPES = ("game", "story")
 SIDE = cover_png.SIDE
+APP_ICON = 72         # an app cover's icon side: its ink about half the cover
+ICON_SET = os.path.join(ROOT, "native", "moy_ui", "icons", "smooth", "default")
 
 # slug -> what differs from the usual capture, where the usual one is a poor
 # picture or still holds HUD: "frames" to play, the square "crop" (x, y, side)
@@ -192,7 +203,7 @@ def silence(ws, names):
     a Python cart's namespace entry becomes a no-op, a Lua cart's global is
     rebound in its own state. The cart's code looks each name up when it calls
     it, so nothing else about the cart changes."""
-    p = ws.player
+    p = ws.run.player
     if getattr(p, "_lua", None) is not None:
         from runtime import moycore      # the host's binding of the Lua engine
         err = moycore.exec("".join("%s = function() end\n" % n for n in names),
@@ -214,8 +225,8 @@ def seeded_lua():
     from runtime import moycore          # the host's binding of the Lua engine
     load = moycore.load
 
-    def load_seeded(chunks):
-        return moycore.exec("srand(%d)" % SEED, "cover") or load(chunks)
+    def load_seeded(*args, **kw):
+        return moycore.exec("srand(%d)" % SEED, "cover") or load(*args, **kw)
 
     moycore.load = load_seeded
     try:
@@ -277,7 +288,7 @@ def capture(slug):
         if ws.cart_error:
             print("skip (crashed during capture):", slug, ws.cart_error)
             return None
-        cv = ws.canvas                   # the cart's GAME canvas
+        cv = ws.run.canvas                   # the cart's GAME canvas
         # indices_of is the exact reduction of the RGB565 canvas back to MOY64
         # indices -- see runtime/host/host_canvas.py.
         return cv.w, cv.h, host_canvas.indices_of(cv), crop
@@ -285,16 +296,68 @@ def capture(slug):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def app_slot(manifest):
+    """The icon set slot an app cart's tile draws: its registered app's id
+    (`moybyte.app.id`, through iconsets.ALIASES), else its id's last part
+    (Notes'), or None."""
+    y = manifest.get("moybyte", {})
+    names = [(y.get("app") or {}).get("id"), str(manifest.get("id") or "").rsplit(".", 1)[-1]]
+    for name in names:
+        n = iconsets.slot_of(name) if name else None
+        if n is not None:
+            return iconsets.SLOTS[n]
+    return None
+
+
+def app_cover(manifest):
+    """The bytes of an app cart's cover.png: its icon (`app_slot`) from the
+    default smooth set at APP_ICON pixels, centred on its title's generated
+    cover block in that block's ink. None where the set draws no such icon."""
+    import io
+
+    import resvg_py
+    from PIL import Image
+    slot = app_slot(manifest)
+    path = os.path.join(ICON_SET, "%s.svg" % slot) if slot else None
+    if path is None or not os.path.exists(path):
+        return None
+    with open(path) as f:
+        svg = f.read()
+    png = bytes(resvg_py.svg_to_bytes(svg_string=svg, width=APP_ICON, height=APP_ICON))
+    alpha = Image.open(io.BytesIO(png)).convert("RGBA").getchannel("A").tobytes()
+    block, ink = initial_block(manifest.get("title") or "")
+    bc = MOY64_RGB[3 * block:3 * block + 3]
+    ic = MOY64_RGB[3 * ink:3 * ink + 3]
+    rgb = bytearray(bc * (SIDE * SIDE))
+    o = (SIDE - APP_ICON) // 2
+    for y in range(APP_ICON):
+        for x in range(APP_ICON):
+            a = alpha[y * APP_ICON + x]
+            if a:
+                d = ((o + y) * SIDE + o + x) * 3
+                for k in range(3):
+                    rgb[d + k] = (bc[k] * (255 - a) + ic[k] * a + 127) // 255
+    return cover_png.encode_indexed(to_palette(bytes(rgb)), MOY64_RGB)
+
+
 def gen_cover(slug):
     """Capture system_carts/<slug>.moy and write its cover.png, bumping its
     manifest version, unless the cover it has is already that one. Returns
     True when a cover was written."""
-    shot = capture(slug)
-    if shot is None:
-        return False
-    data = cover_of(*shot)
-    assert cover_png.decode(data) is not None, "not a cover in the profile"
     src_dir = os.path.join(ROOT, "system_carts", slug + ".moy")
+    with open(os.path.join(src_dir, "manifest.json")) as f:
+        manifest = json.load(f)
+    if manifest.get("moybyte", {}).get("type") == "app":
+        data = app_cover(manifest)
+        if data is None:
+            print("skip (no icon in the default set):", slug)
+            return False
+    else:
+        shot = capture(slug)
+        if shot is None:
+            return False
+        data = cover_of(*shot)
+    assert cover_png.decode(data) is not None, "not a cover in the profile"
     out = os.path.join(src_dir, "cover.png")
     if os.path.exists(out):
         with open(out, "rb") as f:

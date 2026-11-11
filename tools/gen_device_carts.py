@@ -105,6 +105,19 @@ def _read(path):
         return f.read()
 
 
+def _entry_src(base, entries):
+    """A seed's entry files as [[name, text]] (`"moybyte": {"entries": ...}`,
+    docs/app_api_v1.md section 7), which the seed writes beside its main.
+    A seed is text: an entry that is a module raises."""
+    out = []
+    for name in sorted(entries) if isinstance(entries, dict) else ():
+        f = entries[name]
+        if not isinstance(f, str) or not f.endswith((".py", ".lua")):
+            raise ValueError("%s: a seed's entry %r is not a script" % (base, f))
+        out.append([f, _read(os.path.join(base, f))])  # lists: what JSON gives back
+    return out
+
+
 def read_manifests(system_carts_dir=None):
     """Every system cart as `(folder, manifest)`, in SEED order.
 
@@ -251,7 +264,7 @@ def build_carts(system_carts_dir):
                     _seen = True
                     continue
                 (_post if _seen else _pre).append(
-                    (_n, _read(os.path.join(base, _n))))
+                    [_n, _read(os.path.join(base, _n))])
             if _pre:
                 cart["src_before"] = _pre
             if _post:
@@ -313,6 +326,15 @@ def build_carts(system_carts_dir):
             cart["canvas"] = man["canvas"]
         if "permissions" in vendor(man):
             cart["permissions"] = vendor(man)["permissions"]
+        if "handles" in vendor(man):             # the MIME types its app opens
+            cart["handles"] = vendor(man)["handles"]
+        if "receives" in vendor(man):            # the message names other apps may send it
+            cart["receives"] = vendor(man)["receives"]
+        if "entries" in vendor(man):             # its entry points beside main: their files too
+            cart["entries"] = vendor(man)["entries"]
+            cart["entry_src"] = _entry_src(base, vendor(man)["entries"])
+        if "achievements" in vendor(man):        # the badges it declares
+            cart["achievements"] = vendor(man)["achievements"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper
             cart["glass"] = True
         if "pictures" in vendor(man):           # a picture wallpaper
@@ -388,15 +410,23 @@ def pack_cart(cart):
     return comp.compress(body) + comp.flush()
 
 
-def build_packed(system_carts_dir, skip=()):
+def build_packed(system_carts_dir, skip=(), first=()):
     """The packed roster: [(title, version, blob)], in seed order, less the
-    cart folders named in `skip`."""
-    folders = [f for f, _m in read_manifests(system_carts_dir)]
+    cart folders named in `skip`; with `first` (manifest types), the carts of
+    those types lead in that order, each group in seed order, so a seed cut
+    short (the Zero's reserve) leaves out the rest."""
+    mans = read_manifests(system_carts_dir)
+    folders = [f for f, _m in mans]
     unknown = set(skip) - set(folders)
     if unknown:
         raise ValueError("--skip names no system cart: %s" % ", ".join(sorted(unknown)))
-    return [(c["title"], int(c.get("version", 0)), pack_cart(c))
-            for f, c in zip(folders, build_carts(system_carts_dir)) if f not in skip]
+    rows = [(m, (c["title"], int(c.get("version", 0)), pack_cart(c)))
+            for (f, m), c in zip(mans, build_carts(system_carts_dir)) if f not in skip]
+
+    def rank(row):
+        kind = vendor(row[0]).get("type")
+        return first.index(kind) if kind in first else len(first)
+    return [r for _m, r in sorted(rows, key=rank)]
 
 
 def render_packed_module(packed):
@@ -482,13 +512,27 @@ def _default_app_decls():
     return str(runtime_file("app_decls.py"))
 
 
+
+def _write_if_changed(path, text):
+    """The module a board build freezes: rewritten only when its text moved,
+    so an unchanged roster recompiles nothing."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                return
+    except OSError:
+        pass
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
 def main(argv):
     """CLI.
 
       gen_device_carts.py [OUT [SYSTEM_CARTS]]   the frozen carts_data.py
-      gen_device_carts.py --packed OUT [SRC] [--skip F,F]
+      gen_device_carts.py --packed OUT [SRC] [--skip F,F] [--first T,T]
                                                  the same, PACKED (the Zero),
-                                                 less the named cart folders
+                                                 less the named cart folders,
+                                                 the named manifest types first
       gen_device_carts.py --app-decls [OUT]      regenerate runtime/shell/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
@@ -506,6 +550,11 @@ def main(argv):
     if "--skip" in argv:
         i = argv.index("--skip")
         skip = tuple(x for x in argv[i + 1].split(",") if x)
+        del argv[i:i + 2]
+    first = ()
+    if "--first" in argv:
+        i = argv.index("--first")
+        first = tuple(x for x in argv[i + 1].split(",") if x)
         del argv[i:i + 2]
     packed = False
     if argv and argv[0] == "--packed":
@@ -532,7 +581,7 @@ def main(argv):
     if len(argv) > 1:
         src = argv[1]
     if packed:
-        blobs = build_packed(src, skip)
+        blobs = build_packed(src, skip, first)
         text = render_packed_module(blobs)
         sys.stderr.write(
             "seed roster packed: %d carts, %d B compressed (%d KB), %d B plain\n"
@@ -542,8 +591,7 @@ def main(argv):
     else:
         text = render_module(build_carts(src))
     if out and out != "-":
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(text)
+        _write_if_changed(out, text)
     else:
         sys.stdout.write(text)
     return 0

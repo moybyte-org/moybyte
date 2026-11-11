@@ -19,8 +19,6 @@ pins the rules:
   * the back-stack's root is the launcher, goto answers STAYED / PUSHED /
     RETURNED, a kind is on it at most once;
   * a run's exit route follows its caller's kind; the app-return only sets;
-  * a lease tag outside LEASE_TAGS is refused, a release of one never held
-    is not;
   * settings rows hold JSON text and `set` is the one way in: it marks the
     store dirty and persists it through the save hook, a failed write leaves it
     dirty for the next, `get` decodes a row afresh, a load that is refused
@@ -199,6 +197,22 @@ def test_goto_pushes_returns_and_stays(sp):
     assert st.goto("launcher") == sp.RETURNED and st.kinds() == ["launcher"]
 
 
+def test_top_follows_every_change(sp):
+    """top() is asked after every op, the way the frame loop asks it: the
+    native binding keeps the last top's interned name, and a new top of the
+    same length ("menu" after "desk") must still read as itself."""
+    st = sp.BackStack()
+    seen = [st.top()]
+    for op, arg in (("goto", "desk"), ("goto", "menu"), ("goto", "desk"),
+                    ("goto", "file"), ("remove", "file"), ("restore", ["menu"]),
+                    ("restore", ["desk", "menu", "file"]), ("goto", "launcher")):
+        getattr(st, op)(arg)
+        seen.append(st.top())
+        assert st.top() == st.kinds()[-1]
+    assert seen == ["launcher", "desk", "menu", "desk", "file", "desk", "menu",
+                    "file", "launcher"]
+
+
 def test_remove_takes_one_kind_and_never_the_root(sp):
     st = sp.BackStack()
     for k in ("desk", "menu", "desktop", "settings"):
@@ -277,56 +291,27 @@ def test_the_app_return_only_sets_and_only_for_an_app(sp):
     assert rt.take_back() == "files" and rt.back() is None
 
 
-# -- WiFi leases ------------------------------------------------------------
-
-def test_the_lease_tags_are_the_closed_set(sp):
-    assert tuple(sp.LEASE_TAGS) == ("web", "update", "settings", "cart", "link",
-                                    "carts", "dev")
-    ls = sp.Leases()
-    for i, tag in enumerate(sp.LEASE_TAGS):
-        assert ls.hold(tag) == (1 << (i + 1)) - 1 and ls.held(tag)
-    assert ls.holders() == list(sp.LEASE_TAGS)
-
-
-def test_leases_are_a_mask_over_a_closed_set_of_tags(sp):
-    ls = sp.Leases()
-    assert ls.hold("update") == ls.hold("update") != 0
-    ls.hold("web")
-    assert ls.holders() == ["web", "update"] and ls.held("web")
-    assert ls.release("update") != 0
-    assert ls.release("link") == ls.mask()       # never held: not an error
-    assert ls.release("web") == 0 and ls.holders() == []
-    with pytest.raises(ValueError):
-        ls.hold("wasm")
-    with pytest.raises(ValueError):
-        ls.release("nobody")
-    with pytest.raises(TypeError):
-        ls.held(None)
-
-
 def test_the_kernels_tables_outlive_their_views(sp):
     """kernel(fresh): the console's tables as the kernel's own
     (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set, made once, which
     a view dropping (a VM stop's sweep) does not free. A return start
-    (fresh False) reads the route and the lease the stopped VM left; every
-    start clears the registry, and any other start puts the rest back."""
-    apps, back, returns, leases = sp.kernel(True)
+    (fresh False) reads the route the stopped VM left; every start clears the
+    registry, and any other start puts the rest back."""
+    apps, back, returns = sp.kernel(True)
     apps.register("files", "Files")
     back.goto("desktop")
     returns.run("menu")
-    leases.hold("dev")
-    del apps, back, returns, leases
+    del apps, back, returns
     import gc
     gc.collect()
-    apps, back, returns, leases = sp.kernel(False)
+    apps, back, returns = sp.kernel(False)
     assert back.kinds() == ["launcher", "desktop"]
     assert returns.caller() == "menu"
-    assert leases.holders() == ["dev"]
     assert apps.count() == 0 and apps.find("files") == 0
     assert apps.register("files", "Files") != 0
-    apps, back, returns, leases = sp.kernel(True)
+    apps, back, returns = sp.kernel(True)
     assert back.kinds() == ["launcher"] and returns.caller() is None
-    assert leases.mask() == 0 and apps.count() == 0
+    assert apps.count() == 0
 
 
 def test_the_kernels_settings_rows_outlive_their_views(sp):
@@ -574,35 +559,133 @@ def test_adopt_encodes_a_dict_into_rows(sp):
     assert json.loads(s.dump()) == d                  # a refused adopt changes nothing
 
 
-def test_system_json_on_the_card_is_byte_identical(tmp_path):
-    """The format's pin through the shell's store (no migration, CLAUDE.md): a
-    card written the way json.dumps wrote it reads, and writes back, as the same
-    bytes, and every change through the one setter leaves the file json.dumps
-    of the same dict would."""
+def test_the_settings_file_on_the_card_is_byte_identical(tmp_path):
+    """The format's pin through the shell's store: system/settings, one
+    `key = <JSON>` a line sorted by key, reads and writes back as the same
+    bytes, and every change through the one setter leaves the file
+    settings_text of the same dict would."""
     from ws_helpers import build_ws
     from runtime import moy_carts
 
     ws = build_ws(tmp_path)
     path = moy_carts.system_store_path(ws.carts_root)
+    assert path.endswith("/system/settings")
     old = json.loads(GOLDEN)
-    moy_carts.save_system(old, ws.carts_root)       # json.dumps(dict): the old writer
+    moy_carts.save_system(old, ws.carts_root)
+    want = moy_carts.settings_text(old)
     with open(path) as f:
-        assert f.read() == GOLDEN
+        assert f.read() == want
+    assert want.startswith("app_guard = {") and "\ntheme = \"outline\"\n" in want
     ws.prefs.load()
     ws.system.set("theme", "outline")               # a write that changes nothing
     with open(path) as f:
-        assert f.read() == GOLDEN
+        assert f.read() == want
     for key, value in (("font_scale", 3), ("brand_new", {"a": [1, None]}),
                        ("favorites", ["/carts/b.moy"]), ("theme_variant", "light")):
         ws.system.set(key, value)
         old[key] = value
         with open(path) as f:
-            assert f.read() == json.dumps(old), key
+            assert f.read() == moy_carts.settings_text(old), key
     ws.system.delete("desk_mru")
     del old["desk_mru"]
     with open(path) as f:
-        assert f.read() == json.dumps(old)
+        assert f.read() == moy_carts.settings_text(old)
     assert moy_carts.load_system(ws.carts_root) == old
+
+
+def test_a_legacy_system_json_reads_as_absent(tmp_path):
+    """No store migrations (CLAUDE.md): a console with only the old
+    system.json starts on the defaults and writes system/settings beside it,
+    leaving the old file as it was."""
+    from ws_helpers import build_ws
+    from runtime import moy_carts
+
+    ws = build_ws(tmp_path)
+    legacy = tmp_path / "system.json"
+    legacy.write_text(json.dumps({"theme": "dusk", "font_scale": 3}))
+    assert moy_carts.load_system(ws.carts_root) == {}
+    ws.prefs.load()
+    assert ws.system.get("theme") is None and ws.system.get("font_scale") is None
+    ws.system.set("name", "Zed")
+    assert moy_carts.load_system(ws.carts_root) == {"name": "Zed"}
+    assert json.loads(legacy.read_text()) == {"theme": "dusk", "font_scale": 3}
+
+
+def _file_rows(sp):
+    if not hasattr(sp.Settings, "load_file"):
+        pytest.skip("the settings file is C's alone: the oracle has no reader of it")
+    return sp.Settings()
+
+
+SETTINGS_FILE = ('app_guard = {"strikes": {"files": 1}, "open": "files"}\n'
+                 'crisp_pixels = true\ndesk_mru = []\n'
+                 'favorites = ["/carts/a.moy", "/carts/b.moy"]\nfont_scale = 2\n'
+                 'name = "Moy"\nota_channel = "stable"\nratio = 0.5\nskin = null\n'
+                 'theme = "outline"\ntheme_variant = "dark"\nvolume = 3\n')
+
+
+def test_the_settings_file_is_its_rows_sorted_one_a_line(sp):
+    """system/settings' bytes, pinned: the file's one writer is the C rows'."""
+    s = _file_rows(sp)
+    s.load(GOLDEN)
+    assert s.file() == SETTINGS_FILE
+    t = _file_rows(sp)
+    assert t.load_file(SETTINGS_FILE) == 0
+    assert t.file() == SETTINGS_FILE and json.loads(t.dump()) == json.loads(GOLDEN)
+
+
+def test_the_settings_files_reader_passes_over_what_it_cannot_read(sp):
+    s = _file_rows(sp)
+    text = ('# a comment\n\n  theme = "dusk"  \r\nvolume=3\nnot a row\nname = Zed\n'
+            'bad key = 1\n = 2\n#x = 1\nfavorites = ["/a.moy"]\nvolume = 4\n'
+            'deep = [1,\n2]\nlast = "no newline"')
+    assert s.load_file(text) == 6
+    assert s.keys() == ["theme", "volume", "favorites", "last"]
+    assert (s.get("theme"), s.get("volume"), s.get("last")) == ("dusk", 4, "no newline")
+    assert not s.dirty()
+    assert s.file() == ('favorites = ["/a.moy"]\nlast = "no newline"\n'
+                        'theme = "dusk"\nvolume = 4\n')
+
+
+def test_the_settings_file_keeps_only_keys_and_lines_it_can_read_back(sp):
+    s = _file_rows(sp)
+    s.set("b", [1, 2], False)
+    s.set("a.b", 1, False)
+    s.set("a", "x", False)
+    s.set("has space", 1, False)
+    s.set("#hash", 1, False)
+    s.set_text("pretty", '[1,\n 2]', False)
+    assert s.file() == 'a = "x"\na.b = 1\nb = [1, 2]\npretty = [1,  2]\n'
+    t = _file_rows(sp)
+    t.load_file(s.file())
+    assert t.get("pretty") == [1, 2] and len(t.keys()) == 4
+
+
+def test_the_settings_file_functions_are_the_c_rows(monkeypatch):
+    """moy_carts' parse_settings and settings_text hold no parser of their
+    own: with the C reader and writer taken away, neither works."""
+    from runtime import moy_carts, moy_spine
+    assert moy_carts.parse_settings(SETTINGS_FILE) == json.loads(GOLDEN)
+    assert moy_carts.settings_text(json.loads(GOLDEN)) == SETTINGS_FILE
+    assert moy_carts.settings_text(GOLDEN) == SETTINGS_FILE
+
+    def gone(*_a):
+        raise RuntimeError("the C settings file")
+    monkeypatch.setattr(moy_spine.Settings, "load_file", gone)
+    monkeypatch.setattr(moy_spine.Settings, "file", gone)
+    for call in (lambda: moy_carts.parse_settings(SETTINGS_FILE),
+                 lambda: moy_carts.settings_text({"a": 1})):
+        with pytest.raises(RuntimeError):
+            call()
+
+
+def test_a_line_the_settings_reader_cannot_read_is_passed_over(tmp_path):
+    from runtime import moy_carts
+    rows = moy_carts.parse_settings(
+        '# a comment\n\ntheme = "dusk"\nvolume=3\nnot a row\nname = Zed\n'
+        'bad key = 1\n = 2\nfavorites = ["/a.moy"]\n')
+    assert rows == {"theme": "dusk", "volume": 3, "favorites": ["/a.moy"]}
+    assert moy_carts.parse_settings(moy_carts.settings_text(rows)) == rows
 
 
 def test_a_write_through_the_setter_reaches_the_card_with_no_persist_call(tmp_path):

@@ -1,7 +1,7 @@
 """Shift frames in the shipped apps (docs/history/scroll_and_text_2026-10.md §3.3,
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
 Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
-list of projects, Storybook's stories and Appearance's rows,
+list of projects, Storybook's stories, Appearance's rows and Music's stations,
 dragged, flung and stepped through by keys, and the text console typed into,
 on one, two and three buffers presented in turn.
 
@@ -50,6 +50,20 @@ def audit():
                          "or a stop's reach into R outside it" % failed)
 
 
+@pytest.fixture
+def music_face():
+    """Music's media face, faked (`test_music_app.Face`): its station list
+    rather than its no-audio page."""
+    from runtime import music_app
+    from test_music_app import Face
+    s = music_app.STREAM
+    s._end()
+    s.face = Face()
+    yield
+    s._end()
+    s.face = None
+
+
 def _shelf_net():
     repo = Repo("https://mit.example/carts", "Test carts")
     for i in range(24):
@@ -92,7 +106,7 @@ _LOG_SCRIPT = ("for i in range(40):\n    print('row %d of the log, a little long
                "        print('you said', s)\n")
 
 
-def _console(tmp_path, app, ships, desk=False):
+def _console(tmp_path, app, ships, desk=False, chip=False):
     import json
     from runtime import cart_index as ci
     root = tmp_path / ("ships" if ships else "whole")
@@ -106,9 +120,11 @@ def _console(tmp_path, app, ships, desk=False):
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
+    if chip:
+        ws.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
-        ws.player.holds = lambda cv: False
+        ws.run.player.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -129,7 +145,7 @@ def _console(tmp_path, app, ships, desk=False):
         drv = host_app.ConsoleDriver(ws)
         for _ in range(4):
             drv.frame(_DT)
-        ws.player.ns["_open"]("alpha")
+        ws.run.player.ns["_open"]("alpha")
     elif app == "myart":
         for i in range(18):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
@@ -139,7 +155,7 @@ def _console(tmp_path, app, ships, desk=False):
         assert ws.open_app(ws._apps_by_id["myart"])
     elif app == "getcarts":
         repo, net = _shelf_net()
-        (root / ci.INDEXES_NAME).write_text(json.dumps({"indexes": [repo.url("index.json")]}))
+        ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = net
         app_ = ws._apps_by_id["getcarts"]
         app_._inst = _SameFree(app_._inst)
@@ -174,9 +190,9 @@ class Pair:
     """The session on both consoles, frame by frame; the first's buffers
     presented in turn, `bufs` of them."""
 
-    def __init__(self, tmp_path, app, bufs, desk=False):
-        self.a = _console(tmp_path, app, True, desk)
-        self.b = _console(tmp_path, app, False, desk)
+    def __init__(self, tmp_path, app, bufs, desk=False, chip=False):
+        self.a = _console(tmp_path, app, True, desk, chip)
+        self.b = _console(tmp_path, app, False, desk, chip)
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
@@ -205,9 +221,9 @@ class Pair:
             if not idle:
                 ws._dirty = True
             ws.pointer.visible = False
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             self._drive(ws, drv)
-            ws.painted = ws._frames_drawn != k
+            ws.painted = ws.frame_state.frames_drawn != k
         a, b = self.a, self.b
         assert a.painted == b.painted, "the two consoles' gates parted"
         if not a.painted:
@@ -286,12 +302,14 @@ class Pair:
 
 
 APPS = ("settings", "licences", "achievements", "myart", "getcarts", "files", "storybook",
-        "appearance")
+        "appearance", "jukebox")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 @pytest.mark.parametrize("app", APPS)
-def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs):
+def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs, request):
+    if app == "jukebox":
+        request.getfixturevalue("music_face")
     p = Pair(tmp_path, app, bufs)
     lay = p.a.layout
     x = lay.cx + lay.cw // 2
@@ -385,10 +403,10 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     frame is a whole repaint's bytes. On a desk the run's canvas is its
     window's own (`Player.holds`), which holds the log whatever the glass's
     buffers do."""
-    p = Pair(tmp_path, "console", bufs, desk)
+    p = Pair(tmp_path, "console", bufs, desk, chip=True)
     assert p.a.show_fps
     if desk:
-        assert p.a.player.holds(p.a.canvas)
+        assert p.a.run.player.holds(p.a.run.canvas)
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k
@@ -411,7 +429,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     brings the caret, left at the top, back into view: a jump past the
     view's height, which draws whole.)"""
     p = Pair(tmp_path, "notes", bufs, desk)
-    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     if desk:
         ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
         sx += ox
@@ -424,7 +442,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     p.settle(60)
     coast = p.kinds[k:]
     assert len(coast) >= 4 and coast[:4] == ["shift"] * 4, p.kinds
-    top = p.a.player.ns["ed"].ed.top
+    top = p.a.run.player.ns["ed"].ed.top
     assert top > 0, top
     del p.kinds[:]
     for ch in "hello":
@@ -461,11 +479,11 @@ def test_an_overlay_over_the_console_log_moves_none_of_it(tmp_path):
     lies in: a frame that moves nothing draws what lies under it again
     (its floor takes it), one that would move it draws whole, and every
     frame is a whole repaint's bytes."""
-    p = Pair(tmp_path, "console", 2)
+    p = Pair(tmp_path, "console", 2, chip=True)
     cx, top, _cw, _ch = p.a.app_content_rect()
     for ws in (p.a, p.b):
         def over(ws=ws):
-            ws.canvas.rect(cx + 100, top + 60, 60, 30, 3)
+            ws.run.canvas.rect(cx + 100, top + 60, 60, 30, 3)
             ui_draw.overdrew(cx + 100, top + 60, 60, 30)
         ws.perf_ui.draw = over
     _console_session(p)
@@ -564,7 +582,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
             _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
             f = _app(ws, "files")
             f._refresh_counts()
-            f.open_place(files_app.ART)
+            f.open_place(files_app.PICTURES)
         p.settle()
     lay = p.a.layout
     p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch, steps=3)

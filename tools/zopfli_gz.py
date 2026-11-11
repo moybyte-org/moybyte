@@ -15,8 +15,10 @@ extra). A missing one is an error, never a fallback to plain gzip: a build that
 quietly used another compressor would ship a bigger image on that machine alone.
 """
 import gzip
+import hashlib
 import os
 import sys
+import zlib
 
 # 30 passes: 15 -> 30 -> 60 moved the five assets by well under 0.1% in total,
 # while the compress time of micropython.wasm (95% of the work) went 4s -> 6s -> 10s.
@@ -36,20 +38,67 @@ def gz(data):
     return out
 
 
-def main(paths):
+def cache_key(raw):
+    """What a stream is a function of: the input, the passes, the compressor."""
+    try:
+        from importlib.metadata import version
+        ver = version("zopfli")
+    except Exception:  # noqa: BLE001 -- an unknown version keys as one
+        ver = "?"
+    h = hashlib.sha256(raw)
+    h.update(("|zopfli %s|%d" % (ver, ITERATIONS)).encode())
+    return h.hexdigest()
+
+
+def cached_gz(raw, cache):
+    """gz(raw), from `cache` (a directory) when this input was compressed
+    before. An entry that does not inflate to `raw` is recompressed."""
+    path = os.path.join(cache, cache_key(raw) + ".gz")
+    try:
+        with open(path, "rb") as f:
+            out = f.read()
+        if gzip.decompress(out) == raw:
+            return out, path
+    except (OSError, EOFError, zlib.error, gzip.BadGzipFile):
+        pass
+    out = gz(raw)
+    os.makedirs(cache, exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(out)
+    os.replace(path + ".tmp", path)
+    return out, path
+
+
+def main(paths, cache=None):
+    used = set()
     for path in paths:
         with open(path, "rb") as f:
             raw = f.read()
-        out = gz(raw)
+        if cache:
+            out, entry = cached_gz(raw, cache)
+            used.add(os.path.basename(entry))
+        else:
+            out = gz(raw)
         tmp = path + ".gz.tmp"
         with open(tmp, "wb") as f:
             f.write(out)
         os.replace(tmp, path + ".gz")
         print("zopfli_gz: %s %d -> %d" % (os.path.basename(path), len(raw), len(out)))
+    if cache:
+        # The cache holds the last run's streams and nothing older.
+        for name in os.listdir(cache):
+            if name not in used:
+                os.remove(os.path.join(cache, name))
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print("usage: zopfli_gz.py FILE...   (writes FILE.gz beside each)")
-        sys.exit(0 if len(sys.argv) > 1 else 2)
-    main(sys.argv[1:])
+    args = sys.argv[1:]
+    cache = None
+    if args[:1] == ["--cache"] and len(args) >= 2:
+        cache, args = args[1], args[2:]
+    if not args or args[0] in ("-h", "--help"):
+        print("usage: zopfli_gz.py [--cache DIR] FILE...   (writes FILE.gz beside each;\n"
+              "       DIR keeps the last run's streams by input hash, so an unchanged\n"
+              "       file is not compressed again)")
+        sys.exit(0 if args else 2)
+    main(args, cache)

@@ -8,7 +8,8 @@
 // the cart's config as a C table, the tile flags copied in. None of it calls
 // into a VM, which is what lets one copy serve every tier: modmoycore.c (the
 // boards, the browser and the desktop MicroPython) and the host's ctypes
-// shims (runtime/host/moyhost_lua.c, runtime/host/moyhost_wasm.c), one run at a time.
+// shims (runtime/host/moyhost_lua.c, runtime/host/moyhost_wasm.c); a run's
+// console is its row's (moycore_lua.h), the callbacks reading the current one.
 //
 // The callbacks take libmoy's `void *user` and read `moycore_run_cur`, the
 // run being driven.
@@ -36,7 +37,11 @@ enum {
     SNAP_KEY_DOWN,       // the code currently held, or 0
     SNAP_TEXTMODE,       // written BY the cart (textmode)
     SNAP_QUIT,           // written BY the cart (quit)
-    SNAP_WINDOW,         // 1: the run's surface is a window's body (the desk)
+    SNAP_FACE,           // how the run's ui frame draws (moy_ui_wasm.h's FACE_*)
+    SNAP_ROOM_X,         // the rect an app's ui frame lies in, its content_rect()
+    SNAP_ROOM_Y,         // (the surface less the host's bars); a W of 0, a game's,
+    SNAP_ROOM_W,         // is the whole canvas
+    SNAP_ROOM_H,
     SNAP_LEN,
 };
 
@@ -107,6 +112,7 @@ void moycore_run_close(moycore_run_t *c);
 // A compiled cart's run opened and closed from C with no VM (modmoycore.c, the
 // boards' binding: docs/history/kernel_cartpath_2026-10.md section 5.2). Every
 // pointer is the caller's and outlives the run.
+struct moy_app_run;
 typedef struct {
     uint16_t *fb;                // the canvas, w x h words
     int w, h;
@@ -126,9 +132,13 @@ typedef struct {
     const char *writable;        // the manifest's "writable", NUL-joined, or NULL
     size_t writable_len;
     int swapped, allow_unsigned, interp;
+    uint32_t ring;               // the manifest's "audio_ring": `snd`'s depth, 0 the default
+    const struct moy_app_run *app;   // the app's run (native/moy_app/moy_app_run.h), or NULL
+    const int32_t *layout;       // a responsive app's (w, h, fs) for `_layout`, or NULL
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
+int moycore_wasm_ran(void);
 void moycore_close_c(void);
 
 #endif // MOYCORE_RUN_H

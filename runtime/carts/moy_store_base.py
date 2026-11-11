@@ -165,17 +165,34 @@ def _sibling_path(root, name):
     return (parent + "/" + name) if parent else name
 
 
-# The user-files layer's root and kinds, as the sync names them: the layer is
-# native/moy_store/moy_ufiles.h's (module `moy_ufiles`), and the Zero, which
-# denies it, still serves and takes `files/<kind>/` by path.
-# tests/test_userfiles_parity.py holds these to the C.
+# The user-files layer's root, its kinds and the folder each lives in: the
+# layer is native/moy_store/moy_ufiles.h's (module `moy_ufiles`), and the
+# Zero, which denies it, still serves and takes the shared folders by path.
+# The shared folders are the top of `files/` as the OS shows them
+# (docs/os_2026-11/between_apps.md section 2); `files:<folder>` names one in
+# lower case. tests/test_userfiles_parity.py holds these to the C.
 FILES_DIR = "files"
 FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories")
+FILE_KIND_DIRS = {
+    "drawings": "Pictures", "docs": "Documents", "sprites": "Pictures/Sprites",
+    "music": "Music", "recordings": "Recordings", "stories": "Documents/Stories",
+}
+SHARED_FOLDERS = ("Documents", "Pictures", "Music", "Recordings", "Downloads")
 
 
 def files_root(root):
     """The user-files root, beside the carts folder."""
     return _sibling_path(root, FILES_DIR)
+
+
+# The apps' private folders, `apps/<id>/`, beside the carts folder too: what a
+# compiled cart writes (runtime/carts/cart_files.py).
+APPS_DIR = "apps"
+
+
+def apps_root(root):
+    """The apps' private folders' root, beside the carts folder."""
+    return _sibling_path(root, APPS_DIR)
 
 
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and
@@ -219,9 +236,10 @@ USER_NS_KEY = "author"
 # (`"moybyte": {"type": "app", ...}`), never loose at the top level. A field
 # of these at the top level reads as absent: the readers are strict.
 VENDOR_KEY = "moybyte"
-VENDOR_FIELDS = ("type", "system", "order", "permissions",
-                 "config", "edit", "targets", "age_mode", "app", "assets",
-                 "graduated", "glass", "pictures", "animates")
+VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
+                 "achievements", "config", "edit", "targets", "app", "assets",
+                 "graduated", "glass", "pictures", "animates", "native", "audio_ring",
+                 "entries", "wasi")
 
 
 def vendor(man):
@@ -249,13 +267,75 @@ def is_cart_id(s):
     return _id_part(a) and _id_part(n)
 
 
+def id_in_folder(cid, path, folders=None):
+    """The id of the cart in the folder at `path` whose manifest says `cid`:
+    `cid` where it is a cart id (`is_cart_id`) that may name the cart, else
+    the folder's name without the extension. The folder `<id>.moy` owns the
+    id `<id>`: in any other folder an id names the cart only where no folder
+    of the store is named for it, and an id in the built-ins' namespace never
+    does. So a cart copied in under another app's id, a built-in's included,
+    shares none of its grant, prefs or consent record
+    (native/moy_store/moy_cat.c's id_may_name is the twin). `folders` is the
+    store's listing (name -> is a folder) where the caller holds it, else
+    the owner's folder is looked up; a bare folder name, in no store, has no
+    other folder to ask about."""
+    cut = max(path.rfind("/"), path.rfind("\\"))
+    name = path[cut + 1:] if cut >= 0 else path
+    folder = name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+    if not is_cart_id(cid) or cid == folder:
+        return folder
+    if builtin_ns(cid):
+        return folder
+    if folders is not None:
+        owned = folders.get(cid + CART_EXT)
+    else:
+        owned = cut >= 0 and _is_dir(path[:cut + 1] + cid + CART_EXT)
+    if owned:
+        return folder
+    return cid
+
+
+# The store's origin record: each root a seed ran on, and the folders its
+# roster names there (`seeded`, which moy_catalogue.seed and the host's seed
+# call). A built-in is known by where it came from, the firmware's seed, never
+# by what its manifest says: nothing a user cart's manifest can copy (its id,
+# its title, a marker permission, `"system": true`) makes it one.
+_SEEDED = {}
+
+
+def _root_key(root):
+    return str(root).replace("\\", "/").rstrip("/")
+
+
+def seeded(root, folders):
+    """Record that the seed of the store `root` writes `folders` (the
+    roster's): from now on a folder of the built-in namespace under `root` is
+    a built-in only when it is one of them."""
+    _SEEDED[_root_key(root)] = frozenset(folders)
+
+
+def builtin_ns(name):
+    """True when `name` (a folder or an id) is in the built-ins' namespace,
+    which only the firmware's seed writes: an install, a made cart and an
+    index's id never take it."""
+    return isinstance(name, str) and name.startswith(BUILTIN_NS + ".")
+
+
 def builtin_name(path):
     """The folder of the built-in at `path` (`moybyte.files.moy` for
     `.../moybyte.files.moy`), or None for any other cart: an app's identity
-    cart is a built-in, never a cart a kid made or copied. The folder is the
-    one name a built-in has: system_carts/ ships it, every store seeds it."""
-    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
-    return name if name.startswith(BUILTIN_NS + ".") else None
+    cart is a built-in, never a cart a kid made, copied or installed. The
+    folder is the one name a built-in has: system_carts/ ships it, and the
+    store's seed writes it. Under a root the seed recorded (`seeded`), only
+    the roster's folders are built-ins; a folder of the namespace the seed
+    did not write (copied onto the card, say) is not."""
+    p = str(path).replace("\\", "/")
+    cut = p.rfind("/")
+    name = p[cut + 1:]
+    if not builtin_ns(name):
+        return None
+    roster = _SEEDED.get(p[:cut].rstrip("/")) if cut >= 0 else None
+    return name if roster is None or name in roster else None
 
 
 def cart_folder(name, ns=None):
@@ -294,7 +374,7 @@ def ensure_dirs(root=CARTS_DIR):
     _mkdir(root)
     # The publish marker (#154) goes at the PARENT, because that is what covers
     # the whole store in one file: the cart folders and their journals under
-    # `root`, the #108 files layer and the sibling stores (system.json,
+    # `root`, the #108 files layer and the sibling stores (system/settings,
     # wifi.json, shared.moygfx) beside it. One marker, one read per boot.
     set_publish_root(parent or root)
 

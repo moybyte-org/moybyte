@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Echo",
+  "id": "local.echo",
+  "runtime": "lua",
+  "main": "main.lua",
+  "moybyte": {"type": "service", "permissions": [], "receives": ["ping"]}
+}

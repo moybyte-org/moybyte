@@ -78,7 +78,7 @@ def _diag_draw2(diag, ws):
     if diag is None:
         return
     try:
-        cv = getattr(ws, "canvas", None)
+        cv = ws.run.canvas
         if cv is None or ws.perf_sample() is None:
             return
         # #66: map/text/fill joined so the WHOLE render ms attributes to named C

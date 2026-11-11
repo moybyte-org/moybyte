@@ -1,9 +1,71 @@
 // The app ABI's kernel half (moy_app.h has the contract).
 
+#include <stdbool.h>
 #include <string.h>
 
 #include "moy_app.h"
+#include "moy_crypto.h"
+#include "moy_net.h"
 #include "moy_route.h"
+
+// The kernel's timers, messages and log (native/moy_kernel/moy_evq.h,
+// TIMERS and THE RULE; moy_log.h): weak, for a build of the layer alone,
+// where a timer, message or log row answers STALE.
+int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id)
+    __attribute__((weak));
+bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) __attribute__((weak));
+int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
+                 uint32_t *denied) __attribute__((weak));
+int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
+int moy_evq_listen(uint32_t pid, const char *name, bool on) __attribute__((weak));
+int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id) __attribute__((weak));
+
+// The bar's status items (native/moy_kernel/moy_status.h; its codes are this
+// layer's, FULL, BAD and ABSENT): weak, for a build of the layer alone, where
+// a status row answers STALE.
+int moy_status_add(uint32_t pid, const char *icon, size_t n, int32_t order, bool compiled)
+    __attribute__((weak));
+int moy_status_show(uint32_t pid, int h, int state) __attribute__((weak));
+int moy_status_remove(uint32_t pid, int h) __attribute__((weak));
+
+// The queue in front of the notifications and the achievements process
+// (native/moy_kernel/moy_notes.h; its codes are moy_evq's, this layer's
+// STALE, FULL and DENIED): weak, for a build of the layer alone, where a
+// notify, award or progress row answers STALE.
+int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
+                       size_t bn) __attribute__((weak));
+int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) __attribute__((weak));
+int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value)
+    __attribute__((weak));
+
+// The items handed to processes (native/moy_kernel/moy_items.h): weak, for a
+// build of the layer alone, where an item row is the door's.
+bool moy_items_get(uint32_t pid, int32_t h, char *kind, size_t kcap, char *name, size_t ncap,
+                   bool *rw) __attribute__((weak));
+void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+
+// A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
+// for a build of the layer alone, where every one is the door's Python half's.
+int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
+                     const char *cfg, size_t cn) __attribute__((weak));
+int32_t moy_dev_close(uint32_t pid, int32_t h) __attribute__((weak));
+int32_t moy_dev_read(uint32_t pid, int32_t h, uint8_t *out, size_t cap) __attribute__((weak));
+int32_t moy_dev_write(uint32_t pid, int32_t h, const uint8_t *data, size_t n)
+    __attribute__((weak));
+int32_t moy_dev_xfer(uint32_t pid, int32_t h, const uint8_t *data, size_t n, uint8_t *out,
+                     size_t cap) __attribute__((weak));
+int32_t moy_dev_set(uint32_t pid, int32_t h, const char *cfg, size_t n) __attribute__((weak));
+int32_t moy_dev_get(uint32_t pid, int32_t h, const char *what, size_t n) __attribute__((weak));
+uint32_t moy_dev_perm_bit(const char *perm, size_t n) __attribute__((weak));
+#define DEV_PASS (-1000)            // moy_dev.h's MOY_DEV_PASS
+
+// moy_evq.h's and moy_log.h's numbers, which this layer does not include.
+enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_DENIED = 4, EVQ_RANGE = 7 };
+#define EVQ_NAME 24u
+#define EVQ_APP 48u
+#define LOG_INFO 6
+#define LOG_LEVELS 8
+#define LOG_TEXT_MAX 2048u
 
 struct moy_app {
     const moy_htab_mem_t *mem;
@@ -23,24 +85,52 @@ struct moy_app {
     char variant[MOY_APP_NAME_MAX + 1];
     const moy_uf_ops_t *uf;     // the user-files layer the store rows reach, or NULL
     uint8_t readable, writable;
-    int gated;                  // the gate a store row holds now, -1 for none
-    int why;                    // the errno value of the last IO answer
+    uint32_t prefs_owed;        // prefs written off the VM's task, not yet saved
     uint32_t sessions;          // files sessions open
     uint32_t copy_gen;
     char root[MOY_APP_ROOT_MAX + 1];
     uint32_t counts[MOY_ROW_N];
     uint32_t seq;               // the seqlock: odd while the look or the clipboard is written
+    uint32_t sn;                // this state's serial (moy_app_run_t)
+    moy_app_run_t stopped;      // the run a VM stop carries, or none
+    moy_appabi_t *next;         // the states made and not freed
 };
 
-// The seqlock's writer half, around every write of the look and the clipboard.
+// The kernel's writer lock (native/moy_kernel/moy_lock.h): weak, for a build
+// of the layer alone, whose one task needs none.
+void moy_lock_take(void) __attribute__((weak));
+void moy_lock_give(void) __attribute__((weak));
+
+// The seqlock's writer half, around every write of the look and the
+// clipboard: one writer at a time under the kernel's writer lock, the shell's
+// on the VM's task and a compiled program's clipboard write on its own.
 static void seq_open(moy_appabi_t *a) {
+    if (moy_lock_take != NULL) {
+        moy_lock_take();
+    }
     __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELAXED);
     __atomic_thread_fence(__ATOMIC_RELEASE);
 }
 
 static void seq_close(moy_appabi_t *a) {
     __atomic_store_n(&a->seq, a->seq + 1u, __ATOMIC_RELEASE);
+    if (moy_lock_give != NULL) {
+        moy_lock_give();
+    }
 }
+
+// A store row's state is its task's: the gate it holds (-1 for none) and the
+// errno value of its last IO answer, which the caller reads after the row.
+static _Thread_local int t_gated = -1;
+static _Thread_local int t_why;
+
+// The VM's task (native/moy_store's binding says, where the image has it;
+// else the task that bound the door, the host's console): a prefs write
+// made there is saved at once, through the rows' saver, which is Python's.
+int moy_store_on_vm(void) __attribute__((weak));
+uintptr_t moy_store_me(void) __attribute__((weak));
+static uintptr_t s_door_who;
+static int on_vm(void);
 
 uint32_t moy_app_seq_begin(const moy_appabi_t *a) {
     return __atomic_load_n(&a->seq, __ATOMIC_ACQUIRE);
@@ -51,36 +141,9 @@ int moy_app_seq_end(const moy_appabi_t *a, uint32_t s) {
     return __atomic_load_n(&a->seq, __ATOMIC_RELAXED) == s;
 }
 
-static const char *const ROLE_NAMES[MOY_ROLE_N] = {
-    "damage", "surface", "theme", "files", "carts", "nav", "prefs", "notify",
-    "wallpaper", "artwork", "clipboard", "install", "ui",
-};
+static const char *const ROLE_NAMES[MOY_ROLE_N] = MOY_ROLE_NAMES;
 
-static const char *const ROW_NAMES[MOY_ROW_N] = {
-    "damage.all", "damage.again",
-    "surface.canvas", "surface.size", "surface.font_scale", "surface.chrome_scale",
-    "surface.windowed", "surface.bar_h", "surface.content_rect", "surface.pointer",
-    "theme.colors", "theme.token", "theme.gen", "theme.light", "theme.name",
-    "theme.variant",
-    "files.readable", "files.ready", "files.begin", "files.end", "files.list",
-    "files.count", "files.load", "files.save", "files.delete", "files.duplicate",
-    "files.rename", "files.new_name", "files.trash_list", "files.restore",
-    "files.empty_trash", "files.history", "files.history_ops",
-    "files.history_commit", "files.encode_image", "files.decode_image",
-    "files.decode_cover", "files.encode_cover", "files.sig", "files.stamp",
-    "files.encode_text", "files.decode_text", "files.provenance",
-    "prefs.get", "prefs.set", "prefs.clear",
-    "wallpaper.load_copy", "wallpaper.save_copy",
-    "artwork.current", "artwork.follow",
-    "clipboard.put_text", "clipboard.text", "clipboard.kind", "clipboard.seq",
-    "ui.page", "ui.label", "ui.button", "ui.toggle", "ui.slider", "ui.list", "ui.part",
-    "ui.focus", "ui.keys_taken", "ui.at", "ui.group", "ui.info", "ui.link", "ui.cycle",
-    "ui.seg", "ui.swatches", "ui.hints", "ui.icon", "ui.progress", "ui.table", "ui.scroll",
-    "ui.field", "ui.dialog", "ui.tabs", "ui.grid", "ui.card", "ui.popover", "ui.menu",
-    "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part", "ui.part_at",
-    "ui.split", "ui.table_dist", "ui.table_floor", "ui.held", "ui.slots", "ui.slot",
-    "ui.slot_next", "ui.held_last", "ui.held_all",
-};
+static const char *const ROW_NAMES[MOY_ROW_N] = MOY_ROW_NAMES;
 
 // The token vocabulary: the base keys, the semantic roles, the bar's and the
 // chrome's (docs/theme_and_shell_2026-11.md §3.1), in role-id order.
@@ -97,21 +160,30 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
 #define TOKEN_BAR_LIGHT 23
 #define TOKEN_BAND_LIGHT 32
 
+// The shared folders a grant is made for, each by its name and its own kind;
+// then every kind in one (moy_store_base.FILE_KIND_DIRS, which
+// tests/test_moy_app.py holds this to).
+static const char *const FOLDER_NAMES[MOY_APP_KINDS] = {
+    "documents", "pictures", "music", "recordings",
+};
 static const char *const KIND_NAMES[MOY_APP_KINDS] = {
-    "docs", "drawings", "sprites", "music",
+    "docs", "drawings", "music", "recordings",
+};
+static const struct { const char *kind; int8_t folder; } KIND_FOLDERS[] = {
+    { "docs", 0 }, { "stories", 0 }, { "drawings", 1 }, { "sprites", 1 },
+    { "music", 2 }, { "recordings", 3 },
 };
 
 // The allowlist: a role absent here is never granted.
-static const struct { const char *perm; int role; } PERMS[] = {
-    { "files", MOY_ROLE_FILES },
-    { "prefs", MOY_ROLE_PREFS },
-    { "appearance", MOY_ROLE_THEME },
-    { "launch", MOY_ROLE_NAV },
-    { "clipboard", MOY_ROLE_CLIPBOARD },
-};
+static const struct { const char *perm; int role; } PERMS[] = MOY_APP_PERMS;
 #define NPERMS (sizeof(PERMS) / sizeof(PERMS[0]))
 
 // -- the state ---------------------------------------------------------------------
+
+// The states made and not freed, which a run's copy is checked against before
+// its pointer is read, and the serial the next one is made with.
+static moy_appabi_t *s_states;
+static uint32_t s_serial;
 
 moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     moy_appabi_t *a = mem->alloc(sizeof(moy_appabi_t));
@@ -121,7 +193,6 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
     memset(a, 0, sizeof(*a));
     a->mem = mem;
     a->prefs = prefs;
-    a->gated = -1;
     for (uint32_t i = 0; i < MOY_APP_TOKENS; i++) {
         a->tokens[i] = a->near[i] = MOY_TOKEN_ABSENT;
     }
@@ -131,12 +202,21 @@ moy_appabi_t *moy_app_new(const moy_htab_mem_t *mem, moy_settings_t *prefs) {
         moy_app_free(a);
         return NULL;
     }
+    a->sn = ++s_serial != 0u ? s_serial : ++s_serial;
+    a->next = s_states;
+    s_states = a;
     return a;
 }
 
 void moy_app_free(moy_appabi_t *a) {
     if (a == NULL) {
         return;
+    }
+    for (moy_appabi_t **p = &s_states; *p != NULL; p = &(*p)->next) {
+        if (*p == a) {
+            *p = a->next;
+            break;
+        }
     }
     moy_htab_free(a->grants);
     if (a->clip != NULL) {
@@ -169,15 +249,67 @@ uint32_t moy_app_kernel_grants(void) {
     return s_kernel != NULL ? moy_app_grants(s_kernel) : 0u;
 }
 
-void moy_app_fresh(moy_appabi_t *a) {
+void moy_app_run_make(moy_appabi_t *a, uint32_t g, uint32_t roles, moy_app_run_t *r) {
+    r->a = g != 0u ? a : NULL;
+    r->sn = r->a != NULL ? a->sn : 0u;
+    r->g = r->a != NULL ? g : 0u;
+    r->roles = r->a != NULL ? roles : 0u;
+}
+
+int moy_app_run_live(const moy_app_run_t *r) {
+    if (r == NULL || r->a == NULL || r->g == 0u) {
+        return 0;
+    }
+    for (const moy_appabi_t *s = s_states; s != NULL; s = s->next) {
+        if (s == r->a) {
+            return s->sn == r->sn;
+        }
+    }
+    return 0;
+}
+
+void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r) {
+    if (r != NULL && r->a == a) {
+        a->stopped = *r;
+    } else {
+        memset(&a->stopped, 0, sizeof(a->stopped));
+    }
+}
+
+const moy_app_run_t *moy_app_stopped(void) {
+    return s_kernel != NULL && moy_app_run_live(&s_kernel->stopped) ? &s_kernel->stopped
+                                                                   : NULL;
+}
+
+static bool kept(uint32_t owner, const uint32_t *keep, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (keep[i] != 0u && keep[i] == owner) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Every RUN grant ended but those `keep`'s pids own: the runs and services
+// that held them were the stopped VM's.
+static void runs_end(moy_appabi_t *a, const uint32_t *keep, size_t n) {
     for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
         uint32_t h = moy_htab_at(a->grants, s);
         const moy_grant_t *g;
         if (h != 0u && moy_app_grant_get(a, h, &g) == MOY_APP_OK
-            && g->cls == MOY_GRANT_RUN) {
+            && g->cls == MOY_GRANT_RUN && !kept(g->owner, keep, n)) {
             moy_htab_release(a->grants, h);
         }
     }
+    memset(&a->stopped, 0, sizeof(a->stopped));
+}
+
+void moy_app_stop_end(moy_appabi_t *a, const uint32_t *keep, size_t n) {
+    runs_end(a, keep, n);
+}
+
+void moy_app_fresh(moy_appabi_t *a) {
+    runs_end(a, NULL, 0);
     a->damage = 0u;
     seq_open(a);
     a->clip_kind = MOY_CLIP_EMPTY;
@@ -221,7 +353,8 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     for (uint32_t s = 0; s < moy_htab_slots(a->grants) && row == NULL; s++) {
         uint32_t at = moy_htab_at(a->grants, s);
         moy_grant_t *r = at != 0u ? grant_row(a, at) : NULL;
-        if (r != NULL && r->cls == cls && r->id_len == n && memcmp(r->id, id, n) == 0) {
+        if (r != NULL && r->cls == cls && r->owner == owner && r->id_len == n
+            && memcmp(r->id, id, n) == 0) {
             row = r;
             *h = at;
         }
@@ -241,10 +374,33 @@ int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
     row->roles = roles;
     row->kind = (int8_t)kind;
     row->owner = owner;
+    row->devs = 0u;
+    row->folder[0] = '\0';
     memcpy(row->ns, ns, ns_n);
     row->ns[ns_n] = '\0';
     row->ns_len = (uint8_t)ns_n;
     return MOY_APP_OK;
+}
+
+int moy_app_regrant(moy_appabi_t *a, const char *id, size_t n, uint32_t roles, uint32_t svc,
+                    int kind) {
+    if (n == 0u || n > MOY_APP_ID_MAX || kind < -1 || kind >= (int)MOY_APP_KINDS
+        || roles >= (1u << MOY_ROLE_N) || svc >= (1u << MOY_ROLE_N)) {
+        return -MOY_APP_BAD;
+    }
+    int got = 0;
+    for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
+        uint32_t at = moy_htab_at(a->grants, s);
+        moy_grant_t *r = at != 0u ? grant_row(a, at) : NULL;
+        if (r == NULL || r->cls != MOY_GRANT_RUN || r->id_len != n
+            || memcmp(r->id, id, n) != 0) {
+            continue;
+        }
+        r->roles = (r->roles & (1u << MOY_ROLE_SURFACE)) != 0u ? roles | MOY_APP_RUN_BASE : svc;
+        r->kind = (int8_t)kind;
+        got++;
+    }
+    return got;
 }
 
 int moy_app_end(moy_appabi_t *a, uint32_t h) {
@@ -258,7 +414,7 @@ static const moy_grant_t *holding(const moy_appabi_t *a, uint32_t h, int role, i
         *rc = MOY_APP_STALE;
         return NULL;
     }
-    if ((g->roles & (1u << role)) == 0u) {
+    if (((g->roles | MOY_ROLE_FLOOR) & (1u << role)) == 0u) {
         *rc = MOY_APP_DENIED;
         return NULL;
     }
@@ -290,10 +446,31 @@ const char *moy_app_kind_name(int kind) {
     return kind >= 0 && kind < (int)MOY_APP_KINDS ? KIND_NAMES[kind] : NULL;
 }
 
-int moy_app_kind_of(const char *name, size_t n) {
+static int name_at(const char *const *names, const char *name, size_t n) {
     for (int k = 0; k < (int)MOY_APP_KINDS; k++) {
-        if (strlen(KIND_NAMES[k]) == n && memcmp(KIND_NAMES[k], name, n) == 0) {
+        if (strlen(names[k]) == n && memcmp(names[k], name, n) == 0) {
             return k;
+        }
+    }
+    return -1;
+}
+
+int moy_app_kind_of(const char *name, size_t n) {
+    return name_at(KIND_NAMES, name, n);
+}
+
+const char *moy_app_folder_name(int folder) {
+    return folder >= 0 && folder < (int)MOY_APP_KINDS ? FOLDER_NAMES[folder] : NULL;
+}
+
+int moy_app_folder_of(const char *name, size_t n) {
+    return name_at(FOLDER_NAMES, name, n);
+}
+
+int moy_app_kind_folder(const char *kind, size_t n) {
+    for (size_t i = 0; i < sizeof KIND_FOLDERS / sizeof KIND_FOLDERS[0]; i++) {
+        if (strlen(KIND_FOLDERS[i].kind) == n && memcmp(KIND_FOLDERS[i].kind, kind, n) == 0) {
+            return KIND_FOLDERS[i].folder;
         }
     }
     return -1;
@@ -311,10 +488,10 @@ void moy_app_policy_add(moy_app_policy_t *p, const char *perm, size_t n) {
         return;
     }
     if (role == MOY_ROLE_FILES) {
-        // A scoped grant names its kind; an unknown kind narrows to nothing,
-        // never widens to the default.
+        // A scoped grant names its folder; an unknown folder narrows to
+        // nothing, never widens to the default.
         int kind = colon == NULL ? MOY_APP_DEFAULT_KIND
-                                 : moy_app_kind_of(colon + 1, n - head - 1u);
+                                 : moy_app_folder_of(colon + 1, n - head - 1u);
         if (kind < 0) {
             return;
         }
@@ -357,10 +534,10 @@ size_t moy_app_policy_error(const moy_app_policy_t *p, char *out, size_t cap) {
     char num[4] = { (char)('0' + p->nkinds), '\0' };
     size_t at = put(out, cap, 0u, "manifest asks for ");
     at = put(out, cap, at, num);
-    at = put(out, cap, at, " file kinds (");
+    at = put(out, cap, at, " file folders (");
     for (uint8_t i = 0; i < p->nkinds; i++) {
         at = put(out, cap, at, i ? ", " : "");
-        at = put(out, cap, at, KIND_NAMES[p->kinds[i]]);
+        at = put(out, cap, at, FOLDER_NAMES[p->kinds[i]]);
     }
     at = put(out, cap, at, ") - pick one");
     out[at < cap ? at : cap - 1u] = '\0';
@@ -700,14 +877,31 @@ static int prefs_read(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
     if (kn == 0u) {
         return MOY_APP_BAD;
     }
-    if (a->prefs == NULL || !moy_settings_get(a->prefs, k, kn, &j, &jn)) {
+    if (a->prefs == NULL) {
+        return MOY_APP_ABSENT;
+    }
+    moy_settings_lock();
+    if (!moy_settings_get(a->prefs, k, kn, &j, &jn)) {
+        moy_settings_unlock();
         return MOY_APP_ABSENT;
     }
     if (out != NULL) {
         memcpy(out, j, jn < cap ? jn : cap);
     }
+    moy_settings_unlock();
     *len = jn;
     return MOY_APP_OK;
+}
+
+// A prefs write persisted: saved now on the VM's task; from any other task
+// left in the rows and owed, saved by the VM's next frame (moy_app_files_end_all)
+// or, with no VM, by the next start's load, which flushes the rows first.
+static void prefs_save(moy_appabi_t *a) {
+    if (on_vm()) {
+        moy_settings_flush(a->prefs);
+    } else {
+        __atomic_add_fetch(&a->prefs_owed, 1u, __ATOMIC_RELAXED);
+    }
 }
 
 // A size query that finds the row is not a call: the read after it is.
@@ -738,7 +932,7 @@ int moy_app_prefs_set(moy_appabi_t *a, uint32_t g, const char *key, size_t n,
     if (rc != MOY_SETTINGS_OK) {
         return rc == MOY_SETTINGS_NOMEM ? MOY_APP_NOMEM : MOY_APP_BAD;
     }
-    moy_settings_flush(a->prefs);
+    prefs_save(a);
     return MOY_APP_OK;
 }
 
@@ -757,7 +951,7 @@ int moy_app_prefs_clear(moy_appabi_t *a, uint32_t g, const char *key, size_t n) 
     if (a->prefs == NULL || !moy_settings_delete(a->prefs, k, kn)) {
         return MOY_APP_ABSENT;
     }
-    moy_settings_flush(a->prefs);
+    prefs_save(a);
     return MOY_APP_OK;
 }
 
@@ -861,10 +1055,13 @@ static long json_str(const char *j, size_t jn, char *out, size_t cap) {
 static long art_row(const moy_appabi_t *a, const char *key, char *out, size_t cap) {
     const char *j;
     size_t jn;
-    if (a->prefs == NULL || !moy_settings_get(a->prefs, key, strlen(key), &j, &jn)) {
+    if (a->prefs == NULL) {
         return -1;
     }
-    return json_str(j, jn, out, cap);
+    moy_settings_lock();
+    long r = moy_settings_get(a->prefs, key, strlen(key), &j, &jn) ? json_str(j, jn, out, cap) : -1;
+    moy_settings_unlock();
+    return r;
 }
 
 #define ART_KIND MOY_APP_ARTWORK_NS "_doc_kind"
@@ -958,14 +1155,15 @@ int moy_app_store_bind(moy_appabi_t *a, const moy_uf_ops_t *ops, const char *roo
 }
 
 void moy_app_store_unwind(moy_appabi_t *a) {
-    if (a->gated >= 0 && a->uf != NULL) {
-        a->uf->gate_leave(a->gated);
+    if (t_gated >= 0 && a->uf != NULL) {
+        a->uf->gate_leave(t_gated);
     }
-    a->gated = -1;
+    t_gated = -1;
 }
 
 int moy_app_why(const moy_appabi_t *a) {
-    return a->why;
+    (void)a;
+    return t_why;
 }
 
 void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b) {
@@ -979,6 +1177,9 @@ void moy_app_buf_free(moy_appabi_t *a, moy_buf_t *b) {
 uint32_t moy_app_files_end_all(moy_appabi_t *a) {
     uint32_t n = a->sessions;
     a->sessions = 0u;
+    if (__atomic_exchange_n(&a->prefs_owed, 0u, __ATOMIC_RELAXED) != 0u && a->prefs != NULL) {
+        moy_settings_flush(a->prefs);
+    }
     return n;
 }
 
@@ -1000,14 +1201,15 @@ static int uf_rc(moy_appabi_t *a, int rc) {
     if (rc == MOY_ENOMEM) {
         return MOY_APP_NOMEM;
     }
-    a->why = rc;
+    t_why = rc;
     return MOY_APP_IO;
 }
 
 enum { NEED_LAYER = 0, NEED_READ = 1, NEED_WRITE = 2 };
 
 // The grant of a files row, counted: NULL and `*rc` when it cannot run. A
-// kind the grant was not made for is DENIED; `need` is what the store must do.
+// kind outside the folder the grant was made for is DENIED; `need` is what the
+// store must do.
 static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
                                     const char *kind, int need, int *rc) {
     a->counts[row]++;
@@ -1015,7 +1217,8 @@ static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
     if (gr == NULL) {
         return NULL;
     }
-    if (kind != NULL && gr->kind >= 0 && strcmp(kind, KIND_NAMES[(int)gr->kind]) != 0) {
+    if (kind != NULL && gr->kind >= 0
+        && moy_app_kind_folder(kind, strlen(kind)) != gr->kind) {
         *rc = MOY_APP_DENIED;
         return NULL;
     }
@@ -1030,16 +1233,23 @@ static const moy_grant_t *files_row(moy_appabi_t *a, uint32_t g, int row,
     return gr;
 }
 
-// The gate around one store op.
-static void gate_on(moy_appabi_t *a) {
-    a->gated = a->uf->gate_enter(a->root);
+// The gate around one store op, with the store's lock (native/moy_store/
+// moy_vol.h): 0, or NEEDS_VM where the calling task cannot reach the store
+// (a task other than the VM's, a store the volume table does not hold), the
+// row then run on the VM's task.
+static int gate_on(moy_appabi_t *a) {
+    t_gated = a->uf->gate_enter(a->root);
+    return t_gated < 0 ? MOY_APP_NEEDS_VM : 0;
 }
 
 static int gate_off(moy_appabi_t *a, int rc) {
-    a->uf->gate_leave(a->gated);
-    a->gated = -1;
-    return uf_rc(a, rc);
+    int r = uf_rc(a, rc);
+    a->uf->gate_leave(t_gated);
+    t_gated = -1;
+    return r;
 }
+
+#define GATE_ON(a) do { int g_ = gate_on(a); if (g_) { return g_; } } while (0)
 
 int32_t moy_app_files_readable(moy_appabi_t *a, uint32_t g) {
     int rc;
@@ -1089,7 +1299,7 @@ int moy_app_files_list(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_LIST, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->list(a->root, kind, out, count));
 }
 
@@ -1099,7 +1309,7 @@ int moy_app_files_count(moy_appabi_t *a, uint32_t g, const char *kind, uint32_t 
     if (files_row(a, g, MOY_ROW_FILES_COUNT, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->count(a->root, kind, n));
 }
 
@@ -1112,7 +1322,7 @@ int moy_app_files_load(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_LOAD, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->load(a->root, kind, name, out, binary));
 }
 
@@ -1123,7 +1333,7 @@ int moy_app_files_save(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_SAVE, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->save(a->root, kind, name, data, n, name_out));
 }
 
@@ -1136,7 +1346,7 @@ static int named(moy_appabi_t *a, uint32_t g, int row, named_fn fn, const char *
     if (files_row(a, g, row, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, fn(a->root, kind, name, name_out));
 }
 
@@ -1165,7 +1375,7 @@ int moy_app_files_rename(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_RENAME, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->rename(a->root, kind, name, title, name_out));
 }
 
@@ -1176,7 +1386,7 @@ int moy_app_files_new_name(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_NEW_NAME, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     rc = title != NULL && *title ? a->uf->free_name(a->root, kind, title, name_out)
          : a->uf->new_name(a->root, kind, NULL, name_out);
     return gate_off(a, rc);
@@ -1191,7 +1401,7 @@ int moy_app_files_trash_list(moy_appabi_t *a, uint32_t g, moy_buf_t *out,
     if (files_row(a, g, MOY_ROW_FILES_TRASH_LIST, NULL, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->trash_list(a->root, out, count));
 }
 
@@ -1200,7 +1410,7 @@ int moy_app_files_empty_trash(moy_appabi_t *a, uint32_t g) {
     if (files_row(a, g, MOY_ROW_FILES_EMPTY_TRASH, NULL, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->prune_trash(a->root, 0u));
 }
 
@@ -1212,7 +1422,7 @@ int moy_app_files_history(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history(a->root, kind, name, out));
 }
 
@@ -1224,7 +1434,7 @@ int moy_app_files_history_ops(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY_OPS, kind, NEED_READ, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history_ops(a->root, kind, name, out));
 }
 
@@ -1236,7 +1446,7 @@ int moy_app_files_history_commit(moy_appabi_t *a, uint32_t g, const char *kind,
     if (files_row(a, g, MOY_ROW_FILES_HISTORY_COMMIT, kind, NEED_WRITE, &rc) == NULL) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->history_commit(a->root, kind, name, ops, ops_n, kf, kf_n,
                                              prune_err));
 }
@@ -1352,7 +1562,7 @@ int moy_app_wallpaper_load_copy(moy_appabi_t *a, uint32_t g, moy_buf_t *out) {
     if (rc != MOY_APP_OK) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     return gate_off(a, a->uf->copy_load(a->root, out));
 }
 
@@ -1362,7 +1572,7 @@ int moy_app_wallpaper_save_copy(moy_appabi_t *a, uint32_t g, const char *data,
     if (rc != MOY_APP_OK) {
         return rc;
     }
-    gate_on(a);
+    GATE_ON(a);
     rc = gate_off(a, a->uf->copy_save(a->root, data, n));
     if (rc == MOY_APP_OK) {
         a->copy_gen++;
@@ -1434,174 +1644,11 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g) {
 // -- the ROLE door -------------------------------------------------------------------
 
 // The role table, row for row: each row's "role.verb", its role and its C row
-// (MOY_APP_SHELL for a row the Python console serves). tests/test_roles.py
-// holds it to roles.json.
-static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABLE_N] = {
-    {"damage.all", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_ALL},
-    {"damage.again", MOY_ROLE_DAMAGE, MOY_ROW_DAMAGE_AGAIN},
-    {"surface.canvas", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CANVAS},
-    {"surface.size", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_SIZE},
-    {"surface.font_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_FONT_SCALE},
-    {"surface.chrome_scale", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CHROME_SCALE},
-    {"surface.windowed", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_WINDOWED},
-    {"surface.bar_h", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_BAR_H},
-    {"surface.content_rect", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_CONTENT_RECT},
-    {"surface.pointer", MOY_ROLE_SURFACE, MOY_ROW_SURFACE_POINTER},
-    {"theme.colors", MOY_ROLE_THEME, MOY_ROW_THEME_COLORS},
-    {"theme.token", MOY_ROLE_THEME, MOY_ROW_THEME_TOKEN},
-    {"theme.gen", MOY_ROLE_THEME, MOY_ROW_THEME_GEN},
-    {"theme.light", MOY_ROLE_THEME, MOY_ROW_THEME_LIGHT},
-    {"theme.name", MOY_ROLE_THEME, MOY_ROW_THEME_NAME},
-    {"theme.variant", MOY_ROLE_THEME, MOY_ROW_THEME_VARIANT},
-    {"theme.set", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.set_variant", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.change", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.choices", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.set_chrome_scale", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.edit_file", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.name_custom", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"theme.name_check", MOY_ROLE_THEME, MOY_APP_SHELL},
-    {"files.readable", MOY_ROLE_FILES, MOY_ROW_FILES_READABLE},
-    {"files.ready", MOY_ROLE_FILES, MOY_ROW_FILES_READY},
-    {"files.begin", MOY_ROLE_FILES, MOY_ROW_FILES_BEGIN},
-    {"files.end", MOY_ROLE_FILES, MOY_ROW_FILES_END},
-    {"files.list", MOY_ROLE_FILES, MOY_ROW_FILES_LIST},
-    {"files.count", MOY_ROLE_FILES, MOY_ROW_FILES_COUNT},
-    {"files.load", MOY_ROLE_FILES, MOY_ROW_FILES_LOAD},
-    {"files.save", MOY_ROLE_FILES, MOY_ROW_FILES_SAVE},
-    {"files.delete", MOY_ROLE_FILES, MOY_ROW_FILES_DELETE},
-    {"files.duplicate", MOY_ROLE_FILES, MOY_ROW_FILES_DUPLICATE},
-    {"files.rename", MOY_ROLE_FILES, MOY_ROW_FILES_RENAME},
-    {"files.new_name", MOY_ROLE_FILES, MOY_ROW_FILES_NEW_NAME},
-    {"files.trash_list", MOY_ROLE_FILES, MOY_ROW_FILES_TRASH_LIST},
-    {"files.restore", MOY_ROLE_FILES, MOY_ROW_FILES_RESTORE},
-    {"files.empty_trash", MOY_ROLE_FILES, MOY_ROW_FILES_EMPTY_TRASH},
-    {"files.history", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY},
-    {"files.history_ops", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_OPS},
-    {"files.history_commit", MOY_ROLE_FILES, MOY_ROW_FILES_HISTORY_COMMIT},
-    {"files.encode_image", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_IMAGE},
-    {"files.decode_image", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_IMAGE},
-    {"files.decode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_COVER},
-    {"files.encode_cover", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_COVER},
-    {"files.sig", MOY_ROLE_FILES, MOY_ROW_FILES_SIG},
-    {"files.stamp", MOY_ROLE_FILES, MOY_ROW_FILES_STAMP},
-    {"files.encode_text", MOY_ROLE_FILES, MOY_ROW_FILES_ENCODE_TEXT},
-    {"files.decode_text", MOY_ROLE_FILES, MOY_ROW_FILES_DECODE_TEXT},
-    {"files.provenance", MOY_ROLE_FILES, MOY_ROW_FILES_PROVENANCE},
-    {"carts.readable", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.ready", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.begin", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.end", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.all", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.can_journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.slug", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.create", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.journal", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.rescan", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.hydrate", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.images", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.save_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"carts.encode_image", MOY_ROLE_CARTS, MOY_APP_SHELL},
-    {"nav.open_app", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.is_system_app", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.projects", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.edit", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.open_image", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.open_text", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.edit_file", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.play", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.run_script", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.text_mode", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.cover", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"nav.cover_gen", MOY_ROLE_NAV, MOY_APP_SHELL},
-    {"prefs.get", MOY_ROLE_PREFS, MOY_ROW_PREFS_GET},
-    {"prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET},
-    {"prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR},
-    {"notify.achieve", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.award", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.count", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.has", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.found_on", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.progress", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"notify.today", MOY_ROLE_NOTIFY, MOY_APP_SHELL},
-    {"wallpaper.current", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.carts", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.id_for", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.title", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.select", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.preview", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.thumbnail", MOY_ROLE_WALLPAPER, MOY_APP_SHELL},
-    {"wallpaper.load_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_LOAD_COPY},
-    {"wallpaper.save_copy", MOY_ROLE_WALLPAPER, MOY_ROW_WALLPAPER_SAVE_COPY},
-    {"artwork.current", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_CURRENT},
-    {"artwork.follow", MOY_ROLE_ARTWORK, MOY_ROW_ARTWORK_FOLLOW},
-    {"clipboard.put_text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_PUT_TEXT},
-    {"clipboard.text", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_TEXT},
-    {"clipboard.kind", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_KIND},
-    {"clipboard.seq", MOY_ROLE_CLIPBOARD, MOY_ROW_CLIPBOARD_SEQ},
-    {"install.hold", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.release", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.fit", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.memory", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.chip", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.runtimes", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.home", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.can_pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.pick", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.root", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.writable", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.op", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.rescan", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.free", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.wifi", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"install.wifi_open", MOY_ROLE_INSTALL, MOY_APP_SHELL},
-    {"ui.page", MOY_ROLE_UI, MOY_ROW_UI_PAGE},
-    {"ui.label", MOY_ROLE_UI, MOY_ROW_UI_LABEL},
-    {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},
-    {"ui.toggle", MOY_ROLE_UI, MOY_ROW_UI_TOGGLE},
-    {"ui.slider", MOY_ROLE_UI, MOY_ROW_UI_SLIDER},
-    {"ui.list", MOY_ROLE_UI, MOY_ROW_UI_LIST},
-    {"ui.part", MOY_ROLE_UI, MOY_ROW_UI_PART},
-    {"ui.focus", MOY_ROLE_UI, MOY_ROW_UI_FOCUS},
-    {"ui.keys_taken", MOY_ROLE_UI, MOY_ROW_UI_KEYS_TAKEN},
-    {"ui.at", MOY_ROLE_UI, MOY_ROW_UI_AT},
-    {"ui.group", MOY_ROLE_UI, MOY_ROW_UI_GROUP},
-    {"ui.info", MOY_ROLE_UI, MOY_ROW_UI_INFO},
-    {"ui.link", MOY_ROLE_UI, MOY_ROW_UI_LINK},
-    {"ui.cycle", MOY_ROLE_UI, MOY_ROW_UI_CYCLE},
-    {"ui.seg", MOY_ROLE_UI, MOY_ROW_UI_SEG},
-    {"ui.swatches", MOY_ROLE_UI, MOY_ROW_UI_SWATCHES},
-    {"ui.hints", MOY_ROLE_UI, MOY_ROW_UI_HINTS},
-    {"ui.icon", MOY_ROLE_UI, MOY_ROW_UI_ICON},
-    {"ui.progress", MOY_ROLE_UI, MOY_ROW_UI_PROGRESS},
-    {"ui.table", MOY_ROLE_UI, MOY_ROW_UI_TABLE},
-    {"ui.scroll", MOY_ROLE_UI, MOY_ROW_UI_SCROLL},
-    {"ui.field", MOY_ROLE_UI, MOY_ROW_UI_FIELD},
-    {"ui.dialog", MOY_ROLE_UI, MOY_ROW_UI_DIALOG},
-    {"ui.tabs", MOY_ROLE_UI, MOY_ROW_UI_TABS},
-    {"ui.grid", MOY_ROLE_UI, MOY_ROW_UI_GRID},
-    {"ui.card", MOY_ROLE_UI, MOY_ROW_UI_CARD},
-    {"ui.popover", MOY_ROLE_UI, MOY_ROW_UI_POPOVER},
-    {"ui.menu", MOY_ROLE_UI, MOY_ROW_UI_MENU},
-    {"ui.tool", MOY_ROLE_UI, MOY_ROW_UI_TOOL},
-    {"ui.bar", MOY_ROLE_UI, MOY_ROW_UI_BAR},
-    {"ui.rule", MOY_ROLE_UI, MOY_ROW_UI_RULE},
-    {"ui.text_view", MOY_ROLE_UI, MOY_ROW_UI_TEXT_VIEW},
-    {"ui.table_part", MOY_ROLE_UI, MOY_ROW_UI_TABLE_PART},
-    {"ui.part_at", MOY_ROLE_UI, MOY_ROW_UI_PART_AT},
-    {"ui.split", MOY_ROLE_UI, MOY_ROW_UI_SPLIT},
-    {"ui.table_dist", MOY_ROLE_UI, MOY_ROW_UI_TABLE_DIST},
-    {"ui.table_floor", MOY_ROLE_UI, MOY_ROW_UI_TABLE_FLOOR},
-    {"ui.held", MOY_ROLE_UI, MOY_ROW_UI_HELD},
-    {"ui.slots", MOY_ROLE_UI, MOY_ROW_UI_SLOTS},
-    {"ui.slot", MOY_ROLE_UI, MOY_ROW_UI_SLOT},
-    {"ui.slot_next", MOY_ROLE_UI, MOY_ROW_UI_SLOT_NEXT},
-    {"ui.held_last", MOY_ROLE_UI, MOY_ROW_UI_HELD_LAST},
-    {"ui.held_all", MOY_ROLE_UI, MOY_ROW_UI_HELD_ALL},
-};
+// (MOY_APP_SHELL for a row the Python console serves), generated from
+// native/os_calls.json.
+static const struct { const char *name; int8_t role; int16_t c_row; } TABLE[MOY_APP_TABLE_N] =
+    MOY_APP_TABLE_ROWS;
+_Static_assert(MOY_ROW_N <= INT16_MAX, "a C row's index is a TABLE entry's int16_t");
 
 int moy_app_table_role(uint32_t row) {
     return row < MOY_APP_TABLE_N ? TABLE[row].role : -1;
@@ -1619,13 +1666,30 @@ static moy_app_door_fn s_door;
 
 void moy_app_door_bind(moy_app_door_fn fn) {
     s_door = fn;
+    if (fn != NULL && moy_store_me != NULL) {
+        s_door_who = moy_store_me();
+    }
 }
 
-// The packed arguments, read in order.
+// Where no door was ever bound (a harness with no console) every caller is
+// the console's; once one was, its binder's task is, bound or not (a VM stop
+// lets the door go and the console's task stays the VM's).
+static int on_vm(void) {
+    if (moy_store_on_vm != NULL) {
+        return moy_store_on_vm();
+    }
+    return moy_store_me == NULL || s_door_who == 0u || s_door_who == moy_store_me();
+}
+
+// The packed arguments, read in order; the table row they were packed for,
+// and whether the call runs where it was made (how "here") rather than on
+// the VM's task.
 typedef struct {
     const uint8_t *p;
     size_t n, at;
     int bad;
+    uint32_t trow;
+    bool here;
 } args_t;
 
 static const uint8_t *arg_field(args_t *f, size_t *len) {
@@ -1696,6 +1760,17 @@ static int32_t ans_name(int rc, const char *name, uint8_t *ans, size_t cap) {
     return rc == MOY_APP_OK ? ans_put(ans, cap, name, strlen(name)) : -rc;
 }
 
+// A crypto row's answer (moy_crypto.h): its length, or its code as the ABI's.
+static int32_t ans_crypto(int32_t r) {
+    switch (r) {
+        case MOY_CRYPTO_EFULL: return -MOY_APP_FULL;
+        case MOY_CRYPTO_EFORGED: return -MOY_APP_FORGED;
+        case MOY_CRYPTO_EABSENT: return -MOY_APP_ABSENT;
+        case MOY_CRYPTO_ENOMEM: return -MOY_APP_NOMEM;
+        default: return r < 0 ? -MOY_APP_BAD : r;
+    }
+}
+
 static void le32(uint8_t *q, uint32_t v) {
     q[0] = (uint8_t)v;
     q[1] = (uint8_t)(v >> 8);
@@ -1715,10 +1790,504 @@ static int no_args(int row) {
         case MOY_ROW_PREFS_GET: case MOY_ROW_PREFS_SET: case MOY_ROW_PREFS_CLEAR:
         case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
         case MOY_ROW_CLIPBOARD_PUT_TEXT:
+        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
+        case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
+        case MOY_ROW_MOYBYTE_ON: case MOY_ROW_MOYBYTE_AT:
+        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
+        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
+        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
+        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
+        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
+        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
+        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
+        case MOY_ROW_MOYBYTE_DEV_GET:
+        case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
+        case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
+        case MOY_ROW_MOYBYTE_ED25519_PUBLIC: case MOY_ROW_MOYBYTE_ED25519_SIGN:
+        case MOY_ROW_MOYBYTE_ED25519_VERIFY: case MOY_ROW_MOYBYTE_AES_CTR:
+        case MOY_ROW_MOYBYTE_AES_CCM_SEAL: case MOY_ROW_MOYBYTE_AES_CCM_OPEN:
+        case MOY_ROW_MOYBYTE_CLOCK:
             return 0;
         default:
             return 1;
     }
+}
+
+// A compiled process's timers (moybyte.every, after, cancel): the kernel's,
+// of the process the grant names (its owner, the pid a compiled run's grant
+// is made for), so they go off and are set with no VM. A timer answers its
+// id, FULL past MOY_EVQ_TIMERS; a cancel 1 where one of its own went, else 0.
+static int32_t timer_row(moy_appabi_t *a, uint32_t h, int row, int32_t v) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL || g->owner == 0u || moy_evq_timer == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[row]++;
+    if (row == MOY_ROW_MOYBYTE_CANCEL) {
+        return moy_evq_timer_cancel(g->owner, (uint32_t)v) ? 1 : 0;
+    }
+    uint32_t ms = v > 0 ? (uint32_t)v : 0u;
+    if (row == MOY_ROW_MOYBYTE_EVERY && ms == 0u) {
+        ms = 1u;
+    }
+    uint32_t id = 0;
+    int rc = moy_evq_timer(g->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
+    return rc == 0 ? (int32_t)id : rc == 2 ? -MOY_APP_FULL : -MOY_APP_STALE;  // MOY_EVQ_OK, FULL
+}
+
+// A compiled process's messages (moybyte.send, recv) and its log lines
+// (moybyte.log): the kernel's, as the process the grant names, run on the
+// caller's own task (how "here": the queues and the log lock their own
+// state), so they need no VM. A send answers how many took it (FULL:
+// BACKPRESSURE, moy_evq.h; STALE where the process has no queue); a recv the
+// next event's record (moy_evq_read's), 0 with none queued, FULL where `cap`
+// does not hold it (the event stays); a log 0.
+static uint32_t owner_of(moy_appabi_t *a, uint32_t h, int row) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return 0u;
+    }
+    a->counts[row]++;
+    return g->owner;
+}
+
+static int32_t send_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    size_t an, nn, jn;
+    const uint8_t *ap = arg_field(f, &an);
+    const uint8_t *np = arg_field(f, &nn);
+    const uint8_t *jp = arg_field(f, &jn);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_SEND);
+    if (pid == 0u || moy_evq_send == NULL) {
+        return -MOY_APP_STALE;
+    }
+    char app[EVQ_APP], name[EVQ_NAME];
+    if (an >= sizeof app || nn == 0u || nn >= sizeof name || memchr(ap, 0, an) != NULL
+        || memchr(np, 0, nn) != NULL) {
+        return -MOY_APP_BAD;
+    }
+    memcpy(app, ap, an);
+    app[an] = 0;
+    memcpy(name, np, nn);
+    name[nn] = 0;
+    const char *j = jn ? (const char *)jp : "[]";
+    if (!jn) {
+        jn = 2u;
+    }
+    while (jn && (*j == ' ' || *j == '\t' || *j == '\n' || *j == '\r')) {
+        j++;
+        jn--;
+    }
+    if (!jn || *j != '[') {
+        return -MOY_APP_BAD;
+    }
+    int took = moy_evq_send(pid, app, name, j, jn, NULL);
+    return took >= 0 ? took : took == -EVQ_FULL ? -MOY_APP_FULL
+           : took == -EVQ_STALE ? -MOY_APP_STALE : took == -EVQ_NOMEM ? -MOY_APP_NOMEM
+           : -MOY_APP_BAD;
+}
+
+static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_RECV);
+    if (pid == 0u || moy_evq_read == NULL) {
+        return -MOY_APP_STALE;
+    }
+    size_t len = 0;
+    int rc = moy_evq_read(pid, ans, cap, &len);
+    return rc == 0 ? (int32_t)len : rc == EVQ_RANGE ? -MOY_APP_FULL : 0;
+}
+
+// A compiled process's listens and alarms (moybyte.on, at): the kernel's
+// too. An `on` answers 0, FULL where the process listens on MOY_EVQ_LISTEN
+// names already; an `at` (a wall time, Unix seconds) the alarm's id, which
+// `cancel` takes, DENIED without `alarms` (its queue's MOY_EVQ_ALARMS),
+// FULL past MOY_EVQ_TIMERS. An alarm wakes the screen (moy_evq_woke).
+static int32_t on_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    size_t nn;
+    const uint8_t *np = arg_field(f, &nn);
+    int32_t on = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_ON);
+    if (pid == 0u || moy_evq_listen == NULL) {
+        return -MOY_APP_STALE;
+    }
+    char name[EVQ_NAME];
+    if (nn == 0u || nn >= sizeof name || memchr(np, 0, nn) != NULL) {
+        return -MOY_APP_BAD;
+    }
+    memcpy(name, np, nn);
+    name[nn] = 0;
+    int rc = moy_evq_listen(pid, name, on != 0);
+    return rc == 0 ? 0 : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+}
+
+static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    int32_t t = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_AT);
+    if (pid == 0u || moy_evq_at == NULL) {
+        return -MOY_APP_STALE;
+    }
+    uint32_t id = 0;
+    int rc = moy_evq_at(pid, t, &id);
+    return rc == 0 ? (int32_t)id : rc == EVQ_DENIED ? -MOY_APP_DENIED
+           : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+}
+
+// A compiled process's status item (moybyte.status_show, status_state,
+// status_remove): a slot of the kernel's table (moy_status.h) as the
+// process the grant names, on its own task, which the console reads to
+// draw. A show answers the item's handle (FULL where the bar holds
+// MOY_STATUS_CAP, BAD for an empty or long icon or a state out of range),
+// a state 0, a remove 0, each ABSENT for a handle that is no compiled item
+// of the process's. Its panel is described through the VM (status_panel).
+static int32_t status_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
+    size_t in = 0;
+    const uint8_t *icon = NULL;
+    int32_t item = 0;
+    if (row == MOY_ROW_MOYBYTE_STATUS_SHOW) {
+        icon = arg_field(f, &in);
+    } else {
+        item = arg_int(f);
+    }
+    int32_t state = row != MOY_ROW_MOYBYTE_STATUS_REMOVE ? arg_int(f) : 0;
+    int32_t order = row == MOY_ROW_MOYBYTE_STATUS_SHOW ? arg_int(f) : 0;
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u || moy_status_add == NULL) {
+        return -MOY_APP_STALE;
+    }
+    if (row == MOY_ROW_MOYBYTE_STATUS_REMOVE) {
+        return moy_status_remove(pid, item);
+    }
+    if (row == MOY_ROW_MOYBYTE_STATUS_STATE) {
+        return moy_status_show(pid, item, state);
+    }
+    if (state < 0 || state > 2) {
+        return -MOY_APP_BAD;
+    }
+    int got = moy_status_add(pid, (const char *)icon, in, order, true);
+    if (got > 0) {
+        moy_status_show(pid, got, state);
+    }
+    return got;
+}
+
+// A compiled process's notification and badges (moybyte.notify, award,
+// progress): the kernel's queue in front of the console's list and the
+// achievements process (moy_notes.h), as the process the grant names, on its
+// own task. A notify answers its id (DENIED without `notifications`), an
+// award or a progress what its badge's last send answered.
+static int32_t note_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
+    size_t n0, n1 = 0;
+    const uint8_t *p0 = arg_field(f, &n0);
+    const uint8_t *p1 = NULL;
+    int32_t v = 0;
+    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
+        p1 = arg_field(f, &n1);
+    } else if (row == MOY_ROW_MOYBYTE_PROGRESS) {
+        v = arg_int(f);
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u || moy_notes_post == NULL) {
+        return -MOY_APP_STALE;
+    }
+    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
+        return moy_notes_post(pid, (const char *)p0, n0, (const char *)p1, n1);
+    }
+    if (row == MOY_ROW_MOYBYTE_AWARD) {
+        return moy_notes_award(pid, (const char *)p0, n0);
+    }
+    return moy_notes_progress(pid, (const char *)p0, n0, v);
+}
+
+// A compiled process's item_read and item_write: an item handed to it as a
+// user file (moy_items.h, the table the console fills at the handout) read
+// or written whole through the user-files layer under the store's lock, as
+// the process the grant names, on its own task. A write of an item handed
+// "r" answers 0 (nothing written), a read past `cap` FULL. An item the table
+// does not hold, or a store this task cannot reach, is the door's (the
+// console's ConsoleCalls), on the VM's task.
+static int32_t item_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                        size_t cap) {
+    int32_t item = arg_int(f);
+    size_t dn = 0;
+    const uint8_t *d = NULL;
+    if (row == MOY_ROW_MOYBYTE_ITEM_READ) {
+        (void)arg_int(f);           // the answer's capacity, the door's to read
+    } else {
+        d = arg_field(f, &dn);
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, row);
+    if (pid == 0u) {
+        return -MOY_APP_STALE;
+    }
+    char kind[MOY_UF_NAME_MAX + 1u], name[MOY_UF_NAME_MAX + 1u];
+    bool rw;
+    if (moy_items_get != NULL && a->uf != NULL
+        && moy_items_get(pid, item, kind, sizeof kind, name, sizeof name, &rw)) {
+        if (row == MOY_ROW_MOYBYTE_ITEM_WRITE && !rw) {
+            return 0;
+        }
+        if (gate_on(a) == 0) {
+            if (row == MOY_ROW_MOYBYTE_ITEM_READ) {
+                moy_buf_t b = {NULL, 0};
+                int bin;
+                int rc = gate_off(a, a->uf->load(a->root, kind, name, &b, &bin));
+                return ans_buf(a, rc, &b, ans, cap);
+            }
+            char out[MOY_UF_NAME_MAX + 1u];
+            int rc = gate_off(a, a->uf->save(a->root, kind, name, (const char *)d, dn, out));
+            return rc == MOY_APP_OK ? 1 : rc == MOY_APP_IO ? 0 : -rc;
+        }
+        t_gated = -1;
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
+static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
+    int32_t level = arg_int(f);
+    size_t n;
+    const uint8_t *t = arg_field(f, &n);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_LOG);
+    if (pid == 0u || moy_log_write == NULL) {
+        return -MOY_APP_STALE;
+    }
+    moy_log_write(level < 0 || level >= LOG_LEVELS ? LOG_INFO : level, pid, (const char *)t,
+                  n < LOG_TEXT_MAX ? n : LOG_TEXT_MAX);
+    return 0;
+}
+
+// A compiled process's device handles (moybyte.dev_*): the kernel's table
+// (moy_dev.h) for the kinds it owns, as the process the grant names under
+// the grant's device permissions, on the caller's own task; any other kind
+// or handle is the door's Python half's (runtime/system/dev_handles.py),
+// NEEDS_VM where the call runs where it was made, so the tier hops it, and
+// handed to the door on the VM's task.
+static int32_t dev_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                       size_t cap) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[row]++;
+    size_t n0, n1;
+    const uint8_t *p0 = NULL, *p1 = NULL;
+    int32_t hd = 0;
+    if (row == MOY_ROW_MOYBYTE_DEV_OPEN) {
+        p0 = arg_field(f, &n0);
+        p1 = arg_field(f, &n1);
+    } else {
+        hd = arg_int(f);
+        if (row == MOY_ROW_MOYBYTE_DEV_READ) {
+            (void)arg_int(f);                   // the answer's capacity, the door's
+        } else if (row != MOY_ROW_MOYBYTE_DEV_CLOSE) {
+            p0 = arg_field(f, &n0);
+            if (row == MOY_ROW_MOYBYTE_DEV_XFER) {
+                (void)arg_int(f);
+            }
+        }
+    }
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    int32_t r = DEV_PASS;
+    uint32_t pid = g->owner;
+    if (pid != 0u && moy_dev_open != NULL) {
+        switch (row) {
+            case MOY_ROW_MOYBYTE_DEV_OPEN:
+                r = moy_dev_open(pid, g->devs, (const char *)p0, n0, (const char *)p1, n1);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_CLOSE:
+                r = moy_dev_close(pid, hd);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_READ:
+                r = moy_dev_read(pid, hd, ans, cap);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_WRITE:
+                r = moy_dev_write(pid, hd, p0, n0);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_XFER:
+                r = moy_dev_xfer(pid, hd, p0, n0, ans, cap);
+                break;
+            case MOY_ROW_MOYBYTE_DEV_SET:
+                r = moy_dev_set(pid, hd, (const char *)p0, n0);
+                break;
+            default:
+                r = moy_dev_get(pid, hd, (const char *)p0, n0);
+                break;
+        }
+    }
+    if (r != DEV_PASS) {
+        return r;
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
+// A compiled process's moybyte.service_running and service_stop: its app's
+// service where a kernel tier runs it live -- a Lua, ELF or WASI service
+// started under the app's id, the id its grant is made under (moycore_svc_of,
+// moy_os_service_of, moy_wasi_service_of; each weak, for an image without
+// that tier) -- on the caller's own task: running answers its pid; stop hangs
+// it up (its tier's TERM, moycore_svc_term, moy_os_service_term,
+// moy_wasi_service_term), names it to the console's scheduler (moy_evq.h,
+// THE STOPS ASKED), which ends it as its own stop does once a VM runs, and
+// answers 1. Anything else is the door's Python half's
+// (Scheduler.own: a service of Python's, none live or one stopping, an app
+// that declares none, the service asking of itself), NEEDS_VM where the call
+// runs where it was made, so the tier hops it, and handed to the door on the
+// VM's task.
+uint32_t moycore_svc_of(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_os_service_of(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_wasi_service_of(const char *id, size_t n) __attribute__((weak));
+uint32_t moycore_svc_term(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_os_service_term(const char *id, size_t n) __attribute__((weak));
+uint32_t moy_wasi_service_term(const char *id, size_t n) __attribute__((weak));
+void moy_evq_term(uint32_t pid) __attribute__((weak));
+
+static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                       size_t cap) {
+    const moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return -MOY_APP_STALE;
+    }
+    a->counts[row]++;
+    uint32_t (*const of[])(const char *, size_t) = {
+        moycore_svc_of, moy_os_service_of, moy_wasi_service_of,
+    };
+    uint32_t (*const term[])(const char *, size_t) = {
+        moycore_svc_term, moy_os_service_term, moy_wasi_service_term,
+    };
+    uint32_t pid = 0u;
+    size_t tier = 0;
+    for (; tier < sizeof of / sizeof of[0]; tier++) {
+        if (of[tier] != NULL && (pid = of[tier](g->id, g->id_len)) != 0u) {
+            break;
+        }
+    }
+    if (pid != 0u && pid != g->owner && pid <= (uint32_t)INT32_MAX) {
+        if (row == MOY_ROW_MOYBYTE_SERVICE_RUNNING) {
+            return (int32_t)pid;
+        }
+        uint32_t gone = term[tier] != NULL && moy_evq_term != NULL
+                        ? term[tier](g->id, g->id_len) : 0u;
+        if (gone != 0u) {
+            moy_evq_term(gone);
+            return 1;
+        }
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
+// moybyte.clock: the wall clock in Unix seconds (moy_net_time, the one epoch
+// every tier stamps with), on the caller's own task. Its local time is the
+// door's Python half's, which holds the zone (runtime/system/wallclock.py):
+// NEEDS_VM where the call runs where it was made, so the tier hops it, and
+// handed to the door on the VM's task, which answers ABSENT while NTP has
+// not answered.
+static int32_t clock_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                         size_t cap) {
+    if (grant_row(a, h) == NULL) {
+        return -MOY_APP_STALE;
+    }
+    int32_t local = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    a->counts[row]++;
+    if (!local) {
+        return (int32_t)moy_net_time();
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
+int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
+    moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return MOY_APP_STALE;
+    }
+    g->devs = mask;
+    return MOY_APP_OK;
+}
+
+int moy_app_grant_folder(moy_appabi_t *a, uint32_t h, const char *path, size_t n) {
+    moy_grant_t *g = grant_row(a, h);
+    if (g == NULL) {
+        return MOY_APP_STALE;
+    }
+    if (n > MOY_APP_FOLDER_MAX || (n > 0u && (path[0] != '/' || memchr(path, 0, n) != NULL))) {
+        return MOY_APP_BAD;
+    }
+    memcpy(g->folder, path, n);
+    g->folder[n] = '\0';
+    return MOY_APP_OK;
+}
+
+const char *moy_app_root(const moy_appabi_t *a) {
+    return a->root;
+}
+
+static void put_str(char *out, size_t cap, const char *s) {
+    size_t n = strlen(s);
+    if (cap == 0u) {
+        return;
+    }
+    if (n >= cap) {
+        n = 0;                              // one that does not fit is none
+    }
+    memcpy(out, s, n);
+    out[n] = '\0';
+}
+
+bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap,
+                        int *kind) {
+    for (moy_appabi_t *a = s_states; pid != 0u && a != NULL; a = a->next) {
+        for (uint32_t s = 0; s < moy_htab_slots(a->grants); s++) {
+            uint32_t at = moy_htab_at(a->grants, s);
+            const moy_grant_t *g = at != 0u ? grant_row(a, at) : NULL;
+            if (g != NULL && g->cls == MOY_GRANT_RUN && g->owner == pid) {
+                put_str(folder, fcap, g->folder);
+                put_str(root, rcap, a->root);
+                *kind = g->kind;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+uint32_t moy_app_dev_bit(const char *perm, size_t n) {
+    return moy_dev_perm_bit != NULL ? moy_dev_perm_bit(perm, n) : 0u;
 }
 
 // The C rows a compiled app reaches through the door.
@@ -1957,14 +2526,113 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return moy_app_clip_kind(a, g);
         case MOY_ROW_CLIPBOARD_SEQ:
             return moy_app_clip_seq(a, g);
+        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL: {
+            int32_t v = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return timer_row(a, g, row, v);
+        }
+        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
+        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
+        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
+        case MOY_ROW_MOYBYTE_DEV_GET:
+            return dev_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_SERVICE_RUNNING: case MOY_ROW_MOYBYTE_SERVICE_STOP:
+            return svc_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_CLOCK:
+            return clock_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_SEND:
+            return send_row(a, g, f);
+        case MOY_ROW_MOYBYTE_RECV:
+            return recv_row(a, g, ans, cap);
+        case MOY_ROW_MOYBYTE_LOG:
+            return log_row(a, g, f);
+        case MOY_ROW_MOYBYTE_ON:
+            return on_row(a, g, f);
+        case MOY_ROW_MOYBYTE_AT:
+            return at_row(a, g, f);
+        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
+        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
+            return status_row(a, g, row, f);
+        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
+            return note_row(a, g, row, f);
+        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
+            return item_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_RANDOM: {
+            int32_t want = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_random(want, ans, cap));
+        }
+        case MOY_ROW_MOYBYTE_SHA256:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_sha256(d, dn, ans, cap));
+        case MOY_ROW_MOYBYTE_HMAC_SHA256:
+        case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_GCM_OPEN:
+        case MOY_ROW_MOYBYTE_AES_CTR:
+        case MOY_ROW_MOYBYTE_X25519:
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(row == MOY_ROW_MOYBYTE_HMAC_SHA256
+                              ? moy_crypto_hmac_sha256(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_GCM_SEAL
+                              ? moy_crypto_aes_gcm_seal(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_GCM_OPEN
+                              ? moy_crypto_aes_gcm_open(d, dn, e, en, ans, cap)
+                              : row == MOY_ROW_MOYBYTE_AES_CTR
+                              ? moy_crypto_aes_ctr(d, dn, e, en, ans, cap)
+                              : moy_crypto_x25519(d, dn, e, en, ans, cap));
+        case MOY_ROW_MOYBYTE_AES_CCM_SEAL:
+        case MOY_ROW_MOYBYTE_AES_CCM_OPEN: {
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            int32_t tag = arg_int(f);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(row == MOY_ROW_MOYBYTE_AES_CCM_SEAL
+                              ? moy_crypto_aes_ccm_seal(d, dn, e, en, tag, ans, cap)
+                              : moy_crypto_aes_ccm_open(d, dn, e, en, tag, ans, cap));
+        }
+        case MOY_ROW_MOYBYTE_ED25519_PUBLIC:
+            d = arg_field(f, &dn);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_ed25519_public(d, dn, ans, cap));
+        case MOY_ROW_MOYBYTE_ED25519_SIGN:
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_ed25519_sign(d, dn, e, en, ans, cap));
+        case MOY_ROW_MOYBYTE_ED25519_VERIFY: {
+            d = arg_field(f, &dn);
+            e = arg_field(f, &en);
+            const uint8_t *s = arg_field(f, &len);
+            if (f->bad || f->at != f->n) {
+                return -MOY_APP_BAD;
+            }
+            return ans_crypto(moy_crypto_ed25519_verify(d, dn, e, en, s, len));
+        }
         default:
             // An object the Python binding hands out, or a codec over pixels.
             return -MOY_APP_BAD;
     }
 }
 
-int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
-                     size_t n, uint8_t *ans, size_t cap) {
+static int32_t role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                    size_t n, uint8_t *ans, size_t cap, bool here) {
     if (row >= MOY_APP_TABLE_N || (n && arg == NULL) || (cap && ans == NULL)) {
         return -MOY_APP_BAD;
     }
@@ -1973,7 +2641,7 @@ int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *a
         if (n != 0u && no_args(c_row)) {
             return -MOY_APP_BAD;
         }
-        args_t f = {arg, n, 0u, 0};
+        args_t f = {arg, n, 0u, 0, row, here};
         int32_t v = door_c(a, g, c_row, &f, ans, cap);
         return f.bad ? -MOY_APP_BAD : v;
     }
@@ -1981,7 +2649,20 @@ int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *a
     if (rc != MOY_APP_OK) {
         return -rc;
     }
+    if (here) {
+        return -MOY_APP_NEEDS_VM;
+    }
     return s_door == NULL ? -MOY_APP_NEEDS_VM : s_door(g, row, arg, n, ans, cap);
+}
+
+int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                     size_t n, uint8_t *ans, size_t cap) {
+    return role(a, g, row, arg, n, ans, cap, false);
+}
+
+int32_t moy_app_role_here(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                          size_t n, uint8_t *ans, size_t cap) {
+    return role(a, g, row, arg, n, ans, cap, true);
 }
 
 // -- the counters -----------------------------------------------------------------------

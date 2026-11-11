@@ -40,10 +40,6 @@ static void *wasm_target(void) {
 uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
                             uint32_t cap) __attribute__((weak));
 
-// The shape installed when the live theme names another than the one the
-// shell installed; while the shell's is this theme's, nothing is written.
-static moy_ui_shape_t s_shape;
-
 // What every drawing row opens with: the RUN sink over the run's target, lent
 // as `row`, the look current, the run's draw state saved in `saved` and reset.
 typedef struct {
@@ -53,12 +49,26 @@ typedef struct {
     moy_canvas saved;
 } run_t;
 
+// The snapshot's face word (moy_ui_wasm.h's MOYCORE_UI_FACE_*), 0 with no run.
+static int32_t run_face(void) {
+    uint32_t tick = 0, serial = 0;
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    return snap != NULL ? snap[MOYCORE_UI_SNAP_FACE] : 0;
+}
+
+static int face_fs(int32_t face) {
+    int fs = (face >> MOYCORE_UI_FACE_FS_SHIFT) & 0xFF;
+    return fs > 1 ? fs : 1;
+}
+
 static int open_run(run_t *r, moy_canvas *c) {
     if (c == NULL || moy_app_wasm_theme == NULL) {
         return -MOY_UI_STALE;
     }
     uint32_t tick = 0, serial = 0;
-    (void)moycore_ui_snap(&tick, &serial);
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    int32_t face = snap != NULL ? snap[MOYCORE_UI_SNAP_FACE] : 0;
+    int fs = face_fs(face);
     if (serial != s_gen_serial) {
         s_gen = 0;
         s_gen_serial = serial;
@@ -71,9 +81,14 @@ static int open_run(run_t *r, moy_canvas *c) {
     }
     if (gen != s_gen) {
         const moy_ui_shape_t *now = moy_ui_shape();
-        if (name[0] && now != NULL && strcmp(name, now->name) != 0) {
-            moy_theme_shape(name, strlen(name), &s_shape);
-            moy_ui_shape_use(&s_shape);
+        // The live theme names another shape than the shell installed: it
+        // is resolved into a block of its own (PSRAM), which the UI copies.
+        moy_ui_shape_t *sh = name[0] && now != NULL && strcmp(name, now->name) != 0
+            ? CTX_ALLOC(sizeof(*sh)) : NULL;
+        if (sh != NULL) {
+            moy_theme_shape(name, strlen(name), sh);
+            moy_ui_shape_use(sh);
+            free(sh);
         }
         moy_ui_look_set(MOY_UI_LOOK_RUN, tok);
         s_gen = gen;
@@ -88,15 +103,26 @@ static int open_run(run_t *r, moy_canvas *c) {
     r->row.h = (uint16_t)c->h;
     r->row.st[MOY_ST_CX1] = r->row.st[MOY_ST_W] = c->w;
     r->row.st[MOY_ST_CY1] = r->row.st[MOY_ST_H] = c->h;
-    r->row.st[MOY_ST_FONT_SCALE] = 1;
-    // A compiled app is a cart: its colours are MOY64 (its theme imports
-    // answer each role's nearest index), so both halves are the canvas's.
+    r->row.st[MOY_ST_FONT_SCALE] = fs;
     memcpy(r->row.pal, c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    memcpy(&r->row.pal[MOY_CANVAS_BLOCK], c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    r->s.kind = MOY_UI_SINK_RUN;
-    r->s.fs = 1;
-    r->s.look = MOY_UI_LOOK_RUN;
+    r->s.fs = (uint8_t)fs;
     r->s.dst = &r->row;
+    if (face & MOYCORE_UI_FACE_LOOK) {
+        // A responsive app's page is the shell's: the theme's block at
+        // 64..127, as every glass row holds it, and outside the boundary.
+        moy_ui_theme_pal(&r->row.pal[MOY_CANVAS_BLOCK]);
+        r->s.kind = MOY_UI_SINK_ROW;
+        r->s.look = MOY_UI_LOOK_APP;
+        r->s.cart = 0;
+    } else {
+        // A cart's colours are MOY64 (its theme imports answer each role's
+        // nearest index), so both halves are the canvas's.
+        memcpy(&r->row.pal[MOY_CANVAS_BLOCK], c->store, MOY_CANVAS_BLOCK * sizeof(uint16_t));
+        r->s.kind = MOY_UI_SINK_RUN;
+        r->s.look = MOY_UI_LOOK_RUN;
+        r->s.cart = (uint8_t)moy_ui_cart_on();
+    }
+    r->s.shown = (uint8_t)moy_ui_marks_shown();
     return 0;
 }
 
@@ -116,6 +142,8 @@ static int close_run(run_t *r, int rc) {
 static moy_ui_ctx_t *s_ctx;
 static uint32_t s_tick, s_serial;
 static int s_live;
+static uint8_t s_paste[MOY_UI_API_PASTE];  // moy_ui_run_paste's, for the frame begun next
+static size_t s_paste_n;
 
 static moy_ui_ctx_t *run_ctx(const void *target) {
     const moy_canvas *c = (const moy_canvas *)target;
@@ -125,7 +153,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
     }
     const int32_t *snap = moycore_ui_snap(&tick, &serial);
     if (!s_live || serial != s_serial) {
-        moy_ui_api_reset(s_ctx);
+        moy_ui_api_reset_in(s_ctx, NULL);
         s_serial = serial;
         s_tick = tick - 1u;
         s_live = 1;
@@ -135,7 +163,10 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
         int32_t in[MOY_UI_IN_LEN] = {0};
         int flags = 0;
         if (snap != NULL) {
-            flags = snap[MOYCORE_UI_SNAP_WINDOW] ? MOY_UI_WINDOW : 0;
+            int32_t face = snap[MOYCORE_UI_SNAP_FACE];
+            flags = ((face & MOYCORE_UI_FACE_WINDOW) ? MOY_UI_WINDOW : 0)
+                    | ((face & MOYCORE_UI_FACE_DESK) ? MOY_UI_DESK : 0)
+                    | ((face & MOYCORE_UI_FACE_TAP) ? MOY_UI_TAP : 0);
             in[MOY_UI_IN_BTN] = snap[MOYCORE_UI_SNAP_BTN];
             in[MOY_UI_IN_BTNP] = snap[MOYCORE_UI_SNAP_BTNP];
             in[MOY_UI_IN_X] = snap[MOYCORE_UI_SNAP_X];
@@ -144,16 +175,88 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
         }
         in[MOY_UI_IN_DT] = moycore_ui_dt_take();   // the ticks' clock since the last frame
+        // an app's frame is its content_rect() (the snapshot's room), a
+        // game's the whole canvas
         moy_ui_box_t surf = s_ctx->surface;
         if (c != NULL) {
             surf.x = surf.y = 0;
             surf.w = (int16_t)c->w;
             surf.h = (int16_t)c->h;
+            if (snap != NULL && snap[MOYCORE_UI_SNAP_ROOM_W] > 0
+                && snap[MOYCORE_UI_SNAP_ROOM_H] > 0) {
+                int x = snap[MOYCORE_UI_SNAP_ROOM_X], y = snap[MOYCORE_UI_SNAP_ROOM_Y];
+                int x1 = x + snap[MOYCORE_UI_SNAP_ROOM_W], y1 = y + snap[MOYCORE_UI_SNAP_ROOM_H];
+                x = x < 0 ? 0 : x;
+                y = y < 0 ? 0 : y;
+                x1 = x1 > c->w ? c->w : x1;
+                y1 = y1 > c->h ? c->h : y1;
+                if (x1 > x && y1 > y) {
+                    surf.x = (int16_t)x;
+                    surf.y = (int16_t)y;
+                    surf.w = (int16_t)(x1 - x);
+                    surf.h = (int16_t)(y1 - y);
+                }
+            }
         }
-        moy_ui_api_begin(s_ctx, in, surf, flags, 1);
+        moy_ui_api_begin(s_ctx, in, surf, flags, face_fs(run_face()));
+        if (s_paste_n > 0) {
+            moy_ui_api_paste(s_ctx, s_paste, s_paste_n);
+            s_paste_n = 0;
+        }
         s_tick = tick;
     }
     return s_ctx;
+}
+
+void moy_ui_run_paste(const uint8_t *text, size_t n) {
+    if (n > sizeof s_paste) {
+        n = sizeof s_paste;         // moy_ui_api_paste keeps whole characters
+    }
+    memcpy(s_paste, text, n);
+    s_paste_n = n;
+}
+
+int moy_ui_run_back(int take) {
+    uint32_t tick = 0, serial = 0;
+    (void)moycore_ui_snap(&tick, &serial);
+    return s_ctx != NULL && s_live && serial == s_serial ? moy_ui_api_back(s_ctx, take) : 0;
+}
+
+// The run's context while the run that drew in it is the one open, else NULL
+// (a native or WASI app draws with a toolkit of its own, and no run is open).
+static moy_ui_ctx_t *run_ctx_now(void) {
+    uint32_t tick = 0, serial = 0;
+    const int32_t *snap = moycore_ui_snap(&tick, &serial);
+    return snap != NULL && s_ctx != NULL && s_live && serial == s_serial ? s_ctx : NULL;
+}
+
+int moy_ui_run_bar_lent(const char **title, int16_t *slots, int *n, uint32_t *off,
+                        const char **chip) {
+    moy_ui_ctx_t *c = run_ctx_now();
+    int at = -1;
+    if (c == NULL || !moy_ui_api_bar_lent(c, title, slots, n, off)) {
+        return 0;
+    }
+    *chip = moy_ui_api_bar_chip(c, &at);
+    return 1;
+}
+
+void moy_ui_run_bar_tap(int i) {
+    moy_ui_ctx_t *c = run_ctx_now();
+    if (c != NULL) {
+        moy_ui_api_bar_tap(c, i);
+    }
+}
+
+// What shows of the table's part open now (moy_ui_run_table_part), x0, y0,
+// x1, y1 on the canvas: every verb drawn while it is open draws inside it,
+// as the canvas's own verbs do.
+static int32_t s_tp_in[4];
+
+static void run_in_part(run_t *r, const moy_ui_ctx_t *c) {
+    if (c->tp_open) {
+        memcpy(&r->row.st[MOY_ST_CX0], s_tp_in, sizeof(s_tp_in));
+    }
 }
 
 static moy_ui_span_t span(const uint8_t *p, size_t n) {
@@ -176,7 +279,7 @@ static moy_ui_span_t span(const uint8_t *p, size_t n) {
     if (c == NULL) {                                    \
         return close_run(&r, MOY_UI_NOMEM);             \
     }                                                   \
-    (void)0
+    run_in_part(&r, c)
 
 int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]) {
     OPEN(target);
@@ -357,6 +460,10 @@ static int s_tp_on, s_tp_clip[4];
 
 int moy_ui_run_table_part(void *target, int32_t out[8]) {
     OPEN(target);
+    // the table's fades after its last part lie over the view, not the part
+    r.row.st[MOY_ST_CX0] = r.row.st[MOY_ST_CY0] = 0;
+    r.row.st[MOY_ST_CX1] = r.row.w;
+    r.row.st[MOY_ST_CY1] = r.row.h;
     int32_t i = moy_ui_api_table_part(c, &r.s, out);
     close_run(&r, MOY_UI_OK);
     if (s_tp_on) {
@@ -373,6 +480,10 @@ int moy_ui_run_table_part(void *target, int32_t out[8]) {
         s_tp_clip[3] = t_->clip_y1;
         s_tp_on = 1;
         moy_clip(t_, out[4], out[5], out[6], out[7]);
+        s_tp_in[0] = out[4];
+        s_tp_in[1] = out[5];
+        s_tp_in[2] = out[4] + out[6];
+        s_tp_in[3] = out[5] + out[7];
     }
     return i;
 }
@@ -439,6 +550,27 @@ int moy_ui_run_tool(void *target, moy_ui_span_t icon, moy_ui_span_t label, const
 int moy_ui_run_rule(void *target) {
     OPEN(target);
     moy_ui_api_rule(c, &r.s);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_bubble(void *target, moy_ui_span_t text, moy_ui_span_t head, moy_ui_span_t status,
+                      const int32_t *opt, int n, const moy_ui_over_t *o, int32_t out[5]) {
+    OPEN(target);
+    moy_ui_api_bubble(c, &r.s, text, head, status, opt, n, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
+                     size_t n, int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_empty(c, &r.s, icon, title, lines, n);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_note(void *target, moy_ui_span_t icon, const uint8_t *lines, size_t n,
+                    int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_note(c, &r.s, icon, lines, n);
     return close_run(&r, MOY_UI_OK);
 }
 
@@ -900,55 +1032,50 @@ int32_t moy_ui_wasm_rule(void *e) {
     return moy_ui_run_rule(wasm_target());
 }
 
+int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8_t *head,
+                           uint32_t hn, const uint8_t *status, uint32_t sn, const uint8_t *opt,
+                           uint32_t optn, const uint8_t *ob, uint32_t on, uint8_t *out,
+                           uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t words[MOY_UI_BBO_WORDS];
+    int k = 0;
+    for (; k < MOY_UI_BBO_WORDS && 4u * (uint32_t)k + 4u <= optn; k++) {
+        const uint8_t *b = opt + 4 * k;
+        words[k] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16)
+                             | ((uint32_t)b[3] << 24));
+    }
+    int32_t v[5] = {0, 0, 0, 0, 0};
+    int rc = moy_ui_run_bubble(wasm_target(), span(text, n), span(head, hn), span(status, sn),
+                               words, k, &o, v);
+    if (rc == 0) {
+        put_words(out, cap, v, 5);
+    }
+    return rc;
+}
+
+int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
+                          uint32_t n, const uint8_t *lines, uint32_t len) {
+    (void)e;
+    int32_t y = 0;
+    int rc = moy_ui_run_empty(wasm_target(), span(icon, in), span(title, n), lines, len, &y);
+    return rc == 0 ? y : rc;
+}
+
+int32_t moy_ui_wasm_note(void *e, const uint8_t *icon, uint32_t in, const uint8_t *lines,
+                         uint32_t len) {
+    (void)e;
+    int32_t y = 0;
+    int rc = moy_ui_run_note(wasm_target(), span(icon, in), lines, len, &y);
+    return rc == 0 ? y : rc;
+}
+
 #define FN(f) ((void *)(f))
 
-// In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
-// row's import type (tests/test_roles.py holds the two to roles.json).
-static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = {
-    { "ui_page", FN(moy_ui_wasm_page) },
-    { "ui_label", FN(moy_ui_wasm_label) },
-    { "ui_button", FN(moy_ui_wasm_button) },
-    { "ui_toggle", FN(moy_ui_wasm_toggle) },
-    { "ui_slider", FN(moy_ui_wasm_slider) },
-    { "ui_list", FN(moy_ui_wasm_list) },
-    { "ui_part", FN(moy_ui_wasm_part) },
-    { "ui_focus", FN(moy_ui_wasm_focus) },
-    { "ui_keys_taken", FN(moy_ui_wasm_keys_taken) },
-    { "ui_at", FN(moy_ui_wasm_at) },
-    { "ui_group", FN(moy_ui_wasm_group) },
-    { "ui_info", FN(moy_ui_wasm_info) },
-    { "ui_link", FN(moy_ui_wasm_link) },
-    { "ui_cycle", FN(moy_ui_wasm_cycle) },
-    { "ui_seg", FN(moy_ui_wasm_seg) },
-    { "ui_swatches", FN(moy_ui_wasm_swatches) },
-    { "ui_hints", FN(moy_ui_wasm_hints) },
-    { "ui_icon", FN(moy_ui_wasm_icon) },
-    { "ui_progress", FN(moy_ui_wasm_progress) },
-    { "ui_table", FN(moy_ui_wasm_table) },
-    { "ui_scroll", FN(moy_ui_wasm_scroll) },
-    { "ui_field", FN(moy_ui_wasm_field) },
-    { "ui_dialog", FN(moy_ui_wasm_dialog) },
-    { "ui_tabs", FN(moy_ui_wasm_tabs) },
-    { "ui_grid", FN(moy_ui_wasm_grid) },
-    { "ui_card", FN(moy_ui_wasm_card) },
-    { "ui_popover", FN(moy_ui_wasm_popover) },
-    { "ui_menu", FN(moy_ui_wasm_menu) },
-    { "ui_tool", FN(moy_ui_wasm_tool) },
-    { "ui_bar", FN(moy_ui_wasm_bar) },
-    { "ui_rule", FN(moy_ui_wasm_rule) },
-    { "ui_text_view", FN(moy_ui_wasm_text_view) },
-    { "ui_table_part", FN(moy_ui_wasm_table_part) },
-    { "ui_table_dist", FN(moy_ui_wasm_table_dist) },
-    { "ui_table_floor", FN(moy_ui_wasm_table_floor) },
-    { "ui_held", FN(moy_ui_wasm_held) },
-    { "ui_held_last", FN(moy_ui_wasm_held_last) },
-    { "ui_held_all", FN(moy_ui_wasm_held_all) },
-    { "ui_slots", FN(moy_ui_wasm_slots) },
-    { "ui_slot", FN(moy_ui_wasm_slot) },
-    { "ui_slot_next", FN(moy_ui_wasm_slot_next) },
-    { "ui_part_at", FN(moy_ui_wasm_part_at) },
-    { "ui_split", FN(moy_ui_wasm_split) },
-};
+// By import name, in the role table's order (moy_ui_wasm_rows.h, generated
+// from native/os_calls.json with each row's import type).
+static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] =
+    MOY_UI_WASM_NATIVES;
 
 void *moy_ui_wasm_native(const char *name) {
     for (int i = 0; i < MOY_UI_WASM_ROWS; i++) {

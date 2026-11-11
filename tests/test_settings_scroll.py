@@ -93,7 +93,7 @@ def test_every_row_is_reachable_by_keyboard(tmp_path):
             break
         seen.append(sl._focused)
     assert "Update online" in seen, "the update rows below the fold are reached"
-    assert seen[-1] == "Licences", "About's Licences link is the last stop"
+    assert seen[-1] == "System log", "About's System log link is the last stop"
     assert _band(ws) != top, "the page scrolled to keep focus in view"
     for _ in range(len(seen) - 1):      # one more goes on to the bar
         drv.press("up")
@@ -125,7 +125,7 @@ def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):
     x = lay.cx + lay.cw // 2
     _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2, still=4)
     assert _band(ws) != top, "the rows moved under the finger"
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key), \
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view), \
         "letting go of a drag opened nothing"
     moved = _band(ws)
     for _ in range(10):
@@ -150,12 +150,12 @@ def test_a_fling_coasts_the_page_and_the_gate_recloses(tmp_path):
     drv.frame(_DT)
     assert _band(ws) != at, "the page coasts on with no finger"
     _settle(ws, drv)
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key)
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view)
     drv.frame(_DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(5):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn, "at rest, the gate closes"
+    assert ws.frame_state.frames_drawn == drawn, "at rest, the gate closes"
 
 
 def test_a_tap_on_a_row_activates_it(tmp_path):
@@ -254,11 +254,11 @@ def test_a_key_step_paints_once(tmp_path):
     kinds = set()
     for _ in range(10):
         off = moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2)
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         drv.press("down")
         for _ in range(20):
             drv.frame(_DT)
-        paints = ws._frames_drawn - drawn
+        paints = ws.frame_state.frames_drawn - drawn
         if moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2) == off:
             assert paints == 1, "a step in view paints once: %d" % paints
             kinds.add("still")

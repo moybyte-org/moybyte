@@ -18,6 +18,11 @@
     python tools/push_cart.py ports/celeste.moy --board guition_s3 --port /dev/ttyACM1
     python tools/push_cart.py ports/celeste.moy --board p4 --only main.lua --force
 
+A cart pushed over the cable counts as consented: anyone at the cable is the
+owner, so after the rescan the tool records the cart as made on the console
+(`Consent.made`, runtime/shell/app_perms.py) and its first run is not asked.
+A cart a browser pushes, or one copied onto the card, stays asked on the glass.
+
 --board is REQUIRED and deliberately has no default: the boards differ in line
 state, reset policy and upload window, so a default is a silent wrong transport
 on every board but one.
@@ -89,10 +94,11 @@ carries none at all. So when the cart has no module for this board's chip --
 the chip is its board.toml's `[board] chip` -- or has one built for another
 main.wasm, this compiles one with tools/wasm_module.py, UNSIGNED, and pushes
 it in its place; the cart folder itself is left as it was. An unsigned module
-runs at full speed only while the console's Settings -> Unknown sources is
-on; with it off the module is ignored and the cart plays on the interpreter
-instead, so when the module going over is unsigned the tool says so plainly
-before the push either way.
+runs at full speed only for a cart whose manifest asks for "full_access" (the
+consent to full access, app_perms.admits_unsigned); without it the module is
+refused and the cart plays on the interpreter instead, so when the module
+going over is unsigned and the cart does not ask, the tool says so plainly
+before the push.
 
 ON THE BOARD, THE FOLDER KEEPS ONLY THE MODULES THE PUSH CARRIES. A module is
 keyed to the main.wasm it was compiled from, so one already in the folder --
@@ -249,6 +255,68 @@ def _put(tmp, dst):
 def _drop(p):
     return _gated(lambda: _rm(p))
 """
+
+# A pushed folder taken back off the store, the way the console removes a
+# cart: `pkg.removed` (runtime/carts/pkg.py) over the install role, the steps
+# Get Carts' Remove and `pkg remove` take -- the shelf record's entry, the
+# folder, the files the cart wrote (`apps/<id>`), its consent and its keys,
+# then the shelf re-read there. A folder that is no cart (the modules a suite
+# loads by path) goes the same way. `_folders(mark)` is the carts folder's
+# names, each with whether it holds the file `mark`; `_mark(p)` writes one.
+STORE = """
+def _folders(mark=None):
+    r = str(ws.carts_root).rstrip('/')
+    def go():
+        return sorted([f, bool(mark) and _size(r + '/' + f + '/' + mark) > 0]
+                      for f in os.listdir(r))
+    return _gated(go)
+def _mark(p):
+    def go():
+        with open(p, 'w') as f:
+            f.write('1')
+        return 1
+    return _gated(go)
+def _remove(folders):
+    try:
+        import pkg, shell_servers
+    except ImportError:
+        from runtime import pkg, shell_servers
+    inst = shell_servers.ShellInstall(ws)
+    for f in folders:
+        for _ in pkg.through(pkg.removed(inst, f)):
+            pass
+    return 1
+"""
+
+REMOVE_BATCH = 4        # a removal is store work: ~1 s a cart on the T-Deck's card
+REMOVE_S = 180.0        # one batch's reply, a large cart's files included
+
+
+def store_folders(b, mark=None):
+    """`[[folder, marked], ...]` of the board's carts folder, `marked` whether
+    the folder holds the file `mark`; None when the board did not answer."""
+    if not b.pyexec(HELPERS + STORE):
+        return None
+    got = b.pyval("ws._g['_folders'](%r)" % (mark,), timeout=60)
+    return got if isinstance(got, list) else None
+
+
+def remove_folders(b, folders, batch=REMOVE_BATCH):
+    """Take each of `folders` (names in the carts folder) off the store as the
+    console removes a cart (`STORE`'s `_remove`). Returns the ones still
+    there, or None when the board did not list its store afterwards."""
+    folders = list(folders)
+    if not folders:
+        return []
+    if not b.pyexec(HELPERS + STORE):
+        return None
+    for i in range(0, len(folders), batch):
+        b.pyval("ws._g['_remove'](%r)" % (folders[i:i + batch],), timeout=REMOVE_S)
+    now = store_folders(b)
+    if now is None:
+        return None
+    there = {f for f, _m in now}
+    return [f for f in folders if f in there]
 
 
 class StoreFull(RuntimeError):
@@ -547,6 +615,20 @@ def board_chip(board):
     return cfg.get("board", {}).get("chip")
 
 
+def asks_full_access(cart):
+    """Whether the cart folder's manifest asks for "full_access": the consent
+    that admits an unsigned module (runtime/shell/app_perms.py)."""
+    try:
+        with open(os.path.join(cart, "manifest.json"), encoding="utf-8") as f:
+            man = json.load(f)
+    except (OSError, ValueError):
+        return False
+    sys.path.insert(0, ROOT)
+    from runtime import app_perms
+    got = app_perms.manifest_cart(man, os.path.basename(cart)) if isinstance(man, dict) else {}
+    return "full_access" in (got.get("permissions") or ())
+
+
 def compiled_module(cart, chip, work, log=print):
     """For a compiled cart, (its module's file name for `chip`, the local path
     of the module to push under it, whether that module is signed); None for a
@@ -724,6 +806,13 @@ def main(argv=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+# The consent a cable push records, as a `py` expression: the shelf's cart in
+# the pushed folder, made on the console (`Consent.made`); the count of carts
+# it recorded.
+CONSENT = ("len([ws.consent.made(__import__('app_perms').app_id(c)) "
+           "for c in ws.carts.all if (c.get('path') or '').rstrip('/') == %r])")
+
+
 def connect(board, port, verbose=False):
     """A live, identity-checked P4Board on `board`'s `port`: attached and
     verified (never pulsed) for an `attach_only` board, reset only when a
@@ -806,13 +895,12 @@ def _push(a, cart, names, local, work):
                  ", %d baud" % link.rate if link.rate else ""))
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
-        if module is not None and not module[2] and module[0] in names:
-            on = b.pyval("int(bool(getattr(ws, 'unknown_sources', False)))", timeout=20)
-            if on == 0:
-                print("NOTE: %s's module is unsigned, and this console has Unknown "
-                      "sources off, so it will refuse to run the cart. Turn on "
-                      "Settings -> Unknown sources on the console to play it."
-                      % os.path.basename(cart))
+        if (module is not None and not module[2] and module[0] in names
+                and not asks_full_access(cart)):
+            print("NOTE: %s's module is unsigned and the cart does not ask for "
+                  "\"full_access\", so the console runs it on the interpreter. Add "
+                  "\"full_access\" to its manifest's permissions to run the module."
+                  % os.path.basename(cart))
         # A store without the room says so in one line, before or during the
         # push, and so does any other failure: this is a command a person
         # reads, not a traceback.
@@ -834,6 +922,17 @@ def _push(a, cart, names, local, work):
             n = b.pyval("len(ws.rescan_carts() or ())", timeout=60)
             print("store rescanned" if n is not None else
                   "the rescan did not answer -- reset the board to rescan")
+        # A cart that arrived as files is asked on its first run, and the
+        # cable is the owner's hand: the pushed cart is recorded as made on
+        # the console, the record `Consent.made` writes (runtime/shell/
+        # app_perms.py), so it runs on its manifest as written. A browser's
+        # push is not this one and stays asked on the glass.
+        n = b.pyval(CONSENT % dest, timeout=60)
+        if n:
+            print("recorded as made on the console (no first-run prompt)")
+        else:
+            print("not on the shelf yet, so not recorded as made: its first "
+                  "run asks%s" % (" (--no-rescan)" if a.no_rescan else ""))
     finally:
         b.close()
     return 0

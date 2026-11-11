@@ -1,0 +1,10 @@
+{
+  "title": "Hello Native",
+  "id": "elf.hello",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

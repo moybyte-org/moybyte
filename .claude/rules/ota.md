@@ -48,7 +48,7 @@ paths:
     the board's table first and does this when the store moved.
   - **The rollback confirm fires from the FRAME LOOP**, not the boot path
     (`device/moy_ota_health.py`, the updater's base class):
-    `confirm_when_healthy(ws._frames_drawn)` needs `HEALTHY_PAINTS` frames on the
+    `confirm_when_healthy(ws.frame_state.frames_drawn)` needs `HEALTHY_PAINTS` frames on the
     glass AND `HEALTHY_LOOPS` iterations survived. Confirming where the desktop is
     merely CONSTRUCTED certifies an image that never drew a pixel (#56). **The
     paint threshold cannot be raised** — the console repaints only on change, so
@@ -64,9 +64,9 @@ paths:
     lifetime below is not re-implemented. **Do NOT merge them behind a flag** —
     the argument list is where the claim about the hardware lives.
   - **THE UPDATE ROUTES ARE SHARED; THE BACKEND BEHIND THEM IS NOT**
-    (`device/moy_webhost.py`, 2026-08-29). `GET`/`POST /update` are pin-gated on
-    BOTH methods and both read the pin off `?pin=` — one endpoint may not spend
-    its credential in two places. The POST queues and answers; the work runs in
+    (`device/moy_webhost.py`, 2026-08-29). `GET`/`POST /update` are sealed on
+    BOTH methods (the browser sign-in, `docs/os_2026-11/system.md` §3): the VM
+    answers them and the C seals the answer. The POST queues and answers; the work runs in
     `WebHost.poll()`. Two backends, deliberately not one behind a flag (the same
     argument as the two confirm gates above): a HEADLESS board drives the
     install slice by slice (`zero_host.ZeroUpdate`), and a board WITH GLASS
@@ -92,9 +92,10 @@ paths:
   - **The manifest is SIGNED, and the BOARD is inside the signature** (scheme
     `moybyte-ota-v2`): an OTA payload is an app-partition image, so another
     board's is a valid image that cannot boot, and a manifest naming one is
-    refused BY NAME before the signature is even checked. The kernel's TLS
-    verifies no certificate, which is *why* the manifest is signed rather than
-    trusted for arriving over TLS.
+    refused BY NAME before the signature is even checked. The updater's TLS
+    verifies no certificate (`MOY_HTTPC_SIGNED`, the one request that skips
+    the CA bundle), which is *why* the manifest is signed rather than trusted
+    for arriving over TLS.
   - **RSA, not Ed25519**: the verifier is seventeen Montgomery
     multiplications in `moy_ota.c`, and `moy_ota.verify_sig` is the same
     arithmetic in Python for the host's tools and the wasm tier. **Signing
@@ -112,11 +113,15 @@ paths:
   - **`OTA_PUBLIC_KEYS` is a TUPLE so a key can be ROTATED** — publish an image
     trusted by the old key and signed by the new. The kernel's copy is
     `moy_ota.c`'s `KEYS_HEX`; `tests/test_ota_signing.py` holds the two equal.
-  - **`ensure_online()` must WAIT for the link** after autoconnect
-    (`ONLINE_WAIT_MS`): `DeviceWifi.connect()` polls briefly and gives up, and a
-    saved network that comes up just after reads as "wifi offline". The wait
-    belongs there, not in `connect()`, which would freeze the desktop on every
-    wrong password.
+  - **No path waits on the radio in the frame.** Autoconnect only asks the
+    station for the last-joined network and returns, and a P4's association
+    can take 20 s, so a caller POLLS the link (`moy_ota.poll_online`, a
+    `DIAL_MS` budget): the update screen's CHECKING asks `check_online` again
+    each frame while `joining`, Get Carts and pkg poll `CartNet.ready()`,
+    Settings polls its scan and join, the web console's switch binds from its
+    poll, and an http request or a stream `dial()`s and lets its worker's
+    task wait (`moy_net_dialing`). The headless Zero's `connect()` is the one
+    blocking wait: it has no frame.
   - **Bump `moy_ota.FIRMWARE_VERSION` only via `make release`** — a hand bump
     desynchronises the stamp CI reads back out of the artifact, and a manifest
     advertising a version the image does not carry offers the same install

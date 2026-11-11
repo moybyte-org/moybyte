@@ -1071,7 +1071,7 @@ class SpritesLayer:
             cv.rectb(box[0], box[1], box[2], box[3], keyline)
             cv.rectb(box[0] - 1, box[1] - 1, box[2] + 2, box[3] + 2, th["surface"])
             _ui_draw.focus(cv, th, (box[0] - 1, box[1] - 1, box[2] + 2, box[3] + 2),
-                           "part", ring=True)
+                           "cell", ring=True)
 
     def _tools(self, cv, th, lay, doc):
         pe = doc.pe
@@ -1114,9 +1114,9 @@ class SpritesLayer:
                 x += (lay.pitch - t) // 2
             if s == doc.slot:
                 if lay.desk:
-                    _ui_draw.focus(cv, th, (x - 2, y - 2, t + 4, t + 4), "small", ring=True)
+                    _ui_draw.focus(cv, th, (x - 2, y - 2, t + 4, t + 4), "cell", ring=True)
                 else:
-                    _ui_draw.focus(cv, th, (x - 2, y - 2, t + 4, t + 4), "small")
+                    _ui_draw.focus(cv, th, (x - 2, y - 2, t + 4, t + 4), "cell")
             kind = _iconsets.SLOTS[s]
             if doc.is_pixels(s):
                 img = doc.sheet.tile_image(s, doc.sheet.clear)

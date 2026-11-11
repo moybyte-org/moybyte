@@ -8,15 +8,18 @@
 // own bank and its own libmoy state, both in PSRAM. FOCUS names the audible one;
 // the others are muted, not stopped: their verbs change their state and nothing
 // of it reaches the mix until they are focused. With no session focused the mix
-// is silence (plus a compiled cart's stream).
+// is silence (plus the render-ahead stream).
 //
 // The LEVEL a session plays at is the lower of the console's (moy_aud_volume,
 // the Settings row) and the session's own (moy_aud_level, SPEC.md 8.2's
 // volume() verb), so a cart can turn itself down but never past the console.
 //
 // THE MIX (moy_aud_render) is the focused session's synth, then its sample
-// voices, then the compiled cart's stream (moy_audio_snd.h), under the one lock.
-// What pulls it is the board's feeder task (moy_aud_out.c) or, where there is
+// voices, then the render-ahead stream (moy_audio_snd.h), then the
+// background stream (the media service, native/moy_media), under the one lock;
+// where the board's output is stereo at twice the mix's rate
+// (moy_aud_render_st) the two streams are added after the upsampling. What
+// pulls it is the board's feeder task (moy_aud_out.c) or, where there is
 // none, the host's or the browser's per-frame pull.
 //
 // A bank is parsed OUTSIDE the lock into a fresh bank and swapped in under it,
@@ -111,6 +114,46 @@ void moy_aud_set_rate(int rate);
 int moy_aud_rate(void);
 // Mix `n` frames into `out` (overwritten): what the speaker plays next.
 void moy_aud_render(int16_t *out, int n);
+// THE BACKGROUND STREAM: `fn` adds `n` frames in the output's format
+// (moy_aud_out_rate and _channels: stereo interleaved where the output is)
+// into the mix at the console's level, ducked while the focused session
+// sounds (`duck`); it runs on the feeder's task under the lock. NULL: none.
+// The media service sets it.
+typedef void (*moy_aud_bg_fn)(int16_t *out, int n, int console, int duck);
+void moy_aud_bg(moy_aud_bg_fn fn);
+// THE STEREO OUTPUT (a board's MOY_AUDIO_STEREO: the P4s'). The sessions mix
+// at the mix's rate, mono, as on every board; the feeder takes `n` frames (n
+// even) of 16-bit stereo, interleaved, at twice that rate: the sessions'
+// mix upsampled once, 2x (moy_aud_up2), the render-ahead stream added at the
+// output's rate, both channels the same, then the background stream added in
+// stereo. Absent where the board's output is mono.
+void moy_aud_render_st(int16_t *out, int n);
+// The 2x upsampler: a half-band FIR, its interpolated phase
+// 2 x MOY_AUD_UP_TAPS taps (Kaiser, beta 7.5, Q14, summed in 32 bits), so
+// flat to 10 kHz and -6 dB at 11,025 Hz, with an image at or above 12.05 kHz
+// 74 dB down by its design (tests/test_audio_upsample.py holds 70 on what it
+// plays). `n` frames
+// of `in` become 2n of `out`, MOY_AUD_UP_TAPS frames late; `u` carries the
+// history from one call to the next, zeroed to start.
+#define MOY_AUD_UP_TAPS 28
+typedef struct {
+    int16_t h[4 * MOY_AUD_UP_TAPS];     // the last 2 x TAPS frames, twice over
+    uint32_t at;
+} moy_aud_up_t;
+void moy_aud_up2(moy_aud_up_t *u, const int16_t *in, int n, int16_t *out);
+// THE OUTPUT RATE WHERE NO FEEDER RUNS (the host, the browser's page, whose
+// AudioContext names it): the sessions still mix at the mix's rate, so a cart
+// sounds as it does on every board, and moy_aud_render_out upsamples that mix
+// once -- 2x through moy_aud_up2, then linearly to `rate` (exactly the 2x at
+// twice the mix's rate) -- before the render-ahead stream and the background
+// stream are added at `rate`. moy_aud_out_rate() is then `rate`, which the
+// media service resamples to. 0, or the mix's own rate: render_out is
+// moy_aud_render. Set before a stream opens; setting it starts the
+// upsampler from silence. Absent on a board, whose feeder is the output.
+void moy_aud_out_rate_set(int rate);
+int moy_aud_out_rate_get(void);
+void moy_aud_render_out(int16_t *out, int n);
+
 // The self-dump: `n` frames of session `s`'s synth alone, rendered from its
 // state into `out` without the speaker's mix. STALE, or BAD for the focused
 // session, whose state the feeder is advancing.
@@ -164,9 +207,12 @@ enum {
     MOY_AUD_OUT_ABSENT = 3,     // this build has no output (host, browser)
 };
 int moy_aud_out_start(void);    // idempotent; the state it leaves
+// What the output plays: its rate (the mix's where it has none) and channels.
+int moy_aud_out_rate(void);
+int moy_aud_out_channels(void);
 int moy_aud_out_state(const char **why);
 // The AUDIORATE line (the speaker's rate against the mix's, the seam, the
-// ring's misses, the lock and the trigger latency, and a compiled cart's stream
+// ring's misses, the lock and the trigger latency, and the render-ahead stream
 // as queued/played/starved/room), written into `buf`, once
 // per call with at least a second since the last; 0 when there is nothing new.
 size_t moy_aud_out_probe(char *buf, size_t cap);
@@ -180,8 +226,14 @@ void moy_aud_unlock(void);
 uint64_t moy_aud_now_us(void);
 int moy_aud_out_plays(void);
 void moy_aud_out_shallow(int on);
+// The microphone's receive half where it shares the speaker's I2S (a P4's
+// ES7210, moy_mic.h): enabled while the mic is held, read by its task. -1
+// where this build has none.
+int moy_aud_out_rx_enable(int on);
+int moy_aud_out_rx_read(void *buf, size_t bytes, size_t *got, uint32_t timeout_ms);
 void moy_aud_count_out(uint32_t written, uint32_t underruns);
-// A compiled cart's stream: queued, played, starved, room; 0 before any opened.
-int moy_aud_snd_counts(uint32_t c[4], int *open);
+// The render-ahead stream (moy_audio_snd.h): queued, played, starved, room and
+// depth; 0 before any opened.
+int moy_aud_snd_counts(uint32_t c[5], int *open);
 
 #endif // MOY_AUD_H

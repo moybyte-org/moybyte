@@ -9,6 +9,8 @@
 #include "esp_async_memcpy.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "moy_flush.h"
 #include "moy_fold.h"
@@ -19,25 +21,47 @@ moy_fold_t moy_fold;
 // The snapshot engine
 // ---------------------------------------------------------------------------
 
-static async_memcpy_handle_t s_snap;     // installed on the first snapshot
+static async_memcpy_handle_t s_snap;     // installed on a run's first snapshot
 static bool s_snap_dead;                 // never installed, or a copy that never landed
+static SemaphoreHandle_t s_snap_sem;     // the landing's wake (NULL: the waits poll)
+static volatile uint32_t s_snap_parked;  // waiters parked on it
 
 static bool moy_fold_snap_done(async_memcpy_handle_t h, async_memcpy_event_t *e,
                                void *arg) {
     (void)h; (void)e; (void)arg;
     moy_fold.copying = false;
-    return false;                        // ISR: nothing to wake
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    BaseType_t hp = pdFALSE;
+    if (s_snap_sem != NULL && s_snap_parked != 0) {
+        xSemaphoreGiveFromISR(s_snap_sem, &hp);
+    }
+    return hp == pdTRUE;
 }
 
-// Both sides wait the same way: a bounded spin on the latch. The feeder has
-// no GIL to release; the VM side wraps this in an exit/enter pair.
+// Both sides wait the same way: parked on the landing's wake, bounded by the
+// flush deadline. A waiter counts itself parked BEFORE it checks the latch
+// and the ISR clears the latch before it reads the count, so one of the two
+// always sees the other; a binary give that two waiters share is passed on,
+// and a tick bounds a wake lost anyway. The feeder has no GIL to release; the
+// VM side wraps this in an exit/enter pair.
 static void moy_fold_snap_wait(void) {
     if (!moy_fold.copying) {
         return;
     }
     int64_t deadline = esp_timer_get_time() + MOY_FLUSH_TIMEOUT_US;
     while (moy_fold.copying && esp_timer_get_time() < deadline) {
-        esp_rom_delay_us(20);
+        if (s_snap_sem == NULL) {
+            esp_rom_delay_us(20);
+            continue;
+        }
+        __atomic_fetch_add(&s_snap_parked, 1u, __ATOMIC_SEQ_CST);
+        if (moy_fold.copying) {
+            xSemaphoreTake(s_snap_sem, 1);
+        }
+        __atomic_fetch_sub(&s_snap_parked, 1u, __ATOMIC_SEQ_CST);
+    }
+    if (s_snap_sem != NULL && s_snap_parked != 0) {
+        xSemaphoreGive(s_snap_sem);      // the wake this wait took may be another's
     }
     if (moy_fold.copying) {
         // The bug fence, once: a copy that never signals would otherwise hold
@@ -68,6 +92,7 @@ static bool moy_fold_snap_start(uint8_t *dst, const uint8_t *src, size_t len) {
             s_snap_dead = true;
             return false;
         }
+        s_snap_sem = xSemaphoreCreateBinary();
     }
     moy_fold.copying = true;             // BEFORE the submit: the ISR clears it
     esp_err_t err = esp_async_memcpy(s_snap, dst, (void *)src, len,
@@ -299,6 +324,23 @@ void moy_fold_fence(void) {
         esp_rom_delay_us(20);
     }
     MP_THREAD_GIL_ENTER();
+}
+
+void moy_fold_snap_release(void) {
+    moy_fold_snap_fence();
+    // The landing's interrupt clears `copying` before the driver is idle
+    // again, so an uninstall straight after the fence may be refused once.
+    for (int i = 0; i < 50 && s_snap != NULL; i++) {
+        if (esp_async_memcpy_uninstall(s_snap) == ESP_OK) {
+            s_snap = NULL;
+        } else {
+            esp_rom_delay_us(20);
+        }
+    }
+    if (s_snap == NULL && s_snap_sem != NULL && s_snap_parked == 0) {
+        vSemaphoreDelete(s_snap_sem);
+        s_snap_sem = NULL;
+    }
 }
 
 void moy_fold_reset(void) {

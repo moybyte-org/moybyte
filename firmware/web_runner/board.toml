@@ -13,7 +13,8 @@
 #  moy_lua / moy_audio / moycore / moy_png / moy_wasm_web ride micropython.mk
 #  fragments into the wasm port, structurally unlike the boards' USER_C_MODULES
 #  cmake), the runner's own authored modules (web_boot.py /
-#  web_canvas.py / gpio_link.py / update_link.py / carts_link.py / web_p8.py),
+#  web_canvas.py / gpio_link.py / update_link.py / carts_link.py / web_p8.py /
+#  media_link.py / web_vfs.py),
 #  which build.sh copies by name the way a board's tracked modules/ files
 #  simply exist -- and the p8 importer
 #  (#194), the one set of modules staged out of `tools/`: the two VENDORED files
@@ -87,6 +88,62 @@ CPython's `colorsys` at import time, which MicroPython has none of (on glass
 cart-wallpaper panel drew nothing). Deleted 2026-11-01: libmoy's `moy_data.c`
 is the table, `device_canvas.PAL565`/`MOY64_RGB` its baked twins. Named so
 that its return is a decision."""
+
+[[modules.shared.deny]]
+file = "dev_http.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.http` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_mic.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.mic` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_lora.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.lora` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_ble.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.ble` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_usb.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.usb` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_midi.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.midi` answers None there."""
+
+[[modules.shared.deny]]
+file = "dev_camera.py"
+kind = "tier"
+why  = """
+A device API's face (runtime/system/devices.py): the browser has no hardware
+of its own (docs/os_2026-11/hardware.md section 1) and its images compile no
+device driver, so `moybyte.camera` answers None there."""
 
 # -- staged under another name -----------------------------------------------
 

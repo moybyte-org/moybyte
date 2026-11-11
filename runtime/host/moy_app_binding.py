@@ -1,6 +1,7 @@
 # Map (grep -n a name to jump there):
 #   _Buf             moy_fs.h's buffer: an answer the user-files layer allocated
 #   _raise           the ABI's codes as the exceptions the roles raise
+#   _crypto          the crypto rows (native/moy_net/moy_crypto.h)
 #   binding          the module: App, kernel, the role types, the policy
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
@@ -41,8 +42,8 @@ _PU32 = c.POINTER(c.c_uint32)
 _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
-OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 97, 4, 38
+OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM, FORGED, BUSY = range(12)
+KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
@@ -54,14 +55,28 @@ ID_MAX = 63
 _ENOSPC = 28
 
 
-# The role table: the served roles' rows are its own.
-with open(os.path.join(HERE, "..", "..", "native", "moy_app", "roles.json")) as _f:
-    _TABLE = json.load(_f)["rows"]
+# The role table (native/os_calls.json's rows the ROLE door names, in order:
+# tools/gen_os_table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# its roles and C rows size the C's.
+with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
+    _SRC = json.load(_f)
+_TABLE = [{"role": r["name"].split(".", 1)[0], "verb": r["name"].split(".", 1)[1],
+           "server": r["server"]} for r in _SRC["rows"]
+          if r.get("server") in ("c", "shell", "call") or r.get("server", "").startswith("proc:")
+          or r.get("door")]
+ROLE_N = len(_SRC["roles"])
+ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 
 
 class _Buf(c.Structure):
     """moy_fs.h's moy_buf_t: an answer the user-files layer allocated."""
     _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
+
+
+class _Run(c.Structure):
+    """moy_app_run.h's moy_app_run_t: an app's run on a tier binding."""
+    _fields_ = [("a", c.c_void_p), ("sn", c.c_uint32), ("g", c.c_uint32),
+                ("roles", c.c_uint32)]
 
 
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
@@ -94,6 +109,7 @@ _SIGS = (
     ("moy_app_fresh", [_P], None),
     ("moy_app_grant", [_P, _PCHAR, _SIZE, c.c_uint8, _U32, c.c_int, _PCHAR,
                        _SIZE, _U32, _PU32], c.c_int),
+    ("moy_app_regrant", [_P, _PCHAR, _SIZE, _U32, _U32, c.c_int], c.c_int),
     ("moy_app_end", [_P, _U32], c.c_int),
     ("moy_app_grants", [_P], _U32),
     ("moy_app_perm_of", [c.c_int], _PCHAR),
@@ -149,12 +165,14 @@ _SIGS = (
     ("moy_app_role", [_P, _U32, _U32, _P, _SIZE, _P, _SIZE], c.c_int32),
     ("moy_app_table_name", [_U32], _PCHAR),
     ("moy_app_door_bind", [_P], None),
-    ("moy_app_wasm_bind", [_P, _U32, _U32], None),
-    ("moy_app_wasm_end", [], None),
+    ("moy_app_wasm_live", [_P], None),
     ("moy_app_wasm_forget", [_P], None),
+    ("moy_app_run_make", [_P, _U32, _U32, _P], None),
+    ("moy_app_stop_hold", [_P, _P], None),
+    ("moy_app_stop_end", [_P, _P, ctypes.c_size_t], None),
     ("moy_app_wasm_natives", [_PU32], _P),
     ("moy_app_wasm_row", [_U32], c.c_int),
-    ("moy_app_wasm_hops", [_PU32, _PU32, _PU32], None),
+    ("moy_app_wasm_hops", [_PU32, _PU32, _PU32, _PU32], None),
     ("moy_app_store_bind", [_P, _P, _PCHAR, _SIZE, c.c_int, c.c_int], c.c_int),
     ("moy_app_why", [_P], c.c_int),
     ("moy_app_buf_free", [_P, c.POINTER(_Buf)], None),
@@ -196,6 +214,9 @@ _SIGS = (
     ("moy_app_wallpaper_load_copy", [_P, _U32, c.POINTER(_Buf)], c.c_int),
     ("moy_app_wallpaper_save_copy", [_P, _U32, _PCHAR, _SIZE], c.c_int),
     ("moy_app_grant_get", [_P, _U32, c.POINTER(c.c_void_p)], c.c_int),
+    ("moy_app_grant_devs", [_P, _U32, _U32], c.c_int),
+    ("moy_app_grant_folder", [_P, _U32, _PCHAR, _SIZE], c.c_int),
+    ("moy_app_dev_bit", [_PCHAR, _SIZE], _U32),
     ("moy_app_count", [_P, c.c_int], _U32),
     ("moy_app_row_name", [c.c_int], _PCHAR),
     ("moy_app_role_name", [c.c_int], _PCHAR),
@@ -223,6 +244,137 @@ def _scalar(v):
     if v < 0:
         _raise(-v)
     return v
+
+
+# The crypto rows' C (native/moy_net/moy_crypto.h), its codes and sizes.
+_C_BAD, _C_FULL, _C_FORGED, _C_POINT, _C_ABSENT, _C_NOMEM = -1, -2, -3, -4, -5, -6
+_C_HASH, _C_SEAL_OVER, _C_KEY25519, _C_SIG25519, _C_RANDOM_MAX = 32, 28, 32, 64, 4096
+_C_BLOCK, _C_CCM_NONCE = 16, 13
+_SPAN = [c.c_void_p, c.c_size_t]
+_CRYPTO_SIGS = (
+    ("moy_crypto_random", [c.c_int32, c.c_void_p, c.c_size_t]),
+    ("moy_crypto_sha256", _SPAN + _SPAN),
+    ("moy_crypto_hmac_sha256", _SPAN * 3),
+    ("moy_crypto_aes_gcm_seal", _SPAN * 3),
+    ("moy_crypto_aes_gcm_open", _SPAN * 3),
+    ("moy_crypto_aes_ctr", _SPAN * 3),
+    ("moy_crypto_aes_ccm_seal", _SPAN * 2 + [c.c_int32] + _SPAN),
+    ("moy_crypto_aes_ccm_open", _SPAN * 2 + [c.c_int32] + _SPAN),
+    ("moy_crypto_x25519", _SPAN * 3),
+    ("moy_crypto_ed25519_public", _SPAN * 2),
+    ("moy_crypto_ed25519_sign", _SPAN * 3),
+    ("moy_crypto_ed25519_verify", _SPAN * 3),
+)
+
+
+def _bytes_of(o):
+    if isinstance(o, str):
+        return o.encode("utf-8", "surrogateescape")
+    return bytes(memoryview(o))
+
+
+def _crypto(lib):
+    """{name: function} of a Python program's crypto rows over `lib`, as the
+    native module's: bytes in (a str's UTF-8), bytes out, None where sealed
+    bytes do not open."""
+    for name, args in _CRYPTO_SIGS:
+        fn = getattr(lib, name)
+        fn.argtypes = args
+        fn.restype = c.c_int32
+
+    def answer(buf, r):
+        if r >= 0:
+            return buf.raw[:r]
+        if r == _C_FORGED:
+            return None
+        if r == _C_POINT:
+            raise ValueError("a peer key of small order")
+        if r == _C_ABSENT:
+            raise NotImplementedError("a build without it")
+        if r == _C_NOMEM:
+            raise MemoryError("moy_crypto")
+        raise ValueError("a length the call refuses")
+
+    def spans(*objs):
+        out = []
+        for o in objs:
+            b = _bytes_of(o)
+            out += [b, len(b)]
+        return out
+
+    def random(n):
+        n = int(n)
+        if not 0 <= n <= _C_RANDOM_MAX:
+            raise ValueError("a length the call refuses")
+        buf = c.create_string_buffer(n)
+        return answer(buf, lib.moy_crypto_random(n, buf, n))
+
+    def sha256(data):
+        buf = c.create_string_buffer(_C_HASH)
+        return answer(buf, lib.moy_crypto_sha256(*spans(data), buf, _C_HASH))
+
+    def hmac_sha256(key, data):
+        buf = c.create_string_buffer(_C_HASH)
+        return answer(buf, lib.moy_crypto_hmac_sha256(*spans(key, data), buf, _C_HASH))
+
+    def aes_gcm_seal(key, plain):
+        a = spans(key, plain)
+        cap = a[3] + _C_SEAL_OVER
+        buf = c.create_string_buffer(cap)
+        return answer(buf, lib.moy_crypto_aes_gcm_seal(*a, buf, cap))
+
+    def aes_gcm_open(key, sealed):
+        a = spans(key, sealed)
+        cap = max(a[3] - _C_SEAL_OVER, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_gcm_open(*a, buf, cap))
+
+    def aes_ctr(key, data):
+        a = spans(key, data)
+        cap = max(a[3] - _C_BLOCK, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ctr(*a, buf, cap))
+
+    def ccm_tag(tag):
+        tag = int(tag)
+        return tag if 0 < tag <= _C_BLOCK else -1
+
+    def aes_ccm_seal(key, data, tag):
+        a, tag = spans(key, data), ccm_tag(tag)
+        cap = max(a[3] - _C_CCM_NONCE, 0) + max(tag, 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ccm_seal(*a, tag, buf, cap))
+
+    def aes_ccm_open(key, sealed, tag):
+        a, tag = spans(key, sealed), ccm_tag(tag)
+        cap = max(a[3] - _C_CCM_NONCE - max(tag, 0), 0)
+        buf = c.create_string_buffer(max(cap, 1))
+        return answer(buf, lib.moy_crypto_aes_ccm_open(*a, tag, buf, cap))
+
+    def x25519(secret, peer=None):
+        a = spans(secret) + (spans(peer) if peer is not None else [None, 0])
+        buf = c.create_string_buffer(_C_KEY25519)
+        return answer(buf, lib.moy_crypto_x25519(*a, buf, _C_KEY25519))
+
+    def ed25519_public(secret):
+        buf = c.create_string_buffer(_C_KEY25519)
+        return answer(buf, lib.moy_crypto_ed25519_public(*spans(secret), buf, _C_KEY25519))
+
+    def ed25519_sign(secret, msg):
+        buf = c.create_string_buffer(_C_SIG25519)
+        return answer(buf, lib.moy_crypto_ed25519_sign(*spans(secret, msg), buf, _C_SIG25519))
+
+    def ed25519_verify(pub, msg, sig):
+        r = lib.moy_crypto_ed25519_verify(*spans(pub, msg, sig))
+        if r < 0:
+            raise ValueError("a length the call refuses")
+        return bool(r)
+
+    return dict(random=random, sha256=sha256, hmac_sha256=hmac_sha256,
+                aes_gcm_seal=aes_gcm_seal, aes_gcm_open=aes_gcm_open, aes_ctr=aes_ctr,
+                aes_ccm_seal=aes_ccm_seal, aes_ccm_open=aes_ccm_open, x25519=x25519,
+                ed25519_public=ed25519_public, ed25519_sign=ed25519_sign,
+                ed25519_verify=ed25519_verify)
 
 
 def _canvas_handle(cv):
@@ -309,8 +461,35 @@ def binding(sanitize=False):
                                      c.byref(h)))
             return h.value
 
+        def regrant(self, app_id, roles, svc, kind=None):
+            """Every RUN row of `app_id` recomputed: a foreground run's from
+            `roles`, a service's from `svc`, both with files `kind`
+            (moy_app_regrant). The rows it recomputed."""
+            idb = _str(app_id)
+            k = -1
+            if kind is not None:
+                kb = _str(kind)
+                k = lib.moy_app_kind_of(kb, len(kb))
+                if k < 0:
+                    raise ValueError("unknown files kind")
+            got = lib.moy_app_regrant(self._p, idb, len(idb), mask_of(roles), mask_of(svc), k)
+            if got < 0:
+                _check(-got)
+            return got
+
         def end(self, h):
             return lib.moy_app_end(self._p, h) == OK
+
+        def grant_devs(self, h, perms, folder=None):
+            mask = 0
+            for p in perms:
+                if isinstance(p, str):
+                    b = _str(p)
+                    mask |= lib.moy_app_dev_bit(b, len(b))
+            _check(lib.moy_app_grant_devs(self._p, int(h) & 0xFFFFFFFF, mask))
+            if folder is not None:
+                fb = _str(folder)
+                _check(lib.moy_app_grant_folder(self._p, int(h) & 0xFFFFFFFF, fb, len(fb)))
 
         def grant_id(self, h):
             row = c.c_void_p()
@@ -321,13 +500,30 @@ def binding(sanitize=False):
         def count(self):
             return lib.moy_app_grants(self._p)
 
-        def wasm_bind(self, g, roles=()):
-            """The run a compiled app's imports serve (moy_app_wasm_bind)."""
+        def run(self, g, roles=()):
+            """An app's run on a tier binding (native/moy_app/moy_app_run.h):
+            the bytes a Lua or wasm run's open copies, or None for g 0; and
+            this state the one the theme is read from (moy_app_wasm_live)."""
+            lib.moy_app_wasm_live(self._p)
             g = int(g) & 0xFFFFFFFF
-            lib.moy_app_wasm_bind(self._p, g, mask_of(roles) if g else 0)
+            if not g:
+                return None
+            r = _Run()
+            lib.moy_app_run_make(self._p, g, mask_of(roles), c.byref(r))
+            return bytes(r)
 
-        def wasm_end(self):
-            lib.moy_app_wasm_end()
+        def stop_hold(self, run):
+            """The run a VM stop carries (moy_app_stop_hold), None for none."""
+            if run is None:
+                lib.moy_app_stop_hold(self._p, None)
+                return
+            r = _Run.from_buffer_copy(bytes(run))
+            lib.moy_app_stop_hold(self._p, c.byref(r))
+
+        def stop_end(self, keep=()):
+            keep = [int(k) for k in keep]
+            arr = (ctypes.c_uint32 * max(1, len(keep)))(*keep)
+            lib.moy_app_stop_end(self._p, arr, len(keep))
 
         def role(self, g, row, args, cap):
             """The ROLE door (moy_app_role): (answer, the bytes it wrote)."""
@@ -953,9 +1149,9 @@ def binding(sanitize=False):
                       lib.moy_app_wasm_row(i)) for i in range(n.value))
 
     def wasm_hops():
-        n, us, work = c.c_uint32(), c.c_uint32(), c.c_uint32()
-        lib.moy_app_wasm_hops(c.byref(n), c.byref(us), c.byref(work))
-        return n.value, us.value, work.value
+        n, us, work, here = c.c_uint32(), c.c_uint32(), c.c_uint32(), c.c_uint32()
+        lib.moy_app_wasm_hops(c.byref(n), c.byref(us), c.byref(work), c.byref(here))
+        return n.value, us.value, work.value, here.value
 
     def door_bind(on):
         """The shell rows' door: the kernel's ROLE upcall, the loop's own
@@ -980,7 +1176,7 @@ def binding(sanitize=False):
         table=lambda: table_names, door_bind=door_bind, wasm_rows=wasm_rows,
         wasm_hops=wasm_hops, _lib=lib,
         kinds=lambda: kind_names, tokens=lambda: token_names,
-        CLIP_MAX=CLIP_MAX, SLOTS=SLOTS)
+        CLIP_MAX=CLIP_MAX, SLOTS=SLOTS, **_crypto(lib))
     return m
 
 

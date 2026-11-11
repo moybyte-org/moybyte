@@ -1,0 +1,10 @@
+{
+  "title": "Game Native",
+  "id": "elf.game",
+  "moybyte": {
+    "type": "game",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

@@ -132,6 +132,8 @@ static int8_t moycore_ui_flag(lua_State *L, int t, const char *key)
 
 /* The override table at stack index `i` into *o. An `id` and a `hint` string
  * are left on the stack, so the spans stay valid for the call. */
+static const char *moycore_ui_items(lua_State *L, int i, size_t *len);
+
 static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *o)
 {
     moy_ui_over_none(o);
@@ -145,15 +147,59 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->mark = moycore_ui_flag(L, i, "mark");
     o->steps = moycore_ui_flag(L, i, "steps");
     o->wash = moycore_ui_flag(L, i, "wash");
+    lua_getfield(L, i, "wash");
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        o->wash = 2;                /* "view": its anchor's view alone */
+    }
+    lua_pop(L, 1);
     o->lead = moycore_ui_flag(L, i, "lead");
     o->bar = moycore_ui_flag(L, i, "bar");
     o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);
+    o->flags2 = moycore_ui_flag(L, i, "follow") == 1 ? MOY_UI_O2_FOLLOW : 0;
     o->whole = (int8_t)(moycore_ui_flag(L, i, "whole") == 1);
     lua_getfield(L, i, "axis");
     if (lua_type(L, -1) == LUA_TSTRING) {
         size_t n = 0;
         const char *a = lua_tolstring(L, -1, &n);
         o->axis_x = (int8_t)(n == 1 && a[0] == 'x');
+    }
+    lua_pop(L, 1);
+    o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
+    o->card = (int8_t)(moycore_ui_flag(L, i, "card") == 1);
+    /* a tag's and a dialog's focus's text stay on the stack while the verb runs */
+    static const char *const texts[] = {"tag", "focus"};
+    moy_ui_span_t *tspans[] = {&o->tag, &o->focus};
+    for (int k = 0; k < 2; k++) {
+        lua_getfield(L, i, texts[k]);
+        if (lua_type(L, -1) == LUA_TSTRING) {
+            size_t tn = 0;
+            const char *t = lua_tolstring(L, -1, &tn);
+            tspans[k]->p = (const uint8_t *)t;
+            tspans[k]->n = (uint16_t)(tn > 0xFFFFu ? 0xFFFFu : tn);
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+    /* a list's texts a row: each joined text stays on the stack over its
+     * table while the verb runs */
+    static const char *const rows[] = {"values", "subs", "icons", "counts", "tags", "marks"};
+    moy_ui_span_t *spans[] = {&o->values, &o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
+    luaL_checkstack(L, 12, "ui options");
+    for (int k = 0; k < 6; k++) {
+        lua_getfield(L, i, rows[k]);
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            size_t vn = 0;
+            const char *v = moycore_ui_items(L, lua_absindex(L, -1), &vn);
+            spans[k]->p = (const uint8_t *)v;
+            spans[k]->n = (uint16_t)(vn > 0xFFFFu ? 0xFFFFu : vn);
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+    lua_getfield(L, i, "signal");
+    if (lua_isnumber(L, -1)) {
+        lua_Integer sg = lua_tointeger(L, -1);
+        o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
     }
     lua_pop(L, 1);
     lua_getfield(L, i, "offset");
@@ -629,6 +675,9 @@ static int moycore_ui_field(lua_State *L)
     if (cap > 255) cap = 255;
     uint8_t buf[255];
     size_t len = n < (size_t)cap ? n : (size_t)cap;
+    while (len > 0 && len < n && ((uint8_t)text[len] & 0xC0) == 0x80) {
+        len--;                      /* never half a character */
+    }
     memcpy(buf, text, len);
     moy_ui_over_t o;
     int32_t v = (int32_t)len;
@@ -736,6 +785,62 @@ static int moycore_ui_rule(lua_State *L)
     (void)L;
     moy_ui_run_rule(moycore_ui_canvas());
     return 0;
+}
+
+// ui.bubble(text, side, o): o.head, o.signal, o.tone, o.max, o.lines,
+// o.anchor and o.status beside the override keys.
+static int moycore_ui_bubble(lua_State *L)
+{
+    moy_ui_over_t o;
+    moycore_ui_over(L, 3, &o);
+    int32_t opt[MOY_UI_BBO_WORDS] = {0, -1, 0, 75, 4, 0};
+    size_t sn = 0;
+    const char *side = lua_isnoneornil(L, 2) ? "in" : luaL_checklstring(L, 2, &sn);
+    opt[MOY_UI_BBO_SIDE] = strcmp(side, "out") == 0;
+    moy_ui_span_t head = { (const uint8_t *)"", 0 }, status = head;
+    if (lua_istable(L, 3)) {
+        if (lua_getfield(L, 3, "signal") == LUA_TNUMBER) opt[MOY_UI_BBO_SIGNAL] = (int32_t)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        if (lua_getfield(L, 3, "tone") == LUA_TSTRING) opt[MOY_UI_BBO_TONE] = strcmp(lua_tostring(L, -1), "failed") == 0;
+        lua_pop(L, 1);
+        if (lua_getfield(L, 3, "max") == LUA_TNUMBER) opt[MOY_UI_BBO_MAX] = (int32_t)(lua_tonumber(L, -1) * 100 + (lua_Number)0.5);
+        lua_pop(L, 1);
+        if (lua_getfield(L, 3, "lines") == LUA_TNUMBER) opt[MOY_UI_BBO_LINES] = (int32_t)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 3, "anchor");
+        opt[MOY_UI_BBO_ANCHOR] = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 3, "head");     // kept on the stack while the verb runs
+        head = moycore_ui_span(L, -1);
+        lua_getfield(L, 3, "status");
+        status = moycore_ui_span(L, -1);
+    }
+    int32_t v[5] = {0, 0, 0, 0, 0};
+    moy_ui_run_bubble(moycore_ui_canvas(), moycore_ui_span(L, 1), head, status, opt,
+                      MOY_UI_BBO_WORDS, &o, v);
+    for (int i = 0; i < 5; i++) lua_pushinteger(L, v[i]);
+    return 5;
+}
+
+static int moycore_ui_empty(lua_State *L)
+{
+    size_t len = 0;
+    const char *lines = lua_isnoneornil(L, 3) ? "" : moycore_ui_items(L, 3, &len);
+    int32_t y = 0;
+    moy_ui_run_empty(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_span(L, 2),
+                     (const uint8_t *)lines, len, &y);
+    lua_pushinteger(L, y);
+    return 1;
+}
+
+static int moycore_ui_note(lua_State *L)
+{
+    size_t len = 0;
+    const char *lines = lua_isnoneornil(L, 2) ? "" : moycore_ui_items(L, 2, &len);
+    int32_t y = 0;
+    moy_ui_run_note(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)lines, len, &y);
+    lua_pushinteger(L, y);
+    return 1;
 }
 
 static int moycore_ui_part(lua_State *L)
@@ -965,9 +1070,12 @@ static void moycore_ui_open(lua_State *L)
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
         {"tool", moycore_ui_tool}, {"bar", moycore_ui_bar},
         {"rule", moycore_ui_rule}, {"text_view", moycore_ui_text_view},
+        {"empty", moycore_ui_empty}, {"note", moycore_ui_note}, {"bubble", moycore_ui_bubble},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);
+    lua_pushinteger(L, MOY_UI_ST_CUT);    // ui.bubble's state bit: its text was cut
+    lua_setfield(L, -2, "CUT");
     lua_setglobal(L, "ui");
 }
 

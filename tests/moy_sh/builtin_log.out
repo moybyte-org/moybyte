@@ -1,0 +1,9 @@
+$ log
+info kernel/0 kernel up
+warning achievements/2 a slow callback
+info shell/1 desk drawn
+$ log achievements
+warning achievements/2 a slow callback
+$ dmesg | wc -l
+3
+[exit 0]

@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
-#   Notices                     the achievements wiring, the notice banner, the unlock banner
+#   Notices                     the achievements process's start, the notice banner, the unlock banner
+#   Notices._draw_note          the notification banner (notifications.py) and its input
 #   PauseMenu                   the card over a held game: Resume, Options, Quit
 #   DeleteConfirm               "Delete <title>?" before any cart is deleted
 #   SystemMenuUI                the system menu's rows and their actions
@@ -7,10 +8,11 @@
 #   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
 #   SystemMenuUI._draw_look     the rows as the look's popover card
 #   AboutCard                   the system menu's About: Moy, the version, the board, two rows
-"""What the console SAYS on its own: the achievements wiring (the tracker,
-the unlock banner's deadline + beep), the timed system notice and the
-firmware-update verdict that rides it, and the two banners, both
-native/moy_ui's `moy_ui_unlock`. A mixin
+"""What the console SAYS on its own: the achievements process's start and
+its unlock banner (deadline + beep), the timed system notice and the
+firmware-update verdict that rides it, the banners -- the notice, the unlock
+and an app's notification (runtime/system/notifications.py), each
+native/moy_ui's `moy_ui_unlock` -- and the notification's input. A mixin
 of `Workstation`; the deadlines it arms are the flat kernel fields
 `_animating` and both WMs read. Beside it, the cards the console puts up
 over what is running: the pause and stop cards (`PauseMenu`), the delete
@@ -22,10 +24,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_diff)
 try:
-    from widgets import (Achievements, TOAST_MS,
+    from widgets import (TOAST_MS,
                          DANGER_ICON as _DANGER_ICON)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, TOAST_MS,
+    from runtime.widgets import (TOAST_MS,
                                  DANGER_ICON as _DANGER_ICON)
 try:
     import chrome_ops as _ch
@@ -46,11 +48,51 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name as _builtin_name
 try:
+    import app_perms as _perms
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import app_perms as _perms
+try:
+    from notifications import NOTES as _NOTES
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.notifications import NOTES as _NOTES
+try:
+    import devices as _devices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import devices as _devices
+try:
+    import scheduler as _scheduler
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import scheduler as _scheduler
+try:
+    from front import FRONT as _FRONT
+except ImportError:  # host: the runtime package
+    from runtime.front import FRONT as _FRONT
+try:
+    from intents import INTENTS as _INTENTS
+    import intents as _intents
+    import iconsets as _iconsets
+    import system_api as _system_api
+    import text_modes as _text_modes
+    import moybyte as _moybyte
+except ImportError:  # host: the runtime package
+    from runtime.intents import INTENTS as _INTENTS
+    from runtime import intents as _intents
+    from runtime import iconsets as _iconsets
+    from runtime import system_api as _system_api
+    from runtime import text_modes as _text_modes
+    from runtime import moybyte as _moybyte
+try:
+    from status_items import ITEMS as _ITEMS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.status_items import ITEMS as _ITEMS
+try:
     import achievements_ui as _ach_ui
     import about_ui as _about_ui
+    import achievements as _ach
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import achievements_ui as _ach_ui
     from runtime import about_ui as _about_ui
+    from runtime import achievements as _ach
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
@@ -60,17 +102,28 @@ _LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
               "menu.home": "Home",
               "menu.clear_search": "Clear search", "menu.search": "Search",
+              "menu.tasks": "Tasks",
               "menu.settings": "Settings", "menu.about": "About", "menu.sleep": "Sleep",
               "menu.reboot": "Restart Moybyte"}
 _LOOK_ICON = {"menu.delete_cart": "trash", "menu.home": "home",
               "menu.favourite_add": "star", "menu.favourite_remove": "star_on",
               "menu.clear_search": "search", "menu.search": "search",
+              "menu.tasks": "layout",
               "menu.settings": "settings", "menu.about": "doc", "menu.sleep": "sleep",
               "menu.reboot": "power"}
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
              "delete": ("DELETE", "trash", "Delete")}
+
+
+_FRONT_KEY = "desktop"            # the front run's window key (procs.FRONT)
+_OPEN_WITH = "Open with"           # the "open with" menu's title
+# The picker's title by the type asked for, and a row's icon by its file's kind.
+_PICK_TITLE = (("image/", "Choose a picture"), ("text/", "Choose a document"),
+               ("audio/", "Choose a song"), ("", "Choose a file"))
+_PICK_ICON = {"docs": "notes", "drawings": "art", "sprites": "sprite", "music": "music",
+              "recordings": "music", "stories": "storybook"}
 
 
 def _row(kind, sid, action=None):
@@ -101,17 +154,19 @@ class _CardVerb:
 class Notices:
 
     def load_achievements(self):
-        """Wire a fresh Achievements over the badges the store remembers (#21).
-
-        The read is `prefs`'; the WIRING is kernel -- persistence goes back to
-        the store, the day a badge is found comes off the bar's clock, and the
-        unlock effects (the banner's deadline + the beep) are the kernel's
-        own. Call after the store + carts_root are injected (host
+        """(Re)start the achievements process (runtime/system/achievements.py,
+        docs/os_2026-11/processes.md section 8), whose prefs hold the badges.
+        Call after the store + carts_root are injected (host
         build_workstation / device run_desktop)."""
-        self.ach = Achievements(self.prefs.load_achievements(),
-                                on_save=self.prefs.save_achievements,
-                                on_unlock=self._achievement_unlocked,
-                                today=self._today_ymd)
+        self.ach.start()
+
+    def service_env(self, cart):
+        """What the console hands service `cart` in its namespace beside
+        its app's roles: the achievements process's `game`, `clock_day` and
+        `row_stamp`; None for any other."""
+        if _ach.is_proc(cart):
+            return self.ach.env()
+        return None
 
     def _today_ymd(self):
         """Today as YYYYMMDD off the bar's wall clock, 0 without one (a board
@@ -119,31 +174,30 @@ class Notices:
         y, m, d = self.bar_layer._today()
         return y * 10000 + m * 100 + d if y >= 2020 else 0
 
-    def _achievement_unlocked(self, ach_id):
-        """A fresh unlock's EFFECTS: arm the banner, then celebrate with a
-        short rising beep when audio is wired (#21, rev-3 event push).
+    def _achievement_unlocked(self, badge):
+        """A fresh unlock's EFFECTS: arm the banner over `badge`, (head,
+        title, icon, secret), then celebrate with a short rising beep when
+        audio is wired (#21, rev-3 event push). The achievements process's
+        notification brings it (`_note_shown`).
 
-        `Achievements` generates the effect and the kernel executes it. The
-        deadline is written HERE, at the unlock, rather than polled per frame off
+        The deadline is written HERE, at the unlock, rather than polled per frame off
         the object -- `_animating` and the WM's overlay signature read the flat
         field and never call into `ach` on the frame path. There is no banner
-        QUEUE to preserve: `award()` overwrites its payload, so a second unlock
+        QUEUE to preserve: each unlock overwrites the payload, so a second unlock
         inside the window replaces the banner and extends the deadline, which is
         exactly what a later write to this field does. A badge found again
         awards nothing, so it reaches neither the banner nor the beep.
 
         The deadline is armed BEFORE the beep so a silent (or broken) backend
         cannot cost the kid the banner; the beep itself is best-effort."""
+        t = self.ach.toast = badge
         now = _ticks_ms()
         self._toast_at = now
         self._toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
-        t = getattr(self.ach, "toast", None)
         if t:
-            _ch._moy_play().chrome_toast_arm(
-                _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE, t[1], t[2], bool(t[3]),
-                self._toast_until)
-        au = self.audio
+            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), self._toast_until)
+        au = self.run.audio
         if au is not None:
             try:
                 au.beep(880, 0.08)
@@ -195,9 +249,12 @@ class Notices:
         """The system notice: the unlock banner's card at the top centre of
         the content, its tile a check (a warning's, the warning sign), the
         title in `value` over the line under it. The card's rect."""
+        notice = self._notice
+        if notice is None:      # expired between the frame's check and its draw
+            return None
         cv = self.sys_canvas
         lay = self.layout
-        title, sub, kind = self._notice
+        title, sub, kind = notice
         desk = _desk_class()
         return _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, lay.cy + (12 if desk else 6 * lay.fs),
                         title, sub or "", "check" if kind == "ok" else "warn", 0, desk)
@@ -221,9 +278,431 @@ class Notices:
         if t[3]:
             el = _ticks_diff(_ticks_ms(), self._toast_at)
             burst = 255 if el >= _ach_ui.BURST_MS else max(1, el * 255 // _ach_ui.BURST_MS)
-        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top,
-                        _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE,
-                        t[1], t[2], burst, desk)
+        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top, t[0], t[1], t[2], burst, desk)
+
+    # -- notifications (docs/os_2026-11/processes.md §7) ----------------------
+
+    def _init_notes(self):
+        """The notification service's hooks are this console's: who a pid
+        is, which cart an app id names, the banner's kernel copy, and acting
+        on one."""
+        _NOTES.who = self._note_who
+        _NOTES.titled = self._note_titled
+        _NOTES.shown = self._note_shown
+        _NOTES.acted = self._note_acted
+        self._note_rect = None          # the banner's card where it last drew
+        self._note_y0 = None            # where a press on it went down
+
+    # -- intents (docs/os_2026-11/between_apps.md §1) ------------------------
+
+    def _init_intents(self):
+        """The intents' hooks are this console's (runtime/system/intents.py):
+        the app carts that may open an item, a cart's key, the delivery, the
+        "open with" menu (the console's question, `DeleteConfirm.choose`),
+        the user-files store a file grant reads through, the row the last
+        choices are kept in, and the picker: its listing, its question and
+        the running app it hands a pick to. The front's gate
+        (runtime/system/front.py) reads the run on screen and brings a
+        process's run forward as acting on a notification does."""
+        _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
+                      self._intent_ask, self._intent_read, self._intent_write,
+                      self.system, self._intent_list, self._intent_ask_pick,
+                      self._intent_hand)
+        _FRONT.bind(self._front_pid, self._bring)
+
+    def _front_pid(self):
+        """The pid of the run the user is in: the front run while its
+        window holds the input, else None (the shell's)."""
+        pl = self.run.player
+        if pl is None or pl.pid is None or self.cart is None:
+            return None
+        return pl.pid if self.wm.input_holder() == _FRONT_KEY else None
+
+    def _intent_handlers(self):
+        return [c for c in self.carts.all
+                if c.get("type") == "app" and c.get("handles") and not c.get("broken")]
+
+    def _intent_app(self, cart):
+        """The registered app whose identity `cart` is, else None."""
+        for app, _text in self._apps:
+            if app.is_app(cart):
+                return app
+        return None
+
+    def _intent_icon(self, cart):
+        app = self._intent_app(cart)
+        if app is not None:
+            return _iconsets.ALIASES.get(app.id, app.id)
+        return "notes" if _system_api.is_text_app(cart) else "app"
+
+    def _intent_ask(self, label, carts, then):
+        return self.confirm.choose(_OPEN_WITH, label,
+                                   [str(c.get("title") or "") for c in carts],
+                                   [self._intent_icon(c) for c in carts], then)
+
+    def _intent_ask_pick(self, pid, mime, items, then):
+        """The picker: the console's one question, its title the type asked
+        for, a row a file (its name as the Files app shows it, its kind's
+        icon), the asking app's title under the title."""
+        title = _PICK_TITLE[-1][1]
+        for head, t in _PICK_TITLE:
+            if mime.startswith(head):
+                title = t
+                break
+        rows, icons = [], []
+        for item in items:
+            kn = _intents.split(item)
+            rows.append(kn[1] if kn else item)
+            icons.append(_PICK_ICON.get(kn[0], "doc") if kn else "doc")
+        try:
+            who = self.procs.who(pid)[0]
+        except Exception:  # noqa: BLE001 -- a caption is never worth a crash
+            who = ""
+        return self.confirm.choose(title, ("For " + who) if who else "", rows, icons, then)
+
+    def _intent_list(self, kind):
+        h = self.store
+        if self.carts_store is None or not h.ready():
+            return ()
+        try:
+            return h.call(lambda: self.carts_store.list_files(kind, self.carts_root))
+        except Exception:  # noqa: BLE001 -- an unreadable kind lists nothing
+            return ()
+
+    def _intent_hand(self, pid, g):
+        """A pick to the process that asked: the running app's `moy_open(h)`
+        where its run defines one (a compiled app's posts it), any other
+        process's the message `moy_open` (moybyte.hand_item: a native
+        command's or a service's). True where it took it (None, a cancel,
+        reaches it too)."""
+        if pid is None:
+            return False
+        pl = self.run.player
+        if pl is not None and pl.pid == pid:
+            if pl.cart_error is not None:
+                return False
+            if (pl.ns or {}).get("moy_open") is not None:
+                return pl.window_event("moy_open", g)
+        return _moybyte.hand_item(pid, g)
+
+    def _intent_read(self, kind, name):
+        h = self.store
+        if self.carts_store is None or not h.ready():
+            return None
+        try:
+            return h.call(lambda: self.carts_store.load_file(kind, name, self.carts_root))
+        except Exception:  # noqa: BLE001 -- an unreadable file reads as gone
+            return None
+
+    def _intent_write(self, kind, name, data):
+        h = self.store
+        if self.carts_store is None or not h.writable():
+            return False
+        try:
+            h.call(lambda: self.carts_store.save_file(kind, name, data, self.carts_root))
+        except Exception:  # noqa: BLE001 -- the store refused: the grant says so
+            return False
+        return True
+
+    def _intent_keep(self, g, kind):
+        """Shared data a shell door opens as a file: written into `kind` as a
+        new item named for its type, `(kind, name)`, or None."""
+        h = self.store
+        if self.carts_store is None or not h.writable():
+            return None
+        ext = ""
+        for e, m in _intents.TYPES.items():
+            if m == g.mime and e != ".md":
+                ext = e
+        store, root = self.carts_store, self.carts_root
+        try:
+            name = h.call(lambda: store.free_file_name(kind, "Shared" + ext, root))
+            h.call(lambda: store.save_file(kind, name, g.read(), root))
+        except Exception:  # noqa: BLE001 -- nothing to open
+            return None
+        return kind, name
+
+    def _intent_deliver(self, cart, g):
+        """Hand `g` to `cart`'s app: Paint and the text app through their
+        doors (the shell opens the one file for them), any other app cart
+        launched and handed the grant by its `moy_open(h)`. The receiving
+        pid, the shell's for a door, or None where nothing opened."""
+        app = self._intent_app(cart)
+        door = "paint" if app is not None and app.id == "artwork" else (
+            "text" if _system_api.is_text_app(cart) else None)
+        if door is not None:
+            if g.url is not None:
+                return None
+            kn = (g.kind, g.file) if g.file is not None else self._intent_keep(
+                g, "drawings" if door == "paint" else "docs")
+            if kn is None:
+                return None
+            if door == "paint":
+                ok = self.open_image(kn[1], kn[0])
+            else:
+                ok = self.open_text_cart(kn[1], kn[0], _text_modes.mode_for(
+                    _text_modes.file_name(kn[0], kn[1])))
+            return _intents.SHELL if ok else None
+        if app is not None:
+            return None
+        self.open(cart)
+        pl = self.run.player
+        if pl is None or self.cart is None or pl.cart_error is not None \
+                or self.app_cart_id(self.cart) != self.app_cart_id(cart):
+            return None
+        if not pl.window_event("moy_open", g):
+            return None
+        return pl.pid
+
+    # -- the apps' status items (docs/theme_and_shell_2026-11.md §8.6) --------
+
+    def _init_status(self):
+        """The status items' hooks are this console's: an item's caption is
+        its process's title, and its menu closes with it."""
+        _ITEMS.title_of = self._status_title
+        _ITEMS.closed = self._status_closed
+        self.status_open = None         # the item whose desk menu is open
+        self.status_open_k = 0          # ...its place in the bar
+
+    def _status_title(self, pid):
+        try:
+            return self.procs.who(pid)[0]
+        except Exception:  # noqa: BLE001 -- a caption is never worth a crash
+            return ""
+
+    def _status_closed(self, item):
+        m = self.sysmenu
+        if m.open and ((m.widget == "status" and self.status_open is item)
+                       or (m.widget == "battery" and not self.wm.desk_open())):
+            self.close_popover()
+        if self.status_open is item:
+            self.status_open = None
+        self._dirty = True
+
+    def ask_stop_music(self, cart):
+        """A compiled game that fits with the VM stopped only without the
+        music (the Player's `_music_keeps_the_vm`): the running set's
+        dialog asks first, Cancel focused; Stop & play stops the stream as
+        the shell, then opens the game again once the media service has
+        given its memory back (its run ends on the frame's job), now free
+        to stop the VM."""
+        title = str((cart or {}).get("title") or "this game")[:18]
+
+        def then():
+            media = _devices.api("media")
+            if media is None:
+                self.open(cart)
+                return
+            media.stop()
+            self._open_when_quiet(media, cart)
+        self.confirm.ask_close("Stop the music to play %s?" % title,
+                               "%s needs the music's memory. You can start the music "
+                               "again after." % title, then, _STOP_PLAY)
+
+    def _open_when_quiet(self, media, cart, waited=None):
+        """`cart` opened once the media service's run has ended (a frame or
+        two after its stop), STOP_QUIET_MS at most."""
+        if not media.running() or (waited is not None and waited[0] >= STOP_QUIET_MS):
+            if waited is not None:
+                _scheduler.SCHED.plain_cancel(waited[1])
+            self.open(cart)
+            return
+        if waited is None:
+            waited = [0, 0]
+            waited[1] = _scheduler.SCHED.plain_every(
+                STOP_POLL_MS, lambda: self._open_when_quiet(media, cart, waited))
+        waited[0] += STOP_POLL_MS
+
+    def ask_first(self, cart, then):
+        """A cart that is asked before its first run (`app_perms.asks_first`:
+        it arrived as files, with no consent record): the install prompt's
+        lines in the running set's dialog, "Open <title>?", No focused;
+        Open records the consent, as an install does, then `then()`. No
+        records nothing and the cart stays unrun. True when it asked."""
+        consent = getattr(self, "consent", None)
+        if consent is None or not cart:
+            return False
+        aid = _perms.app_id(cart)
+        if not _perms.asks_first(cart, consent.get(aid)):
+            return False
+        title = str(cart.get("title") or "this cart")[:18]
+        perms = list(cart.get("permissions") or ())
+
+        def allow():
+            consent.record(aid, perms)
+            then()
+        self.confirm.ask_lines("Open %s?" % title, _perms.prompt(cart), allow, _OPEN)
+        return True
+
+    def open_status_menu(self, item):
+        """Status item `item`'s menu on the desk, hung from its cell; the
+        same item again closes it (`toggle_popover`)."""
+        if item is None:
+            return
+        if _ITEMS.bare(item):
+            self.open_status_app(item)
+            return
+        m = self.sysmenu
+        same = m.open and m.widget == "status" and self.status_open is item
+        if m.open and m.widget == "status" and not same:
+            self.close_popover()
+        self.status_open = item
+        sh = _ITEMS.shown
+        for k in range(len(sh)):
+            if sh[k] is item:
+                self.status_open_k = k
+        self.toggle_popover("status")
+        self._dirty = True
+
+    def _note_who(self, pid):
+        return self.procs.who(pid)
+
+    def _note_titled(self, app):
+        """The cart app id `app` names, None where none on the shelf does."""
+        for c in self.carts.all:
+            if _perms.app_id(c) == app:
+                return c
+        return None
+
+    def _note_shown(self, n, until):
+        """The banner went up (`n`) or down: the kernel's copy, which a run
+        it drives draws over its frames, follows. The achievements process's
+        banner is the unlock banner: its card with the kernel's words and a
+        secret's burst, and the beep; the notification stays in the list."""
+        self._dirty = True
+        badge = self.ach.badge_of(n)
+        if badge is not None:
+            self._achievement_unlocked(badge)
+            _NOTES.dismiss()
+            return
+        if n is None:
+            self._note_rect = None
+            _ch._moy_play().chrome_note("", "", "", 0)
+        else:
+            _ch._moy_play().chrome_note(n.app, n.summary, n.icon, until or 1)
+
+    def _note_acted(self, n, key):
+        """Notification `n` was opened by `key`: its process comes to the
+        front -- a run the front's, as the task manager's Switch to brings
+        it (the game in front then throttled on the desk, minimised on a
+        handheld), a cart no longer running opened again -- and its
+        `moy_action(id, key)` runs; a service, which has no window, gets
+        the call alone, and an app's own service's notification opens its
+        app too (scheduler.as_service)."""
+        self._dirty = True
+        brought = self._bring(n.pid)
+        if brought is not None:
+            if brought:
+                self.run.player.window_event("moy_action", n.id, key)
+            return
+        try:
+            import scheduler as _sched
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import scheduler as _sched
+        hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
+        c = n.cart
+        if hooked and not (c and c.get("entry") and c.get("path")):
+            return
+        self._open_cart_of(c)
+
+    def _open_cart_of(self, c):
+        """Process cart `c` opened again: an app's own service's its app's
+        cart, a service with no app nothing."""
+        if c and c.get("entry") and c.get("path"):
+            c = next((a for a in self.carts.all if a.get("path") == c["path"]), None)
+        if c and c.get("path") and c.get("type") != "service":
+            if self.wm.top_is("tasks") and self.procs.handheld():
+                self.close_tasks()
+            self.open(c)
+
+    def open_status_app(self, item):
+        """Status item `item`, which has no menu, was tapped: its process's
+        run comes to the front, as a notification's does, else its cart
+        opens (an app's own service's, its app)."""
+        if item is None or not item.pid:
+            return
+        self._dirty = True
+        self.close_popover()
+        if self._bring(item.pid) is not None:
+            return
+        self._open_cart_of(self.procs.who(item.pid)[1])
+
+    def _bring(self, pid):
+        """Process `pid`'s run comes to the front, as the task manager's
+        Switch to brings it: True where it is the front run after, False
+        where it could not come, None where no run is `pid`'s."""
+        if pid is None:
+            return None
+        procs = self.procs
+        pl = self.run.player
+        if pl is not None and pl.pid == pid:
+            if not procs.handheld():
+                self.wm.bring_forward("desktop")
+            elif self.wm.top_is("tasks"):
+                self.close_tasks()
+            return True
+        for p in procs.list:
+            if p.player.pid == pid:
+                self.tasks_switch(p.key)
+                return self.run.player.pid == pid
+        return None
+
+    def _note_top(self):
+        """The banner's top: under the bar where there is one, at the
+        glass's top over a fullscreen game (the unlock banner's)."""
+        lay = self.layout
+        desk = _desk_class()
+        wm = self.wm
+        game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
+                and not self._running_cart_shows_bar())
+        return (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
+
+    def _draw_note(self):
+        """The notification banner over whatever is up: the posting app's
+        title over the summary, on its icon's tile, at the top centre."""
+        n = _NOTES.up()
+        if n is None:
+            return
+        cv = self.sys_canvas
+        self._note_rect = _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, self._note_top(),
+                                          n.app, n.summary, n.icon, 0, _desk_class())
+
+    def _draw_rec(self):
+        """The recording indicator while a process holds the microphone
+        (`devices.MIC`): kernel chrome at the glass's top right, over
+        everything but the cursor, which nothing turns off."""
+        cv = self.sys_canvas
+        _ui_draw.rec(cv, self.theme_colors, cv.w - 2, 2, _desk_class())
+
+    def _note_pointer(self, px, py, click):
+        """A tap on the banner opens its notification; a press on it dragged
+        up dismisses it, the app in front playing on. While a press on it is
+        held, the pointer is the banner's."""
+        n = _NOTES.up()
+        y0 = self._note_y0
+        if n is None:
+            self._note_y0 = None
+            return False
+        down = bool(getattr(self.pointer, "down", False))
+        if y0 is None:
+            r = self._note_rect
+            if r is None or not (down or click) or not _in_box(px, py, r):
+                return False
+            if click and not down:
+                _NOTES.act(n.id)
+                return True
+            self._note_y0 = py
+            return True
+        if down and not click:
+            return True
+        self._note_y0 = None
+        if y0 - py >= 8 * self.layout.fs:
+            _NOTES.dismiss()
+        else:
+            r = self._note_rect
+            if r is not None and _in_box(px, py, r):
+                _NOTES.act(n.id)
+        return True
 
 
 class PauseMenu:
@@ -235,7 +714,10 @@ class PauseMenu:
     desk, in both modes, over a game full screen or docked in the Editor's
     Run slot, Play in a window follows Resume (owner, 2026-10-31): the run
     goes on in a desk window of its own (`WindowedWM.play_in_window`); over
-    a game already in a window there is no such row. Options is the card's
+    a game already in a window there is no such row. On a handheld
+    Minimise follows Resume where the run can join the running set
+    (owner, 2026-11-03; `Procs.minimise`): the game is held where it is
+    and the console goes home. Options is the card's
     second page, the console's Volume (Esc goes back). The card is a
     popover of the public UI API's with nothing to hang from, holding a
     `ui.menu`, drawn on the system canvas over the frozen frame; the menu's
@@ -246,14 +728,17 @@ class PauseMenu:
     card over the run's last frame washed, naming the cart and Stopped, the
     sentence (`say.crash_line`), the error exact in the code face on a
     `sunk` inset, then See why (the Code tab on the line,
-    `Workstation._crash_to_code`; none for a compiled cart or one with
-    nothing to edit), Restart and Home, its keys in its foot. A notice (a
+    `Workstation._crash_to_code`; none for a compiled or native cart or
+    one with nothing to edit), Restart and Home, its keys in its foot. A notice (a
     compiled cart this console cannot run) is the same card with its words
     in the body face and Open Updates (a newer console's) or Home. Esc, B or
     Super leave for Home."""
 
     ITEMS = ("Resume", "Restart", "Options", "Quit")
     ICONS = ("play", "rotate", "settings", "close")
+    MINIMISE = "Minimise"
+    HAND_ITEMS = ("Resume", MINIMISE, "Restart", "Options", "Quit")
+    HAND_ICONS = ("play", "minimize", "rotate", "settings", "close")
     WINDOW = "Play in a window"
     DESK_ITEMS = ("Resume", WINDOW, "Restart", "Options", "Quit")
     DESK_ICONS = ("play", "maximize", "rotate", "settings", "close")
@@ -292,7 +777,7 @@ class PauseMenu:
         The first, or None elsewhere or with no room."""
         ws = self.ws
         cv = ws.sys_canvas
-        if ws.canvas is not cv:
+        if ws.run.canvas is not cv:
             return None
         lay = _ui_draw.held_layer(ws, cv, 2)
         if lay is not None:
@@ -304,11 +789,13 @@ class PauseMenu:
         if ws.cart_error is not None:
             self.stop()
             return
-        ws.player.pause()
+        ws.run.player.pause()
         self.stopped = False
         offers = getattr(ws.wm, "offers_window", None)
         if offers is not None and offers():
             self.rows, self.icons = self.DESK_ITEMS, self.DESK_ICONS
+        elif ws.procs.handheld() and ws.procs._detachable():
+            self.rows, self.icons = self.HAND_ITEMS, self.HAND_ICONS
         else:
             self.rows, self.icons = self.ITEMS, self.ICONS
         self._open()
@@ -317,12 +804,13 @@ class PauseMenu:
         """Open the stop card over the run that stopped (its error, or its
         notice, is the Player's), its rows by the run's kind."""
         ws = self.ws
-        player = ws.player
+        player = ws.run.player
         self.stopped = True
         cart = ws.cart or {}
         if player.notice is not None:
             rows = (self.UPDATES, self.HOME) if player.newer else (self.HOME,)
-        elif ws.project is None or cart.get("runtime") == "wasm" or ws.web.parked:
+        elif (ws.run.project is None or cart.get("runtime") == "wasm" or cart.get("native")
+              or ws.web.parked):
             rows = (self.RESTART, self.HOME)
         else:
             rows = (self.SEE_WHY, self.RESTART, self.HOME)
@@ -337,6 +825,7 @@ class PauseMenu:
         self.page = 0
         self._key = getattr(ws.input, "last_key", 0)
         self._hold.drop()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self._capture = True
         if self._host is None:
             self._host = _ui_draw.AppHost()
@@ -354,7 +843,8 @@ class PauseMenu:
         self.open = False
         self._hold.unsnap(self.ws, self.ws.sys_canvas)   # the frame as the game left it
         self._hold.drop()
-        self.ws.player.resume()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
+        self.ws.run.player.resume()
         self.ws.pause_touch()
 
     def back(self):
@@ -377,6 +867,7 @@ class PauseMenu:
         self.stopped = False
         self._hold.unsnap(self.ws, self.ws.sys_canvas)
         self._hold.drop()
+        self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self.ws.pause_touch()
         self.ws._dirty = True
 
@@ -412,6 +903,10 @@ class PauseMenu:
         if row == self.WINDOW:
             self.close()
             ws.wm.play_in_window()        # the same run, in a desk window
+        elif row == self.MINIMISE:
+            self._shut()                  # the run stays held: it joins the running set
+            if not ws.procs.minimise():
+                ws.run.player.resume()
         elif row == "Restart":
             self.close()
             ws._reset_canvas_state()
@@ -468,9 +963,24 @@ class PauseMenu:
         elif i.pressed("a") or i.pressed("run"):
             self.choose(self.sel)
 
+    def shows_bar(self):
+        """Whether the bar shows over the paused game (owner, 2026-11-05):
+        on a handheld, over a game full screen, so the status cluster and
+        the control center are reachable while it is paused."""
+        ws = self.ws
+        return (self.open and not self.stopped and ws.wm.top_is_player()
+                and not ws.windowed_chrome and not _desk_class())
+
+    def at_top(self):
+        """The keys are on the card's first row: up walks onto the bar."""
+        return not self.page and self.sel == 0
+
     def handle_pointer(self, px, py, click):
         host = self._host
         ws = self.ws
+        if click and self.shows_bar() and ws.bar_layer.handle_bar_tap("pause", px, py):
+            ws.pause_touch()
+            return
         if self.page:
             if click and not _in_box(px, py, host.box("Pause")):
                 self.back()
@@ -513,6 +1023,24 @@ class PauseMenu:
         cv = ws.sys_canvas
         hold = self._hold
         top = ws.wm.top_is_player()
+        if self._capture and top and ws.sysmenu.open and self.shows_bar():
+            self._capture = False
+            if self.prealloc() is not None:
+                hold.snap(ws, cv)
+                _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
+                hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
+        if ws.sysmenu.open and self.shows_bar():
+            # a popover the bar opened over the paused game (the control
+            # center): over the paused game kept washed, the bar and the
+            # popover, which the pause draws (the popover's own layer is
+            # under this one); the card waits
+            if not (hold.snapped and hold.put(ws, cv, (0, 0, cv.w, cv.h),
+                                              self._washed_key(cv))):
+                _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
+            ws.icon_spec()
+            self._bar()
+            ws.menu_ui._draw_sysmenu()
+            return
         if not top:
             self._capture = False         # a notice over the screen it opened from
         elif self._capture:
@@ -522,6 +1050,7 @@ class PauseMenu:
         elif hold.snapped and hold.put(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv)):
             ws.icon_spec()
             self._card()                  # over the frame kept washed
+            self._bar()
             return
         else:
             hold.unsnap(ws, cv)
@@ -529,11 +1058,17 @@ class PauseMenu:
         # the paused game dims under the card (D-01): over the frame just
         # put back, or the composite just made, never over the last scrim;
         # the whole glass, or on the desk the content under its bar
-        if hold.snapped or ws.canvas is not cv or not top:
+        if hold.snapped or ws.run.canvas is not cv or not top:
             _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
             if hold.snapped and top:
                 hold.keep(ws, cv, (0, 0, cv.w, cv.h), self._washed_key(cv), True)
         self._card()
+        self._bar()
+
+    def _bar(self):
+        """The bar over the paused game, where it shows (`shows_bar`)."""
+        if self.shows_bar():
+            self.ws.bar_layer._draw_status_strip("pause")
 
     def _washed_key(self, cv):
         """What the kept frame washed is a function of: the frame kept, the
@@ -626,7 +1161,7 @@ class PauseMenu:
         """The stop card's body under its icon: the cart and its state, what
         happened, the rows and the keys."""
         ws = self.ws
-        player = ws.player
+        player = ws.run.player
         title = str((cart.get("title") if cart else "") or "Game")
         if player.notice is not None:
             _ui.info(title, "")
@@ -647,6 +1182,11 @@ class PauseMenu:
 _STOP_SENTENCE = {"wrap": True, "lines": 2}
 _STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
 _STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
+_WRAP = {"wrap": True, "lines": 3}
+_STOP_PLAY = ("Cancel", "Stop & play")
+STOP_POLL_MS = 50               # how often Stop & play looks for the music's end
+STOP_QUIET_MS = 3000            # and how long it waits for it
+_OPEN = ("No", "Open")
 
 
 class DeleteConfirm:
@@ -662,7 +1202,23 @@ class DeleteConfirm:
     Its keys and taps go to the dialog's engine, which moves focus between
     the buttons and activates one; B, Esc, HOME, the console's key (the
     T-Deck's Mic) and a press outside the card cancel. The answer is read
-    as the dialog draws, and the delete runs at the frame's tail."""
+    as the dialog draws, and the delete runs at the frame's tail.
+
+    The same dialog asks the running set's one question (`ask_close`,
+    runtime/shell/procs.py): a game that does not fit beside the ones
+    running names what to close, Cancel and Close; and the Player's before
+    a compiled game the VM must stop for while the music holds the Wi-Fi,
+    Cancel and Stop & play. Its line wraps, the card growing to fit.
+
+    And the first run of a cart that arrived as files (`ask_lines`,
+    `Workstation.ask_first`): "Open <title>?" over the install prompt's
+    lines, as Get Carts draws them (`app_perms.show`), No and Open.
+
+    And the intents' "open with" menu (`choose`, runtime/system/intents.py):
+    "Open with", the item's name over a menu of the apps that open it, each
+    row its app's icon and title, the one chosen last first and focused, and
+    Cancel. The rows are stops of the dialog's engine: up and down move
+    through them, Enter or A picks, a tap on a row picks it."""
 
     BUTTONS = ("Cancel", "Delete")
 
@@ -675,18 +1231,19 @@ class DeleteConfirm:
         self._host = None
         self._key = 0                # the key typed last frame (a press is its change)
         self.focused = None          # the focused button as the last frame left it
+        self.line = self.UNDONE      # the line under the title
+        self.buttons = self.BUTTONS
+        self._act = None             # what the danger button does
+        self.rows = ()               # a choice's rows (`choose`), else ()
+        self.icons = ()
+        self._choice = None          # fn(i) told the row picked, None on a cancel
+        self.lines = ()              # a first-run prompt's lines (`ask_lines`), else ()
 
-    def ask(self, cart, then=None):
-        """Ask before `cart` (a cart dict, or None for the open cart) is
-        deleted; `then()` runs after a delete that removed it."""
+    UNDONE = "This can't be undone."
+    CLOSE = ("Cancel", "Close")
+
+    def _arm(self):
         ws = self.ws
-        target = cart if cart is not None else ws.cart
-        if target is None or not target.get("path"):
-            return False
-        name = str(target.get("title") or "").strip()
-        self.cart = cart
-        self.title = "Delete %s?" % name if name else "Delete this cart?"
-        self._then = then
         self.open = True
         self.focused = None
         self._key = getattr(ws.input, "last_key", 0) or 0
@@ -696,6 +1253,70 @@ class DeleteConfirm:
             self._host.reset()
         self._host.key = self._key   # the key that asked is no press of the dialog's
         ws._dirty = True
+
+    def choose(self, title, label, rows, icons, then):
+        """Ask which of `rows` (their `icons` beside them), under `label`:
+        `then(i)` with the row picked, at the frame's tail, or `then(None)`
+        where the menu was cancelled."""
+        self._drop_choice()
+        self.cart = None
+        self.title = title
+        self.line = label
+        self.lines = ()
+        self.rows = list(rows)
+        self.icons = list(icons)
+        self.buttons = ("Cancel",)
+        self._then = self._act = None
+        self._choice = then
+        self._arm()
+        return True
+
+    def _drop_choice(self):
+        fn, self._choice = self._choice, None
+        self.rows = self.icons = ()
+        if fn is not None:
+            fn(None)
+
+    def ask_close(self, title, line, then, buttons=None):
+        """Ask to close what `title` names so that what `line` says can
+        open; `then()` closes it and opens that. `buttons` (Cancel, then
+        the verb) name the answers where Close does not."""
+        self._drop_choice()
+        self.cart = None
+        self.title = title
+        self.line = line
+        self.lines = ()
+        self.buttons = buttons or self.CLOSE
+        self._then = None
+        self._act = then
+        self._arm()
+        return True
+
+    def ask_lines(self, title, lines, then, buttons):
+        """Ask the install prompt's question: `title` over the prompt's
+        `lines` (`app_perms.show`), `buttons` No and the verb; `then()` on
+        the verb."""
+        self.ask_close(title, "", then, buttons)
+        self.lines = list(lines)
+        return True
+
+    def ask(self, cart, then=None):
+        """Ask before `cart` (a cart dict, or None for the open cart) is
+        deleted; `then()` runs after a delete that removed it."""
+        ws = self.ws
+        target = cart if cart is not None else ws.cart
+        if target is None or not target.get("path"):
+            return False
+        name = str(target.get("title") or "").strip()
+        self._drop_choice()
+        self.cart = cart
+        self.title = "Delete %s?" % name if name else "Delete this cart?"
+        self.line = self.UNDONE
+        self.lines = ()
+        self.buttons = self.BUTTONS
+        self._then = then
+        self._act = self._delete
+        self._arm()
         return True
 
     def cancel(self):
@@ -703,7 +1324,8 @@ class DeleteConfirm:
         if not self.open:
             return
         self.open = False
-        self.cart = self._then = None
+        self.cart = self._then = self._act = None
+        self._drop_choice()
         self.ws._dirty = True
 
     def _delete(self):
@@ -769,16 +1391,32 @@ class DeleteConfirm:
         cv = ws.sys_canvas
         ws.icon_spec()                # the theme's set in the engine, as the bar has it
         settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
-        pick = _ui.dialog(self.title, self.BUTTONS, "danger")
-        _ui.label("This can't be undone.")
+        got = -1
+        if self.rows:
+            pick = _ui.dialog(self.title, self.buttons, "normal")
+            got = _ui.menu(self.line, self.rows, self.icons)
+        elif self.lines:
+            pick = _ui.dialog(self.title, self.buttons, "primary")
+            _perms.show(_ui, self.lines)
+        else:
+            pick = _ui.dialog(self.title, self.buttons, "danger")
+            _ui.label(self.line, _WRAP)
         _ui.dialog()
         self._unwash_strip(cv)
         self.focused = _ui.focus()
-        if pick == 0:
+        if got >= 0:
+            self.open = False         # the answer is in: the tail hands it over
+            fn, self._choice = self._choice, None
+            self.rows = self.icons = ()
+            if fn is not None:
+                ws.defer(lambda: fn(got), toast=False)
+        elif pick == 0:
             self.cancel()
         elif pick == 1:
-            self.open = False         # the answer is in: the tail deletes
-            ws.defer(self._delete, toast=False)
+            self.open = False         # the answer is in: the tail acts
+            act, self._act = self._act, None
+            if act is not None:
+                ws.defer(act, toast=False)
         elif not settled or self._host.moved:
             ws.request_frame()
 
@@ -866,6 +1504,8 @@ class SystemMenuUI:
             sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
                    else "menu.search")
             rows.append(_row("item", sid, self.ws.toggle_search))
+        if not ws.wm.top_is("tasks"):
+            rows.append(_row("item", "menu.tasks", ws.open_tasks))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
         # Sleep where the board's idle ladder can blank its light (absent on
@@ -997,11 +1637,12 @@ class SystemMenuUI:
         """Whether a system modal's scrim is up: this menu or a card's menu,
         ABOUT, the pause menu, the delete confirm. A bar widget's popover (the calendar, Wi-Fi,
         power) hangs from its widget as an app's picker does, and dims
-        nothing (docs/history/look_2026-10.md, D-01)."""
+        nothing (docs/history/look_2026-10.md, D-01), but a handheld's
+        control center, which dims the page beside it."""
         ws = self.ws
         m = ws.sysmenu
-        return (m.open and m.comp is None) or ws._about or ws.pause.open \
-            or ws.confirm.open
+        return (m.open and (m.comp is None or getattr(m.comp, "SCRIM", None) is not None)) \
+            or ws._about or ws.pause.open or ws.confirm.open
 
     def draw_full(self, dt):
         """The menu on a frame of the whole glass: the scrim, then the card.
@@ -1009,7 +1650,7 @@ class SystemMenuUI:
         card is held washed (`ui_draw.Hold`, surface model §14.5): a
         frame that put it back draws the card alone."""
         ws = self.ws
-        f = ws._frames_drawn
+        f = ws.frame_state.frames_drawn
         if self._put_f != f:
             cv = ws.sys_canvas
             # the key the home's put asked this frame, before it drew
@@ -1032,7 +1673,7 @@ class SystemMenuUI:
         """Put the home under the open menu back washed, as the frame that
         held it left it: True when it was, and the home draws nothing."""
         key = self._key = self._home_key(cv)
-        self._key_f = self.ws._frames_drawn
+        self._key_f = self.ws.frame_state.frames_drawn
         if key is None or not self._held.put(self.ws, cv, (0, 0, cv.w, cv.h), key, dt):
             return False
         self._put_f = self._key_f
@@ -1062,16 +1703,27 @@ class SystemMenuUI:
         rect alone keeps it. `also`: a buffer each washed pixel is stored
         to as well (the held layer's)."""
         ws = self.ws
+        m = ws.sysmenu
+        a = getattr(m.comp, "SCRIM", None) if m.open else None
         for rect in self.scrim_rects():
-            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect, None, also)
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect, None, also, a)
 
     def scrim_rects(self):
         """The rects `scrim` washes, on the glass: none for a bar widget's
-        popover, ABOUT's content, or the system menu's bands."""
+        popover but the control center (a component with a `SCRIM` of its
+        own), which dims the page under the bar down to the hint strip,
+        ABOUT's content, or the system menu's bands."""
         ws = self.ws
         m = ws.sysmenu
         if m.open and m.comp is not None and not ws._about:
-            return ()
+            if getattr(m.comp, "SCRIM", None) is None:
+                return ()
+            lay = ws.layout
+            h = lay.ch
+            strip = self.about._strip()
+            if strip is not None and lay.cy < strip[1] < lay.cy + h:
+                h = strip[1] - lay.cy
+            return ((lay.cx, lay.cy, lay.cw, h),)
         if ws._about:
             lay = ws.layout
             return ((lay.cx, lay.cy, lay.cw, lay.ch),)

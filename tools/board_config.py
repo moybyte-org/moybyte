@@ -6,7 +6,9 @@
 #   stage_native        stage the native modules and write their cmake list
 #   sdkconfig_required  the stale-sdkconfig guard's list
 #   headroom_floor      the OTA-slot headroom the build's size guard demands
+#   hardware            the [hardware] table, checked against its chip's GPIO list
 #   stage               stage the Python modules
+#   mirror              the content-keyed tree copy both stagers write through
 #   Setting             one sdkconfig.board assignment and its prose
 #   TomlError           a board.toml the parser refuses
 """Read a board's `board.toml` and stage its modules (#161 Phase 3).
@@ -46,6 +48,7 @@ Usage from a test:
     staged_modules(TDECK)      # {"console.py": Path(".../runtime/shell/console.py")}
 """
 
+import fnmatch
 import os
 import re
 import shutil
@@ -168,6 +171,27 @@ class _Parser:
             if self.i < self.n and self.s[self.i] == ",":
                 self.i += 1
 
+    def _inline(self):
+        """An inline table, `{k = v, ...}`, on one line (TOML 1.0)."""
+        self._expect("{")
+        out = {}
+        while True:
+            self._skip(False)
+            if self.i < self.n and self.s[self.i] == "}" and not out:
+                self.i += 1
+                return out
+            key = self._bare_key()
+            self._skip(False)
+            self._expect("=")
+            if key in out:
+                raise TomlError("duplicate key %r at offset %d" % (key, self.i))
+            out[key] = self._value()
+            self._skip(False)
+            if self.i < self.n and self.s[self.i] == "}":
+                self.i += 1
+                return out
+            self._expect(",")
+
     def _value(self):
         self._skip(False)
         c = self.s[self.i]
@@ -175,6 +199,8 @@ class _Parser:
             return self._string()
         if c == "[":
             return self._array()
+        if c == "{":
+            return self._inline()
         if self.s.startswith("true", self.i):
             self.i += 4
             return True
@@ -182,7 +208,7 @@ class _Parser:
             self.i += 5
             return False
         start = self.i
-        while self.i < self.n and self.s[self.i] not in ",]\n#":
+        while self.i < self.n and self.s[self.i] not in ",]}\n#":
             self.i += 1
         raw = self.s[start:self.i].strip()
         try:
@@ -276,16 +302,215 @@ def load(board_dir):
 def headroom_floor(board_dir):
     """`(ota id, floor in bytes)`: the OTA-slot headroom the board's app image
     must keep, `[image] headroom_floor_kib`. The build's size guard fails
-    under it; a board with an OTA id and no floor is an error, not a pass."""
+    under it; a board with an OTA id and no floor is an error, not a pass.
+    A declared 0 is a written decision to keep only the slot-fit guard."""
     cfg = load(board_dir)
     ota = cfg.get("board", {}).get("ota")
     kib = cfg.get("image", {}).get("headroom_floor_kib")
     if not ota:
         raise ValueError("%s/board.toml: [board] has no ota id" % board_dir)
-    if not isinstance(kib, int) or isinstance(kib, bool) or kib <= 0:
+    if not isinstance(kib, int) or isinstance(kib, bool) or kib < 0:
         raise ValueError("%s/board.toml: [image] headroom_floor_kib must be a "
-                         "positive integer, got %r" % (board_dir, kib))
+                         "non-negative integer, got %r" % (board_dir, kib))
     return ota, kib * 1024
+
+
+def roster_skip(board_dir):
+    """The system carts a board's seed roster leaves out, `[roster] skip`
+    (cart ids); () where the board bakes every one."""
+    skip = load(board_dir).get("roster", {}).get("skip", [])
+    if not isinstance(skip, list) or not all(isinstance(s, str) for s in skip):
+        raise ValueError("%s/board.toml: [roster] skip must be a list of cart ids"
+                         % board_dir)
+    return tuple(skip)
+
+
+def roster_first(board_dir):
+    """The manifest types a board's seed roster leads with, `[roster] first`;
+    () where the roster keeps its seed order."""
+    first = load(board_dir).get("roster", {}).get("first", [])
+    if not isinstance(first, list) or not all(isinstance(s, str) for s in first):
+        raise ValueError("%s/board.toml: [roster] first must be a list of cart types"
+                         % board_dir)
+    return tuple(first)
+
+
+# -- the hardware (docs/os_2026-11/hardware.md section 1) ---------------------
+#
+# Each chip's GPIO, and the pads no `lease` row may hold on any board: the
+# strapping pins, the flash's and the PSRAM's, and the USB PHYs'. The P4's
+# flash, PSRAM, MIPI lanes and USB 2.0 port have pads outside its GPIO matrix.
+CHIP_GPIO = {
+    "esp32s3": {
+        "gpio": tuple(range(0, 22)) + tuple(range(26, 49)),
+        "strapping": (0, 3, 45, 46),
+        "flash_psram": tuple(range(26, 38)),    # octal flash/PSRAM: 33-37 too
+        "usb": (19, 20),
+    },
+    "esp32p4": {
+        "gpio": tuple(range(0, 55)),
+        "strapping": (34, 35, 36, 37, 38),
+        "flash_psram": (),
+        "usb": (24, 25, 26, 27),                # the two USB 1.1 PHYs
+    },
+}
+HW_CLASSES = ("os", "class", "lease", "never")
+# The device APIs a `class` row may name (hardware.md section 1), and the
+# device-tier module that serves each where one exists: a board whose row names
+# it stages that module. `http`, `mic`, `lora` and `ble` are served by shared
+# runtime modules (runtime/system/devices.py) over C drivers every image
+# compiles, which read the board's `hw_defines`.
+DEVICE_APIS = {
+    "battery": "battery.py", "brightness": None, "alarms": None, "mic": None,
+    "http": None, "media": None, "gps": None, "lora": None, "ble": None,
+    "usb": None, "midi": None, "camera": None,
+}
+
+
+# The lease rows a board may offer, by name (native/moy_kernel/moy_lease.h):
+# `gpio`, a pin set; `uart<n>` and `spi<n>`, a unit riding the gpio row
+# (`bus = "gpio"`), its pins named in this order, the defaults a take may
+# replace with other pins of the gpio row.
+LEASE_PINS = {"gpio": None, "uart": ("tx", "rx"), "spi": ("sck", "mosi", "miso")}
+
+
+def _lease_kind(name):
+    for kind in LEASE_PINS:
+        rest = name[len(kind):] if name.startswith(kind) else None
+        if rest is not None and (rest == "" if kind == "gpio" else
+                                 len(rest) == 1 and rest.isdigit()):
+            return kind
+    return None
+
+
+def _lease_row(where, r, pins):
+    name = r.get("name", "")
+    kind = _lease_kind(name)
+    if kind is None:
+        raise ValueError("%s: the lease row %r is not gpio, uart<n> or spi<n>"
+                         % (where, name))
+    want = LEASE_PINS[kind]
+    if want is not None:
+        named = r.get("pins")
+        if not isinstance(named, dict) or tuple(named) != want or r.get("bus") is None:
+            raise ValueError("%s: the lease row %s rides a bus and names its pins %s"
+                             % (where, name, ", ".join(want)))
+
+
+def lease_spec(board_dir):
+    """The board's lease rows as moy_lease_offer's spec ("gpio:0,1/uart1:4,5"),
+    or None where it offers none."""
+    hw = hardware(board_dir)
+    if hw is None:
+        return None
+    out = []
+    for r in hw[2]:
+        if r["class"] != "lease":
+            continue
+        out.append("%s:%s" % (r["name"], ",".join(str(p) for p in r["pins"])))
+    return "/".join(out) or None
+
+
+def hw_defines(board_dir):
+    """The `[hardware]` table as C defines, for the drivers a `class` row's
+    device API names: `MOY_API_<API>` 1 for each API a class row names, and
+    `MOY_HW_<ROW>_<PIN>` for each named pin of a class or os row (the LoRa
+    row's `MOY_HW_LORA_RST`, its bus's `MOY_HW_SPI2_RADIO_CS`). Empty for a
+    target with no table."""
+    hw = hardware(board_dir)
+    if hw is None:
+        return []
+    apis, pins = [], []
+    for r in hw[2]:
+        if r["class"] == "class":
+            for a in r["api"]:
+                d = "MOY_API_" + a.upper()
+                if (d, 1) not in apis:
+                    apis.append((d, 1))
+        named = load(board_dir)["hardware"]["resource"]
+        row = [x for x in named if x.get("name") == r["name"]][0]
+        if r["class"] in ("class", "os") and isinstance(row.get("pins"), dict):
+            for k, v in row["pins"].items():
+                pins.append(("MOY_HW_%s_%s" % (r["name"].upper(), k.upper()), v))
+    return apis + pins
+
+
+def _pins_of(row):
+    pins = row.get("pins", [])
+    return list(pins.values()) if isinstance(pins, dict) else list(pins)
+
+
+def hardware(board_dir):
+    """The board's `[hardware]` table, checked: `(chip_gpio, unused, rows)`,
+    each row a dict with its `pins` as a list and its `api` as a tuple, or
+    None for a target with no table (the browser). Raises ValueError for a
+    table that breaks a rule: an unknown chip or class, a pin outside the
+    chip or in two places, a pin of the chip in none, an `os` or `never` row
+    without its why, a `class` row naming no known device API, a `lease`
+    row holding a strapping, flash, PSRAM or USB pad, or a unit `lease` row
+    naming a unit an `os` or `class` row drives or the flash's SPI host."""
+    hw = load(board_dir).get("hardware")
+    if hw is None:
+        return None
+    where = "%s/board.toml [hardware]" % board_dir
+    chip = CHIP_GPIO.get(hw.get("chip_gpio"))
+    if chip is None:
+        raise ValueError("%s: chip_gpio %r is not one of %s"
+                         % (where, hw.get("chip_gpio"), sorted(CHIP_GPIO)))
+    seen = {}
+    for pin in hw.get("unused", []):
+        seen.setdefault(pin, []).append("unused")
+    rows = []
+    banned = set(chip["strapping"]) | set(chip["flash_psram"]) | set(chip["usb"])
+    for r in hw.get("resource", []):
+        name, cls = r.get("name"), r.get("class")
+        if cls not in HW_CLASSES:
+            raise ValueError("%s: %s's class %r is not one of %s"
+                             % (where, name, cls, HW_CLASSES))
+        if cls in ("os", "never") and not str(r.get("why", "")).strip():
+            raise ValueError("%s: the %s row %s says no why" % (where, cls, name))
+        api = r.get("api", ())
+        api = (api,) if isinstance(api, str) else tuple(api)
+        if cls == "class" and (not api or any(a not in DEVICE_APIS for a in api)):
+            raise ValueError("%s: the class row %s names %r, not a device API"
+                             % (where, name, api))
+        pins = _pins_of(r)
+        if cls == "lease" and banned & set(pins):
+            raise ValueError("%s: the lease row %s holds %s, a strapping, "
+                             "flash, PSRAM or USB pad"
+                             % (where, name, sorted(banned & set(pins))))
+        if cls == "lease":
+            _lease_row(where, r, pins)
+        if not (cls == "lease" and r.get("bus")):
+            for pin in pins:
+                seen.setdefault(pin, []).append(name)
+        rows.append(dict(r, pins=pins, api=api))
+    for r in rows:
+        if r["class"] == "lease" and r.get("bus"):
+            bus = [b for b in rows if b["name"] == r["bus"] and b["class"] == "lease"
+                   and not b.get("bus")]
+            if not bus or not set(r["pins"]) <= set(bus[0]["pins"]):
+                raise ValueError("%s: the lease row %s rides %r, which must be a "
+                                 "lease row holding its pins" % (where, r["name"], r["bus"]))
+            # A unit the OS drives is never leased: the T-Deck's SPI2 carries
+            # its panel and card, and a leased host would take the bus from them.
+            own = [b["class"] for b in rows if b["name"] == r["name"] and b["class"] != "lease"]
+            if own:
+                raise ValueError("%s: the lease row %s is a unit an %s row drives"
+                                 % (where, r["name"], own[0]))
+            if _lease_kind(r["name"]) == "spi" and int(r["name"][3:]) < 2:
+                raise ValueError("%s: the lease row %s is the flash's SPI host"
+                                 % (where, r["name"]))
+    for pin, names in sorted(seen.items()):
+        if pin not in chip["gpio"]:
+            raise ValueError("%s: GPIO%s is not a pad of %s"
+                             % (where, pin, hw["chip_gpio"]))
+        if len(names) > 1:
+            raise ValueError("%s: GPIO%s is in %s" % (where, pin, names))
+    missing = sorted(set(chip["gpio"]) - set(seen))
+    if missing:
+        raise ValueError("%s: GPIO %s in no row and not unused" % (where, missing))
+    return hw["chip_gpio"], list(hw.get("unused", [])), rows
 
 
 def _shared(cfg):
@@ -558,6 +783,72 @@ def impls(board_dir):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Content-keyed copies. Every staged file is an input a build compiles by
+# mtime (ninja, MicroPython's makemanifest, make), so a copy that rewrites
+# identical bytes recompiles and relinks an image nothing changed in. A file
+# is written only when its bytes differ, and then as a fresh write: its mtime
+# is now, newer than whatever was compiled from the old text, wherever the
+# source's own mtime stands.
+# ---------------------------------------------------------------------------
+
+
+def write_if_changed(path, data):
+    """Write `data` (bytes) to `path` unless it already holds them; True when
+    it wrote."""
+    path = Path(path)
+    try:
+        if path.stat().st_size == len(data) and path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".staging")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    return True
+
+
+def put(src, dest):
+    """Copy `src` to `dest` unless `dest` already holds its bytes, mode
+    included; True when it wrote."""
+    wrote = write_if_changed(dest, Path(src).read_bytes())
+    if (os.stat(src).st_mode & 0o777) != (os.stat(dest).st_mode & 0o777):
+        shutil.copymode(src, dest)
+    return wrote
+
+
+def mirror(src, dest, ignore=(), keep=()):
+    """Make `dest` hold exactly `src`'s tree, less names matching `ignore`,
+    each file through `put`. Whatever else `dest` holds goes, except names
+    matching `keep` (files a build generates INTO the staged copy)."""
+    src, dest = Path(src), Path(dest)
+
+    def skip(name, patterns):
+        return any(fnmatch.fnmatch(name, p) for p in patterns)
+
+    want = set()
+    for dirpath, dirnames, filenames in os.walk(src):
+        dirnames[:] = sorted(d for d in dirnames if not skip(d, ignore))
+        rel = Path(dirpath).relative_to(src)
+        want.add(rel)
+        for f in filenames:
+            if not skip(f, ignore):
+                want.add(rel / f)
+                put(Path(dirpath) / f, dest / rel / f)
+    if not dest.exists():
+        dest.mkdir(parents=True)
+    for dirpath, dirnames, filenames in os.walk(dest, topdown=False):
+        rel = Path(dirpath).relative_to(dest)
+        for f in filenames:
+            if rel / f not in want and not skip(f, keep):
+                (Path(dirpath) / f).unlink()
+        for d in dirnames:
+            p = Path(dirpath) / d
+            if rel / d not in want and not any(p.iterdir()):
+                p.rmdir()
+
+
 def native_dest(board_dir):
     """Where `stage_native` puts the shared native modules, relative to the
     board dir -- board.toml `[native] dest`, or the default.
@@ -572,12 +863,9 @@ def native_dest(board_dir):
 
 # What a native source dir may hold that was GENERATED for another build (the
 # desktop binary's `moy_web_blob.gen.c`, written there by `make
-# unix-micropython`). Never staged: the copy keeps the source's mtime, so a
-# generated file would arrive carrying the time it was last written for someone
-# else -- older than the object a previous board build compiled from different
-# text -- and the generator, finding the text already right, leaves it. ninja
-# then keeps that object, and a removed web bundle ships as the old blob. The
-# board's build generates these into the staged copy, new every build.
+# unix-micropython`). Never staged from the source: it is another build's text.
+# The board's build generates its own into the staged copy, written only when
+# its text moved, and the staging keeps it there between builds.
 GENERATED = "*.gen.*"
 
 
@@ -588,6 +876,8 @@ INPUT_PARAMS = {
     "repeat_rate_ms": "MOY_INPUT_REPEAT_RATE_MS",
     "ball_coast": "MOY_INPUT_BALL_COAST",
     "ball_coast_rate": "MOY_INPUT_BALL_COAST_RATE",
+    "isr_ring_max": "MOY_EV_ISR_DEPTH_MAX",
+    "isr_iram": "MOY_INPUT_ISR_IRAM",
 }
 
 
@@ -614,10 +904,11 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     """Stage the shared native modules into <board>/<native.dest> and write the
     cmake include list the board's tracked native/micropython.cmake pulls in.
 
-    The whole dest tree is rebuilt from scratch each call, so a module that
-    stops being staged cannot linger in a warm checkout (the same stray-prune
-    argument as the Python side, solved here by demolition instead of a
-    prune -- nothing in .staged/ is ever authored).
+    The dest tree is mirrored from the sources each call (`mirror`): a module
+    that stops being staged, or a file a module drops, cannot linger in a warm
+    checkout, and an unchanged file keeps its mtime, so an unchanged build
+    compiles nothing. Nothing in .staged/ is ever authored; the generated
+    files a board build writes into it stay.
     """
     board_dir, root = Path(board_dir).resolve(), Path(root)
     mods = []
@@ -627,9 +918,14 @@ def stage_native(board_dir, root=ROOT, quiet=False):
     if not mods:
         return []
     dest = board_dir / native_dest(board_dir)
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    staged = {m for m, _src in mods} | {"micropython.cmake"}
+    for p in dest.iterdir():
+        if p.name not in staged:
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
     lines = ["# AUTO-GENERATED by tools/board_config.py from board.toml -- the"
              " shared native modules staged this build.",
              # Usermod sources are compiled TWICE and only one copy links: the
@@ -642,15 +938,20 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
     for define, v in input_defines(board_dir):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
+    for define, v in hw_defines(board_dir):
+        lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
+    spec = lease_spec(board_dir)
+    if spec is not None:
+        lines.append('target_compile_definitions(usermod INTERFACE "MOY_LEASE_ROWS=\\"%s\\"")'
+                     % spec)
     for m, src in mods:
-        shutil.copytree(src, dest / m,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
-                                                      GENERATED))
+        mirror(src, dest / m, ignore=("__pycache__", "*.pyc", GENERATED),
+               keep=(GENERATED,))
         lines.append("include(${CMAKE_CURRENT_LIST_DIR}/%s/micropython.cmake)"
                      % m)
     mods = [m for m, _src in mods]
-    (dest / "micropython.cmake").write_text("\n".join(lines) + "\n",
-                                            encoding="utf-8")
+    write_if_changed(dest / "micropython.cmake",
+                     ("\n".join(lines) + "\n").encode("utf-8"))
     if not quiet:
         denied = sorted(native_denials(board_dir))
         print("staged %d shared native modules into %s%s"
@@ -821,14 +1122,10 @@ def stage(board_dir, root=ROOT, quiet=False):
         raise SystemExit("board.toml stages files that do not exist: %s"
                          % ", ".join(missing))
     for name, src in sorted(wanted.items()):
-        shutil.copyfile(src, dest / name)
+        put(src, dest / name)
 
     for name, src in sorted(staged_packages(board_dir, root).items()):
-        pkg = dest / name
-        if pkg.exists():
-            shutil.rmtree(pkg)
-        shutil.copytree(src, pkg,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        mirror(src, dest / name, ignore=("__pycache__", "*.pyc"))
 
     removed = []
     if mods.get("prune"):
@@ -863,6 +1160,16 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "stage-native":
         stage_native(argv[2])
         return 0
+    if len(argv) >= 4 and argv[1] == "mirror":
+        # mirror SRC DEST [--ignore PATTERN]...: a build script's content-keyed
+        # copy of a tree.
+        ignore = [argv[i + 1] for i in range(4, len(argv) - 1)
+                  if argv[i] == "--ignore"]
+        if Path(argv[2]).is_dir():
+            mirror(argv[2], argv[3], ignore=ignore)
+        else:
+            put(argv[2], argv[3])
+        return 0
     if len(argv) >= 3 and argv[1] == "impls":
         for name, value in sorted(impls(argv[2]).items()):
             print("%s=%s" % (name, value))
@@ -883,6 +1190,12 @@ def main(argv):
         for s in sdkconfig_required(argv[2]):
             print(s.assignment)
         return 0
+    if len(argv) >= 3 and argv[1] == "roster-skip":
+        print(",".join(roster_skip(argv[2])))
+        return 0
+    if len(argv) >= 3 and argv[1] == "roster-first":
+        print(",".join(roster_first(argv[2])))
+        return 0
     if len(argv) >= 3 and argv[1] == "headroom-floor":
         ota, floor = headroom_floor(argv[2])
         print("%d %s" % (floor, ota))
@@ -902,6 +1215,8 @@ def main(argv):
     print("usage: board_config.py stage|stage-native|list|list-native "
           "<board_dir>", file=sys.stderr)
     print("       board_config.py native-dest|impls|headroom-floor <board_dir>",
+          file=sys.stderr)
+    print("       board_config.py mirror SRC DEST [--ignore PATTERN]...",
           file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)

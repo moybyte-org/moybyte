@@ -48,8 +48,8 @@ cannot have started to matter:
   asserts every import of every staged module resolves on this target — the same
   net every console board rides.
 
-`provision.sh` survives and **changed jobs**: it provisions the credentials and
-the pairing pin, and keeps the module push as an opt-in dev loop. The CARTS
+`provision.sh` survives and **changed jobs**: it provisions the credentials and,
+with `--password`, the password browsers pair with, and keeps the module push as an opt-in dev loop. The CARTS
 stopped being its job on 2026-08-30 — the image carries a compressed seed
 roster and inflates it on first boot — so what is left there is a safety net and
 a re-push flag. See "Provisioning" below.
@@ -72,19 +72,20 @@ same table to publish the asset the page serves. Both tables read the reset
 pair off this board's `[flash]` block, so the page asks for the default reset
 (esptool-js takes its USB-Serial/JTAG path off the `303a:1001` PID and drives
 this board into the loader exactly as it does the Guition) and asks for no
-reset afterwards, because the `watchdog_reset` that gets it out is a sequence
-esptool-js does not implement. So the browser's gesture is a replug when the
+reset afterwards, because the `watchdog_reset` that gets it out is not one
+of the line sequences the page plays (`site/build.py` `HARD_RESET_LINES`). So the browser's gesture is a replug when the
 write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 
 **A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
-`0x6A0000` (since 2026-10-18; `0x620000` from 2026-10-07); a board flashed under
+`0x720000` (since 2026-11-07; `0x6A0000` from 2026-10-18, `0x620000` from
+2026-10-07); a board flashed under
 an older table, or the stock MicroPython one, has its filesystem elsewhere, so
 the new image comes up on a freshly formatted store (`tools/board_flash.py`
 erases the moved store's first blocks and says so). A table change needs a USB
 flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
 the app slot, never the table. Run
-`./provision.sh` afterwards to put the credentials and the pin back; the seed
+`./provision.sh` afterwards to put the credentials and the password back; the seed
 roster the image carries seeds itself on the next boot. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
 them back on the next visit — but anything that existed *only* here is.
@@ -95,7 +96,9 @@ them back on the next visit — but anything that existed *only* here is.
   The console S3 layout does not fit 8MB, and the failure is not a build error:
   the bootloader rejects the table and the board boot loops with no console at
   all. That was learned here — see the hardware facts below — so this table is
-  authored, not inherited.
+  authored, not inherited. It has no coredump partition, where every console
+  board's has one (2026-11-09; the CSV says why), and the image builds with
+  `CONFIG_ESP_COREDUMP_ENABLE_TO_NONE`.
 - **What makes two slots fit** is that the image is headless: no console, no
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
@@ -117,9 +120,20 @@ them back on the next visit — but anything that existed *only* here is.
   ENOSPC and a kid's cart had no room), so this board's build leaves the two
   speed-test carts out of its roster (`--skip` in `build.sh`; owner,
   2026-10-23). The boot line says `the store is FULL` when a seed fails that
-  way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run beside the board's
-  floor (`[image] headroom_floor_kib` in `board.toml`) and fails under it or on
-  an overflow (#168).
+  way. On 2026-11-07 (owner) each slot grew by 256 KiB to **3.5 MiB**
+  (`0x380000`, at `0x20000` and `0x3A0000`) for the terminal (below), and the
+  store became the **896 KiB** `vfs` at `0x720000`, 224 blocks, with no backup
+  of the store: the table change wipes it and the roster seeds the empty one.
+  The whole roster overfilled it (on glass that day: 17 carts in, no block left
+  for the system folder), so the same day (owner) the roster was cut to the
+  apps, one desktop and five games, the shell's own carts first (board.toml's
+  `[roster]`), and the seed stops while `zero_host.SEED_RESERVE` (96 KiB) is
+  still free, so
+  the system folder (`/moy/system`: the password, the SSH host key, the
+  browsers' keys) and a kid's carts always fit. The seed is the EMPTY store's
+  only: a cart the kid deletes stays deleted (`zero_host.seed_carts`). The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
+  `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
@@ -135,8 +149,8 @@ them back on the next visit — but anything that existed *only* here is.
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
   answer is yes, `runtime/` IS the console, and this board is not one.
-- **The shared C modules are the store, the kernel's floor, the links and
-  `moy_web`.** Every other one is denied with the hardware or the workload that
+- **The shared C modules are the store, the kernel's floor, the links,
+  `moy_web` and the terminal (`moy_sh`, `moy_tty`, `moy_ssh`).** Every other one is denied with the hardware or the workload that
   is missing. The driver halves with no caller here are off in the board's own
   files: wired Ethernet, WPA-Enterprise, ESP-NOW and I2S (`sdkconfig.board`,
   `mpconfigboard.h`), because the image's growth is the browser console it
@@ -145,18 +159,18 @@ them back on the next visit — but anything that existed *only* here is.
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
+./provision.sh [--modules] [--carts] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 ```
 
-Default: make the directories, optionally write the credentials, mint or keep
-the pairing pin, reboot, and print the paired url. It copies the seed roster
-**only onto a board that has no carts at all** — the image now writes out
-whatever its store is missing on every boot, so this is the safety net for an
-image built before the roster was baked in, and the emptiness question is asked
-on the board with the same read `store_is_empty()` does. `--carts` forces the push, for a roster that moved since the image was
-built; forcing it writes the repo's copy of a cart over whatever is on the
-board, which on the one board that is the store *of record* is a real thing to
-mean.
+Default: make the directories, optionally write the credentials and (`--password`) the
+board's password, reboot, and print where to pair. Every write is checked on
+the board: one it refuses (a full store) stops the script, non-zero, with what
+the board said. It pushes no carts by default, because the image seeds an
+empty store on the reboot it ends with; `--carts` pushes the image's roster
+(`system_carts/` less board.toml's `[roster] skip`), for a roster that moved
+since the image was built, and writes the repo's copy of a cart over whatever
+is on the board, which on the one board that is the store *of record* is a
+real thing to mean.
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -165,12 +179,12 @@ supported answer**: a board with no credentials hosts its own setup AP (below),
 and re-running the script without the argument leaves an existing
 `/moy/wifi.json` alone.
 
-The script **mints a pairing pin** when the board has none, and prints the
-paired url at the end. That is the whole gesture: since 2026-08-25 the pin gates
-everything but the console's boot files, so a page opened without it can read
-nothing. Minted on the board — the "is there one?" check and the write are one
-read of one filesystem — and **kept** when there is one, so re-provisioning
-never rotates a pin somebody has already scanned.
+`--password` asks for the board's password twice, never echoed, hashes it on
+this machine (`ssh_service.hashed`, the console's `passwd` form) and writes
+`/moy/system/password`; the plain password never reaches the board. It is
+what a browser pairs with (below), and a board with none can pair no browser:
+the script says so at the end, and a board that kept one from an earlier run
+keeps it.
 
 ### The flags, and the one hazard they exist for
 
@@ -210,13 +224,13 @@ hardware lives.
 **The trigger is a request, not a timer.**
 
 ```
-GET  /update?pin=NNNN   → the running version/label/channel/slot, the PREVIOUS
+GET  /update            → the running version/label/channel/slot, the PREVIOUS
                           install's verdict, and live progress
 POST /update            → {"action": "check" | "install" | "cancel", ...}
                           answers immediately; the work runs in the poll loop
 ```
 
-Both methods are gated. There is deliberately **no read-half exemption**: what a
+Both methods are sealed to a paired browser's session. There is deliberately **no read-half exemption**: what a
 GET reveals is which firmware a specific board on somebody's home network is
 running, which is a shopping list for whoever wants to hand it an image — the
 same call `/gpio`'s GET was brought under on 2026-08-25. The doctrine and its
@@ -225,8 +239,8 @@ an instance of it.
 
 **A boot-time check runs, and installs nothing.** Once the running image has
 certified itself (below), the board checks the manifest once, prints the result
-on serial, and caches it for `GET /update`. Installing takes a request carrying
-the pin — the same act of consent that gates every other write here.
+on serial, and caches it for `GET /update`. Installing takes a paired browser's
+request — the same act of consent that gates every other write here.
 
 **There is no auto-install, and there was one for a day.** `"ota_auto": true`
 in `/moy/zero.json` made the boot check install what it found, off by default;
@@ -247,9 +261,8 @@ glass.
 **How a human learns it happened**, three ways, none of them a UI:
 
 - **serial** — every transition prints a `ZERO ota:` line, and the boot line
-  names the running label. The cable is how a pin reaches a human on this board
-  anyway.
-- **`GET /update?pin=`** — including `last`, the previous install's verdict:
+  names the running label.
+- **`GET /update`** from a paired page — including `last`, the previous install's verdict:
   `ok` (the slot we pointed the bootloader at is the one running) or
   `rolled_back` (the bootloader gave up on it). That is the headless replacement
   for the console's notice banner, and it is why the pending marker is cleared
@@ -286,7 +299,7 @@ its own network for as long as it takes to be told about a real one:
 boot → connect() finds nothing joinable
      → SoftAP `moybyte-zero-XXXX`  (open; the suffix is the AP MAC's tail)
      → join it from a phone; the form opens by itself (or open http://192.168.4.1/)
-     → name + 4-digit pin + a network from the scan + its password
+     → name + the board's password + a network from the scan + its password
      → saved → reboot → STA, as normal
 ```
 
@@ -298,8 +311,8 @@ because a board either serves or hosts this AP and never both. It is a plain
 the password field and tells you what the scan found, so a phone with a broken
 script still has a page with a correct static state to type into. The AP is
 **open on purpose**: there is nothing behind it but the form, it exists only
-while the board is unconfigured, and the one secret that crosses it belongs to
-the person standing next to the board. What it costs is that a neighbour in
+while the board is unconfigured, and the secrets that cross it belong to the
+person standing next to the board. What it costs is that a neighbour in
 range during that minute could configure the board first; what it buys is a
 setup that needs no printed key and no instructions.
 
@@ -317,31 +330,71 @@ cannot bind :53 prints one line and setup serves exactly as it did before, and
 answers carry TTL 0 so nothing this board says about a name outlives the phone's
 stay on the AP.
 
-Setup writes two files: the network into `/moy/wifi.json` (**merged** — the new
-one goes first, since `connect()` walks the list in order, and older ones are
-kept so a board set up elsewhere still comes up at home), and the name + pin
-into `/moy/zero.json`. From then on the name is the mDNS label and the pin is
-the whole access control.
+Setup writes three files: the network into `/moy/wifi.json` (**merged** — the
+new one goes first, since `connect()` walks the list in order, and older ones
+are kept so a board set up elsewhere still comes up at home), the name into
+`/moy/zero.json` and the password's record into `/moy/system/password`. From
+then on the name is the mDNS label and the password is how a browser pairs.
 
-## The pin gates everything (2026-08-25)
+## The sign-in gates everything (2026-11-07)
 
-The doctrine and its reasoning live in `device/moy_webhost.py`'s SECURITY
-docstring, which this board's host is an instance of. What is true *here*:
+The browser sign-in is the console's (`docs/os_2026-11/system.md` §3; the
+protocol `native/moy_net/moy_seal.h`), and this board's host is an instance of
+it, its keys file `/moy/system/webkeys`. What is true *here*:
 
-- **Every Zero has a pin.** Setup's form mints one; `provision.sh` mints one
-  for a board that never saw that form. The old "no `zero.json`, so writes stay
-  open" state is gone — once reads are gated too, a pinless board is one
-  handing its entire store to whoever is on the WiFi.
-- **`/gpio` and `/update` are gated on both methods**, which is this board's own
-  addition to the table — see the Pins and Updates sections for why neither
-  `GET` is free.
-- **Nothing here can show the pin to a human.** No screen: it reaches you over
-  the cable (`provision.sh`'s paired url, the boot line) or off the setup form
-  you just filled in. Keep the url; opening the bare address is not a dead end,
-  but it costs you a prompt and a typed four digits.
+- **A browser pairs with the board's password.** A console pairs by its QR
+  too; this board has no screen to draw one, so a board with no password pairs
+  no browser. Setup's form takes one; `provision.sh --password` sets one for a
+  board that never saw that form. Pairing runs SPAKE2+ against the stored
+  record, so the password never crosses the network, a copy of the record
+  pairs no browser, and the browser keeps a key of its own from then on.
+- **Every route but the boot files and `GET /sync` is sealed** to a paired
+  browser's session: the store's pulls and pushes, and `/gpio`
+  and `/update` on both methods — see the Pins and Updates sections for why
+  neither `GET` is free.
+- **Forgetting a browser** is `passwd -r ID|all` over SSH (below), or deleting
+  `/moy/system/webkeys` over the cable (every browser pairs again). Changing
+  the password forgets no browser.
 - **What stays open is the console's own boot files plus `GET /sync`.** A
   browser has to load the page before it can ask for anything, and the page has
   to know a board is here before it knows to ask.
+
+## The terminal (2026-11-07)
+
+The consoles' C shell (`native/moy_sh`), its face over a stream
+(`native/moy_tty`) and the SSH server (`native/moy_ssh`), with SFTP
+(`docs/os_2026-11/system.md` sections 3 and 4). The browser is this board's
+only screen, so the browser console's Terminal on the page it serves is the
+shell's first face (`GET /term`, sealed to a browser paired with the board's
+password); SSH is the other:
+
+```bash
+ssh moybyte-zero.local            # any user name; the board's password
+sftp moybyte-zero.local           # the files tree, the store at /moy
+scp file moybyte-zero.local:/moy/ # scp -s before OpenSSH 9.0
+```
+
+- **The password is the board's one** (`/moy/system/password`): the one a
+  browser pairs with, set by the setup form or `provision.sh --password`, and
+  changed with `passwd NEW` in the shell. With none set no browser pairs, so
+  there is no Terminal, and there is no SSH.
+  `ssh-copy-id` keys go to `/etc` (`/moy/system/authorized_keys`).
+- **The C built-ins only**: a WASI command needs the wasm engine, which
+  this board denies (board.toml says why). `zero_shell.py` is the
+  door into Python: `passwd` (its `-l` and `-r` over this board's webhost),
+  `df`, `mem` and `ps`. What only a console answers (its processes, `/proc`'s
+  and `/dev`'s rows, the other role commands, `python`) says "needs the
+  console", as a console's shell does with its VM stopped; `settings` and
+  `pkg list` are the store's C.
+- **No WiFi lease**: the station and the `moybyte-zero.local` name are up
+  while the board serves, so the server rides them
+  (`runtime/system/ssh_service.py`).
+- **No frame**: what a session must do on the VM's task (the store's files,
+  the door) is served by the serve loop's `zero_shell.tail()` each turn
+  (`moy_tty.tail()`), about every 10 ms.
+- **No palette**: the toolkit's colours are not in this image, so `neofetch`
+  draws plain and a full-screen app's colours reach the client as its own base
+  colours.
 
 ## Pins (`native/moy_net/moy_gpio.c`, #9)
 
@@ -350,21 +403,23 @@ not". A cart running in the browser calls `pin_write` / `pin_read`; the page
 batches them and POSTs to whoever served it.
 
 ```
-GET  /gpio?pin=1234  → {"v": 1, "pins": [...]}             the allowlist
-POST /gpio           → {"v": 1, "ops": [...], "pin": "1234"}
+GET  /gpio   → {"v": 1, "pins": [...]}             the allowlist
+POST /gpio   → {"v": 1, "ops": [...]}
              → {"ok": n, "reads": {"<pin>": 0|1}, "err": [...]}
 ```
 
-Both are gated. The `GET` was open until 2026-08-25 on the reasoning that it
+Both are sealed to a signed-in session (`docs/os_2026-11/system.md` §3). The `GET` was open until 2026-08-25 on the reasoning that it
 changes nothing; what it hands over is this board's wiring, which is a fact
 about somebody's house — and the page never needed it, because it probes with
 an empty `POST`, which was always gated.
 
 Digital in and out only. **The allowlist is the security model** — `1, 2, 4, 5,
-6, 7, 8, 9` (the pads `D0 D1 D3 D4 D5 D8 D9 D10`) plus `21`, the on-board user
+6` (the pads `D0 D1 D3 D4 D5`) plus `21`, the on-board user
 LED. A pin outside it is refused and never touched, because the pins left out
 are the ones the board is running on: `26–37` (flash + octal PSRAM), `19/20`
-(the USB device this board is reached through), `43/44` (`D6`/`D7`, UART0,
+(the USB device this board is reached through), `7/8/9` (`D8`–`D10`, the LoRa
+radio's SPI, with `38–42` behind the board-to-board connector: see LoRa
+below), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
 one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
@@ -373,8 +428,43 @@ one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
 Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
 leaves the LED lit — the other way round, reading a light turns it off), which
-means a written pin stays an output until reboot; and **an input is pulled up**,
-so an unwired pin reads 1 and a button to ground reads 0.
+means a written pin stays an output while the page holds it; and **an input is
+pulled up**, so an unwired pin reads 1 and a button to ground reads 0.
+
+**The page's pins are leases** (`moy_gpio.c`'s header, `native/moy_kernel/moy_lease.h`):
+a write takes the pin's lease for a process named `web`, which `pins` and `ps`
+show, and the webhost's stop drops them. A pin a cart on this board leased is
+refused `pin N: busy`, a read as a write, and never touched; a pin the page
+holds is busy to a cart.
+
+## LoRa (`native/moy_net/moy_lora.h`)
+
+This Zero carries a Wio-SX1262 on the XIAO's board-to-board connector (the
+XIAO ESP32-S3 & Wio-SX1262 kit), declared as the `lora` row of `board.toml`'s
+`[hardware]`: SPI on `7/8/9` (SCK, MISO, MOSI — the `D8`–`D10` pads, which is
+why they left the pin allowlist), CS `41`, RESET `42`, BUSY `40`, DIO1 `39`
+and the module's receive switch on `38`. The SX1262 runs off its 1.8 V TCXO
+(DIO3), DIO2 switches its transmit path and the driver drives `38` high while
+it listens.
+
+The driver is the T-Deck's (`moy_lora.c`), built for a radio that owns its
+bus: it brings SPI2 up at the open and frees it at the close, with no band-gap
+gate (there is no panel), and `gate_stats()` answers `None`. This board runs
+no apps, so the `moybyte.lora` face is not here and nothing posts events: the
+module is reached from the REPL, by owner number, and `recv` is polled.
+
+```python
+import moy_lora as L
+from array import array
+L.open(1)                                              # -EIO: no radio fitted
+L.config(1, 868100000, 9, 125000, 5, 14, 0x12, 8)      # freq sf bw cr dBm sync preamble
+L.send(1, b"hello")                                    # -EBUSY while one is on the air
+L.listen(1, 1)
+buf, meta = bytearray(255), array("i", [0, 0, 0])
+n = L.recv(1, buf, meta)                               # meta: RSSI dBm, SNR x4, port
+L.close(1)                                             # before a soft reset: the
+                                                       # driver outlives the VM
+```
 
 ## Verified where
 
@@ -383,8 +473,9 @@ that is a real build, with real numbers (the sizes above come out of it), and it
 is the *only* thing about the image that has been checked. No Zero has been
 flashed with it. Everything in the two lists below that is dated 2026-08-25 was
 measured on the **pushed** arrangement this build replaces; the modules are the
-same files, so what those runs prove about `moy_sync`, the pin gate and the
-files layer still holds, and what they say nothing about is the image: the
+same files, so what those runs prove about `moy_sync` and the files layer
+still holds (the pin they ran behind is gone since 2026-11-07), and what they
+say nothing about is the image: the
 partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
@@ -476,6 +567,12 @@ below used to hold:
   channel with nothing on it — which is the correct answer, and every layer
   under it had to work to produce it.
 
+- **LoRa round-trips with the T-Deck** (2026-11-04): raw packets at 868.1 MHz,
+  SF9, 125 kHz, sync `0x12`, 25 of 25 intact each way with the T-Deck at its
+  desk and with it running Brick Siege (its radio inside the band-gap gate), the
+  far end both this driver and an SX1262 script written apart from it; and a
+  ping-pong, the T-Deck listening between its own sends, 20 of 20.
+
 **NOT verified on hardware**, and each for its own reason:
 
 - **A cart in a browser driving this board's PINS.** The console half is
@@ -554,8 +651,7 @@ subtitle. *Fail, and which is which:*
   http://192.168.4.1/` from the laptop.
 
 **2. The page is usable one-handed.** *Pass:* nothing needs pinch-zoom to read,
-tapping a field does not zoom the page, the pin field brings up a number
-keypad, the network list shows real SSIDs as tappable chips, tapping one fills
+tapping a field does not zoom the page, the network list shows real SSIDs as tappable chips, tapping one fills
 the field, and "show password" reveals what was typed. *Fail:* the page zooms
 on focus (an input smaller than 16px slipped in); the chips are absent and the
 hint still reads "Looking for networks..." (the `/scan` fetch never resolved —
@@ -564,13 +660,12 @@ range" while the phone can see plenty (the STA scan beside a live AP is what
 that means, and it is the one thing only this hardware can test).
 
 **3. The reboot-into-STA leg.** Fill the form in with a real network and submit.
-*Pass:* the "saved" page names the network and shows `http://<name>.local/
-?pin=NNNN`; the monitor prints `ZERO SETUP saved: name=… ssid=… -- rebooting`
-and then, after the reset, `ZERO wifi: <ssid> <ip>` and `ZERO serving
-http://<ip>/?pin=NNNN`. Then check what landed:
+*Pass:* the "saved" page names the network and `http://<name>.local/`; the
+monitor prints `ZERO SETUP saved: name=… ssid=… -- rebooting` and then, after
+the reset, `ZERO wifi: <ssid> <ip>` and `ZERO serving http://<ip>/`. Then check what landed:
 `mpremote connect /dev/ttyACM0 fs cat :/moy/wifi.json` — the network just typed
 must be **first** and any older one still there — and `… fs cat :/moy/zero.json`
-→ `{"name": …, "pin": …}`. *Fail:* the board reboots straight back into the
+→ `{"name": …}`, and `… fs cat :/moy/system/password` → `$moy2$…`. *Fail:* the board reboots straight back into the
 setup AP → it saved but cannot join (a wrong password: the whole reason for the
 reveal in step 2); the page hangs on submit with nothing on the monitor → the
 POST never arrived; `ZERO SETUP save failed:` → the filesystem, and the board
@@ -580,14 +675,8 @@ stays on the AP so it can be retried. Restore the real credentials afterwards
 
 **4. The LED's polarity.** ANSWERED 2026-08-30: it is **active-low**, confirmed
 by watching the board rather than by reading the schematic. Kept here because it
-is the check to repeat on a board that behaves oddly. With the board serving and
-its pin known:
-
-```bash
-curl -s -X POST http://<ip>/gpio \
-  -d '{"v":1,"pin":"NNNN","ops":[{"p":21,"mode":"out","v":0}]}'
-# -> {"ok": 1, "reads": {}, "err": []}
-```
+is the check to repeat on a board that behaves oddly. From a paired page, run
+a cart that calls `pin_write(21, 0)` (step 5's `Pin Light` does).
 
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
@@ -596,29 +685,24 @@ measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 
-**5. A cart in a browser drives a pin.** `Pin Light` ships in the roster for
-exactly this — open the paired url, open it from the launcher, tap the button.
+**5. A cart in a browser drives a pin.** `Pin Light` is the cart for exactly
+this, left out of this board's roster (board.toml's `[roster]`): push it with
+`mpremote cp -r system_carts/moybyte.pin_light.moy :/moy/carts/`, open the
+paired url, open it from the launcher, tap the button.
 (Or write your own calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer.) *Pass:* the LED blinks in step with the cart, and the network tab shows
-`POST /gpio` batches carrying the pin. *Fail:* 403 `{"error":"pin"}` → the page
-was opened without `?pin=`; batches leaving with no LED → step 4's polarity;
+sealed `POST /gpio` batches. *Fail:* 401 `{"error":"session"}` → the page is
+not signed in; batches leaving with no LED → step 4's polarity;
 no batches at all → `gpio_link` or the worker's pump, which is the half that
 has only ever been host-checked.
 
-**6. The OTA endpoints on real flash.** Both methods are gated and both read
-the pin off the QUERY, the POST included:
-
-```bash
-curl -s "http://<ip>/update?pin=NNNN"
-curl -s -X POST "http://<ip>/update?pin=NNNN" -d '{"action":"check"}'
-```
-
-*Pass:* the GET returns JSON naming the running version/label/channel/slot and
-`"state": "idle"`, plus `"last"` once an install has happened; the POST answers
-`{"ok": true, "message": "queued", …}` **immediately** and the monitor prints a
-`ZERO ota:` line a moment later. *Fail:* `403 {"error":"pin"}` → the pin, and
-note it is not in the body here; `503 {"error":"no updater"}` → `make_updater`
-failed at boot and printed why; a POST that hangs for tens of seconds → it is
-doing the download inline, which is exactly the shape it is written not to have.
+**6. The OTA endpoints on real flash.** Both methods are sealed, so the check
+runs from a paired page's firmware strip: *Pass:* it names the running
+version/label/channel/slot and, once an install has happened, the previous
+one's verdict; "check" answers at once and the monitor prints a `ZERO ota:`
+line a moment later. *Fail:* the strip says the board refused the session →
+pair again; `no updater` → `make_updater` failed at boot and printed why; a
+check that hangs for tens of seconds → it is doing the download inline, which
+is exactly the shape it is written not to have.
 
 **7. The rollback confirm.** After an install, watch for `ZERO ota: this image
 confirmed itself -- rollback cancelled`. *Pass:* it appears once, shortly after
@@ -679,23 +763,12 @@ new image's host did not come up.
     undo it — but it means the board is off the network until it is power-cycled.
   - **So do store surgery over HTTP, not over the cable.** The sync protocol has
     a whole-cart delete, which is the one store edit this board actually needs
-    (replacing a built-in that shipped broken — the seed reads presence, so a
-    new image will not overwrite it):
-
-    ```bash
-    curl -X POST http://<board>/sync -H "Content-Type: application/json" \
-         -d '{"v":1,"pin":"NNNN","ops":[{"p":"moybyte.pin_light.moy","dc":1}]}'
-    # -> {"err": [], "ok": 1}
-    ```
-
-    **The pin goes in the BODY here**, not the query — `moy_webhost` reads
-    `doc["pin"]` for a POST, which is what the protocol envelope declares, and a
-    `?pin=` is refused with `{"error":"pin"}`. (The GETs are the other way
-    round, which is exactly why this is worth writing down.) It takes the
-    journal with it; the next BOOT seeds the image's copy, so it still wants a
-    power cycle — there is no reset endpoint. No cable, no stopped console, and
-    nothing that can wedge USB. Verified on this board 2026-08-30, create and
-    delete both.
+    (replacing a built-in that shipped broken — the seed never writes into a
+    store with carts, so a new image will not replace it): deleting the cart
+    from a paired page's launcher sends it, and it takes the journal with it.
+    The seed does not bring it back: the page's sync pushes its own copy, or
+    `./provision.sh --carts` the repo's. No stopped console, and nothing that
+    can wedge USB.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow
@@ -728,10 +801,9 @@ new image's host did not come up.
 
 ## What is deliberately absent
 
-- **No way for the BOARD to show its own pin.** It has no screen, so the pin
-  reaches a human over the cable (`provision.sh`'s paired url, the serial line
-  at boot) or off the setup form they just filled in. A QR on a sticker, or a
-  button that re-prints it, is still #41's. Until then: keep the url.
+- **No QR of its own.** It has no screen, so a browser pairs by the password
+  set in setup or by `provision.sh --password`. A QR on a sticker would be a
+  token that never expires, which the sign-in does not keep.
 - **No `files/` UI of its own** — this board *stores* the #108 layer and
   serves it; the browsing, editing and undo of those files happen in the
   console that pairs with it. Note the asymmetry the sync stack carries: the

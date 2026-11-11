@@ -4,6 +4,14 @@
 
 #include <string.h>
 
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define JOINED_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#else
+#include <stdlib.h>
+#define JOINED_ALLOC(n) malloc(n)
+#endif
+
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
@@ -101,6 +109,32 @@ static mp_obj_t ui_theme(mp_obj_t name, mp_obj_t light) {
                        mp_obj_new_int_from_uint(bad), MP_OBJ_NEW_SMALL_INT(rc)};
     return mp_obj_new_tuple(3, out);
 }
+
+// theme_marks(name, light) -> (dropped bits, L8 warning, marks): the marks
+// theme `name` draws (moy_theme_marks), each kind's states in turn a tuple
+// (mark, colour token, ink token, w, gap, alpha, key width, key colour).
+static mp_obj_t ui_theme_marks(mp_obj_t name, mp_obj_t light) {
+    size_t n;
+    const char *s = mp_obj_str_get_data(name, &n);
+    int v = mp_obj_is_true(light) ? MOY_THEME_LIGHT : MOY_THEME_DARK;
+    int32_t row[MOY_THEME_ROLES];
+    moy_theme_resolve(s, n, v, row, NULL);
+    moy_ui_mark_t m[MOY_UI_ITEMS * MOY_UI_MSTATES];
+    int warn = 0;
+    uint32_t failed = moy_theme_marks(s, n, v, row, m, &warn);
+    mp_obj_t items[MOY_UI_ITEMS * MOY_UI_MSTATES];
+    for (int i = 0; i < MOY_UI_ITEMS * MOY_UI_MSTATES; i++) {
+        mp_obj_t t[8] = {MP_OBJ_NEW_SMALL_INT(m[i].mark), MP_OBJ_NEW_SMALL_INT(m[i].c),
+                         MP_OBJ_NEW_SMALL_INT(m[i].ink), MP_OBJ_NEW_SMALL_INT(m[i].w),
+                         MP_OBJ_NEW_SMALL_INT(m[i].gap), MP_OBJ_NEW_SMALL_INT(m[i].alpha),
+                         MP_OBJ_NEW_SMALL_INT(m[i].key_w), mp_obj_new_int(m[i].key_c)};
+        items[i] = mp_obj_new_tuple(8, t);
+    }
+    mp_obj_t out[3] = {mp_obj_new_int_from_uint(failed), mp_obj_new_bool(warn),
+                       mp_obj_new_tuple(MOY_UI_ITEMS * MOY_UI_MSTATES, items)};
+    return mp_obj_new_tuple(3, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_theme_marks_obj, ui_theme_marks);
 
 // theme_modes(name) -> the MOY_THEME_MODE_* bits theme `name` has
 static mp_obj_t ui_theme_modes(mp_obj_t name) {
@@ -777,13 +811,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_load_obj, ui_font_load);
 
 // font_free(font) -> bool: False for an id that names no loaded font.
 static mp_obj_t ui_font_free(mp_obj_t font) {
-    return mp_obj_new_bool(moy_font_free((uint32_t)mp_obj_get_int_truncated(font)));
+    return mp_obj_new_bool(moy_ui_font_free((uint32_t)mp_obj_get_int_truncated(font)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_free_obj, ui_font_free);
 
 // font_reset(): free every loaded font (moy_text.h).
 static mp_obj_t ui_font_reset(void) {
-    moy_font_reset();
+    moy_ui_font_reset();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);
@@ -833,6 +867,12 @@ static int font_role(mp_obj_t name) {
             return i;
         }
     }
+    if (strcmp(r, "tap") == 0) {
+        return MOY_UI_FONT_TAP_UI;
+    }
+    if (strcmp(r, "tap_caption") == 0) {
+        return MOY_UI_FONT_TAP_CAPTION;
+    }
     mp_raise_ValueError(MP_ERROR_TEXT("font role"));
 }
 
@@ -848,7 +888,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(ui_use_font_obj, ui_use_font);
 // box's width, its line advance and its baseline.
 static mp_obj_t ui_font(mp_obj_t role) {
     moy_font_info_t f;
-    uint32_t id = moy_ui_font(font_role(role), &f);
+    uint32_t id = moy_ui_font(moy_ui_cart_on(), font_role(role), &f);
     mp_obj_t t[4] = {mp_obj_new_int_from_uint(id), MP_OBJ_NEW_SMALL_INT(f.w),
                      MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent)};
     return ret_tuple(4, t);
@@ -876,10 +916,12 @@ static mp_obj_t ui_print_font(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_print_font_obj, 0, 1, ui_print_font);
 
-// cart_text(on) -> bool: the app-cart boundary (moy_ui.h); whether it was on.
+// cart_text(mode) -> the mode it replaced: the app-cart boundary (moy_ui.h's
+// MOY_UI_CART_*; True and False are ON and OFF).
 static mp_obj_t ui_cart_text(mp_obj_t on) {
-    moy_canvas_cart(mp_obj_is_true(on));    // the canvases' colour mask with it
-    return mp_obj_new_bool(moy_ui_cart_text(mp_obj_is_true(on)));
+    mp_int_t m = mp_obj_get_int(on);
+    moy_canvas_cart(m != 0);                // the canvases' colour mask with it
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_cart_text((int)m));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_cart_text_obj, ui_cart_text);
 
@@ -1814,6 +1856,12 @@ static mp_obj_t ui_scrim(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrim_obj, 3, 5, ui_scrim);
 
+// scrim_alpha(a) -> the alpha it replaces: the scrim's strength until set again
+static mp_obj_t ui_scrim_alpha(mp_obj_t a) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_scrim_alpha(mp_obj_get_int(a)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_scrim_alpha_obj, ui_scrim_alpha);
+
 // tile(cv, look, rect, icon, tone, r, fs, desk): a badge's tile on a card's surface
 static mp_obj_t ui_tile(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -1840,9 +1888,22 @@ static mp_obj_t ui_unlock(size_t n_args, const mp_obj_t *a) {
                         num(a[8]), num(a[9]), &b));
     mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
                      MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
-    return mp_obj_new_tuple(4, t);
+    return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_unlock_obj, 10, 10, ui_unlock);
+
+// rec(cv, look, right, top, fs, desk) -> (x, y, w, h): the recording indicator
+static mp_obj_t ui_rec(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_box_t b;
+    check(moy_ui_rec(&s, num(a[2]), num(a[3]), num(a[4]), num(a[5]), &b));
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
+                     MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
+    return ret_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_rec_obj, 6, 6, ui_rec);
 
 // month_h(weeks, fs, desk) -> a month's height (moy_ui_month_h)
 static mp_obj_t ui_month_h(mp_obj_t weeks, mp_obj_t fs, mp_obj_t desk) {
@@ -2027,7 +2088,7 @@ static mp_obj_t ui_panel(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_panel_obj, 5, 5, ui_panel);
 
-// focus(cv, look, rect, cls, r, flags, fs) -> (ink or None, content rect)
+// focus(cv, look, rect, kind, r, flags, fs) -> (ink or None, content rect)
 static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
@@ -2041,35 +2102,37 @@ static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_obj, 7, 7, ui_focus);
 
-// current(cv, look, rect, r, flags, fs) -> ink or None
+// current(cv, look, rect, kind, r, flags, fs) -> ink or None
 static mp_obj_t ui_current(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     int ink;
     check(moy_ui_current(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
-                         fs_or(a[5], &s), &ink));
+                         mp_obj_get_int(a[5]), fs_or(a[6], &s), &ink));
     return ink < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(ink);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 6, 6, ui_current);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 7, 7, ui_current);
 
 // marks(active=None, reset=False) -> (active, focus marks drawn, a card's
-// focus reach)
+// focus reach, whether a cell's ON mark is an opaque fill)
 static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
     if (active != mp_const_none) {
         moy_ui_marks_active(mp_obj_is_true(active));
     }
-    mp_obj_t out[3] = {mp_obj_new_bool(moy_ui_marks_shown()),
+    mp_obj_t out[4] = {mp_obj_new_bool(moy_ui_marks_shown()),
                        mp_obj_new_int_from_uint(moy_ui_marks_drawn(mp_obj_is_true(reset))),
-                       MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_MARK_CARD))};
-    return mp_obj_new_tuple(3, out);
+                       MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_ITEM_CARD)),
+                       mp_obj_new_bool(moy_ui_mark_solid(MOY_UI_ITEM_CELL))};
+    return mp_obj_new_tuple(4, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_marks_obj, ui_marks);
 
-// mark_reach(cls) -> how far class `cls`'s focus mark reaches past its box
-// (moy_ui_mark_reach): the ring's gap, width and outline as the look sets them.
-static mp_obj_t ui_mark_reach(mp_obj_t cls) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(mp_obj_get_int(cls)));
+// mark_reach(kind) -> how far item kind `kind`'s focus mark reaches past its
+// box (moy_ui_mark_reach): a ring's gap, width and keyline as the look
+// declares them.
+static mp_obj_t ui_mark_reach(mp_obj_t kind) {
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(mp_obj_get_int(kind)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_mark_reach_obj, ui_mark_reach);
 
@@ -2270,6 +2333,17 @@ static moy_ui_ctx_t *ctx_of(mp_obj_t o) {
     return c;
 }
 
+// For another module's C that draws on a Python frame through the engine
+// (moy_sh's Face): the context `ctx` holds, and the sink of canvas `cv` in
+// `look`.
+moy_ui_ctx_t *moy_ui_mp_ctx(mp_obj_t ctx) {
+    return ctx_of(ctx);
+}
+
+void moy_ui_mp_sink(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look) {
+    sink_of(s, cv, look);
+}
+
 // A colour key's value (`over_vals`): a role by its token name, an RGB
 // colour, or absent (an unknown name too).
 static int32_t over_colour(mp_obj_t v) {
@@ -2296,7 +2370,8 @@ static int8_t over_flag(mp_obj_t v) {
 enum {
     OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
     OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
-    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_COUNT
+    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK,
+    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_TAG, OV_FOCUS, OV_FOLLOW, OV_COUNT
 };
 
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
@@ -2340,6 +2415,18 @@ static int over_slot(qstr q) {
         case MP_QSTR_over: return OV_OVER;
         case MP_QSTR_shift: return OV_SHIFT;
         case MP_QSTR_fade: return OV_FADE;
+        case MP_QSTR_signal: return OV_SIGNAL;
+        case MP_QSTR_values: return OV_VALUES;
+        case MP_QSTR_check: return OV_CHECK;
+        case MP_QSTR_subs: return OV_SUBS;
+        case MP_QSTR_icons: return OV_ICONS;
+        case MP_QSTR_counts: return OV_COUNTS;
+        case MP_QSTR_tags: return OV_TAGS;
+        case MP_QSTR_marks: return OV_MARKS;
+        case MP_QSTR_card: return OV_CARD;
+        case MP_QSTR_tag: return OV_TAG;
+        case MP_QSTR_focus: return OV_FOCUS;
+        case MP_QSTR_follow: return OV_FOLLOW;
         default: return -1;
     }
 }
@@ -2365,6 +2452,10 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
 
 // The override table (§3) straight from the app's dict, as runtime/toolkit/ui.py's
 // block reads: no block is built, so a verb given a table allocates nothing.
+#define OPTS_BUF 512
+#define JOINED_BUF (2 * OPTS_BUF)
+static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out);
+
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t vals[OV_COUNT];
     over_vals(mp_obj_dict_get_map(d), vals);
@@ -2389,6 +2480,9 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
     mp_obj_t lead = vals[OV_LEAD];
     if (wash != MP_OBJ_NULL || lead != MP_OBJ_NULL) {
         out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
+        if (out->wash == 1 && mp_obj_is_str(wash)) {
+            out->wash = 2;          // "view": its anchor's view alone
+        }
         out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
     }
     v = vals[OV_GEN];
@@ -2415,6 +2509,7 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         out->axis_x = (int8_t)(n == 1 && a[0] == 'x');
     }
     out->snap = (int8_t)(over_flag(vals[OV_SNAP]) == 1);
+    out->flags2 = over_flag(vals[OV_FOLLOW]) == 1 ? MOY_UI_O2_FOLLOW : 0;
     out->whole = (int8_t)(over_flag(vals[OV_WHOLE]) == 1);
     v = vals[OV_OFFSET];
     if (v != MP_OBJ_NULL) {
@@ -2470,6 +2565,51 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         mp_int_t h = mp_obj_get_int_truncated(v);
         out->fade = (int16_t)(h < 0 ? 0 : h > 4096 ? 4096 : h);
     }
+    v = vals[OV_SIGNAL];
+    if (v != MP_OBJ_NULL) {
+        mp_int_t g = mp_obj_get_int_truncated(v);
+        out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
+    }
+    // a list's texts a row, joined into the module's own buffer: made at the
+    // first list that names them (JOINED_ALLOC: PSRAM where the board has
+    // it) and kept, where a static would hold it in internal SRAM from boot;
+    // without one they join on the heap
+    static uint8_t *joined;
+    if (joined == NULL) {
+        joined = JOINED_ALLOC(JOINED_BUF);
+    }
+    size_t used = 0, room = joined != NULL ? JOINED_BUF : 0;
+    static const uint8_t keys[] = {OV_VALUES, OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS};
+    moy_ui_span_t *spans[] = {&out->values, &out->subs, &out->icons, &out->counts, &out->tags,
+                              &out->marks};
+    for (size_t i = 0; i < sizeof(keys); i++) {
+        v = vals[keys[i]];
+        if (v != MP_OBJ_NULL) {
+            mp_buffer_info_t b;
+            opts_cap(v, joined != NULL ? joined + used : NULL, room - used, &b);
+            if (joined != NULL && (uint8_t *)b.buf == joined + used) {
+                used += b.len;
+            }
+            spans[i]->p = (const uint8_t *)b.buf;
+            spans[i]->n = (uint16_t)(b.len > 0xffff ? 0xffff : b.len);
+        }
+    }
+    v = vals[OV_CHECK];
+    if (v != MP_OBJ_NULL) {
+        out->check = mp_obj_is_true(v);
+    }
+    v = vals[OV_CARD];
+    if (v != MP_OBJ_NULL) {
+        out->card = mp_obj_is_true(v);
+    }
+    v = vals[OV_TAG];
+    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
+        out->tag = span_of(v);
+    }
+    v = vals[OV_FOCUS];
+    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
+        out->focus = span_of(v);
+    }
 }
 
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
@@ -2490,12 +2630,33 @@ static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
 }
 
 // A verb's options as the engine reads them, NUL-separated: bytes as they
-// are, or a list or tuple of the items, each as str() makes it, joined into
-// `buf` (OPTS_BUF bytes, the caller's) or, where they run longer, into the
-// heap. runtime/toolkit/ui.py's `_opts` hands a sequence straight over where the
-// module takes one (`opts_seq`), so a verb given its options builds nothing.
-#define OPTS_BUF 512
-static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
+// are, or a list or tuple of the items, each as str() makes it (a small int
+// written here), joined into `buf` (`cap` bytes, the caller's) or, where
+// they run longer, into the heap. runtime/toolkit/ui.py's `_opts` hands a
+// sequence straight over where the module takes one (`opts_seq`), so a verb
+// given its options, texts or small ints, builds nothing.
+static size_t int_text(mp_int_t v, uint8_t *out) {
+    uint8_t tmp[24];
+    size_t n = 0, k = 0;
+    mp_uint_t u = v < 0 ? (mp_uint_t)(-v) : (mp_uint_t)v;
+    do {
+        tmp[n++] = (uint8_t)('0' + u % 10);
+        u /= 10;
+    } while (u);
+    if (v < 0) {
+        tmp[n++] = '-';
+    }
+    while (n) {
+        if (out != NULL) {
+            out[k] = tmp[n - 1];
+        }
+        k++;
+        n--;
+    }
+    return k;
+}
+
+static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out) {
     if (!mp_obj_is_type(o, &mp_type_list) && !mp_obj_is_type(o, &mp_type_tuple)) {
         mp_get_buffer_raise(o, out, MP_BUFFER_READ);
         return;
@@ -2504,7 +2665,7 @@ static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     mp_obj_t *it;
     mp_obj_get_array(o, &n, &it);
     for (size_t i = 0; i < n; i++) {
-        if (!mp_obj_is_str(it[i])) {
+        if (!mp_obj_is_str(it[i]) && !mp_obj_is_small_int(it[i])) {
             mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
             for (size_t j = 0; j < n; j++) {
                 mp_obj_t v = it[j];
@@ -2517,22 +2678,34 @@ static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     size_t len = n ? n - 1 : 0;
     for (size_t i = 0; i < n; i++) {
         size_t k;
-        mp_obj_str_get_data(it[i], &k);
+        if (mp_obj_is_small_int(it[i])) {
+            k = int_text(MP_OBJ_SMALL_INT_VALUE(it[i]), NULL);
+        } else {
+            mp_obj_str_get_data(it[i], &k);
+        }
         len += k;
     }
-    uint8_t *dst = len <= OPTS_BUF ? buf : m_new(uint8_t, len);
+    uint8_t *dst = len <= cap ? buf : m_new(uint8_t, len);
     size_t at = 0;
     for (size_t i = 0; i < n; i++) {
-        size_t k;
-        const char *p = mp_obj_str_get_data(it[i], &k);
         if (i) {
             dst[at++] = 0;
         }
+        if (mp_obj_is_small_int(it[i])) {
+            at += int_text(MP_OBJ_SMALL_INT_VALUE(it[i]), dst + at);
+            continue;
+        }
+        size_t k;
+        const char *p = mp_obj_str_get_data(it[i], &k);
         memcpy(dst + at, p, k);
         at += k;
     }
     out->buf = dst;
     out->len = len;
+}
+
+static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
+    opts_cap(o, buf, OPTS_BUF, out);
 }
 
 // api_size() -> the bytes a context takes
@@ -2944,7 +3117,7 @@ static mp_obj_t ui_api_block_set(mp_obj_t id, mp_obj_t field, mp_obj_t value) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_bool(moy_ui_api_block_set(sp, mp_obj_get_int(field),
+    return mp_obj_new_bool(moy_ui_api_block_set(NULL, sp, mp_obj_get_int(field),
                                                 (uint32_t)mp_obj_get_int_truncated(value)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_block_set_obj, ui_api_block_set);
@@ -2955,7 +3128,7 @@ static mp_obj_t ui_api_block_gen(mp_obj_t id) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int(moy_ui_api_block_gen(sp));
+    return mp_obj_new_int(moy_ui_api_block_gen(NULL, sp));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_gen_obj, ui_api_block_gen);
 
@@ -2965,7 +3138,7 @@ static mp_obj_t ui_api_block_since(mp_obj_t id, mp_obj_t gen) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int_from_uint(moy_ui_api_block_since(sp, (int32_t)mp_obj_get_int(gen)));
+    return mp_obj_new_int_from_uint(moy_ui_api_block_since(NULL, sp, (int32_t)mp_obj_get_int(gen)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_block_since_obj, ui_api_block_since);
 
@@ -2975,7 +3148,7 @@ static mp_obj_t ui_api_block_key(mp_obj_t id) {
     if (sp.p == NULL) {
         sp.p = (const uint8_t *)"";
     }
-    return mp_obj_new_int(moy_ui_api_block_key(sp));
+    return mp_obj_new_int(moy_ui_api_block_key(NULL, sp));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_key_obj, ui_api_block_key);
 
@@ -3399,22 +3572,13 @@ static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 7, ui_api_bar);
 
-// api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
-// its bar, or None
-static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
-    const char *title = NULL;
-    int16_t slots[MOY_UI_API_BAR];
-    int n = 0;
-    uint32_t off = 0;
-    if (!moy_ui_api_bar_lent(ctx_of(ctx), &title, slots, &n, &off)) {
-        return mp_const_none;
-    }
+// A lent bar as api_bar_lent answers it.
+static mp_obj_t bar_lent_tuple(const char *title, const int16_t *slots, int n, uint32_t off,
+                               const char *chip) {
     mp_obj_t sl[MOY_UI_API_BAR];
     for (int i = 0; i < n; i++) {
         sl[i] = MP_OBJ_NEW_SMALL_INT(slots[i]);
     }
-    int at = -1;
-    const char *chip = moy_ui_api_bar_chip(ctx_of(ctx), &at);
     // The host's bar asks every frame it draws, and the bar lent is the last
     // one's as a rule: the answer it had, where it says the same, allocates
     // nothing.
@@ -3443,7 +3607,61 @@ static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
     MP_STATE_VM(moy_ui_bar_last) = last;
     return last;
 }
+
+// api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
+// its bar, or None
+static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
+    const char *title = NULL;
+    int16_t slots[MOY_UI_API_BAR];
+    int n = 0;
+    uint32_t off = 0;
+    if (!moy_ui_api_bar_lent(ctx_of(ctx), &title, slots, &n, &off)) {
+        return mp_const_none;
+    }
+    int at = -1;
+    return bar_lent_tuple(title, slots, n, off, moy_ui_api_bar_chip(ctx_of(ctx), &at));
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_bar_lent_obj, ui_api_bar_lent);
+
+// api_run_bar_lent() -> api_bar_lent over the running cart's own context, a
+// Lua, compiled, WASI or native app's (moy_ui_run_bar_lent)
+static mp_obj_t ui_api_run_bar_lent(void) {
+    const char *title = NULL, *chip = "";
+    int16_t slots[MOY_UI_API_BAR];
+    int n = 0;
+    uint32_t off = 0;
+    if (!moy_ui_run_bar_lent(&title, slots, &n, &off, &chip)) {
+        return mp_const_none;
+    }
+    return bar_lent_tuple(title, slots, n, off, chip);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_run_bar_lent_obj, ui_api_run_bar_lent);
+
+// api_run_bar_tap(i): api_bar_tap over the running cart's own context
+static mp_obj_t ui_api_run_bar_tap(mp_obj_t i) {
+    moy_ui_run_bar_tap(mp_obj_get_int(i));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_bar_tap_obj, ui_api_run_bar_tap);
+
+// api_paste(ctx, text): the console's Paste into the field focused in the
+// frame begun (moy_ui_api_paste); text bytes, UTF-8
+static mp_obj_t ui_api_paste(mp_obj_t ctx, mp_obj_t text) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
+    moy_ui_api_paste(ctx_of(ctx), (const uint8_t *)b.buf, b.len);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_paste_obj, ui_api_paste);
+
+// api_run_paste(text): api_paste into the running cart's own frame begun next
+static mp_obj_t ui_api_run_paste(mp_obj_t text) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
+    moy_ui_run_paste((const uint8_t *)b.buf, b.len);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_paste_obj, ui_api_run_paste);
 
 // api_rule(ctx, cv, look)
 static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
@@ -3460,6 +3678,21 @@ static mp_obj_t ui_api_bar_tap(mp_obj_t ctx, mp_obj_t i) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_bar_tap_obj, ui_api_bar_tap);
+
+// api_back(ctx, take) -> whether the app takes the host's back over the
+// frame drawn last (moy_ui_api_back): a popover it drew, or a page it lent
+// the bar's way back for; `take` false only asks
+static mp_obj_t ui_api_back(mp_obj_t ctx, mp_obj_t take) {
+    return mp_obj_new_bool(moy_ui_api_back(ctx_of(ctx), mp_obj_is_true(take)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_back_obj, ui_api_back);
+
+// api_run_back(take): api_back over the running cart's own context, a Lua,
+// compiled, WASI or native app's (moy_ui_run_back)
+static mp_obj_t ui_api_run_back(mp_obj_t take) {
+    return mp_obj_new_bool(moy_ui_run_back(mp_obj_is_true(take)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_back_obj, ui_api_run_back);
 
 // api_text(ctx, lines, centre, tone, role): the next label's text options.
 static mp_obj_t ui_api_text(size_t n_args, const mp_obj_t *a) {
@@ -3496,6 +3729,27 @@ static mp_obj_t ui_api_group_card(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_group_card_obj, ui_api_group_card);
 
+// api_bubble(ctx, cv, look, text, head, status, opt, o) -> (x, y, w, h, state):
+// `opt` an array of int32 words in MOY_UI_BBO_* order
+static mp_obj_t ui_api_bubble(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t ob;
+    mp_get_buffer_raise(a[6], &ob, MP_BUFFER_READ);
+    moy_ui_over_t o;
+    int32_t v[5];
+    moy_ui_api_bubble(c, &s, span_of(a[3]), span_of(a[4]), span_of(a[5]),
+                      (const int32_t *)ob.buf, (int)(ob.len / 4), over_of(a[7], &o), v);
+    mp_obj_t t[5];
+    for (int i = 0; i < 5; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return ret_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bubble_obj, 8, 8, ui_api_bubble);
+
 // api_empty(ctx, cv, look, icon, title, lines) -> the head's foot y
 static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3509,6 +3763,19 @@ static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
                                            (const uint8_t *)b.buf, b.len));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_empty_obj, 6, 6, ui_api_empty);
+
+// api_note(ctx, cv, look, icon, lines) -> the note's foot y
+static mp_obj_t ui_api_note(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t b;
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[4], ob, &b);
+    return mp_obj_new_int(moy_ui_api_note(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_note_obj, 5, 5, ui_api_note);
 
 // api_month(ctx, cv, look, title, days, first, n, today) -> -1, 0 or 1
 static mp_obj_t ui_api_month(size_t n_args, const mp_obj_t *a) {
@@ -3569,7 +3836,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_offset_obj, ui_api_offset);
 
 // api_fades(reset) -> the list fades drawn since the count was reset
 static mp_obj_t ui_api_fades(mp_obj_t reset) {
-    return mp_obj_new_int_from_uint(moy_ui_api_fades(mp_obj_is_true(reset)));
+    return mp_obj_new_int_from_uint(moy_ui_api_fades(NULL, mp_obj_is_true(reset)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_fades_obj, ui_api_fades);
 
@@ -3826,7 +4093,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_keep_obj, 5, 5, ui_api_keep);
 // api_audit(on) -> the shift frames whose records moved outside the floor
 // since the last call (the tests' net); on -1 leaves the switch
 static mp_obj_t ui_api_audit(mp_obj_t on) {
-    return mp_obj_new_int_from_uint(moy_ui_api_audit(mp_obj_get_int(on)));
+    return mp_obj_new_int_from_uint(moy_ui_api_audit(NULL, mp_obj_get_int(on)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_audit_obj, ui_api_audit);
 
@@ -3871,7 +4138,7 @@ static mp_obj_t ui_api_lost(mp_obj_t ctx) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
 
 // wasm_rows() -> the public UI API's rows a compiled app imports ("ui_page", ...),
-// in roles.json's order: what this image serves (moy_ui_wasm.h).
+// in the role table's order: what this image serves (moy_ui_wasm.h).
 static mp_obj_t ui_wasm_rows(void) {
     mp_obj_t items[MOY_UI_WASM_ROWS];
     for (int i = 0; i < MOY_UI_WASM_ROWS; i++) {
@@ -4029,12 +4296,20 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_bar), MP_ROM_PTR(&ui_api_bar_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bar_lent), MP_ROM_PTR(&ui_api_bar_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bar_tap), MP_ROM_PTR(&ui_api_bar_tap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_back), MP_ROM_PTR(&ui_api_back_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_back), MP_ROM_PTR(&ui_api_run_back_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_bar_lent), MP_ROM_PTR(&ui_api_run_bar_lent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_paste), MP_ROM_PTR(&ui_api_paste_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_run_paste), MP_ROM_PTR(&ui_api_run_paste_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_note), MP_ROM_PTR(&ui_api_note_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_bubble), MP_ROM_PTR(&ui_api_bubble_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
@@ -4110,8 +4385,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_part), MP_ROM_PTR(&ui_bar_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scrim_alpha), MP_ROM_PTR(&ui_scrim_alpha_obj) },
     { MP_ROM_QSTR(MP_QSTR_tile), MP_ROM_PTR(&ui_tile_obj) },
     { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&ui_unlock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rec), MP_ROM_PTR(&ui_rec_obj) },
     { MP_ROM_QSTR(MP_QSTR_modal), MP_ROM_PTR(&ui_modal_obj) },
     { MP_ROM_QSTR(MP_QSTR_month_h), MP_ROM_PTR(&ui_month_h_obj) },
     { MP_ROM_QSTR(MP_QSTR_modal_band), MP_ROM_PTR(&ui_modal_band_obj) },
@@ -4124,6 +4401,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&ui_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_marks), MP_ROM_PTR(&ui_marks_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_reach), MP_ROM_PTR(&ui_mark_reach_obj) },
+    { MP_ROM_QSTR(MP_QSTR_theme_marks), MP_ROM_PTR(&ui_theme_marks_obj) },
     { MP_ROM_QSTR(MP_QSTR_inset), MP_ROM_PTR(&ui_inset_obj) },
     { MP_ROM_QSTR(MP_QSTR_cut), MP_ROM_PTR(&ui_cut_obj) },
     { MP_ROM_QSTR(MP_QSTR_split), MP_ROM_PTR(&ui_split_obj) },

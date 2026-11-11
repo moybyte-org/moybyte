@@ -31,6 +31,9 @@ thing the store holds across them, so its rows are what take handles.
                                    then holds exactly these rows of the root
                                    (see below)
   entry(h) -> entry | None         one cart's entry, read again
+  reread(path) -> entry | None     the cart folder at `path` read again, with
+                                   its "h": `catalogue`'s reconcile for that
+                                   one folder (see below)
   load(h) -> cart | None           one cart whole: its entry and its payloads
   path(h) -> str                   the cart's folder, composed from its root
                                    and its folder name (moy_store_base)
@@ -74,6 +77,9 @@ folder takes a row, and every row of that root the scan did not find is
 released, so a cart deleted behind the store's back (the sync wire, a card
 swap) goes stale at the next scan; the rows of other roots are left as they
 are. A root that will not list changes nothing and reads as an empty shelf.
+`reread` is that reconcile for one folder, the read a roster change that
+knows its folder makes instead of a scan: a folder that reads takes (or keeps)
+its row, and one that does not -- removed, or no cart -- has its row released.
 """
 
 try:
@@ -81,11 +87,13 @@ try:
     import moy_journal
     from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
     from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
+    from moy_store_base import BUILTIN_NS, cart_folder, seeded
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moy_carts
     from runtime import moy_journal
     from runtime.moy_index import Index, ROOTS, StaleHandle  # noqa: F401
     from runtime.moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
+    from runtime.moy_store_base import BUILTIN_NS, cart_folder, seeded
 
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs
@@ -133,6 +141,9 @@ def catalogue(root=CARTS_DIR):
 
 
 def seed(seed, root, shelf, progress=None):
+    packed = moy_carts.is_packed(seed)
+    seeded(root, [cart_folder(item[0] if packed else item["title"], BUILTIN_NS)
+                  for item in seed])
     present = {}
     for e in shelf:
         present[e["path"][len(root) + 1:]] = e["version"]
@@ -179,15 +190,31 @@ def path(h):
     return cart_path(_index.root_path(ord(key[0])), key[1:])
 
 
-def handle(path):
-    cut = path.rfind("/")
-    root = path[:cut]
+def _key_of(path):
+    """The index key of the cart folder at `path`, split against the roots."""
+    root = path[:path.rfind("/")]
     for rid in range(1, ROOTS + 1):
         r = _index.root_path(rid)
         if r is not None and path.startswith(r + "/") and "/" not in path[len(r) + 1:]:
             root = r
             break
-    return _intern(root, path)
+    return _key(_rid(root), path[len(root) + 1:])
+
+
+def handle(path):
+    return _index.intern(_key_of(path))
+
+
+def reread(path):
+    key = _key_of(path)
+    e = moy_carts.entry(path)
+    if e:
+        e["h"] = _index.intern(key)
+    else:
+        h = _index.find(key)
+        if h:
+            _index.release(h)
+    return e
 
 
 def valid(h):

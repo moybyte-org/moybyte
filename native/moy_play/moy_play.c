@@ -23,6 +23,7 @@
 #include "moycore_lua.h"
 #include "moycore_run.h"
 #include "moy_buf.h"
+#include "moy_proc.h"
 
 _Static_assert(MOY_PLAY_UPC == MOY_UPC_CLASSES, "a run's books carry every crossing class");
 
@@ -47,7 +48,7 @@ static struct {
     volatile uint32_t budget;       // its budget, ms
     volatile bool fired;            // the watcher ended it
     uint32_t override;              // moy_play_watch_budget's, 0: the slots' rule
-    char what[96];                  // the stuck words this run's ticks end with
+    const char *what;               // the stuck words the live tick's run ends with
     bool on;                        // the watcher polls
 } W;
 
@@ -147,7 +148,7 @@ bool moy_play_watch(uint32_t now_ms) {
     watch_lock();
     if (W.since != 0u && !W.fired && now_ms - W.since >= W.budget) {
         W.fired = fire = true;
-        moycore_stuck(W.what);
+        moycore_stuck(W.what != NULL ? W.what : "stuck");
     }
     watch_unlock();
     return fire;
@@ -169,10 +170,11 @@ static uint32_t watch_budget(const moy_tick_t *t) {
          : ms > MOY_PLAY_STUCK_MAX_MS ? MOY_PLAY_STUCK_MAX_MS : ms;
 }
 
-static void watch_begin(uint32_t budget) {
+static void watch_begin(uint32_t budget, const char *what) {
     uint32_t now = moycore_run_now_ms();
     watch_lock();
     W.budget = budget;
+    W.what = what;
     W.fired = false;
     W.since = now != 0u ? now : 1u;
     watch_unlock();
@@ -199,6 +201,10 @@ uint32_t moy_play_stack_free(void) {
 // The crash record's OPEN id (moy_crash.h's GAME role): the board's kernel
 // keeps it; weak, so an image or a host without one arms nothing.
 void moy_kernel_arm(int role, const char *id) __attribute__((weak));
+void moy_kernel_arm_pid(uint32_t pid) __attribute__((weak));
+// The OS log's current process (moy_log.h): the run's, set by the console
+// as it starts the run, before the launch. Weak: an image without the log.
+uint32_t moy_log_current(void) __attribute__((weak));
 
 static void arm(const char *id) {
     if (moy_kernel_arm != NULL) {
@@ -269,8 +275,7 @@ void moy_play_rows(bool lua, bool wasm, bool python) {
 
 typedef struct {
     uint32_t h;                     // the live run's handle, 0 with none
-    uint32_t last;                  // the last run's, live or ended
-    uint32_t gen;
+    uint32_t last;                  // the row's last run's, live or ended
     const moy_rt_ops_t *rt;
     moy_play_info_t info;
     moy_input_t *in;
@@ -279,26 +284,82 @@ typedef struct {
     uint32_t flags;
     uint32_t start_ms;
     int32_t ptr[3];                 // x, y, the touch() flags
-    int32_t window;                 // the console's: the run lies in a window
+    int32_t face;                   // the console's: how its ui frame draws
+    int32_t room[4];                // the console's: an app's ui frame (w 0: the canvas)
     uint32_t upc0[MOY_UPC_CLASSES];
     uint32_t owner;                 // the run's OWNER row (moy_buf.h), or 0
+    moycore_run *mc;                // its runtime's row (moycore_lua.h), from its open
     int view;                       // what the cart had declared last frame
     int view_w, view_h;
     uint32_t budget;                // the runaway watch's, for each tick (ms)
+    char what[96];                  // the stuck words its ticks end with
+    uint32_t pid;                   // its process (moy_log.h's), 0 unknown
+    uint32_t proc;                  // its process row (moy_proc.h), 0 none: a VM run's
+    bool muted;                     // held aside: its snapshot reads no input
+    uint32_t gen;                   // its launch's number: the oldest is ended for a new one
     bool armed;                     // the crash record names this run
     bool reseed;                    // a lockstep frame starts: seed libmoy first
-    bool lock_any;                  // the match's last send: lock_at is set
-    uint32_t lock_at;
     char path[192];                 // the cart's folder
 } run_t;
 
-// The run's state, allocated at the first launch from the kernel's allocator
-// (PSRAM on a board): what the S3s count as internal SRAM is the pointer.
-static run_t *g_run;
-#define R (*g_run)
+// THE RUNS ARE ROWS: MOY_PLAY_RUNS of them, each a run's state, allocated
+// at the first launch from the kernel's allocator (PSRAM on a board): what the
+// S3s count as internal SRAM is the pointer. A handle is the launch's number,
+// the row and the tag (gen << 10 | slot << 8 | MOY_PLAY_TAG). `cur` is the
+// row launched last, which the stop's path and flags, `current` and the
+// front's state read; the crash record names the row that ticked last
+// (`armed`): its id and its process.
+typedef struct {
+    run_t row[MOY_PLAY_RUNS];
+    uint32_t gen;                   // the last launch's number
+    uint32_t last;                  // the last run launched, live or ended
+    uint8_t cur;
+    int8_t armed;                   // the row the crash record names, -1: none
+} runs_t;
+
+static runs_t *g_runs;
+#define R (g_runs->row[g_runs->cur])
 
 static run_t *live(uint32_t run) {
-    return g_run != NULL && run != 0u && run == R.h ? g_run : NULL;
+    if (g_runs == NULL || run == 0u) {
+        return NULL;
+    }
+    run_t *r = &g_runs->row[(run >> 8) & (MOY_PLAY_RUNS - 1u)];
+    return run == r->h ? r : NULL;
+}
+
+static bool runs_make(void *(*alloc)(size_t n)) {
+    if (g_runs == NULL) {
+        g_runs = alloc(sizeof(runs_t));
+        if (g_runs == NULL) {
+            return false;
+        }
+        memset(g_runs, 0, sizeof(runs_t));
+        g_runs->armed = -1;
+    }
+    return true;
+}
+
+static bool any_live(void) {
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        if (g_runs->row[i].h != 0u) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The crash record names `r` (its id, the GAME role): armed when it ticks
+// and it was not the one named.
+static void arm_row(run_t *r) {
+    int8_t slot = (int8_t)(r - g_runs->row);
+    if (r->armed && g_runs->armed != slot) {
+        arm(r->info.id);
+        if (moy_kernel_arm_pid != NULL) {
+            moy_kernel_arm_pid(r->pid);
+        }
+        g_runs->armed = slot;
+    }
 }
 
 typedef struct {
@@ -309,7 +370,7 @@ typedef struct {
 } launch_ctx_t;
 
 static const char *const STOP_NAMES[MOY_PLAY_STOP_WHYS] = {
-    "stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big",
+    "stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big", "media",
 };
 
 const char *moy_play_stop_name(uint8_t why) {
@@ -366,17 +427,30 @@ static int entry_seen(void *ctx, const moy_cat_entry_t *e) {
 
 int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32_t *run) {
     (void)caller;
-    if (g_run == NULL) {
-        g_run = moy_loop_alloc(sizeof(run_t));
-        if (g_run == NULL) {
-            return MOY_PLAY_NOMEM;
+    if (!runs_make(moy_loop_alloc)) {
+        return MOY_PLAY_NOMEM;
+    }
+    // A free row, else the oldest run's: it ends for this one.
+    uint32_t slot = 0, oldest = 0;
+    bool found = false;
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        run_t *ri = &g_runs->row[i];
+        if (ri->h == 0u) {
+            slot = i;
+            found = true;
+            break;
         }
-        memset(g_run, 0, sizeof(run_t));
+        if (ri->gen < g_runs->row[oldest].gen) {
+            oldest = i;
+        }
     }
-    if (R.h != 0u) {
-        moy_play_end(R.h, MOY_PLAY_END_QUIT);
+    if (!found) {
+        slot = oldest;
+        moy_play_end(g_runs->row[slot].h, MOY_PLAY_END_QUIT);
     }
+    g_runs->cur = (uint8_t)slot;
     memset(&R.info, 0, sizeof(R.info));
+    R.mc = NULL;
     launch_ctx_t c = { &R.info, false, cart, flags };
     if (moy_cat_entry(cart, entry_seen, NULL, &c) != 0 || !c.seen) {
         return MOY_PLAY_NOCART;
@@ -385,8 +459,9 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     if (rt == NULL) {
         return MOY_PLAY_NORT;
     }
-    R.gen = R.gen >= 0xFFFFFFu ? 1u : R.gen + 1u;
-    R.h = R.last = R.gen << 8 | MOY_PLAY_TAG;
+    g_runs->gen = g_runs->gen >= 0xFFFFFu ? 1u : g_runs->gen + 1u;
+    R.gen = g_runs->gen;
+    R.h = R.last = g_runs->last = R.gen << 10 | slot << 8 | MOY_PLAY_TAG;
     R.rt = rt;
     R.in = NULL;
     R.audio = 0;
@@ -397,16 +472,15 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
     R.ptr[0] = R.ptr[1] = R.ptr[2] = 0;
     R.view = 0;
     R.reseed = false;
-    R.lock_any = false;
+    R.muted = false;
+    R.pid = moy_log_current != NULL ? moy_log_current() : 0u;
     R.info.stack_open = R.info.stack_frame = MOY_PLAY_NO_STACK;
     R.budget = watch_budget(NULL);
-    moy_chrome_stuck_text(W.what, sizeof(W.what), R.budget);
+    moy_chrome_stuck_text(R.what, sizeof(R.what), R.budget);
     watch_run(true);
     // Armed before the runtime loads: a fault in the load names the cart.
     R.armed = R.info.game;
-    if (R.armed) {
-        arm(R.info.id);
-    }
+    arm_row(&R);
     // The run's lifetime in the glass: what its runtime loads -- a Lua run's
     // layer and image pixels -- is on loan to it and goes with it.
     R.owner = 0;
@@ -414,6 +488,17 @@ int moy_play_launch(const char *cart, const char *caller, uint32_t flags, uint32
         R.owner = 0;
     }
     moycore_lua_owner(R.owner);
+    // A run outside the VM is a process of the table's; its runtime's row
+    // takes it next.
+    R.proc = 0;
+    if (!rt->vm) {
+        uint8_t tier = strcmp(R.info.runtime, "wasm") == 0 ? MOY_PROC_WASM : MOY_PROC_LUA;
+        if (moy_proc_add(R.pid, tier, R.info.game ? MOY_PROC_GAME : MOY_PROC_APP, R.info.id,
+                         R.owner, R.h, &R.proc) != MOY_PROC_OK) {
+            R.proc = 0;
+        }
+    }
+    moy_proc_next(R.proc);
     uint32_t frame[MOY_UPC_CLASSES];
     moy_loop_upcalls(frame, R.upc0);
     *run = R.h;
@@ -429,7 +514,7 @@ int moy_play_bind(uint32_t run, moy_input_t *in, uint32_t audio, moy_tick_t *tic
     r->audio = audio;
     r->tick = tick;
     r->budget = watch_budget(tick);
-    moy_chrome_stuck_text(W.what, sizeof(W.what), r->budget);
+    moy_chrome_stuck_text(r->what, sizeof(r->what), r->budget);
     return MOY_PLAY_OK;
 }
 
@@ -443,8 +528,10 @@ int moy_play_open(uint32_t run) {
     }
     if (r->rt->open(r->info.error, sizeof(r->info.error)) != 0) {
         r->info.raised = true;
+        moy_proc_state(r->proc, MOY_PROC_RAISED);
         return MOY_PLAY_RAISED;
     }
+    r->mc = moycore_run_row;
     r->view = moycore_run_view(&moycore_RUN.c, &r->view_w, &r->view_h);
     r->info.stack_open = moy_play_stack_free();
     return MOY_PLAY_OK;
@@ -458,7 +545,8 @@ int moy_play_input(uint32_t run, const moy_play_in_t *in) {
     r->ptr[0] = in->x;
     r->ptr[1] = in->y;
     r->ptr[2] = in->touch;
-    r->window = in->window ? 1 : 0;
+    r->face = in->face;
+    memcpy(r->room, in->room, sizeof(r->room));
     return MOY_PLAY_OK;
 }
 
@@ -466,9 +554,14 @@ int moy_play_input(uint32_t run, const moy_play_in_t *in) {
 // table: the union of every source as player one (libmoy's seven buttons are
 // the table's first seven bits), player two's own when more than one slot is
 // in play, the last typed key, the pointer the console published and the
-// cart's clock, and whether its surface is a window's body.
+// cart's clock, how its ui frame draws and the rect an
+// app's ui frame lies in.
 static void refresh(run_t *r, int32_t *s) {
-    s[SNAP_WINDOW] = r->window;
+    s[SNAP_FACE] = r->face;
+    s[SNAP_ROOM_X] = r->room[0];
+    s[SNAP_ROOM_Y] = r->room[1];
+    s[SNAP_ROOM_W] = r->room[2];
+    s[SNAP_ROOM_H] = r->room[3];
     moy_match_t *m = moy_match_kernel();
     if (m != NULL && m->s.live) {
         // A match: the session's two global players, as its last advance
@@ -480,13 +573,15 @@ static void refresh(run_t *r, int32_t *s) {
         s[SNAP_PLAYERS] = 2;
         s[SNAP_KEY] = 0;
         s[SNAP_TOUCH_X] = s[SNAP_TOUCH_Y] = s[SNAP_TOUCH_DOWN] = s[SNAP_TOUCH_MS] = 0;
-        s[SNAP_TIME_MS] = (int32_t)(moycore_run_now_ms() - r->start_ms);
+        // time() is the match's clock: two consoles' wall clocks are two worlds.
+        s[SNAP_TIME_MS] = moy_lockstep_ms(m, m->s.frame);
         return;
     }
     uint32_t held = 0, pressed = 0;
     uint8_t slots[MOY_INPUT_SOURCES];
     uint8_t n = 1;
-    if (r->in != NULL) {
+    s[SNAP_KEY] = 0;
+    if (r->in != NULL && !r->muted) {
         moy_input_masks(r->in, MOY_INPUT_UNION, &held, &pressed);
         n = moy_input_players(r->in, slots);
         if (n > 1) {
@@ -500,9 +595,9 @@ static void refresh(run_t *r, int32_t *s) {
     s[SNAP_BTN] = (int32_t)(held & MOY_PLAY_BUTTON_MASK);
     s[SNAP_BTNP] = (int32_t)(pressed & MOY_PLAY_BUTTON_MASK);
     s[SNAP_PLAYERS] = n < 1 ? 1 : n;
-    s[SNAP_TOUCH_X] = r->ptr[0];
-    s[SNAP_TOUCH_Y] = r->ptr[1];
-    s[SNAP_TOUCH_DOWN] = r->ptr[2];
+    s[SNAP_TOUCH_X] = r->muted ? 0 : r->ptr[0];
+    s[SNAP_TOUCH_Y] = r->muted ? 0 : r->ptr[1];
+    s[SNAP_TOUCH_DOWN] = r->muted ? 0 : r->ptr[2];
     s[SNAP_TOUCH_MS] = 0;
     s[SNAP_TIME_MS] = (int32_t)(moycore_run_now_ms() - r->start_ms);
 }
@@ -552,10 +647,16 @@ void moy_kernel_say(const char *line) __attribute__((weak));
 
 static void stuck(run_t *r, bool raised) {
     moycore_lua_unstuck();
-    if (!raised || strstr(r->info.error, W.what) == NULL) {
-        snprintf(r->info.error, sizeof(r->info.error), "%s", W.what);
+    if (!raised || strstr(r->info.error, r->what) == NULL) {
+        size_t n = strnlen(r->what, sizeof(r->what));
+        if (n >= sizeof(r->info.error)) {
+            n = sizeof(r->info.error) - 1u;
+        }
+        memcpy(r->info.error, r->what, n);     // two fields of one row: no snprintf
+        r->info.error[n] = 0;
     }
     r->info.raised = true;
+    moy_proc_state(r->proc, MOY_PROC_RAISED);
     r->info.stuck = true;
     if (moy_kernel_say != NULL) {
         char line[240];
@@ -579,8 +680,17 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     if (r->info.raised) {
         return MOY_PLAY_RAISED;         // its runtime is broken: report, never rerun
     }
+    moycore_run_use(r->mc);             // its own row, whichever was current
+    arm_row(r);
     int32_t *snap = moycore_RUN.c.snap;
     int32_t *aq = moycore_RUN.c.aq;
+    moy_match_t *lm = moy_match_kernel();
+    if (lm != NULL && lm->s.live) {
+        // A match's dt is the C float of its tick on every path: a dt that
+        // crossed a VM (REPR_C's 30-bit float, the console path) is not
+        // the bits the kernel's front frame hands the other console.
+        dt = 1.0f / (float)moy_lockstep_hz_at(lm, lm->s.frame - 1);
+    }
     for (uint8_t i = 0; i < ticks; i++) {
         if ((r->flags & MOY_PLAY_PACED) && r->in != NULL) {
             moy_input_tick_edges(r->in);
@@ -596,7 +706,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
             r->reseed = false;
         }
         bool draw = render && i + 1u == ticks;
-        watch_begin(r->budget);
+        watch_begin(r->budget, r->what);
         int rc = r->rt->frame(dt, draw, r->info.error, sizeof(r->info.error));
         if (watch_end()) {
             stuck(r, rc != 0);
@@ -604,6 +714,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
         }
         if (rc != 0) {
             r->info.raised = true;
+            moy_proc_state(r->proc, MOY_PROC_RAISED);
             return MOY_PLAY_RAISED;
         }
         r->info.ticks++;
@@ -634,6 +745,15 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
     return MOY_PLAY_OK;
 }
 
+int moy_play_mute(uint32_t run, bool on) {
+    run_t *r = live(run);
+    if (r == NULL) {
+        return MOY_PLAY_STALE;
+    }
+    r->muted = on;
+    return MOY_PLAY_OK;
+}
+
 int moy_play_hold(uint32_t run, uint32_t ms) {
     run_t *r = live(run);
     if (r == NULL) {
@@ -656,10 +776,28 @@ int moy_play_end(uint32_t run, int why) {
         r->info.upcalls[i] = total[i] - r->upc0[i];
     }
     r->h = 0;
-    watch_run(false);
-    if (r->armed) {
+    watch_run(any_live());
+    if (g_runs->armed == (int8_t)(r - g_runs->row)) {
         arm("");                        // the board survived the run
-        r->armed = false;
+        g_runs->armed = -1;
+    }
+    r->armed = false;
+    if (r == &R) {
+        // `cur` moves to the newest run still live, if any.
+        uint32_t best = g_runs->cur;
+        for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+            run_t *ri = &g_runs->row[i];
+            if (ri->h != 0u && (g_runs->row[best].h == 0u || ri->gen > g_runs->row[best].gen)) {
+                best = i;
+            }
+        }
+        g_runs->cur = (uint8_t)best;
+    }
+    // The runtime's close came first: the process row and its copy of the
+    // grant go before the console ends the grant.
+    if (r->proc != 0u) {
+        moy_proc_end(r->proc, r->info.raised ? 1 : 0);
+        r->proc = 0;
     }
     if (r->owner != 0u) {
         moy_owner_end(r->owner);        // any loan the runtime's close left
@@ -689,24 +827,21 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
     // tail's drain left it up to a frame stale (8.0% -> 6.4% stalled ticks
     // at DELAY=2 from this alone, on glass).
     moy_match_drain_input(m, now, MOY_MATCH_DRAIN_MAX);
-    // Every advance and every resend is a broadcast. A due tick always runs;
-    // a stalled tick's retry and the resend between ticks wait out
-    // MOY_PLAY_LOCK_MS since the last send, the cadence of a console's loop
-    // frame. The kernel's front loops far faster: a send each pass flooded
-    // the air (T-Deck and P4: 17 ticks/s, 47% of ticks stalled),
-    // and a 4 ms retry did the same.
+    // Every advance and every resend is a broadcast: a stalled tick's retry
+    // and the resend between ticks wait out MOY_MATCH_LOCK_MS (the gate).
     bool due = moy_lockstep_due(m, now);
-    if (!due && r->lock_any && now - r->lock_at < MOY_PLAY_LOCK_MS) {
+    if (!moy_lockstep_gate(m, now, due)) {
         return true;
     }
-    r->lock_any = true;
-    r->lock_at = now;
     if (due || m->s.waiting) {
         // A stalled tick retries every loop frame: the missing input usually
         // lands a few ms after it was first needed.
         uint32_t held = 0, pressed = 0;
         if (r->in != NULL) {
             moy_input_masks(r->in, MOY_INPUT_UNION, &held, &pressed);
+        }
+        if (moy_lockstep_world_due(m)) {
+            moy_lockstep_world(m, m->s.frame, moycore_lua_digest());
         }
         if (moy_lockstep_advance(m, (uint8_t)(held & MOY_PLAY_BUTTON_MASK), now, true) == 1) {
             *ticks = 1;
@@ -721,11 +856,11 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
 }
 
 const char *moy_play_path(void) {
-    return g_run != NULL && R.h != 0u ? R.path : NULL;
+    return g_runs != NULL && R.h != 0u ? R.path : NULL;
 }
 
 uint32_t moy_play_flags(void) {
-    return g_run != NULL ? R.flags : 0u;
+    return g_runs != NULL ? R.flags : 0u;
 }
 
 void moy_play_set_down(uint32_t run) {
@@ -736,23 +871,44 @@ void moy_play_set_down(uint32_t run) {
 }
 
 uint32_t moy_play_current(void) {
-    return g_run != NULL ? R.h : 0u;
+    return g_runs != NULL ? R.h : 0u;
 }
 
 uint32_t moy_play_last(void) {
-    return g_run != NULL ? R.last : 0u;
+    return g_runs != NULL ? g_runs->last : 0u;
+}
+
+uint32_t moy_play_run_at(uint32_t slot) {
+    return g_runs != NULL && slot < MOY_PLAY_RUNS ? g_runs->row[slot].h : 0u;
+}
+
+uint32_t moy_play_proc(uint32_t run) {
+    run_t *r = live(run);
+    return r != NULL ? r->proc : 0u;
+}
+
+uint32_t moy_play_runs(void) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; g_runs != NULL && i < MOY_PLAY_RUNS; i++) {
+        n += g_runs->row[i].h != 0u;
+    }
+    return n;
 }
 
 int moy_play_info(uint32_t run, moy_play_info_t *out) {
-    if (g_run == NULL || run == 0u || run != R.last) {
+    if (g_runs == NULL || run == 0u) {
         return MOY_PLAY_STALE;
     }
-    *out = R.info;
-    if (!R.info.ended) {
+    run_t *r = &g_runs->row[(run >> 8) & (MOY_PLAY_RUNS - 1u)];
+    if (run != r->last) {
+        return MOY_PLAY_STALE;
+    }
+    *out = r->info;
+    if (!r->info.ended) {
         uint32_t frame[MOY_UPC_CLASSES], total[MOY_UPC_CLASSES];
         moy_loop_upcalls(frame, total);
         for (int i = 0; i < MOY_UPC_CLASSES; i++) {
-            out->upcalls[i] = total[i] - R.upc0[i];
+            out->upcalls[i] = total[i] - r->upc0[i];
         }
     }
     return MOY_PLAY_OK;
@@ -761,6 +917,11 @@ int moy_play_info(uint32_t run, moy_play_info_t *out) {
 // Whether a VM runs (moy_loop.c): weak, for a build of the Player without
 // the loop (the host's), where one always does.
 extern __typeof__(moy_loop_vm) moy_loop_vm __attribute__((weak));
+// The compiled run's frame hand-off (moycore_lua.h): weak, for an image whose
+// moycore runs no compiled cart.
+extern __typeof__(moycore_wasm_owed) moycore_wasm_owed __attribute__((weak));
+extern __typeof__(moycore_wasm_presented) moycore_wasm_presented __attribute__((weak));
+extern __typeof__(moycore_wasm_settle) moycore_wasm_settle __attribute__((weak));
 
 // -- the run in front ------------------------------------------------------------
 
@@ -771,12 +932,7 @@ static struct {
 } F;
 
 void moy_play_reserve(void *(*alloc)(size_t n)) {
-    if (g_run == NULL) {
-        g_run = alloc(sizeof(run_t));
-        if (g_run != NULL) {
-            memset(g_run, 0, sizeof(run_t));
-        }
-    }
+    runs_make(alloc);
     watch_make();
 }
 
@@ -793,12 +949,15 @@ int moy_play_front(uint32_t run) {
     if (r == NULL) {
         return MOY_PLAY_STALE;
     }
-    // A Lua run: its frame is the console's canvas. A compiled cart's frame
-    // is its own memory, which the console's present composes (CartFrame).
-    // A run with the VM down is the exception: the kernel's present shows
-    // its canvas, which the cart's blits write (no frame hand-off is taken).
+    moycore_run_use(r->mc);
+    // A Lua run: its frame is the console's canvas. A compiled cart's is its
+    // own memory, which only a board that shows frames from there takes in
+    // front (moy_play.h); with the VM down no frame hand-off is taken, and
+    // the kernel's present shows the canvas the cart's blits write.
+    bool wasm = moycore_RUN.wasm;
     if (F.ops == NULL || r->rt->vm || r->in == NULL || r->view || r->info.raised
-            || (!r->info.vm_down && (strcmp(r->rt->name, "lua") != 0 || moycore_RUN.wasm))) {
+            || (!r->info.vm_down && (wasm ? F.ops->frame == NULL || moycore_wasm_owed == NULL
+                                          : strcmp(r->rt->name, "lua") != 0))) {
         return MOY_PLAY_NORT;
     }
     int w = 0, h = 0;
@@ -811,21 +970,58 @@ int moy_play_front(uint32_t run) {
     return MOY_PLAY_OK;
 }
 
+// A compiled run's frame as the console takes it back: nothing the board
+// started still reads the cart's memory or its copy, and the canvas holds
+// the frame (the console's composite shows the canvas).
+static void front_settle(void) {
+    if (!moycore_RUN.wasm || F.ops->frame == NULL || moycore_wasm_settle == NULL) {
+        return;
+    }
+    if (F.ops->frame_fence != NULL) {
+        F.ops->frame_fence(F.ops->ctx);
+    }
+    moycore_wasm_settle();
+}
+
 static int front_ended(int why) {
+    run_t *r = live(F.run);
+    if (r != NULL) {
+        moycore_run_use(r->mc);
+        front_settle();
+    }
     moy_play_end(F.run, why);
     F.live = false;
     return -1;
 }
 
+// The panel a run the kernel stopped the VM for leaves (moy_play_stop.c): the
+// run has ended, and the panel holds the VM down until it is released.
+static uint32_t s_panel;
+static char s_panel_text[96];
+
+void moy_play_panel(uint32_t run, const char *text) {
+    s_panel = run;
+    snprintf(s_panel_text, sizeof(s_panel_text), "%s", run != 0u && text != NULL ? text : "");
+}
+
+bool moy_play_panel_up(void) {
+    return s_panel != 0u;
+}
+
 bool moy_play_front_end(int why) {
     if (!moy_play_front_live()) {
-        return false;
+        if (s_panel == 0u) {
+            return false;
+        }
+        s_panel = 0;                    // its run ended before the panel went up
+        return true;
     }
     front_ended(why);
     return true;
 }
 
 static int front_back(void) {
+    front_settle();
     F.live = false;                     // the console drives the run from here
     return -1;
 }
@@ -836,6 +1032,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         F.live = false;
         return -1;
     }
+    moycore_run_use(r->mc);             // the canvas below is its row's
     // A Ctrl-C ends the run; the console's next upcall raises it.
     if (moy_play_interrupt_pending != NULL && moy_play_interrupt_pending()) {
         return front_ended(MOY_PLAY_END_SERIAL);
@@ -867,7 +1064,8 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     uint8_t ticks = 1;
     bool render = true;
     if (moy_play_lockstep(F.run, now, &ticks)) {
-        dt = 1.0f / (float)MOY_MATCH_TICK_HZ;
+        moy_match_t *mm = moy_match_kernel();
+        dt = 1.0f / (float)moy_lockstep_hz_at(mm, mm->s.frame - 1);
         // A matched game draws the frames it simulates and no others: a draw
         // between ticks, or over a stalled one, is a present the stall's
         // retry waits behind (the console's path draws on the due tick).
@@ -890,6 +1088,12 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         return front_back();
     }
     moycore_RUN.c.canvas.pix = (moy_pixel *)px;
+    // A compiled run's frame: what the board started on the last one reads
+    // the cart's memory no more once its next hook runs.
+    bool shows = moycore_RUN.wasm && F.ops->frame != NULL && moycore_wasm_owed != NULL;
+    if (shows && F.ops->frame_fence != NULL) {
+        F.ops->frame_fence(F.ops->ctx);
+    }
     uint32_t out = 0;
     int rc = moy_play_frame(F.run, ticks, dt, render, &out);
     if (rc == MOY_PLAY_RAISED) {
@@ -903,6 +1107,27 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
     }
     if (out & MOY_PLAY_VIEW) {
         return front_back();            // a view the console composes
+    }
+    if (render && shows) {
+        // The frame the cart blitted goes from its memory; a banner over it,
+        // or a layout the board does not show, is written into the canvas
+        // first. A frame the cart did not replace is on the glass already.
+        const uint16_t *lut = NULL;
+        bool kept = false;
+        const uint8_t *fr = moycore_wasm_owed(&lut, &kept);
+        if (moy_chrome_overlay_up(now)) {
+            moycore_wasm_settle();
+        } else if (fr != NULL) {
+            const uint8_t *copy = NULL;
+            if (F.ops->frame(F.ops->ctx, fr, lut, &copy)) {
+                moycore_wasm_presented(copy);
+                return 1;
+            }
+            moycore_wasm_settle();
+        } else if (kept) {
+            F.ops->present(F.ops->ctx, false);
+            return 0;
+        }
     }
     if (render) {
         moy_chrome_overlay_draw(px, w, h, moycore_RUN.c.canvas.wire, now);
@@ -937,17 +1162,42 @@ static void ups(char *o, size_t n, size_t *pat, const uint32_t *u) {
     *pat = at;
 }
 
-size_t moy_play_state_json(char *o, size_t n) {
+// `state` while a stopped run's panel waits: the run's title and the panel's
+// words, with the VM as it is.
+static size_t panel_json(char *o, size_t n) {
     size_t at = 0;
-    if (!moy_play_front_live()) {
+    moy_play_info_t i;
+    if (moy_play_info(s_panel, &i) != MOY_PLAY_OK) {
         PUT("null");
         return at;
     }
-    const moy_play_info_t *i = &R.info;
+    PUT("{\"screen\": \"panel\", \"front\": false, \"vm\": %s, \"cart\": ",
+        moy_loop_vm == NULL || moy_loop_vm() ? "true" : "false");
+    PUTS(i.title);
+    PUT(", \"cart_error\": ");
+    PUTS(s_panel_text);
+    PUT(", \"run\": {\"runtime\": ");
+    PUTS(i.runtime);
+    PUT(", \"stop\": \"%s\", \"vm_down\": %s, \"end_why\": %u}}",
+        moy_play_stop_name(i.stop_why), i.vm_down ? "true" : "false", (unsigned)i.end_why);
+    return at;
+}
+
+size_t moy_play_state_json(char *o, size_t n) {
+    size_t at = 0;
+    if (!moy_play_front_live()) {
+        if (s_panel != 0u) {
+            return panel_json(o, n);
+        }
+        PUT("null");
+        return at;
+    }
+    run_t *fr = live(F.run);
+    const moy_play_info_t *i = &fr->info;
     uint32_t frame[MOY_UPC_CLASSES], total[MOY_UPC_CLASSES], since[MOY_UPC_CLASSES];
     moy_loop_upcalls(frame, total);
     for (int k = 0; k < MOY_UPC_CLASSES; k++) {
-        since[k] = total[k] - R.upc0[k];
+        since[k] = total[k] - fr->upc0[k];
     }
     PUT("{\"screen\": \"desktop\", \"front\": true, \"vm\": %s, \"cart\": ",
         moy_loop_vm == NULL || moy_loop_vm() ? "true" : "false");
@@ -973,9 +1223,9 @@ size_t moy_play_state_json(char *o, size_t n) {
     ups(o, n, &at, frame);
     PUT(", \"upcall_totals\": ");
     ups(o, n, &at, total);
-    if ((R.flags & MOY_PLAY_PACED) && R.tick != NULL && R.tick->rate > 0) {
-        PUT(", \"tick\": [%d, %u, %u, %s]", R.tick->rate, (unsigned)R.tick->div,
-            (unsigned)R.tick->misses, R.tick->steady ? "true" : "false");
+    if ((fr->flags & MOY_PLAY_PACED) && fr->tick != NULL && fr->tick->rate > 0) {
+        PUT(", \"tick\": [%d, %u, %u, %s]", fr->tick->rate, (unsigned)fr->tick->div,
+            (unsigned)fr->tick->misses, fr->tick->steady ? "true" : "false");
     } else {
         PUT(", \"tick\": null");
     }

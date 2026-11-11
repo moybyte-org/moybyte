@@ -28,7 +28,7 @@ u8, u16, u32 = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32
 CRASH_FAULT, CRASH_ABORT, CRASH_VM = 1, 2, 7
 ROLE_APP, ROLE_WALLPAPER, ROLE_GAME = 1, 2, 3
 BOOT_START, BOOT_SAFE, BOOT_REPL, BOOT_RECOVERY = 1, 2, 3, 4
-WHY_VM_START, WHY_BOOT_LOOP, WHY_HEAP = 1, 2, 3
+WHY_VM_START, WHY_BOOT_LOOP, WHY_HEAP, WHY_CRASHES = 1, 2, 3, 4
 TEST_VM_START, TEST_HEAP = 1, 2
 BOOT_LOOP_STARTS = 4
 
@@ -41,16 +41,6 @@ CONSOLES = {
     "guition_p4": (1280, 800, 270, 0),
 }
 TOUCH = {"guition_s3"}
-# Each floor's foot and whether the serial words get a line of their own,
-# as moy_kernel.c's moy_kernel_recovery makes them from the board's input:
-# a button (MOY_KERNEL_BUTTON_NAME), a touch panel, or nothing but serial and
-# the idle countdown to SAFE.
-FOOT = {
-    "tdeck": ("Press the trackball for the next, hold it to start.", 1),
-    "guition_s3": ("Tap a choice, or type retry, safe or repl on serial.", 0),
-    "p4": ("Press BOOT for the next, hold it to start.", 1),
-    "guition_p4": ("Safe start in 30 s, or type retry, safe or repl on serial.", 0),
-}
 # moy_kernel.c's K_BAND_ROWS and K_SCRATCH.
 BAND_ROWS = 8
 SCRATCH = 12288
@@ -60,15 +50,16 @@ class Rec(ctypes.Structure):
     _fields_ = [("magic", u32), ("version", u16), ("size", u16), ("crc", u32),
                 ("boot", u32), ("uptime_ms", u32), ("build", u32), ("pc", u32),
                 ("cause", u32), ("addr", u32), ("bt", u32 * 4), ("kind", u8),
-                ("core", u8), ("role", u8), ("reset", u8),
+                ("core", u8), ("role", u8), ("reset", u8), ("pid", u32),
                 ("task", ctypes.c_char * 16), ("id", ctypes.c_char * 24),
-                ("what", ctypes.c_char * 32)]
+                ("what", ctypes.c_char * 28)]
 
 
 class KState(ctypes.Structure):
     _fields_ = [("magic", u32), ("boot", u32), ("unproven", u8), ("next", u8),
                 ("reason", u8), ("test", u8), ("open_app", ctypes.c_char * 24),
-                ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24)]
+                ("open_wallpaper", ctypes.c_char * 24), ("open_game", ctypes.c_char * 24),
+                ("open_game_pid", u32), ("crashes", u8), ("crash_limit", u8)]
 
 
 class Decision(ctypes.Structure):
@@ -86,7 +77,7 @@ COLS = 64
 
 class View(ctypes.Structure):
     _fields_ = [("line", (ctypes.c_char * COLS) * 8), ("nlines", ctypes.c_int),
-                ("hint", ctypes.c_char * COLS), ("sel", ctypes.c_int)]
+                ("hint", ctypes.c_char * COLS)]
 
 
 def _lib():
@@ -105,7 +96,7 @@ def _lib():
     lib.moy_crash_crc32.argtypes = [u32, ctypes.c_void_p, ctypes.c_size_t]
     lib.moy_boot_decide.restype = Decision
     lib.moy_kstate_open_id.argtypes = [ctypes.POINTER(KState), ctypes.POINTER(ctypes.c_char_p)]
-    lib.moy_recovery_hit.argtypes = [ctypes.POINTER(Geom), ctypes.c_int, ctypes.c_int]
+    lib.moy_kstate_intake.argtypes = [ctypes.POINTER(KState), ctypes.POINTER(Rec)]
     lib.moy_recovery_view.argtypes = [ctypes.POINTER(View), ctypes.c_int, ctypes.POINTER(Rec),
                                       ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
     lib.moy_web_screen_render.argtypes = [ctypes.c_void_p, ctypes.POINTER(Geom),
@@ -152,10 +143,10 @@ def _record(**kw):
 # ---- the record -----------------------------------------------------------------
 
 def test_the_record_is_128_bytes_and_its_crc_is_zlibs(lib):
-    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 84
+    assert ctypes.sizeof(Rec) == 128 and ctypes.sizeof(KState) == 92
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
-    assert (r.magic, r.version, r.size) == (0x4D4F5943, 1, 128)
+    assert (r.magic, r.version, r.size) == (0x4D4F5943, 2, 128)
     assert r.crc == zlib.crc32(bytes(r)[12:])
     assert lib.moy_crash_valid(ctypes.byref(r))
     assert lib.moy_crash_crc32(0, b"123456789", 9) == 0xCBF43926
@@ -167,7 +158,7 @@ def test_a_torn_or_foreign_record_reads_as_none(lib):
     assert not lib.moy_crash_valid(ctypes.byref(Rec()))
     r = _record()
     lib.moy_crash_seal(ctypes.byref(r))
-    for field, value in (("pc", 1), ("kind", 0), ("version", 2), ("magic", 0)):
+    for field, value in (("pc", 1), ("kind", 0), ("version", 1), ("magic", 0)):
         t = Rec.from_buffer_copy(bytes(r))
         setattr(t, field, value)
         assert not lib.moy_crash_valid(ctypes.byref(t)), field
@@ -204,6 +195,57 @@ def test_a_power_on_starts_the_count_over(lib):
     assert (st.magic, st.boot, st.unproven, st.next) == (0x4D4F594B, 1, 0, 0)
     lib.moy_kstate_open(ctypes.byref(st))
     assert st.boot == 2
+
+
+def _crashed(lib, st, role=0, kind=1):
+    """A boot whose intake took a record of `role` and `kind` (1: a fault),
+    its decision, and the console it started proving itself before it
+    crashed."""
+    lib.moy_kstate_open(ctypes.byref(st))
+    r = Rec()
+    r.role, r.kind = role, kind
+    lib.moy_kstate_intake(ctypes.byref(st), ctypes.byref(r))
+    d = _decide(lib, st)
+    lib.moy_boot_proven(ctypes.byref(st))
+    return d
+
+
+def test_the_consoles_own_crashes_in_a_row_open_the_recovery_console(lib):
+    """THE CRASH COUNT (moy_crash.h): a crash no app, wallpaper or game was
+    open in counts one a boot, and the third in a row sends the next boot to
+    the recovery console; a choice made there starts the count over."""
+    st = _state(lib)
+    assert (st.crashes, st.crash_limit) == (0, 3)
+    assert _crashed(lib, st)[0] == BOOT_START
+    assert _crashed(lib, st)[0] == BOOT_START
+    assert _crashed(lib, st)[:2] == (BOOT_RECOVERY, WHY_CRASHES) and st.crashes == 3
+    lib.moy_kstate_open(ctypes.byref(st))              # reset on the floor: still the floor
+    assert _decide(lib, st)[:2] == (BOOT_RECOVERY, WHY_CRASHES)
+    st.next = BOOT_START                                # the floor's Try again
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert _decide(lib, st)[0] == BOOT_START and st.crashes == 0
+
+
+def test_a_clean_boot_starts_the_crash_count_over_and_the_ledgers_crashes_leave_it(lib):
+    st = _state(lib)
+    _crashed(lib, st)
+    _crashed(lib, st)
+    for role in (ROLE_APP, ROLE_WALLPAPER, ROLE_GAME):  # the strike ledger's, or a game's
+        assert _crashed(lib, st, role)[0] == BOOT_START and st.crashes == 2
+    assert _crashed(lib, st, kind=6)[0] == BOOT_START and st.crashes == 2   # a brownout's
+    lib.moy_kstate_open(ctypes.byref(st))
+    lib.moy_kstate_intake(ctypes.byref(st), None)
+    assert st.crashes == 0
+
+
+def test_a_crash_limit_of_0_never_opens_the_console_and_an_old_state_takes_the_default(lib):
+    st = _state(lib)
+    st.crash_limit = 0
+    for _ in range(5):
+        assert _crashed(lib, st)[0] == BOOT_START
+    st.crashes, st.crash_limit = 200, 200              # an older image's bytes past the ids
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert (st.crashes, st.crash_limit) == (0, 3)
 
 
 def test_a_boot_forgets_the_last_boots_open_ids(lib):
@@ -302,6 +344,24 @@ def test_a_crash_names_a_game_between_the_app_and_the_wallpaper(lib):
     assert st.open_game == b""
 
 
+def test_a_games_record_names_its_process(lib):
+    """The kernel's Player arms the pid of the run that ticked last beside
+    its id; a record of the GAME role carries it, any other role none, and
+    the game's end clears it."""
+    st = _state(lib)
+    lib.moy_kstate_open_pid.restype = ctypes.c_uint32
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"moybyte.brick_siege_lua")
+    lib.moy_kstate_arm_pid(ctypes.byref(st), 41)
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_GAME) == 41
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_APP) == 0
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"")
+    assert lib.moy_kstate_open_pid(ctypes.byref(st), ROLE_GAME) == 0
+    lib.moy_kstate_arm(ctypes.byref(st), ROLE_GAME, b"sky_run")
+    lib.moy_kstate_arm_pid(ctypes.byref(st), 7)
+    lib.moy_kstate_open(ctypes.byref(st))
+    assert st.open_game_pid == 0
+
+
 # ---- the recovery screen ----------------------------------------------------------
 
 _MEM = {}
@@ -325,19 +385,6 @@ def geom(lib, w, h, rot, swap, touch=0):
 
 def board_geom(lib, board):
     return geom(lib, *CONSOLES[board], touch=int(board in TOUCH))
-
-
-def render(lib, board, lines, hint, sel):
-    """(crc32, words) of the floor `board` draws for these lines: what the
-    board prints as `KERNEL recovery ... crc=` beside its `KERNEL line`s."""
-    g = board_geom(lib, board)
-    v = View()
-    for i, text in enumerate(lines):
-        v.line[i].value = text.encode()[:COLS - 1]
-    v.nlines, v.hint, v.sel = len(lines), hint.encode()[:COLS - 1], sel
-    fb = (ctypes.c_uint16 * (g.fb_w * g.fb_h))()
-    assert lib.moy_recovery_render(fb, ctypes.byref(g), ctypes.byref(v)) == 0
-    return zlib.crc32(bytes(fb)), fb
 
 
 def _view(lib, rec=None, serial=0, hint="Type retry, safe or repl on serial."):
@@ -367,45 +414,16 @@ def test_the_serial_protocol_keeps_its_words(lib):
     assert [lib.moy_recovery_choice_name(i) for i in range(3)] == [b"RETRY", b"SAFE", b"REPL"]
 
 
-# The crc32 of each console's floor for _view(_record()) with its FOOT and
-# RETRY selected;
-# MOY_RECOVERY_PNG=<dir> writes each as a PNG to look at.
-GOLDEN = {
-    "tdeck": 0x8302ECBC,
-    "guition_s3": 0xF0A214D7,
-    "p4": 0x8ED2C4F7,
-    "guition_p4": 0x6FB95981,
-}
-
-
-@pytest.mark.parametrize("board", sorted(CONSOLES))
-def test_each_consoles_floor_is_pinned(lib, board):
-    hint, serial = FOOT[board]
-    v = _view(lib, _record(), serial=serial, hint=hint)
-    lines = [v.line[i].value.decode() for i in range(v.nlines)]
-    crc, fb = render(lib, board, lines, v.hint.decode(), 0)
-    png = os.environ.get("MOY_RECOVERY_PNG")
-    if png:
-        _write_png(os.path.join(png, "%s.png" % board), fb, *CONSOLES[board])
-    assert crc == GOLDEN[board], "%s: %08x" % (board, crc)
-
-
 def test_every_printable_byte_draws_in_the_kernels_scratch(lib):
-    """The floor draws a crash record's own text, any printable byte, through
-    a scratch it never grows: every glyph at the largest size a kernel screen
+    """The web screen draws a pin's own text, any printable byte, through a
+    scratch it never grows: every glyph at the largest size a kernel screen
     draws in fits it, on the widest panel."""
     src = open(os.path.join(KERNEL, "moy_kernel.c")).read()
     assert "#define K_SCRATCH %d\n" % SCRATCH in src
     assert "#define K_BAND_ROWS %d\n" % BAND_ROWS in src
     g = geom(lib, 1280, 800, 0, 0)
-    v = View()
     text = bytes(range(0x20, 0x7F))
-    for i in range(0, len(text), 40):
-        v.line[i // 40 + 1].value = text[i:i + 40]
-    v.line[0].value, v.nlines = b"x", len(text) // 40 + 2
-    v.hint = text[:60]
     fb = (u16 * (1280 * 800))()
-    assert lib.moy_recovery_render(fb, ctypes.byref(g), ctypes.byref(v)) == 0
     for line in (text[i:i + 12] for i in range(0, len(text), 12)):
         w = View()
         lib.moy_web_screen_view(ctypes.byref(w), b"http://" + b"1" * 3 + b"/?pin=" + line)
@@ -436,7 +454,7 @@ def _render_geom(lib, w, h, rot, lines, swap=0):
         v.line[i].value = text.encode()
     v.nlines = len(lines)
     fb = (ctypes.c_uint16 * (g.fb_w * g.fb_h))()
-    assert lib.moy_recovery_render(fb, ctypes.byref(g), ctypes.byref(v)) == 0
+    assert lib.moy_web_screen_render(fb, ctypes.byref(g), ctypes.byref(v), None) == 0
     return list(fb)
 
 
@@ -444,7 +462,7 @@ def test_a_turned_screen_without_a_band_draws_nothing(lib):
     g = geom(lib, 320, 200, 90, 0)
     g.band = None
     fb = (ctypes.c_uint16 * (320 * 200))()
-    assert lib.moy_recovery_render(fb, ctypes.byref(g), ctypes.byref(View())) != 0
+    assert lib.moy_web_screen_render(fb, ctypes.byref(g), ctypes.byref(View()), None) != 0
     assert not any(fb)
 
 
@@ -452,25 +470,6 @@ def test_a_swapped_framebuffer_is_the_same_picture_high_byte_first(lib):
     plain = _render_geom(lib, 320, 240, 0, ["Swap"])
     swapped = _render_geom(lib, 320, 240, 0, ["Swap"], swap=1)
     assert [((p >> 8) | (p << 8)) & 0xFFFF for p in swapped] == plain
-
-
-@pytest.mark.parametrize("board", sorted(CONSOLES))
-def test_a_tap_on_a_choice_is_that_choice(lib, board):
-    """A row of the choices' card is its choice, the whole row; above the card,
-    beside it and under it nothing is."""
-    g = board_geom(lib, board)
-    w, h = CONSOLES[board][:2]
-    hits = {}
-    for y in range(h):
-        got = lib.moy_recovery_hit(ctypes.byref(g), w // 2, y)
-        if got >= 0:
-            hits.setdefault(got, []).append(y)
-    assert sorted(hits) == [0, 1, 2]
-    spans = [(min(v), max(v)) for _k, v in sorted(hits.items())]
-    assert spans[0][1] + 1 == spans[1][0] and spans[1][1] + 1 == spans[2][0]
-    rh = spans[0][1] - spans[0][0] + 1
-    assert rh >= (28 if board in TOUCH else 22)
-    assert lib.moy_recovery_hit(ctypes.byref(g), 2, spans[1][0]) == -1
 
 
 def _write_png(path, fb, w, h, rot, swap):
@@ -509,16 +508,18 @@ def _web(lib, board, url, pal=None):
 def test_the_plain_web_screen_says_where_to_go(lib, board):
     """What the kernel draws while no VM runs and the web console serves
     (docs/history/kernel_survival_2026-10.md section 13, answer 8; docs/history/look_2026-10.md
-    step 33): the address to open and the pin, the shell's page without its
-    QR -- and the address is what the pixels carry. With no address, that the
-    console is restarting."""
-    v, crc, fb = _web(lib, board, b"http://192.168.1.7/?pin=1234")
+    step 33): the address to open, the shell's page without its QR or its
+    pairing token -- and the address is what the pixels carry. With no
+    address, that the console is restarting."""
+    v, crc, fb = _web(lib, board, b"http://192.168.1.7/")
     lines = [v.line[i].value.decode() for i in range(v.nlines)]
-    assert lines == ["Open this in a browser:", "192.168.1.7", "1234"]
+    assert lines == ["Open this in a browser:", "192.168.1.7"]
+    v, _crc, _fb = _web(lib, board, b"http://192.168.1.7/#t=AAAA&b=BBBB")
+    assert [v.line[i].value.decode() for i in range(v.nlines)] == lines
     png = os.environ.get("MOY_RECOVERY_PNG")
     if png:
         _write_png(os.path.join(png, "web-%s.png" % board), fb, *CONSOLES[board])
-    _v, other, _fb = _web(lib, board, b"http://10.0.0.2/?pin=9999")
+    _v, other, _fb = _web(lib, board, b"http://10.0.0.2/")
     assert other != crc
     v, waiting, fb = _web(lib, board, b"")
     assert [v.line[i].value for i in range(v.nlines)] == [b"The console is restarting..."]
@@ -528,11 +529,11 @@ def test_the_plain_web_screen_says_where_to_go(lib, board):
 
 
 def test_the_web_screen_keeps_a_port_and_draws_on_the_kept_ground(lib):
-    v, day, _fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/?pin=42")
-    assert [v.line[i].value for i in range(3)] == [b"Open this in a browser:",
-                                                   b"192.168.1.7:8080", b"42"]
+    v, day, _fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/")
+    assert [v.line[i].value for i in range(v.nlines)] == [b"Open this in a browser:",
+                                                          b"192.168.1.7:8080"]
     night = (u16 * 6)(0x0884, 0xEF9F, 0xA539, 0xB55E, 0x31CB, 0x31CB)
-    _v, kept, fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/?pin=42", night)
+    _v, kept, fb = _web(lib, "tdeck", b"http://192.168.1.7:8080/", night)
     assert kept != day and fb[0] == 0x8408       # Night's ground, high byte first
 
 
@@ -565,18 +566,11 @@ def test_the_kernels_logo_is_the_boot_screens_picture(lib, board):
 
 
 def test_the_kernels_palettes_are_moys(lib):
-    """The kernel cannot read a theme, so moy_scr.c and moy_recovery.c carry
-    Moy Day's splash palette and Moy Night's recovery roles as constants:
-    held here to the theme they copy."""
+    """The kernel's first light cannot read a theme, so moy_scr.c carries Moy
+    Day's splash palette as a constant: held here to the theme it copies."""
     from runtime import chrome, console
     day = (u16 * 6).in_dll(lib, "moy_splash_day")
     assert bytes(day) == console.splash_pal(chrome.theme_colors("moy", "light"))
-    th = chrome.theme_colors("moy", "dark")
-    night = [chrome.rgb565_of(th[k]) for k in ("panel", "surface", "ink", "ink_dim",
-                                               "border", "accent")]
-    src = open(os.path.join(KERNEL, "moy_recovery.c")).read()
-    assert "static const uint16_t NIGHT[N_PAL] = {%s};" % ", ".join(
-        "0x%04Xu" % c for c in night) in src
 
 
 def test_moys_art_is_chromes(lib):
@@ -609,27 +603,3 @@ class _Scr(ctypes.Structure):
                 ("scratch", ctypes.c_void_p), ("scratch_n", ctypes.c_size_t),
                 ("px", ctypes.c_void_p), ("stride", ctypes.c_int), ("y0", ctypes.c_int),
                 ("y1", ctypes.c_int), ("fails", ctypes.c_int)]
-
-
-def test_each_floor_names_its_input_once():
-    """The foot names the board's own way to choose, and the serial words
-    show once: in the foot where it has room for them, else on their own
-    line -- never both. FOOT is moy_kernel.c's, string for string."""
-    import json
-    en = json.load(open(os.path.join(ROOT, "native", "moy_spine", "strings", "en.json")))
-    en = en.get("strings", en)
-    src = open(os.path.join(KERNEL, "moy_kernel.c")).read()
-    assert "int serial = 1;" in src and "MOY_S_RECOVERY_HINT_BUTTON" in src
-    buttons = {"tdeck": "the trackball", "p4": "BOOT"}
-    for board, d in (("tdeck", "lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK"),
-                     ("p4", "esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4")):
-        h = open(os.path.join(ROOT, "firmware", d, "mpconfigboard.h")).read()
-        assert '#define MOY_KERNEL_BUTTON_NAME              "%s"' % buttons[board] in h
-    for board, (hint, serial) in FOOT.items():
-        if board in buttons:
-            assert hint == en["recovery.hint_button"] % buttons[board] and serial
-        elif board in TOUCH:
-            assert hint == en["recovery.hint_touch"] and not serial
-        else:
-            assert hint == en["recovery.safe_in"] % 30 and not serial
-        assert ("retry, safe or repl" in hint) != bool(serial), board

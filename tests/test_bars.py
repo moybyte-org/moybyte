@@ -65,7 +65,8 @@ def _cells(packed, i):
 def test_todays_bar_packs_to_the_fixed_game_cluster():
     """The game canvas's strip: the packing of today's bar at 320 wide is the
     fixed cluster the crash-era constants name."""
-    got = _cells(shell_layout.pack(320, 240, 18, 1, 1, 40, of=DEFAULT_BARS), 0)
+    got = _cells(shell_layout.pack(320, 240, 18, 1, 1, 40, of=DEFAULT_BARS, cluster=False,
+                                   items=0), 0)
     assert got["battery"] == BL._ZONE_BATT
     assert got["wifi"] == BL._ZONE_WIFI
     assert got["menu"] == BL._ZONE_GEAR
@@ -302,7 +303,11 @@ def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
     L = ws.layout
     assert L.status_h == (40 if desk else 28)
     names = _names_of(L.bars)[0]
-    assert names[0] == "menu" and names[-4:] == ["zone", "wifi", "battery", "clock"]
+    # (a handheld's status cluster keeps its ring's room: a `status` cell
+    # ahead of the Wi-Fi, empty of items)
+    status = [] if desk else ["status"]
+    assert names[0] == "menu" and names[-4 - len(status):] == \
+        ["zone"] + status + ["wifi", "battery", "clock"]
     assert ("chips" in names) == desk
     menu = L.bars[0][3][0][1]
     assert menu[0] == 2 * L.cs and menu[2] == layout_base.sys_tile(L.status_h)[2]
@@ -408,11 +413,20 @@ def test_the_status_clusters_ink_is_one_gap_apart(tmp_path, config, lo, hi, mode
             run = [c for c in cells if c[0] in ("wifi", "battery", "clock")]
             if len(run) < 3:
                 continue
-            dx = bl._status_dx(cells) or {}
+            cluster = bl._cluster()
+            dx = bl._status_dx(cells, cluster) or {}
             inks = [bl._ink(n, r) for n, r, _t, _s in run]
             inks = [(a + dx.get(n, 0), b + dx.get(n, 0))
                     for (a, b), (n, _r, _t, _s) in zip(inks, run)]
             gaps = [inks[i + 1][0] - inks[i][1] - 1 for i in range(len(inks) - 1)]
+            if cluster:
+                # a handheld's cluster keeps its ring's room before the
+                # clock: the ring stands CLOCK_CLEAR off the clock's cell
+                ring = bl._cluster_box(cells)
+                clock = [r for n, r, _t, _s in run if n == "clock"][0]
+                fs = ws.layout.fs
+                assert clock[0] - (ring[0] + ring[2]) >= shell_layout.CLOCK_CLEAR * fs, ring
+                gaps = gaps[:-1]
             assert max(gaps) - min(gaps) <= 1, gaps
             assert lo <= min(gaps) and max(gaps) <= hi, gaps
             return

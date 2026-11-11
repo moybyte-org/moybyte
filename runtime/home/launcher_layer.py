@@ -635,7 +635,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         bytes it saves."""
         ws = self.ws
         g = self.grid
-        g.frame_no = ws._frames_drawn
+        g.frame_no = ws.frame_state.frames_drawn
         g.restore_whole = True
         if self._lib_unsupported:
             g.face_key = None
@@ -736,12 +736,12 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
             # (the statics this frame's band key was made of: `_band_key`)
             key = self._retained_key(self.ws.sys_canvas, self._sk.v)
             if key != self._lib_key:
-                self._cap_owed = (self.ws._frames_drawn, key, None)
+                self._cap_owed = (self.ws.frame_state.frames_drawn, key, None)
         elif end == -1:
             if whole:
                 self._still_debt()
             else:
-                self._debt_owed = self.ws._frames_drawn
+                self._debt_owed = self.ws.frame_state.frames_drawn
 
     def _band_note(self, cv, dt, vouch=True):
         """A frame that put the band there by other means (the retained
@@ -809,7 +809,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         lay = self.ws.layout
         q = g.quiet()[0]
         d = _ui_draw.depth()
-        m = _ui_draw.mark_reach("part") + 1
+        m = _ui_draw.mark_reach("cell") + 1
         if d[5]:
             m += d[8] + max(abs(d[9]), abs(d[10]))    # the hero's shadow
         x0 = max(lay.cx, q[0] - m)
@@ -938,7 +938,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
             # nothing waits on the board (`capture_due`)
             key = self._retained_key(cv)
             if key != self._lib_key:
-                self._cap_owed = (ws._frames_drawn, key, parts)
+                self._cap_owed = (ws.frame_state.frames_drawn, key, parts)
         else:
             self._still_debt()
         return True
@@ -949,7 +949,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         owed = self._debt_owed
         self._debt_owed = None
         ws = self.ws
-        if owed is not None and owed + 1 == ws._frames_drawn and not self.grid.moving:
+        if owed is not None and owed + 1 == ws.frame_state.frames_drawn and not self.grid.moving:
             ws.mark_dirty()
 
     def capture_due(self):
@@ -962,7 +962,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         owed = self._cap_owed
         self._cap_owed = None
         ws = self.ws
-        if owed is None or ws._frames_drawn != owed[0] + 1:
+        if owed is None or ws.frame_state.frames_drawn != owed[0] + 1:
             return
         cv = ws.sys_canvas
         if self._retained_key(cv) == owed[1]:
@@ -1315,7 +1315,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         ws = self.ws
         grid = self.grid
         down = ws.pointer.down
-        i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
+        i = grid.pointer_frame(px, py, click, down, dt_ms=ws.frame_state.pointer_dt_ms)
         if grid.moving:
             ws.mark_dirty()
         if i is not None:
@@ -1373,7 +1373,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
             return True
         if not self._carousel():
             return self._grid_pointer(px, py, click)
-        i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
+        i = grid.pointer_frame(px, py, click, down, dt_ms=ws.frame_state.pointer_dt_ms)
         if grid.moving:
             ws.mark_dirty()
         if i is not None:
@@ -1406,7 +1406,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         if not down or grid.dragging or abs(px - h[1]) > slop or abs(py - h[2]) > slop:
             self._hold = None
             return False
-        h[3] += self.ws._frame_dt_ms
+        h[3] += self.ws.frame_state.frame_dt_ms
         if h[3] < LONG_PRESS_MS:
             return False
         self._hold = None

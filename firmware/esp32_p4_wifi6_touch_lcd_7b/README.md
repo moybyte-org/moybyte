@@ -19,14 +19,17 @@ the kernel's (`native/moy_input/moy_hid.c` on NimBLE's host task,
 `moy_ble_task.c`, since 2026-10-07): over the C6 on ESP-Hosted it discovers
 HOGP service `0x1812`, bonds (Just Works, the bonds in NimBLE's NVS store),
 prefers the Boot Host path (Protocol Mode `0x00`, then Boot Keyboard Input
-only), and writes make/break state and the typed byte into the kernel table's
-`ble` source, which the frame takes before its edge snapshot. There is no
+for the keys), and writes make/break state and the typed byte into the kernel
+table's `ble` source, which the frame takes before its edge snapshot. There is no
 `bluetooth` module and nothing of it runs Python, so a soft reset leaves the
 link up. `bt status` names the machine's state. Settings' picker lists every
-nearby HOGP keyboard and reconnects only the one picked. Report-only keyboards
-are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
-Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
-USB-HID is #83's, out of sprint 3.
+nearby HOGP keyboard; no keyboard is connected until one is picked there, and
+then only that one, reconnected after a reboot. Report-only keyboards
+are decoded as the standard eight-byte report; a two-byte Consumer Control
+report (one usage) is a media key, which the media service answers
+(`native/moy_input/moy_hid.h`); arbitrary/NKRO Report Maps, bitmap consumer
+reports, Classic-Bluetooth-only keyboards and gamepads are not supported.
+The console's own USB keyboard and mouse are #83's.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
@@ -58,8 +61,15 @@ before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
 the whole lever existed for. Why, with numbers:
 `docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
 
-OTA is wired on this board like every other; wired USB-HID keyboard, mouse
-and gamepad is #83. Open performance work lives in #58 and #77.
+OTA is wired on this board like every other. The high-speed USB OTG port is
+the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`: HID reports,
+CDC-ACM serial and USB-MIDI for the process holding it), so MicroPython's
+TinyUSB device is off (`MICROPY_HW_ENABLE_USBDEV` 0 in `mpconfigboard.h`);
+the console's own USB keyboard, mouse and gamepad are #83's. The same port
+is Settings' USB drive (native/moy_usbdisk: the card as a drive on a
+computer, the store held closed meanwhile), which refuses while the host is
+up this boot and the host while it is on; the CH343 dev channel stays. Open
+performance work lives in #58 and #77.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 
@@ -124,8 +134,9 @@ make firmware-flash-p4 PORT=/dev/ttyACM0           # esptool @0x2000 (the P4 app
 make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 ```
 
-(Raw equivalent: `.venv/bin/python -m esptool --chip esp32p4 --port /dev/ttyACM0
---baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin`.)
+(Raw equivalent: `ESPTOOL_STUB_VERSION=2 .venv/bin/python -m esptool --chip
+esp32p4 --port /dev/ttyACM0 --baud 3000000 write_flash 0x2000
+dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
 - `build.sh` clones MicroPython v1.28.0 into `.build/`, reuses the T-Deck
   build's ESP-IDF v5.5.1 checkout when present (clones its own otherwise),
@@ -141,8 +152,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
   custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×8 MiB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
-  console — with the tail from 0x1010000 left unlisted so mainline auto-builds
-  the vfs over it; a cable flash that moves it erases the new store's first
+  console — then the 128 KiB coredump partition a panic writes its ESP-IDF
+  core dump to (`tools/coredump.py` reads it), with the tail from 0x1030000
+  left unlisted so mainline auto-builds the vfs over it; a cable flash that moves it erases the new store's first
   blocks and the store re-seeds, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
   with the Guition JC8012P4A1C and staged here by `board.toml` `[native.p4]`;
@@ -237,18 +249,21 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
   MicroPython never enables it, so without it the card times out
-  card-or-no-card. `device/p4_desktop.py` (`p4_card`, shared with the Guition
-  P4) does the pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)`
-  then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on),
-  then `moy_sd.mmc(0, 43, 44, (39, 40, 41, 42))` brings slot 0 up once (4-bit,
-  20 MHz; never torn down) and `moy_store.card` mounts the store's own volume
+  card-or-no-card. `native/moy_sd/moy_sd.c` pokes it before the card's first
+  command: `0x501151D8 |= (1<<7)|(1<<14)` then `|= (1<<8)`
+  (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on; the register is
+  `MOY_SD_MMC_LDO_REG` in `mpconfigboard.h`), then brings slot 0 up once from
+  the board.toml `sdmmc0` row (4-bit, 20 MHz; never torn down). The console
+  calls it as `moy_sd.up()` from `device/p4_desktop.py`'s `p4_card` (shared
+  with the Guition P4), and the kernel's recovery floor with no VM; then
+  `moy_store.card` mounts the store's own volume
   over it — the kernel's FATFS with the card's read cache
   (`native/moy_store/moy_card.c`), each transfer's bounce in PSRAM, which this
   host's DMA reaches.
 - **A card that mounts IS the cart store** (`device/card_store.py`; the T-Deck's
   and the Guition S3's model, minus their bus-sharing machinery — this slot
   shares nothing). Mounted once at `/sd`; the carts and the system documents
-  beside them (`system.json`, `wifi.json`, `shared.moygfx`) live under
+  beside them (`system/settings`, `wifi.json`, `shared.moygfx`) live under
   **`/sd/moybyte/`** — the T-Deck's layout, so nothing lands at the card's root.
   FAT32 and **exFAT** both mount: the esp32 port leaves FatFS's exFAT off
   (`MICROPY_FATFS_EXFAT`, set in `mpconfigboard.h`), and a card over 32GB ships
@@ -271,7 +286,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   already enables MicroPython Bluetooth central/GATT client + pairing/bonding
   (`CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI`); HCI shares the C6's SDIO transport with
   WiFi. Only BLE/HOGP keyboards can work — a Bluetooth 3.0/BR-EDR-only keyboard
-  will never appear in the scan. Discovery retries with a 5-second idle gap so
+  will never appear in the scan. With no keyboard picked nothing scans in the
+  background; the picked one's discovery retries with a 5-second idle gap so
   an absent keyboard does not keep the shared radio in a continuous scan. The
   ESP-IDF 5.5 DPI driver restarts its full-frame DSI DW-GDMA transfer from a
   default low-priority completion interrupt; ESP-Hosted SDIO bursts during BLE
@@ -383,7 +399,7 @@ below, so re-check against those, not against it.
   polling works.
 - Audio: ES8311 codec (0x18) + ES7210 quad-mic (0x40) on the same I2C bus;
   I2S MCLK13/WS10/BCLK12/DIN11/DOUT9; PA enable GPIO53.
-- Boot button GPIO35. No camera fitted (empty MIPI-CSI socket).
+- Boot button GPIO35. No camera fitted (empty MIPI-CSI socket); the image carries no camera driver, so `moybyte.camera` is None.
 - **Web Serial (the website's flasher) fails with "The device has been lost"
   after any pyserial tool has touched the port.** Not a hardware fault and not a
   disconnect — the port stays enumerated, and udev reports no remove event.
@@ -399,3 +415,17 @@ below, so re-check against those, not against it.
   ```
 - Factory firmware (xiaozhi AI assistant) backup: `dist/p4/factory_full_32MB_backup.bin`
   (local only, gitignored) — restore with `write_flash 0 <file>`.
+
+## Free pins
+
+`board.toml`'s `[hardware]` leases these, the pins the board map above gives
+nothing (`docs/os_2026-11/hardware.md` §1): GPIO0, GPIO1, GPIO2, GPIO3,
+GPIO4, GPIO5, GPIO6, GPIO20, GPIO21, GPIO22, GPIO23, GPIO28, GPIO29, GPIO30,
+GPIO31, GPIO45, GPIO46, GPIO47, GPIO48, GPIO49, GPIO50, GPIO51 and GPIO52.
+Every other pad has its own row there: the OS's buses, the strapping pins 34
+and 36, and both USB 1.1 PHYs (24–27).
+
+UART1 and SPI2 are leased on these pins too (`uart1`: TX GPIO47, RX GPIO48;
+`spi2`: SCK GPIO49, MOSI GPIO50, MISO GPIO51), rows that ride the gpio row:
+those are their defaults, and a lease may route either unit to other pins of
+the row through the GPIO matrix.

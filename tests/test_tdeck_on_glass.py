@@ -45,10 +45,50 @@ def board():
 # same tree: board.toml's moy_wasm `take` turned to `deny`, built from an
 # EMPTY build dir (a configured one keeps the engine in its module table and
 # fails to link; a fresh `tools/worktree.py new` has one). Measured
-# 2026-10-31 on 1993fb0c, two fresh boots alike: 126791 free, 86016 largest;
-# the image with the engine read 125243 / 81920. A change that adds internal
-# statics re-measures it the same way.
-WASM_IDLE_BASELINE = (126791, 86016)
+# 2026-11-05 on 687c296a5, two fresh boots: 125843 and 125863 free, 86016
+# largest; the image with the engine read 124683 free. The idle desk's bar
+# reads the battery gauge (its low glyph), so the baseline holds what the
+# ADC driver keeps in internal SRAM once read. A change that adds internal
+# statics, or internal RAM the idle desk holds, re-measures it the same way.
+# Plus mDNS's scratch (the espressif/mdns component's four function-static
+# buffers, a PSRAM block while the responder runs, moybyte_patch_mdns_psram):
+# 1849 bytes of .bss by the link map against dev 145567a4f, 2026-11-06.
+# Less CORE_DUMP_SRAM, what the core dump keeps internal (8fa65650d,
+# 2026-11-09), all of it reached by a panic with the cache off: its own
+# 1792-byte stack (the IDF's floor while task stacks may be PSRAM), 1892 with
+# what the IDF adds to it; the ISR stacks, which an ELF dump needs at 2096
+# bytes a core where they were 1536, 1120; the panic's registers, frames,
+# flash config and the writer's other statics, 941; the kernel's table of
+# loaded modules, which the dump carries (native/moy_elf/moy_elf_maps.h,
+# .dram2.coredump), and its keys, 240; and 177 bytes of IRAM, the flash and
+# port functions the writer calls with the cache off, which move the DRAM's
+# start a 256-byte step. 4450 bytes by the heap's start against dev
+# eb0498275, link maps, 2026-11-09.
+# And BATCH6_SRAM, the statics of the kernel's alarms (native/moy_kernel/
+# moy_evq.c: the woken pids and the timer counters, the timers themselves
+# PSRAM in their queues), the media service's last run's end and key time
+# (native/moy_media/moy_media.c, its state PSRAM) and the VM queue's flag:
+# 70 bytes of .bss by the link map against dev eb0498275, 2026-11-09.
+CORE_DUMP_SRAM = 4450
+BATCH6_SRAM = 70
+# Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
+# its first use: the per-verb profiler's counters (native/moycore/
+# moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
+# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# app's theme names another shape) and the dev channel's `state` line while a
+# run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
+# heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
+# heap's start sits where it was at eb0498275 or lower, and the largest
+# block with it.
+MOVED_SRAM = 4560
+# And TAP_FONTS_SRAM, the tap floor's two font roles in the UI's font tables
+# (native/moy_ui/moy_ui.c's `s_font`, 8, and the main instance's `font_from`
+# and `font_local`, native/moy_ui/moy_ui_api.h, 16): ids the draw path reads
+# every row, so they stay internal. 24 bytes of .bss by the link map against
+# dev 57dfc2d20, 2026-11-11.
+TAP_FONTS_SRAM = 24
+WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM,
+                      86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
@@ -71,8 +111,8 @@ def test_the_hello_module_runs_and_foreign_modules_are_refused(board, wasm):
         board, WASM_BOARD_DIR, wasm)
 
 
-def test_unknown_sources_lets_only_a_missing_signature_through(board, wasm):
-    on_glass.wasm_unknown_sources_lets_only_a_missing_signature_through(
+def test_consent_lets_only_a_missing_signature_through(board, wasm):
+    on_glass.wasm_consent_lets_only_a_missing_signature_through(
         board, wasm)
 
 
@@ -114,12 +154,18 @@ def wasm_carts(board):
 
 def test_a_compiled_app_reaches_its_roles_through_imports(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_reaches_its_roles(board, root)
+    try:
+        on_glass.wasm_app_reaches_its_roles(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_a_compiled_app_draws_the_toolkits_widgets(board):
     root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
-    on_glass.wasm_app_draws_the_toolkit(board, root)
+    try:
+        on_glass.wasm_app_draws_the_toolkit(board, root)
+    finally:
+        on_glass.remove_carts(board, on_glass.WASM_APPS)
 
 
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
@@ -153,6 +199,19 @@ def test_a_blit565_frame_goes_to_the_glass_from_the_carts_memory(board):
     on_glass.compiled_frames_go_to_the_glass_from_the_cart(board, on_glass.JET_TITLE, 1)
 
 
+# A fullscreen compiled play runs in the kernel's front with the VM up: the
+# frame fold takes its frames from the cart's memory in C (moy_glass.front's
+# frame op), a palette frame (the blit fixture) and a blit565 one (Jet), and
+# its bands are the composite the frame makes, byte for byte.
+def test_a_compiled_palette_run_shows_its_frames_in_front(board, wasm_carts):
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, wasm_carts["blit"], "fold")
+
+
+def test_a_compiled_blit565_run_shows_its_frames_in_front(board):
+    on_glass.jet_push(board, WASM_BOARD_DIR)
+    on_glass.a_compiled_run_shows_its_frames_in_front(board, on_glass.JET_TITLE, "fold")
+
+
 def test_a_compiled_cart_with_no_module_runs_on_the_interpreter(board, wasm_carts):
     on_glass.wasm_no_module_at_all_runs_on_the_interpreter(board, WASM_BOARD_DIR)
 
@@ -169,8 +228,8 @@ def test_a_compiled_cart_whose_module_was_tampered_with_is_refused(board, wasm_c
     on_glass.wasm_tampered_module_is_refused(board, WASM_BOARD_DIR)
 
 
-def test_an_unsigned_cart_runs_only_with_unknown_sources_on(board, wasm_carts):
-    on_glass.wasm_unsigned_cart_follows_unknown_sources(board, WASM_BOARD_DIR)
+def test_an_unsigned_cart_runs_natively_only_with_native_granted(board, wasm_carts):
+    on_glass.wasm_unsigned_cart_follows_its_consent(board, WASM_BOARD_DIR)
 
 
 def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_carts):
@@ -179,6 +238,14 @@ def test_a_compiled_cart_too_big_for_the_board_opens_the_notice(board, wasm_cart
 
 def test_a_compiled_cart_for_a_newer_console_opens_the_notice(board, wasm_carts):
     on_glass.wasm_newer_cart_opens_the_notice(board, WASM_BOARD_DIR)
+
+
+def test_a_trap_in_init_is_the_carts_own_error(board, wasm_carts):
+    on_glass.wasm_init_trap_is_the_carts_own_error(board, WASM_BOARD_DIR)
+
+
+def test_a_trap_in_init_with_the_vm_down_is_the_carts_own_error(board, wasm_carts):
+    on_glass.wasm_init_trap_is_the_carts_own_error(board, WASM_BOARD_DIR, stopped=True)
 
 
 def test_a_folder_in_the_cart_reads_as_a_missing_file(board, wasm_carts):
@@ -268,6 +335,58 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_log_word_reads_the_ring(board):
+    on_glass.the_log_word_reads_the_ring(board)
+
+
+def test_the_shell_answers_over_serial(board):
+    on_glass.the_shell_answers_over_serial(board)
+
+
+def test_wasi_commands_run_in_the_shell(board):
+    on_glass.wasi_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_elf_commands_run_in_the_shell(board):
+    on_glass.elf_commands_run(board, WASM_BOARD_DIR)
+
+
+def test_pkg_installs_a_cart_from_the_carts_repo(board):
+    on_glass.pkg_installs_a_cart_from_the_carts_repo(board)
+
+
+def test_the_clock_syncs_when_the_network_comes_up(board):
+    on_glass.the_clock_syncs_when_the_network_comes_up(board)
+
+
+def test_an_alarm_wakes_the_screen_and_at_logs(board):
+    on_glass.an_alarm_wakes_the_screen_and_at_logs(board)
+
+
+def test_the_shell_answers_with_the_vm_down(board):
+    on_glass.the_shell_answers_with_the_vm_down(board)
+
+
+def test_the_event_rings_keep_their_records(board):
+    on_glass.the_event_rings_keep_their_records(board)
+
+
+def test_the_scheduler_stops_a_runaway_service(board):
+    on_glass.the_scheduler_stops_a_runaway_service(board)
+
+
+def test_a_lua_service_runs_on_a_task_of_its_own(board):
+    on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
+
+
+def test_an_asyncio_service_runs_beside_the_desk(board):
+    on_glass.an_asyncio_service_runs_beside_the_desk(board)
+
+
+def test_an_on_crash_service_restarts_after_a_forced_crash(board):
+    on_glass.an_on_crash_service_restarts_after_a_forced_crash(board)
+
+
 def test_the_painter_matches_the_host(board):
     on_glass.painter_matches_host(board)
 
@@ -301,7 +420,7 @@ def test_the_theme_font_is_installed(board):
 
 
 def test_the_font_set_is_the_tiers(board):
-    on_glass.the_font_set_is_the_tiers(board, 'handheld')
+    on_glass.the_font_set_is_the_tiers(board, 'lilygo_t_deck_plus_mainline')
 
 
 def test_the_glyph_lane_draws_the_hosts_bytes(board):

@@ -119,7 +119,7 @@ left:
   (`docs/history/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
   from the formulas every tier runs, so a widget or a layout formula change
   moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
-  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
+  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`. `tools/golden_png.py CONFIG` renders a config's goldens to PNGs to look at.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
   an `"app"` block in the identity cart's manifest, and `runtime/shell/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on
@@ -131,7 +131,7 @@ left:
   deliberately: carts authors executable content, so granting it to a cart is
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
   +5.1µs) — live state reads through a method. `prefs_ns` exists because
-  `paint_doc` is the real key in kids' `system.json` since #108.
+  `paint_doc` is the real key in kids' `system/settings` since #108.
 - **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
   C, with `runtime/toolkit/ui_draw.py` its face (sprint 6, `docs/history/kernel_toolkit_2026-10.md`);
   `runtime/toolkit/ui.py` is the public UI API over it (`docs/ui_api_2026-10.md`), and
@@ -142,14 +142,14 @@ left:
   effects), installed with the theme, and `tests/test_style.py` holds the style
   tables and the `colors=` hatch.
 - **A user can add an app.** `runtime/shell/system_api.py` maps manifest permissions to
-  roles as an ALLOWLIST (`native/moy_app/roles.json` is the table); never
+  roles as an ALLOWLIST (`native/os_calls.json`'s role rows are the table); never
   grantable: `artwork`, `carts`, `damage`, `install`, `notify`, `surface`,
   `wallpaper`. `clipboard` comes with the clipboard permission, and `ui` goes to
   every app. **An ungranted verb is ABSENT, not
   stubbed** (`system_carts/moybyte.notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives
-  in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit
+  in a window whose blit source IS `ws.run.canvas`, so binding makes the desktop blit
   itself. Found only by rendering it.
 - **`crash_guard` disables a type:"app" cart after three crashed opens**, and
   committing fixed CODE forgives the strikes (`Project.commit_code` →

@@ -49,6 +49,10 @@ def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
     # with the card: the matrix is the cache's too, so it must have been hit.
     hits = re.search(r"card cache (\d+) hits checked", out)
     assert hits and int(hits.group(1)) > 0, out
+    # ...and its zero runs (a new directory's cluster, cleared as one write):
+    # every cut falls inside and between them too.
+    runs = re.search(r"(\d+) zero runs", out)
+    assert runs and int(runs.group(1)) > 0, out
 
 
 def test_the_seeded_fuzz_runs_clean_under_the_sanitizers():

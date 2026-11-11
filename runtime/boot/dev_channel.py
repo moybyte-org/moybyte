@@ -28,7 +28,7 @@ COUNTS what it swallowed (`rx=` on the SERIAL line), so "something is
 injecting into stdin" is a number rather than a mystery hang.
 
 THE READER IS THE KERNEL'S (native/moy_kernel/moy_devch.c): it takes the
-bytes, runs the kernel's own words (`power`, `bl`, `quit`) and hands every
+bytes, runs the kernel's own words (`power`, `bl`, `log`, `sh`, `quit`) and hands every
 other line to `run` here through the loop's word upcall. The gestures `tap`,
 `swipe` and `drag` play from C too; the words below find what they aim at.
 
@@ -110,10 +110,10 @@ except ImportError:        # host, and a board without the kernel
 # being written here.
 try:
     from settings_layer import SETTINGS_TOGGLES
-    from crash_guard import last_crash
+    from crash_guard import core_dump, last_crash
 except ImportError:        # host / test -- the runtime package
     from runtime.settings_layer import SETTINGS_TOGGLES
-    from runtime.crash_guard import last_crash
+    from runtime.crash_guard import core_dump, last_crash
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
@@ -715,17 +715,15 @@ def _remote_state(ws):
     st = {}
     try:
         st["screen"] = ws.screen
-        st["frames"] = getattr(ws, "_frames_drawn", None)
+        st["frames"] = ws.frame_state.frames_drawn
         st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
         # A fit notice is a panel too, and not an error: a compiled cart this
         # console cannot hold, refused before it loaded (Player.notice).
-        notice = getattr(getattr(ws, "player", None), "notice", None)
+        notice = getattr(getattr(getattr(ws, "run", None), "player", None),
+                         "notice", None)
         st["notice"] = notice
         st["cart_error"] = None if notice else getattr(ws, "cart_error", None)
         st["diag"] = bool(getattr(ws, "diag_live", False))
-        # Settings -> UNKNOWN SOURCES: whether a compiled cart whose module
-        # carries no signature may load on this console.
-        st["unknown_sources"] = bool(getattr(ws, "unknown_sources", False))
         # Idle screen blank: the harness has to be able to tell a blanked panel
         # from a hung one -- they look identical from the host end.
         # The kernel's ladder (native/moy_kernel/moy_idle.c): [asleep, the
@@ -794,8 +792,6 @@ def _remote_state(ws):
             "focus": f, "focus_box": None if box is None else list(box),
             "wifi_view": bool(sl.wifi_view),
             "bt_view": bool(getattr(sl, "bt_view", False)),
-            # the toggle whose warning is up before it turns ON, or None
-            "confirm": getattr(sl, "confirm_key", None),
             # the kernel's last-crash panel is up (Settings -> LAST CRASH)
             "crash_view": bool(getattr(sl, "crash_view", False)),
         }
@@ -813,8 +809,10 @@ def _remote_state(ws):
     try:
         # The last crash the kernel recorded (native/moy_kernel): what was
         # OPEN in the strike ledger, why it stopped, where. None on a board
-        # with no record and on every tier without the kernel.
+        # with no record and on every tier without the kernel. `dump`: the
+        # size of the core dump the panic wrote to flash, or None.
         st["crash"] = last_crash()
+        st["dump"] = core_dump()
     except Exception as exc:  # noqa: BLE001
         st["crash_err"] = str(exc)
     try:
@@ -909,7 +907,7 @@ def _remote_state(ws):
         # The tick model (#217): [rate, divisor, misses, steady] while a game
         # is paced, else None -- the on-glass suites read "did the cart hold
         # its tick" from here rather than from pixels.
-        pl = ws.player
+        pl = ws.run.player
         st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
                        bool(pl.sched.steady)] if pl.tick_ms else None)
         st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
@@ -935,7 +933,7 @@ def _remote_state(ws):
             st["run"]["stop"] = info[11]
             st["run"]["vm_down"] = bool(info[12])
             # the verdict's fit check with the VM up: (need, need_block,
-            # free, largest, vm_heap) bytes, None where it reached none
+            # free, largest, what a stop frees) bytes, None where it reached none
             st["run"]["fit"] = list(info[13]) if len(info) > 13 and info[13] else None
         st["play"] = (None if info is None else
                       {"runtime": info[0], "frames": info[3], "ticks": info[4],
@@ -953,7 +951,7 @@ def _remote_state(ws):
         # cart and for a tier whose allocator has one region: the moment a cart
         # tips into the ~2x-slower PSRAM regime has to be distinguishable from
         # the board that cannot tip at all.
-        st["sram"] = ws.player.sram_report()
+        st["sram"] = ws.run.player.sram_report()
     except Exception as exc:  # noqa: BLE001
         st["sram_err"] = str(exc)
     return st
@@ -1007,7 +1005,17 @@ class DevChannel:
       tap <x> <y>     a synthetic tap at canvas coords
       tap <name>      tap a named bar button (any ws.layout.<name>_btn rect)
       run [name]      select the first cart whose title matches, and run it
-      open <what>     settings|projects|appearance|wifi -- deterministic app open
+      open <what>     settings|projects|appearance|wifi|log -- deterministic app
+                      open (`log`: Settings' System log page)
+      log [level] [+seq] [name]   the OS log (native/moy_kernel/moy_log.h): a
+                      `LOG` line a line of each record at that level or more
+                      severe, from record seq on, of the processes whose name
+                      holds `name`, then `LOG end` -- a kernel word, answered
+                      with no VM running too
+      sh <line>       the line in the C shell's serial session
+                      (native/moy_sh/moy_sh_board.h): `SH` a line of its
+                      output, then `SH end <status>` (`SH more`: send the
+                      command's next line) -- a kernel word too
       swipe x0 y0 x1 y1 [frames]   a touch gesture through the real pointer
                       feed: press edge, held interpolation, real release
       drag [frames] [step]         grab the TOP window's title strip and
@@ -1016,10 +1024,7 @@ class DevChannel:
                       and every periodic line, PERF included
       steady 0|1      the tick model's STEADY / FREE knob (#217)
       crisp 0|1       the #204 nearest-neighbour composite of palette-based
-                      game frames
-      unknown_sources 0|1   Settings -> UNKNOWN SOURCES: whether a compiled
-                      cart's unsigned module may load, set without the
-                      screen's warning -- these three are SETTINGS_TOGGLES
+                      game frames -- these two are SETTINGS_TOGGLES
                       entries that declared a serial word, not branches
                       written here; a board whose capability gate says no
                       declines the word. None persists, so a test or a
@@ -1037,9 +1042,12 @@ class DevChannel:
                       now, `power on` wakes now. The board keeps RENDERING while
                       dark, so an unattended bench run still produces frames.
       web [start]     serve the wasm console from this board (ws.webhost)
-      link [on|off|cart <title>]   the #7 ESP-NOW radio: peers, pairing and
-                      the live lockstep match, as JSON. `on`/`off` arm it by
-                      hand (the Player only arms it for a multiplayer cart)
+      link [on|off|cart <title>|check on|off|rate 30|60|auto]   the #7
+                      ESP-NOW radio: peers, pairing and the live lockstep match,
+                      as JSON. `on`/`off` arm it by hand (the Player only arms
+                      it for a multiplayer cart); `check` arms the desync
+                      check's world digest; `rate` forces the tick this console
+                      asks when it hosts (auto: the cart's pace)
       py <code>       eval/exec one line against the LIVE console
       recv <n> <window> [rate=<baud>] <path>   take n RAW bytes off stdin
                       into <path>.new, acking every <window> of them, the
@@ -1849,7 +1857,7 @@ class DevChannel:
             # Through set_diag_live, not around it: the 3s diag tick re-syncs
             # perf_capture FROM diag_live, so poking perf_capture alone would be
             # silently undone. persist=False -- a serial A/B must not rewrite the
-            # kid's system.json.
+            # kid's system/settings.
             try:
                 ws.set_diag_live(on, persist=False)
             except Exception:  # noqa: BLE001 -- older console: flag only
@@ -1876,7 +1884,7 @@ class DevChannel:
             # capability gate is EXPRESSED here too: a board that cannot serve
             # the setting declines the word instead of flipping a flag nothing
             # reads. persist=False -- a serial A/B must never rewrite the kid's
-            # system.json -- and the reported state is the one the console
+            # system/settings -- and the reported state is the one the console
             # actually reached, not the one that was asked for.
             key, _label, _default, setter, gate, _dev = tog
             if gate is not None and not gate(ws):
@@ -1890,7 +1898,7 @@ class DevChannel:
         if cmd == "uncap":
             on = not (len(parts) == 2 and parts[1] == "0")
             ws._uncap = on                    # the next run starts uncapped
-            pl = getattr(ws, "player", None)
+            pl = getattr(getattr(ws, "run", None), "player", None)
             if pl is not None and getattr(pl, "tick_ms", 0):
                 pl.uncap_mode(on)             # ...and the running one flips now
             print("REMOTE uncap %s" % ("on" if on else "off"))
@@ -1985,6 +1993,10 @@ class DevChannel:
             if what == "appearance" and getattr(ws, "appearance_app", None) is not None:
                 ok = ws.open_app(ws.appearance_app)
                 print("REMOTE open appearance -> %s" % ok)
+                return
+            if what == "log" and hasattr(ws, "open_log"):
+                ws.open_log()
+                print("REMOTE open log")
                 return
             if what == "wifi" and hasattr(ws, "open_settings"):
                 ws.open_settings()

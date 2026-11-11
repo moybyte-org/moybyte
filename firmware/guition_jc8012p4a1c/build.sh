@@ -69,6 +69,11 @@ moybyte_patch_native_code_free
 # whole boot (tools/patch_usj_rx_init.py).
 moybyte_patch_usj_rx_init
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # 2e) REPR_C -- FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT (the Waveshare's
 #     build.sh carries the measured argument): every board that can hold a
 #     link runs REPR_C. With it, the map-lookup cache index re-aimed for
@@ -84,6 +89,9 @@ moybyte_patch_gc_meters
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# FatFS's long-name buffer on the calling task's stack, which the re-entrant
+# oofatfs needs (mpconfigboard.h, tools/patch_fatfs_lfn.py).
+moybyte_patch_fatfs_lfn
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
@@ -92,9 +100,17 @@ moybyte_patch_import_cache
 # P4 profile behind it.
 moybyte_patch_thread_state_tls
 
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap. A
+# P4's 32 MB keeps the stock doubling; MOYBYTE_GC_GROW_MAX is the S3 boards' alone.
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
 # so a call here reserves 0. Whether a P4 wants a reserve is unmeasured (#58).
+
+# DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
+# SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
+
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board denies
+# native/moy_usbdisk, so TinyUSB's MSC class is not built.
 
 # DECLINED moybyte_patch_psram_retune -- not applicable: an ESP32-S3 MSPI
 # timing-tuner patch (#169); this is an ESP32-P4 and the file does not exist
@@ -138,7 +154,7 @@ moybyte_stage_native
 moybyte_ota_identity guition_p4 "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table (OTA-shaped 2x7.5 MiB app slots + auto-vfs
+# 4) Frozen manifest + partition table (OTA-shaped 2x7.875 MiB app slots + auto-vfs
 #    tail on 16MB) + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"

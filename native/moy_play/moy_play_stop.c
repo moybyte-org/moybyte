@@ -3,20 +3,29 @@
 //
 // THE LEVER is the board's MOY_VM_STOP (its mpconfigboard.h): the S3 boards,
 // whose PSRAM a Doom-sized compiled cart needs whole. A board without it (the
-// P4s) has no verdict here and keeps the VM for every run (KEEP_LEVER).
+// P4s) has no verdict here and keeps the VM for every run (KEEP_LEVER). A
+// run that keeps the VM is the loop's foreground all the same where its
+// board's compositor takes it (moy_play.h): a Lua run, and a compiled one
+// whose frames the compositor shows from the cart's memory.
 //
 // THE VERDICT (moy_play_stop_verdict, at the launch, the VM up): a VM-free
 // game stops the VM only when every clause of moy_play.h's verdict lets it -- its
-// route is HOME, no Python owner holds a WiFi lease (the link and a cart's
-// run are the kernel's own holders), no update is being written, the kernel's
-// present shows its canvas -- and, the policy being `need`, its fit check
-// FAILS with the VM up: a compiled cart's footprint (moy_wasm_footprint.h,
-// the module this console would load) against free PSRAM and its largest
-// block. `vmstop force` (the dev channel's, never a kid's) makes the fit read
-// as failing, so a board where the cart fits can still be made to stop.
+// route is HOME, no Python owner holds a WiFi lease (the link, a cart's run
+// and the media service's run are the kernel's own holders), no update is
+// being written, the kernel's present shows its canvas -- and, the policy
+// being `need`, its fit check FAILS with the VM up: a compiled cart's
+// footprint (moy_wasm_footprint.h, the module this console would load)
+// against free PSRAM and its largest block, and with what the stop gives
+// back (the VM's heap and the serial shell's idle session) it must then fit
+// (moy_play_stop_fit). The media service plays on through the stop, so what
+// its run holds is not given back: a cart that would fit only with it too is
+// KEEP_MEDIA, which the console asks about first. `vmstop force` (the dev
+// channel's, never a kid's) makes the fit read as failing, so a board where
+// the cart fits can still be made to stop.
 //
 // THE RUN (moy_play_stopped_run), on the VM service task after the stop's
-// mp_deinit (native/moy_kernel's moy_kernel_vm_down): the PSRAM line the gate
+// mp_deinit (native/moy_kernel's moy_kernel_vm_down): the serial shell's idle
+// session released (native/moy_sh/moy_sh_board.h), the PSRAM line the gate
 // reads, then the load -- the fit checked again against the largest block,
 // the module found by name (this console's AOT module, else main.wasm on the
 // interpreter, as device/moycore_glue.py's WasmRun finds it), main.wasm's head
@@ -25,8 +34,9 @@
 // buffer. The run is then the loop's foreground (moy_play_front) and the
 // kernel's loop steps until it ends: the hold, quit(), a Ctrl-C (SERIAL), the
 // dev channel's `end`. A refusal or a raise paints the chrome's panel and
-// waits for a press. pmem is written back (the store's crash-safe write) and
-// everything is closed before the next VM starts.
+// waits for a press, a Ctrl-C or `end` (moy_play_panel). pmem is written
+// back (the store's crash-safe write) and everything is closed before the
+// next VM starts, the shell's session made again in its folder last.
 
 #include "py/mpconfig.h"
 
@@ -42,18 +52,20 @@
 #include "py/gc.h"
 #include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/sha256.h"
 
 #include "moy_cat.h"
 #include "moy_chrome.h"
+#include "moy_drivers.h"
 #include "moy_fs.h"
 #include "moy_input.h"
 #include "moy_json.h"
+#include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_play.h"
-#include "moy_route.h"
 #include "moy_tick.h"
 #include "moy_vol.h"
 #include "moycore_lua.h"
@@ -79,10 +91,21 @@
 #define CFG_MAX (16u * 1024u)
 #define PMEM_MAX (8u * 1024u)
 #define END_SERIAL 5                // MOY_PLAY_END_SERIAL
+#define MOY_SH_CWD_MAX 512          // native/moy_sh's MOY_SH_PATH_MAX
 
 // The kernel's (native/moy_kernel): the heaps line, the serial line out, the
 // task watchdog.
 void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
+// The app's run the stop carries (native/moy_app/moy_app.h), weak: an image
+// without native/moy_app has none.
+const struct moy_app_run *moy_app_stopped(void) __attribute__((weak));
+// The serial shell's idle session (native/moy_sh/moy_sh_board.h's stopped
+// run's room), weak: an image without native/moy_sh has none.
+size_t moy_sh_board_idle_bytes(void) __attribute__((weak));
+bool moy_sh_board_release(char *cwd, size_t cap) __attribute__((weak));
+// The media service's run (moy_media.h): weak, for an image without it.
+uint32_t moy_media_pid(void) __attribute__((weak));
+bool moy_sh_board_restore(const char *cwd) __attribute__((weak));
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
 void moy_kernel_stamp(int part);
@@ -181,10 +204,10 @@ static void footprint(const module_t *m, uint64_t *total, uint64_t *block) {
 
 // -- the verdict ------------------------------------------------------------------
 
-// The bytes the VM's heap areas hold (what a stop gives back), read with the
-// VM up.
-static uint64_t vm_heap_bytes(void) {
-    uint64_t held = 0;
+// The bytes a stop gives back, read with the VM up: the VM's heap areas and
+// the serial shell's idle session, which the stopped run releases.
+static uint64_t stop_bytes(void) {
+    uint64_t held = moy_sh_board_idle_bytes != NULL ? moy_sh_board_idle_bytes() : 0u;
     for (mp_state_mem_area_t *a = &MP_STATE_MEM(area); a != NULL;) {
         held += (uint64_t)(a->gc_pool_end
                            - (a == &MP_STATE_MEM(area) ? a->gc_alloc_table_start : (byte *)a));
@@ -202,12 +225,13 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     if (!(flags & MOY_PLAY_HOME)) {
         return MOY_PLAY_KEEP_PLACE;
     }
-    const moy_spine_kernel_t *k = moy_spine_kernel(NULL);
-    if (k != NULL) {
-        uint32_t kernel_holders = moy_lease_bit("link", 4) | moy_lease_bit("cart", 4);
-        if (moy_leases_mask(k->leases) & ~kernel_holders) {
-            return MOY_PLAY_KEEP_LEASE;
-        }
+    uint32_t kernel_holders = moy_lease_wifi_bit("link", 4) | moy_lease_wifi_bit("cart", 4)
+                              | moy_lease_wifi_bit("media", 5);
+    if (moy_lease_wifi_mask() & ~kernel_holders) {
+        return MOY_PLAY_KEEP_LEASE;
+    }
+    if (moy_lease_held(MOY_LEASE_VM) != 0) {
+        return MOY_PLAY_KEEP_LEASE;
     }
     if (moy_ota_state != NULL) {
         stop_ota_state_t st;
@@ -229,21 +253,16 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
     footprint(&m, &total, &block);
     size_t free_ = heap_caps_get_free_size(PSRAM_CAPS);
     size_t largest = heap_caps_get_largest_free_block(PSRAM_CAPS);
-    uint64_t held = vm_heap_bytes();
+    uint64_t held = stop_bytes();
     fit[0] = (uint32_t)total;
     fit[1] = (uint32_t)block;
     fit[2] = (uint32_t)free_;
     fit[3] = (uint32_t)largest;
     fit[4] = (uint32_t)held;
-    if (!s_force && total <= free_ && block <= largest) {
-        return MOY_PLAY_KEEP_FITS;
-    }
-    // What the stop gives back is at most the VM's heap: a cart that would
-    // not fit even with all of it is the fit notice, with the VM up.
-    if (total > free_ + held || block > largest + held) {
-        return MOY_PLAY_KEEP_BIG;
-    }
-    return MOY_PLAY_STOPS;
+    return moy_play_stop_fit(total, block, free_, largest, held,
+                             moy_media_pid != NULL && moy_media_pid() != 0u
+                                 ? moy_share_held(MOY_SHARE_MEDIA) : 0u,
+                             s_force);
 }
 
 // -- the load ----------------------------------------------------------------------
@@ -261,6 +280,7 @@ typedef struct {
     size_t cfg_len;
     char writable[512];
     size_t writable_len;
+    uint32_t ring;
     uint8_t *head;
     size_t head_len;
     char title[48];
@@ -294,6 +314,8 @@ static int entry_read(void *ctx, const moy_cat_entry_t *e) {
             S->title[tn] = 0;
         }
     }
+    S->ring = e->audio_ring.kind == 1 && e->audio_ring.value > 0
+                  && e->audio_ring.value <= 0xFFFFFFF ? (uint32_t)e->audio_ring.value : 0u;
     // "writable": its strings NUL-joined, as Python joined them.
     S->writable_len = 0;
     if (e->writable_ok) {
@@ -605,8 +627,13 @@ static bool k_map(void *ctx, int32_t *x, int32_t *y) {
 
 static const moy_front_ops_t K_FRONT = { k_canvas, k_present, k_map, NULL };
 
-// The panel a refusal or a raise leaves, until a press or a Ctrl-C.
-static void panel_wait(const char *title, const char *text, bool notice) {
+// The panel a refusal or a raise leaves (the run ended), until a press, a
+// Ctrl-C or the dev channel's `end` (moy_play_panel: `end` and `state` reach
+// it as they reach a run in front). With the VM down the kernel's table holds
+// the keys and buttons only: the trackball's click and a touch, which the VM's
+// loop puts there, are read from the board's drivers here, as the recovery
+// floor reads them.
+static void panel_wait(uint32_t run, const char *title, const char *text, bool notice) {
     int w, h;
     uint16_t *px = k_canvas(NULL, &w, &h);
     memset(px, 0, (size_t)w * (size_t)h * 2u);
@@ -614,22 +641,43 @@ static void panel_wait(const char *title, const char *text, bool notice) {
     moy_chrome_panel(&S->chrome, w, h, notice, title, text);
     moy_chrome_raster(&S->chrome, px, w, h, S->wire, 1);
     k_present(NULL, true);
+    moy_play_panel(run, text);
     moy_input_t *in = moy_input_kernel();
+    moy_ball_t *ball = NULL;
+    bool was = false, click = false;
+    bool has_ball = moy_input_board_ball(&ball, &was);
+    moy_touchdev_t *touch = NULL;
+    bool has_touch = moy_input_board_touch(&touch, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H)
+                     && touch->available;
     uint32_t t0 = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
     for (;;) {
         moy_loop_step();
-        if (moy_loop_board_serial()) {
-            return;
+        if (moy_loop_board_serial() || !moy_play_panel_up()) {
+            break;
         }
         uint32_t held = 0, pressed = 0;
         if (in != NULL) {
             moy_input_masks(in, MOY_INPUT_UNION, &held, &pressed);
         }
         uint32_t now = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-        if (now - t0 > 500u && (pressed || moy_input_last_key(in) != 0)) {
-            return;
+        bool tap = false;
+        if (has_ball) {
+            moy_input_board_ball(&ball, &click);
+            tap = click && !was;
+            was = click;
+        }
+        if (has_touch) {
+            moy_touch_pt_t pt;
+            moy_touchdev_poll(touch, (uint32_t)(esp_timer_get_time() / 1000)
+                              & (MOY_INPUT_TICKS_PERIOD - 1u), &pt);
+            tap |= pt.down && pt.edge;
+        }
+        if (now - t0 > 500u
+            && (pressed || tap || (in != NULL && moy_input_last_key(in) != 0))) {
+            break;
         }
     }
+    moy_play_panel(0, NULL);
 }
 
 // The palette's 64 panel words: libmoy's canonical RGB565, byte-swapped
@@ -691,13 +739,16 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .pages = S->m.pages, .sha = S->m.interp ? NULL : S->sha, .dir = path,
         .writable = S->writable_len ? S->writable : NULL, .writable_len = S->writable_len,
         .swapped = MOY_KERNEL_PANEL_SWAP, .allow_unsigned = (flags & MOY_PLAY_UNSIGNED) != 0,
-        .interp = S->m.interp,
+        .interp = S->m.interp, .ring = S->ring,
+        .app = moy_app_stopped != NULL ? moy_app_stopped() : NULL,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
-    if (rc != 0 && !S->m.interp && strncmp(S->err, "refused: bad signature", 22) != 0
+    if (rc != 0 && !S->m.interp && !moycore_wasm_ran()
+        && strncmp(S->err, "refused: bad signature", 22) != 0
         && strncmp(S->err, "refused: malformed signature", 28) != 0) {
         // Not tamper evidence: this console cannot use its module, and the
-        // cart plays on the interpreter (WasmRun's retry).
+        // cart plays on the interpreter (WasmRun's retry). A module that
+        // ran its _init trapped in the cart's own code: that is its error.
         printf("STOP module refused: %s -- the interpreter instead\n", S->err);
         moycore_close_c();
         o.module = S->m.main;
@@ -707,6 +758,35 @@ static int load(uint32_t run, const char *path, bool *notice) {
     }
     (void)run;
     return rc;
+}
+
+// The idle serial session goes with the VM (moy_sh_board.h's stopped run's
+// room): left in place it would split what the stop gave back. Released
+// before anything of the run's is allocated: true when it was, its folder
+// then in *cwd (PSRAM; NULL where none could be kept, and the session comes
+// back at its home).
+static __attribute__((noinline)) bool sh_release(char **cwd) {
+    char at[MOY_SH_CWD_MAX];
+    *cwd = NULL;
+    if (moy_sh_board_release == NULL || !moy_sh_board_release(at, sizeof(at))) {
+        return false;
+    }
+    size_t n = strlen(at) + 1;
+    *cwd = heap_caps_malloc(n, PSRAM_CAPS);
+    if (*cwd != NULL) {
+        memcpy(*cwd, at, n);
+    }
+    return true;
+}
+
+// The released session back in its folder, once the run is closed.
+static __attribute__((noinline)) void sh_restore(bool kept, char *cwd) {
+    char at[MOY_SH_CWD_MAX];
+    snprintf(at, sizeof(at), "%s", cwd != NULL ? cwd : "");
+    heap_caps_free(cwd);
+    if (kept) {
+        moy_sh_board_restore(at);
+    }
 }
 
 static void run_line(const char *what) {
@@ -723,11 +803,14 @@ void moy_play_stopped_run(void) {
     }
     char cart[192];
     snprintf(cart, sizeof(cart), "%s", path);
+    char *sh_cwd;
+    bool sh_kept = sh_release(&sh_cwd);
     // The gate's reading: PSRAM after the stop, before the load.
     moy_kernel_heaps("STOP", "down", "");
     S = heap_caps_calloc(1, sizeof(stop_t), PSRAM_CAPS);
     if (S == NULL) {
         moy_play_end(run, MOY_PLAY_END_CRASH);
+        sh_restore(sh_kept, sh_cwd);
         return;
     }
     wire_init();
@@ -790,7 +873,7 @@ void moy_play_stopped_run(void) {
             } else {
                 moy_chrome_crash_title(title, sizeof(title), S->err, 0);
             }
-            panel_wait(title, S->err, notice);
+            panel_wait(run, title, S->err, notice);
         }
     }
     // The exit's first moment, which the return start is measured from.
@@ -811,6 +894,7 @@ void moy_play_stopped_run(void) {
     heap_caps_free(S);
     S = NULL;
     moy_kernel_heaps("STOP", "ended", "");
+    sh_restore(sh_kept, sh_cwd);
 }
 
 #endif

@@ -273,13 +273,13 @@ class WS:
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False
-        self._frames_drawn = 5
+        self.frame_state = types.SimpleNamespace(frames_drawn=5)
         self._apps = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
-        self.player = Player()
+        self.run = types.SimpleNamespace(player=Player(), canvas=Canvas(8, 4),
+                                         cart_frame=None, view=None)
         self.pmem = None
-        self.canvas = Canvas(8, 4)
         self.homes = 0
         self.net_tps = None           # a lockstep rate, when a test sets one
 
@@ -334,7 +334,7 @@ class Pump:
 
     @property
     def drawn(self):
-        return self.ws._frames_drawn
+        return self.ws.frame_state.frames_drawn
 
 
 class Wire:
@@ -355,7 +355,7 @@ class Wire:
         self.sent = []
         self.fps = list(fps)
         self.next_perf = clock.now + 2.0
-        self._drawn = float(ws._frames_drawn)
+        self._drawn = float(ws.frame_state.frames_drawn)
 
     def _tick(self, dt):
         """The console's frames over `dt` s: a cart draws at the head rate,
@@ -363,7 +363,7 @@ class Wire:
         self.clock.now += dt
         if self.ws.cart and self.fps:
             self._drawn += self.fps[0] * dt
-            self.ws._frames_drawn = int(self._drawn)
+            self.ws.frame_state.frames_drawn = int(self._drawn)
 
     def write(self, data):
         self.pending += data
@@ -578,11 +578,11 @@ def _perf_run(tmp_path, monkeypatch, uncap):
         ws.frame(1 / 60.0)
         if moy_loop.perf_due():
             ws.perf_push(moy_loop)
-        return ws._frames_drawn
+        return ws.frame_state.frames_drawn
 
     moy_loop.register(ws.input.begin_frame, lambda: None, frame)
     moy_loop.capture(True)
-    moy_loop.tick(ws.player.tick_ms)
+    moy_loop.tick(ws.run.player.tick_ms)
     reads = []
     out = []
     for f in range(7 * 60):
@@ -620,11 +620,11 @@ def test_pmem_flushes_the_cart_before_reading(clock):
     text = b"zone 1 failed\0"
     cells = [int.from_bytes(text[i:i + 4].ljust(4, b"\0"), "little")
              for i in range(0, len(text), 4)]
-    ws.player._lua = Lua(ws, [7, -1] + [0] * 254)
+    ws.run.player._lua = Lua(ws, [7, -1] + [0] * 254)
     code, out = run(board.cmd_pmem, b, args(text=False, start=0))
-    assert ws.player._lua.flushed == 1
+    assert ws.run.player._lua.flushed == 1
     assert out.split()[:3] == ["0:", "7", "-1"]
-    ws.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
+    ws.run.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
     code, out = run(board.cmd_pmem, b, args(text=True, start=0))
     assert out.strip() == "zone 1 failed"
 
@@ -633,6 +633,82 @@ def test_pmem_with_no_cart_says_so(clock):
     ws, wire, b = console(clock)
     code, out = run(board.cmd_pmem, b, args(text=False, start=0))
     assert code == 1 and out.startswith("no pmem")
+
+
+# -- the C6 radio's firmware ----------------------------------------------------
+
+
+class C6Radio:
+    """`ws.c6_updater` over a stream that fails a read past its end, as the
+    boards' lwIP does after a plain-HTTP close."""
+
+    def __init__(self, activates=True, verifies=True):
+        self.updater = types.SimpleNamespace(error=None, begin_download=self._begin)
+        self.error = None
+        self.dl_done = 0
+        self.size = None
+        self.sink = None
+        self.activates, self.verifies = activates, verifies
+
+    def _begin(self, m, sink):
+        self.size, self.sink = m["size"], sink
+
+    def download_step(self):
+        if self.dl_done >= self.size:
+            self.updater.error = "read failed (errno 128)"
+            return False
+        self.dl_done = min(self.size, self.dl_done + 16384)
+        return self.dl_done < self.size
+
+    def download_finish(self):
+        if not self.verifies:
+            self.error = "sha256 mismatch"
+            return None
+        return "<c6>"
+
+    def activate(self):
+        if self.activates:
+            return True
+        self.error = board.C6_NO_ACTIVATE
+        return False
+
+
+def c6_console(clock, monkeypatch, radio):
+    ws, wire, b = console(clock, board_dir=P4)
+    ws.c6_updater = radio
+    held = []
+    ws.wifi = types.SimpleNamespace(status=lambda: (True, "net", "10.0.0.2"))
+    ws.wifi_hold = held.append
+    ws.wifi_release = held.remove
+    monkeypatch.setitem(sys.modules, "device_wifi", types.SimpleNamespace(
+        autoconnect_wifi=lambda w: True))
+    monkeypatch.setitem(sys.modules, "moy_ota", types.SimpleNamespace(SINK_C6=2))
+    return b, held
+
+
+def test_a_c6_image_streams_to_its_size_and_no_further(clock, monkeypatch):
+    radio = C6Radio()
+    b, held = c6_console(clock, monkeypatch, radio)
+    code, out = run(board.c6_stream, b, "http://h/c6.bin", 100000, "ab" * 32)
+    assert code == "activated"
+    assert (radio.dl_done, radio.sink, radio.updater.error) == (100000, 2, None)
+    assert held == [], "the radio lease outlived the stream"
+
+
+def test_a_slave_without_activate_has_swapped_by_itself(clock, monkeypatch):
+    b, held = c6_console(clock, monkeypatch, C6Radio(activates=False))
+    code, _ = run(board.c6_stream, b, "http://h/c6.bin", 5000, "ab" * 32)
+    assert code == "swapped"
+
+
+def test_an_image_that_does_not_verify_is_never_handed_over(clock, monkeypatch):
+    radio = C6Radio(verifies=False)
+    radio.activate = lambda: pytest.fail("activated an unverified image")
+    b, held = c6_console(clock, monkeypatch, radio)
+    with pytest.raises(board.BoardError) as exc:
+        board.c6_stream(b, "http://h/c6.bin", 5000, "ab" * 32)
+    assert "sha256 mismatch" in str(exc.value)
+    assert held == []
 
 
 # -- the shot -----------------------------------------------------------------
@@ -750,7 +826,7 @@ def test_shot_of_the_game_canvas_crops_its_view(clock, device_modules, tmp_path)
     stride, bh = 20, 10
     px, buf = frame(stride, bh, little_endian=False)
     ws, wire, b = console(clock, comp=BandedComp(4, 4, bytearray(32)))
-    ws.canvas = Canvas(6, 3, stride=stride, ox=4, oy=2, buf=buf)
+    ws.run.canvas = Canvas(6, 3, stride=stride, ox=4, oy=2, buf=buf)
     out = tmp_path / "g.png"
     run(board.cmd_shot, b, args(out=str(out), source="game", raw=False))
     w, h, rows = decode_png(out.read_bytes())
@@ -902,3 +978,15 @@ def test_a_board_at_the_repl_is_named_as_one(monkeypatch):
         board.wait_for_desk("tdeck", DIRS, port="/dev/null", timeout=30,
                             quiet=True, reset=True)
     assert "REPL" in str(exc.value) and "reboot --soft" in str(exc.value)
+
+
+def test_sh_interrupt_sends_the_channels_line_not_a_raw_ctrl_c(clock):
+    """Ctrl-C in `board.py sh` is the dev channel's `sh ^C` line: a raw 0x03
+    reaches a board's MicroPython REPL instead of the shell."""
+    ws, wire, b = console(clock)
+    b._pump = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+    b.wait_line = lambda needle, timeout=10.0: "SH end 130"
+    code, out = run(board.cmd_sh, b, args(lines=["sleep 9"], also=None,
+                                          timeout=5.0, verbose=False))
+    assert wire.sent == ["sh sleep 9", "sh ^C"]
+    assert wire.pending == b"" and code == 130

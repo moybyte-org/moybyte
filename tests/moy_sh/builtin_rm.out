@@ -1,0 +1,14 @@
+$ echo x > a; mkdir -p d/e; echo y > d/e/f
+$ rm a; ls
+bin/  d/  dev/  proc/
+$ rm d; echo dir=$?
+rm: d: is a folder
+dir=1
+$ rm -r d; ls
+bin/  dev/  proc/
+$ rm nosuch; echo status=$?
+rm: nosuch: No such file or directory
+status=1
+$ rm -f nosuch; echo forced=$?
+forced=0
+[exit 0]

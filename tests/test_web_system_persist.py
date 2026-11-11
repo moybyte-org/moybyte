@@ -5,7 +5,7 @@ reset? They should use the store, achievements as well").
 Two page loads of the REAL console (dist/worker.js and its wasm, through
 `system_persist_test.mjs`) on a static host, sharing one fake OPFS the way two
 loads share an origin's: the first boots on a stored theme and SHOW FPS off,
-opens a cart -- which earns First Steps and records the run in system.json --
+opens a cart -- which earns First Steps and records the run in system/settings --
 and the sweep carries both documents into the store; the second boots from
 that store alone. The store's own crash-safety and path rules are
 `store_test.mjs`'s (tests/test_web_store.py runs it); the watcher's are
@@ -22,6 +22,8 @@ import shutil
 import subprocess
 
 import pytest
+
+from runtime.moy_carts import parse_settings, settings_text
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _RUNNER = os.path.abspath(os.path.join(_HERE, os.pardir, "firmware", "web_runner"))
@@ -53,16 +55,22 @@ def _load(search, tree):
     return tagged
 
 
+SETTINGS = "system/system/settings"       # the OPFS store "system", its system/settings
+
+
 def _doc(tree, rel):
     raw = json.loads(tree.read_text()).get(rel)
-    return None if raw is None else json.loads(base64.b64decode(raw))
+    if raw is None:
+        return None
+    text = base64.b64decode(raw).decode()
+    return parse_settings(text) if rel == SETTINGS else json.loads(text)
 
 
 def test_theme_settings_and_badges_survive_a_reload(tmp_path):
     tree = tmp_path / "opfs.json"
     stored = {"theme": "blocks", "theme_variant": "dark", "show_fps": False}
-    tree.write_text(json.dumps({"system/system.json": base64.b64encode(
-        json.dumps(stored).encode()).decode()}))
+    tree.write_text(json.dumps({SETTINGS: base64.b64encode(
+        settings_text(stored).encode()).decode()}))
 
     first = _load("?desktop=1&cart=" + _CART, tree)
     st = first["STATE"]
@@ -72,12 +80,12 @@ def test_theme_settings_and_badges_survive_a_reload(tmp_path):
     assert "first_open" in st["ach"], st["ach"]
 
     # The first load's own writes reached the store, the stored rows with them.
-    sysdoc = _doc(tree, "system/system.json")
+    sysdoc = _doc(tree, SETTINGS)
     assert sysdoc["theme"] == "blocks" and sysdoc["show_fps"] is False, sysdoc
     assert sysdoc.get("desk_mru"), \
         "the run this load recorded never reached the store: %r\n%r" % (
             sysdoc, first["BATCHES"])
-    assert "first_open" in _doc(tree, "system/achievements.json")["found"]
+    assert "first_open" in sysdoc["moybyte.achievements_badges"]["system"]["found"]
     names = json.loads(tree.read_text())
     assert not [n for n in names if n.startswith("system/") and "~" in n], \
         "a committed write left its staging behind: %r" % sorted(names)

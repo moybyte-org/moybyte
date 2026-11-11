@@ -694,7 +694,7 @@ class _Pick:
 def _app_ws(tmp_path, net, indexes, keep=None, pick=None, home=None):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
+    ci.save_sources(str(tmp_path / "carts"), indexes)
     ws.cart_net = net
     ws.cart_keep = keep
     ws.cart_pick = pick
@@ -916,6 +916,7 @@ def test_remove_in_the_browser_sends_the_record_to_the_keeper(tmp_path):
     app._press("REMOVE")                          # asks
     assert app.asking
     app._remove()                                 # the dialog's Remove
+    _until(ws, app, net, lambda: app._tail is None)   # a store op a frame
     assert keep.records and keep.records[-1]["carts"] == {}
     assert not (tmp_path / "carts" / "rock.moy").exists()
 
@@ -956,7 +957,7 @@ def test_the_bridge_reads_a_spool_only_as_far_as_it_has_grown(link):
     assert net.cors is True and net.online() is True
     a = net.open("https://pages.example/carts/index.json")
     jobs = json.loads(lk.poll_json())
-    assert jobs == [{"op": "get", "id": a.rid,
+    assert jobs == [{"op": "get", "id": a.rid, "path": str(spool / str(a.rid)),
                      "url": "https://pages.example/carts/index.json"}]
     assert lk.poll_json() == ""
     (spool / str(a.rid)).write_bytes(b"")
@@ -990,6 +991,7 @@ def test_the_bridge_asks_the_page_for_a_range_and_reads_its_206(link):
     assert net.ranges is True
     a = net.open("https://pages.example/carts/a.zip", span=(100, 50))
     assert json.loads(lk.poll_json()) == [{"op": "get", "id": a.rid, "range": [100, 149],
+                                           "path": str(spool / str(a.rid)),
                                            "url": "https://pages.example/carts/a.zip"}]
     (spool / str(a.rid)).write_bytes(b"x" * 50)
     lk.event_json(json.dumps({"id": a.rid, "status": 206}))
@@ -1076,7 +1078,8 @@ def test_the_bridge_asks_the_page_for_a_file_and_takes_the_question_away(link):
     p = lk.pick("doom1.wad", 4196020, "deb.debian.org")
     job, = json.loads(lk.poll_json())
     assert job == {"op": "pick", "id": p.rid, "name": "doom1.wad", "size": 4196020,
-                   "host": "deb.debian.org"}
+                   "host": "deb.debian.org", "path": job["path"]}
+    assert job["path"].endswith("/pick-%d" % p.rid)
     assert p.poll() is None
     lk.event_json(json.dumps({"id": p.rid, "picked": "/moy/net/pick-%d" % p.rid}))
     assert p.poll() == ("file", "/moy/net/pick-%d" % p.rid)

@@ -433,7 +433,7 @@ def test_row_glyph_ink_and_size_are_independent_of_the_label():
     ui_draw.row(b, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd,
            glyph_ink=TH["accent"], glyph_size=16)
     assert bytes(a._buf) != bytes(b._buf)
-    assert b.pix(5, 5) == TH["accent"]
+    assert b.pix(14, 5) == TH["accent"]
 
 
 def test_row_content_rect_is_where_row_actually_draws():

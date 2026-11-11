@@ -58,16 +58,21 @@ def test_brick_siege_lua_runs_under_the_real_player(tmp_path):
             break
     else:
         raise AssertionError("Brick Siege Lua is not on the shelf")
-    assert ws.player.cart_error is None
-    assert ws.player._lua is not None                  # started via the #67 seam
-    run = ws.player._lua
+    assert ws.run.player.cart_error is None
+    assert ws.run.player._lua is not None                  # started via the #67 seam
+    run = ws.run.player._lua
     assert run.get_global_len("tanks") == 1            # _init built the P1 tank
     for _ in range(240):                               # 8s: spawns, shots, booms
         ws.frame(1 / 30)
-    assert ws.player.cart_error is None
+    assert ws.run.player.cart_error is None
     # The cart kept ticking. A game over restarts the field and zeroes `t` on
-    # the frame it does so (the AI-less tanks die at a random moment), so read
-    # the clock after one more frame: a restart is 1.6s away from the next.
-    ws.frame(1 / 30)
-    assert ws.player.cart_error is None
-    assert float(run.get_global("t")) > 0.0
+    # the frame it does so (the AI-less tanks die at a random moment, so a
+    # restart can land on any frame), and restarts are 1.6s apart: of two
+    # frames in a row, at most one is a restart's, so one of them reads the
+    # clock moving.
+    seen = []
+    for _ in range(2):
+        ws.frame(1 / 30)
+        assert ws.run.player.cart_error is None
+        seen.append(float(run.get_global("t")))
+    assert max(seen) > 0.0, seen

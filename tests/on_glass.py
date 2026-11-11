@@ -5,7 +5,9 @@
 #   -- the windowed tier's three PERF columns  wm_meters_answer_for_the_frame_they_measured
 #   -- the WebAssembly engine         wasm_modules, wasm_push
 #   -- the Player path                wasm_carts_push, wasm_cart_fps
-#   -- Settings -> UNKNOWN SOURCES    unknown_sources
+#   -- WASI commands in the shell     wasi_commands_run
+#   -- native (ELF) commands          elf_commands_run
+#   -- an unsigned module's admission  wasm_unsigned_cart_follows_its_consent
 #   -- a cart too big for the board   wasm_fit, wasm_too_big_cart_opens_the_notice
 #   -- Doom, built by the recipe      doom_push, doom_frames_match_the_host
 """The three on-glass suites' shared body (#206 item 3).
@@ -30,9 +32,12 @@ swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 
 import contextlib
 import hashlib
+import json
 import os
+import re
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -80,9 +85,87 @@ def session(port, board_dir):
             b.verify_board()
         else:
             b.reset()                  # verifies identity once the desk is up
-        yield b
+        before = take_store(b)
+        try:
+            yield b
+        finally:
+            give_store_back(b, before)
     finally:
         b.close()
+
+
+# A suite pushes fixtures (the compiled wasm carts, the stuck pair, the jet,
+# the conformance carts ...) and most of them never take their own cart back
+# off. The session gives the store back: every folder of the carts folder
+# that was not there when it opened goes when it closes, and so does every
+# folder a suite push made and marked (`mark_pushed`, the file PUSHED in it),
+# each removed the way the console removes a cart
+# (`push_cart.remove_folders`: pkg.removed, the record, the folder, the files
+# it wrote, its consent and keys). A session that never closed (killed, a
+# board that stopped answering) leaves its marks, and the next one removes
+# those folders when it opens, before it records the store. A push only marks
+# a folder it made, so a folder that was there -- the owner's own carts, an
+# installed Doom a test pushes over -- survives a pass.
+
+PUSHED = ".on_glass"
+
+
+def mark_pushed(board, dest):
+    """Mark the folder `dest` (a path on the board), which a suite's push
+    made, so a later session removes it if this one never gives it back."""
+    import push_cart as pc
+    assert board.pyexec(pc.HELPERS + pc.STORE), "could not install the store helpers"
+    board.pyval("ws._g['_mark'](%r)" % (dest.rstrip("/") + "/" + PUSHED), timeout=30,
+                strict=True)
+
+
+def take_store(board):
+    """The carts folder's unmarked folders now (a list), after removing the
+    marked ones an earlier session left; None when the board did not list it
+    -- then the session has nothing to give back. Never raises."""
+    import push_cart as pc
+    try:
+        now = pc.store_folders(board, PUSHED)
+        if now is None:
+            return None
+        left = pc.remove_folders(board, [f for f, m in now if m])
+        if left:
+            warnings.warn("an earlier session's pushes are still on the store: %r"
+                          % (left,))
+        return [f for f, m in now if not m]
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn("could not read the store: %r" % (exc,))
+        return None
+
+
+def give_store_back(board, before):
+    """Remove every folder not in `before` and every marked one. Never raises
+    (it runs while a failing suite unwinds): what it could not remove is a
+    warning."""
+    import push_cart as pc
+    if before is None:
+        return
+    try:
+        now = pc.store_folders(board, PUSHED)
+        if now is None:
+            raise RuntimeError("the board did not list its store")
+        had = set(before)
+        left = pc.remove_folders(board, [f for f, m in now if m or f not in had])
+        if left is None:
+            raise RuntimeError("the board did not list its store")
+        if left:
+            warnings.warn("the suite left folders on the store: %r" % (left,))
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn("could not give the store back: %r" % (exc,))
+
+
+# The store scanned again for the folders a suite pushed, each cart on the
+# shelf then recorded as made on the console (`Consent.made`): a pushed cart
+# is one that arrived as files, which the console asks about on its first
+# run (runtime/shell/app_perms.py, `asks_first`), and a suite runs it on its
+# manifest as written.
+RESCAN = ("len(ws.rescan_carts() or ()) + len([ws.consent.made("
+          "__import__('app_perms').app_id(c)) for c in ws.carts.all])")
 
 
 # -- the checks every fullscreen-tier board shares ---------------------------
@@ -151,24 +234,51 @@ def the_internal_volume_is_the_kernels(board):
                        strict=True) == "k"
 
 
+def rest_holders(board):
+    """The radio's holders on a console at rest: none, but `ssh` while its
+    SSH server serves (a password set on the board,
+    runtime/system/ssh_service.py), which holds the radio for as long as it
+    does. Read from the board, never assumed: a board with no password must
+    still hold nothing."""
+    serving = board.pyval("__import__('ssh_service')._state['serving']")
+    return ["ssh"] if serving is True else []
+
+
+def station_up(board):
+    """Whether the kernel's WiFi driver has the station started
+    (`moy_net.wifi_status()`): the radio itself, which the console's view
+    (`state`'s `wifi`) stops seeing once the last hold lets it go. None on an
+    image with no kernel driver."""
+    got = board.pyval("getattr(__import__('moy_net'), 'wifi_status', lambda: None)()",
+                      strict=True)
+    return None if got is None else bool(got[1])
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match
-    holds nothing and reports no link. `wifi_held` is the lease's holders;
-    a firmware from before the lease has no such key, and says so here."""
+    holds nothing and reports no link -- but for the SSH server's `ssh` while
+    a password is set (`rest_holders`), whose station is up. `wifi_held` is
+    the lease's holders; a firmware from before the lease has no such key,
+    and says so here."""
     st = board.state()
+    rest = rest_holders(board)
     assert "wifi_held" in st, "no wifi_held in state: firmware predates the lease"
-    assert st["wifi_held"] == [], "something holds the radio at rest: %r" % (
+    assert st["wifi_held"] == rest, "something holds the radio at rest: %r" % (
         st["wifi_held"],)
-    assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
+    if not rest:
+        assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
+        assert station_up(board) is not True, "the station is up with nothing holding it"
 
 
 def the_bar_wifi_widget_opens_the_wifi_panel(board):
     """A tap on the bar's wifi widget opens Settings' WIFI panel -- the one
-    wifi implementation -- as a popover hung from the widget, in console mode
+    wifi implementation -- as a popover hung from the widget (on a handheld
+    through the control center the status cluster opens), in console mode
     and desktop mode alike (docs/theme_and_shell_2026-11.md §8.6, look step 33),
     holding the radio; closing the popover lets the radio go."""
     _home_desk(board)
+    rest = rest_holders(board)
     cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
                         strict=True)
     xy = None
@@ -181,13 +291,23 @@ def the_bar_wifi_widget_opens_the_wifi_panel(board):
     board.drain(1.5)
     try:
         got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
+        if tuple(got) == (True, "battery"):
+            # a handheld's status cluster opens the control center, whose
+            # Wi-Fi row opens the panel (docs/theme_and_shell_2026-11.md §1.5)
+            assert board.pyval("type(ws.sysmenu.comp).__name__", strict=True) == \
+                "ControlCenter"
+            board.pyexec("ws.close_popover()\nws.toggle_popover('wifi')", strict=True)
+            board.drain(1.5)
+            got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
         assert tuple(got) == (True, "wifi"), got
         assert "settings" in (board.state().get("wifi_held") or []), \
             "the panel does not hold the radio"
     finally:
         board.pyexec("ws.sysmenu.close()\nws.popover_touch()", strict=True)
         board.drain(1.0)
-    assert board.state().get("wifi_held") == [], "the radio outlived the panel"
+    assert board.state().get("wifi_held") == rest, "the radio outlived the panel"
+    if not rest:
+        assert station_up(board) is not True, "the station outlived the panel"
     _home_desk(board)
 
 
@@ -341,7 +461,7 @@ def painter_host_frames():
 _PAINTER_HELPER = """
 import ui_draw, chrome, moy_ui, device_canvas, binascii
 def _paint_scene(src, rect):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(16, 12)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(16, 12)
     try:
         assert moy_ui.theme_install(src)[0] == 0
         ui_draw.use_shape('painted')
@@ -431,7 +551,7 @@ def _scale(cv, fs):
     cv._gate_state[device_canvas._ST_FONT_SCALE] = fs
 def _sprite_scene(src, what, args, fs):
     sheet = _SPRITE_SHEET
-    cv = (ws.sys_canvas or ws.canvas).new_layer(48, 40)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(48, 40)
     was = getattr(cv, 'font_scale', 1)
     try:
         assert moy_ui.theme_install(src)[0] == 0
@@ -551,7 +671,7 @@ def picker_kernel_matches_sspr(board):
     got = []
     for scale in (1, 2, 3, 5):      # one scale a command: all 72 trip an S3's task watchdog late in a suite
         got += board.pyval("ws._g['_pk_cases'](lambda w, h: "
-                           "(ws.sys_canvas or ws.canvas).new_layer(w, h), (%d,))" % scale,
+                           "(ws.sys_canvas or ws.run.canvas).new_layer(w, h), (%d,))" % scale,
                            timeout=60.0, strict=True)
     assert [same for same, _ in got] == [True] * len(want)
     assert [crc for _, crc in got] == [crc for _, crc in want]
@@ -618,7 +738,7 @@ def _sl_check(back, W, H, kd, prev, b, extra=None):
     return True
 
 def _sl_cases(cases, k=0):
-    cv = ws.sys_canvas or ws.canvas
+    cv = ws.sys_canvas or ws.run.canvas
     comp = cv._comp
     W, H = comp.size()
     ppa = _sl_engine()
@@ -650,7 +770,7 @@ def _sl_cases(cases, k=0):
     return out
 
 def _sl_into():
-    cv = ws.sys_canvas or ws.canvas
+    cv = ws.sys_canvas or ws.run.canvas
     comp = cv._comp
     W, H = comp.size()
     ppa = _sl_engine()
@@ -691,7 +811,7 @@ def shift_last_matches_the_reference(board, p4=False, rotated=False):
     lines the CPU had cached; on the rotated compositor a shift answers False
     while the frame's rotate flies. On an S3 the copy runs while the feeder
     ships its source."""
-    w, h = board.pyval("(ws.sys_canvas or ws.canvas)._comp.size()", strict=True)
+    w, h = board.pyval("(ws.sys_canvas or ws.run.canvas)._comp.size()", strict=True)
     rw, rh = min(400, w - 80), min(220, h - 60)
     cases = [(40, 30, rw, rh, 0, 8), (40, 30, rw, rh, 0, -8), (40, 30, rw, rh, 0, 1),
              (40, 30, rw, rh, 0, -1), (40, 30, rw, rh, 6, 0), (40, 30, rw, rh, -6, 0),
@@ -1129,18 +1249,22 @@ def the_theme_font_is_installed(board):
     assert ids[0] != 0 and pf == ids[0], (ids, pf)
 
 
-def the_font_set_is_the_tiers(board, tier):
-    """The image carries its tier's font set (docs/history/look_2026-10.md step 3):
-    the faces set.json names for `tier`, each byte for byte the host's, with
+def the_font_set_is_the_tiers(board, board_dir):
+    """The image carries its font set (docs/history/look_2026-10.md step 3):
+    the faces set.json names for each tier the board's board.toml takes
+    (`tools/make_font.py`'s `board_fonts`), each byte for byte the host's, with
     its family's licence, and each one loads and measures as on the host."""
     import binascii
     import json
     import runtime  # noqa: F401  (registers the host's moy_ui)
     import moy_ui
     from runtime import appearance
-    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "native", "moy_ui", "fonts", "set.json")) as f:
-        want = json.load(f)["tiers"][tier]
+    from tools import make_font
+    tiers = make_font.board_fonts(str(ROOT / "firmware" / board_dir))
+    tiers = (tiers,) if isinstance(tiers, str) else tiers
+    with open(ROOT / "native" / "moy_ui" / "fonts" / "set.json") as f:
+        meta = json.load(f)["tiers"]
+    want = sorted({n for t in tiers for n in meta[t]})
     got = board.pyval("list(__import__('fontset').names())", strict=True)
     assert list(got) == want
     for n in want:
@@ -1167,12 +1291,566 @@ def the_font_set_is_the_tiers(board, tier):
 
 
 def py_probe_reaches_the_console(board):
-    line = board.cmd("py ws._frames_drawn", wait_for="PY ")
+    line = board.cmd("py ws.frame_state.frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line
     assert int(line.split("PY ", 1)[1]) > 0
     # The loop objects are in the py scope (comp/boot/pump).
     line = board.cmd("py boot.done", wait_for="PY ")
     assert line == "PY True", line
+
+
+def the_log_word_reads_the_ring(board):
+    """The OS log (native/moy_kernel/moy_log.h) over the dev channel: a record
+    the console writes is a `LOG` line of the kernel's `log` word, under the
+    shell at its level, and the word ends with `LOG end`."""
+    line = board.cmd('py __import__("moy_log").write(5, 1, "on-glass probe")',
+                     wait_for="PY ")
+    assert line is not None and line.startswith("PY "), line
+    n0 = len(board.lines)
+    end = board.cmd("log notice shell", wait_for="LOG end")
+    assert end is not None and end.startswith("LOG end n="), end
+    got = [l for l in board.lines[n0:] if l.startswith("LOG ") and "on-glass probe" in l]
+    assert got and " notice shell/1 on-glass probe" in got[-1], board.lines[n0:]
+
+
+def _sh(board, line, retry=True, timeout=10.0):
+    """`sh LINE` over the dev channel: (its status, its output lines)."""
+    n0 = len(board.lines)
+    end = board.cmd("sh " + line, wait_for="SH end ", timeout=timeout, retry=retry)
+    assert end is not None, ("no `SH end` for %r" % line, board.lines[n0:])
+    out = []
+    for l in board.lines[n0:]:
+        if l.startswith("SH end "):
+            break
+        if l.startswith("SH "):
+            out.append(l[3:])
+    return int(end.split("SH end ")[1]), out
+
+
+def the_shell_answers_over_serial(board):
+    """The C shell's serial face (native/moy_sh/moy_sh_board.h): the dev
+    channel's `sh` word runs a line in the kernel's session and answers it
+    `SH <line>` a line, then `SH end <status>`; the session keeps its state
+    from one line to the next, and the console's processes, its role
+    commands and the python REPL cross the ROLE door
+    (runtime/shell/sh_door.py, runtime/shell/sh_roles.py)."""
+    assert _sh(board, "echo on-glass $((6 * 7))") == (0, ["on-glass 42"])
+    assert _sh(board, "X=kept; cd /proc")[0] == 0
+    assert _sh(board, "echo $X; pwd") == (0, ["kept", "/proc"])
+    st, ps = _sh(board, "ps")
+    assert st == 0 and ps[0].split() == ["PID", "PPID", "KIND", "STATE", "NAME"], ps
+    rows = {r.split()[0]: r.split() for r in ps[1:]}
+    assert rows["0"][2:] == ["kernel", "running", "kernel"], ps
+    assert rows["1"][2:4] == ["shell", "running"], ps
+    st, status = _sh(board, "cat /proc/1/status")
+    assert st == 0 and status[:2] == ["Name:\tshell", "Pid:\t1"], status
+    assert _sh(board, "python -c 'print(6 * 7)'") == (0, ["42"])
+    assert _sh(board, "printf 'x = 6\\nx * 7\\n' | python") == (0, ["42"])
+    st, out = _sh(board, "perm list")
+    assert st == 0 and all(len(r.split()) == 3 for r in out), out
+    st, out = _sh(board, "service status")
+    assert st == 0 and any(r.split()[2:] == ["moybyte.achievements"] for r in out), out
+    st, out = _sh(board, "notify send -u low on-glass")
+    assert st == 0 and out[0].isdigit(), out
+    assert _sh(board, "notify clear %s" % out[0]) == (0, [])
+    assert _sh(board, "ls /bin")[0] == 0
+    st, out = _sh(board, "free")
+    assert st == 0 and [r.split()[0] for r in out[1:]] == ["internal", "psram", "python"], out
+    assert _sh(board, "cd /")[0] == 0
+
+
+def pkg_installs_a_cart_from_the_carts_repo(board, ident="teapot"):
+    """docs/os_2026-11.md P3.2's check: `pkg install` over the serial face
+    fetches moybyte-org/carts' index (its source the default, no
+    system/sources), installs `ident` through the one installer, and the
+    shelf has it; `pkg remove` takes it off again. A board with no network
+    skips."""
+    st, out = _sh(board, "pkg sources")
+    assert st == 0 and out, out
+    _sh(board, "pkg remove %s" % ident, timeout=60)
+    st, out = _sh(board, "pkg update", timeout=120)
+    if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
+        pytest.skip("no network: %r" % out)
+    assert st == 0 and "carts" in out[-1], out
+    st, out = _sh(board, "pkg list", timeout=60)
+    assert st == 0 and any(l.split()[0] == ident for l in out), out
+    st, out = _sh(board, "pkg install -y %s" % ident, timeout=600)
+    assert st == 0 and ("%s " % ident) in out[-1] and "installed" in out[-1], out
+    print("pkg install:", out[-1])
+    folders = board.pyval("[str(c.get('path', '')).rsplit('/', 1)[-1] for c in ws.carts.all]",
+                          strict=True)
+    assert ident + ".moy" in folders, folders
+    st, out = _sh(board, "pkg list", timeout=60)
+    assert any(l.split()[:3][::2] == [ident, "installed"] for l in out), out
+    assert _sh(board, "pkg remove %s" % ident, timeout=60) == (0, [ident + " removed"])
+    if not rest_holders(board):
+        assert station_up(board) is not True, "the station outlived pkg's holds"
+
+
+def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
+    """docs/os_2026-11/hardware.md section 1's network time: `pkg update`
+    raises the WiFi for its fetch, NTP answers while it is up (or answered
+    earlier this power-on), and the bar shows local time in a non-UTC zone;
+    the radio goes down after. The zone the board had is put back. A board
+    with no network skips."""
+    import calendar
+    was = board.pyval("ws.system.get('tz')", strict=True)
+    try:
+        board.pyval("ws.set_time_zone(%r) or 1" % tz, strict=True)
+        st, out = _sh(board, "pkg update", timeout=120)
+        if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
+            pytest.skip("no network: %r" % out)
+        assert st == 0, out
+        assert board.pyval("__import__('moy_net').clock_state()", strict=True) == 1
+        assert board.pyval("__import__('moybyte').clock_synced()", strict=True) is True
+        lt, bar, after = board.pyval(
+            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer._clock_text(),"
+            " tuple(__import__('wallclock').localtime()[:6]))", strict=True)
+        board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
+        assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
+        # the bar may still show the minute that just ended
+        assert bar in {"%02d:%02d" % tuple(t[3:5]) for t in (lt, after)} | \
+            {"%02d:%02d" % divmod((lt[3] * 60 + lt[4] - 1) % 1440, 60)}, (bar, lt, after)
+        assert board.pyval("sorted(ws.leases.holders())", strict=True) == \
+            rest_holders(board), "the radio stayed held"
+    finally:
+        board.pyval("ws.set_time_zone(%r) or 1" % (was,), strict=True)
+        if was is None:
+            board.pyval("ws.system.delete('tz') or 1", strict=True)
+
+
+def an_alarm_wakes_the_screen_and_at_logs(board):
+    """docs/os_2026-11/between_apps.md section 3 on glass: `at` runs its line
+    as a process (`at`) whose output is in the OS log, and an alarm that
+    wakes (`moybyte.at`'s, made here as the registry's) lights the screen from the idle ladder's sleep, the BLANK
+    rung `power off` takes, with nothing said on the line meanwhile (any
+    serial word is input and would wake it): the log then says the alarm
+    woke it, after the job ran. Both alarms are on the wall clock as it
+    reads, synced or not."""
+    st, out = _sh(board, "at now + 4 seconds echo on-glass-at")
+    assert st == 0 and out and out[0].startswith("job "), out
+    line = board.cmd('py __import__("moybyte").WAKES.alarm(__import__("wallclock").now() + 6, '
+                     'lambda: None) and 1', wait_for="PY ")
+    assert line is not None and line.startswith("PY "), line
+    seq = board.pyval('__import__("moy_log").next()', strict=True)
+    board.cmd("power off", wait_for="REMOTE power")
+    board.drain(9.0)                       # say nothing: the alarms are the stimulus
+    try:
+        n0 = len(board.lines)
+        end = board.cmd("log info +%d" % seq, wait_for="LOG end")
+        assert end is not None, board.lines[n0:]
+        got = [l for l in board.lines[n0:] if l.startswith("LOG ")]
+        ran = [i for i, l in enumerate(got) if " at/" in l and "on-glass-at" in l]
+        woke = [i for i, l in enumerate(got) if "an alarm woke the screen" in l]
+        assert len(ran) == 2 and any(" at/" in l and "exit 0" in l for l in got), got
+        assert woke and woke[0] > ran[-1], got
+        assert board.state()["psave"][0] is False
+    finally:
+        board.cmd("power on", wait_for="REMOTE power")
+
+
+def the_shell_answers_with_the_vm_down(board, title="Doom"):
+    """docs/os_2026-11.md P3.1's check: with the VM stopped for a compiled
+    run, `ps`, `log` and `kill` answer over the serial face from the kernel
+    -- the console stopped, the run in front its own row -- the console's
+    commands say "needs the console", and `kill` of the run ends it and the
+    VM comes back."""
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    try:
+        board.ser.write(("run %s\r\n" % title.lower()).encode())
+        board.ser.flush()
+        assert board.wait_line("STOP 1/1 down", 60) is not None, "the VM never stopped"
+        assert board.wait_line("STOP running", 60) is not None, "the run never started"
+        st, ps = _sh(board, "ps")
+        rows = [r.split() for r in ps[1:]]
+        assert st == 0 and ["1", "0", "shell", "stopped", "console"] in rows, ps
+        run = [r for r in rows if r[2] == "app" and r[3] == "running"]
+        assert len(run) == 1, ps
+        pid = run[0][0]
+        st, log = _sh(board, "log %s" % run[0][4])
+        assert st == 0, log
+        st, out = _sh(board, "perm list")
+        assert st == 1 and out == ["perm: needs the console"], out
+        assert _sh(board, "kill %s" % pid, retry=False)[0] == 0
+        assert board.wait_line("STOP 1/1 ended", 30) is not None, "kill did not end the run"
+        _desk_back(board)
+        st, ps = _sh(board, "ps")
+        assert ["1", "0", "shell", "running", "shell"] in [r.split()[:5] for r in ps[1:]], ps
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
+def the_event_rings_keep_their_records(board):
+    """The input table's event rings (native/moy_input/moy_event.h) in the
+    real C on glass: the touch source's ring is POLL and in PSRAM (no internal
+    cost), a reader that keeps up with a writer passing the ring's depth many
+    times over loses nothing, a burst past the depth drops the oldest and the
+    reader reads the gap as one LOST record, and reading allocates nothing.
+    The records are posted on the `local` source, whose latch they leave
+    alone."""
+    board.pyexec("import array, gc, moy_input as I\n"
+                 "t = ws.input\n"
+                 "s = t.source('local')\n"
+                 "dbase = s.ring()[2]\n"
+                 "ws._er = t.reader(1 << I.EV_EDGE)\n"
+                 "ws._eb = array.array('i', [0] * (I.EV_FIELDS * 64))\n"
+                 "kept = 0\n"
+                 "for f in range(40):\n"
+                 "    for i in range(24):\n"
+                 "        s.post(I.EV_EDGE, i, 0, f)\n"
+                 "    kept += t.events(ws._eb, ws._er)\n"
+                 "d0 = s.ring()[2] - dbase\n"
+                 "for i in range(100):\n"
+                 "    s.post(I.EV_EDGE, i, 0, 1)\n"
+                 "n = t.events(ws._eb, ws._er)\n"
+                 "first = (ws._eb[I.EV_KIND], ws._eb[I.EV_B], ws._eb[I.EV_FIELDS + I.EV_A])\n"
+                 "gc.collect()\n"
+                 "m0 = gc.mem_alloc()\n"
+                 "for i in range(100):\n"
+                 "    t.events(ws._eb, ws._er)\n"
+                 "m1 = gc.mem_alloc()\n"
+                 "t.reader_free(ws._er)\n"
+                 "ws._eq = (kept, d0, n, first, m1 - m0, s.ring()[2] - dbase - d0, s.ring(), "
+                 "t.source('touch').ring()[3:5], I.EV_LOST)",
+                 strict=True)
+    kept, d0, n, first, alloc, drops, ring, touch, lost = board.pyval("ws._eq", strict=True)
+    depth, _count, _drops, prov, internal, _src = ring
+    assert kept == 40 * 24 and d0 == 0, (kept, d0)
+    assert n == depth + 1 and first == (lost, 100 - depth, 100 - depth), (n, first, depth)
+    assert drops == 100 - depth, (drops, ring)
+    assert (prov, internal) == (2, False), ring
+    assert touch == (2, False), touch
+    assert alloc == 0, alloc
+
+
+def the_scheduler_stops_a_runaway_service(board):
+    """The cooperative scheduler (runtime/system/scheduler.py) over the real
+    guard (native/moy_kernel/modmoy_guard.c) on glass: a service whose
+    callback never returns is aborted by the guard's timer each time it runs,
+    each abort a strike, and the third suspends it while the desk keeps
+    drawing; its stop that never returns is killed. The limits are shortened
+    for the test and put back."""
+    import time
+    board.pyexec("import scheduler as S, moy_guard\n"
+                 "ws._sq = (S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS)\n"
+                 "S.MOY_BG_ABORT_US = 50000\n"
+                 "S.MOY_SERVICE_STOP_MS = 100\n"
+                 "SRC = 'import moybyte\\n"
+                 "def spin():\\n    while True:\\n        pass\\n"
+                 "def moy_start():\\n    moybyte.every(200, spin)\\n"
+                 "def moy_stop():\\n    spin()\\n'\n"
+                 "ws._sa = moy_guard.stats()[1]\n"
+                 "ws._sp = S.SCHED.start({'id': 't.runaway', 'title': 'runaway', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "ws._sf = ws.frame_state.frames_drawn",
+                 strict=True)
+    try:
+        time.sleep(2.5)
+        board.pyexec("import scheduler as S, moy_guard\n"
+                     "p = S.SCHED.procs[ws._sp]\n"
+                     "ws._sq2 = (p.strikes, p.state, moy_guard.can_abort())\n"
+                     "S.SCHED.stop(ws._sp)\n"
+                     "ws._sq2 = ws._sq2 + (moy_guard.stats()[1] - ws._sa, p.code, "
+                     "S.SCHED.wakes.count(ws._sp))",
+                     strict=True)
+        strikes, state, can, aborts, code, left = board.pyval("ws._sq2", strict=True)
+        assert can is True
+        assert (strikes, state) == (3, "suspended"), (strikes, state, aborts)
+        assert aborts == 4, aborts             # three in its wakes, one in its stop
+        assert (code, left) == (137, 0), (code, left)
+        line = board.cmd("state", wait_for="STATE ")
+        assert line is not None, "the desk did not answer after the aborts"
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS = ws._sq\n"
+                     "S.SCHED.reset()",
+                     strict=True)
+
+
+def a_lua_service_runs_on_a_task_of_its_own(board):
+    """A Lua service on glass (native/moycore/moycore_svc.h, WHERE IT RUNS):
+    on its own task on every console board (the S3s' stack in PSRAM), its
+    timer firing there while the desk draws, and its stop reaped into exit
+    0."""
+    import time
+    board.pyexec("import scheduler as S, moycore\n"
+                 "SRC = 'n = 0\\nfunction moy_start() moybyte.every(20, "
+                 "function() n = n + 1 end) end\\n'\n"
+                 "ws._lt = moycore.svc_tasks()\n"
+                 "ws._lp = S.SCHED.start({'id': 't.lua_svc', 'title': 'lua svc', "
+                 "'runtime': 'lua', 'src': SRC, 'permissions': []})",
+                 strict=True)
+    try:
+        time.sleep(1.0)
+        tasks, pid = board.pyval("(ws._lt, ws._lp)", strict=True)
+        assert tasks is True and pid is not None, (tasks, pid)
+        state, cpu = board.pyval(           # its figures read as the accounting reads them
+            "(lambda S: S.SCHED.figures() or (lambda p: (p.state, p.cost_us))"
+            "(S.SCHED.procs[ws._lp]))(__import__('scheduler'))",
+            strict=True)
+        assert state == "background", state
+        assert cpu > 0, cpu                    # its timer ran on its task
+        board.pyexec("import scheduler as S\nS.SCHED.stop(ws._lp)", strict=True)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            state, code = board.pyval(
+                "(lambda p: (p.state, p.code))(__import__('scheduler').SCHED.procs[ws._lp])",
+                strict=True)
+            if state == "exited":
+                break
+            time.sleep(0.2)
+        assert (state, code) == ("exited", 0), (state, code)
+        assert board.cmd("state", wait_for="STATE ") is not None
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.procs.get(ws._lp)\n"
+                     "if p is not None and p.state != 'exited':\n"
+                     "    S.SCHED.stop(ws._lp)",
+                     strict=True)
+
+
+def an_asyncio_service_runs_beside_the_desk(board):
+    """The shell's asyncio loop (runtime/system/aio.py) on glass: a service
+    whose main is `asyncio.run(main())` steps on the scheduler, each step its
+    callback, while the desk keeps answering; its stop cancels the task,
+    which cleans up."""
+    import time
+    board.pyexec("import scheduler as S, aio\n"
+                 "SRC = 'import asyncio\\nn = [0]\\nclean = []\\n"
+                 "async def main():\\n    try:\\n        while True:\\n"
+                 "            n[0] += 1\\n            await asyncio.sleep_ms(50)\\n"
+                 "    finally:\\n        clean.append(1)\\nasyncio.run(main())\\n'\n"
+                 "ws._ap = S.SCHED.start({'id': 't.aio', 'title': 'aio', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "ws._an = S.SCHED.procs[ws._ap].ns",
+                 strict=True)
+    try:
+        time.sleep(1.0)
+        line = board.cmd("state", wait_for="STATE ")
+        time.sleep(1.0)
+        board.pyexec("import scheduler as S, aio\n"
+                     "p = S.SCHED.procs[ws._ap]\n"
+                     "ws._aq = (p.state, ws._an['n'][0], p.calls, aio.count(ws._ap))\n"
+                     "S.SCHED.stop(ws._ap)",
+                     strict=True)
+        time.sleep(0.5)
+        board.pyexec("import aio\n"
+                     "ws._aq2 = (ws._an['clean'], aio.count(ws._ap), aio.LOOP.w is None)",
+                     strict=True)
+        state, n, calls, tasks = board.pyval("ws._aq", strict=True)
+        clean, left, wake = board.pyval("ws._aq2", strict=True)
+        assert (state, tasks) == ("background", 1), (state, tasks)
+        assert n >= 20 and calls > n, (n, calls)         # about 40 in 2 s
+        assert line is not None, "the desk did not answer beside the service"
+        assert (clean, left, wake) == ([1], 0, True), (clean, left, wake)
+    finally:
+        board.pyexec("import scheduler as S\nS.SCHED.stop(ws._ap)", strict=True)
+
+
+def an_on_crash_service_restarts_after_a_forced_crash(board):
+    """Init restart policies (runtime/system/scheduler.py) on glass: an
+    `on-crash` service whose wake raises is started again after its back-off
+    as a new process. The policy is held in a store of the test's, so the
+    board's settings are not written."""
+    import time
+    board.pyexec("import scheduler as S\n"
+                 "class _St:\n"
+                 "    def __init__(self): self.rows = {}\n"
+                 "    def get(self, k, d=None): return self.rows.get(k, d)\n"
+                 "    def set(self, k, v): self.rows[k] = v\n"
+                 "ws._rs = S.SCHED.store\n"
+                 "S.SCHED.store = _St()\n"
+                 "S.SCHED.set_policy('t.oncrash', S.ON_CRASH)\n"
+                 "SRC = 'import moybyte, scheduler\\ndef tick():\\n"
+                 "    if getattr(scheduler, \"CRASH_NOW\", 0):\\n"
+                 "        scheduler.CRASH_NOW = 0\\n"
+                 "        raise ValueError(\"forced\")\\n"
+                 "moybyte.every(50, tick)\\n'\n"
+                 "ws._rp = S.SCHED.start({'id': 't.oncrash', 'title': 'oncrash', "
+                 "'src': SRC, 'permissions': []})\n"
+                 "S.CRASH_NOW = 1",
+                 strict=True)
+    try:
+        time.sleep(0.5)
+        board.pyexec("import scheduler as S\n"
+                     "ws._r1 = (S.SCHED.procs[ws._rp].code, 't.oncrash' in S.SCHED.pending)",
+                     strict=True)
+        time.sleep(1.5)                                 # the first back-off, 1 s
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.find('t.oncrash')\n"
+                     "ws._r2 = (p.pid != ws._rp, p.state) if p else None",
+                     strict=True)
+        first = board.pyval("ws._r1", strict=True)
+        again = board.pyval("ws._r2", strict=True)
+        assert first == (1, True), first
+        assert again == (True, "background"), again
+        line = board.cmd("state", wait_for="STATE ")
+        assert line is not None, "the desk did not answer after the restart"
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "S.SCHED.forgive('t.oncrash')\n"
+                     "p = S.SCHED.find('t.oncrash')\n"
+                     "if p:\n    S.SCHED.stop(p.pid)\n"
+                     "S.SCHED.store = ws._rs", strict=True)
+
+
+def lease_pin(board_dir):
+    """A pin of the board's `lease` row (board.toml [hardware]): free, so a
+    test may drive it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import board_config
+    rows = board_config.hardware(str(ROOT / "firmware" / board_dir))[2]
+    return max(p for r in rows if r["class"] == "lease" for p in r["pins"])
+
+
+LOST_TAP = """\
+import array, gc, time, moy_input as I
+t = I.kernel()
+def burst(depth, n, period):
+    e = I.edge(PIN, depth, True)
+    r = t.reader(1 << I.EV_EDGE)
+    b = array.array('i', [0] * (I.EV_FIELDS * (n + 8)))
+    junk = [bytearray(48) for _ in range(3000)]
+    e.drive(n, period)
+    c0 = time.ticks_us()
+    junk = None
+    gc.collect()
+    gc_us = time.ticks_diff(time.ticks_us(), c0)
+    a0 = gc.mem_alloc()
+    while e.driving():
+        pass
+    a1 = gc.mem_alloc()
+    k = t.events(b, r)
+    recs = [tuple(b[i * I.EV_FIELDS:(i + 1) * I.EV_FIELDS]) for i in range(k)]
+    ring = e.ring()
+    name = t.src_name(ring[5])
+    e.close()
+    t.reader_free(r)
+    edges = [x for x in recs if x[I.EV_KIND] == I.EV_EDGE]
+    lost = sum(x[I.EV_B] for x in recs if x[I.EV_KIND] == I.EV_LOST)
+    gaps = [time.ticks_diff(y[I.EV_T], x[I.EV_T]) for x, y in zip(edges, edges[1:])]
+    lv = [x[I.EV_B] for x in edges]
+    return (len(edges), lost, ring[2], ring[3], ring[4], name, t.src_name(ring[5]), gc_us,
+            min(gaps) if gaps else 0, max(gaps) if gaps else 0,
+            all(lv[i] != lv[i + 1] for i in range(len(lv) - 1)),
+            all(x[I.EV_A] == PIN for x in edges), a1 - a0)
+"""
+
+
+def a_gpio_lease_loses_no_tap(board, board_dir):
+    """The lost-tap test (docs/os_2026-11.md phase 2 step 2) on the stand-in
+    GPIO source a lease will adopt (native/moy_input/moy_edge.h), in the real
+    C: a free pin of the board's lease row looped back on itself, its level
+    changed 400 times at 2 kHz by an esp_timer while the console's frame
+    collects its heap. A ring that covers the burst reads every edge, levels
+    alternating, each stamped ISR when the pin moved -- stamps a period
+    apart, through the collection -- with nothing lost; a ring of 32 drops
+    the oldest and reads the gap as LOST, the source counting each drop once.
+    Waiting out the drive allocates nothing, and a closed source is gone."""
+    pin = lease_pin(board_dir)
+    board.pyexec(LOST_TAP.replace("PIN", str(pin))
+                 + "ws._lt = (burst(512, 400, 500), burst(32, 400, 500))",
+                 timeout=60.0, strict=True)
+    whole, shallow = board.pyval("ws._lt", strict=True)
+    n, lost, drops, prov, internal, name, after, gc_us, lo, hi, alt, pins, alloc = whole
+    assert (n, lost, drops) == (400, 0, 0), whole
+    assert (prov, internal, name, after) == (0, True, "gpio%d" % pin, None), whole
+    assert alt and pins, whole
+    # Stamped when the pin moved, through the collection: no gap past 1500 us.
+    # The drive is an esp_timer task, so a late tick is followed by a
+    # catch-up tick; the shortest gap measures that task, not the ISR.
+    assert 0 < lo and hi <= 1500, whole
+    assert alloc == 0, whole
+    n, lost, drops = shallow[:3]
+    assert (n, lost, drops) == (32, 368, 368), shallow
+
+
+SSD1306 = ("lib", "micropython-lib", "micropython", "drivers", "display", "ssd1306", "ssd1306.py")
+
+LEASED_DRIVER = """\
+import moy_lease as N, moy_log, moybyte, leases
+mod = {'__name__': 'ssd1306'}
+exec(DRIVER, mod)
+pid = moy_log.spawn('t.oled')
+was = moy_log.current()
+grants = leases.LEASES.grants
+leases.LEASES.grants = None         # a process the console runs no row for
+moy_log.current(pid)
+try:
+    spi = moybyte.lease('spi2', baudrate=1000000)
+    dc, res, cs = moybyte.lease('gpio45'), moybyte.lease('gpio46'), moybyte.lease('gpio2')
+    oled = mod['SSD1306_SPI'](128, 64, spi, dc, res, cs)
+    oled.fill(0)
+    oled.text('moybyte', 0, 0, 1)
+    oled.show()
+    rows = leases.LEASES.rows()
+    held = ([N.pin_state(p) & N.PIN_PERIPH for p in (49, 50)], cs.value(), N.held(N.VM),
+            [r[3] for r in rows if r[0] in ('spi2', 'gpio45')])
+finally:
+    moy_log.current(was)
+    leases.LEASES.grants = grants
+moybyte.end(pid)
+safe = [N.pin_state(p) for p in (49, 50, 51, 45, 46, 2)]
+try:
+    oled.show()
+    kept = 'showed'
+except OSError as e:
+    kept = e.errno
+ws._ld = (held, safe, kept, len([h for h in N.leases() if N.get(h)[0] == pid]))
+"""
+
+LEASE_CRASH = """\
+import moy_lease as N, scheduler as S, app_perms
+SRC = ('import moybyte, leases\\n'
+       'p = moybyte.lease(\\'gpioPIN\\', mode=leases.Pin.OUT, value=1)\\n'
+       'def boom():\\n    p.on()\\n    raise ValueError(\\'crash\\')\\n'
+       'moybyte.every(50, boom)\\n')
+ws._lp = S.SCHED.start({'id': 't.lease', 'title': 'lease', 'type': 'service', 'src': SRC,
+                        'runtime': 'python', 'permissions': ['lease:gpio'], 'required': []},
+                       None, app_perms.services(ws))
+ws._lc = (N.pin_state(PIN), N.sim_get(PIN),
+          len([h for h in N.leases() if N.get(h)[0] == ws._lp]))
+"""
+
+
+def a_lease_runs_a_driver_and_a_crash_leaves_it_safe(board, board_dir):
+    """Leases on glass (docs/os_2026-11/hardware.md section 1, the lease table
+    in the real C): micropython-lib's SSD1306 driver, unchanged, on a leased
+    SPI2 and three leased pins (no panel attached: SPI has no ack), its
+    process ending with its SPI's pins driven by the peripheral and its pins
+    then read back safe from the GPIO matrix, and the driver kept past its
+    process raising EBADF; then a service holding a pin it drove high crashes
+    in its wake, and the sweep leaves that pin an input with no pull. Each
+    count is of the process's own leases: the console's may hold others (the
+    radio's row while the SSH server serves)."""
+    import time
+    mp = ROOT / "firmware" / board_dir / ".build" / "micropython"
+    src = (mp.joinpath(*SSD1306)).read_text()
+    board.pyexec("DRIVER = %r\n" % src + LEASED_DRIVER, timeout=60.0, strict=True)
+    held, safe, kept, left = board.pyval("ws._ld", strict=True)
+    periph, cs, n_held, holders = held
+    assert periph == [16, 16] and cs == 1 and n_held == 4, held
+    assert holders == ["t.oled", "t.oled"], holders
+    assert safe == [1] * 6, safe                    # PIN_SAFE: an input, nothing else
+    assert kept == 9 and left == 0, (kept, left)
+    pin = lease_pin(board_dir)
+    try:
+        board.pyexec(LEASE_CRASH.replace("PIN", str(pin)), strict=True)
+        state, level, n = board.pyval("ws._lc", strict=True)
+        assert state & 2 and level == 1 and n == 1, (state, level, n)
+        time.sleep(1.0)
+        board.pyexec("import moy_lease as N, scheduler as S\n"
+                     "ws._lc = (S.SCHED.procs[ws._lp].code, N.pin_state(%d),\n"
+                     "          len([h for h in N.leases() if N.get(h)[0] == ws._lp]))" % pin,
+                     strict=True)
+        code, state, n = board.pyval("ws._lc", strict=True)
+        assert (code, state, n) == (1, 1, 0), (code, state, n)
+    finally:
+        board.pyexec("import scheduler as S\nS.SCHED.reset()", strict=True)
 
 
 def a_quiet_console_collects_its_garbage(board):
@@ -1216,11 +1894,11 @@ def a_leaked_session_leaves_the_panel_flushing(board):
     assert board.pyval(files + ".begin()", strict=True) == (True, None)
     n, err = board.pyval(files + ".count('drawings')", strict=True)
     assert err is None and isinstance(n, int), (n, err)
-    d0 = board.pyval("ws._frames_drawn", strict=True)
+    d0 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     for _ in range(4):
         board.pyval("setattr(ws, '_dirty', True)", strict=True)
         time.sleep(0.25)
-    d1 = board.pyval("ws._frames_drawn", strict=True)
+    d1 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
     assert board.pyval("ws.store.open", strict=True) == 0, "a frame left the session open"
 
@@ -1450,14 +2128,17 @@ def _sd_squeeze():
     held = []
     out = {'read': None, 'write': None}
     try:
-        for _ in range(64):
+        for _ in range(256):
             big = largest()
             if big < 512:
                 break
             try:
                 held.append(moy_alloc.alloc(max(big - 128, 64), caps))
             except MemoryError:
-                break
+                try:                # a block the request's header overflows
+                    held.append(moy_alloc.alloc(big // 2, caps))
+                except MemoryError:
+                    break
         out['left'] = largest()
         try:
             moy_sd.read(64, buf, 16)
@@ -1513,7 +2194,9 @@ def web_console_is_baked_into_the_image(board):
     2026-09-08 before anyone noticed. Self-consistent on purpose (the names
     the webhost's table serves, not this checkout's `dist/`): a board may
     legitimately run an older build, and the question is whether ITS console
-    is whole -- and whether the kernel's webhost hands it out.
+    is whole -- and whether the webhost names it as what it serves. A board
+    serves only through its socket (its moy_net has no web_handle), so the
+    response's headers are the C router's, held by tests/test_moy_webhost.py.
     """
     import sys
     sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -1536,12 +2219,8 @@ def web_console_is_baked_into_the_image(board):
     for name, size, magic in got:
         assert magic == b"\x1f\x8b\x08", (name, magic)
         assert size > 0, name
-    head = board.pyval(
-        "bytes(ws.webhost.handle_http('GET', '/', b'')[:160]) "
-        "if not ws.webhost.serving else b'serving'")
-    if head != b"serving":
-        assert head.startswith(b"HTTP/1.1 200 OK"), head
-        assert b"Content-Encoding: gzip" in head, head
+    note = board.pyval("__import__('moy_webhost').WebHost('/moy/carts').source_note()")
+    assert "baked into this firmware" in note and stamp.split()[2] in note, (note, stamp)
 
 
 def _clear_to_console(board, clear):
@@ -1614,6 +2293,55 @@ VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
 
 
+def _multiplayer_titles():
+    """The seed carts whose manifest asks for `multiplayer`: a run of one
+    arms the radio link."""
+    import json
+    titles = set()
+    for m in (ROOT / "system_carts").glob("*.moy/manifest.json"):
+        man = json.loads(m.read_text(encoding="utf-8"))
+        if "multiplayer" in ((man.get("moybyte") or {}).get("permissions") or ()):
+            titles.add(man.get("title"))
+    return titles
+
+
+@contextlib.contextmanager
+def radio_room(title):
+    """Hold the bench's one radio room for a run of `title` when it is a
+    multiplayer cart. Two consoles on the same multiplayer cart within radio
+    range form a match by design (docs/netplay_v1.md: being in the same room
+    is the pairing ceremony): the guest's re-run is no HOME launch (stop
+    `place`), a lockstep run stalls on the peer's inputs, and neither is
+    the solo run a check reads. `tools/board.py pass` runs every board's
+    suite at once, and the suites reach their Brick Siege Lua runs within
+    seconds of each other, so a run of one takes a machine-wide flock under
+    ~/.cache/moybyte for its length; the link stops when the run ends, and
+    the next board's run finds the room quiet. A console driven by hand
+    outside a suite is not in the lock: one left on a multiplayer cart is a
+    peer every suite run of it meets."""
+    if title not in _multiplayer_titles():
+        yield
+        return
+    import fcntl
+    cache = Path.home() / ".cache" / "moybyte"
+    cache.mkdir(parents=True, exist_ok=True)
+    with open(cache / "radio-room.lock", "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def _in_the_room(check):
+    """`check(board, spec, title, ...)` run inside `radio_room(title)`."""
+    import functools
+
+    @functools.wraps(check)
+    def run(board, spec, title, *args, **kw):
+        with radio_room(title):
+            return check(board, spec, title, *args, **kw)
+    return run
+
+
+@_in_the_room
 def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     """The cart path's second checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
     a VM-free seed game is the kernel loop's foreground -- its input, ticks,
@@ -1623,9 +2351,9 @@ def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
     it runs, so reading it and leaving it cross nothing either; the books
     frozen at the end are read back once the console has the frame again.
     `clear` is cart_runs_and_exits's. `front` False: a board whose
-    compositor gives the kernel no front (the Guition P4's rotated one), where
-    the console's frame drives the same Player -- its CONSOLE crossing a
-    frame is the only one, and the run is left by the shell."""
+    compositor gives the kernel no front, where the console's frame drives
+    the same Player -- its CONSOLE crossing a frame is the only one, and the
+    run is left by the shell."""
     import time
     _clear_to_console(board, clear)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
@@ -1726,6 +2454,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
         board.drain(1.5)
 
 
+@_in_the_room
 def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
                                       runtime="lua"):
     """The cart path's first checkpoint (docs/history/kernel_cartpath_2026-10.md §6):
@@ -1825,7 +2554,7 @@ def idle_saver_and_wake(board):
     after its seconds of silence the console shows the saver -- a cover cycle
     fullscreen, the desk's wallpaper on a desk -- and the input that wakes it
     is swallowed and moves the kernel epoch, so the console repaints every
-    buffer the saver held (`_frames_drawn` advances by at least the backend's
+    buffer the saver held (`frame_state.frames_drawn` advances by at least the backend's
     RETAINED_FRAMES) and comes back on the stack it left."""
     stack = board.state()["stack"]
     board.cmd("power blank 0", wait_for="REMOTE power")
@@ -1838,7 +2567,7 @@ def idle_saver_and_wake(board):
         after = board.state()
         assert after["idle"]["state"] == 0, after["idle"]
         assert after["stack"] == stack
-        retained = board.pyval("getattr(ws.sys_canvas or ws.canvas, "
+        retained = board.pyval("getattr(ws.sys_canvas or ws.run.canvas, "
                                "'RETAINED_FRAMES', 1)", strict=True)
         assert board.pyval("ws._saver is None", strict=True) is True
         assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
@@ -1944,8 +2673,9 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     teardown gave moy_alloc's registry back). The baseline is the SECOND
     cycle: the first one's teardown still holds a 153,600 B buffer the
     session before it left (every console, 2026-10-08), which the next VM
-    gives back. From there the largest block is the
-    same to the byte and free never falls more than KSTOP_JITTER below it (the
+    gives back. From there the largest block never shrinks (a later VM may
+    still give a block back: the Guition S3's grew 128 KB at cycle 3 and held,
+    2026-11-08) and free never falls more than KSTOP_JITTER below it (the
     Guition S3 reads 8 B higher every fourth cycle)."""
     import time
     board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
@@ -1958,7 +2688,7 @@ def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
     assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
     free0, largest0 = after[1][1:]
     drift = [a for a in after[1:]
-             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+             if a[2] < largest0 or a[1] < free0 - KSTOP_JITTER]
     assert not drift, "PSRAM (free, largest) after cycle 2 %s, then %s" % (
         (free0, largest0), drift)
     end = time.time() + 120.0
@@ -1989,7 +2719,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     """`kstop N stop`: N real stops and starts of the VM with no cart
     (docs/history/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
     lease on the kernel's tables before the stop and reads them back with the
-    VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
+    VM down (`route=kstop lease=kstop` on the KSTOP down line); the heaps read
     then -- the first heap area freed with the VM -- hold flat from the second
     cycle, the largest block to the byte and free within KSTOP_JITTER. The
     app ABI's grants (`grants=N`, native/moy_app) read the same every cycle:
@@ -2005,7 +2735,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
     while len(down) < n and time.time() < end:
         line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
         if line is not None and " down " in line:
-            assert "route=kstop lease=dev" in line, line
+            assert "route=kstop lease=kstop" in line, line
             grants.append(line.split("grants=", 1)[1].split()[0])
             down.append(_kstop_after(line.replace(" down ", " after ")))
     assert len(down) == n, "only %d of %d stops came back" % (len(down), n)
@@ -2013,7 +2743,7 @@ def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
         "the grant count moved across stops: %s" % grants)
     free0, largest0 = down[min(1, n - 1)][1:]
     drift = [a for a in down[1:]
-             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+             if a[2] < largest0 or a[1] < free0 - KSTOP_JITTER]
     assert not drift, "PSRAM (free, largest) down after cycle 2 %s, then %s" % (
         (free0, largest0), drift)
     _desk_back(board)
@@ -2087,7 +2817,10 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
             assert all(start[k] is not None and start[k] >= 0 for k in
                        ("total", "vm", "imports", "workstation", "wiring",
                         "first_frame")), start
-            assert back.get("wifi_held") == [], back.get("wifi_held")
+            # a new VM starts with nothing held; the SSH server, where one
+            # serves, takes its lease back once the console's services boot
+            assert set(back.get("wifi_held") or ()) <= set(rest_holders(board)), \
+                back.get("wifi_held")
     finally:
         board.cmd("vmstop need", wait_for="REMOTE vmstop")
     return psram
@@ -2108,7 +2841,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
         assert board.pyexec(
             "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
             "ws._open_workspace(c)\n"
-            "ws.run(ws.project, ws.launcher_layer)" % title), board.last_error
+            "ws.play(ws.launcher_layer)" % title), board.last_error
         st = None
         for _ in range(20):
             time.sleep(0.5)
@@ -2210,36 +2943,47 @@ PAUSE_PSRAM_MAX = 160 * 1024
 PAUSE_PSRAM_LEAK_MAX = 4096
 
 
-def _strip_light(px, w, h, margin):
-    """(brightest, mean) luma of the pixels in the `margin` columns at both
-    ends of a frame -- the part a centred card never covers."""
+def _band_light(px, w, h, margin, rows):
+    """(darkest, brightest) luma of the bottom `rows` rows of a frame in the
+    `margin` columns at both ends -- the part a centred card never covers."""
     seen = []
-    for y in range(h):
+    for y in range(h - rows, h):
         row = y * w
         for x in tuple(range(margin)) + tuple(range(w - margin, w)):
             v = px[row + x]
             seen.append(((v >> 11) & 31) * 240 + ((v >> 5) & 63) * 118
                         + (v & 31) * 88)
-    return max(seen) // 100, sum(seen) // len(seen) // 100
+    return min(seen) // 100, max(seen) // 100
 
 
-def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
+def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
     """A running game's pause menu opens, dims the game and closes back to
     it, on the heap the suite already guards: internal SRAM stays at or above
     moycore's floor and within WASM_RUN_SRAM_MAX of the run before the menu,
     and PSRAM gives back what the card took (its layers are kept from
-    before the run). Opened and closed
-    by the console's one key (`ws.system_key`, the T-Deck's Mic).
+    before the run, and the desk has warmed its covers before it: a walk
+    still owed runs on the first idle frames it meets, the pause's, and
+    keeps what it warmed, which is the shelf's and not the card's). Opened
+    and closed by the console's one key (`ws.system_key`, the T-Deck's Mic).
 
-    The dim is read off the glass, in the columns beside the card: the
-    brightest pixel there falls under the running game's while the menu is
-    open, and comes back when it closes. Returns the heap numbers,
+    The dim is read off the glass, in the columns beside the card, on the
+    game's bottom `rows` rows, which hold one colour on every frame (Star
+    Catcher's floor, drawn over its stars and its catch flash): every pixel
+    there is darker than the game's while the menu is open, and the game's
+    colour again once it closes; the FPS chip, which draws over that
+    corner, is off for the run. Returns the heap numbers,
     {"sram": (before, during, after), "psram": (before, during, after)}."""
     from tools import board as board_tool
-    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
-    assert line is not None and "no cart match" not in line, line
+    end = time.time() + 60
+    while board.pyval("ws.covers._seen", strict=True):
+        assert time.time() < end, "the desk never finished warming its covers"
+        board.drain(0.5)
+    fps_was = board.pyval("ws.show_fps", strict=True)
+    board.pyexec("ws.show_fps = False", strict=True)
     paused = False
     try:
+        line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+        assert line is not None and "no cart match" not in line, line
         board.drain(2.5)
         st = board.state()
         assert st.get("cart") and not st.get("cart_error"), st
@@ -2250,23 +2994,23 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         board_tool.grab(board, "screen")
         sram0, psram0 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit0 = _strip_light(px, w, h, margin)
-        assert lit0[0] > 120, "the game shows nothing bright to dim: %r" % (lit0,)
+        lit0 = _band_light(px, w, h, margin, rows)
+        assert lit0[0] == lit0[1] > 0, "the glass shows no floor of the game: %r" % (lit0,)
 
         board.pyexec("ws.system_key()", strict=True)
         paused = True
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is True
-        assert board.pyval("ws.player.paused", strict=True) is True
+        assert board.pyval("ws.run.player.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit1 = _strip_light(px, w, h, margin)
+        lit1 = _band_light(px, w, h, margin, rows)
 
         board.pyexec("ws.system_key()", strict=True)
         paused = False
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is False
-        assert board.pyval("ws.player.paused", strict=True) is False
+        assert board.pyval("ws.run.player.paused", strict=True) is False
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         f0 = st["frames"]
@@ -2274,19 +3018,20 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
         assert board.state()["frames"] > f0, "the game is not ticking after resume"
         sram2, psram2 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
-        lit2 = _strip_light(px, w, h, margin)
+        lit2 = _band_light(px, w, h, margin, rows)
     finally:
         if paused:
             board.pyexec("ws.pause.close()")
         board.leave_cart()
         board.drain(1.0)
+        board.pyexec("ws.show_fps = %r" % bool(fps_was))
     print("\nPAUSE internal SRAM free %d -> %d (open) -> %d, floor %d; "
-          "PSRAM free %d -> %d (open) -> %d; beside the card brightest %d "
-          "-> %d (open) -> %d, mean %d -> %d -> %d"
+          "PSRAM free %d -> %d (open) -> %d; the floor beside the card "
+          "(darkest, brightest) %r -> %r (open) -> %r"
           % (sram0, sram1, sram2, floor, psram0, psram1, psram2,
-             lit0[0], lit1[0], lit2[0], lit0[1], lit1[1], lit2[1]))
-    assert lit1[0] < lit0[0] * 0.85 and lit1[1] < lit0[1], (lit0, lit1)
-    assert lit2[0] > lit0[0] * 0.85 and lit2[0] > lit1[0], (lit0, lit1, lit2)
+             lit0, lit1, lit2))
+    assert lit1[1] < lit0[0] * 0.85, (lit0, lit1)
+    assert lit2 == lit0, (lit0, lit1, lit2)
     assert min(sram0, sram1, sram2) >= floor, (sram0, sram1, sram2, floor)
     assert sram0 - sram1 <= WASM_RUN_SRAM_MAX, (sram0, sram1)
     assert psram0 - psram1 <= PAUSE_PSRAM_MAX, (psram0, psram1)
@@ -2508,7 +3253,7 @@ def wasm_modules(chip):
     compiled-code format version, other flags (the key saying so), another
     chip, no signature, and a signed module with one byte of its key changed
     -- plus an unsigned module keyed for another format, which the board
-    refuses by its key once Unknown sources lets it past the signature."""
+    refuses by its key once the consent lets it past the signature."""
     if chip not in _WASM_BUILT:
         import tempfile
         from tools import wasm_module as wm
@@ -2549,9 +3294,12 @@ def wasm_push(board, board_dir):
     dest = root.rstrip("/") + "/" + WASM_DIR
     link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    fresh = not board.pyval("ws._g['_ls'](%r)" % dest, timeout=30, strict=True)
     board.pyval("ws._g['_mkdirs'](%r)" % [dest])
     for name, local in sorted(mods.items()):
         pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), link)
+    if fresh:
+        mark_pushed(board, dest)
     return {name: "%s/%s.aot" % (dest, name) for name in mods}
 
 
@@ -2690,13 +3438,14 @@ def wasm_hello_runs_and_foreign_modules_are_refused(board, board_dir, paths):
         assert r["error"].startswith(why), (name, r["error"])
 
 
-def wasm_unknown_sources_lets_only_a_missing_signature_through(board, paths):
-    """The engine with the owner's switch on (`allow_unsigned`, what
-    Settings -> UNKNOWN SOURCES hands every load): a module with no signature
-    loads and runs, its provenance key still checked -- an unsigned module
-    keyed for another runtime is refused by the key -- and a module whose
-    signature is present but does not verify is refused exactly as with the
-    switch off. The switch lets a missing signature through, nothing else."""
+def wasm_consent_lets_only_a_missing_signature_through(board, paths):
+    """The engine with the cart's consent given (`allow_unsigned`, what
+    app_perms.admits_unsigned hands a load of a cart granted "full_access"): a
+    module with no signature loads and runs, its provenance key still
+    checked -- an unsigned module keyed for another runtime is refused by
+    the key -- and a module whose signature is present but does not verify
+    is refused exactly as without it. The consent lets a missing signature
+    through, nothing else."""
     r = wasm_run(board, paths["unsigned"], "step", (20000,), allow_unsigned=True)
     assert r["ok"], r["error"]
     assert r["value"] == WASM_STEP_20000, r
@@ -2789,7 +3538,12 @@ def wasm_runaway_runs_to_its_end(board, paths, n=400000000):
     r = wasm_run(board, paths["hello"], "spin", (n,), during=_stop)
     assert not r["ok"] and "terminated by user" in r["error"], r
     assert r["terminated"] is True
-    assert r["run_us"] >= 0.9 * ref["run_us"], (r["run_us"], ref["run_us"])
+    # The stop lands a fifth of the way in, so a run cut there reads ~0.2 of
+    # the reference and one that ran to its end ~1.0. The reference is ONE
+    # run, and a busy desk slows one by a tenth and more (the Guition P4:
+    # 841 ms against its usual 745, the terminated run 753), so the bound sits
+    # between the two answers rather than at the reference's own noise.
+    assert r["run_us"] >= 0.6 * ref["run_us"], (r["run_us"], ref["run_us"])
     return ref["call_us"], r["run_us"]
 
 
@@ -2876,6 +3630,8 @@ def wasm_low_water_with_radios_up(board, paths):
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
             board.pyval("%s.stop()" % _ble(board), timeout=30)
+    if not rest_holders(board):
+        assert station_up(board) is not True, "the station outlived the dev hold"
     assert r["ok"], r["error"]
     cost = r["sram_before"] - r["sram_min"]
     print("\nWASM with WiFi+BLE up: internal before %d, low-water %d (run cost "
@@ -2908,8 +3664,11 @@ def _push_folder(board, board_dir, local, dest):
     names = pc.cart_files(local)
     link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    fresh = not board.pyval("ws._g['_ls'](%r)" % dest, timeout=30, strict=True)
     pc.push_files(board, {n: os.path.join(local, n) for n in names}, names,
                   dest, link)
+    if fresh:
+        mark_pushed(board, dest)
 
 
 def wasm_carts_push(board, board_dir):
@@ -2928,12 +3687,437 @@ def wasm_carts_push(board, board_dir):
                         out, chips=(chip,))
         _push_folder(board, board_dir, out,
                      root.rstrip("/") + "/wasm_" + name + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
                          strict=True)
     for title in WASM_CARTS.values():
         assert title in titles, "%s is not on the shelf after the push" % title
     return dict(WASM_CARTS)
+
+
+# -- WASI commands in the shell (native/moy_wasm/moy_wasi.h) ---------------------------
+
+
+def wasi_commands_run(board, board_dir):
+    """WASI commands (native/moy_wasm/moy_wasi.h) through the serial face's
+    shell: wasi-sdk's cat and Rust's wasm32-wasip1 hello, each built unchanged
+    by its toolchain and carrying this chip's module, signed, and the probe
+    with none, on the interpreter. Args, env, a pipe in and out, files in
+    the user's folder, the exit code and a trap; a long run the door steps,
+    the console's frames going on meanwhile, ended by `sh ^C` with 130; the
+    Rust hello last, skipped where this machine has no rustc for
+    wasm32-wasip1."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_wasi_")
+    rust = wasm_cart.rust_wasip1()
+    for name, chips in (("wasi_cat", (chip,)), ("wasi_probe", ()), ("wasi_hello", (chip,))):
+        if name == "wasi_hello" and not rust:
+            continue
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")), out,
+                        chips=chips)
+        _push_folder(board, board_dir, out, root + "/" + name + ".moy")
+    board.pyval(RESCAN, timeout=60)
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=60)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("cd; mkdir -p Documents; cd Documents; printf 'one\\ntwo\\n' > wasi.txt; wasi.cat/cat wasi.txt", (0, ["one", "two"]))
+    runs("wasi.probe/probe args a b | wasi.cat/cat", (0, ["0=probe", "1=args", "2=a", "3=b"]))
+    runs("wasi.cat/cat < wasi.txt | wasi.probe/probe stdin", (0, ["8 bytes 2 lines"]))
+    runs("export WASI_ON=glass; wasi.probe/probe env WASI_ON", (0, ["glass"]))
+    runs("wasi.probe/probe files",
+         (0, ["size 14", "entry b.txt", "read two", "read three", "gone yes"]))
+    runs("wasi.probe/probe clock", (0, ["since 2000 yes, slept yes"]))
+    runs("wasi.probe/probe exit 3", (3, ["leaving with 3"]))
+    st, out = _sh(board, "wasi.probe/probe trap", timeout=60)
+    assert st == 134 and "unreachable" in " ".join(out), (st, out)
+    # a long run is a job the door steps: the frame goes on while it sleeps
+    # (its wait on the module's thread) and while it spins (an import a
+    # loop), and the channel's Ctrl-C ends it with 130 (a raw 0x03 is the
+    # serial ISR's KeyboardInterrupt while the console runs)
+    for verb in ("sleep", "spin"):
+        n0 = len(board.lines)
+        board._write_line("sh wasi.probe/probe " + verb)
+        time.sleep(1.5)
+        f0 = board.state()["upcall_totals"][0]       # the console's frame upcalls
+        time.sleep(1.0)
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped under " + verb
+        board._write_line("sh ^C")
+        assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+    runs("wasi.probe/probe exit 3", (3, ["leaving with 3"]))    # its record went
+    runs("rm wasi.txt", (0, []))
+    if not rust:
+        pytest.skip("no rustc with the wasm32-wasip1 target for the Rust hello")
+    runs("wasi.hello/hello on glass", (0, ["hello from rust, 3 args", "on", "glass"]))
+
+# -- native (ELF) commands in the shell (native/moy_elf/README.md) -------------------
+
+
+def elf_commands_run(board, board_dir):
+    """Native commands (native/moy_elf/README.md) through the serial face's
+    shell: the SDK's hello and cat and the probe, built for this board's chip
+    by tools/elf_cart.py (signed with the OTA key where this machine has it;
+    an unsigned module runs too). Args, a pipe in and out, a file through
+    redirections, env, exit codes, threads and a mutex; a module built
+    against rows this console lacks refused; `sh ^C` ending a run the door
+    steps with 130, the console's frames going on meanwhile; the SDK's C
+    library through unmodified programs (head; the libc probe, whose stdout
+    is the same program's built against this machine's glibc); netcat both
+    ways with a socket on this machine, when the board's network reaches
+    it (skipped, last, when it does not); what the loads cost
+    (`moy_elf.load()`) printed for the ledger."""
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    from tools import elf_cart, wasm_module
+    chip = _wasm_chip(board_dir)
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain under ~/.espressif for the native modules" % chip)
+    signed = wasm_module.signing_key() is not None
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_elf_")
+    fixtures = ROOT / "tests" / "fixtures" / "elf"
+    for name in ("elf_hello", "elf_cat", "elf_probe", "elf_head", "elf_libc", "elf_nc"):
+        out = os.path.join(tmp, name + ".moy")
+        elf_cart.build(str(fixtures / (name + ".moy")), out, [chip], signed=signed)
+        _push_folder(board, board_dir, out, root + "/" + name + ".moy")
+    newer = os.path.join(tmp, "src_newer.moy")
+    shutil.copytree(str(fixtures / "elf_hello.moy"), newer)
+    with open(os.path.join(newer, "src", "main.c"), "w") as f:
+        f.write('__asm__(".pushsection .moy.rows,\\"\\",@progbits\\n.4byte 4000\\n'
+                '.popsection");\nint main(void) { return 0; }\n')
+    with open(os.path.join(newer, "manifest.json")) as f:
+        man = json.load(f)
+    man["id"], man["title"] = "elf.newer", "Newer Native"
+    with open(os.path.join(newer, "manifest.json"), "w") as f:
+        json.dump(man, f)
+    out = os.path.join(tmp, "elf_newer.moy")
+    elf_cart.build(newer, out, [chip], signed=signed)
+    _push_folder(board, board_dir, out, root + "/elf_newer.moy")
+    board.pyval(RESCAN, timeout=60)
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=60)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("elf.hello/hello on glass", (0, ["hello from a native module on glass"]))
+    load = board.pyval("__import__('moy_elf').load()", strict=True)
+    runs("cd; mkdir -p Documents; cd Documents; printf 'one\\ntwo\\n' > elf.txt; elf.cat/cat elf.txt", (0, ["one", "two"]))
+    runs("printf 'x\\ny\\n' | elf.cat/cat | elf.cat/cat", (0, ["x", "y"]))
+    runs("elf.cat/cat < elf.txt > elf2.txt; elf.cat/cat elf2.txt", (0, ["one", "two"]))
+    runs("export ELF_ON=glass; elf.probe/probe env ELF_ON", (0, ["glass"]))
+    runs("elf.probe/probe exit 3", (3, []))
+    runs("elf.probe/probe threads", (0, ["count 4000", "joined 6"]))
+    st, out = _sh(board, "elf.newer/newer", timeout=60)
+    assert st == 126 and "needs a console update" in " ".join(out), (st, out)
+    n0 = len(board.lines)
+    board._write_line("sh elf.probe/probe sleep")
+    time.sleep(1.5)
+    f0 = board.state()["upcall_totals"][0]       # the console's frame upcalls
+    time.sleep(1.0)
+    assert board.state()["upcall_totals"][0] > f0, "the frame stopped while the command ran"
+    # the channel's Ctrl-C for a parked run (a raw 0x03 is the serial ISR's
+    # KeyboardInterrupt while the console runs)
+    board._write_line("sh ^C")
+    assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+    runs("elf.head/head -n 1 elf.txt", (0, ["one"]))
+    args = "-a -b x -a op1 op2"
+    # The probe's own status first: a probe that dies leaves an empty file,
+    # which the cat alone would read as a clean run.
+    st, got = _sh(board, "echo 'first line' | elf.libc/libc %s > elf3.txt 2> /dev/null; "
+                  "echo $?; elf.cat/cat elf3.txt" % args, timeout=60)
+    exe = os.path.join(tmp, "libc_native")
+    subprocess.run(["cc", "-O1", "-w", "-o", exe,
+                    str(fixtures / "elf_libc.moy" / "src" / "libc.c")], check=True)
+    want = subprocess.run([exe] + args.split(), input=b"first line\n", capture_output=True,
+                          check=True).stdout.decode().splitlines()
+    assert (st, got) == (0, ["0"] + want), (st, got)
+    runs("rm elf.txt elf2.txt elf3.txt", (0, []))
+    stats = board.pyval("__import__('moy_elf').stats()", strict=True)
+    assert stats[3] == 0, stats                  # no thread left running
+    mem = board.pyval("__import__('moy_elf').mem()", strict=True)
+    print("\nELF %s load: read %d us, check %d us, relocate %d us; internal free "
+          "%d before, %d loaded, %d after; stats %r"
+          % (chip, load[0], load[1], load[2], load[3], load[4], mem[0], stats))
+    _elf_nc_both_ways(board)
+
+
+def elf_umode_isolates(board, board_dir):
+    """A P4 runs a native module in RISC-V U-mode, confined by PMP to its own
+    memory (native/moy_elf/moy_umode.h): the FPU's lazy enable reaches it, its
+    mappings outnumber the PMP's slots while three of its threads and the
+    console's tasks take the core in turn, and every wild access -- a store
+    into the console's memory, internal RAM or PSRAM, a jump into kernel
+    text, a row handed a kernel pointer, an ecall past the table, a CSR, a
+    stack run off its end -- ends the process alone with a fault record
+    naming it, the console's frames going on."""
+    import tempfile
+    from tools import elf_cart, wasm_module
+    chip = _wasm_chip(board_dir)
+    if not elf_cart.available(chip):
+        pytest.skip("no %s toolchain under ~/.espressif for the native modules" % chip)
+    signed = wasm_module.signing_key() is not None
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_elf_")
+    out = os.path.join(tmp, "elf_wild.moy")
+    elf_cart.build(str(ROOT / "tests" / "fixtures" / "elf" / "elf_wild.moy"), out, [chip],
+                   signed=signed)
+    _push_folder(board, board_dir, out, root + "/elf_wild.moy")
+    board.pyval(RESCAN, timeout=60)
+    assert board.pyval("__import__('moy_elf').umode() is not None", strict=True)
+
+    def runs(line, want):
+        got = _sh(board, line, timeout=120)
+        assert got == want, "%s -> %r" % (line, got)
+
+    runs("elf.wild/wild float 1000", (0, ["1000"]))
+    runs("elf.wild/wild spin 20000 7", (0, ["ok 7"]))
+    runs("elf.wild/wild spins 200000 11", (0, ["ok"]))
+    psram = board.pyval("id(ws)", strict=True) & 0xffffffff
+    sane = "type(ws).__name__"
+    kind = board.pyval(sane, strict=True)
+    wild = (("store 0x%x" % psram, 139, 7), ("store 0x4ff40000", 139, 7),
+            ("load 0x4ff40000", 139, 5), ("jump 0x4ff00100", 139, 1),
+            ("jump 0x40000100", 139, 1), ("row 0x4ff40000", 139, 0x200 | 3),
+            ("ecall", 159, 0x100), ("csr", 132, 2), ("stack", 139, 7))
+    for args, status, cause in wild:
+        f0 = board.state()["upcall_totals"][0]
+        st, got = _sh(board, "elf.wild/wild " + args, timeout=60)
+        said = " ".join(got)
+        assert st == status and "killed" in said and "survived" not in said, (args, st, got)
+        last = board.pyval("__import__('moy_elf').faults()[0]", strict=True)
+        assert last[2] == cause and "wild" in last[1], (args, last)
+        assert board.pyval(sane, strict=True) == kind
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped: " + args
+    _elf_attacks(board, root, chip, signed)
+    stats = board.pyval("__import__('moy_elf').stats()", strict=True)
+    assert stats[3] == 0, stats
+
+
+def _elf_healthy(board, what, f0=None):
+    """After an attack: the heap intact (heap_caps_check_integrity_all), the
+    console's task and every native thread with stack to spare, and the
+    console's frames still going."""
+    ok, vm_free, thr_free = board.pyval("__import__('moy_elf').check()", strict=True)
+    assert ok, "the heap is corrupt after " + what
+    assert vm_free > 512 and (thr_free is None or thr_free > 256), (what, vm_free, thr_free)
+    if f0 is not None:
+        assert board.state()["upcall_totals"][0] > f0, "the frame stopped: " + what
+
+
+def _elf_attacks(board, root, chip, signed):
+    """The P4's ELF isolation under attack (native/moy_elf/README.md,
+    "Isolation"), each attack followed by _elf_healthy:
+
+    - every pointer argument of every checked row (native/os_calls.json, by
+      tools/gen_os_table.py into the fixture's rows.h) handed memory outside
+      the process -- NULL, the kernel's, the console's PSRAM, another live
+      process's mapping -- or a buffer straddling the end of the process's
+      memory: each ends the process alone, SIGSEGV naming the row; every
+      nullable one as NULL, and every counted one as a kernel pointer with a
+      count of 0, answered;
+    - every descriptor, thread, directory, mutex and mapping argument stale,
+      foreign, junk or reused after its close: an error, never another's;
+    - sp pointed at the kernel's memory, the console's and a sibling
+      thread's stack, then a row, an illegal instruction and interrupts;
+    - teardown: a process ended (exit, Ctrl-C) with its threads inside rows,
+      a thread ending while the process's end runs, slots reused right after
+      a reap, a service stopped over and over while its watch job runs.
+
+    The suite runs one outside case and one straddle case per argument and a
+    few teardown rounds; MOYBYTE_ELF_SWEEP=all runs every case and
+    MOYBYTE_ELF_SOAK=N that many rounds."""
+    mod = "%s/elf_wild.moy/main.%s.elf" % (root, chip)
+    flags = 0 if signed else 2
+    psram = board.pyval("id(ws)", strict=True) & 0xffffffff
+    pid = 9461
+    seq = board.pyval("__import__('moy_log').next()", strict=True)
+    why = board.pyval("__import__('moy_elf').service(%r, %d, 'elf.wild', %d)" % (mod, pid, flags),
+                      strict=True)
+    assert why is None, why
+    hold = None
+    t0 = time.monotonic()
+    while hold is None and time.monotonic() - t0 < 10:
+        for r in board.pyval("[r[4] for r in __import__('moy_log').read(%d, 64) if r[3] == %d]"
+                             % (seq, pid), strict=True):
+            if r.startswith("hold "):
+                hold = [int(v, 16) for v in r.split()[1:4]]
+        time.sleep(0.2)
+    assert hold is not None, "the holding service never said what it holds"
+    f_map, f_thr, f_mtx = hold
+    try:
+        # the argument sweep
+        f0 = board.state()["upcall_totals"][0]
+        st, out = _sh(board, "elf.wild/wild cases 0x%x" % f_map, timeout=60)
+        cases = [l.split() for l in out if l[:1].isdigit()]
+        assert st == 0 and cases, out
+        full = os.environ.get("MOYBYTE_ELF_SWEEP") == "all"
+        # each argument once outside the process (its kind turning with the
+        # row) and once across its memory's end
+        pick, seen = [], {}
+        for c, row, name, arg, bad in cases:
+            n = seen.get((row, arg), 0)
+            outside = bad in ("null", "kernel", "psram", "foreign")
+            if full or bad == "mapend" or (outside and n == (int(row) + int(arg)) % 3):
+                pick.append((c, name))
+            seen[(row, arg)] = n + outside
+        names = dict(pick)
+        t1 = time.monotonic()
+        for k in range(0, len(pick), 40):
+            ids = " ".join(c for c, _n in pick[k:k + 40])
+            st, out = _sh(board, "for c in %s; do elf.wild/wild sweep $c 0x%x 0x%x; "
+                          "echo \"case $c $?\"; done" % (ids, psram, f_map), timeout=600)
+            said = []
+            for l in out:
+                if l.startswith("case "):
+                    _w, c, code = l.split()
+                    text = " ".join(said)
+                    assert code == "139" and "passed a row memory outside it (%s)" % names[c] \
+                        in text and "survived" not in text, (c, names[c], code, said)
+                    said = []
+                else:
+                    said.append(l)
+        sweep_s = time.monotonic() - t1
+        _elf_healthy(board, "the argument sweep", f0)
+        for mode, want in (("nulls", "nulls "), ("zeros", "zeros ")):
+            st, out = _sh(board, "elf.wild/wild " + mode, timeout=120)
+            assert st == 0 and any(l.startswith(want) and l.endswith(" ok") for l in out), \
+                (mode, st, out)
+        _elf_healthy(board, "the NULL and empty arguments")
+
+        # handles
+        st, out = _sh(board, "cd; mkdir -p Documents; cd Documents; elf.wild/wild handles "
+                      "0x%x 0x%x 0x%x" % (f_thr, f_mtx, f_map), timeout=180)
+        assert (st, out[-1:]) == (0, ["handles ok"]), out
+        st, out = _sh(board, "elf.wild/wild unmapped", timeout=60)
+        assert st == 139 and "read outside its memory" in " ".join(out), (st, out)
+        st, out = _sh(board, "elf.wild/wild load 0x%x" % f_map, timeout=60)
+        assert st == 139 and "read outside its memory" in " ".join(out), (st, out)
+        _elf_healthy(board, "the handle sweep")
+
+        # stack pivots
+        for target in (0x4ff40000, psram):
+            for act, status, said in (("ecall", 139, "pivot ecall ok"), ("ill", 132, "illegal"),
+                                      ("spin", 139, "wrote outside")):
+                f0 = board.state()["upcall_totals"][0]
+                st, out = _sh(board, "elf.wild/wild pivot 0x%x %s" % (target, act), timeout=60)
+                assert st == status and said in " ".join(out), (target, act, st, out)
+                _elf_healthy(board, "a pivot (%s) onto 0x%x" % (act, target), f0)
+        st, out = _sh(board, "elf.wild/wild pivot 0 sib", timeout=60)
+        assert (st, out) == (0, ["spun"]), out
+
+        # teardown
+        rounds = int(os.environ.get("MOYBYTE_ELF_SOAK", "4"))
+        f0 = board.state()["upcall_totals"][0]
+        st, out = _sh(board, "i=0; while [ $i -lt %d ]; do elf.wild/wild churn 40; "
+                      "echo \"churn $?\"; i=$((i+1)); done" % (rounds * 5), timeout=60 + 10 * rounds)
+        assert st == 0 and [l for l in out if l.startswith("churn")] == ["churn 3"] * rounds * 5, out
+        for _ in range(rounds):
+            n0 = len(board.lines)
+            board._write_line("sh elf.wild/wild churn 0")
+            assert board.wait_line("SH churning", 30) is not None, board.lines[n0:]
+            time.sleep(0.3)
+            board._write_line("sh ^C")
+            assert _said_since(board, n0, "SH end 130", 30), board.lines[n0:]
+        _elf_healthy(board, "the churn", f0)
+    finally:
+        code = board.pyval("__import__('moy_elf').stop(%d)" % pid, strict=True)
+    assert code == 0, code
+    for i in range(rounds * 2):
+        why = board.pyval("__import__('moy_elf').service(%r, %d, 'elf.wild', %d)"
+                          % (mod, pid + 1 + i, flags), strict=True)
+        assert why is None, why
+        time.sleep(0.05 * (i % 4))
+        code = board.pyval("__import__('moy_elf').stop(%d)" % (pid + 1 + i), strict=True)
+        assert code in (0, 137), code
+    _elf_healthy(board, "the services stopped while watched")
+    print("\nELF attacks: %d sweep cases in %.1f s, %d teardown rounds"
+          % (len(pick), sweep_s, rounds))
+
+
+def _elf_nc_both_ways(board):
+    """The SDK's netcat on the board against a socket on this machine: it
+    dials one listening here, then listens for this machine to dial it. The
+    board joins its kept network for the socket's "native" hold; a board
+    whose network does not reach this machine skips."""
+    import socket
+    import threading
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))         # no packet: the route's own address
+        here = probe.getsockname()[0]
+    finally:
+        probe.close()
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", 0))
+    srv.listen(1)
+    srv.settimeout(60)
+    port = srv.getsockname()[1]
+    heard = []
+    peer = []
+
+    def serve():
+        try:
+            conn, addr = srv.accept()
+        except OSError:
+            return
+        peer.append(addr[0])
+        with conn:
+            data = b""
+            while True:
+                b = conn.recv(256)
+                if not b:
+                    break
+                data += b
+            heard.append(data)
+            conn.sendall(b"world\n")
+
+    th = threading.Thread(target=serve, daemon=True)
+    th.start()
+    st, got = _sh(board, "echo hello | elf.nc/nc %s %d" % (here, port), timeout=90)
+    srv.close()
+    th.join(5)
+    if not heard:
+        pytest.skip("the board's network does not reach %s (%s: %r)" % (here, st, got))
+    assert heard == [b"hello\n"] and (st, got) == (0, ["world"]), (heard, st, got)
+    ip = peer[0]                # the radio's hold ended with nc: status() may read None
+    lport = 7000 + os.getpid() % 1000
+    answered = []
+
+    def dial():
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 60:
+            try:
+                conn = socket.create_connection((ip, lport), timeout=5)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            with conn:
+                conn.sendall(b"pong\n")
+                data = b""
+                while True:
+                    b = conn.recv(256)
+                    if not b:
+                        break
+                    data += b
+                answered.append(data)
+            return
+
+    th = threading.Thread(target=dial, daemon=True)
+    th.start()
+    st, got = _sh(board, "echo ping | elf.nc/nc -l -p %d" % lport, timeout=90)
+    th.join(10)
+    assert answered == [b"ping\n"] and (st, got) == (0, ["pong"]), (answered, st, got)
+    held = board.state().get("wifi_held", [])
+    assert not [h for h in held if h.split(":")[0] == "native"], held
 
 
 APP_ROLES = ("app_roles", "App Roles Wasm")
@@ -2969,7 +4153,7 @@ def wasm_app_push(board, board_dir):
             with open(p, "w") as f:
                 json.dump(man, f)
         _push_folder(board, board_dir, out, root + "/wasm_" + name + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     # Pushed code is fixed code: the strikes an earlier run of these left
     # (the crash guard, #160) are forgiven, as a commit forgives them.
     for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
@@ -2978,10 +4162,28 @@ def wasm_app_push(board, board_dir):
     return root
 
 
+def remove_carts(board, titles):
+    """Remove the carts titled `titles` from the board's store as the console
+    removes a cart (`push_cart.remove_folders`): what a test pushed, given
+    back."""
+    import push_cart as pc
+    folders = board.pyval("[str(c['path']).rstrip('/').rsplit('/', 1)[-1] "
+                          "for c in ws.carts.all if c['title'] in %r]"
+                          % (list(titles),), timeout=20, strict=True)
+    pc.remove_folders(board, folders)
+    left = board.pyval("[c['title'] for c in ws.carts.all if c['title'] in %r]"
+                       % (list(titles),), timeout=20, strict=True)
+    assert not left, "still on the board after the delete: %r" % left
+
+
+WASM_APPS = (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1])
+
+
 def wasm_app_reaches_its_roles(board, root):
     """App Roles Wasm runs with its prefs and theme imports and no crossing of
-    any class but the console's frame, each prefs row hopped to the VM's task (moy_app.wasm_hops: the
-    hop's price per call, printed); the module one permission short is refused
+    any class but the console's frame, each prefs row answered in C on the
+    run's own task, none hopped to the VM's (moy_app.wasm_hops: rows of how
+    "here" and hops, counted); the module one permission short is refused
     at load naming prefs_get; App Shell Wasm's verdict keeps the VM, naming its
     shell-served import. Leaves the desk as it found it."""
     hops0 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
@@ -3004,10 +4206,11 @@ def wasm_app_reaches_its_roles(board, root):
                           "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
     assert strikes == 0, "the run's end left %r strikes" % strikes
     hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
-    n, us, work = [b - a for a, b in zip(hops0, hops1)]
-    assert n >= 2, "prefs.get and prefs.set did not hop: %r -> %r" % (hops0, hops1)
-    print("\nWASM APP: %d hops, %d us end to end, %d us the rows' own: %.1f us "
-          "per hop" % (n, us, work, (us - work) / n))
+    n, _us, _work, here = [b - a for a, b in zip(hops0, hops1)]
+    assert here >= 2, "prefs.get and prefs.set were not answered here: %r -> %r" % (
+        hops0, hops1)
+    assert n == 0, "the run hopped to the VM: %r -> %r" % (hops0, hops1)
+    print("\nWASM APP: %d rows answered here, %d hops" % (here, n))
     line = board.cmd("run %s" % APP_SHORT[1].lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     try:
@@ -3023,18 +4226,20 @@ def wasm_app_reaches_its_roles(board, root):
     census = board.pyval("__import__('moy_play').census(%r)"
                          % (root + "/wasm_app_roles.moy"), strict=True)
     assert list(census) == ["wasm", True, "free"], census
-    return (us - work) / n
 
 
 # App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat).
 _UI_FRAMES, _UI_FAIL, _UI_HASH = 0, 8, 9
 
 
-def _app_ui_host_pmem(look):
+def _app_ui_host_pmem(look, tier):
     """The fixture's pmem after its first frames on the host's WAMR in the
-    board's look (theme, variant) and its input in use (moy_ui.input(): the
-    hints draw that input's keys): the page's pixel hash the board's must
-    equal."""
+    board's look (theme, variant), its input in use (moy_ui.input(): the
+    hints draw that input's keys) and its tier (the system canvas's w and h,
+    whether the desk is the windowed WM's: where the game canvas is the
+    system's, the bar over the app is the system layout's, sized for that
+    input; on a desk it is the game canvas's 18 rows): the page's pixel hash
+    the board's must equal."""
     import tempfile
     from runtime import host_app, wasm_host
     from tools import wasm_cart
@@ -3045,7 +4250,7 @@ def _app_ui_host_pmem(look):
     host_app.moy_carts.ensure_dirs(root)
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"),
                     os.path.join(root, "app_ui.moy"))
-    ws = host_app.build_workstation(root)
+    ws = host_app.build_workstation(root, sys_size=(tier[0], tier[1]), windowed=tier[2])
     ws.pointer.visible = False
     ws.look.set_theme(look[0], persist=False, variant=look[1])
     from runtime import ui_draw
@@ -3057,7 +4262,7 @@ def _app_ui_host_pmem(look):
         quiesce(ws)
         ws._dirty = True
         drv.frame(1.0 / 30.0)
-    pm = list(ws.player._lua._run.pmem()[1])
+    pm = list(ws.run.player._lua._run.pmem()[1])
     ws.exit()
     ui_draw.input_kind("keys")      # the host's own again
     return pm
@@ -3077,6 +4282,8 @@ def wasm_app_draws_the_toolkit(board, root):
 def _wasm_app_draws_the_toolkit(board, root):
     host = _app_ui_host_pmem(board.pyval(
         "(ws.look.theme_name, ws.look.theme_variant, __import__('moy_ui').input())",
+        strict=True), board.pyval(
+        "(ws.sys_canvas.w, ws.sys_canvas.h, type(ws.wm).__name__ == 'WindowedWM')",
         strict=True))
     pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
                "(__import__('array').array('i', bytearray(1024)))")
@@ -3116,7 +4323,8 @@ def wasm_cart_fps(board, title, seconds=10.0, check=None):
 
 def _wasm_cart_fps(board, title, seconds, check):
     from runtime.perf_line import parse_perf
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     try:
@@ -3149,10 +4357,12 @@ def hello_read_its_greeting(board):
     """The hello cart's `read` crossed to the VM and back: its greeting's
     black band spans the text (8 pixels a character) only when the read
     returned the file's bytes; with nothing read it is 8 pixels wide and row 9
-    at x=100 is the blit's gradient."""
+    at x=24 is the blit's gradient. x=24 is left of the system notice an
+    interpreted run shows ("RUNNING SLOWLY"), which the kernel's front draws
+    centred over the top of the run's canvas."""
     px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
-                     "(ws.canvas._buf, 2 * (9 * ws.canvas.w + 100))", strict=True)
-    black = board.pyval("ws.canvas._wire[0]", strict=True)
+                     "(ws.run.canvas._buf, 2 * (9 * ws.run.canvas.w + 24))", strict=True)
+    black = board.pyval("ws.run.canvas._wire[0]", strict=True)
     assert px == black, "the greeting was not read: pixel %#06x" % px
 
 
@@ -3185,7 +4395,7 @@ def jet_push(board, board_dir, **config):
     cart = jet_cart.build(tempfile.mkdtemp(prefix="moy_jet_"), chips=(chip,),
                           config=config or None)
     _push_folder(board, board_dir, cart, root.rstrip("/") + "/jet_teapot.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     titles = board.pyval("[c['title'] for c in ws.carts.all]", timeout=20,
                          strict=True)
     assert JET_TITLE in titles, "%s is not on the shelf after the push" % JET_TITLE
@@ -3250,7 +4460,7 @@ def _wasm_fixture_variant(board, board_dir, chip, title, slug, change=None,
         change(out)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_" + slug + ".moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def _wasm_run_error(board, title):
@@ -3279,7 +4489,7 @@ def wasm_read_of_a_folder_reads_nothing(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_readdir.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     size = os.path.getsize(os.path.join(out, "manifest.json"))
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a)[:3])[1])"
           "(__import__('array').array('i', bytearray(1024)))")
@@ -3314,9 +4524,10 @@ def wasm_files_push(board, board_dir, fresh=True):
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/" + FILES_FOLDER)
     if fresh:
-        board.pyval("ws._with_sd(lambda: __import__('cart_files').remove("
-                    "str(ws.carts_root), %r)) or 1" % FILES_FOLDER, timeout=30)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+        board.pyval("ws._with_sd(lambda: __import__('moy_store_base')._rmtree("
+                    "__import__('cart_files').folder_of(str(ws.carts_root) + '/' + %r))) or 1"
+                    % FILES_FOLDER, timeout=30, strict=True)
+    board.pyval(RESCAN, timeout=60)
 
 
 def wasm_files_turn(board):
@@ -3366,59 +4577,52 @@ def wasm_tampered_module_is_refused(board, board_dir):
     return err
 
 
-# -- Settings -> UNKNOWN SOURCES (the owner's switch, 2026-09-29) --------------
+# -- an unsigned module's admission (moy_ota_admit_module) -------------------
 #
-# A compiled cart whose module carries no signature runs at full speed only
-# while the owner has the switch on; with it off, it is ignored -- same as
-# no module at all -- and the cart plays on the interpreter with the short
-# notice (2026-09-30, "A cart survives its firmware"). `unknown_sources 0|1`
-# is the dev channel's word for the switch: it sets it without the screen's
-# warning and never persists.
+# A compiled cart whose module carries no signature runs natively only when
+# its consent grants "full_access" (app_perms.admits_unsigned; a cart pushed by
+# hand has no consent record, so its manifest decides); without it the module
+# is refused -- same as no module at all -- and the cart plays on the
+# interpreter with the short notice (2026-09-30, "A cart survives its
+# firmware").
 
 UNSIGNED_TITLE = "Unsigned Wasm"
+UNSIGNED_NATIVE_TITLE = "Unsigned Native Wasm"
 
 
-def unknown_sources(board, on):
-    """Set the switch over the dev channel and check the console reached it."""
-    word = "on" if on else "off"
-    line = board.cmd("unknown_sources %d" % (1 if on else 0),
-                     wait_for="REMOTE unknown_sources")
-    assert line == "REMOTE unknown_sources " + word, line
-    assert board.state()["unknown_sources"] is bool(on)
+def _asks_full_access(folder):
+    path = os.path.join(folder, "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man.setdefault("moybyte", {}).setdefault("permissions", []).append("full_access")
+    with open(path, "w") as f:
+        json.dump(man, f)
 
 
-def wasm_unsigned_cart_follows_unknown_sources(board, board_dir):
-    """The hello cart with its module built unsigned: with the switch off it
-    is IGNORED, same as an absent module, and plays on the interpreter with
-    the short "isn't signed" notice; with the switch on the same module runs
-    natively (native trust) and reads its greeting, with no notice. A cart
-    whose module was tampered with after signing is still refused either
-    way -- that is tamper evidence, not staleness. The switch is left OFF
-    whatever happens."""
+def wasm_unsigned_cart_follows_its_consent(board, board_dir):
+    """The hello cart with its module built unsigned: a cart that does not
+    ask for "full_access" has the module REFUSED, same as an absent one, and plays
+    on the interpreter with the short "isn't signed" notice; the same module
+    in a cart that asks for "full_access" runs natively and reads its greeting,
+    with no notice. A cart whose module was tampered with after signing is
+    refused either way -- that is tamper evidence, not staleness."""
     wasm_signing_key()
     chip = _wasm_chip(board_dir)
     _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_TITLE, "unsigned",
                           signed=False)
+    _wasm_fixture_variant(board, board_dir, chip, UNSIGNED_NATIVE_TITLE,
+                          "unsigned_native", change=_asks_full_access, signed=False)
     _tampered_cart(board, board_dir, chip)
-    try:
-        unknown_sources(board, False)
-        notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
-                                      check=hello_read_its_greeting)
-        unknown_sources(board, True)
+    notice = _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
+                                  check=hello_read_its_greeting)
 
-        def _native_and_greets(b):
-            hello_read_its_greeting(b)
-            assert b.pyval("bool(ws.player._lua.interp)", strict=True) is False
-        _runs_clean(board, UNSIGNED_TITLE, check=_native_and_greets)
-        err = _wasm_run_error(board, TAMPERED_TITLE)
-        assert "refused: bad signature" in err, err
-        unknown_sources(board, False)
-        assert _runs_on_interpreter(board, UNSIGNED_TITLE, cause="unsigned",
-                                    check=hello_read_its_greeting) == notice
-    finally:
-        board.cmd("unknown_sources 0", wait_for="REMOTE unknown_sources")
-    assert board.state()["unknown_sources"] is False
-    print("\nWASM unsigned cart: %r notice with the switch off, native with it on"
+    def _native_and_greets(b):
+        hello_read_its_greeting(b)
+        assert b.pyval("bool(ws.run.player._lua.interp)", strict=True) is False
+    _runs_clean(board, UNSIGNED_NATIVE_TITLE, check=_native_and_greets)
+    err = _wasm_run_error(board, TAMPERED_TITLE)
+    assert "refused: bad signature" in err, err
+    print("\nWASM unsigned cart: %r notice without \"native\", native with it"
           % (notice,))
     return notice
 
@@ -3458,7 +4662,7 @@ def _notice_on_launch(board, title, text=None):
             assert notice == text, notice
         else:
             assert notice.startswith(title + " needs ") and " MB " in notice, notice
-        assert board.pyval("ws.player._lua is None", strict=True) is True
+        assert board.pyval("ws.run.player._lua is None", strict=True) is True
         return notice
     finally:
         board.leave_cart()
@@ -3509,7 +4713,7 @@ def stuck_carts_push(board, board_dir):
     _push_folder(board, board_dir, out, root + "/wasm_stuck.moy")
     _push_folder(board, board_dir, str(ROOT / "tests" / "fixtures" / "stuck_lua.moy"),
                  root + "/stuck_lua.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
 
 
 def a_stuck_run_is_ended(board, runtime):
@@ -3542,6 +4746,75 @@ def a_stuck_run_is_ended(board, runtime):
     return err
 
 
+# -- the timed lanes (native/moy_wasm/moy_wasm_session.h, the P4s) -------------
+#
+# lanes.moy's moy_audio fills the render-ahead ring and its moy_timer asks for
+# every millisecond; lanes_runaway.moy's moy_audio spins after its 200th call,
+# which the deadline monitor strikes, muting the ring, while the timer lane
+# and the cart run on. Each runs AOT (its module built for this board's chip)
+# and interpreted (a copy with none).
+
+LANES = {("aot", False): "Lanes Wasm", ("aot", True): "Lanes Runaway Wasm",
+         ("interp", False): "Lanes Interp", ("interp", True): "Lanes Runaway Interp"}
+
+
+def lanes_carts_push(board, board_dir):
+    """The four lanes carts into the store, rescanned."""
+    import json
+    import shutil
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_lanes_")
+    for name in ("lanes", "lanes_runaway"):
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / (name + ".moy")), out,
+                        chips=(chip,))
+        _push_folder(board, board_dir, out, root + "/wasm_%s.moy" % name)
+        interp = os.path.join(tmp, name + "_interp.moy")
+        shutil.copytree(out, interp, ignore=shutil.ignore_patterns("*.aot"))
+        man = os.path.join(interp, "manifest.json")
+        m = json.load(open(man))
+        m["title"] = m["title"].replace("Wasm", "Interp")
+        json.dump(m, open(man, "w"))
+        _push_folder(board, board_dir, interp, root + "/wasm_%s_interp.moy" % name)
+    board.pyval(RESCAN, timeout=60)
+
+
+def timed_lanes_run(board, tier, runaway):
+    """The lanes cart for `tier` ("aot" or "interp"), run for three seconds:
+    both lanes ran, the timer near its asked-for rate and the audio lane
+    keeping the ring fed -- or, for the runaway, the audio lane struck at its
+    deadline with the ring muted while the timer lane and the cart run on.
+    Returns moy_wasm.tlanes()."""
+    title = LANES[(tier, runaway)]
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        lanes = board.pyval("__import__('moy_wasm').tlanes()", strict=True)
+        ring = board.pyval("__import__('moy_audio').snd_counts()", strict=True)
+        print("\nLANES %s%s: %r ring %r" % (tier, " runaway" if runaway else "", lanes, ring))
+        audio, timer = lanes
+        assert audio[1] and timer[1], lanes
+        assert timer[2] > 1000 and not timer[5], timer
+        if runaway:
+            assert audio[5] and audio[6].startswith("deadline"), audio
+            assert audio[2] == 200 and ring[4] is False, (audio, ring)
+        else:
+            assert audio[3] > 22050 and not audio[5], audio
+            assert ring[4] is True and ring[5] == 512, ring
+        return lanes
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+
+
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # The sub-line by cause (runtime/run/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than
@@ -3549,8 +4822,8 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # all, one built for another chip, and one left over from an older format --
 # every one of those is simply the wrong file name to this console, so the
 # Player cannot tell them apart and shows the same "needs an update"; a
-# module that matched this console's name but carried no signature while
-# Unknown sources is off is "unsigned"; one whose load stopped on a helper
+# module that matched this console's name but carried no signature, its cart
+# not granted "full_access", is "unsigned"; one whose load stopped on a helper
 # this firmware does not register is "firmware".
 INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
                      "firmware": "console needs an update"}
@@ -3558,7 +4831,7 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
-    interpreter tier: `ws.player._lua.interp` is true and the short system
+    interpreter tier: `ws.run.player._lua.interp` is true and the short system
     notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
@@ -3572,7 +4845,7 @@ def _runs_on_interpreter(board, title, check=None, cause="missing"):
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
         assert not st.get("notice"), st["notice"]
-        assert board.pyval("bool(ws.player._lua.interp)", strict=True) is True
+        assert board.pyval("bool(ws.run.player._lua.interp)", strict=True) is True
         notice = board.pyval("list(ws._notice[:2]) if ws._notice else None",
                              strict=True)
         assert notice == [INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB[cause]], notice
@@ -3630,7 +4903,7 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
                     chips=(chip,))
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_huge.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     need, have = wasm_fit(board, HUGE_TITLE)
     assert need[0] > have[0], (need, have)
     notice = _notice_on_launch(board, HUGE_TITLE)
@@ -3663,7 +4936,7 @@ def wasm_newer_cart_opens_the_notice(board, board_dir):
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "newer.moy"), out)
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_newer.moy")
-    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    board.pyval(RESCAN, timeout=60)
     missing = board.pyval(
         "ws.runtimes['wasm'].missing([c for c in ws.carts.all if c['title'] == %r][0])"
         % NEWER_TITLE, timeout=30, strict=True)
@@ -3671,6 +4944,145 @@ def wasm_newer_cart_opens_the_notice(board, board_dir):
     notice = _notice_on_launch(board, NEWER_TITLE, NEWER_NOTICE)
     _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
     return notice
+
+
+# -- a cart that runs out of native stack ------------------------------------
+#
+# A compiled cart's native stack is its session thread's own, and the AOT
+# code checks it at every entry against the boundary the session handed the
+# runtime (native/moy_wasm/README.md). A trap there names the numbers the
+# check compared (modmoy_wasm.c's stack_note), so one that should not have
+# fired says why.
+
+DEEP_TITLE = "Deep Wasm"
+STACK_NOTE = re.compile(r"native stack overflow \[stack 0x[0-9a-f]+\+(\d+) bound \+(\d+) "
+                        r"set \+(\d+) free (\d+) frame (\d+) (here|elsewhere)\]")
+STACK_GUARD = 2048          # modmoy_wasm.c's MOY_WASM_STACK_GUARD
+
+
+def wasm_deep_recursion_traps_with_its_numbers(board, board_dir):
+    """The deep fixture recurses without end on its second frame: the native
+    stack check traps it -- "native stack overflow", never a real overflow --
+    and the trap says the env held the boundary it was handed, the guard above
+    the session thread's stack, and was entered on that thread. The board
+    stays healthy: the hello cart runs after it and reads its greeting.
+    Returns the note's numbers."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_deep_")
+    out = os.path.join(tmp, "deep.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "deep.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board_dir, out, root.rstrip("/") + "/wasm_deep.moy")
+    board.pyval(RESCAN, timeout=60)
+    err = _wasm_run_error(board, DEEP_TITLE)
+    m = STACK_NOTE.search(err)
+    assert m, err
+    shift, bound, given, free, frame = (int(g) for g in m.groups()[:5])
+    assert bound == given == STACK_GUARD, err
+    assert m.group(6) == "here", err
+    assert shift < STACK_GUARD and frame < STACK_GUARD, err
+    print("\nWASM deep recursion: %r" % err)
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return shift, bound, given, free, frame
+
+
+DEEP_INIT_TITLE = "Deep Init"
+DEEP_INIT_FOLDER = "wasm_deep_init.moy"
+
+
+def _deep_init_push(board, board_dir):
+    """Deep Init (tests/fixtures/wasm/deep_init.moy: Deep Wasm's recursion in
+    _init) built for this board's chip and pushed; the cart's path on the
+    board. Its written "inits" outlives the push (cart_files.py)."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_deep_init_")
+    out = os.path.join(tmp, "deep_init.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "deep_init.moy"), out,
+                    chips=(chip,))
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    _push_folder(board, board_dir, out, root + "/" + DEEP_INIT_FOLDER)
+    board.pyval(RESCAN, timeout=60)
+    return root + "/" + DEEP_INIT_FOLDER
+
+
+def _deep_init_inits(board, path):
+    """How many times Deep Init's _init has run: the byte in its written
+    "inits" (mod 256), 0 before it was ever written."""
+    board.pyexec("def _deep_inits(p):\n"
+                 "    try:\n"
+                 "        with open(p, 'rb') as f:\n"
+                 "            return f.read(1)\n"
+                 "    except OSError:\n"
+                 "        return b''\n", strict=True)
+    got = board.pyval("ws._with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
+                      ".folder_of(%r) + '/inits'))" % path, timeout=30, strict=True)
+    return got[0] if got else 0
+
+
+def _assert_stack_trap(err):
+    assert "native stack overflow" in err and STACK_NOTE.search(err), err
+    assert "wasm_open wants" not in err and "operand stack" not in err, err
+
+
+def wasm_init_trap_is_the_carts_own_error(board, board_dir, stopped=False):
+    """Deep Init traps in _init, after its module loaded: the trap is the
+    cart's own error -- "native stack overflow" with the note the stack check
+    names its numbers in -- never a retry on the interpreter, which would run
+    _init a second time or be refused by the session still open. Its written
+    "inits" counts one more run. With `stopped`, the run is the S3s' with the VM down
+    (`vmstop force`, native/moy_play/moy_play_stop.c), whose panel the board
+    prints as "STOP error:" and the dev channel's `end` releases. The hello
+    cart runs after it. Returns the error."""
+    import time
+    path = _deep_init_push(board, board_dir)
+    before = _deep_init_inits(board, path)
+    if not stopped:
+        err = _wasm_run_error(board, DEEP_INIT_TITLE)
+    else:
+        line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+        assert line is not None and "force" in line, line
+        n0 = len(board.lines)
+        ended = False
+        try:
+            line = board.cmd("run %s" % DEEP_INIT_TITLE.lower(), wait_for="REMOTE run",
+                             timeout=30)
+            assert line is not None and DEEP_INIT_TITLE in line, line
+            said = None
+            end = time.time() + 60
+            while said is None and time.time() < end:
+                said = next((ln for ln in board.lines[n0:] if "STOP error:" in ln), None)
+                if said is None:
+                    board.drain(0.2)
+            assert said is not None, "the stop never said its error"
+            err = said.split("STOP error:", 1)[1].strip()
+            # the panel waits with the VM down; the kernel's `state` names it,
+            # and the dev channel's `end` releases it and brings the VM back
+            st = board.state()
+            assert st.get("screen") == "panel" and st.get("vm") is False, st
+            assert st["run"]["vm_down"] is True, st
+            board.cmd("end", wait_for="REMOTE end", retry=False)
+            ended = _said_since(board, n0, "STOP 1/1 ended", 30)
+            assert ended, "the run never ended"
+            _desk_back(board)
+        finally:
+            if not ended and not _said_since(board, n0, "STOP 1/1 ended", 0):
+                board.ser.write(b"\x03")
+                board.ser.flush()
+                board.wait_line("STOP 1/1 ended", 30)
+                _desk_back(board)
+            board.cmd("vmstop need", wait_for="REMOTE vmstop")
+    _assert_stack_trap(err)
+    assert _deep_init_inits(board, path) == (before + 1) % 256, err
+    print("\nWASM init trap%s: %r" % (" (VM down)" if stopped else "", err))
+    _runs_clean(board, WASM_CARTS["hello"], check=hello_read_its_greeting)
+    return err
 
 
 # -- Doom, built by the recipe (experiments/wasm_aot/doom/build_cart.py) --------
@@ -3756,7 +5168,7 @@ def doom_push(board, board_dir):
         pytest.skip("the cart store at %s has %d bytes free and the Doom cart "
                     "needs %d more: the store cannot hold it" % (root, free, need))
     _push_folder(board, board_dir, local, dest)
-    board.pyval("len(ws.rescan_carts() or ())", timeout=90)
+    board.pyval(RESCAN, timeout=90)
     return frames
 
 
@@ -3849,7 +5261,8 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
     need, have = wasm_fit(board, "Doom")
     print("\nDOOM fit: footprint %r, free %r" % (need, have))
     host = doom_host_crcs(tics)
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     pm = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
           "(__import__('array').array('i', bytearray(1024)))")
     with perf_diag(board):             # its fps is read off PERF
@@ -3906,9 +5319,9 @@ def doom_frames_match_the_host(board, board_dir, tics=DOOM_TICS, short=None,
 _FRAME_FOLD_PROOF = """
 def _ff_proof():
     import moy_alloc
-    cf = ws.cart_frame
+    cf = ws.run.cart_frame
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     gw = gc.w
     gh = gc.h
     fmt = cf.fmt
@@ -3957,16 +5370,20 @@ def _ff_proof():
 
 def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
                                                   seconds=6.0):
-    """The frame fold on a banded board: run `title` from the launcher with
-    the FPS chip on -- the default, and an opaque rect over every frame --
-    and every frame it draws is folded from the cart's memory (the frame
-    fold's count climbs with the fold's own), the snapshot DMA takes them all
-    and never times out, frames are in layout `fmt` (1 blit565, 2 blit), and
-    the proof above reads 0. Returns the frames folded in `seconds`."""
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    """The frame fold on a banded board, on the console's frame: run `title`
+    from the launcher with the FPS chip on -- the default, and an opaque rect
+    over every frame -- and the kernel's front held off (its own fold is
+    a_compiled_run_shows_its_frames_in_front's), and every frame it draws is
+    folded from the cart's memory (the frame fold's count climbs with the
+    fold's own), the snapshot DMA takes them all and never times out, frames
+    are in layout `fmt` (1 blit565, 2 blit), and the proof above reads 0.
+    Returns the frames folded in `seconds`."""
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     st = board.state()
     fps_was = board.pyval("ws.show_fps", strict=True)
-    board.pyexec("ws.show_fps = True", strict=True)
+    board.pyexec("ws.show_fps = True\nws._g['_bind_was'] = ws.front_bind\n"
+                 "ws.front_bind = lambda: False", strict=True)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:
@@ -3979,13 +5396,14 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
         st = board.state()
         f1, ff1 = st["fold"], st["ffold"]
         snaps1 = board.pyval("ws.comp.snap_stats()", strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == fmt
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == fmt
         assert board.pyexec(_FRAME_FOLD_PROOF, strict=True)
         bad = board.pyval("ws._g['_ff_proof']()", timeout=120, strict=True)
     finally:
         board.leave_cart()
         board.drain(1.0)
-        board.pyexec("ws.show_fps = %r" % bool(fps_was))
+        board.pyexec("ws.show_fps = %r\nws.front_bind = ws._g['_bind_was']"
+                     % bool(fps_was))
     print("\nFRAME FOLD %s: folded %d of %d flushes' folds in %.0fs, snap %r -> %r, "
           "proof %r" % (title, ff1 - ff0, f1 - f0, seconds, snaps0, snaps1, bad))
     assert ff1 - ff0 > 0, "no frame was folded from the cart's memory"
@@ -3996,6 +5414,70 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
     assert snaps1[1] == snaps0[1], "a snapshot was a CPU copy"
     assert bad == 0, "the folded frame differs from its composite: %d bytes" % bad
     return ff1 - ff0
+
+
+# A VM-free Lua run in the kernel's front on a banded panel larger than its
+# game canvas (the Guition S3, moy_glass.front): every present arms the fold
+# over the game canvas and the scratch the binder hands it. The proof, between
+# two front frames: the fold over those same arguments synthesizes the bands
+# of the composite the console's blit_game makes of the same snapshot -- 0
+# differing bytes -- and the composite one pixel off does not.
+_FRONT_FOLD_PROOF = """
+def _front_proof(shift):
+    comp = ws.comp
+    gc = ws.run.canvas
+    gw, gh = gc.w, gc.h
+    ox, oy, scale = ws.wm.play_viewport()
+    assert scale == 1, scale
+    fbw, fbh = comp.size()
+    scr = ws.sys_canvas.front_scratch(gw, gh)
+    comp.fold_fence()
+    comp.snap_fence()
+    back = comp._back
+    fb = comp._fbs[back]
+    try:
+        comp.snap_scale_fold(gc._buf, 0, scr, gw, gh, 0, gw, ox, oy, scale)
+        comp.snap_fence()
+        z = bytes(2 * fbw)
+        for y in range(fbh):
+            fb[2 * fbw * y:2 * fbw * (y + 1)] = z
+        src = memoryview(scr)
+        for y in range(gh):
+            a = 2 * ((oy + y) * fbw + ox + shift)
+            fb[a:a + 2 * gw] = src[2 * gw * y:2 * gw * (y + 1)]
+        return comp._lcd.fold_test(back)
+    finally:
+        comp.disarm_scale_fold()
+"""
+
+
+def a_lua_run_folds_to_the_glass_in_front(board, title="Brick Siege Lua", seconds=4.0):
+    """`title` runs in the kernel's front, its frames folded through the
+    flush (the fold's count climbs), and the proof above reads 0 -- and not 0
+    for the composite one pixel off. Returns the folds counted."""
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(3.0)
+        assert board.pyval("__import__('moy_play').front_live()", strict=True), \
+            "the run did not take the front"
+        f0 = board.pyval("ws.comp.fold_count", strict=True)
+        board.drain(seconds)
+        f1 = board.pyval("ws.comp.fold_count", strict=True)
+        assert board.pyexec(_FRONT_FOLD_PROOF, strict=True)
+        bad = board.pyval("ws._g['_front_proof'](0)", timeout=120, strict=True)
+        off = board.pyval("ws._g['_front_proof'](1)", timeout=120, strict=True)
+        live = board.pyval("__import__('moy_play').front_live()", strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nFRONT FOLD %s: %d folds in %.0fs, proof %r, one pixel off %r"
+          % (title, f1 - f0, seconds, bad, off))
+    assert f1 - f0 > 20 * seconds, "the front's frames were not folded"
+    assert bad == 0, "the front's fold differs from its composite: %d bytes" % bad
+    assert off > 0, "the proof cannot see a one-pixel shift"
+    assert live, "the proof took the run out of the front"
+    return f1 - f0
 
 
 # A compiled cart's direct-colour frame on a P4: the PPA scales it from the
@@ -4011,14 +5493,14 @@ def compiled_frames_go_to_the_glass_from_the_cart(board, title, fmt,
 _P4_FRAME_PROOF = """
 def _p4_canvas_crc(rows):
     import binascii
-    gc = ws.canvas
+    gc = ws.run.canvas
     return binascii.crc32(memoryview(gc._buf)[:2 * gc.w * rows])
 
 def _p4_frame_proof(glass):
     import binascii, moy_alloc, moy_ppa
-    cf = ws.cart_frame
+    cf = ws.run.cart_frame
     comp = ws.comp
-    gc = ws.canvas
+    gc = ws.run.canvas
     sc = ws.sys_canvas
     gw = gc.w
     gh = gc.h
@@ -4057,7 +5539,8 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
     canvas above the chip is never written while the frames change, and the
     proof above reads 0 and a settle that reproduces the snapshot. Returns
     the snapshots taken in `seconds`."""
-    assert not board.state().get("wifi_held"), "WiFi is held: not a cart's state"
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
     fps_was = board.pyval("ws.show_fps", strict=True)
     board.pyexec("ws.show_fps = True", strict=True)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
@@ -4067,7 +5550,7 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         assert board.pyexec(_P4_FRAME_PROOF, strict=True)
-        rows = "ws.canvas.h - 24"
+        rows = "ws.run.canvas.h - 24"
         crc0 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
         snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         f0 = st["frames"]
@@ -4076,7 +5559,7 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
         f1 = st["frames"]
         snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc1 = board.pyval("ws._g['_p4_canvas_crc'](%s)" % rows, strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == 1
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == 1
         bad, settled = board.pyval("ws._g['_p4_frame_proof'](%r)" % bool(glass),
                                    timeout=120, strict=True)
     finally:
@@ -4097,6 +5580,205 @@ def p4_compiled_frames_go_to_the_glass_from_the_cart(board, title, glass,
     return snaps1[0] - snaps0[0]
 
 
+# A compiled run in the kernel's front with the VM up (moy_glass.front's
+# frame op, native/moy_play/moy_play.h): its frames go to the glass from the
+# cart's memory in C. The proof, between two front frames, over the copy the
+# front kept (`moy_glass.front_stats`: how many it showed, where the last
+# copy sits in the run's scratch, its layout) and the game rect it was bound
+# to: on a DSI board ("dsi") the buffer the last frame drew into holds, in
+# that rect, byte for byte the PPA's scale of the copy; on the rotated one
+# ("rot") the scan buffer it was shown in holds the PPA's scale and rotate of
+# it; on a banded panel ("fold") the fold over the copy synthesizes the bands
+# of the CPU composite of it. Each is taken again one pixel off, which must
+# differ. Every family: the copy settles into the canvas exactly.
+
+_FRONT_FRAME_PROOF = """
+def _ff_rect():
+    wm = ws.wm
+    r = getattr(ws, 'render_scale', 1)
+    if getattr(wm, 'mode', None) == 'desktop':
+        ox, oy, scale = wm._player_view(wm._wins['desktop'])
+    else:
+        ox, oy, scale = wm.play_viewport()
+    return ox * r, oy * r, scale * r
+
+def _front_frame_proof(kind, shift):
+    import binascii, moy_glass
+    cf = ws.run.cart_frame
+    comp = ws.comp
+    gc = ws.run.canvas
+    gw, gh = gc.w, gc.h
+    st = moy_glass.front_stats()
+    off, fmt = st[1], st[2]
+    n = gw * gh * (1 if fmt == 2 else 2)
+    kept = memoryview(cf._scratch)[off:off + n]
+    ox, oy, scale = _ff_rect()
+    bad = -1
+    if kind == 'fold':
+        import array, moy_alloc
+        comp.fold_fence()
+        comp.snap_fence()
+        fbw, fbh = comp.size()
+        scr = moy_alloc.alloc(len(cf._scratch), moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        back = comp._back
+        fb = comp._fbs[back]
+        # The palette the front resolved: the fold's own copy, after the
+        # frame's 64-aligned span (the console never saw this frame's).
+        tail = (off + n + 63) & ~63
+        lut = array.array('H', bytes(memoryview(cf._scratch)[tail:tail + 512]))
+        try:
+            comp.frame_fold(kept, fmt, lut if fmt == 2 else None, scr, gw, gh,
+                            0, 0, gw, gh, ox, oy, scale, None, None)
+            comp.snap_fence()
+            z = bytes(2 * fbw)
+            for y in range(fbh):
+                fb[2 * fbw * y:2 * fbw * (y + 1)] = z
+            row = bytearray(2 * gw * scale)
+            for y in range(gh):
+                for x in range(gw):
+                    if fmt == 2:
+                        v = lut[kept[y * gw + x]]
+                        lo, hi = v & 0xFF, v >> 8
+                    else:
+                        j = 2 * (y * gw + x)
+                        lo, hi = kept[j + 1], kept[j]
+                    for s in range(scale):
+                        row[2 * (x * scale + s)] = lo
+                        row[2 * (x * scale + s) + 1] = hi
+                for s in range(scale):
+                    a = 2 * ((oy + y * scale + s) * fbw + ox + shift)
+                    m = min(len(row), len(fb) - a)
+                    fb[a:a + m] = row[:m]
+            bad = comp._lcd.fold_test(back)
+        finally:
+            comp.disarm_scale_fold()
+            moy_alloc.free(scr)
+        return bad
+    import moy_alloc, moy_ppa
+    moy_ppa.sync()
+    moy_ppa.snap_wait()
+    if kind == 'dsi':
+        fbw, fbh = comp.size()
+        fb = comp._fbs[(comp._back - 1) % len(comp._fbs)]
+        x0, y0, w, h = ox, oy, gw * scale, gh * scale
+        dst = moy_alloc.alloc(2 * fbw * fbh, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+        try:
+            moy_ppa.blit_scale(dst, fbw, fbh, ox + shift, oy, kept, gw, gh, scale)
+            bad = _ff_diff(fb, dst, fbw, x0, y0, w, h)
+        finally:
+            moy_alloc.free(dst)
+        return bad
+    comp.sync()
+    pw, ph = comp._pw, comp._ph
+    lw, lh = comp._w, comp._h
+    angle = comp.angle
+    w, h = gw * scale, gh * scale
+    if angle == 90:
+        x0, y0 = oy, lw - (ox + shift) - w
+    else:
+        x0, y0 = lh - oy - h, ox + shift
+    fb = comp._fbs[comp._front]
+    dst = moy_alloc.alloc(2 * pw * ph, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+    try:
+        moy_ppa.rotate_scale(dst, pw, ph, x0, y0, kept, gw, gh, scale, angle)
+        if angle == 90:
+            x0, y0 = oy, lw - ox - w
+        else:
+            x0, y0 = lh - oy - h, ox
+        bad = _ff_diff(fb, dst, pw, x0, y0, h, w)
+    finally:
+        moy_alloc.free(dst)
+    return bad
+
+def _ff_diff(fb, dst, stride, x0, y0, w, h):
+    bad = 0
+    for y in range(y0, y0 + h):
+        a = 2 * (y * stride + x0)
+        b = a + 2 * w
+        if fb[a:b] != dst[a:b]:
+            bad += sum(1 for i in range(a, b) if fb[i] != dst[i])
+    return bad
+
+def _front_settle_proof(kind):
+    import binascii, moy_glass, moycore
+    st = moy_glass.front_stats()
+    gc = ws.run.canvas
+    n = gc.w * gc.h * (1 if st[2] == 2 else 2)
+    kept = memoryview(ws.run.cart_frame._scratch)[st[1]:st[1] + n]
+    # The front's frame fence first, as its hand-back takes it: the copy
+    # of the frame shown last may still be landing.
+    if kind == 'fold':
+        ws.comp.snap_fence()
+    else:
+        import moy_ppa
+        moy_ppa.snap_wait()
+    want = binascii.crc32(kept)
+    moycore.frame_settle()
+    if st[2] == 2:
+        return True
+    if kind != 'fold':
+        return binascii.crc32(gc._buf) == want
+    # An S3 canvas holds the panel's byte order, the cart's frame its own.
+    # A front over the whole panel draws the run into the compositor's back
+    # buffer, which its present flips; the console's canvas re-points only
+    # on its own frames, so the frame shown last is the compositor's.
+    buf = gc._buf
+    if gc is ws.sys_canvas:
+        buf = ws.comp.last_buffer() or buf
+    c = memoryview(buf)
+    for i in range(0, n, 2):
+        if c[i] != kept[i + 1] or c[i + 1] != kept[i]:
+            return False
+    return True
+"""
+
+
+def a_compiled_run_shows_its_frames_in_front(board, title, kind, seconds=4.0):
+    """`title`, a compiled cart, plays fullscreen in the kernel's front with
+    the VM up: the front is live, the frames it shows from the cart's memory
+    (`front_stats`) climb with the frames drawn, the game canvas is never
+    written meanwhile, and the proof above for this board's family (`kind`:
+    "dsi", "rot" or "fold") reads 0 -- and not 0 one pixel off. Returns the
+    frames shown."""
+    assert board.state().get("wifi_held") == rest_holders(board), \
+        "WiFi is held: not a cart's state"
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    crc = "__import__('binascii').crc32(ws.run.canvas._buf)"
+    try:
+        board.drain(3.0)
+        assert board.pyval("__import__('moy_play').front_live()", strict=True), \
+            "the run did not take the front"
+        assert board.pyexec(_FRONT_FRAME_PROOF, strict=True)
+        s0 = board.pyval("__import__('moy_glass').front_stats()", strict=True)
+        c0 = board.pyval(crc, strict=True)
+        f0 = board.state()["frames"]
+        board.drain(seconds)
+        f1 = board.state()["frames"]
+        s1 = board.pyval("__import__('moy_glass').front_stats()", strict=True)
+        c1 = board.pyval(crc, strict=True)
+        bad = board.pyval("ws._g['_front_frame_proof'](%r, 0)" % kind, timeout=180,
+                          strict=True)
+        off = board.pyval("ws._g['_front_frame_proof'](%r, 1)" % kind, timeout=180,
+                          strict=True)
+        settled = board.pyval("ws._g['_front_settle_proof'](%r)" % kind, timeout=60,
+                              strict=True)
+        live = board.pyval("__import__('moy_play').front_live()", strict=True)
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nFRONT FRAMES %s (%s): %d shown over %d frames in %.0fs, proof %r, "
+          "one pixel off %r, settle %r" % (title, kind, s1[0] - s0[0], f1 - f0, seconds,
+                                           bad, off, settled))
+    assert s1[0] - s0[0] >= (f1 - f0) // 2 > 0, "the front did not show its frames"
+    assert c1 == c0, "a frame was written into the game canvas"
+    assert bad == 0, "the glass differs from the front's frame: %d bytes" % bad
+    assert off > 0, "the proof cannot see a one-pixel shift"
+    assert settled, "the settled canvas is not the front's copy"
+    assert live, "the proof took the run out of the front"
+    return s1[0] - s0[0]
+
+
 def p4_palette_frames_keep_the_blit(board, title, seconds=2.0):
     """A P4 shows blit565's frames from the cart's memory and leaves blit's
     to the blit (ESP-IDF disables the PPA's palette mode): the run holds a
@@ -4110,14 +5792,14 @@ def p4_palette_frames_keep_the_blit(board, title, seconds=2.0):
         board.drain(2.5)
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
-        assert board.pyval("ws.cart_frame is not None", strict=True) is True
-        crc = ("__import__('binascii').crc32(ws.canvas._buf)")
+        assert board.pyval("ws.run.cart_frame is not None", strict=True) is True
+        crc = ("__import__('binascii').crc32(ws.run.canvas._buf)")
         snaps0 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc0 = board.pyval(crc, strict=True)
         board.drain(seconds)
         snaps1 = board.pyval("__import__('moy_ppa').snap_stats()", strict=True)
         crc1 = board.pyval(crc, strict=True)
-        assert board.pyval("ws.cart_frame.fmt", strict=True) == 0
+        assert board.pyval("ws.run.cart_frame.fmt", strict=True) == 0
     finally:
         board.leave_cart()
         board.drain(1.0)

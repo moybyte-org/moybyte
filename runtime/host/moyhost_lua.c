@@ -27,9 +27,12 @@
  *   - register()'s verbs call back into Python through one dispatch, and each
  *     call is counted APP, as modmoycore.c's trampoline counts it.
  *
- * ONE RUN AT A TIME, as on a board: moycore_RUN is it. A new hl_new closes the
- * run before it, and every call through a handle that is not the live one is
- * refused.
+ * THE RUNS ARE ROWS, as on a board (moycore_lua.h): each hl_new opens a row
+ * of its own beside the runs already open, and every call makes its handle's
+ * row current first, so two runs interleave call by call. A call through a
+ * handle whose run has closed is refused. Where every row is held, hl_new
+ * closes the oldest Lua run first: a harness that dropped a run without
+ * closing it leaves its row, which a board refuses and the host takes back.
  */
 
 #include <stdlib.h>
@@ -145,40 +148,67 @@ int moycore_frame(float dt, int draw, char *err, size_t n)
 
 /* -- the run ------------------------------------------------------------------- */
 
+typedef int (*hl_dispatch_fn)(int idx, int argc, const int *kinds,
+                              const int *iargs, const char **sargs,
+                              int *out, const char **sout);
+
 typedef struct {
-    uint32_t gen;               /* this handle's run; the live one is G_GEN */
+    uint32_t h;                 /* its row's run (moycore_run_handle), 0 once closed */
+    uint32_t gen;               /* the order the runs were made in */
+    hl_dispatch_fn dispatch;    /* register()'s verbs call back through it */
+    uint8_t *p8mem, *p8rom;     /* its p8 machine's buffers */
 } host_lua;
 
 static uint32_t G_GEN;
-static host_lua *G_LIVE;
-static uint8_t *G_P8MEM, *G_P8ROM;
+static host_lua *G_ROWS[MOYCORE_RUNS];      /* the run holding each row */
 
 #define RUN moycore_RUN
-#define LIVE(r) ((r) != NULL && (r) == G_LIVE)
 
-static void close_live(void)
+/* `r`'s row made current: 1, or 0 when its run has closed. */
+static int sel(host_lua *r)
 {
-    if (G_LIVE == NULL) return;
+    moycore_run *row = r != NULL && r->h ? moycore_run_of(r->h) : NULL;
+    if (row == NULL || G_ROWS[row->slot] != r) return 0;
+    moycore_run_use(row);
+    return 1;
+}
+#define LIVE(r) sel(r)
+
+static void close_run(host_lua *r)
+{
+    if (!sel(r)) return;
     moycore_lua_close();
     if (RUN.layers.blit_state)
         mg_lr_forget((mg_lrestore_t *)RUN.layers.blit_state, &mg_copy_none);
     moycore_run_close(&RUN.c);
-    memset(&RUN, 0, sizeof(RUN));
-    moycore_run_cur = NULL;
-    G_LIVE = NULL;
+    G_ROWS[RUN.slot] = NULL;
+    moycore_run_end(&RUN);
+    r->h = 0;
 }
 
-/* The run is one at a time across both runtimes: a run claims it, ending the
- * live one first (a Lua run's close, or a compiled run's `release`). */
-static void (*G_RELEASE)(void);
 
-void hl_claim(void (*release)(void))
+/* A compiled run's row released (moyhost_wasm.c, where WAMR builds): its
+ * console goes, and its calls report it is not running. */
+void hw_release_row(moycore_run *row) __attribute__((weak));
+
+/* A row for a new run, Lua or compiled (moyhost_wasm.c): a free one, else
+ * the oldest run's, closed. */
+moycore_run *hl_row_for_new(void)
 {
-    void (*f)(void) = G_RELEASE;
-    close_live();
-    G_RELEASE = NULL;
-    if (f) f();
-    G_RELEASE = release;
+    moycore_run *row = moycore_run_new();
+    while (row == NULL) {
+        moycore_run *old = NULL;
+        for (int i = 0; i < MOYCORE_RUNS; i++) {
+            moycore_run *ri = moycore_run_at(i);
+            if (ri && (ri->L || ri->wasm) && (!old || ri->gen < old->gen)) old = ri;
+        }
+        if (old == NULL) return NULL;
+        if (G_ROWS[old->slot]) close_run(G_ROWS[old->slot]);
+        else if (hw_release_row) hw_release_row(old);
+        else return NULL;
+        row = moycore_run_new();
+    }
+    return row;
 }
 
 /* The console over the caller's RGB565 framebuffer (`wire`: the 64-entry
@@ -194,8 +224,10 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
         return NULL;
     r = (host_lua *)calloc(1, sizeof(host_lua));
     if (!r) return NULL;
-    hl_claim(NULL);
-    memset(&RUN, 0, sizeof(RUN));
+    if (hl_row_for_new() == NULL) {
+        free(r);
+        return NULL;
+    }
     moycore_lua_meters_reset();
     moy_canvas_init(&RUN.c.canvas, (moy_pixel *)pix, w, h);
     if (wire) moy_canvas_wire(&RUN.c.canvas, wire);
@@ -203,17 +235,20 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, const uint16_t *wire,
     RUN.c.con.rng = (uint32_t)moycore_run_now_us() | 1u;
     RUN.open = 1;
     r->gen = ++G_GEN;
-    G_LIVE = r;
+    r->h = moycore_run_handle(&RUN);
+    G_ROWS[RUN.slot] = r;
     return r;
 }
 
-int hl_open(host_lua *r, char *err, int errlen)
+/* `app` is the app's run (native/moy_app/moy_app_run.h) the state opens its
+ * role names over, or NULL. */
+int hl_open(host_lua *r, const struct moy_app_run *app, char *err, int errlen)
 {
     if (!LIVE(r)) return 1;
-    if (!G_P8MEM) G_P8MEM = (uint8_t *)malloc(MOY_P8_MEM);
-    if (!G_P8ROM) G_P8ROM = (uint8_t *)malloc(MOY_P8_ROM);
-    moycore_lua_p8_memory(G_P8MEM && G_P8ROM ? G_P8MEM : NULL, G_P8ROM);
-    return moycore_lua_open(err, errlen > 0 ? (size_t)errlen : 0) != 0;
+    if (!r->p8mem) r->p8mem = (uint8_t *)malloc(MOY_P8_MEM);
+    if (!r->p8rom) r->p8rom = (uint8_t *)malloc(MOY_P8_ROM);
+    moycore_lua_p8_memory(r->p8mem && r->p8rom ? r->p8mem : NULL, r->p8rom);
+    return moycore_lua_open(app, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
 /* The sheet, flags and map: moycore_run.h's, which says why each is checked
@@ -251,15 +286,12 @@ void hl_retarget(host_lua *r, void *pix)
 #define HL_BOOL 2
 #define HL_NIL  3
 
-typedef int (*hl_dispatch_fn)(int idx, int argc, const int *kinds,
-                              const int *iargs, const char **sargs,
-                              int *out, const char **sout);
-
-static hl_dispatch_fn CUR_DISPATCH;
-
+/* The verb's run is its second upvalue: each run calls back through its own
+ * dispatch. */
 static int hl_tramp(lua_State *L)
 {
     int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
+    hl_dispatch_fn dispatch = ((host_lua *)lua_touserdata(L, lua_upvalueindex(2)))->dispatch;
     int n = lua_gettop(L);
     int kinds[HL_MAX_IARGS];
     int iargs[HL_MAX_IARGS];
@@ -283,11 +315,11 @@ static int hl_tramp(lua_State *L)
         }
         ic++;
     }
-    if (CUR_DISPATCH == NULL) return 0;
+    if (dispatch == NULL) return 0;
     moy_loop_count(MOY_UPC_APP);
     int out[HL_MAX_IARGS + 1] = {0};
     const char *sout = NULL;
-    int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, out, &sout);
+    int has = dispatch(idx, ic, kinds, iargs, sargs, out, &sout);
     if (has == 1) { lua_pushinteger(L, out[0]); return 1; }
     if (has == 2 && sout != NULL) {
         lua_pushlstring(L, sout, (size_t)out[0]);
@@ -301,7 +333,7 @@ static int hl_tramp(lua_State *L)
     return 0;
 }
 
-void hl_set_dispatch(host_lua *r, hl_dispatch_fn fn) { (void)r; CUR_DISPATCH = fn; }
+void hl_set_dispatch(host_lua *r, hl_dispatch_fn fn) { if (r) r->dispatch = fn; }
 
 /* `name` as a Lua global calling back with `idx`. After hl_open and before
  * hl_load: a cart captures its globals into locals as it executes. */
@@ -309,7 +341,8 @@ void hl_register(host_lua *r, const char *name, int idx)
 {
     if (!LIVE(r) || !RUN.L) return;
     lua_pushinteger(RUN.L, idx);
-    lua_pushcclosure(RUN.L, hl_tramp, 1);
+    lua_pushlightuserdata(RUN.L, r);
+    lua_pushcclosure(RUN.L, hl_tramp, 2);
     lua_setglobal(RUN.L, name);
 }
 
@@ -369,15 +402,24 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
     return moycore_lua_exec(src, (size_t)len, name, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
-/* The cart's chunks in order, then _init (modmoycore.c's load). */
+/* The cart's chunks in order, then _layout with `layout`'s (w, h, fs) where it
+ * is not NULL, then _init (modmoycore.c's load). */
 int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,
-            int n, char *err, int errlen)
+            int n, const int32_t *layout, char *err, int errlen)
 {
     if (!LIVE(r) || !RUN.L) return hl_exec(r, "", 0, "", err, errlen);
     moycore_lua_load_begin();
     for (int i = 0; i < n; i++)
         if (hl_exec(r, srcs[i], lens[i], names[i], err, errlen)) return 1;
-    return moycore_lua_load_finish(err, errlen > 0 ? (size_t)errlen : 0) != 0;
+    return moycore_lua_load_finish(layout, err, errlen > 0 ? (size_t)errlen : 0) != 0;
+}
+
+/* The cart's _layout(w, h, fs) (modmoycore.c's layout): 1 called, 0 none,
+ * -1 with the message in err. */
+int hl_layout(host_lua *r, int32_t w, int32_t h, int32_t fs, char *err, int errlen)
+{
+    if (!LIVE(r) || !RUN.L) return 0;
+    return moycore_lua_layout(w, h, fs, err, errlen > 0 ? (size_t)errlen : 0);
 }
 
 /* One frame (moycore_frame); `draw` 0 is a logic-only tick. */
@@ -463,8 +505,28 @@ void hl_split(uint32_t *update_us, uint32_t *draw_us)
 void hl_free(host_lua *r)
 {
     if (r == NULL) return;
-    if (LIVE(r)) close_live();
+    close_run(r);
+    free(r->p8mem);
+    free(r->p8rom);
     free(r);
+}
+
+/* The run's Lua heap in bytes, Lua's own count with no collect: exact, what
+ * the task manager's row shows. */
+int hl_heap_live(host_lua *r)
+{
+    moycore_run *row = r != NULL && r->h ? moycore_run_of(r->h) : NULL;
+    return row != NULL ? (int)moycore_run_heap(row) : 0;
+}
+
+/* How many runs are open, Lua and compiled. */
+int hl_runs(void) { return moycore_run_count(); }
+
+/* The run's handle (moycore_run_handle), 0 once it has closed. */
+uint32_t hl_handle(host_lua *r)
+{
+    moycore_run *row = r != NULL && r->h ? moycore_run_of(r->h) : NULL;
+    return row != NULL && G_ROWS[row->slot] == r ? r->h : 0u;
 }
 
 /* -- the kernel's Player (moy_play.h) ------------------------------------------- */
@@ -485,9 +547,9 @@ int hl_play_open(uint32_t run) { return moy_play_open(run); }
 /* The run's ticks; the pointer and the window flag the console published
  * first. `out` gets MOY_PLAY_QUIT and MOY_PLAY_VIEW. */
 int hl_play_frame(uint32_t run, int ticks, float dt, int render, int x, int y, int touch,
-                  int window, uint32_t *out)
+                  int face, int rx, int ry, int rw, int rh, uint32_t *out)
 {
-    moy_play_in_t in = { x, y, touch, window != 0 };
+    moy_play_in_t in = { x, y, touch, face, { rx, ry, rw, rh } };
     int rc = moy_play_input(run, &in);
     if (rc != MOY_PLAY_OK) {
         *out = 0;

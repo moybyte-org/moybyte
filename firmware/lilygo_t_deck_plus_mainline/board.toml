@@ -266,7 +266,11 @@ before         = "usb_reset"
 # took the image near the floor, and to 7 MiB (owner, 2026-10-26) when the
 # look's steps took it back there: the theme fonts stay in the image, and the
 # vfs (the store's fallback without a card) gives the room.
-headroom_floor_kib = 512
+# Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
+# resize, so a growing image costs nothing yet; at the first release the
+# choice is to reject a feature, shrink, or re-cut the slots by cable,
+# which wipes the store.
+headroom_floor_kib = 0
 
 [serial]
 # Read by tools/push_cart.py. This board's USB-Serial/JTAG is ON the SoC, which
@@ -310,12 +314,106 @@ baud = 115200
 [input]
 # The input table's parameters, each a compile definition
 # (tools/board_config.py INPUT_PARAMS; native/moy_input/moy_input.h has the
-# defaults and what each means): repeat_delay_ms, repeat_rate_ms, ball_coast,
-# ball_coast_rate. The trackball's coast ships at 0, no momentum
+# defaults and what each means; isr_ring_max's are in moy_event.h):
+# repeat_delay_ms, repeat_rate_ms, ball_coast, ball_coast_rate, isr_ring_max,
+# isr_iram. The trackball's coast ships at 0, no momentum
 # (docs/theme_and_shell_2026-11.md §1.4): a hand trial sets it here.
 ball_coast = 0
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
+# in exactly one row -- `os` (the OS drives it for itself), `class` (the OS
+# drives it and exposes the device API it names), `lease` (handed raw to one
+# process), `never` (off limits) -- or in `unused`. The pins are the vendor's
+# (`examples/UnitTest/utilities.h` in Xinyuan-LilyGO/T-Deck; README.md's "The
+# light, the battery and the GPS"). Every pad of this chip is wired, so the
+# board has no `lease` row: its one expansion connector, the Grove port, is
+# UART0, which the T-Deck Plus gives to its GPS.
+
+[hardware]
+chip_gpio = "esp32s3"
+unused = []
+
+[[hardware.resource]]
+name = "spi2"
+class = "os"
+pins = {sck = 40, mosi = 41, miso = 38, tft_dc = 11, tft_cs = 12, sd_cs = 39, radio_cs = 9}
+why = "the panel, the SD card and the LoRa radio share it; a per-op teardown hangs the board (README.md)"
+
+[[hardware.resource]]
+name = "i2c0"
+class = "os"
+pins = {sda = 18, scl = 8, touch_int = 16, kbd_int = 46}
+why = "the C3 keyboard and the GT911, read once a frame by the kernel's input task (#69)"
+
+[[hardware.resource]]
+name = "trackball"
+class = "os"
+pins = {up = 3, down = 15, left = 1, right = 2, click = 0}
+why = "the console's pointer and its button; the click is the recovery button and a strapping pin"
+
+[[hardware.resource]]
+name = "speaker"
+class = "os"
+pins = {bck = 7, ws = 5, dout = 6}
+why = "the MAX98357 amp the console's mix plays through (native/moy_audio/moy_aud_out.c)"
+
+[[hardware.resource]]
+name = "power"
+class = "os"
+pins = {poweron = 10}
+why = "the board's power rail: the panel, the radio, the GPS and the amp"
+
+[[hardware.resource]]
+name = "backlight"
+class = "class"
+api = "brightness"
+pins = {bl = 42}
+
+[[hardware.resource]]
+name = "battery"
+class = "class"
+api = "battery"
+pins = {adc = 4}
+
+[[hardware.resource]]
+name = "lora"
+class = "class"
+api = "lora"
+bus = "spi2"
+pins = {rst = 17, busy = 13, irq = 45}
+
+[[hardware.resource]]
+name = "uart0"
+class = "class"
+api = "gps"
+pins = {tx = 43, rx = 44}
+
+[[hardware.resource]]
+name = "mic"
+class = "class"
+api = "mic"
+pins = {mclk = 48, lrck = 21, sck = 47, din = 14}
+
+[[hardware.resource]]
+name = "radio"
+class = "class"
+api = ["http", "ble"]
+pins = []
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [19, 20]
+why = "the USB-Serial/JTAG the console, its dev channel and the flasher are reached through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+why = "octal flash and octal PSRAM"
 
 [native]
 dest = "native/.staged"
@@ -340,6 +438,19 @@ declaration because this is where "which C crosses to which board" is written
 down."""
 
 [[native.shared.take]]
+module = "moy_usbdisk"
+why = """
+USB mass storage (docs/os_2026-11/between_apps.md section 2): Settings' USB
+drive switches the S3's one internal PHY from USB-Serial/JTAG to the OTG
+controller, so the card is a drive on a computer and the dev channel is gone
+until it is turned off, which switches back. A restart switches back first and
+the image's start puts the PHY on USB-Serial/JTAG before anything prints;
+BOOT reaches the ROM loader either way. Its transfers wait for the panel's
+band gaps (moy_flush's gate), the card being on the panel's SPI2. It brings
+the TinyUSB device stack (moy_tusb_config.h); the internal RAM it adds is
+the build's .dram0.bss to read."""
+
+[[native.shared.take]]
 module = "moy_wasm"
 why = """
 The WebAssembly cart tier's engine (native/moy_wasm/README.md): the
@@ -348,6 +459,15 @@ ships on every console board or on none, so this board takes it. Its internal
 SRAM is the tighter of the two S3 floors, and the on-glass suite's wasm checks
 are the gate on it. The run stack's size and placement are this board's
 MOY_WASM_* settings in mpconfigboard.h, with the measurement that chose them."""
+
+[[native.shared.take]]
+module = "moy_elf"
+why = """
+The native tier (native/moy_elf/README.md): the vendored elf_loader, the
+process model a module runs under and the OS table it calls by ordinal. A
+module's text and data live in PSRAM, loaded when it runs and freed when it
+ends, so what the tier costs at rest is its code in both OTA slots. The tier
+ships on every console board or on none, so this board takes it."""
 
 [[native.shared.take]]
 module = "moy_play"
@@ -402,6 +522,16 @@ The links' native home (docs/history/kernel_survival_2026-10.md section 6): WiFi
 link, the HTTP core, the webhost, the sync RPC and the updater. It compiles to
 nothing until pass 2 of sprint 3 gives it its sources; every board with a radio
 takes it."""
+
+[[native.shared.take]]
+module = "moy_sh"
+why = """
+The terminal's C shell (native/moy_sh/README.md, docs/os_2026-11/system.md
+section 1): dash, the session, the C built-ins, the board's host table and the
+serial face, the dev channel's `sh` word. It answers with the VM stopped, so
+it is the kernel's, and a console takes it where its image has the room. Its writable data is one word
+(tests/test_moy_sh.py); a session is PSRAM, made when a face first runs."""
+
 
 
 # ---------------------------------------------------------------------------
@@ -490,11 +620,8 @@ STAGE 4 (SD). The mount lifecycle for a card that SHARES SPI2 with the panel:
 `moy_lcd.init()` already initialised (`sdspi_host_init_device`, no bus re-init)
 and keeps the card RESIDENT for the session, because tearing the sdspi device
 down between ops corrupts the shared bus and silent-hangs the next panel flush.
-
-Its legacy `machine.SDCard` paths (`mount_sd`, `with_sd`, `read_first_project_source`)
-are dead on this build -- they reach `tdeck_display.get_spi_bus` and
-`machine.SPI.Bus`, neither of which exists on mainline -- but both lookups are
-already inside `try/except` there, and nothing on this board calls them."""
+The attach itself is native/moy_sd's C (`moy_sd.up()`), from the `spi2` row's
+`sd_cs` and `radio_cs`."""
 
 [[modules.device.group]]
 files = ["device_api.py", "moycore_glue.py"]

@@ -1,19 +1,25 @@
 // The public UI API's RUN face (docs/ui_api_2026-10.md): the verbs a Lua
 // cart calls as `ui.*` (native/moycore/moycore_ui.h) and the `ui` rows of
-// roles.json a compiled app imports from `moybyte.app` (`ui_<verb>`, named
+// native/os_calls.json a compiled app imports from `moybyte.app` (`ui_<verb>`, named
 // by native/moy_app/moy_app_wasm.c's table), over native/moy_ui/moy_ui_api.h.
 //
 // A verb draws into the run's draw target through the RUN sink: the canvas a
 // cart's own verbs draw on (for a compiled app moycore_ui_target, an owed or
 // kept frame on the screen written in first, as libmoy's verbs do), lent to
 // the primitives as a canvas row of its own -- its pixels, its size, the
-// whole canvas as the clip, no camera, font scale 1 (the app is
-// cart-shaped), the canvas's index-to-pixel words as the palette. Around each
+// whole canvas as the clip, no camera, the canvas's index-to-pixel words as
+// the palette. How it draws is the snapshot's face word (SNAP_FACE, the
+// console's Player.ui_face), so a run's page is the page a Python app's frame
+// draws with the same calls: the font scale of the canvas, the desk's rows,
+// and for a responsive app (one that defines `_layout`) the shell's look --
+// a ROW sink in MOY_UI_LOOK_APP, the theme's faces and icons, its block at
+// the palette's 64..127 -- where a game's or a fixed app's draws as a cart's,
+// in petme128 and the look below. Around each
 // verb the run's libmoy draw state (camera, clip, pal, palt, the screen
 // palette, fillp) is saved, reset, and restored after, so a widget looks the
 // same whatever the cart left set and the cart finds its state as it left it.
 //
-// The colours are the RUN look's (MOY_UI_LOOK_RUN): the style resolved
+// A cart's colours are the RUN look's (MOY_UI_LOOK_RUN): the style resolved
 // against the live theme's token row, rebuilt when its generation moves and
 // read under native/moy_app's seqlock, so a verb runs on the run's own thread
 // with no hop and no upcall.
@@ -32,7 +38,9 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 43
+// MOY_UI_WASM_ROWS, each row's prototype (which must be the ones below) and
+// the natives by import name, generated from native/os_calls.json.
+#include "moy_ui_wasm_rows.h"
 
 // The run's draw target, from the module that drives the run (moycore_wasm.c on
 // an image, runtime/host/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -49,7 +57,17 @@ int32_t moycore_ui_dt_take(void);
 enum {
     MOYCORE_UI_SNAP_BTN = 0, MOYCORE_UI_SNAP_BTNP = 1, MOYCORE_UI_SNAP_X = 6,
     MOYCORE_UI_SNAP_Y = 7, MOYCORE_UI_SNAP_PTR = 8, MOYCORE_UI_SNAP_KEY = 10,
-    MOYCORE_UI_SNAP_WINDOW = 14
+    MOYCORE_UI_SNAP_FACE = 14, MOYCORE_UI_SNAP_ROOM_X = 15, MOYCORE_UI_SNAP_ROOM_Y = 16,
+    MOYCORE_UI_SNAP_ROOM_W = 17, MOYCORE_UI_SNAP_ROOM_H = 18
+};
+// The face word's bits: the surface is a window's body (the page's ground is
+// the window's), the frame lays out on the desk's rows (MOY_UI_DESK), it is a
+// responsive app's (the shell's look), the board's tap floor stands
+// (moy_ui.h's MOY_UI_TAP), and from FS_SHIFT the font scale its text draws at
+// (0: 1). A game's is its window bit alone.
+enum {
+    MOYCORE_UI_FACE_WINDOW = 1, MOYCORE_UI_FACE_DESK = 2, MOYCORE_UI_FACE_LOOK = 4,
+    MOYCORE_UI_FACE_TAP = 8, MOYCORE_UI_FACE_FS_SHIFT = 8
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a
@@ -133,10 +151,35 @@ int moy_ui_run_card(void *target, moy_ui_span_t title, moy_ui_span_t sub, const 
 int moy_ui_run_tool(void *target, moy_ui_span_t icon, moy_ui_span_t label, const moy_ui_over_t *o,
                     int32_t *out);
 int moy_ui_run_rule(void *target);
+// A chat's bubble (moy_ui_api_bubble): out its x, y, w, h and state.
+int moy_ui_run_bubble(void *target, moy_ui_span_t text, moy_ui_span_t head, moy_ui_span_t status,
+                      const int32_t *opt, int n, const moy_ui_over_t *o, int32_t out[5]);
+// A note on the page (moy_ui_api_note): *out the y under it.
+int moy_ui_run_note(void *target, moy_ui_span_t icon, const uint8_t *lines, size_t n,
+                    int32_t *out);
+// An empty page's head (moy_ui_api_empty): *out the y under it.
+int moy_ui_run_empty(void *target, moy_ui_span_t icon, moy_ui_span_t title, const uint8_t *lines,
+                     size_t n, int32_t *out);
 int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
                    int32_t *out);
+// The host's back over the run's frame drawn last (moy_ui_api_back): 1 where
+// the app takes it, 0 where the host leaves the app; `take` 0 only asks.
+int moy_ui_run_back(int take);
+// The host's bar over the run's frame drawn last, as moy_ui_api_bar_lent,
+// moy_ui_api_bar_chip and moy_ui_api_bar_tap are over a context: what a Lua
+// or compiled app lent it with ui.bar (0: nothing, or no run open), and a
+// tool of it the bar activated.
+int moy_ui_run_bar_lent(const char **title, int16_t *slots, int *n, uint32_t *off,
+                        const char **chip);
+void moy_ui_run_bar_tap(int i);
+// The console's Paste fired: the run's frame begun next takes `text`
+// (moy_ui_api_paste), its focused field inserting it. The console's host
+// calls it for a Lua or compiled run; a native or WASI app's linked toolkit
+// for the "paste" message its console posts ahead of the frame carrying
+// Ctrl+V (sdk/src/moyui_link.c).
+void moy_ui_run_paste(const uint8_t *text, size_t n);
 
-// The rows, in roles.json's order: each an import's native, the engine's
+// The rows, in the role table's order: each an import's native, the engine's
 // handle on the call first, a '*~' a checked pointer and its length (an
 // override block, moy_ui_api.h's, of length 0 is none). An answer below 0 is
 // moy_ui.h's code negated; ui_focus answers the focused id's length (0 none)
@@ -242,6 +285,18 @@ int32_t moy_ui_wasm_tool(void *e, const uint8_t *icon, uint32_t in, const uint8_
                          uint32_t n, const uint8_t *o, uint32_t on);
 // ui_rule: a divider (moy_ui_api_rule).
 int32_t moy_ui_wasm_rule(void *e);
+// ui_bubble writes the bubble's x, y, w, h and the state bits at `out`;
+// `opt` its options as little-endian words (MOY_UI_BBO_* order).
+int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8_t *head,
+                           uint32_t hn, const uint8_t *status, uint32_t sn, const uint8_t *opt,
+                           uint32_t optn, const uint8_t *o, uint32_t on, uint8_t *out,
+                           uint32_t cap);
+// ui_note: the y under the note; `lines` its paragraphs, NUL-separated.
+int32_t moy_ui_wasm_note(void *e, const uint8_t *icon, uint32_t in, const uint8_t *lines,
+                         uint32_t len);
+// ui_empty: the y under the empty page's head; `lines` NUL-separated.
+int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
+                          uint32_t n, const uint8_t *lines, uint32_t len);
 // ui_bar: the tool the host's bar activated (from 0), -2 its way back, -1
 // none; bit i of `off` its tool i at half strength, bit 31 the app's way back.
 int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t *tools,

@@ -177,7 +177,7 @@ class HostBoard:
             if ws.ball_owed:
                 ws.ball(0, 0, False)
             moy_loop.drive(ws.handle_input, ws.handle_pointer,
-                           lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
+                           lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
             self.frames += 1
         return []
 
@@ -189,7 +189,7 @@ class HostBoard:
         return {"order": [], "wins": {}}
 
     def leave_cart(self):
-        if self.ws.player._update is not None or self.ws.player._draw is not None:
+        if self.ws.run.player._update is not None or self.ws.run.player._draw is not None:
             self.ws.exit()
 
     def close(self):
@@ -255,7 +255,7 @@ def test_the_null_floor_draws_nothing_and_gives_the_canvas_back(host):
     bench = ib.Bench(host, "host", None)
     host.pyexec("_ib_app('settings')")
     host.drain(0.5)
-    cv = ws.canvas
+    cv = ws.run.canvas
     clip0 = (cv._clip_x0, cv._clip_y0, cv._clip_x1, cv._clip_y1)
     plan = ib.build_plan("drag", _surface("Settings"), (0, 0, bench.W, bench.H), False)
     got = bench.play(plan, None, null=True)

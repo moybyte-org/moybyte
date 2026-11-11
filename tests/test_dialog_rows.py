@@ -80,9 +80,9 @@ class Pair:
                 if force:
                     ws._dirty = True
                 ws.pointer.visible = False
-                k = ws._frames_drawn
+                k = ws.frame_state.frames_drawn
                 drv.frame(1 / 30)
-                ws.painted = ws._frames_drawn != k
+                ws.painted = ws.frame_state.frames_drawn != k
             a, b = self.a, self.b
             assert a.painted == b.painted, "the two consoles' gates parted"
             if not a.painted:
@@ -228,8 +228,8 @@ def test_the_blocks_prompts_draw_their_rows_alone(tmp_path, monkeypatch, bufs, w
 def test_cart_info_and_new_script_draw_their_rows_alone(tmp_path, monkeypatch, bufs, windowed):
     p = Pair(tmp_path, monkeypatch, bufs, windowed)
     _cards_session(p)
-    assert p.a.project.cart.get("title") == p.b.project.cart.get("title") == "Coins"
-    assert p.a.project.cart.get("author") == "Ana"
+    assert p.a.run.project.cart.get("title") == p.b.run.project.cart.get("title") == "Coins"
+    assert p.a.run.project.cart.get("author") == "Ana"
     assert p.rows() >= 25, "the dialogs drew their rows alone on %d frames: %r" % (
         p.rows(), p.kinds)
 

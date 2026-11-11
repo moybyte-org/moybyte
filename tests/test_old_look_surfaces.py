@@ -64,10 +64,10 @@ def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):
     _frames(ws)
     cart = next(c for c in ws.carts.all if c.get("type") == "game")
     ws._open_workspace(cart)
-    pl = ws.player
+    pl = ws.run.player
     pl._notice = pl.cart_error = chrome_ops.newer_text(["tilemap2"])
     pl._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     p = ws.pause
     assert p.open and p.stopped and not ws.wm.top_is_player()
     assert p.rows == (p.UPDATES, p.HOME)

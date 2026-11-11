@@ -214,11 +214,16 @@ def print_width(s, scale=1):
     return _C.text_width(s, scale, _C.print_font())
 
 
+CART_OFF, CART_ON, CART_APP = 0, 1, 2      # moy_ui.h's MOY_UI_CART_*
+
+
 def cart_text(on):
     """The app-cart boundary (docs/theme_and_shell_2026-11.md §3.7): on while a
     cart's code runs, so its `print` and its `ui` draw in petme128 whatever
-    the theme names; off puts the shell's fonts back. Answers whether it
-    was on."""
+    the theme names; off puts the shell's fonts back. `on` is a mode:
+    CART_OFF (False), CART_ON (True), or CART_APP, a responsive app's, whose
+    `print` stays inside while its `ui` verbs draw in the shell's look.
+    Answers the mode it replaced."""
     return _C.cart_text(on)
 
 
@@ -526,8 +531,20 @@ def _bind_theme(th):
     _TH, _LOOK, _FLAT = th, slot, ent[2]
 
 
+_LOOK_RUN = 4                         # moy_ui.h's MOY_UI_LOOK_RUN
 _LOOK_KERNEL = 5                      # moy_ui.h's MOY_UI_LOOK_KERNEL
+_LOOK_APP = 6                         # moy_ui.h's MOY_UI_LOOK_APP
 _KERNEL = [None, -1]                  # the theme dict the kernel's look holds, its look gen
+
+
+def run_look(near, th):
+    """Put `near`, the live theme's nearest MOY64 tokens, in a run's look, the
+    one a game's or a fixed app's page draws in on a Lua, compiled, WASI or
+    native run, and `th`, the live theme's own, in a responsive app's
+    (moy_ui.h's MOY_UI_LOOK_APP): the theme block carries both to a copy of
+    the toolkit linked into a program (moy_ui.h's moy_ui_theme_pull)."""
+    _C.look(_LOOK_RUN, _pack(near))
+    _C.look(_LOOK_APP, _pack(th))
 
 
 def kernel_look(th):
@@ -1438,6 +1455,13 @@ def unlock(cv, th, cx, y, head, name, icon, burst=0, desk=False):
                      _fs(cv), _DESK if desk else 0)
 
 
+def rec(cv, th, right, top, desk=False):
+    """The recording indicator (moy_ui_rec), its top right corner at
+    (`right`, `top`). Its box."""
+    return _C.rec(cv, _LOOK if th is _TH else _look(th), right, top, _fs(cv),
+                  _DESK if desk else 0)
+
+
 def modal(cv, th, rect, desk=False):
     """A system card over `rect`, flat (the popover's and the pause card's:
     a hard drop in a shade of the ground, the surface and its edge), for a
@@ -1461,17 +1485,21 @@ def perf(cv, th, args, words, out):
     _C.perf(cv, _LOOK if th is _TH else _look(th), args, words, out)
 
 
-def scrim(cv, th, rect, src=None, also=None):
+def scrim(cv, th, rect, src=None, also=None, alpha=None):
     """What a modal dims under it (D-01): `rect` washed in the look's
     `scrim`, drawn once a full frame, before the modal's card. `src`: a
     buffer laid out as the canvas's whose pixels it washes instead of the
     canvas's (the frame a buffer of the ring holds); `also`: one each result
-    is stored to as well (the layer a hold keeps)."""
+    is stored to as well (the layer a hold keeps); `alpha` (0..255) a
+    strength of the surface's own in place of the look's."""
     look = _LOOK if th is _TH else _look(th)
+    was = None if alpha is None else _C.scrim_alpha(alpha)
     if src is None and also is None:
         _C.scrim(cv, look, rect)
     else:
         _C.scrim(cv, look, rect, src, also)
+    if was is not None:
+        _C.scrim_alpha(was)
 
 
 def bar_part(cv, th, part, rect, on=0, fill=None):
@@ -1530,39 +1558,39 @@ def autoscroll_mark(cv, th, x, y, s=1):
     cv.tri(x - 2 * s, y + s, x + 2 * s, y + s, x, y + 4 * s, th["ink"])
 
 
-# The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
-_MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
-_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 4, 8, 32, 64
-_MARK_KEEP, _MARK_SELECTED, _MARK_PILL = 512, 1024, 2048
+# The marks' item kinds and flags (native/moy_ui/moy_ui.h, the marks).
+_MARK_KIND = {"row": 0, "cell": 1, "card": 2}
+_MARK_AFTER, _MARK_BACK, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 8, 32, 64
+_MARK_KEEP, _MARK_SELECTED, _MARK_PILL, _MARK_BOTH = 512, 1024, 2048, 4096
 
 
-def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False,
-          pill=False, flat=False):
-    """The focus mark on `rect`, the theme's by its size class
-    (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
-    "part", or None to class it by its size. Drawn after the part's own fill
-    and before its content; a lifted card's rim is a second call with
-    `after`, once its content is drawn. Returns (ink, box): the colour the
-    content takes (None: its own) and the box it draws in (a lifted card's,
-    grown and raised). A part drawn by `row`, `cell`, `chip` or `button`
-    takes `focus=True` instead. In a window behind it draws nothing. `ring`
-    draws the theme's ring whatever its focus style, and is no focus mark (a
-    cursor's: the sprite editor's). `selected` marks the card a screen
-    describes while focus is elsewhere or does not draw (touch): the card's
-    mark as a current mark, drawn whatever the shell says of focus, with no
-    rim and no focus mark counted (the desk shelf's selected card). `pill`
-    draws the bar's mark whatever the theme's style (an OS widget's, a tab's
-    of the home): a plate of the mark's colour under the content, and with
-    `after` a ring two units (`fs`) wide on `rect`'s edge, radius `r`; the
-    content keeps its own ink. `flat` draws the theme's ring as the focus
-    mark, counted, whatever its style: a mark that moves with every focus
-    step and must not lift or shadow its neighbours (the home's grid and
-    icons, docs/history/look_2026-10.md step 33)."""
+def focus(cv, th, rect, item="cell", r=0, after=False, fs=None, ring=False, selected=False,
+          pill=False, flat=False, both=False):
+    """The focus mark the theme declares for item kind `item` ("row", "cell"
+    or "card", docs/theme_and_shell_2026-11.md §3.3) on `rect`. Drawn after
+    the part's own fill and before its content; a lifted card's rim is a
+    second call with `after`, once its content is drawn. Returns (ink, box):
+    the colour the content takes (None: its own) and the box it draws in (a
+    lifted card's, grown and raised). A part drawn by `row`, `cell`, `chip`
+    or `button` takes `focus=True` instead. In a window behind it draws
+    nothing. `both`: the item is selected too, its `current` drawn under. `ring`
+    draws a ring in the cell's focus colour whatever the marks, and is no
+    focus mark (a cursor's: the sprite editor's). `selected` marks the card a
+    screen describes while focus is elsewhere or does not draw (touch): the
+    card's mark, drawn whatever the shell says of focus, with no rim and no
+    focus mark counted (the desk shelf's selected card). `pill` draws the
+    bar's mark whatever the marks (an OS widget's, a tab's of the home): a
+    plate of the cell's focus colour under the content, and with `after` a
+    ring two units (`fs`) wide on `rect`'s edge, radius `r`; the content
+    keeps its own ink. `flat` draws that ring as the focus mark, counted: a
+    mark that moves with every focus step and must not lift or shadow its
+    neighbours (the home's grid and icons, docs/history/look_2026-10.md step
+    33)."""
     if flat:
         ring = True
-    return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
+    return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_KIND[item], r,
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
-                    | (_MARK_COUNT if flat else 0)
+                    | (_MARK_COUNT if flat else 0) | (_MARK_BOTH if both else 0)
                     | (_MARK_SELECTED if selected else 0) | (_MARK_PILL if pill else 0), fs)
 
 
@@ -1584,24 +1612,21 @@ def cursor(cv, rect, keyline=0):
     cv.rrect(x - 5, y - 5, w + 10, h + 10, 4, None, s)
 
 
-def current(cv, th, rect, r=0, back=False, side=False, fs=None, keep=False):
-    """The current mark under `rect`'s content: the theme's plate, fill or
-    bar (`side`: a bar beside a row, not under it; `back`: in a window
-    behind; `keep`: the content keeps its own colours, a code line's, so an
-    opaque plate is the row's outline instead). Returns the ink the content
-    takes, or None for its own. A part drawn by `row`, `cell`, `chip` or
-    `tab` marks its `on` itself."""
-    return _C.current(cv, _LOOK if th is _TH else _look(th), rect, r,
-                      (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0)
-                      | (_MARK_KEEP if keep else 0), fs)
+def current(cv, th, rect, r=0, back=False, item="cell", fs=None, keep=False):
+    """The ON mark the theme declares for item kind `item` under `rect`'s
+    content (`back`: in a window behind; `keep`: the content keeps its own
+    colours, a code line's, so an opaque fill is its outline instead).
+    Returns the ink the content takes, or None for its own. A part drawn by
+    `row`, `cell`, `chip` or `tab` marks its `on` itself."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), rect, _MARK_KIND[item], r,
+                      (_MARK_BACK if back else 0) | (_MARK_KEEP if keep else 0), fs)
 
 
-def current_ink(cv, th, back=False):
-    """The ink the current content takes under the theme's current mark, as
-    `current` answers it, without drawing the mark (a caller that draws its
-    own, the desk bar's chips): the look's `current.ink`, a fill's selection
-    ink, or None for its own."""
-    return _C.current(cv, _LOOK if th is _TH else _look(th), (0, 0, 0, 0), 0,
+def current_ink(cv, th, back=False, item="cell"):
+    """The ink the content takes on `item`'s ON mark, as `current` answers
+    it, without drawing the mark (a caller that draws its own, the desk bar's
+    chips): the mark's `ink`, a fill's ink, or None for its own."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), (0, 0, 0, 0), _MARK_KIND[item], 0,
                       _MARK_INK | (_MARK_BACK if back else 0), None)
 
 
@@ -1609,11 +1634,12 @@ _MARKS_ON = [True]   # what `marks` last set, read with no tuple made (`marks_on
 
 
 def marks(active=None, reset=False):
-    """(active, focus marks drawn, reach): whether focus draws (`active` sets it: the shell clears it
+    """(active, focus marks drawn, reach, solid): whether focus draws (`active` sets it: the shell clears it
     while a window behind draws; under touch, `input_kind`, no focus draws
     whatever it says, as on a phone), the count of focus marks drawn (`reset`
-    zeroes it after reading), and how far a card's focus mark reaches past
-    the card's top edge."""
+    zeroes it after reading), how far a card's focus mark reaches past
+    the card's top edge, and whether a cell's ON mark is an opaque fill
+    (Contrast's), whose content takes the fill's ink."""
     if active is not None:
         _MARKS_ON[0] = bool(active)
         _PF[_PF_KEY] = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
@@ -1625,12 +1651,12 @@ def marks_on():
     return _MARKS_ON[0]
 
 
-def mark_reach(size="part"):
-    """How far a focus mark of size class `size` ("part", "card", "small")
-    reaches past its box: the ring's gap, width and outline as the live look
-    rounds and defaults them (0 for a mark inside its box). What a part that
-    keeps room for its ring lays out by."""
-    return _C.mark_reach(_MARK_CLASS[size])
+def mark_reach(item="cell"):
+    """How far item kind `item`'s focus mark ("row", "cell", "card")
+    reaches past its box: a ring's gap, width and keyline as the live look
+    declares them (0 for a mark inside its box). What a part that keeps room
+    for its ring lays out by."""
+    return _C.mark_reach(_MARK_KIND[item])
 
 
 # -- the public UI API's host side (docs/ui_api_2026-10.md) ----------------------
@@ -1644,8 +1670,10 @@ def mark_reach(size="part"):
 UI_TARGET = [None, None, 0, 0]  # the frame's context, canvas, look and desk flags
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
+_PANEL = 32                             # ... and MOY_UI_PANEL
 _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
+_TAP = 8                                # ... and MOY_UI_TAP
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
@@ -1861,9 +1889,9 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
             rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
-    flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
+    flags = ((_DESK if desk else 0) | (_PANEL if window == "panel" else _WINDOW if window else 0)
              | (_ELSEWHERE if elsewhere else 0) | (_KEY_EDGE if edge else 0))
-    t[3] = flags & (_DESK | _WINDOW)
+    t[3] = flags & (_DESK | _WINDOW | _PANEL)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
     if inp is not None:
@@ -1874,12 +1902,17 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     return settled
 
 
+# The context of the running cart's own frames, a Lua, compiled, WASI or native
+# app's (native/moy_ui/moy_ui_wasm.c's), as `bar_lent` and `bar_tap` take it.
+RUN_UI = "run"
+
+
 def bar_lent(ctx):
-    """What the app whose context is `ctx` lent its bar in the frame it drew
-    last (`ui.bar`): (title, icon slots, half-strength bits, back, chip), or
-    None; `chip` the words of the tool that names no icon (its slot -1),
-    "" for none."""
-    got = _C.api_bar_lent(ctx)
+    """What the app whose context is `ctx` (RUN_UI: the running cart's own)
+    lent its bar in the frame it drew last (`ui.bar`): (title, icon slots,
+    half-strength bits, back, chip), or None; `chip` the words of the tool
+    that names no icon (its slot -1), "" for none."""
+    got = _C.api_run_bar_lent() if ctx is RUN_UI else _C.api_bar_lent(ctx)
     if got is None:
         return None
     last = _BAR_LENT
@@ -1896,8 +1929,51 @@ _BAR_LENT = [None, None]                # the module's last answer, and ours to 
 
 def bar_tap(ctx, i):
     """The host's bar activated tool `i` (-2: its way back) of the bar `ctx`
-    lent; the app's next `ui.bar` answers it."""
-    _C.api_bar_tap(ctx, i)
+    (RUN_UI: the running cart's own) lent; the app's next `ui.bar` answers
+    it."""
+    if ctx is RUN_UI:
+        _C.api_run_bar_tap(i)
+    else:
+        _C.api_bar_tap(ctx, i)
+
+
+# The console's Paste: the key Ctrl+V types (the desk's), and where the text
+# it brings comes from, set by the console: a function answering its
+# clipboard's text as UTF-8 bytes, or None where it holds none.
+KEY_PASTE = 0x16
+PASTE = [None]
+
+
+def paste_text():
+    """The text the console's Paste brings, UTF-8 bytes; None for none."""
+    src = PASTE[0]
+    return src() if src is not None else None
+
+
+def paste(ctx, text):
+    """The console's Paste (the desk's Ctrl+V) into the field the app `ctx`
+    (RUN_UI: the running cart's own) has focused: `text` UTF-8 bytes from the
+    console's clipboard. A Python app's frame takes it once begun, the run's
+    its frame begun next (moy_ui_api_paste, moy_ui_run_paste)."""
+    if ctx is RUN_UI:
+        _C.api_run_paste(text)
+    else:
+        _C.api_paste(ctx, text)
+
+
+def app_back(ctx, take=True):
+    """The host's back -- the bar's chevron, a window's, Esc, B and the
+    T-Deck's K -- over the frame `ctx` drew last: True where the app takes
+    it (a popover it drew is dismissed, else the page it lent `ui.bar`'s
+    `back` for answers UP next frame), False where it has no view to step
+    out of and the host leaves it. `take` False only asks."""
+    return _C.api_back(ctx, take)
+
+
+def run_back(take=True):
+    """`app_back` over the running cart's own context: a Lua, compiled,
+    WASI or native app's."""
+    return _C.api_run_back(take)
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
@@ -1954,6 +2030,22 @@ def on_bar(on=None):
     return _ON_BAR[0]
 
 
+# The board's tap floor (#203): its chrome stands over its font scale on the
+# handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
+# (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app
+# run's face word carries it, `Player.ui_face`): a list's rows meet the floor
+# and a bubble takes its tap metrics and faces.
+_TAP_FLOOR = [False]
+
+
+def tap_floor(on=None):
+    """Whether the board's tap floor stands; `on` sets it first (the
+    console, at every relayout)."""
+    if on is not None:
+        _TAP_FLOOR[0] = bool(on)
+    return _TAP_FLOOR[0]
+
+
 def bar_or(items):
     """`items`, or `BAR_KEYS` while the keys are on the bar (`on_bar`)."""
     return BAR_KEYS if _ON_BAR[0] else items
@@ -1980,6 +2072,7 @@ def console_reset():
     _KEYS_HOST[0] = None
     _EDGE[0] = False
     _ON_BAR[0] = False
+    _TAP_FLOOR[0] = False
 
 
 console_reset()

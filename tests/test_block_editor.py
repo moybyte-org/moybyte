@@ -1287,16 +1287,16 @@ def test_undo_after_save_does_not_leak_into_cart_blocks(tmp_path):
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
     assert ws.block_ui.save_blocks() is True
-    saved = _snap_of(ws.project.cart["blocks"])
+    saved = _snap_of(ws.run.project.cart["blocks"])
     # a post-save in-place edit must NOT reach through into the cart's snapshot...
     go_to_insert(be, 1)
     be.insert_block("spr", {"id": 0, "x": 1, "y": 2})
-    assert ws.project.cart["blocks"] == saved
-    assert "spr" not in _body_types(ws.project.cart["blocks"])
+    assert ws.run.project.cart["blocks"] == saved
+    assert "spr" not in _body_types(ws.run.project.cart["blocks"])
     # ...and after an undo, cart["blocks"] still can't hold the undone block
     assert be.undo() is True
-    assert "spr" not in _body_types(ws.project.cart["blocks"])
-    assert ws.project.cart["blocks"] == saved
+    assert "spr" not in _body_types(ws.run.project.cart["blocks"])
+    assert ws.run.project.cart["blocks"] == saved
 
 
 def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
@@ -1308,14 +1308,14 @@ def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
-    ws.project.cart["path"] = None                       # force the in-RAM save path
+    ws.run.project.cart["path"] = None                       # force the in-RAM save path
     assert ws.block_ui.save_blocks() is True
-    saved = _snap_of(ws.project.cart["blocks"])
+    saved = _snap_of(ws.run.project.cart["blocks"])
     go_to_insert(be, 1)
     be.insert_block("spr", {"id": 1, "x": 3, "y": 4})
-    assert ws.project.cart["blocks"] == saved            # no reach-through
+    assert ws.run.project.cart["blocks"] == saved            # no reach-through
     assert be.undo() is True
-    assert ws.project.cart["blocks"] == saved
+    assert ws.run.project.cart["blocks"] == saved
     # a FRESH editor built from cart["blocks"] (the no-store fallback) gets a clone:
     # its edits never touch the cart's tree until the next save
     ws.block_ui.reset()
@@ -1324,5 +1324,5 @@ def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
     assert be2 is not None and be2.program == saved
     go_to_insert(be2, 1)
     be2.insert_block("beep", {"freq": 220})
-    assert ws.project.cart["blocks"] == saved
-    assert "beep" not in _body_types(ws.project.cart["blocks"])
+    assert ws.run.project.cart["blocks"] == saved
+    assert "beep" not in _body_types(ws.run.project.cart["blocks"])

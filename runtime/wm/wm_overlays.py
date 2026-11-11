@@ -36,8 +36,8 @@ class WindowOverlays:
     def _game_rect(self, win):
         """The rect a quiet frame composites the game into, on the glass."""
         ox, oy, scale = self._player_view(win)
-        gc = self.ws.canvas
-        view = None if self.ws.app_window_canvas else self._view_src()
+        gc = self.ws.run.canvas
+        view = None if self.ws.run.app_window_canvas else self._view_src()
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         return (ox, oy, gw * scale, gh * scale)
 
@@ -196,6 +196,8 @@ class WindowOverlays:
         ride = True
         if up:
             ride = w[1] is None
+            if not ride:
+                self._desk_whole()        # the last one's restore is dropped
             w[1] = rect
             w[3] = False
             sp = self._pause_span
@@ -234,6 +236,12 @@ class WindowOverlays:
         return (self.ws.sysmenu.open or self._pause_rides()) and self._pop_rides()
 
     def _pop_reset(self):
+        """Drop every overlay's snapshot and debt: what one put in a buffer
+        has no restore left, so the desk lays every buffer whole
+        (`_desk_whole`)."""
+        w = self._pop_wash
+        if w[1] is not None or any(s[1] is not None for s in self._pop_slots):
+            self._desk_whole()
         self._pop_seq += 1
         self._wash_seq += 1
         self._pop_face_ok = False
@@ -251,6 +259,14 @@ class WindowOverlays:
         self._mark_owed = 0
         self._mark_kept = False
         self._wash_focus_drop()
+
+    def _desk_whole(self):
+        """The desk and every window lay each buffer whole again: a still
+        desk skips its repaint on the overlays' restores' word, so one
+        dropped with a buffer still owed it leaves that buffer's card or
+        wash in place."""
+        self._desk_streak = 0
+        self._win_sig = None
 
     def _pop_note(self, r):
         nd = getattr(self._root_canvas, "note_damage", None)
@@ -277,10 +293,12 @@ class WindowOverlays:
             return
         if not ride:
             if not w[4]:
+                if w[2] > 0:
+                    self._desk_whole()    # the wash it was owed is dropped
                 w[1] = None
+                w[2] = 0
                 w[3] = False
                 self._wash_focus_drop()
-            w[2] = 0
             return
         if w[2] <= 0:
             return
@@ -420,7 +438,7 @@ class WindowOverlays:
             # The last frame's card, as it was: inside the wash this frame
             # copied, or copied itself.
             w = self._pop_wash[1]
-            if ((self._pop_wash_f == self.ws._frames_drawn and _inside(r, w))
+            if ((self._pop_wash_f == self.ws.frame_state.frames_drawn and _inside(r, w))
                     or self._root_canvas.copy_last(r[0], r[1], r[2], r[3])):
                 self._pop_note(r)
                 s[2] -= 1
@@ -467,9 +485,12 @@ class WindowOverlays:
         while a buffer is owed it, the snapshot taken before the first."""
         w = self._pop_wash
         if not ride:
-            # A full frame washes what it painted. Its snapshot would cost
-            # the frame a copy of the glass: the next close repaints whole.
-            w[2] = 0
+            # A full frame washes what it painted: one buffer of those owed
+            # the wash, the rest washed by the rides after it over a
+            # snapshot of their own. Its snapshot would cost the frame a
+            # copy of the glass: a close with none repaints whole.
+            if w[2] > 0:
+                w[2] -= 1
             w[3] = False
             self.ws.menu_ui.scrim()
             return
@@ -484,7 +505,7 @@ class WindowOverlays:
             # what that frame's card left over it, which the card's own
             # paint puts back first where it changed.
             self._pop_note(w[1])
-            self._pop_wash_f = self.ws._frames_drawn
+            self._pop_wash_f = self.ws.frame_state.frames_drawn
             w[2] -= 1
             if self._pause_owed > 0:
                 self._pause_paint(self._repeating)
@@ -538,7 +559,7 @@ class WindowOverlays:
             if r is not None:
                 _grow(sp, r[0], r[1], r[0] + r[2], r[1] + r[3])
             s = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
-            if s[2] > 0 and ((self._pop_wash_f == ws._frames_drawn
+            if s[2] > 0 and ((self._pop_wash_f == ws.frame_state.frames_drawn
                               and _inside(s, self._pop_wash[1]))
                              or self._root_canvas.copy_last(s[0], s[1], s[2], s[3])):
                 self._pop_note(s)

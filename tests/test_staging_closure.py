@@ -97,7 +97,12 @@ NATIVE = {
     # moy_input and moy_net, sprint 3's kernel modules, stage on every console
     # (moy_input compiles to nothing until its pass fills it); the Zero takes
     # moy_net alone. moy_ui, the toolkit, stages on every console and in the
-    # browser.
+    # browser. moy_sh, the terminal's C shell, moy_tty, its face over a stream,
+    # and moy_ssh, the SSH server (native/moy_ssh/README.md), are taken by
+    # every board, the Zero's too (its board.toml says why). moy_elf, the
+    # native tier, stages on every console and not on the Zero. moy_usbdisk,
+    # USB mass storage, is the T-Deck's and the Waveshare P4's alone (each
+    # other board.toml says why it denies it).
     #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
@@ -106,54 +111,67 @@ NATIVE = {
     # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
-                       "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                       "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
-                       "moy_net", "moy_app", "moy_ui"},
+                       "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty",
+                       "moy_usbdisk"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
     # SDMMC slot 0 under the store's card volume.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
-    # track -- docs/history/espnow_p4_2026-08.md).
+    # track -- docs/history/espnow_p4_2026-08.md); moy_usb the `usb` device
+    # API's host on the OTG port. moy_media, the media service, rides every
+    # board with a speaker.
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_c6", "moy_prof", "moy_wasm",
+           "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm", "moy_elf",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui"},
-    # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
-    # four P4 modules are the SILICON tier (native/p4, a second board.toml
+           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
+           "moy_sh", "moy_ssh", "moy_tty", "moy_usbdisk"},
+    # The Guition P4 (2026-09-06): the Waveshare's set less moy_usbdisk, because the
+    # P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
     # authors no native module of its own, and moy_dsi drives its JD9365
     # through a board define rather than a second panel module.
     "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
-                   "moy_dsi", "moy_ppa", "moy_c6", "moy_prof",
-                   "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                   "moy_dsi", "moy_ppa", "moy_c6", "moy_usb", "moy_prof",
+                   "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
-                   "moy_net", "moy_app", "moy_ui"},
+                   "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
-    # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
+    # board.toml), and with it moy_media; moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
-                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
+                   "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_elf", "moy_serial",
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui"},
+                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui",
+                   "moy_sh", "moy_ssh", "moy_tty"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. Besides the store, the kernel's entry (a serial-only
-    # floor) and moy_net, the links its webhost serves, `moy_web` is the
-    # shared C module it compiles in, and
-    # it is the module that justifies the board having an image at all -- the
+    # floor), moy_net, the links its webhost serves, and the terminal over SSH
+    # (moy_sh, moy_tty, moy_ssh), `moy_web` is the shared C module it compiles
+    # in, and it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
+    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel",
+             "moy_sh", "moy_tty", "moy_ssh"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
             "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui"},
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's
-# entry and its frame loop, the module `moy_loop`; moy_app builds the
-# user-files layer it serves the files role over, the module `moy_ufiles`.
-USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop"},
-                   "moy_app": {"moy_app", "moy_ufiles"}}
+# entry, its frame loop (the module `moy_loop`), the lease table (the module
+# `moy_lease`) and the service model's queues (the module `moy_evq`); moy_app builds the
+# user-files layer it serves the files role over, the module `moy_ufiles`; the
+# device APIs' drivers register beside the module of the directory they live
+# in (`moy_http` and `moy_lora` in moy_net, `moy_mic` in moy_audio, `moy_gatt`
+# and `moy_midi` in moy_input).
+USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop", "moy_lease", "moy_evq"},
+                   "moy_app": {"moy_app", "moy_ufiles"},
+                   "moy_net": {"moy_net", "moy_http", "moy_lora"},
+                   "moy_audio": {"moy_audio", "moy_mic"},
+                   "moy_input": {"moy_input", "moy_gatt", "moy_midi"}}
 
 
 def _native_modules(target):
@@ -182,18 +200,18 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # them.
 HOST_ONLY = {
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "moycore",
-                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                        "native_build", "host_native", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
     "p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native",
            "simulate_desktop", "wasm_host", "wasm_binding"},
     "guition-s3": {"host_app", "host_api", "host_canvas", "moycore", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                    "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     "guition-p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
-                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
                    "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
@@ -202,7 +220,7 @@ HOST_ONLY = {
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
     "zero": {"host_app", "host_api", "host_canvas", "moycore", "input",
-             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play",
              "native_build", "host_native", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
@@ -210,7 +228,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "moycore", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_lease", "moy_evq", "lease_sim", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "mic_sim", "lora_sim", "gatt_sim", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 
@@ -684,7 +702,7 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
 
     The positive half is the owner call of 2026-08-25 ("the Zero supports all
     features"): before it, the board carried the minimum that BOOTS, which meant
-    `moy_sync.file_kinds()` found no store module and answered None -- read as
+    `moy_sync.file_folders()` found no store module and answered None -- read as
     "refuse" everywhere, so the board 404'd /files.json and the kid's drawings
     could not travel. Every name below is a feature, not a dependency detail.
 
@@ -830,7 +848,7 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     is structurally different) and stays hand-listed."""
     for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
                               ("guition-s3", GUITION),
-                              ("guition-p4", GUITION_P4)):
+                              ("guition-p4", GUITION_P4), ("zero", ZERO)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")
@@ -880,6 +898,7 @@ def test_every_authored_web_module_reaches_the_bundle():
 WEB_ABSENT_FLAGS = {
     "moy_glass": ("MOY_GLASS_PRESENT", ROOT / "native" / "moy_glass" / "modmoy_glass.c"),
     "moy_net": ("MOY_NET_SERVE", ROOT / "native" / "moy_net" / "modmoy_net.c"),
+    "moy_input": ("MOY_INPUT_DRIVERS", ROOT / "native" / "moy_input" / "modmoy_input.c"),
 }
 
 
@@ -901,9 +920,9 @@ def _gated_table_names(src, flag):
 
 
 def test_the_web_build_reaches_no_board_only_name_unprobed():
-    """The browser's build leaves `moy_glass`'s compositors and `moy_net`'s
-    serving half out, and their names are ABSENT from its modules, never
-    stubs. A web module that names one outright (`moy_net.web_start`, `from
+    """The browser's build leaves `moy_glass`'s compositors, `moy_net`'s
+    serving half and `moy_input`'s drivers out, and their names are ABSENT
+    from its modules, never stubs; `moy_input`'s event rings stay. A web module that names one outright (`moy_net.web_start`, `from
     moy_net import ota_verify`) raises where every board passes; it asks with
     getattr/hasattr instead, which this does not see as a use."""
     mk = (WEB / "variant" / "mpconfigvariant.mk").read_text(encoding="utf-8")
@@ -916,6 +935,10 @@ def test_the_web_build_reaches_no_board_only_name_unprobed():
     assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
     assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
     assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}
+    assert {"keyboard", "touch", "trackball", "ble"} <= absent["moy_input"]
+    assert not absent["moy_input"] & {
+        "InputTable", "HostInputTable", "InputSource", "Pointer", "pointer_state",
+        "ball_coast", "kick", "reader", "events", "pending", "post", "hid_usage"}
 
     bad = []
     for name, path in sorted(frozen_set("web").items()):

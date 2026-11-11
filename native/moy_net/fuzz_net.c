@@ -30,14 +30,30 @@ void moy_net_free(void *p) {
     free(p);
 }
 
+void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
+    moy_sha256_t h;
+    moy_sha256_init(&h);
+    moy_sha256_update(&h, p, n);
+    moy_sha256_final(&h, out);
+}
+
 int moy_conn_open(const char *host, uint16_t port, int tls, void **conn) {
     (void)host, (void)port, (void)tls;
     *conn = NULL;
     return -111;
 }
 
+int moy_conn_verifies(void) {
+    return 0;
+}
+
 int moy_conn_read(void *conn, void *p, size_t n) {
     (void)conn, (void)p, (void)n;
+    return -5;
+}
+
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms) {
+    (void)conn, (void)p, (void)n, (void)ms;
     return -5;
 }
 
@@ -144,6 +160,8 @@ static const char *SEEDS[] = {
     "PUT  /x HTTP/1.1\ncontent-length:  +7 \n\nbody",
     "GET /a?x&pin=&pin=9 HTTP/1.0\r\nCONTENT-LENGTH: 99999999999\r\n\r\n",
     "{\"v\": 2, \"root\": \"files\", \"ops\": [{\"p\": \"x\", \"t\": \"\\u00e9\"}], \"pin\": \"1\"}",
+    "{\"v\": 2, \"root\": \"apps\", \"ops\": [{\"p\": \"a/k\", \"b\": \"AA==\"}, "
+    "{\"p\": \"a\", \"dc\": 1}]}",
     "{\"v\": 1, \"ops\": [], \"v\": \"again\"}",
     "[1, 2]",
     "\xff\xfe",
@@ -197,16 +215,16 @@ static void one(const char *src, size_t n) {
         CHECK(r.head_end <= n && r.clen <= MOY_HTTP_CLEN_MAX);
         const char *v;
         size_t vn;
-        if (moy_http_query(r.target, r.target_n, "pin", 3, &v, &vn)) {
+        if (moy_http_query(r.target, r.target_n, "s", 1, &v, &vn)) {
             inside(r.target, r.target_n, v, vn);
         }
     }
     moy_sync_env_t e;
     if (moy_sync_decode(buf, n, &e) == MOY_SYNC_OK) {
         CHECK(moy_utf8_valid(buf, n));
-        const char *spans[4][2] = {{e.v, e.v_end}, {e.root, e.root_end},
-                                   {e.ops, e.ops_end}, {e.pin, e.pin_end}};
-        for (int i = 0; i < 4; i++) {
+        const char *spans[3][2] = {{e.v, e.v_end}, {e.root, e.root_end},
+                                   {e.ops, e.ops_end}};
+        for (int i = 0; i < 3; i++) {
             if (spans[i][0]) {
                 inside(buf, n, spans[i][0], (size_t)(spans[i][1] - spans[i][0]));
                 CHECK(moy_json_valid(spans[i][0],
@@ -219,36 +237,30 @@ static void one(const char *src, size_t n) {
             size_t need = moy_sync_encode(
                 NULL, 0, e.v, (size_t)(e.v_end - e.v), e.root,
                 e.root ? (size_t)(e.root_end - e.root) : 0, e.ops,
-                (size_t)(e.ops_end - e.ops), e.pin,
-                e.pin ? (size_t)(e.pin_end - e.pin) : 0);
+                (size_t)(e.ops_end - e.ops));
             char *out = malloc(need);
             CHECK(moy_sync_encode(out, need, e.v, (size_t)(e.v_end - e.v),
                                   e.root,
                                   e.root ? (size_t)(e.root_end - e.root) : 0,
-                                  e.ops, (size_t)(e.ops_end - e.ops), e.pin,
-                                  e.pin ? (size_t)(e.pin_end - e.pin) : 0)
+                                  e.ops, (size_t)(e.ops_end - e.ops))
                   == need);
             moy_sync_env_t back;
             CHECK(moy_sync_decode(out, need, &back) == MOY_SYNC_OK);
             CHECK((size_t)(back.ops_end - back.ops) == (size_t)(e.ops_end - e.ops));
             CHECK(memcmp(back.ops, e.ops, (size_t)(e.ops_end - e.ops)) == 0);
             CHECK((back.root == NULL) == (e.root == NULL));
-            CHECK((back.pin == NULL) == (e.pin == NULL));
             free(out);
         }
     }
     // The receiver's batch rule: a batch it takes is one the envelope took, its
-    // ops an array and its pin a span inside the body.
+    // ops an array inside the body.
     moy_sync_batch_t bt;
     if (moy_sync_batch(buf, n, &bt) == MOY_SYNC_OK) {
         CHECK(moy_sync_decode(buf, n, &e) == MOY_SYNC_OK);
-        CHECK(bt.root == MOY_SYNC_CARTS || bt.root == MOY_SYNC_FILES);
+        CHECK(bt.root == MOY_SYNC_CARTS || bt.root == MOY_SYNC_FILES
+              || bt.root == MOY_SYNC_SYSTEM || bt.root == MOY_SYNC_APPS);
         inside(buf, n, bt.ops, (size_t)(bt.ops_end - bt.ops));
         CHECK(moy_json_kind(bt.ops, bt.ops_end) == MOY_JSON_ARR);
-        if (bt.pin) {
-            inside(buf, n, bt.pin, (size_t)(bt.pin_end - bt.pin));
-        }
-        CHECK(moy_sync_pin_ok(&bt, NULL) && moy_sync_pin_ok(&bt, ""));
     }
     char head[256];
     size_t hn = moy_http_head(head, sizeof(head), 200 + (int)(rnd() % 400),
@@ -284,9 +296,8 @@ static void one(const char *src, size_t n) {
     CHECK(jr == MOY_OTA_OK || jr == MOY_OTA_ERR);
     CHECK(moy_ota_verify(buf, n, buf, n < 600 ? n : 600, NULL, 0) == 0);
     char gdoc[512];
-    int gs = moy_gpio_request((int)(rnd() & 1), "/gpio?pin=1", 11, buf, n,
-                              (rnd() & 1) ? "1" : NULL, gdoc, sizeof(gdoc));
-    CHECK(gs == 200 || gs == 400 || gs == 403);
+    int gs = moy_gpio_request((int)(rnd() & 1), "/gpio", 5, buf, n, gdoc, sizeof(gdoc));
+    CHECK(gs == 200 || gs == 400);
     CHECK(strlen(gdoc) < sizeof(gdoc));
     uint8_t dns[MOY_DNS_QUERY_MAX + 16];
     size_t dn = moy_dns_reply((const uint8_t *)buf, n, 0x0104a8c0u, dns, sizeof(dns));

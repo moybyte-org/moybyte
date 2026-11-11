@@ -66,9 +66,18 @@ moybyte_patch_native_code_free
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# DECLINED moybyte_patch_fatfs_lfn -- the long-name buffer on the stack, for a
+# re-entrant oofatfs: the Zero runs no program on a task of its own, so its
+# FatFS stays the port's, unlocked.
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
 # `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
@@ -99,6 +108,12 @@ moybyte_patch_import_cache
 # DECLINED moybyte_patch_gc_meters -- gc.pauses() feeds the PERF line and
 #    gc.areas() the dev channel's `heapcaps`; this board runs neither.
 #
+# DECLINED moybyte_patch_mdns_psram -- this board's responder runs for its
+# whole power-on (it is found by name), so the buffers would be held anyway.
+
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board denies
+# native/moy_usbdisk, so TinyUSB's MSC class is not built.
+
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:
@@ -114,6 +129,9 @@ moybyte_patch_import_cache
 #    2026-08-25 on stock MicroPython, which carries no such patch at all.
 #    These two move together: take the 120MHz profile and take this with it.
 #
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap, for
+#    a console whose canvas and layers share PSRAM with the heap; headless, this
+#    board has neither.
 # DECLINED moybyte_patch_gc_split_reserve -- caps split-heap growth so PSRAM
 #    stays available to the C side (#66). What needs that PSRAM on a console is
 #    the canvas and the layer pool; this board is headless and has neither.
@@ -169,11 +187,12 @@ moybyte_patch_import_cache
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
-#    The two speed-test carts stay off: they are the perf ledger's fixtures,
-#    and a store of 352 littlefs blocks has no room for carts a headless
-#    board never runs (owner, 2026-10-23).
+#    The roster is cut to this board's store and led by the shell's own carts:
+#    board.toml's `[roster]`.
+ZERO_SKIP="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-skip "${SCRIPT_DIR}")"
+ZERO_FIRST="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-first "${SCRIPT_DIR}")"
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py" --skip moybyte.bench,moybyte.bench_lua
+  "${MODULES_DIR}/carts_data.py" --skip "${ZERO_SKIP}" --first "${ZERO_FIRST}"
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for
@@ -181,9 +200,10 @@ moybyte_stage_native
 moybyte_ota_identity xiao_zero "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table + the stale-sdkconfig guard.
+# 4) Frozen manifest (MicroPython's half is boards/MOYBYTE_ZERO/manifest.py) +
+#    partition table + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
-moybyte_frozen_manifest "${MANIFEST}"
+moybyte_frozen_manifest "${MANIFEST}" "${BOARD_DIR}/manifest.py"
 moybyte_sdkconfig_guard "${BOARD_DIR}" \
   "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 

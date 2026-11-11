@@ -1785,7 +1785,23 @@ wasm_runtime_register_natives_raw(const char *module_name,
                                   uint32_t n_native_symbols);
 
 /**
- * Undo wasm_runtime_register_natives or wasm_runtime_register_natives_raw
+ * Register native functions with same module name, as
+ *   wasm_runtime_register_natives does, from rows already in strictly
+ * ascending strcmp order of their symbols (no symbol twice). The runtime
+ * never writes to the rows, so the array may be const, in read-only memory,
+ * and must stay valid while registered.
+ *
+ * @return true if success, false otherwise, including when the rows are out
+ *         of order
+ */
+WASM_RUNTIME_API_EXTERN bool
+wasm_runtime_register_natives_sorted(const char *module_name,
+                                     const NativeSymbol *native_symbols,
+                                     uint32_t n_native_symbols);
+
+/**
+ * Undo wasm_runtime_register_natives, wasm_runtime_register_natives_raw or
+ * wasm_runtime_register_natives_sorted
  *
  * @param module_name    Should be the same as the corresponding
  *                       wasm_runtime_register_natives.
@@ -1799,7 +1815,7 @@ wasm_runtime_register_natives_raw(const char *module_name,
  */
 WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_unregister_natives(const char *module_name,
-                                NativeSymbol *native_symbols);
+                                const NativeSymbol *native_symbols);
 
 /**
  * Get an export global instance

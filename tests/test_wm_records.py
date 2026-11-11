@@ -20,7 +20,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import ui_draw
-from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner, seed_stories
+from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner, seed_stories, settle_badges
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -102,7 +102,7 @@ def _open(ws, root, app):
         repo = Repo("https://mit.example/carts", "Test carts")
         for i in range(24):
             repo.add("c%02d" % i, name="Cart %02d" % i)
-        (root / ci.INDEXES_NAME).write_text(json.dumps({"indexes": [repo.url("index.json")]}))
+        ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
         a = ws._apps_by_id["getcarts"]
         a._inst = _SameFree(a._inst)
@@ -125,6 +125,7 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
     ws.bar_layer._clock_text = lambda: "10:30"
     ws.wallpaper.is_animating = lambda dt: False
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws.open_desk()
     if not ships:
@@ -230,10 +231,10 @@ class Pair:
         painted = False
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             ws.pointer.visible = False
-            k = ws._frames_drawn
+            k = ws.frame_state.frames_drawn
             r = ws.wm._repeats_n
             self._drive(ws, drv)
-            if ws._frames_drawn != k:
+            if ws.frame_state.frames_drawn != k:
                 painted = True
                 root = ws.wm._root_canvas
                 h = self.held[id(ws)]
@@ -393,9 +394,9 @@ def test_the_p4_desk_shifts_its_apps_pages_byte_for_byte(tmp_path, app, bufs):
     p.settle()
     p.keys("down", 12)
     p.settle()
-    a, b = p.a._frames_drawn, p.b._frames_drawn
+    a, b = p.a.frame_state.frames_drawn, p.b.frame_state.frames_drawn
     p.hold("down", 40)                # at the end: its steps move nothing
-    a, b = p.a._frames_drawn - a, p.b._frames_drawn - b
+    a, b = p.a.frame_state.frames_drawn - a, p.b.frame_state.frames_drawn - b
     assert a < b, "the held steps at %s's end painted %d frames, every step %d" % (app, a, b)
     p.settle()
     assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
@@ -420,7 +421,7 @@ def _art(p):
         _drawings(ws)
         f = _inst(ws, "FilesAppLayer")
         f._refresh_counts()
-        f.open_place(files_app.ART)
+        f.open_place(files_app.PICTURES)
         f._focus = "files"
     p.settle()
 
@@ -620,7 +621,8 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
     p.frame()
     cx, cy, cw, chh = c.content_rect()
     vis = next((x, y) for y in range(cy + chh - 4, cy, -8) for x in range(cx + 4, cx + cw, 8)
-               if not (s.x <= x < s.x + s.w and s.y <= y < s.y + s.h))
+               if not (s.x <= x < s.x + s.w and s.y <= y < s.y + s.h)
+               and w._resize_zone_at(x, y) is None)   # a tap on Calc, not a grab of an edge
     p.both("click", *vis)
     p.frame()
     assert w._focus == "calc"
@@ -718,12 +720,12 @@ def _held_at_the_end(ws, drv, n=40):
     drv.hold("down", True)
     drv.press("down")
     drv.frame(_DT)
-    k = ws._frames_drawn
+    k = ws.frame_state.frames_drawn
     for _ in range(n):
         quiesce(ws)
         drv.frame(_DT)
     drv.hold("down", False)
-    return ws._frames_drawn - k
+    return ws.frame_state.frames_drawn - k
 
 
 @pytest.mark.parametrize("app", ("settings", "licences", "files"))
@@ -796,7 +798,7 @@ def test_a_frame_whose_change_is_the_window_repaints_no_desk_or_chrome(tmp_path)
         if p.frame() and w._repeats_n == r0:
             assert p.direct == d0 + 1, "a %s frame did not draw into the glass" % cls
             assert not w._desk_painted and w._chrome_quiet, "a %s frame laid the desk" % cls
-            assert w._outside_f != p.a._frames_drawn - 1, "a %s frame drew outside" % cls
+            assert w._outside_f != p.a.frame_state.frames_drawn - 1, "a %s frame drew outside" % cls
             seen[cls] = seen.get(cls, 0) + 1
     x, y = p.at("settings")
     p.both("touch", x, y)

@@ -25,7 +25,8 @@ to whoever called it.
   mixins (`runtime/README.md` lists them): the key and pointer routers are
   `console_input.py`'s, and the spawn/exit verbs, app registration and
   the WiFi lease `runtime/shell/console_spine.py`'s, over the spine's components
-  in `native/moy_spine` (ids and kinds, never objects); everything
+  in `native/moy_spine` and the lease table's radio rows (ids, kinds and tags,
+  never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
 - **The 2026-07 shell split** — `project.py` / `player.py` / `editor_app.py` /
@@ -97,7 +98,11 @@ to whoever called it.
   `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
   — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
   its unit of 2 at chrome size 1 (docs/history/look_2026-10.md step 9). RIGHT
-  zone = OS status (clock/wifi/batt). The LEFT zone opens with the **back
+  zone = OS status (clock/wifi/batt) and the apps' status items
+  (`runtime/system/status_items.py`; how they read on each tier is
+  docs/theme_and_shell_2026-11.md §1.5). An item allocates nothing per
+  frame and draws its section AS its process; a handheld's cluster is one
+  stop, and the bar reserves its focus ring's room. The LEFT zone opens with the **back
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
   gets its X instead): one level back, as Esc and B (`ws.app_back` for a
   registered app, whose `back()` steps its own pages); the launcher root draws
@@ -111,7 +116,8 @@ to whoever called it.
   set, a tile a slot of its `SLOTS`), else 16×16 sprites from the shell's baked `IconSheet`; the slots a
   theme's `icons.pixel_slots` names draw from its own tiles, painted in the Editor's theme mode
   (`runtime/editors/theme_editor.py`). **The bar hides entirely while a GAME plays** (the cart
-  owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
+  owns all 320×240) and shows again over its pause card on a handheld;
+  tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
 - **Exit model (#71's BACKSPACE pause machinery is retired).** A game is left
   through the pause menu, which the console's one key opens (`start`:
@@ -149,7 +155,7 @@ to whoever called it.
     `blit565_resize`, one call a card -- with no per-size variants
     (docs/history/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
-  - **A FILE's DELETE moves it to `files/trash/`, restorable, and never confirms**; emptying
+  - **A FILE's DELETE moves it to `files/.Trash/`, restorable, and never confirms**; emptying
     the Trash is Files' one verb that asks first (a `ui.dialog`). A CART has no
     Trash: its delete removes the folder, so every route asks first in the
     same `ui.dialog`. WALL/GAME/wallpaper
@@ -157,19 +163,24 @@ to whoever called it.
     (#108's comments hold that design discussion).
 - **Cart runtimes (#67): a manifest `"runtime"` other than python routes
   `Player.start` through `ws.runtimes`, a map of the runtimes this build carries**
-  -- `"lua"`, and `"wasm"` (a compiled cart, `native/moy_wasm/README.md`,
-  on the same moycore console over the `native/moy_wasm` engine). A runtime a
+  -- `"lua"`, `"wasm"` (a compiled cart, `native/moy_wasm/README.md`,
+  on the same moycore console over the `native/moy_wasm` engine), and
+  `"elf"`, the tier of any cart whose manifest names `native` chips, played
+  as a game in its own process (`runtime/run/elf_run.py`, `ElfGame`; a
+  native command or service is the Terminal's and the scheduler's). A runtime a
   build lacks is an ABSENT KEY, and its carts open the runtime-missing panel.
-  A compiled cart the console has no room for opens that same panel as a
+  A compiled or native cart the console has no room for opens that same panel as a
   NOTICE, never an error: the Player compares the cart's load footprint with
   what the runtime reports free before anything loads, and a load that runs
   out anyway maps to the same notice (`native/moy_wasm/README.md`). A cart
   with no module for this console, one built for another chip or format, or
-  one whose module is unsigned while Settings -> UNKNOWN SOURCES is off is
+  one whose module is unsigned while its cart is not granted `full_access` is
   never refused either (2026-09-30, "A cart survives its firmware"): it plays
   on the interpreter instead, with a short notice naming the cause ("needs an
   update" or "isn't signed"), never a panel. Only tamper evidence -- a
-  signature present but not verifying -- still stays an error.
+  signature present but not verifying -- still stays an error, and so does a
+  trap once the module has run (`moycore.wasm_ran()`: a crash in `_init` is the
+  cart's own error and is never retried on the interpreter).
   `docs/moycore_direction.md` is the direction doc and `native/moycore/` the
   implementation; the decisions and traps:
   - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine

@@ -113,6 +113,13 @@ class IdleLadder:
         until the next input, which the ladder swallows as it wakes."""
         self.loop.power(False)
 
+    def wake(self):
+        """The ladder back to AWAKE now (an alarm, moybyte.at): the light
+        comes on as an input would bring it. True when it was below AWAKE."""
+        was = self.loop.idle_state()
+        self.loop.power(True)
+        return was != 0
+
     def set(self, key, secs):
         """Rung `key` at `secs`, persisted and live."""
         for k, rung, _t, _d in ROWS:
@@ -151,7 +158,7 @@ class Saver:
             return False
         self._next = now + self.PERIOD_MS
         carts = [c for c in ws.carts.all if c.get("type") == "game"] or ws.carts.all
-        cv = ws.sys_canvas or ws.canvas
+        cv = ws.sys_canvas or ws.run.canvas
         cv.cls(0)
         if carts:
             self._i = (self._i + 1) % len(carts)

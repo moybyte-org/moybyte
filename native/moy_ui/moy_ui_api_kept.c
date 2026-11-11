@@ -5,35 +5,34 @@
 
 // -- a kept table (o->keep) and the parts `held` names ------------------------------
 
-// The engine's kept memory, one block taken at the first context that keeps
-// (PSRAM where the board has it: a static would hold it in internal SRAM
-// from boot, and a context's bytes would carry it whether it keeps or not):
-// a ring for each of the KEPT_OWNERS contexts that kept last, the one
+// An instance's kept memory, one block taken at its first context that
+// keeps (PSRAM where the board has it: a static would hold it in internal
+// SRAM from boot, and a context's bytes would carry it whether it keeps or
+// not): a ring for each of the KEPT_OWNERS contexts that kept last, the one
 // begun least recently given up for another, and the faces' one record.
 #define KEPT_OWNERS 4
 
-typedef struct {
+struct mua_kept_mem {
     kept_ring_t ring[KEPT_OWNERS];
     uint32_t used;
     moy_ui_faces_t fc;
-} kept_mem_t;
+};
+typedef struct mua_kept_mem kept_mem_t;
 
-static kept_mem_t *s_kept;
-
-static kept_mem_t *kept_mem(void) {
-    if (s_kept == NULL) {
-        s_kept = (kept_mem_t *)KEPT_ALLOC(sizeof(kept_mem_t));
-        if (s_kept != NULL) {
-            memset(s_kept, 0, sizeof(*s_kept));
+static kept_mem_t *kept_mem(moy_ui_inst_t *I) {
+    if (I->kept == NULL) {
+        I->kept = (kept_mem_t *)KEPT_ALLOC(sizeof(kept_mem_t));
+        if (I->kept != NULL) {
+            memset(I->kept, 0, sizeof(kept_mem_t));
         }
     }
-    return s_kept;
+    return I->kept;
 }
 
 // The ring the engine keeps for context c, else NULL; with `make` one taken
 // for it where it has none, holding the paint begun (kt_f) alone.
 kept_ring_t *mua_ring_of(const moy_ui_ctx_t *c, int make) {
-    kept_mem_t *m = make ? kept_mem() : s_kept;
+    kept_mem_t *m = make ? kept_mem(c->inst) : c->inst->kept;
     if (m == NULL) {
         return NULL;
     }
@@ -82,7 +81,7 @@ void mua_kept_begin(moy_ui_ctx_t *c, int32_t f, int k) {
     if (r == NULL) {
         return;
     }
-    r->used = ++s_kept->used;
+    r->used = ++c->inst->kept->used;
     if (!r->n || r->kt[r->ri].f != f) {
         r->ri = (uint8_t)(r->ri + 1 >= MOY_UI_KEPT_RING ? 0 : r->ri + 1);
         if (r->n < MOY_UI_KEPT_RING) {
@@ -508,28 +507,27 @@ int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
 
 // -- the faces a table's parts keep drawn (moy_ui_api_slots) -------------------------
 
-// The engine keeps one context's faces at a time, in its kept memory: the
-// ticket it gave last (s_fc_owner) names that context.
-static uint32_t s_fc_owner;
-static uint32_t s_fc_ids;
-
+// An instance keeps one context's faces at a time, in its kept memory: the
+// ticket it gave last (fc_owner) names that context.
 static int faces_mine(const moy_ui_ctx_t *c) {
-    return c->fc_id != 0 && s_fc_owner == c->fc_id && s_kept != NULL && s_kept->fc.cap > 0;
+    const moy_ui_inst_t *I = c->inst;
+    return c->fc_id != 0 && I->fc_owner == c->fc_id && I->kept != NULL && I->kept->fc.cap > 0;
 }
 
 int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
+    moy_ui_inst_t *I = c->inst;
     cap = cap < 0 ? 0 : cap > MOY_UI_FACE_SLOTS ? MOY_UI_FACE_SLOTS : cap;
-    kept_mem_t *m = cap > 0 ? kept_mem() : s_kept;
+    kept_mem_t *m = cap > 0 ? kept_mem(I) : I->kept;
     if (m == NULL) {
         return 0;
     }
     moy_ui_faces_t *fc = &m->fc;
-    if (c->fc_id == 0 || s_fc_owner != c->fc_id) {
-        if (++s_fc_ids == 0) {
-            s_fc_ids = 1;
+    if (c->fc_id == 0 || I->fc_owner != c->fc_id) {
+        if (++I->fc_ids == 0) {
+            I->fc_ids = 1;
         }
-        c->fc_id = s_fc_ids;
-        s_fc_owner = c->fc_id;
+        c->fc_id = I->fc_ids;
+        I->fc_owner = c->fc_id;
         fc->cap = 0;
     }
     if (fc->cap != cap || fc->key != key) {
@@ -550,7 +548,7 @@ int32_t moy_ui_api_slot(moy_ui_ctx_t *c, moy_ui_span_t name, int32_t gen, int mi
     if (!faces_mine(c)) {
         return -1;
     }
-    moy_ui_faces_t *fc = &s_kept->fc;
+    moy_ui_faces_t *fc = &c->inst->kept->fc;
     uint32_t key = mua_hash(name.p, name.n, 0x66616365u) ^ ((uint32_t)gen * 0x9e3779b1u);
     if (++fc->tick == 0) {             // (the uses wrapped: every face forgotten)
         memset(fc->used, 0, sizeof(fc->used));
@@ -578,7 +576,7 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c) {
     if (!faces_mine(c)) {
         return -1;
     }
-    moy_ui_faces_t *fc = &s_kept->fc;
+    moy_ui_faces_t *fc = &c->inst->kept->fc;
     int np = fc->np, shown = (fc->r1 - fc->r0) * np, n = fc->rows * np;
     for (;;) {
         int w = fc->w, p = -1;

@@ -128,7 +128,7 @@ def test_the_registry_shape_is_uniform():
 
 
 def test_every_entry_resolves_on_a_real_console(tmp_path):
-    """key IS the flat attribute IS the system.json key, and setter IS a verb.
+    """key IS the flat attribute IS the system/settings key, and setter IS a verb.
     All three were the same string six times over before the registry; this is
     what turns that coincidence into a contract."""
     ws = build_ws(tmp_path)
@@ -308,7 +308,7 @@ def test_a_gated_toggle_declines_its_serial_word(tmp_path, capsys):
 def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
     """`steady` keeps the wire shape `skip` had -- the on-glass suites and the
     bench tools speak it -- and it does not persist, so a measurement session
-    cannot leave a kid's system.json off-default."""
+    cannot leave a kid's system/settings off-default."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
     ws = build_ws(tmp_path)
@@ -326,7 +326,7 @@ def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
 def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
     """The pinned behaviour the gate must not tidy away: LOCAL 2P reports OFF
     whatever it is told when there is no second keyboard. The gate hides the
-    row; the SETTER is what keeps a stale system.json key from claiming two
+    row; the SETTER is what keeps a stale system/settings key from claiming two
     players nothing can drive."""
     ws = build_ws(tmp_path)
     assert ws.second_keyboard() is None

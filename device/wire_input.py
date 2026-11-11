@@ -38,14 +38,31 @@ def wire_pointer(inp, inputs, w, h):
     return touch, pointer
 
 
+def picked_keyboard(ble):
+    """Has keyboard input on and a Bluetooth keyboard picked in Settings?"""
+    try:
+        status = ble.settings_status()
+    except Exception:  # noqa: BLE001 -- a radio error is no keyboard
+        return False
+    return bool(status[0]) and status[3] is not None
+
+
 def start_keyboards(ws, keyboard, ble_keyboard, _census):
     """The second keyboard attached, and the console's keyboard started."""
     if ble_keyboard is not None:
         # A second keyboard beside the physical one (#26). Both write into the
         # same InputState, so the console never asks which one a key came
         # from; Settings finds it because _bt_service() checks ws.ble_keyboard
-        # before ws.keyboard.
+        # before ws.keyboard. Its radio starts here only for a keyboard
+        # picked in Settings, so that one reconnects from boot; with none
+        # picked, Settings starts it when the panel opens.
         ws.ble_keyboard = ble_keyboard
+        if picked_keyboard(ble_keyboard):
+            try:
+                ble_keyboard.start()
+            except Exception:  # noqa: BLE001 -- the board's own keyboard still types
+                pass
+            _census("ble keyboard")
     if keyboard is not None and getattr(keyboard, "start", None) is not None:
         # A BLE keyboard starts its radio only now, after the Workstation's
         # boot allocations; a keyboard that answers from __init__ has no

@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -233,7 +233,14 @@ UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
 # ubuntu-26.04 runner installs from Ubuntu's amd64v3 variant, whose gcc
 # defaults to -march=x86-64-v3, and tests/test_audio_parity.py diverged there.
 # Pinned, the result no longer depends on the compiler's default target.
-UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off
+# MICROPY_ENABLE_VM_ABORT is the boards' too (each console's mpconfigboard.h):
+# the scheduler's callback guard, native/moy_kernel/modmoy_guard.c. It changes
+# the VM's state struct, so a build tree whose objects were compiled with
+# other flags is rebuilt whole (the `moy_cflags` stamp below). The FatFS
+# grant is the boards' too: every call on the card's volume takes the store's
+# lock (native/moy_store/moy_vol.h, THE STORE'S LOCK), and it changes FATFS.
+UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off -DMICROPY_ENABLE_VM_ABORT=1 \
+	-DMICROPY_FATFS_REENTRANT=1 -DMICROPY_FATFS_SYNC_T=uintptr_t -DMICROPY_FATFS_ENABLE_LFN=2
 UNIX_MP_R32_CFLAGS := $(UNIX_MP_CFLAGS) \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
@@ -274,6 +281,7 @@ unix-micropython:
 # news about a test binary that is not an image.
 	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
 	@bash tools/mpy_tree.sh $(UNIX_MP_SRC) $(UNIX_MP_TAG)
+	@$(PYTHON) tools/patch_fatfs_lfn.py $(UNIX_MP_SRC)
 # Separate from the clone on purpose (the web runner's build.sh learned the
 # same lesson): a checkout can exist WITHOUT its submodules if a previous run
 # died between the two, and a guarded init could never repair that. It is also
@@ -293,6 +301,9 @@ unix-micropython:
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
 	@for b in build-moybyte build-moybyte-board; do \
+	  c=$(UNIX_MP_SRC)/ports/unix/$$b/moy_cflags; \
+	  if [ -d "$$(dirname $$c)" ] && [ "$$(cat $$c 2>/dev/null)" != "$(UNIX_MP_CFLAGS)" ]; then \
+	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b; fi; \
 	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
 	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
 	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
@@ -306,6 +317,7 @@ unix-micropython:
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
+	@echo "$(UNIX_MP_CFLAGS)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_cflags
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
@@ -315,6 +327,7 @@ unix-micropython:
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
 	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
+	  echo "$(UNIX_MP_CFLAGS)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_cflags && \
 	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \
@@ -358,6 +371,46 @@ sync-issues:
 #   make vendor-libmoy SPEC=/path/to/moy-spec
 vendor-libmoy:
 	$(PYTHON) tools/vendor_libmoy.py $(if $(SPEC),--spec $(SPEC))
+
+# Re-vendor dash, the shell native/moy_sh derives from: upstream at the pin,
+# native/moy_sh/patches applied, dash's generators run (native/moy_sh/UPSTREAM.md).
+#   make vendor-dash
+#   make vendor-dash DASH=/path/to/clone COMMIT=<sha>
+vendor-dash:
+	$(PYTHON) tools/vendor_dash.py $(if $(DASH),--dash $(DASH)) $(if $(COMMIT),--commit $(COMMIT))
+
+# Re-vendor Espressif's elf_loader, the native tier's loader: the pinned
+# release from the component registry (fetched to .build/, its SHA-256
+# checked), native/moy_elf/patches applied (native/moy_elf/UPSTREAM.md).
+#   make vendor-elf-loader
+vendor-elf-loader:
+	$(PYTHON) tools/vendor_elf_loader.py
+
+# Re-vendor Dropbear, the SSH server native/moy_ssh runs: the pinned release
+# (fetched to .build/, its SHA-256 checked), native/moy_ssh/patches applied
+# (native/moy_ssh/UPSTREAM.md).
+#   make vendor-dropbear
+vendor-dropbear:
+	$(PYTHON) tools/vendor_dropbear.py
+
+# Re-vendor mbedTLS's crypto subset -- the sign-in's and the apps' AES, GCM,
+# SHA-256, P-256 and Curve25519 for the host's library and the wasm (a board
+# links ESP-IDF's own) --
+# from the boards' ESP-IDF tree, or SRC=/path, into native/moy_net/mbedtls with
+# the stamp native/moy_net/mbedtls_vendor.json; tests/test_mbedtls_vendor.py
+# holds the copy to it.
+#   make vendor-mbedtls
+#   make vendor-mbedtls SRC=/path/to/mbedtls
+vendor-mbedtls:
+	$(PYTHON) tools/vendor_mbedtls.py $(if $(SRC),--src $(SRC))
+
+# Re-vendor Monocypher -- the apps' Ed25519 on every tier -- the pinned release
+# (fetched to .build/, its SHA-512 checked against monocypher.org's), into
+# native/moy_net/monocypher with the stamp native/moy_net/monocypher_vendor.json;
+# tests/test_monocypher_vendor.py holds the copy to it.
+#   make vendor-monocypher
+vendor-monocypher:
+	$(PYTHON) tools/vendor_monocypher.py
 
 # Re-vendor the AOT-only WAMR runtime -- the WebAssembly cart engine --
 # from Moybyte's fork (experiments/wasm_aot/wamr, or WAMR=/path) at its HEAD or
@@ -608,7 +661,7 @@ firmware-monitor-guition-p4:
 # how you read the boot line, the paired url and every `ZERO ota:` transition.
 #
 # A TABLE-CHANGING FLASH IS A STORE WIPE. This board's table puts vfs at
-# 0x6A0000 (since 2026-10-18); a board flashed under an older table has its
+# 0x720000 (since 2026-11-07); a board flashed under an older table has its
 # filesystem elsewhere, so the new image comes up on a freshly formatted store.
 # Re-run provision.sh afterwards -- see the board README.
 

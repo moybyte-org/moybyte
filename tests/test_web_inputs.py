@@ -4,6 +4,7 @@ worker at init) is on touch from boot, a key brings the keys back and the
 page's pointer press puts touch back in use; a fine pointer is a mouse, no
 finger, and its page stays on its keys."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -112,3 +113,64 @@ def test_the_pages_mouse_reaches_the_consoles_pointer_as_a_mouse(web_boot, tmp_p
     ws.input.begin_frame()
     assert ws.input.pointer_buttons == moy_input.PB_PRIMARY
     assert ws.input.mods & moy_input.SHIFT
+
+
+def test_one_frame_takes_one_change_of_the_pointer():
+    from runtime import web_input
+    down, up = {"type": "down", "x": 1, "y": 2}, {"type": "up"}
+    move = {"type": "move", "x": 5, "y": 2}
+    assert web_input.frame_cut([]) == 0
+    assert web_input.frame_cut([down, up, {"type": "hover", "x": 1, "y": 2}]) == 3
+    assert web_input.frame_cut([down, up, down, up]) == 2
+    assert web_input.frame_cut([{"type": "key", "code": 97}, down, up, down]) == 3
+    assert web_input.frame_cut([down, move, up]) == 1
+    assert web_input.frame_cut([move, move, up]) == 2
+    assert web_input.frame_cut([up, {"type": "hover", "x": 1, "y": 2}, down]) == 3
+
+
+def _web_code(web_boot, tmp_path, monkeypatch, text):
+    from test_mouse_pointer import _code, _code_xy
+    ws, d, ed = _code(Path(tmp_path), text)
+    monkeypatch.setattr(web_boot, "_S", {"ws": ws, "driver": d,
+                                         "sink": web_boot._PointerSink(d)})
+
+    def at(row, col):
+        return _code_xy(ws, ed, row, col)
+
+    def send(*events):
+        web_boot.apply_events_json(json.dumps({"events": list(events)}))
+
+    x, y = at(0, 0)
+    send({"type": "hover", "x": x, "y": y})
+    web_boot.step_frame_json(1 / 30)
+    return ed, at, send
+
+
+def test_a_double_click_that_reaches_one_frame_takes_the_word(web_boot, tmp_path, monkeypatch):
+    """A slow frame lets both presses of a double click reach the page's next
+    frame in one batch. The pointer carries one press a frame, so the second
+    goes to the frame after it: the Code tab sees two presses at one place
+    and takes the word."""
+    ed, at, send = _web_code(web_boot, tmp_path, monkeypatch, "alpha beta_2 gamma\nsecond")
+    x, y = at(0, 8)
+    click = [{"type": "down", "x": x, "y": y}, {"type": "up"}]
+    send(*(click + click))
+    web_boot.step_frame_json(1 / 30)
+    assert not ed.has_selection(), "the first press only places the caret"
+    web_boot.step_frame_json(1 / 30)
+    assert ed.selected_text() == "beta_2"
+    assert web_boot._S["evq"] == []
+
+
+def test_a_drag_that_reaches_one_frame_selects_to_its_end(web_boot, tmp_path, monkeypatch):
+    """A whole drag in one batch -- the press, its moves and the release --
+    is the press's frame, the held moves' and the release's, so the
+    selection reaches the place the button went up at."""
+    ed, at, send = _web_code(web_boot, tmp_path, monkeypatch, "alpha beta_2 gamma\nsecond")
+    (x0, y), (x2, _), (x4, _) = at(0, 0), at(0, 2), at(0, 4)
+    send({"type": "down", "x": x0, "y": y}, {"type": "move", "x": x2, "y": y},
+         {"type": "move", "x": x4, "y": y}, {"type": "up"})
+    for _ in range(3):
+        web_boot.step_frame_json(1 / 30)
+    assert ed.selected_text() == "alph"
+    assert web_boot._S["evq"] == []

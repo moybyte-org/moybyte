@@ -1,10 +1,14 @@
 # Map (grep -n a name to jump there):
 #   InstallError                a failure: the kid's text and serial's detail
 #   -- references               is_url, resolve, plain_name, mirror_ok
-#   -- the index                check_cart, cover_ref, parse_index (_read_listing), load_indexes
+#   -- the sources              parse_sources, sources_text, load_indexes, save_sources
+#   -- the signature            split_signed, check_signature
+#   -- the index                check_cart, cover_ref, parse_index (_read_listing)
+#   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
-#   -- the record               load_record, save_record, record_entry
-#   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
+#   -- the record               load_record, save_record, record_entry, staged, recover_steps, remove_steps, drain, stepped
+#   -- fetching                 Worker, Fetch, Reach, FileCheck, index_fetch, cover_fetch
+#   Worker                      a transport with the http worker: documents whole, downloads streamed
 #   Fetch                       one small document, whole
 #   Reach                       which of a cart's URLs this console can read
 #   FileCheck                   a file the player supplied, held to the index
@@ -55,20 +59,33 @@ What it does differently, because a console is not a PC:
     a compiled cart, whose native module a board loads only by its
     signature, a Lua cart, or a theme package ("runtime": "theme"), data
     the theme loader parses, validates and clamps (docs/theme_and_shell_2026-11.md
-    §6) and nothing runs. A board fetches over TLS without checking
-    certificates (the OTA's arrangement), so an index is not proof of
-    anything; what lands is sandboxed, signed or validated data.
+    §6) and nothing runs. A board's TLS checks the server's certificate,
+    but a server is not proof of what it serves; what lands is sandboxed,
+    signed or validated data.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
 module, every file's sha256), and `install/`, where an install is built. A cart
 folder holds only its index's files; the record is what says which version it
-is. An `indexes.json` there replaces DEFAULT_INDEXES ({"indexes": [url, ...]}),
-the way /sd/update/ota.json points the OTA check at a LAN host.
+is. `system/sources` there (docs/os_2026-11/system.md §6), one index URL a
+line, replaces DEFAULT_INDEXES, the way /sd/update/ota.json points the OTA
+check at a LAN host; a legacy `indexes.json` reads as absent.
+
+AN INDEX MAY BE SIGNED as OTA manifests are (device/moy_ota.py's keys, RSA-2048
+PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends
+`, "sig": "<hex>"}` in place of the document's closing brace, and the signature
+covers SIG_SCHEME and the document as it was before. A signed index whose
+signature does not verify is refused, wherever this console can verify (the
+kernel's `moy_net.ota_verify` on a board, its host twin on CPython); the
+browser has no verifier and needs none, its fetch checking the server's
+certificate. An unsigned index is read.
+
+An entry's `depends` (a list of cart ids, optional) names the carts it needs
+on the console first; `needs` resolves them over the indexes.
 
 A crash at any point leaves the old cart or the new one, never half of either:
-`recover`, which the app runs when it opens, removes an unfinished build and
-puts back an old copy whose replacement never moved in.
+`recover_steps`, which the app steps when it opens, removes an unfinished build
+and puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
@@ -132,28 +149,40 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
-                                cart_path)
-    from moy_fs import _exists, _mkdir
+    from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
+                                builtin_ns, cart_path)
+    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
     import moy_carts as _store
     import cart_files as _cart_files
     import cart_listing as _cl
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
-                                        COVER_MAX_BYTES, cart_path)
-    from runtime.moy_fs import _exists, _mkdir
+    from runtime.moy_store_base import (_sibling_path, _is_dir,
+                                        COVER_MAX_BYTES, builtin_ns, cart_path)
+    from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
+                                _write_atomic_steps)
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
     from runtime import cart_listing as _cl
+
+# The record and the removal are native/moy_store/moy_shelf.h's on every tier:
+# the image's moy_store, or the same C over ctypes on CPython.
+try:
+    import moy_store as _shelf
+    _shelf.shelf_record
+except (ImportError, AttributeError):  # CPython
+    from runtime import moy_shelf_binding as _shelf
 
 
 INDEX_VERSION = 1
 DEFAULT_INDEXES = (
     "https://moybyte-org.github.io/carts/index.json",
 )
-INDEXES_NAME = "indexes.json"
+SOURCES_NAME = "system/sources"
 RECORD_NAME = "installed.json"
+SIG_SCHEME = b"moybyte-index-v1\n"
+SIG_TAIL = b', "sig": "'
+INDEX_KEYS = None             # the keys an index verifies against; None: the image's
 STAGE_DIR = "install"
 RUNTIMES = ("wasm", "lua", "theme")
 
@@ -203,6 +232,7 @@ NO_WRITE = "Can't write to the store."
 NO_LICENCE = "Its licence wasn't accepted."
 NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
+BAD_SIGNATURE = "The cart shelf's signature is wrong."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -344,9 +374,17 @@ def check_cart(c):
             return "no %s" % key
     if not isinstance(c.get("version"), int):
         return "no version"
+    deps = c.get("depends", ())
+    if not isinstance(deps, list) and deps != ():
+        return "depends"
+    for d in deps:
+        if not isinstance(d, str) or not d:
+            return "depends"
     folder = c["folder"]
-    if not plain_name(folder) or not folder.endswith(".moy"):
+    if not plain_name(folder) or not folder.endswith(".moy") or builtin_ns(folder):
         return "folder %r" % folder
+    if builtin_ns(c["id"]) or folder != c["id"] + ".moy":
+        return "id %r" % c["id"]
     lic = c.get("licence")
     if not _sized(lic) or not isinstance(lic.get("url"), str):
         return "licence"
@@ -405,14 +443,21 @@ def parse_index(data, url):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
     cannot read is left out and logged, and so is a `cover` it cannot (the
-    cart stays); a document that is not an index is an InstallError."""
+    cart stays); a document that is not an index, or whose signature does not
+    verify (`check_signature`), is an InstallError."""
+    if isinstance(data, str):
+        data = data.encode()
+    signed = check_signature(data, url)
     try:
-        index = json.loads(data.decode() if isinstance(data, (bytes, bytearray)) else data)
+        index = json.loads(data.decode())
     except (ValueError, UnicodeError) as exc:
         raise InstallError(UNREACHABLE, "%s is not JSON: %s" % (url, exc))
     if not isinstance(index, dict) or index.get("version") != INDEX_VERSION:
         raise InstallError(UNREACHABLE, "%s is not a version %d index"
                            % (url, INDEX_VERSION))
+    if "sig" in index and signed is False:
+        raise InstallError(BAD_SIGNATURE, "%s: a sig that is not the last member"
+                           % url)
     out = []
     for c in index.get("carts") or ():
         why = check_cart(c)
@@ -445,24 +490,127 @@ def parse_index(data, url):
             c["external"] = exts
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
+        c["signed"] = bool(signed)
         out.append(c)
     return out
 
 
+# -- the sources ------------------------------------------------------------------
+
+def parse_sources(text):
+    """The index URLs a `system/sources` text names: one a line, blank lines
+    and `#` comments passed over, a line that is not a URL left out."""
+    out = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line and line[0] != "#" and is_url(line) and line not in out:
+            out.append(line)
+    return out
+
+
+def sources_text(urls):
+    return "".join(u + "\n" for u in urls)
+
+
 def load_indexes(root):
-    """The indexes this console browses: `indexes.json` beside the carts
+    """The indexes this console browses: `system/sources` beside the carts
     folder when it names any, else DEFAULT_INDEXES."""
-    def pick(d):
-        got = d.get("indexes") if isinstance(d, dict) else None
-        if not isinstance(got, list):
-            return None
-        urls = [u for u in got if is_url(u)]
-        return urls or None
     try:
-        got = _store._load_store_json(_sibling_path(root, INDEXES_NAME), pick)
+        got = parse_sources(_read_recover(_sibling_path(root, SOURCES_NAME)))
     except Exception:  # noqa: BLE001 -- an unreadable override is no override
         got = None
-    return list(got) if got else list(DEFAULT_INDEXES)
+    return got or list(DEFAULT_INDEXES)
+
+
+def save_sources(root, urls):
+    """Write `system/sources`; an empty list is the defaults."""
+    _mkdir(_sibling_path(root, "system"))
+    _write_atomic(_sibling_path(root, SOURCES_NAME), sources_text(urls))
+
+
+# -- the signature ----------------------------------------------------------------
+
+def split_signed(data):
+    """`(payload, sig)` of a signed index's bytes -- the bytes its signature
+    covers and the signature's hex -- or None for an unsigned one."""
+    end = len(data)
+    while end and data[end - 1] in (32, 9, 13, 10):
+        end -= 1
+    if end < 2 or data[end - 2:end] != b'"}':
+        return None
+    at = data.rfind(SIG_TAIL, 0, end)
+    if at < 0:
+        return None
+    sig = data[at + len(SIG_TAIL):end - 2]
+    if not sig:
+        return None
+    for b in sig:
+        if not (48 <= b <= 57 or 97 <= b <= 102 or 65 <= b <= 70):
+            return None
+    return SIG_SCHEME + data[:at] + b"}", sig.decode()
+
+
+def _verifier():
+    try:
+        import moy_net
+    except ImportError:
+        try:
+            from runtime import net_binding as moy_net
+        except ImportError:  # the browser: its fetch checks the certificate
+            return None
+    return getattr(moy_net, "ota_verify", None)
+
+
+def check_signature(data, url):
+    """True for an index whose signature verifies, False for an unsigned one,
+    None for a signed one where nothing can verify it (the browser). An
+    InstallError for a signature that does not verify."""
+    got = split_signed(data)
+    if got is None:
+        return False
+    verify = _verifier()
+    if verify is None:
+        return None
+    ok = verify(got[0], got[1]) if INDEX_KEYS is None \
+        else verify(got[0], got[1], INDEX_KEYS)
+    if not ok:
+        raise InstallError(BAD_SIGNATURE, "%s: its signature does not verify" % url)
+    return True
+
+
+# -- depends ----------------------------------------------------------------------
+
+def needs(carts, cart, have):
+    """The carts installing `cart` takes, dependencies first and `cart` last:
+    each of its `depends` (and theirs) the console does not `have` (a set of
+    ids), found in `carts` (the indexes' entries; the first with an id wins).
+    An InstallError when one is in no index or the chain comes back on
+    itself."""
+    by_id = {}
+    for c in carts:
+        by_id.setdefault(c["id"], c)
+    out = []
+    seen = []
+
+    def visit(c, path):
+        if c["id"] in seen:
+            return
+        for d in c.get("depends") or ():
+            if d in have:
+                continue
+            if d in path:
+                raise InstallError("It depends on itself.", "%s: a cycle through %s"
+                                   % (cart["id"], d))
+            dep = by_id.get(d)
+            if dep is None:
+                raise InstallError("It needs %s, which no cart shelf has." % d,
+                                   "%s needs %s" % (c["id"], d))
+            visit(dep, path + [d])
+        seen.append(c["id"])
+        out.append(c)
+
+    visit(cart, [cart["id"]])
+    return out
 
 
 # -- what this console takes ------------------------------------------------------
@@ -569,15 +717,16 @@ def need_bytes(p, block):
 # -- the record -------------------------------------------------------------------
 
 def load_record(root):
-    """{folder: entry} for every cart this store installed."""
-    def pick(d):
-        carts = d.get("carts") if isinstance(d, dict) else None
-        return carts if isinstance(carts, dict) else None
-    try:
-        got = _store._load_store_json(_sibling_path(root, RECORD_NAME), pick)
-    except Exception:  # noqa: BLE001 -- no record reads as nothing installed
-        got = None
-    return dict(got) if got else {}
+    """{folder: entry} for every cart this store installed: the record as
+    moy_shelf.h reads it (the file, else its backup healed into place)."""
+    text = _shelf.shelf_record(root)
+    return dict(json.loads(text)["carts"]) if text is not None else {}
+
+
+def find_installed(root, ident):
+    """The folder of the installed cart `ident` names (its folder or its id),
+    or None."""
+    return _shelf.shelf_find(root, ident)
 
 
 def record_text(rec):
@@ -586,6 +735,23 @@ def record_text(rec):
 
 def save_record(root, rec):
     _store._write_sibling(root, RECORD_NAME, record_text(rec))
+
+
+def _record_steps(root, text, again):
+    """`yield from` it inside a generator whose every resume is a store op:
+    the record `text` written in two of them (moy_fs._write_atomic_steps).
+    `again()` is the text as it would be made now, asked before the second:
+    a record written meanwhile (another face's install or removal) is written
+    whole from it instead, or not at all when it is None."""
+    path = _sibling_path(root, RECORD_NAME)
+    steps = _write_atomic_steps(path, text)
+    next(steps)
+    yield
+    now = again()
+    if now == text:
+        next(steps, None)
+    elif now is not None:
+        _write_atomic(path, now)
 
 
 def record_entry(cart, p):
@@ -636,65 +802,252 @@ def stage_root(root):
     return _sibling_path(root, STAGE_DIR)
 
 
-def recover(root):
-    """Finish what an interrupted install or removal left in `install/`: an
-    unfinished build goes, an old copy goes once its replacement is in place
-    and comes back when it is not, a removed cart goes. Call inside one store
-    session. Returns how many entries it handled."""
+def staged(root):
+    """Whether `install/` holds anything for `recover_steps` to finish."""
+    try:
+        return bool(os.listdir(stage_root(root)))
+    except OSError:
+        return False
+
+
+def recover_steps(root):
+    """Finish what an interrupted install or removal left in `install/`, a
+    store op a resume (`stepped` runs one a frame): an unfinished build goes,
+    an old copy goes once its replacement is in place (as a `.gone` first,
+    `discard_steps`) and comes back when it is not, a removed cart goes. A cut
+    anywhere leaves entries the next pass finishes."""
     base = stage_root(root)
     try:
         names = os.listdir(base)
     except OSError:
-        return 0
+        return
     for n in names:
+        yield
         p = base + "/" + n
-        if n.endswith(".old") and not _exists(cart_path(root, n[:-4])):
-            os.rename(p, cart_path(root, n[:-4]))
-            _log("put back %s" % n[:-4])
+        if n.endswith(".old"):
+            if not _exists(cart_path(root, n[:-4])):
+                os.rename(p, cart_path(root, n[:-4]))
+                _log("put back %s" % n[:-4])
+            else:
+                yield from discard_steps(p, base + "/" + n[:-4] + ".gone")
         elif _is_dir(p):
-            _rmtree(p)
+            yield from rmtree_steps(p)
         else:
-            os.remove(p)
-    return len(names)
+            try:
+                os.remove(p)
+            except OSError:
+                pass                      # a `.gone` an `.old` above already took
 
 
-def remove(root, folder, keep=None):
-    """Take `folder` off the shelf: one rename out of the carts folder (so a
-    crash mid-delete never leaves half a cart listed), then the delete, then
-    the record, then the files the cart wrote (runtime/carts/cart_files.py), which
-    live beside the store and go with it. Call inside one store session.
+def recover(root):
+    """`recover_steps` in one go. Call inside one store session. Returns how
+    many entries `install/` held."""
+    try:
+        n = len(os.listdir(stage_root(root)))
+    except OSError:
+        return 0
+    for _ in recover_steps(root):
+        pass
+    return n
+
+
+def discard_steps(path, gone):
+    """An old copy at `path` (an `.old`) deleted for good, a store op a
+    resume: renamed to `gone` (a `.gone` a cut left deleted first) and that
+    deleted an entry at a time. Half an `.old` left by a cut could come back
+    as a cart once its replacement is removed; half a `.gone` only goes."""
+    if _exists(gone):
+        yield from rmtree_steps(gone)
+        yield
+    os.rename(path, gone)
+    yield from rmtree_steps(gone)
+
+
+def remove_steps(root, folder, keep=None):
+    """`folder` taken off the shelf, a store op a resume (`stepped` runs one
+    a frame): the record without it made (native/moy_store/moy_shelf.h), the
+    folder renamed out of the carts folder (so a crash mid-delete never leaves
+    half a cart listed; `recover` deletes what one left), the record written,
+    then the folder and the files the cart wrote (runtime/carts/cart_files.py),
+    which live beside the store, deleted an entry a resume.
 
     With a keeper the record without the cart goes to the store of record
     FIRST, ahead of the folder's deletion: a record that outlives its folder
     would one day offer an UPDATE over a kid's own cart of the same name,
     while a folder that outlives its record is only offered again."""
-    rec = load_record(root)
-    had = rec.pop(folder, None) is not None
-    if keep is not None and had:
-        keep.record(record_text(rec))
-    base = stage_root(root)
-    _mkdir(base)
-    gone = base + "/" + folder + ".gone"
-    if _exists(gone):
-        _rmtree(gone)
-    os.rename(cart_path(root, folder), gone)
-    _rmtree(gone)
-    if had:
-        save_record(root, rec)
-    _cart_files.remove(root, folder)
+    text = _shelf.shelf_without(root, folder)
+    if keep is not None and text is not None:
+        keep.record(text)
+    yield
+    gone = _shelf.shelf_take(root, folder)
+    if text is not None:
+        yield
+        yield from _record_steps(root, text, lambda: _shelf.shelf_without(root, folder))
+    yield
+    yield from rmtree_steps(gone)
+    yield
+    yield from rmtree_steps(_shelf.shelf_written(root, folder))
     erased = getattr(keep, "erased", None)
     if erased is not None:
         erased(_cart_files.cart_id(folder), None)
 
 
+def remove(root, folder, keep=None):
+    """`remove_steps` in one go. Call inside one store session."""
+    for _ in remove_steps(root, folder, keep):
+        pass
+
+
+def rmtree_steps(path):
+    """The tree at `path` deleted, files before their folder, one entry a
+    resume (each a store op); nothing where there is none."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for n in names:
+        yield
+        p = path + "/" + n
+        if _is_dir(p):
+            yield from rmtree_steps(p)
+        else:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    yield
+    try:
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
+_DONE = object()
+
+
+def drain(job):
+    """`yield from` it: an Install stepped until it ends, one step a resume."""
+    while job.step():
+        yield
+
+
+def stepped(op, steps):
+    """`yield from` it: the generator `steps` resumed once a frame, each
+    resume inside `op` (one store op: the console's SD gate, a call-through on
+    flash), so no frame holds more than one of its units."""
+    while op(lambda: next(steps, _DONE)) is not _DONE:
+        yield
+
+
 # -- fetching -------------------------------------------------------------------
+
+class _Whole:
+    """A document fetched whole off the VM's thread (a transport's
+    `get(url, cap)`: the http worker's request, runtime/system/dev_http.py)
+    as the response Fetch reads: no status while it runs."""
+
+    def __init__(self, req):
+        self.req = req
+        self.at = 0
+        self.status = None
+        self.length = None
+
+    def poll(self):
+        st = self.req.state()
+        if st is not None:
+            self.status, self.length = st
+
+    def ready(self, n):
+        return True
+
+    def readinto(self, mv):
+        n = self.req.readinto(mv, self.at)
+        self.at += n
+        return n
+
+    def close(self):
+        self.req.close()
+
+
+class _Streamed:
+    """A download streamed through the http worker's window (a transport's
+    `stream(url)`: runtime/system/dev_http.py) as the response Install
+    reads: no status while its head is on its way, then its bytes as they
+    come, never waited for."""
+
+    def __init__(self, req, window):
+        self.req = req
+        self.window = window
+        self.status = None
+        self.length = None
+        self._failed = None
+
+    def poll(self):
+        st = self.req.state()
+        if st is not None:
+            self.status = st[0]
+
+    def ready(self, n):
+        if self._failed is not None:
+            return True
+        try:
+            self.req.state()
+        except OSError as exc:           # broke off: the read says so
+            self._failed = exc
+            return True
+        have = self.req.available()
+        return have >= n or have >= self.window or self.req.ended()
+
+    def readinto(self, mv):
+        if self._failed is not None:
+            raise self._failed
+        return self.req.readinto(mv)
+
+    def close(self):
+        self.req.close()
+
+
+class Worker:
+    """A transport whose requests the http worker serves off the VM's
+    thread (runtime/system/dev_http.py): Fetch's documents up to GET_MAX
+    fetched whole, and Install's downloads of any size streamed through a
+    window, so no TLS handshake or read holds a frame. The rest is the
+    transport's."""
+
+    def __init__(self, net, http):
+        self._net = net
+        self.get = http.get
+        self.stream = http.stream
+        self.GET_MAX = http.CAP_MAX
+
+    def __getattr__(self, name):
+        return getattr(self._net, name)
+
+
+# A stream's window: a reader's gate (GATE, a zip member's header whole) must
+# fit in it with room for the worker to read on, or the gate never opens.
+WINDOW = GATE + 65536
+
+
+def _request(net, url):
+    """The response a download reads: streamed by the http worker where the
+    transport has it, else the transport's own `open`."""
+    stream = getattr(net, "stream", None)
+    if stream is not None:
+        try:
+            return _Streamed(stream(url, WINDOW), WINDOW)
+        except OSError as exc:      # no slot, no grant: the transport's own way
+            _log("%s: %s; opened instead" % (url, exc))
+    return net.open(url)
+
 
 class Fetch:
     """One small document whole -- an index, a licence text, a cover -- at
     most `limit` bytes and, given `size`/`sha`, exactly those. `step()` is True
     while the answer is still on its way (only a non-blocking transport ever
-    says so) and raises an InstallError when it cannot be had; then `data`
-    holds the bytes."""
+    says so: one with `get(url, cap)` up to its GET_MAX, whose request
+    answers off the VM's thread) and raises an InstallError when it cannot be
+    had; then `data` holds the bytes."""
 
     def __init__(self, net, url, limit, size=None, sha=None):
         self.net = net
@@ -705,8 +1058,12 @@ class Fetch:
         self.data = None
         self._out = bytearray()
         self._buf = bytearray(4096)
+        get = getattr(net, "get", None)
         try:
-            self._resp = net.open(url)
+            if get is not None and self.limit <= getattr(net, "GET_MAX", 0):
+                self._resp = _Whole(get(url, self.limit))
+            else:
+                self._resp = net.open(url)
         except Exception as exc:  # noqa: BLE001 -- every transport error is "unreachable"
             raise InstallError(net_text(net, UNREACHABLE), "%s: %s" % (url, exc))
 
@@ -715,6 +1072,12 @@ class Fetch:
         if resp is None:
             return False
         try:
+            if resp.status is None and hasattr(resp, "poll"):
+                try:
+                    resp.poll()
+                except Exception as exc:  # noqa: BLE001 -- no response is "unreachable"
+                    raise InstallError(net_text(self.net, UNREACHABLE), "%s: %s"
+                                       % (self.url, exc))
             if resp.status is None:
                 return True
             if resp.status != 200:
@@ -1014,6 +1377,15 @@ class Install:
     it fetches anything. `supplied` maps an external file's path to a file the
     player gave instead of its archive. On any failure the staging folder goes
     and the shelf is exactly as it was; `cancel()` does the same on purpose.
+    The folder goes a store op a step (`dropping`), so a stopped job is
+    stepped until `step()` ends like any other, or left to `recover`.
+
+    With an `ask`, `ask(stage)` is called once every file is checked and
+    before anything moves into place, inside a store session: None goes on,
+    anything else is the install prompt's question (runtime/shell/
+    app_perms.py), held in `asking` until `agree()` goes on or `cancel()`
+    removes the build; an InstallError it raises refuses the install. A
+    denied install leaves the shelf exactly as it was.
 
     With a `keep` (the module docstring's keeper) the checked build goes to the
     store of record before it moves into place, and moves only once that store
@@ -1022,8 +1394,10 @@ class Install:
     comes, whether or not anybody is still stepping it."""
 
     def __init__(self, cart, p, net, root, session, accepted=(), chunk=None,
-                 step_ms=None, archive="ram", supplied=None, keep=None):
+                 step_ms=None, archive="ram", supplied=None, keep=None, ask=None):
         self.cart = cart
+        self.ask = ask
+        self.asking = None
         self.plan = p
         self.net = net
         self.root = root
@@ -1067,6 +1441,10 @@ class Install:
         self._src = None
         self._opening = None
         self._started = None
+        self._steps = None                # store ops a step at a time: the staging made, the landing
+        self._then = None                 # what follows when they end
+        self.landing = False
+        self.dropping = False             # a stopped build being deleted, a store op a step
         self._reported = False
 
     # -- the store, timed ------------------------------------------------------
@@ -1093,16 +1471,29 @@ class Install:
         still on their way."""
         if self.finished:
             return False
-        if self.keeping:
+        if self.keeping or self.asking is not None:
             return True
         budget = self.step_ms if budget_ms is None else budget_ms
         t = _ticks_ms()
         try:
             if self._started is None:
                 self._begin()
+            if self._steps is not None:
+                if self.in_store(lambda: next(self._steps, _DONE)) is not _DONE:
+                    return True
+                self._steps = None
+                then, self._then = self._then, None
+                if then is not None:
+                    then()
+                return not self.finished
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
+                        ask, self.ask = self.ask, None
+                        if ask is not None:
+                            self.asking = self.in_store(lambda: ask(self.stage))
+                            if self.asking is not None:
+                                return True
                         self._commit()
                         return not self.finished
                     if self._reader is None and not self._open_step():
@@ -1118,7 +1509,7 @@ class Install:
         finally:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
-        return False
+        return not self.finished
 
     def _report_once(self):
         if self.finished and self.done and not self._reported:
@@ -1138,14 +1529,26 @@ class Install:
         else:
             self._fail(STOPPED, "%s: %r" % (self.folder, exc))
 
+    def agree(self):
+        """The install prompt accepted: the build moves into place on the
+        next step."""
+        self.asking = None
+
     def cancel(self):
-        """Stop, keeping nothing. False once the keeper has the build: past
-        that point the cart lands."""
-        if self.keeping:
+        """Stop, keeping nothing: the build is deleted over the next steps
+        (`dropping`). False once the build is landing, or the keeper has it:
+        past that point the cart lands."""
+        if self.keeping or self.landing:
             return False
-        if not self.finished:
+        if not self.finished and not self.dropping:
             self._fail(None, "cancelled")
         return True
+
+    def finish(self):
+        """A landing begun, done now: what a caller that stops stepping
+        (Ctrl-C, the app closed) calls, so a cart is never left half moved."""
+        while self.landing and not self.finished and self.step():
+            pass
 
     def rate(self):
         """Bytes per second so far, or 0."""
@@ -1168,13 +1571,17 @@ class Install:
             if e["path"] not in self.accepted:
                 raise InstallError(NO_LICENCE, "%s: %s not accepted"
                                    % (self.folder, e["path"]))
+        self._steps = self._fresh()
 
-        def _fresh():
-            _mkdir(stage_root(self.root))
-            if _exists(self.stage):
-                _rmtree(self.stage)
-            os.mkdir(self.stage)
-        self.in_store(_fresh)
+    def _fresh(self):
+        """The staging folder made empty, a store op a step: what a stopped
+        build left deleted an entry at a time, then the folder made."""
+        _mkdir(stage_root(self.root))
+        if _exists(self.stage):
+            yield
+            yield from rmtree_steps(self.stage)
+        yield
+        os.mkdir(self.stage)
 
     def _next(self):
         """The next file to fetch or copy: True when there was one."""
@@ -1228,7 +1635,7 @@ class Install:
                 o.url = resolve(self.cart["index"], o.urls.pop(0))
                 t = _ticks_ms()
                 try:
-                    o.resp = self.net.open(o.url)
+                    o.resp = _request(self.net, o.url)
                 except Exception as exc:  # noqa: BLE001 -- try the next mirror
                     o.why.append("%s: %s" % (o.url, exc))
                     o.text = net_text(self.net, o.text)
@@ -1236,6 +1643,14 @@ class Install:
                 finally:
                     self.t_net += _ticks_diff(_ticks_ms(), t)
             resp = o.resp
+            if resp.status is None and hasattr(resp, "poll"):
+                try:
+                    resp.poll()
+                except Exception as exc:  # noqa: BLE001 -- no answer: the next mirror
+                    o.why.append("%s: %s" % (o.url, exc))
+                    o.text = net_text(self.net, o.text)
+                    o.close()
+                    continue
             if resp.status is None:
                 return False
             if resp.status != 200 or (resp.length is not None and resp.length != o.size):
@@ -1279,8 +1694,9 @@ class Install:
                                % self.folder)
         entry = record_entry(self.cart, self.plan)
         if self.keep is None:
-            self.in_store(lambda: self._swap(entry, True))
-            self._landed()
+            self.landing = True
+            self._steps = self._land(entry)
+            self._then = self._landed
             return
 
         def _prepare():
@@ -1303,7 +1719,7 @@ class Install:
             if why:
                 raise InstallError(FULL if full else NO_WRITE,
                                    "%s: %s" % (self.folder, why))
-            self.in_store(lambda: self._swap(entry, False))
+            self.in_store(lambda: self._swap(entry))
             self.keep.landed(self.folder)
             self._landed()
         except Exception as exc:  # noqa: BLE001 -- an install never takes the shell down
@@ -1312,13 +1728,41 @@ class Install:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
 
-    def _swap(self, entry, carry):
-        """The build into the carts folder by one rename (the old copy aside
-        first), and the record. Inside one store session."""
+    def _land(self, entry):
+        """The checked build onto the shelf, a store op a step: the kid's
+        config carried from the copy it replaces, then its saves in the op
+        that sets that copy aside (so the running cart's last save goes too), the
+        build moved in by one rename, the record, then the old copy deleted
+        an entry at a time (`recover` finishes what a cut leaves)."""
+        old = _exists(self.target)
+        aside = self.stage + ".old"
+        if old:
+            prev = load_record(self.root).get(self.folder)
+            yield
+            self._carry_config(prev)
+            if _exists(aside):
+                yield
+                yield from rmtree_steps(aside)
+            yield
+            self._carry_saves()           # with the move aside: a save between is never left behind
+            os.rename(self.target, aside)
+        yield
+        _moy_carts().adopt(self.stage, self.target)
+        yield
+
+        def made():
+            rec = load_record(self.root)
+            rec[self.folder] = entry
+            return record_text(rec)
+        yield from _record_steps(self.root, made(), made)
+        if old:
+            yield
+            yield from discard_steps(aside, self.stage + ".gone")
+
+    def _swap(self, entry):
+        """The keeper's build into the carts folder by one rename (the old
+        copy aside first), and the record. Inside one store session."""
         rec = load_record(self.root)
-        old = rec.get(self.folder)
-        if carry and _exists(self.target):
-            self._carry(old)
         _moy_carts().adopt(self.stage, self.target)
         rec[self.folder] = entry
         save_record(self.root, rec)
@@ -1330,9 +1774,15 @@ class Install:
     def _carry(self, old):
         """The kid's own files from the copy being replaced: the saves always,
         the config when it is not the one this store wrote."""
+        self._carry_saves()
+        self._carry_config(old)
+
+    def _carry_saves(self):
         prev = self.target + "/" + SAVES
         if _exists(prev):
             _copy_bytes(prev, self.stage + "/" + SAVES)
+
+    def _carry_config(self, old):
         prev = self.target + "/" + CONFIG
         if not _exists(prev):
             return
@@ -1365,12 +1815,18 @@ class Install:
                 drop()
             except Exception as exc:  # noqa: BLE001 -- recover() finishes it next open
                 _log("%s: archive left for recover: %s" % (self.folder, exc))
-        if ok:
+        if ok or self.dropping:
             return
-        try:
-            self.in_store(lambda: _rmtree(self.stage) if _exists(self.stage) else None)
-        except Exception as exc:  # noqa: BLE001 -- recover() finishes it next open
-            _log("%s: staging left for recover: %s" % (self.folder, exc))
+        # The build deleted a store op a step, the job unfinished until then: a
+        # staging folder is `recover`'s to finish wherever a cut leaves it.
+        self.finished = False
+        self.dropping = True
+        self.asking = None
+        self._steps = rmtree_steps(self.stage)
+        self._then = self._dropped
+
+    def _dropped(self):
+        self.finished = True
 
 
 def _copy_bytes(src, dst):

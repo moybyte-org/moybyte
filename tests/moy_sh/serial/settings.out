@@ -1,0 +1,45 @@
+> sh settings
+SH end 0
+> sh settings get theme
+SH settings: theme: not set
+SH end 1
+> sh mkdir -p /sd/moybyte/system
+SH end 0
+> sh printf 'theme = "dusk"\nvolume=3\nnot a row\n# a comment\nfavorites = ["/a.moy"]\n' > /sd/moybyte/system/settings
+SH end 0
+> sh settings
+SH favorites = ["/a.moy"]
+SH theme = "dusk"
+SH volume = 3
+SH end 0
+> sh settings get volume
+SH 3
+SH end 0
+> sh settings set name Moy the Cat
+SH end 0
+> sh settings set font_scale 3
+SH end 0
+> sh settings set bad key 1
+SH end 0
+> sh settings unset favorites
+SH end 0
+> sh settings unset favorites
+SH settings: favorites: not set
+SH end 1
+> sh cat /sd/moybyte/system/settings
+SH bad = "key 1"
+SH font_scale = 3
+SH name = "Moy the Cat"
+SH theme = "dusk"
+SH volume = 3
+SH end 0
+> sh settings reload
+SH settings: reload: needs the console
+SH end 1
+> sh settings frob
+SH usage: settings [list] | get KEY | set KEY VALUE... | unset KEY | reload
+SH end 2
+> sh pkg update
+SH pkg: needs the console
+SH end 1
+[exit 0]

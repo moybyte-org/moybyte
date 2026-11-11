@@ -1,0 +1,11 @@
+$ # a forked child's state is gone when it exits
+$ v=outer; ( v=inner; cd /proc; echo in $v $(pwd) ); echo out $v $(pwd)
+in inner /proc
+out outer /
+$ ( exit 5 ); echo status=$?
+status=5
+$ f() { v=func; }; ( f ); echo after $v
+after outer
+$ echo $( v=sub; echo $v ) $v
+sub outer
+[exit 0]

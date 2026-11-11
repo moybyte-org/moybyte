@@ -1,0 +1,704 @@
+"""A WASI service run by the scheduler (runtime/system/scheduler.py, COMPILED
+SERVICES; native/moy_wasm/moy_wasi.h, A SERVICE; docs/os_2026-11/processes.md
+section 1, the service model): started under its consent on a thread of its
+own with no shell session, listed with the other services, its moybyte.os
+`send` to the VM's processes served at the next frame's start, its end by
+itself reaped into the restart policy, its stop the descriptor's end of file,
+and a wake that never polls again struck by the watchdog, then killed (137)
+and terminated once it strikes out. The native tier's twin is
+tests/test_native_services.py; the fixture is
+tests/fixtures/wasm/wasi_svc.moy, which tests/test_wasi_commands.py runs as a
+command."""
+
+import json
+import os
+import re
+import shutil
+import time
+
+import pytest
+
+from runtime import native_build
+
+if native_build.cc() is None:
+    pytest.skip("no C compiler", allow_module_level=True)
+
+from runtime import moy_evq, moybyte, os_log, scheduler as S  # noqa: E402
+from runtime import moy_log as L  # noqa: E402
+from test_scheduler import _clear  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIXTURE = os.path.join(ROOT, "tests", "fixtures", "wasm", "wasi_svc.moy")
+
+
+def _required():
+    return bool(os.environ.get("CI") or os.environ.get("MOYBYTE_REQUIRE_HOST_WASM"))
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    from runtime import wasm_binding, wasm_host
+    from tools import jet_cart, wasm_cart
+    if not wasm_host.available():
+        why = "no host wasm binding: %s" % (wasm_binding.why_unavailable() or "?")
+        if _required():
+            pytest.fail(why)
+        pytest.skip(why)
+    try:
+        jet_cart.wasi_sdk(fetch=True)
+    except Exception as exc:  # noqa: BLE001
+        if _required():
+            pytest.fail("no wasi-sdk: %s" % exc)
+        pytest.skip("no wasi-sdk: %s" % exc)
+    dst = str(tmp_path_factory.mktemp("wasisvc") / "wasi_svc.moy")
+    wasm_cart.build(FIXTURE, dst)
+    return dst
+
+
+@pytest.fixture
+def svc(tmp_path, built):
+    """(ws, the scheduler, the service cart as the shelf holds it, a peer
+    process of the service's own app that the VM serves)."""
+    from runtime import wasm_binding
+    from runtime.host_app import build_workstation
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    shutil.copytree(built, str(carts / "wasi_svc.moy"))
+    ws = build_workstation(str(carts))
+    assert "wasm" in ws.runtimes
+    cart = [c for c in ws.carts.all if c.get("id") == "wasi.svc"][0]
+    wakes = moybyte.WAKES
+    _clear(wakes)
+    s = S.SCHED
+    s.reset()
+    peer = L.spawn("peer")
+    assert moy_evq.open(peer, "wasi.svc", "", True) == moy_evq.OK
+    assert moy_evq.listen(peer, "pong", True) == moy_evq.OK
+    yield ws, s, cart, peer
+    moy_evq.close(peer)
+    s.reset()
+    _clear(wakes)
+    t0 = time.monotonic()
+    while wasm_binding.services_live() and time.monotonic() - t0 < 2:
+        wasm_binding.reap_services()
+        time.sleep(0.01)
+    assert wasm_binding.services_live() == 0
+
+
+def _polled(s, cond, secs=5.0):
+    """The scheduler's poll run until cond() holds or `secs` pass."""
+    t0 = time.monotonic()
+    while not cond():
+        if time.monotonic() - t0 >= secs:
+            return False
+        s.poll()
+        time.sleep(0.01)
+    return True
+
+
+def _texts(since, pid):
+    return [t for _s, _t, _l, q, t in os_log.records(since, 128) if q == pid]
+
+
+def test_a_wasi_service_is_started_listed_and_stopped_as_any_service(svc):
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    assert pid is not None
+    p = s.procs[pid]
+    assert p.kind == S.SERVICE and p.state == S.BACKGROUND and p.rt is ws.runtimes["wasm"]
+    assert s.services() == [p] and s.find("wasi.svc") is p
+    assert s._poll                                  # the poll's wake, while it lives
+    assert moy_evq.app(pid) == "wasi.svc"           # its queue, the scheduler's
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "ping", "[1]")[0] == 1)
+    s.wakes.queued = 0
+    assert _polled(s, lambda: s.wakes.queued == 1)  # its send to a VM process
+    assert moy_evq.take(peer) == (pid, "wasi.svc", "pong", "[1]")
+    assert _polled(s, lambda: p.cost_us > 0 and p.mem > 0)  # its wakes and memory, onto its row
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 0.1:              # its clock ticks meanwhile
+        s.poll()
+        time.sleep(0.01)
+    assert s.stop(pid)
+    assert p.state == S.EXITED and p.code == 0 and p.rt is None
+    assert not moy_evq.has(pid)
+    texts = _texts(since, pid)
+    assert texts[0] == "start wasi.svc" and texts[-1] == "exit 0"
+    assert "listening" in texts                     # its stdout, the OS log's lines
+    assert any(t.startswith("ping ") and t.endswith(" from wasi.svc: 1") for t in texts)
+    assert "stopped after 1 pings, ticking" in texts    # the descriptor's end of file
+    s.poll()
+    assert not s._poll                              # gone with the last service
+
+
+def test_an_end_by_itself_is_reaped_into_its_restart_policy(svc):
+    ws, s, cart, peer = svc
+    store = {}
+
+    class Store:
+        def get(self, k, d=None):
+            return store.get(k, d)
+
+        def set(self, k, v):
+            store[k] = v
+    pid = S.start_cart(ws, cart, s)
+    s.store = Store()
+    s.set_policy("wasi.svc", S.ON_CRASH)
+    p = s.procs[pid]
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "quit", "[]")[0] == 1)
+    assert _polled(s, lambda: p.state == S.EXITED)
+    assert p.code == 7 and p.rt is None
+    assert "wasi.svc" in s.pending                  # on-crash: its restart waits
+    s.pending.clear()
+
+
+def test_a_wake_that_never_polls_again_is_struck_out_killed_and_terminated(svc):
+    """The watchdog at the poll strikes a wake once for each abort budget it
+    runs on, and the third strike, which suspension cannot hold, kills it
+    (137): the instance is terminated, and `_start` returns at its next
+    import call (its sleep's slice)."""
+    from runtime import wasm_binding
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    p = s.procs[pid]
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "spin", "[]")[0] == 1)
+    assert _polled(s, lambda: p.state == S.EXITED, 10)
+    assert p.code == L.KILLED
+    texts = _texts(since, pid)
+    assert "killed: a wake ran past its strikes without a poll" in texts
+    assert sum("strike" in t for t in texts) >= 3
+    assert wasm_binding.services_live() == 0        # its thread returned, its record freed
+
+
+def test_a_console_without_the_wasm_tier_refuses_one(svc):
+    ws, s, cart, _peer = svc
+    since = L.next()
+    del ws.runtimes["wasm"]
+    assert S.start_cart(ws, cart, s) is None
+    p = s.services()[0]
+    assert p.state == S.EXITED and p.code == S.EXIT_CRASHED
+    assert "a wasm service does not run on this console" in _texts(since, p.pid)
+    assert not moy_evq.has(p.pid)
+
+
+def test_the_pinger_wakes_a_wasi_service_that_receives_its_ping(tmp_path, built):
+    """tests/fixtures/pinger_py.moy, the Python service the S3 measurements
+    wake a service with (#246): every PERIOD_MS a "ping" from another app,
+    which the WASI service takes because its manifest lists it."""
+    from runtime.host_app import build_workstation
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    shutil.copytree(built, str(carts / "wasi_svc.moy"))
+    man_path = carts / "wasi_svc.moy" / "manifest.json"
+    man = json.loads(man_path.read_text())
+    man["moybyte"]["receives"] = ["ping"]
+    man_path.write_text(json.dumps(man))
+    shutil.copytree(os.path.join(ROOT, "tests", "fixtures", "pinger_py.moy"),
+                    str(carts / "pinger_py.moy"))
+    ws = build_workstation(str(carts))
+    by_id = {c.get("id"): c for c in ws.carts.all}
+    wakes = moybyte.WAKES
+    _clear(wakes)
+    s = S.SCHED
+    s.reset()
+    try:
+        since = L.next()
+        svc_pid = S.start_cart(ws, by_id["wasi.svc"], s)
+        pinger = S.start_cart(ws, by_id["local.pinger"], s)
+        assert svc_pid is not None and pinger is not None
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5:
+            s.tick(20000)
+            s.poll()
+            if sum(t.startswith("ping ") and " from local.pinger" in t
+                   for t in _texts(since, svc_pid)) >= 2:
+                break
+            time.sleep(0.01)
+        pings = [t for t in _texts(since, svc_pid) if t.startswith("ping ")]
+        assert len(pings) >= 2 and all(" from local.pinger: " in t for t in pings)
+    finally:
+        s.reset()
+        _clear(wakes)
+
+
+def _granted(ws, cart, perms):
+    """The service's cart with its manifest asking for `perms`, rescanned."""
+    path = os.path.join(cart["path"], "manifest.json")
+    with open(path) as f:
+        man = json.load(f)
+    man["moybyte"]["permissions"] = list(perms)
+    with open(path, "w") as f:
+        json.dump(man, f)
+    ws.carts.rescan()
+    return [c for c in ws.carts.all if c.get("id") == "wasi.svc"][0]
+
+
+@pytest.mark.parametrize("perms", [("notifications",), ()])
+def test_a_wasi_service_notifies_under_its_permission_and_writes_the_log(svc, perms):
+    """moybyte.os `notify` is the console call a Python service's
+    moybyte.notify is, posted on the VM's queue and answered at the poll as
+    the service's process; `log` writes the OS log under its pid."""
+    from runtime import notifications
+    ws, s, cart, peer = svc
+    notifications.NOTES.reset()
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "note", '["hi"]')[0] == 1)
+    assert _polled(s, lambda: "noted" in _texts(since, pid))
+    # its own app declares no service: a `type: service` cart's call is
+    # ABSENT, read as WASI's NOENT (44), as an ELF module reads ENOENT
+    assert _polled(s, lambda: "service_running -1 errno 44" in _texts(since, pid))
+    texts = _texts(since, pid)
+    notifications.NOTES.drain()         # the console's next frame takes it into the list
+    mine = [n for n in notifications.NOTES.list if n.pid == pid]
+    if perms:
+        assert [(n.summary, n.body) for n in mine] == [("Service Wasi", '["hi"]')]
+        assert "note %d errno 0" % mine[0].id in texts, texts
+    else:
+        assert mine == [] and "note -1 errno 2" in texts, texts     # WASI's ACCES
+    assert s.stop(pid)
+
+
+@pytest.mark.parametrize("perms", [("alarms",), ()])
+def test_a_wasi_service_s_timers_and_alarm_are_the_system_s_messages(svc, perms):
+    """moybyte.os `after`, `every` and `at` are console calls answered with
+    the wake's id, each heard on the event descriptor as the system's message
+    carrying it (a timer's "moybyte.timer", the alarm's "moybyte.at"); `cancel` ends its own timer; `at` needs
+    `alarms`. Past TIMERS_MAX a timer is RANGE (the door's FULL); the one it
+    keeps goes with its end."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", "[]")[0] == 1)
+    assert _polled(s, lambda: s.tick() >= 0 and any(t.startswith("cancel ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    texts = _texts(since, pid)
+    after = [int(t.split()[1]) for t in texts if t.startswith("after ")]
+    every = [int(t.split()[1]) for t in texts if t.startswith("every ")]
+    assert after and after[0] > 0 and every and every[0] > 0, texts
+    assert "moybyte.timer from system [%d]" % after[0] in _texts(since, pid)
+    assert "cancel 1" in _texts(since, pid), _texts(since, pid)
+    at = [t for t in _texts(since, pid) if t.startswith("at ")]
+    if perms:
+        wid = int(at[0].split()[1])
+        assert wid > 0, _texts(since, pid)
+        assert _polled(s, lambda: s.tick() >= 0
+                       and "moybyte.at from system [%d]" % wid in _texts(since, pid))
+    else:
+        assert at == ["at -1 errno 2"], at                         # WASI's ACCES
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["timers"]')[0] == 1)
+    assert _polled(s, lambda: s.tick() >= 0
+                   and any(t.startswith("uncap ") for t in _texts(since, pid))), _texts(since, pid)
+    texts = _texts(since, pid)
+    assert "timers %d -1 errno 68" % moybyte.TIMERS_MAX in texts, texts   # WASI's RANGE
+    assert "uncap %d" % (moybyte.TIMERS_MAX - 1) in texts, texts
+    assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]
+    assert s.stop(pid)
+    assert _polled(s, lambda: not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail
+                                   if w[1] == pid] and moy_evq.timers(pid) == 0)
+
+
+@pytest.mark.parametrize("perms", [("prefs", "clipboard"), ()])
+def test_a_wasi_service_s_app_rows_answer_under_its_permissions(svc, perms):
+    """moybyte.os `prefs_*` and `clipboard_*` are the role table's rows for
+    the service's own grant (the one its start made): a pref written and read
+    back, the clipboard's text, a buffer too small RANGE, and each refused
+    ACCES without its permission; `open_with` is the console call, 0 where no
+    app opens the item."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", "[]")[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("open_with ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.split(" ")[0] in (
+        "prefs.set", "prefs.get", "clipboard.put_text", "clipboard.text", "clipboard.short",
+        "open_with")]
+    if perms:
+        assert got == ["prefs.set 0 errno 0", "prefs.get 42 errno 0",
+                       "clipboard.put_text 0 errno 0", "clipboard.text from wasi errno 0",
+                       "clipboard.short -1 errno 68", "open_with 0 errno 0"], got
+    else:
+        assert got == ["prefs.set -1 errno 2", "prefs.get  errno 2",
+                       "clipboard.put_text -1 errno 2", "clipboard.text  errno 2",
+                       "clipboard.short -1 errno 2", "open_with 0 errno 0"], got
+    assert s.stop(pid)
+
+
+@pytest.mark.parametrize("synced", [True, False])
+def test_a_wasi_service_reads_the_wall_clock_and_its_local_time(svc, synced):
+    """moybyte.os `clock`: the wall clock in Unix seconds, answered on the
+    service's own task; with 1 the console's local time, the door's Python
+    half's (runtime/system/wallclock.py's zone), NOENT while NTP has not
+    answered."""
+    from runtime import wallclock as wc
+    ws, s, cart, peer = svc
+    try:
+        wc.set_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+        wc._kernel[:] = [lambda: int(synced), True]
+        since = L.next()
+        pid = S.start_cart(ws, cart, s)
+        assert pid is not None
+        t0 = wc.now()
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["clock"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("clock ") for t in _texts(since, pid)))
+        t1 = wc.now()
+        got = [t for t in _texts(since, pid) if t.startswith("clock ")][0].split()
+        unix = int(got[1])
+        assert t0 <= unix <= t1, (t0, got, t1)
+        if synced:
+            assert got[3:] == [str(unix + wc.offset(unix)), "errno", "0"], got
+            assert wc.offset(unix) != 0, "Belgrade is east of UTC"
+        else:
+            assert got[3:] == ["-1", "errno", "44"], got            # WASI's NOENT
+        assert s.stop(pid)
+    finally:
+        wc.set_zone(wc.UTC)
+        wc._kernel[:] = [None, False]
+
+
+@pytest.mark.parametrize("perms", [("launch", "front"), ()])
+def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, monkeypatch):
+    """moybyte.os `nav_open_app`, `share` and `pick` pass the front's gate
+    (runtime/system/front.py) as the service's process: `open_app` needs
+    `launch` (ACCES without), a document shared reaches the app that opens
+    it, and the picker goes up for a process holding `front`; the item
+    picked reaches the service as "moy_open" (moybyte.hand_item), its handle
+    what `item_read` and `item_write` take, read and written on its own
+    task (native/moy_kernel/moy_items.h: no console call), and a handle it
+    was never given NOENT, the console's answer. In the background without `front`, the share and the pick wait
+    as the process's notification (its latest request), the picker not up."""
+    from runtime import intents as I
+    from runtime import notifications
+    from runtime import shell_servers as ss
+    ws, s, cart, peer = svc
+    door = []
+    for verb in ("item_read", "item_write"):
+        real = getattr(ss.ConsoleCalls, verb)
+        monkeypatch.setattr(ss.ConsoleCalls, verb,
+                            lambda self, g, h, x, _v=verb, _r=real: door.append(_v)
+                            or _r(self, g, h, x))
+    notifications.NOTES.reset()
+    ws.carts_store.save_file("docs", "picked", "# picked\n", ws.carts_root)
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["front"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("pick ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    docs = ws.carts_store.list_files("docs", ws.carts_root)
+    if perms:
+        assert _texts(since, pid)[-3:] == [
+            "nav.open_app 1 errno 0", "share 1 errno 0", "pick 1 errno 0"]
+        assert "shared" in docs
+        assert I.INTENTS.picking is not None and I.INTENTS.picking[0] == pid
+        assert I.INTENTS.picked(I.INTENTS.picking[3].index("Documents/picked.md"))
+        assert _polled(s, lambda: any(t.startswith("item_read.none") for t in _texts(since, pid)))
+        got = _texts(since, pid)[-5:]
+        assert re.match(r'^moy_open \[[1-9][0-9]*, "text/markdown", "rw", "picked.md"\]$', got[0])
+        assert got[1:] == ["item_read # picked errno 0", "item_write 1 errno 0",
+                           "item_read.again # kept errno 0", "item_read.none -1 errno 44"], got
+        assert door == ["item_read"], "the picked file's rows ran on its task, `none` the door's"
+        assert ws.carts_store.load_file("docs", "picked", ws.carts_root) == "# kept\n"
+    else:
+        assert _texts(since, pid)[-3:] == [
+            "nav.open_app -1 errno 2", "share 1 errno 0", "pick 1 errno 0"]   # WASI's ACCES
+        assert "shared" not in docs and I.INTENTS.picking is None
+        assert [(n.pid, n.summary) for n in notifications.NOTES.list
+                if n.then is not None] == [(pid, "Wants you to pick a file")]
+    assert s.stop(pid)
+
+
+def _links():
+    """Two consoles' links on tests/test_espnow_link.py's fake air: this
+    console's (radio down) and a peer's."""
+    from runtime import players as P
+    from test_espnow_link import _Air, _Clock, _FakeRadio, _FakeWlan
+    air, clock = _Air(), _Clock()
+
+    def make(mac, name):
+        radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+        radio.wlan = wlan
+        return P.EspNowLink(board="p4", name=name, ticks_ms=clock, radio=radio, wlan=wlan)
+    return make(b"\x01" * 6, "Ada"), make(b"\x02" * 6, "Bo")
+
+
+@pytest.mark.parametrize("perms", [("multiplayer",), ()])
+def test_a_wasi_service_talks_on_a_port_of_the_radio_link_by_handle(svc, perms):
+    """moybyte.os `dev_*` on a `net` handle (docs/netplay_v1.md, Ports): its
+    "svc" on port 7 reaches a second console's port 7, the second console's
+    message on port 7 is a record its tick reads and one on port 8 is not;
+    its end closes the port and the radio goes down, its stop serving the
+    read a tick of it waits on. Each refused ACCES without `multiplayer`."""
+    ws, s, cart, peer = svc
+    link, other = _links()
+    ws.link = link
+    assert other.open_port(7) == 0 and other.open_port(8) == 0
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["net"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("net_write ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.startswith("net_")]
+    if not perms:
+        assert got == ["net_open -1 errno 2", "net_write -1 errno 44"], got
+        assert not link.active
+        assert s.stop(pid)
+        return
+    assert got == ["net_open 1 errno 0", "net_write 3 errno 0"], got
+    other.poll()
+    assert other.port_take(7) == (b"\x01" * 6, b"svc")
+    assert other.port_send(7, b"hello svc") == 0 and other.port_send(8, b"not yours") == 0
+
+    def heard():
+        link.poll()
+        return any(t.startswith("net_heard ") for t in _texts(since, pid))
+    assert _polled(s, heard), _texts(since, pid)
+    assert [t for t in _texts(since, pid) if t.startswith("net_heard ")] == [
+        "net_heard 2 7 hello svc"]
+    assert s.stop(pid)
+    assert _texts(since, pid)[-1] == "exit 0", "its stop answered the read its tick hopped with"
+    assert link.ports_open() == 0
+    assert not link.active
+
+
+def test_the_fixture_is_a_service():
+    with open(os.path.join(FIXTURE, "manifest.json")) as f:
+        man = json.load(f)
+    assert man["runtime"] == "wasm" and man["moybyte"]["type"] == "service"
+
+
+@pytest.mark.parametrize("perms", [("lease:gpio", "lease:uart1"), ()])
+def test_a_wasi_service_holds_leases_by_handle_until_it_ends(svc, perms):
+    """moybyte.os `dev_*` are the device handles' rows (native/moy_kernel/
+    moy_dev.h's pin and UART, over its buses' host twin) for the service's
+    process: a pin driven and read back, a
+    UART written and read through its peer, a handle it never had NOENT, each
+    refused ACCES without its `lease:<row>`. A pin it holds is BUSY to a
+    Python program until the service ends, whose sweep leaves it safe."""
+    from runtime import leases
+    from runtime import moy_lease as N
+    from runtime.host import bus_sim, lease_sim
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    ws, s, cart, peer = svc
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    bus_sim.reset()
+    bus_sim.loopback(1, True)
+    try:
+        since = L.next()
+        pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+        assert pid is not None
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["dev"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("dev_get.none ") for t in _texts(since, pid))), \
+            _texts(since, pid)
+        got = [t for t in _texts(since, pid) if t.startswith("dev_")]
+        if perms:
+            assert got == ["dev_open.gpio6 1 errno 0", "dev_get.value 1 errno 0",
+                           "dev_open.uart1 1 errno 0", "dev_write 4 errno 0",
+                           "dev_read ping errno 0", "dev_close 0 errno 0",
+                           "dev_get.none -1 errno 44"], got
+            assert N.pin_state(6) & N.PIN_OUT and N.held() == 1
+            with pytest.raises(OSError) as e:
+                leases.LEASES.take(moybyte.SHELL, "gpio6")      # Python's, ungated
+            assert e.value.errno == 16                                  # EBUSY
+        else:
+            assert got == ["dev_open.gpio6 -1 errno 2", "dev_get.value -1 errno 44",
+                           "dev_open.uart1 -1 errno 2", "dev_write -1 errno 44",
+                           "dev_read  errno 44", "dev_close -1 errno 44",
+                           "dev_get.none -1 errno 44"], got
+        assert s.stop(pid)
+        assert _polled(s, lambda: N.held() == 0)
+        if perms:
+            assert N.pin_state(6) == N.PIN_SAFE
+        leases.LEASES.drop(leases.LEASES.take(moybyte.SHELL, "gpio6"))
+    finally:
+        for p in list(leases.LEASES.held):
+            leases.LEASES.sweep(p)
+        N.reset()
+        leases.stand_in(None, None)
+
+
+@pytest.mark.parametrize("perms", [("ble",), ()])
+def test_a_wasi_service_scans_and_connects_by_a_ble_handle(svc, perms):
+    """moybyte.os `dev_*` on a `ble` handle: a scan read back as records (the
+    host's stand-in peripherals, each advertisement's name), a connection to
+    the first device heard, kept until the service ends, whose sweep drops
+    it; each refused ACCES without the `ble` permission. The drivers' rings
+    are the kernel table's, the one a board's console binds."""
+    from runtime import moy_gatt as N
+    from runtime import moy_input as mi
+    from runtime.host import gatt_sim
+    ws, s, cart, peer = svc
+    gatt_sim.install()
+    gatt_sim.device("c0:ff:ee:00:00:01", "Pulse", rssi=-48)
+    gatt_sim.device("c0:ff:ee:00:00:02", "Lamp", rssi=-71)
+    was = moybyte.WAKES.table
+    moybyte.bind(mi.kernel())
+    try:
+        since = L.next()
+        pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+        assert pid is not None
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["ble"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("ble_connected ") for t in _texts(since, pid))), \
+            _texts(since, pid)
+        got = [t for t in _texts(since, pid) if t.startswith("ble_")]
+        if perms:
+            assert got == ["ble_open 1 errno 0", "ble_scan 1:Pulse 1:Lamp 2 errno 0",
+                           "ble_connect 0 errno 0", "ble_connected 1 errno 0"], got
+            assert N.owner() == pid and N.state() == N.CONNECTED
+        else:
+            assert got == ["ble_open -1 errno 2", "ble_scan errno 44",
+                           "ble_connect -1 errno 44", "ble_connected -1 errno 44"], got
+        assert s.stop(pid)
+        assert _polled(s, lambda: N.owner() == 0)
+        assert N.state() == 0
+    finally:
+        moybyte.WAKES.table = None
+        if was is not None:
+            moybyte.bind(was)
+        gatt_sim.remove()
+
+
+@pytest.mark.parametrize("perms", [("media",), ()])
+def test_a_wasi_service_plays_a_file_by_a_media_handle_until_it_ends(svc, perms):
+    """moybyte.os `dev_*` on a `media` handle: a file probed (its length and
+    its tag's title), played by the media service with this service its
+    client, its source read back with the now-playing text; the stream is
+    the media service's and plays on after the WASI service ends. Each
+    refused ACCES without `media`. The
+    file is in the service's own folder, the one a media handle plays
+    from without a `files` permission."""
+    from runtime import audio_binding, dev_media
+    from runtime import moy_media as N
+    if audio_binding.get() is None or not dev_media.present():
+        pytest.skip("no media service on this host")
+    ws, s, cart, peer = svc
+    tone = os.path.join(cart["path"], "tone_1k.mp3")
+    shutil.copy(os.path.join(ROOT, "tests", "fixtures", "media", "tone_1k.mp3"), tone)
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, perms), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake",
+                                           json.dumps(["media", tone], separators=(",", ":")))[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("media_src ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.startswith("media_")]
+    if perms:
+        assert got == ["media_open 1 errno 0", "media_probe 2:Tone errno 0",
+                       "media_play 1 errno 0", "media_mine 1 errno 0",
+                       "media_src same errno 0", "media_volume 40 errno 0"], got
+        run = N.pid()
+        assert run not in (0, pid) and dev_media.now()["client"] == pid
+    else:
+        assert got == ["media_open -1 errno 2", "media_probe -1: errno 44",
+                       "media_play -1 errno 44", "media_mine -1 errno 44",
+                       "media_src other errno 44", "media_volume -1 errno 44"], got
+    assert s.stop(pid)
+    if perms:
+        assert N.pid() == run, "the service's end leaves the stream playing"
+        was = L.current()
+        L.current(1)
+        try:
+            dev_media.stop()                 # the shell stops it
+        finally:
+            L.current(was)
+    for _ in range(50):
+        if not N.pid():
+            break
+        N.pump()
+    assert N.pid() == 0
+
+
+def _shell_stops_media():
+    from runtime import dev_media
+    from runtime import moy_media as N
+    was = L.current()
+    L.current(1)
+    try:
+        dev_media.stop()
+    finally:
+        L.current(was)
+    for _ in range(50):
+        if not N.pid():
+            break
+        N.pump()
+    assert N.pid() == 0
+
+
+def test_a_wasi_service_plays_media_and_sets_its_volume_through_a_vm_stop(svc):
+    """The media handle is the kernel's (native/moy_media/moy_media_dev.c),
+    served on the service's own task: with the VM stopped (the kernel's
+    leases' VM end), a service plays a file of its own folder and sets the
+    stream's volume, and no Python handle is made. The console's frame then
+    finds the run it started and follows it (dev_media.frame)."""
+    from runtime import audio_binding, dev_handles, dev_media
+    from runtime import moy_lease as K
+    from runtime import moy_media as N
+    if audio_binding.get() is None or not dev_media.present():
+        pytest.skip("no media service on this host")
+    ws, s, cart, peer = svc
+    tone = os.path.join(cart["path"], "tone_1k.mp3")
+    shutil.copy(os.path.join(ROOT, "tests", "fixtures", "media", "tone_1k.mp3"), tone)
+    since = L.next()
+    pid = S.start_cart(ws, _granted(ws, cart, ("media",)), s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.hears(pid, "wake"))
+    K.vm_stop()
+    assert moy_evq.send(peer, "wasi.svc", "wake",
+                        json.dumps(["media", tone], separators=(",", ":")))[0] == 1
+    t0 = time.monotonic()
+    while not any(t.startswith("media_volume ") for t in _texts(since, pid)):
+        assert time.monotonic() - t0 < 5, _texts(since, pid)
+        time.sleep(0.01)                     # no scheduler poll: the VM is down
+    got = [t for t in _texts(since, pid) if t.startswith("media_")]
+    assert got == ["media_open 1 errno 0", "media_probe 2:Tone errno 0",
+                   "media_play 1 errno 0", "media_mine 1 errno 0",
+                   "media_src same errno 0", "media_volume 40 errno 0"], got
+    run = N.pid()
+    assert run not in (0, pid) and N.status()[N.FIELDS.index("volume")] == 40
+    assert pid not in dev_handles.HANDLES
+    dev_media.frame()                        # the console's next frame
+    assert dev_media.running() == run and dev_media.now()["client"] == pid
+    assert s.stop(pid)
+    assert N.pid() == run, "the service's end leaves the stream playing"
+    _shell_stops_media()
+
+
+def test_a_wasi_service_s_status_item_hears_its_panel_until_it_ends(svc):
+    """moybyte.os `status_*` (runtime/system/status_items.py) for the
+    service's process: an item with a described panel, a toggle out of its
+    range EINVAL, a handle it never had NOENT; a press in the panel reaches
+    it as the system's message "moybyte.status" [item, id, value], and its
+    end sweeps the item."""
+    from runtime.status_items import ITEMS, ERROR
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["status"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("status_none ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    got = [t for t in _texts(since, pid) if t.startswith("status_")]
+    h = int(got[0].split()[1])
+    assert got == ["status_show %d errno 0" % h, "status_panel 0 errno 0",
+                   "status_bad -1 errno 28", "status_state 0 errno 0",
+                   "status_none -1 errno 44"], got
+    it = ITEMS.of(pid, h)
+    assert it is not None and it.state == ERROR and it.section.n == 2
+    assert (it.section.label[0], it.section.value[0], it.section.rid[1]) == \
+        ("Uplink", "up", "sync")
+    it.section._press(1, 1)
+    want = 'moybyte.status from system [%d, "sync", 1]' % h
+    assert _polled(s, lambda: want in _texts(since, pid)), _texts(since, pid)
+    assert s.stop(pid)
+    assert _polled(s, lambda: ITEMS.of(pid, h) is None), "its end sweeps the item"
+    assert ITEMS.count() == 0

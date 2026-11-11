@@ -110,13 +110,19 @@ def test_micropython_native_sd_shares_display_spi_host():
     machine.SDCard, which hangs the shared bus once the panel is up. The Python
     half is executed in tests/test_moybyte_sd.py; the C module and the board's
     session routing are pinned here."""
-    mod = (NATIVE / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    face = (NATIVE / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    mod = (NATIVE / "moy_sd" / "moy_sd.c").read_text(encoding="utf-8")
     cmake = (NATIVE / "moy_sd" / "micropython.cmake").read_text(encoding="utf-8")
     runtime = _device_backend_src()
 
-    # Native module attaches (init_device) rather than re-initializing the bus.
-    assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in mod
+    # The card's C attaches (init_device) to the panel's SPI2 rather than
+    # re-initializing the bus; the module is its Python face.
+    assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in face
     assert "sdspi_host_init_device" in mod
+    attach = mod[mod.index("#elif defined(MOY_HW_SPI2_SD_CS)"):mod.index("#elif defined(MOY_HW_SPI3_CS)")]
+    assert "SD_SPI_ATTACH" in attach
+    spi_up = mod[mod.index("static int spi_up("):mod.index("err = sdspi_host_init();")]
+    assert spi_up.index("#if !defined(SD_SPI_ATTACH)") < spi_up.index("spi_bus_initialize")
     assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
     assert "target_link_libraries(usermod INTERFACE usermod_moy_sd)" in cmake
 
@@ -690,6 +696,19 @@ def test_the_gc_split_reserve_call_and_the_board_define_agree():
             "MOYBYTE_GC_SPLIT_RESERVE = %r" % (build, called, defined))
 
 
+def test_the_gc_grow_step_call_and_the_board_define_agree():
+    """The growth-step patch caps nothing without MOYBYTE_GC_GROW_MAX, so a
+    board that calls it and defines nothing is the stock doubling under a
+    patched name: the call and the define travel together, both ways."""
+    for build in _esp32_builds():
+        called = _opts_in(build, "moybyte_patch_gc_grow_step")
+        hdr = board_config.sdkconfig_path(build.parent).parent / "mpconfigboard.h"
+        defined = "MOYBYTE_GC_GROW_MAX" in hdr.read_text(encoding="utf-8")
+        assert called == defined, (
+            "%s: calls the grow-step patch = %r but defines "
+            "MOYBYTE_GC_GROW_MAX = %r" % (build, called, defined))
+
+
 def test_repr_c_unboxed_floats_wired():
     """REPR_C (unboxed 30-bit floats) is ONE body in the shared lib -- its sed
     and guard are executed in tests/test_esp32_build_lib.py -- and no board may
@@ -826,14 +845,15 @@ def test_web_runner_audio_pulls_the_kernels_mix():
     assert not (web / "moy_audio_micropython.mk").exists()
     assert "moy_audio_micropython.mk" not in build
     assert "class _RunnerPump(PcmPump):" in boot
-    assert "na.render(buf, n)" in boot
+    assert "na.render_out(" in boot
     assert "audio_out=_RunnerPump()" in boot
     for gone in (".voice_set(", ".voice_read(", "._advance_music(", "bank_load("):
         assert gone not in boot, gone
 
 
 def test_the_feeder_task_is_pinned_lazy_and_chunked():
-    """The I2S feed is a native C task PINNED TO CORE 1 that owns the IDF
+    """The I2S feed is a native C task PINNED TO THE BOARD'S MOY_AUDIO_CORE
+    (core 1 unless named; the P4s name 0, off the VM's core) that owns the IDF
     i2s_std channel and feeds it continuously, decoupled from the frame: the VM
     cannot run Python there, only a pure-C task can. It is created at the
     first focus of a session (moy_aud_focus -> moy_aud_out_start), never at
@@ -844,7 +864,14 @@ def test_the_feeder_task_is_pinned_lazy_and_chunked():
     aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
     assert "xTaskCreatePinnedToCore(feeder" in out
-    assert "&s_task, 1)" in out                 # core 1, the last argument
+    assert "&s_task, MOY_AUDIO_CORE)" in out    # the core, the last argument
+    assert "#define MOY_AUDIO_CORE 1\n" in out
+    # Under the esp_timer task where the two share a core.
+    assert "#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)" in out
+    for board in ("esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
+                  "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
+        h = (Path("firmware") / board / "mpconfigboard.h").read_text(encoding="utf-8")
+        assert re.search(r"#define MOY_AUDIO_CORE\s+\(0\)", h), board
     for fn in ("i2s_new_channel(", "i2s_channel_init_std_mode(",
                "i2s_channel_write(", "xSemaphoreCreateMutex(",
                "xSemaphoreTake(", "xSemaphoreGive("):

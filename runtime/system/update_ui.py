@@ -58,6 +58,11 @@ except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_diff
 
 
+def _dots():
+    """One to three dots, stepping: a wait that is still running."""
+    return "." * (1 + _ticks_ms() // 400 % 3)
+
+
 class UpdateUI:
     def __init__(self, ws, names, err_text):
         self.ws = ws
@@ -102,8 +107,10 @@ class UpdateUI:
 
     def open_update_online(self):
         """Open the online-update flow (#53 Phase 3): connect WiFi + fetch the manifest,
-        and if it's newer, stream the image into the inactive slot. The blocking check
-        runs in _pump_update one frame later so a CHECKING... screen shows first."""
+        and if it's newer, stream the image into the inactive slot. The check
+        runs in _pump_update one frame later so a CHECKING... screen shows first;
+        the link's dial is polled there a frame at a time, so the screen keeps
+        drawing and B cancels it."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
         self.ws._set_text_mode(False)
@@ -287,8 +294,9 @@ class UpdateUI:
 
     def _pump_c6(self):
         """The C6 flow's per-frame step (called from _pump_update). Same shape
-        as the firmware phases: one blocking check behind its arm gate, then
-        one chunk of download or flash per painted frame."""
+        as the firmware phases: one check behind its arm gate, asked again
+        each frame while the link dials, then one chunk of download or flash
+        per painted frame."""
         cu = getattr(self.ws, "c6_updater", None)
         ph = self._upd_phase
         if cu is None:
@@ -300,6 +308,8 @@ class UpdateUI:
                 self._check_armed = True
                 return
             verdict = cu.check(self.ws._ota_channel())
+            if verdict == "pending":
+                return                         # the link is dialled: ask next frame
             if verdict == "offer":
                 self._upd_phase = "c6_confirm"
             elif verdict == "uptodate":
@@ -360,8 +370,9 @@ class UpdateUI:
             self._pump_c6()
             return
         if ph == "checking":
-            # Run the blocking connect + manifest fetch ONE frame after entry, so the
-            # CHECKING... screen paints first (this method runs before _draw each frame).
+            # The check starts ONE frame after entry, so the CHECKING... screen
+            # paints first (this method runs before _draw each frame); the link
+            # is polled each frame after, then the manifest's fetch blocks once.
             if not self._check_armed:
                 self._check_armed = True
                 return
@@ -385,11 +396,10 @@ class UpdateUI:
                 self._upd_phase = "handed"
                 return
             if getattr(u, "pending", False):
-                # The backend has ASKED and not been answered. Only a remote
-                # one can be in this state (a local check blocks and returns),
-                # and without the probe the very first frame's empty answer
-                # would be reported as "no manifest" against a board that is
-                # simply still looking.
+                # The backend has ASKED and not been answered: a local one is
+                # dialling its link, a remote one's board has not replied.
+                # Without the probe the first frame's empty answer would be
+                # reported as "no manifest" against a console still looking.
                 return
             if getattr(u, "absent", False):
                 # Nothing published on this channel for this console yet -- the
@@ -463,7 +473,7 @@ class UpdateUI:
         not strand a board whose bootloader already points at the new slot."""
         ws = self.ws
         app = getattr(ws, "editor_app", None)
-        if app is None or app.project is not ws.project:
+        if app is None or app.project is not ws.run.project:
             return
         try:
             app.save_current()
@@ -500,6 +510,9 @@ class UpdateUI:
             say("channel: %s" % ("BETA" if beta else "STABLE"),
                        NAMES["orange"] if beta else th["play"])
             say("running: %s %s" % (slot, vlabel), th["ink_dim"])
+            if getattr(u, "joining", False):
+                say("joining WiFi" + _dots(), th["ink"])
+            say("B = BACK", th["accent"])
         elif phase == "nopublish":
             beta = self.ws._ota_channel() == "unstable"
             say("NOTHING NEW YET", th["play"])
@@ -590,6 +603,9 @@ class UpdateUI:
             iv = cu.installed if cu is not None else None
             say("radio: %s" % (
                 ("shim v%d" % iv) if iv else "no espnow shim"), th["ink_dim"])
+            if getattr(u, "joining", False):
+                say("joining WiFi" + _dots(), th["ink"])
+            say("B = BACK", th["accent"])
         elif phase == "c6_confirm":
             cu = getattr(self.ws, "c6_updater", None)
             c6 = (cu.offer or {}) if cu is not None else {}

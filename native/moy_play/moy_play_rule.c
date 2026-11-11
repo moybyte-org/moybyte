@@ -57,7 +57,7 @@ static bool native_perm(const char *v, const char *e) {
 }
 
 // A permission a compiled app may hold VM-free: one whose role's rows it
-// imports are C-served (its imports decide, below). "files:<kind>" is files.
+// imports are C-served (its imports decide, below). "files:<folder>" is files.
 static bool role_perm(const char *v, const char *e) {
     char p[24];
     size_t n = moy_json_strlen(v, e);
@@ -68,6 +68,15 @@ static bool role_perm(const char *v, const char *e) {
     p[n] = 0;
     const char *colon = strchr(p, ':');
     return moy_app_role_of(p, colon != NULL ? (size_t)(colon - p) : n) >= 0;
+}
+
+// A device lease a compiled app may hold VM-free: the kernel's device table
+// (native/moy_kernel/moy_dev.h) serves every lease kind on the program's own
+// task and takes it without MOY_LEASE_VM. What keeps the VM for a lease is
+// one a VM process holds at the launch (moy_play_stop.c's verdict), never the
+// permission that names it.
+static bool lease_perm(const char *v, const char *e) {
+    return *v == '"' && moy_json_strlen(v, e) > 6 && memcmp(v + 1, "lease:", 6) == 0;
 }
 
 typedef struct {
@@ -171,7 +180,7 @@ static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, si
         return MOY_PLAY_WHY_TYPE;
     }
     // 3: the native set, or none at all; for a compiled app also the
-    // permissions of roles, whose rows it imports decide.
+    // permissions of roles and device leases, whose rows it imports decide.
     if (e->permissions.v != NULL) {
         if (*e->permissions.v != '[') {
             return MOY_PLAY_WHY_PERM;
@@ -180,7 +189,7 @@ static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, si
         const char *k, *ke, *v, *ve;
         moy_json_iter(&it, e->permissions.v, e->permissions.e);
         while (moy_json_next(&it, &k, &ke, &v, &ve)) {
-            if (!native_perm(v, ve) && !(app && role_perm(v, ve))) {
+            if (!native_perm(v, ve) && !(app && (role_perm(v, ve) || lease_perm(v, ve)))) {
                 return MOY_PLAY_WHY_PERM;
             }
         }

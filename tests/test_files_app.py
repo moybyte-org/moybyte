@@ -71,10 +71,10 @@ def _tap(drv, x, y):
 
 
 def _art(ws, drv):
-    """The Art place's page, reached as a person does: down twice, Enter."""
+    """The Pictures place's page, reached as a person does: down twice, Enter."""
     app = ws.files_app
     _press(drv, "down", "down", "a")
-    assert (app.place, app.level) == (files_app.ART, "files")
+    assert (app.place, app.level) == (files_app.PICTURES, "files")
     return app
 
 
@@ -106,7 +106,7 @@ def test_the_handheld_walks_places_then_files_and_b_comes_back(tmp_path):
     assert app.names_shown() == ["dragon"]
     assert app._focused == "files"
     _press(drv, "b")
-    assert app.level == "places" and app.place == files_app.ART
+    assert app.level == "places" and app.place == files_app.PICTURES
     assert ws.wm.top_kind() == "files", "b left the page, not the app"
 
 
@@ -124,7 +124,7 @@ def test_the_places_count_their_files_and_themes_show_once_there_are_any(tmp_pat
     _seed_drawing(carts, "one")
     _seed_drawing(carts, "two")
     app, _drv = _files(ws)
-    assert app._count(files_app.ART) == 2
+    assert app._count(files_app.PICTURES) == 2
     assert app._count(files_app.PROJECTS) == len(app._nav.projects())
     assert files_app.THEMES not in [p[0] for p in app.shown_places()]
 
@@ -152,9 +152,9 @@ def test_the_verbs_are_the_current_rows(tmp_path):
     moy_carts.save_file("docs", "note", "hi", carts)
     moy_carts.save_file("docs", "tool.py", "print(1)", carts)
     app, _drv = _files(ws)
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
     assert app._action_labels() == app.PICTURE_ACTIONS
-    app.open_place("docs", keep="note")
+    app.open_place(files_app.DOCUMENTS, keep="note")
     assert app._action_labels() == app.DOC_ACTIONS
     app.select("tool.py")
     assert app._action_labels()[0] == "RUN"
@@ -275,7 +275,7 @@ def test_reuse_actions_are_copies(tmp_path):
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon", color=20)
     app, drv = _files(ws)
-    app.open_place(files_app.ART, keep="dragon")
+    app.open_place(files_app.PICTURES, keep="dragon")
 
     # WALL: copy-on-set -- the wallpaper copy + My Art bg hold the pixels
     # (plus a #108 phase-2 provenance stamp, so compare decoded pixels).
@@ -317,7 +317,7 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     name = _seed_drawing(carts, "doomed")
     ws.artwork.open_named(name)
     app, _drv = _files(ws)
-    app.open_place(files_app.ART)
+    app.open_place(files_app.PICTURES)
     app._act("DEL", name)
     # Paint now opens a fresh canvas under the stale pointer -- no crash.
     _open_app(ws, "Paint")
@@ -427,7 +427,7 @@ def test_files_app_use_action_lists_and_resends(tmp_path):
     ti = ws.artwork.targets().index("Star Catcher")
     ws.artwork.attach(ti, "dragon")
     app, drv = _files(ws)
-    app.open_place(files_app.ART, keep="dragon")
+    app.open_place(files_app.PICTURES, keep="dragon")
     app._act("USE", "dragon")
     assert app.dialog == "used"
     assert any(r["label"] == "Star Catcher" for r in app.used_rows)
@@ -449,21 +449,21 @@ def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
     ws = _ws(tmp_path)
     moy_carts.save_file("docs", "note", "hi", carts)
     app, _drv = _files(ws)
-    app.open_place("docs")
+    app.open_place(files_app.DOCUMENTS)
     assert "OPEN" in app._action_labels()
 
 
 def test_send_sprites_to_files_producer(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
-    # Open a project so ws.project.sheet is a real sprite sheet.
+    # Open a project so ws.run.project.sheet is a real sprite sheet.
     ws.carts_store.create("Doodle", carts, type="game")
     ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
-    ws.project.sheet.pset(0, 0, 9)
+    ws.run.project.sheet.pset(0, 0, 9)
     name = ws.send_sprites_to_files()
     assert name in moy_carts.list_files("sprites", carts)
-    assert moy_carts.load_file("sprites", name, carts) == ws.project.sheet.to_hex()
+    assert moy_carts.load_file("sprites", name, carts) == ws.run.project.sheet.to_hex()
 
 
 # -- painting ----------------------------------------------------------------------
@@ -478,15 +478,15 @@ def test_a_settled_files_page_paints_nothing(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     for _ in range(4):
         drv.frame(_DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn, "an idle Files page painted"
+    assert ws.frame_state.frames_drawn == drawn, "an idle Files page painted"
     before = bytes(ws.sys_canvas._buf)
     drv.press("left")                   # on a place with nothing beside it
     for _ in range(6):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
+    assert ws.frame_state.frames_drawn == drawn + 1, "one frame for the press, then none"
     assert bytes(ws.sys_canvas._buf) == before
 
 
@@ -508,7 +508,7 @@ def test_the_desk_shows_the_places_beside_the_files(tmp_path):
     app._focus = "Places"
     _frames(drv)
     _press(drv, "down", "down")
-    assert app.place == files_app.ART and app.names_shown() == ["dragon"]
+    assert app.place == files_app.PICTURES and app.names_shown() == ["dragon"]
     assert app._focused == "Places", "a place opens beside the list, focus stays"
 
 

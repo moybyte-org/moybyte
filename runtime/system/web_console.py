@@ -1,7 +1,7 @@
 """The WEB CONSOLE switch (#197) -- wasm mode as a Workstation collaborator.
 
-`Workstation.web`. Everything the switch is made of lives here: the pairing
-pin, the paired url, the park/unpark of the glass, the Settings row's label,
+`Workstation.web`. Everything the switch is made of lives here: the paired
+url (its single-use pairing token), the park/unpark of the glass, the Settings row's label,
 and the one funnel that starts and stops the host. The connection screen
 itself is `web_console_ui.WebConsoleUI` -- this object owns the one instance
 (`ws.web.ui`) and the flag that says the glass is parked on it.
@@ -13,11 +13,7 @@ is `.serving` / `.start()` / `.stop()` / `.url()`.
 The webhost is read THROUGH `ws` on every call and never captured here: it is
 `None` at construction and injected later by `wire_workstation_core`, and the
 settings load later still (the same ordering `make_webhost` respects by reading
-the pin at `start()` rather than at construction). The pin's own persistence
-goes to the sibling collaborator that owns system.json (`ws.prefs`, #209
-landing B); `ws.system` stays a plain alias of the rows it holds, so reading and
-writing a key through it (`get`, and `set`, which persists) needs nothing from
-this object.
+the sign-in's folder at `start()` rather than at construction).
 """
 
 try:
@@ -49,8 +45,6 @@ class WebConsole:
     nothing on the glass can be, because the glass is showing this screen.
     """
 
-    _PIN_DIGITS = 4
-
     def __init__(self, ws, names):
         self.ws = ws
         # The WEB CONSOLE connection screen (web_console_ui.py) + the flag that
@@ -62,6 +56,8 @@ class WebConsole:
         self.ui = WebConsoleUI(ws.app_context("webconsole", WebConsoleUI.NEEDS),
                                self, names)
         self._parked = False
+        self._paired = None             # (the QR's url, its ticks_us)
+        self._hint = None
 
     @property
     def parked(self):
@@ -76,58 +72,56 @@ class WebConsole:
         if wc_park is not None and getattr(self.ws.webhost, "joining", None) is not None:
             wc_park(self._parked)
 
-    def pin(self):
-        """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
-
-        MINTED ONCE, LAZILY, and then persisted in system.json beside every
-        other Settings choice. Lazily because a board that never serves the web
-        console should never have written a secret to its store; once because a
-        pin that changed per boot would mean re-scanning the QR after every
-        power cycle, and a kid's phone keeping the old url would look like the
-        board had broken.
-
-        Four digits is the strength a kid can read off a panel and a grown-up
-        can type. It is not a password: it stops the OTHER machine on the
-        network from writing to this store by accident, which is the threat an
-        open write endpoint on a classroom LAN actually poses (moy_webhost's
-        SECURITY note). The read half stays open, by the standing owner call."""
-        ws = self.ws
-        pin = ws.system.get("web_pin")
-        if pin:
-            return str(pin)
-        pin = self._mint_pin()
-        ws.system.set("web_pin", pin)
-        return pin
-
-    def _mint_pin(self):
-        """A fresh 4-digit pin. `os.urandom` where there is one (both boards and
-        the host have it); the clock is the fallback, and is only ever reached
-        on a build with no urandom at all."""
-        n = None
-        try:
-            import os as _os
-            n = int.from_bytes(_os.urandom(3), "big")
-        except Exception:  # noqa: BLE001 -- no urandom: fall through to the clock
-            n = None
-        if n is None:
-            n = _ticks_us()
-        return "%04d" % (n % (10 ** self._PIN_DIGITS))
+    # The QR's token outlives a draw: one is minted when the link is first
+    # asked for and kept until a browser spends it (on_paired) or it nears the
+    # kernel's ten minutes (moy_webauth.h, MOY_WA_TOKEN_MS).
+    _TOKEN_US = 540 * 1000 * 1000
 
     def url(self):
-        """The PAIRED url -- what the QR encodes and SHOW ADDRESS reveals.
-
-        `http://<ip>/?pin=NNNN`: the page forwards its own `?pin=` into
-        every sync batch, so scanning this is the whole pairing gesture. Empty
-        when nothing is serving -- there is no address to show then, and a
-        placeholder would encode to a QR that sends a phone nowhere."""
+        """The PAIRED url -- what the QR encodes: the address and, after its
+        `#`, a fresh single-use pairing token and the board's id (moy_net.h,
+        moy_wc_url). The page pairs with the token and never sends it in a
+        URL; the address alone is what the screen prints. Empty when nothing
+        is serving -- there is no address to show then, and a placeholder
+        would encode to a QR that sends a phone nowhere."""
         wh = self.ws.webhost
         if wh is None or not getattr(wh, "serving", False):
+            self._paired = None
             return ""
+        now = _ticks_us()
+        got = self._paired
+        if got is not None and 0 <= now - got[1] < self._TOKEN_US:
+            return got[0]
         try:
             paired = getattr(wh, "paired_url", None)
-            return (paired() if paired is not None else wh.url()) or ""
+            url = (paired() if paired is not None else wh.url()) or ""
         except Exception:  # noqa: BLE001 -- a url is not worth a crash
             return ""
+        self._paired = (url, now) if url else None
+        self._hint = None
+        return url
+
+    def sign_in_hint(self):
+        """How a browser that cannot scan the code signs in, one sentence,
+        read with the link it sits beside (the password file is a read)."""
+        if self._hint is None:
+            try:
+                import ssh_service
+            except ImportError:  # host: the runtime package
+                from runtime import ssh_service
+            self._hint = ("Or type this console's password" if ssh_service.is_set(self.ws)
+                          else "Scan to pair: set a password (passwd) to type one instead")
+        return self._hint
+
+    def on_paired(self):
+        """A browser paired with the QR's token: the screen draws a fresh one,
+        and Settings' list of paired browsers reads the new one."""
+        self._paired = None
+        self._hint = None
+        sl = getattr(self.ws, "settings_layer", None)
+        if sl is not None:
+            sl._read_paired()
+        self.ws._dirty = True
 
     def park(self):
         """Take the glass over with the connection screen (#197).

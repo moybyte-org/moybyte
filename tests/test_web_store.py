@@ -35,79 +35,43 @@ def test_the_browser_store_passes_its_own_suite():
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-def test_the_two_skip_predicates_agree():
-    """`_skip` is the ONE rule for what never leaves a cart folder, and mode 1
-    added a JS copy of it -- so it can now rot. A file the sweep ships but the
-    local store refuses would vanish on the next reload."""
+def test_the_browser_store_takes_its_rules_from_the_vm():
+    """The page's store holds no copy of a rule: the worker hands it the
+    registry, the native store's `skip`, the path and song rules over the
+    receiving C (`moy_sync.local_segs`, `local_song`) and an install's name
+    rule (`cart_index.plain_name`) before any store is opened (bindStore), and
+    a copy could rot -- a file the sweep ships but the local store refuses
+    vanishes on the next reload."""
+    js = _read("firmware", "web_runner", "moy_store.mjs")
+    worker = _read("firmware", "web_runner", "worker.js")
+    for gone in ("SKIP_DIRS", "SITE_SKIP_DIRS", "BINARY_FILES", "export const ROOTS",
+                 "safeSegments", "isSong", "const RECORD_NAME", "const STAGE_DIR"):
+        assert gone not in js, gone
+    bind = worker[worker.index("function bindStore()"):]
+    bind = bind[:bind.index("\n}\n")]
+    for rule in ("moy_sync.roots_json", 'mp.pyimport("moy_store")', "native.skip(",
+                 "sync.local_segs(", "sync.local_song(", "ci.plain_name(",
+                 "ci.RECORD_NAME", "ci.STAGE_DIR", "store.bind("):
+        assert rule in bind, rule
+    init = worker[worker.index("async function init("):]
+    assert init.index("bindStore()") < init.index("initStore(fetched)")
+
+
+def test_the_root_registry_the_browser_reads_is_the_receivers():
+    """`moy_sync.roots_json` is what the browser's store iterates: each root's
+    VFS path and endpoint from the registry, and the files root's music
+    folder."""
+    import json
     from runtime import moy_sync
 
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-
-    def arr(name):
-        m = re.search(r"const %s = \[([^\]]*)\]" % name, js)
-        assert m, "no %s in moy_store.mjs" % name
-        return tuple(re.findall(r'"([^"]*)"', m.group(1)))
-
-    assert arr("SKIP_DIRS") == moy_sync.SKIP_DIRS
-    assert arr("SKIP_FILES") == moy_sync.SKIP_FILES
-    assert arr("SKIP_SUFFIXES") == moy_sync.SKIP_SUFFIXES
-    # ...and the SITE-mode pair, which is the same rule minus the journal
-    # (2026-08-25: the journal lives with the store of record, and in mode 1
-    # that is the browser). Two languages, two lists, same drift risk.
-    assert arr("SITE_SKIP_DIRS") == moy_sync.SITE_SKIP_DIRS
-    assert arr("SITE_SKIP_FILES") == moy_sync.SITE_SKIP_FILES
-
-
-def test_the_binary_rule_agrees_across_languages():
-    """The wire's binary predicate has a JS copy (and two C ones, held by
-    tests/test_moy_webhost.py): a font a theme package carries must cross
-    as bytes from every side."""
-    from runtime import moy_sync
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-    for name, want in (("BINARY_FILES", moy_sync.BINARY_FILES),
-                       ("BINARY_SUFFIXES", moy_sync.BINARY_SUFFIXES)):
-        m = re.search(r"const %s = \[([^\]]*)\]" % name, js)
-        assert m, "no %s in moy_store.mjs" % name
-        assert tuple(re.findall(r'"([^"]*)"', m.group(1))) == want
-
-
-def test_the_sync_root_registry_agrees_across_languages():
-    """A static host has no server to hand the page the root list, so
-    moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --
-    a root whose dc arity or vfs path drifts would persist a kid's drawing into
-    the wrong place or reject a legal delete -- so pin id, endpoint, vfs, the
-    whole-folder-delete arity and the named top-level files against the
-    Python registry, in order."""
-    from runtime import moy_sync
-
-    js = _read("firmware", "web_runner", "moy_store.mjs")
-    block = re.search(r"export const ROOTS = \[(.*?)\];", js, re.S)
-    assert block, "no ROOTS registry in moy_store.mjs"
-    entries = re.findall(r"\{([^}]*)\}", block.group(1))
-    assert len(entries) == len(moy_sync.SYNC_ROOTS), \
-        "the JS registry has %d roots, Python has %d" % (
-            len(entries), len(moy_sync.SYNC_ROOTS))
-
-    def field(entry, name):
-        m = re.search(r'%s:\s*("([^"]*)"|null|true|\d+)' % name, entry)
-        if m is None:
-            return None
-        v = m.group(1)
-        if v in ("null", "true"):
-            return {"null": None, "true": True}[v]
-        return m.group(2) if v.startswith('"') else int(v)
-
-    for entry, root in zip(entries, moy_sync.SYNC_ROOTS):
-        assert field(entry, "id") == root.id, entry
-        assert field(entry, "endpoint") == (
-            None if root.endpoint is None else root.endpoint.lstrip("/")), entry
-        assert field(entry, "vfs") == root.path("/moy/carts"), entry
-        top = re.search(r"top:\s*\[([^\]]*)\]", entry)
-        assert (tuple(re.findall(r'"([^"]*)"', top.group(1))) if top else None) \
-            == root.top, entry
-        lo, hi = field(entry, "dcMin"), field(entry, "dcMax")
-        assert [n for n in (1, 2, 3, 4) if lo is not None and n >= lo
-                and (hi is None or n <= hi)] == _dc_depths(root), entry
+    got = json.loads(moy_sync.roots_json("/moy/carts"))
+    assert [r["id"] for r in got] == [r.id for r in moy_sync.SYNC_ROOTS]
+    for entry, root in zip(got, moy_sync.SYNC_ROOTS):
+        assert entry["endpoint"] == root.endpoint.lstrip("/"), entry
+        assert entry["vfs"] == root.path("/moy/carts"), entry
+        assert entry["top"] == (list(root.top) if root.top else None), entry
+        assert entry["binary"] == root.binary and entry["site"] == root.site, entry
+    assert {r["id"]: r.get("songs") for r in got}["files"] == moy_sync.MUSIC
 
 
 def _dc_depths(root):
@@ -119,7 +83,7 @@ def _dc_depths(root):
     with tempfile.TemporaryDirectory() as d:
         ok = []
         for n in (1, 2, 3, 4):
-            path = "/".join(["drawings"] + ["x%d" % i for i in range(n - 1)])
+            path = "/".join(["Pictures"] + ["x%d" % i for i in range(n - 1)])
             if root_id == "carts":
                 path = "/".join(["a.moy"] + ["x%d" % i for i in range(n - 1)])
             applied, _errs, _shelf = moy_sync.apply_ops(
@@ -127,6 +91,50 @@ def _dc_depths(root):
             if applied:
                 ok.append(n)
         return ok
+
+
+def test_the_local_store_keeps_what_the_receiving_c_takes():
+    """`moy_sync.local_segs` is the browser store's path rule, and it is the
+    receiving C's (moy_sync_path, moy_sync_apply.c's): every path the C
+    applies into a root, the local store keeps, and every path it refuses as
+    a path, the local store refuses -- the journal aside, which a store of
+    record keeps. A whole-folder delete reaches the depths the C deletes."""
+    import tempfile
+    from runtime import moy_sync
+
+    paths = ("a.moy/main.py", "a.moy/x/y.py", "a.moy", "../a.moy/x", "a.moy/../x",
+             "a.moy//x", "a.moy/./x", "a.moy/x.bak", "a.moy/thumbs/t.png",
+             "a\\b/x", "a.moy/x\r", "a.moy/" + "x" * 300, "a.moy/~x",
+             "Pictures/a/b.json", "Music/a.mp3", "doom/doomsav0.dsg", "doom/k~part")
+    for root_id in ("carts", "files", "apps"):
+        for p in paths:
+            with tempfile.TemporaryDirectory() as d:
+                applied, _errs, _shelf = moy_sync.apply_ops(
+                    d, [{"p": p, "b": "eA=="} if root_id == "apps" else {"p": p, "t": "x"}],
+                    root_id)
+            local = moy_sync.local_segs(root_id, p)
+            if applied:
+                assert local, (root_id, p)
+            elif moy_sync.sync_path(p, 0) == 0:
+                assert not local, (root_id, p)
+    assert moy_sync.local_segs("carts", "a.moy/journal/journal.jsonl") == 3
+    assert moy_sync.sync_path("a.moy/journal/journal.jsonl", 0) == 0
+    for root in moy_sync.SYNC_ROOTS:
+        depths = [n for n in (1, 2, 3, 4) if moy_sync.local_segs(
+            root.id, "/".join(["Pictures"] + ["x%d" % i for i in range(n - 1)]), True)]
+        assert depths == _dc_depths(root), root.id
+
+
+def test_a_song_is_the_media_routes():
+    """The browser store's songs are the board's media route's
+    (moy_sync_song): a name of the music folder, no dot first, ".mp3" in any
+    case."""
+    from runtime import moy_sync
+    keep = ("Music/a.mp3", "Music/B.MP3", "Music/x y.Mp3")
+    leave = ("Music/.a.mp3", "Music/a.mp3.txt", "Music/mp3", "Music/x/a.mp3",
+             "a.mp3", "Pictures/a.mp3", "Music/.mp3", "Music/../a.mp3")
+    assert all(moy_sync.local_song(r) for r in keep)
+    assert not any(moy_sync.local_song(r) for r in leave)
 
 
 def test_the_journal_crosses_only_into_the_local_store():
@@ -195,7 +203,7 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
     nothing, reading as a decision that had been made."""
     worker = _read("firmware", "web_runner", "worker.js")
     body = worker[worker.index("async function init("):]
-    assert body.index("web_boot.store_mode(") < body.index("web_boot.boot(")
+    assert body.index("web_boot.store_mode(") < body.index("web_boot.page_boot(")
     # A name the boot script imports but web_boot does not export is a
     # NameError at boot, in a worker, on somebody else's machine.
     assert "store_mode" in worker[worker.index("from web_boot import"):
@@ -213,7 +221,7 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
     # own predicate (None), so a mode that fails to arrive never starts shipping
     # journals at a board.
     sync = runtime_file("moy_sync.py").read_text(encoding="utf-8")
-    skip = sync[sync.index("def watch_skip("):sync.index("def watch_skip(") + 400]
+    skip = sync[sync.index("def watch_skip("):sync.index("def watch_read(")]
     assert "skip_keep_journal" in skip and "site_keep_journal" in skip, skip
     assert "else None" in skip, skip
 
@@ -231,37 +239,115 @@ def test_the_mode_is_decided_before_anything_is_written():
     # The console boots AFTER the store is seeded: web_boot rebases each watcher
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]
-    assert body.index("initStore({") < body.index("mp.runPython")
+    assert body.index("initStore(fetched)") < body.index("import web_boot")
 
 
 def test_get_carts_layout_agrees_across_languages():
     """Get Carts in the browser (#124) splits one layout between Python and
     the worker: the record and the staging folder beside the carts store
-    (cart_index's names, which OPFS keeps under the same ones), and the
-    spool directory the worker streams a fetch into and carts_link reads.
-    A drift is an install the next boot cannot find, or a response nobody
-    reads."""
+    (cart_index's names, which the worker hands the store and OPFS keeps
+    under the same ones), and the spool the worker streams a fetch into,
+    which the job names (carts_link, media_link: web_vfs's SPOOL). A drift
+    is an install the next boot cannot find, or a response nobody reads."""
     import sys
-    from runtime import cart_index
+    from runtime import cart_index, moy_sync
     from runtime.moy_store_base import _sibling_path
 
-    js = _read("firmware", "web_runner", "moy_store.mjs")
     worker = _read("firmware", "web_runner", "worker.js")
-
-    def const(src, name):
-        m = re.search(r'const %s = "([^"]*)"' % name, src)
-        assert m, "no %s" % name
-        return m.group(1)
-
-    assert const(js, "RECORD_NAME") == cart_index.RECORD_NAME
-    assert const(js, "STAGE_DIR") == cart_index.STAGE_DIR
-    # The worker derives the VFS record from the carts root the same way
-    # moy_store_base._sibling_path does.
-    assert "store.RECORD_NAME" in worker
-    assert _sibling_path("/moy/carts", cart_index.RECORD_NAME) == "/moy/installed.json"
+    # The worker writes the record into the system root's directory, the
+    # carts folder's sibling as moy_store_base._sibling_path places it.
+    assert 'store.rootById("system").vfs' in worker and "installRecord" in worker
     sys.path.insert(0, _RUNNER)
     try:
-        import carts_link
+        import web_vfs
     finally:
         sys.path.remove(_RUNNER)
-    assert const(worker, "NET_DIR") == carts_link.SPOOL
+    assert _sibling_path(web_vfs.CARTS, cart_index.RECORD_NAME) == (
+        moy_sync.system_root(web_vfs.CARTS) + "/" + cart_index.RECORD_NAME)
+    # Every spool file is the one its job names.
+    for field in ("j.path", "j.spool", "live.path", "live.spool"):
+        assert field in worker, field
+
+
+def _web_boot():
+    """web_boot imported for its verbs only -- no VM, no canvas."""
+    import sys
+    for p in ("firmware/web_runner", "device", "runtime", "tools"):
+        d = os.path.join(_ROOT, p)
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    try:
+        import web_boot
+    except Exception as exc:  # noqa: BLE001 -- a wasm-only dep would skip, not fail
+        pytest.skip("web_boot not importable on the host: %s" % exc)
+    return web_boot
+
+
+def test_which_roots_a_page_seeds_is_the_registrys():
+    """A board-served page seeds the roots its board served and the carts
+    always; a site-mode page every root it keeps itself (the apps' folders
+    are their keeper's there)."""
+    from runtime import moy_sync
+    assert [r.id for r in moy_sync.SYNC_ROOTS
+            if moy_sync.seeds(r.id, False, False)] == ["carts"]
+    assert all(moy_sync.seeds(r.id, False, True) for r in moy_sync.SYNC_ROOTS)
+    for served in (False, True):
+        assert [r.id for r in moy_sync.SYNC_ROOTS if moy_sync.seeds(r.id, True, served)] \
+            == ["carts", "files", "system"]
+
+
+def test_a_dropped_file_is_named_by_the_vm():
+    """What the page does with a dropped file is web_boot.drop_kind's call: a
+    song Music keeps, a PICO-8 cart by its name or a PNG's signature, else a
+    `.moy` archive."""
+    import json
+    wb = _web_boot()
+    png = json.dumps(list(b"\x89PNG\r\n\x1a\n"))
+    zip_ = json.dumps(list(b"PK\x03\x04\x14\x00\x00\x00"))
+    assert wb.drop_kind("Song.MP3", zip_) == "song"
+    assert wb.drop_kind("x/y/tune.mp3", "[]") == "song"
+    assert wb.drop_kind("celeste.p8", "[]") == "p8"
+    assert wb.drop_kind("Celeste.P8.PNG", "[]") == "p8"
+    assert wb.drop_kind("download (3)", png) == "p8"
+    assert wb.drop_kind("hop.moy", zip_) == "archive"
+    assert wb.drop_kind("hop.zip", "[]") == "archive"
+
+
+def test_a_site_pages_shelves_are_its_sources(tmp_path):
+    """indexes.json becomes a site-mode console's system/sources through
+    cart_index's writer; a page a board serves browses the board's own."""
+    import json
+    from runtime import cart_index
+    wb = _web_boot()
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    doc = json.dumps({"indexes": ["https://a.example/index.json", 3,
+                                  "https://b.example/index.json"]})
+    was = wb._S.get("store_mode")
+    try:
+        wb._S["store_mode"] = "board"
+        wb.site_sources(str(carts), doc)
+        assert not (tmp_path / "system" / "sources").exists()
+        wb._S["store_mode"] = "site"
+        wb.site_sources(str(carts), doc)
+        assert cart_index.load_indexes(str(carts)) == [
+            "https://a.example/index.json", "https://b.example/index.json"]
+    finally:
+        wb._S["store_mode"] = was
+
+
+def test_the_export_picker_lists_the_folders_the_wire_carries(tmp_path):
+    import json
+    from runtime import moy_sync
+    for name in ("b.moy", "a.moy", "thumbs", "__pycache__"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "wifi.json").write_text("{}")
+    assert json.loads(moy_sync.folders_json(str(tmp_path))) == ["a.moy", "b.moy"]
+
+
+def test_a_page_reloads_the_roots_of_files():
+    """A board's reload re-pulls the carts first and every root of files,
+    never the console's own documents, which the live console holds."""
+    import json
+    from runtime import moy_sync
+    assert json.loads(moy_sync.reload_json()) == ["carts", "files", "apps"]

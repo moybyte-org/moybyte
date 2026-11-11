@@ -24,7 +24,9 @@ SLOTS = 32
 ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-          "notify", "wallpaper", "artwork", "clipboard", "install", "ui")
+          "notify", "wallpaper", "artwork", "clipboard", "install", "ui", "moybyte")
+# The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR).
+_FLOOR = ("moybyte",)
 _ROWS = ("damage.all", "damage.again",
          "surface.canvas", "surface.size", "surface.font_scale",
          "surface.chrome_scale", "surface.windowed", "surface.bar_h",
@@ -51,7 +53,30 @@ _ROWS = ("damage.all", "damage.again",
          "ui.menu", "ui.tool", "ui.bar", "ui.rule", "ui.text_view", "ui.table_part",
          "ui.part_at", "ui.split", "ui.table_dist", "ui.table_floor", "ui.held",
          "ui.slots", "ui.slot", "ui.slot_next", "ui.held_last",
-         "ui.held_all")
+         "ui.held_all", "ui.empty", "ui.note", "ui.bubble",
+         # the kernel's messages, notifications and badges, items handed,
+         # timers, alarms and log (native/moy_kernel/moy_evq.h, moy_notes.h,
+         # moy_items.h, moy_log.h) and
+         # its tiers' services, counted by nothing here
+         "moybyte.notify", "moybyte.send", "moybyte.award", "moybyte.progress",
+         "moybyte.on", "moybyte.every", "moybyte.after",
+         "moybyte.cancel", "moybyte.log", "moybyte.recv",
+         "moybyte.item_read", "moybyte.item_write", "moybyte.at",
+         "moybyte.service_stop", "moybyte.service_running",
+         # the crypto rows: native/moy_net/moy_crypto.h's, and the device
+         # handles (native/moy_kernel/moy_dev.h), counted by nothing here
+         "moybyte.random", "moybyte.sha256", "moybyte.hmac_sha256",
+         "moybyte.aes_gcm_seal", "moybyte.aes_gcm_open", "moybyte.x25519",
+         "moybyte.dev_open", "moybyte.dev_close", "moybyte.dev_read", "moybyte.dev_write",
+         "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get",
+         "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify",
+         # the bar's status items (native/moy_kernel/moy_status.h), counted
+         # by nothing here
+         "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove",
+         # the crypto rows appended after them
+         "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open",
+         # the wall clock (moy_net_time), counted by nothing here
+         "moybyte.clock")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
@@ -62,7 +87,12 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
 _FLAGS = ("surface_light", "bar_light", "band_light")
 NAME_MAX = 31
 DOC_MAX = 255
-_KINDS = ("docs", "drawings", "sprites", "music")
+# The shared folders a files grant is made for, each by its name and its own
+# kind; a grant reaches every kind in its folder (moy_store_base.FILE_KIND_DIRS).
+_FOLDERS = ("documents", "pictures", "music", "recordings")
+_KINDS = ("docs", "drawings", "music", "recordings")
+_KIND_FOLDER = {"docs": "documents", "stories": "documents", "drawings": "pictures",
+                "sprites": "pictures", "music": "music", "recordings": "recordings"}
 _PERMS = (("appearance", "theme"), ("files", "files"), ("launch", "nav"),
           ("prefs", "prefs"), ("clipboard", "clipboard"))
 _ALL, _AGAIN = 1, 2
@@ -83,6 +113,144 @@ def kinds():
 
 def perms():
     return _PERMS
+
+
+# The crypto rows, as native/moy_net/moy_crypto.h answers them: CPython's
+# hashlib, hmac and pyca's cryptography the oracle, imported where called.
+_RANDOM_MAX = 4096
+
+
+def _bytes(o):
+    return o.encode("utf-8", "surrogateescape") if isinstance(o, str) else bytes(o)
+
+
+def random(n):
+    if not 0 <= n <= _RANDOM_MAX:
+        raise ValueError("a length the call refuses")
+    import os
+    return os.urandom(n)
+
+
+def sha256(data):
+    import hashlib
+    return hashlib.sha256(_bytes(data)).digest()
+
+
+def hmac_sha256(key, data):
+    import hmac
+    return hmac.new(_bytes(key), _bytes(data), "sha256").digest()
+
+
+def _gcm(key):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _bytes(key)
+    if len(key) not in (16, 24, 32):
+        raise ValueError("a length the call refuses")
+    return AESGCM(key)
+
+
+def aes_gcm_seal(key, plain):
+    import os
+    nonce = os.urandom(12)
+    return nonce + _gcm(key).encrypt(nonce, _bytes(plain), None)
+
+
+def aes_gcm_open(key, sealed):
+    from cryptography.exceptions import InvalidTag
+    g, sealed = _gcm(key), _bytes(sealed)
+    if len(sealed) < 28:
+        return None
+    try:
+        return g.decrypt(sealed[:12], sealed[12:], None)
+    except InvalidTag:
+        return None
+
+
+def _aes_key(key):
+    key = _bytes(key)
+    if len(key) not in (16, 24, 32):
+        raise ValueError("a length the call refuses")
+    return key
+
+
+def aes_ctr(key, data):
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    key, data = _aes_key(key), _bytes(data)
+    if len(data) < 16:
+        raise ValueError("a length the call refuses")
+    e = Cipher(algorithms.AES(key), modes.CTR(data[:16])).encryptor()
+    return e.update(data[16:]) + e.finalize()
+
+
+def _ccm(key, tag):
+    from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+    key = _aes_key(key)
+    if tag not in (4, 6, 8, 10, 12, 14, 16):
+        raise ValueError("a length the call refuses")
+    return AESCCM(key, tag_length=tag)
+
+
+def aes_ccm_seal(key, data, tag):
+    c, data = _ccm(key, tag), _bytes(data)
+    if len(data) < 13:
+        raise ValueError("a length the call refuses")
+    return c.encrypt(data[:13], data[13:], None)
+
+
+def aes_ccm_open(key, sealed, tag):
+    from cryptography.exceptions import InvalidTag
+    c, sealed = _ccm(key, tag), _bytes(sealed)
+    if len(sealed) < 13 + tag:
+        return None
+    try:
+        return c.decrypt(sealed[:13], sealed[13:], None)
+    except InvalidTag:
+        return None
+
+
+def x25519(secret, peer=None):
+    from cryptography.hazmat.primitives import serialization as ser
+    from cryptography.hazmat.primitives.asymmetric import x25519 as cx
+    secret = _bytes(secret)
+    if len(secret) != 32 or (peer is not None and len(_bytes(peer)) not in (0, 32)):
+        raise ValueError("a length the call refuses")
+    k = cx.X25519PrivateKey.from_private_bytes(secret)
+    if not peer:
+        return k.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+    try:
+        return k.exchange(cx.X25519PublicKey.from_public_bytes(_bytes(peer)))
+    except ValueError:
+        raise ValueError("a peer key of small order")
+
+
+def _ed25519_key(secret):
+    from cryptography.hazmat.primitives.asymmetric import ed25519 as ced
+    secret = _bytes(secret)
+    if len(secret) != 32:
+        raise ValueError("a length the call refuses")
+    return ced.Ed25519PrivateKey.from_private_bytes(secret)
+
+
+def ed25519_public(secret):
+    from cryptography.hazmat.primitives import serialization as ser
+    return _ed25519_key(secret).public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+
+
+def ed25519_sign(secret, msg):
+    return _ed25519_key(secret).sign(_bytes(msg))
+
+
+def ed25519_verify(pub, msg, sig):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric import ed25519 as ced
+    pub, sig = _bytes(pub), _bytes(sig)
+    if len(pub) != 32 or len(sig) != 64:
+        raise ValueError("a length the call refuses")
+    try:
+        ced.Ed25519PublicKey.from_public_bytes(pub).verify(sig, _bytes(msg))
+    except (InvalidSignature, ValueError):
+        return False
+    return True
 
 
 def tokens():
@@ -148,16 +316,35 @@ class App:
         if not app_id or len(app_id.encode()) > ID_MAX or len(ns.encode()) > ID_MAX:
             raise ValueError("an argument the role refuses")
         for h, g in self._grants.items():
-            if g[0] == app_id and g[1] == bool(run):
-                self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
+            if g[0] == app_id and g[1] == bool(run) and g[5] == owner:
+                self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 return h
         for slot in range(SLOTS):
             if not any((h & 0xFF) == slot for h in self._grants):
                 h = self._gen[slot] << 12 | 12 << 8 | slot
-                self._grants[h] = [app_id, bool(run), set(mask), kind, ns]
+                self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
         raise OSError(_ENOSPC, "the grant table is full")
+
+    def regrant(self, app_id, roles, svc, kind=None):
+        mask, smask = set(), set()
+        for got, rs in ((mask, roles), (smask, svc)):
+            for r in rs:
+                if r not in _ROLES:
+                    raise ValueError("unknown app context role: " + str(r))
+                got.add(r)
+        if kind is not None and kind not in _KINDS:
+            raise ValueError("unknown files kind")
+        if not app_id or len(app_id.encode()) > ID_MAX:
+            raise ValueError("an argument the role refuses")
+        got = 0
+        for g in self._grants.values():
+            if g[0] == app_id and g[1]:
+                g[2] = mask | {"surface", "theme"} if "surface" in g[2] else set(smask)
+                g[3] = kind
+                got += 1
+        return got
 
     def end(self, h):
         if h not in self._grants:
@@ -238,7 +425,7 @@ class App:
         g = self._grants.get(h)
         if g is None:
             raise ValueError("a grant that ended")
-        if role not in g[2]:
+        if role not in g[2] and role not in _FLOOR:
             raise ValueError("a role the grant does not hold")
         return g
 
@@ -429,9 +616,9 @@ def _read(perms):
         if role is None:
             continue
         if role == "files":
-            kind = "docs" if colon < 0 else perm[colon + 1:]
-            if kind in _KINDS and kind not in kinds:
-                kinds.append(kind)
+            folder = "documents" if colon < 0 else perm[colon + 1:]
+            if folder in _FOLDERS and folder not in kinds:
+                kinds.append(folder)
             continue
         if role not in roles:
             roles.append(role)
@@ -443,13 +630,13 @@ def policy(perms):
     if len(kinds) == 1:
         roles.append("files")
     return (tuple(r for r in _ROLES if r in roles),
-            kinds[0] if len(kinds) == 1 else None)
+            _KINDS[_FOLDERS.index(kinds[0])] if len(kinds) == 1 else None)
 
 
 def manifest_error(perms):
     _roles, kinds = _read(perms)
     if len(kinds) > 1:
-        return ("manifest asks for %d file kinds (%s) - pick one"
+        return ("manifest asks for %d file folders (%s) - pick one"
                 % (len(kinds), ", ".join(kinds)))
     return None
 
@@ -516,7 +703,8 @@ class Files(_Role):
         """(True, None) when the row may run, else (False, its `err`)."""
         app = self._app
         g = app._hold(self._g, "files", "files." + row)
-        if kind is not None and g[3] is not None and kind != g[3]:
+        if (kind is not None and g[3] is not None
+                and _KIND_FOLDER.get(kind) != _KIND_FOLDER[g[3]]):
             raise ValueError("a role the grant does not hold")
         root, readable, writable, no_store = app._store
         if root is None or (need == "read" and not readable) or (
@@ -656,16 +844,16 @@ class Files(_Role):
         return _layer().read_provenance(blob)
 
 
-# The roles every row of which the console serves (roles.json's "shell" rows).
+# The roles every row of which the console serves (native/os_calls.json's "shell" rows).
 _SERVED = {
     "carts": ("readable ready begin end all can_journal slug create journal rescan "
               "hydrate images save_image encode_image"),
     "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
             "play run_script text_mode"),
-    "notify": "achieve award count has found_on progress today",
+    "notify": "award groups today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
-                "writable op rescan free find net keep wifi wifi_open"),
+                "writable op rescan free find net keep wifi wifi_open consent"),
 }
 
 

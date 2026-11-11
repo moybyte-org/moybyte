@@ -51,19 +51,68 @@ A frame reaches the canvas as every non-board frame does: `blit` and
 `blit565` write moycore's canvas, which the worker ships to the page. A
 cart's `snd` goes to `moy_audio`'s stream (`moy_audio_snd.h`), which the web
 runner's per-frame `render()` mixes after the synth, so the samples ride the
-same finished PCM the page plays through its AudioWorklet.
+same finished PCM the page's sink plays (page_core.html, THE SINK).
+
+## A WASI command here
+
+The site's console (`firmware/web_runner/build.sh --site`) runs the shell
+itself, and a WASI command typed in its Terminal runs here too: the boards'
+adapter, `native/moy_wasm/moy_wasi.c`, compiled for this build
+(`MOY_WASI_WEB`, under `MOY_WEB_SHELL=1` only) over `moy_wasi_web.h`, the
+names of WAMR's API it calls answered by the page's engine. So stdio, args,
+the session's exported variables, exit codes, the files its permissions
+reach, the clocks and random (the page's, through emscripten's libc), Ctrl-C
+and the budget are one copy of C on every tier; the shell door
+(`runtime/shell/sh_door.py`) and `moycore_glue.WasmRuntime` are the boards'.
+
+| piece | where |
+|---|---|
+| `command_start`, `command_step`, `command_stop` | `modmoy_wasm_web.c`, the boards' surface in shape |
+| WAMR's names over the page's engine, the rows' registry | `moy_wasi_web.c` |
+| the module, its imports, `_start` | `firmware/web_runner/worker.js`'s command engine (`installCommandEngine`) |
+
+The start reads the module through the VFS, has the page compile it and list
+its imports and exports, checks it as a board does (`moy_wasi_check`) and has
+the page instantiate it, one import per registered row, called by its table
+index with the module's own arguments. A pointer is an offset in the
+module's memory, which is what a native's pointer is here; a row's body
+reaches the bytes behind one by copy (`moy_wasi_web_reach`), and the page
+writes the bytes the body changed back when the row returns, then throws
+through the module where the C says it unwinds (`proc_exit`, Ctrl-C, the
+budget). The first step runs `_start` to its end inside the door's crossing:
+the page has one thread and the line's run holds it already
+(`MOY_SH_RUN_BUDGET_S`), so stdin from the Terminal's grid is end of file
+(a pipe or a redirection is not) and a run past 3 s is stopped at its next
+import. A command that asks before its first run (a cart that arrived as
+files, `app_perms.asks_first`) asks at the shell's prompt before its run
+starts, and the next line typed answers (`moy_sh_ask`, native/moy_sh/moy_sh.h),
+so the question needs no keys during a run.
+
+`moybyte.os`'s rows take pointers into the engine's memory, so a row served
+here is handed each pointer and length its signature marks `*~` as a copy in
+this VM, whose changed bytes go back after it (the C hands the page the
+row's signature: `moy_web_cmd_row`). Served are the rows served where they
+are called, `how` "here" or "seq" in `native/os_calls.json`
+(`MOY_WASI_OS_HERE`, generated): the files, prefs and clipboard rows, the
+timers, `on` and `at`, `send` and `log`, the notifications, badges and status
+items, the items a program was handed, `service_stop`, the device handles and
+the crypto rows, in place, the page's one thread being the VM's. The rows
+that hop (the console calls, the door's Python half's, the screen) go
+through the VM's queue (`moy_vmq.h`), which a run holding that thread cannot
+wait on: each answers NOSYS, and a module importing them still runs.
 
 ## What does not apply here
 
 A board's compiled module is NATIVE code, trusted by provenance: a key naming
-its chip and format, a signature, and the owner's Unknown sources switch for
-an unsigned one. The browser never loads one. `main.wasm` is validated by the
-browser and runs bounds-checked in its own memory, the sandbox SPEC.md §16
-assumes, so it needs no key, no signature and no switch: `CHIP` and `FORMAT`
+its chip and format, and its admission (`moy_ota_admit_module`: a signature,
+or the cart's consent to `full_access` for an unsigned one). The browser never
+loads one. `main.wasm` is validated by the browser and runs bounds-checked in
+its own memory, the sandbox SPEC.md §16 assumes, so it needs no key, no
+signature and no admission: `CHIP` and `FORMAT`
 are None, Get Carts installs no module (`cart_index.plan` with no chip), and
 WasmRun opens `main.wasm` itself and is never "slow" for it — the slow-play
-notice is about a board missing ITS module. The Unknown sources row is on
-every tier's Settings and has nothing to govern here.
+notice is about a board missing ITS module. A cart's `full_access` consent has
+nothing to govern here.
 
 The fit check is the browser's own: a cart's load takes its declared memory,
 one block of its own (the module's `WebAssembly.Memory`), and its module

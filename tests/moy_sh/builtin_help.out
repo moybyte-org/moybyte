@@ -1,0 +1,5 @@
+$ help | head -n 1
+The shell's commands (installed commands are in /bin):
+$ help | grep -c grep
+1
+[exit 0]

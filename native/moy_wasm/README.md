@@ -12,12 +12,13 @@ moycore drives (see "A cart's session").
 | piece | where |
 |---|---|
 | the runtime | `wamr/`: the AOT-plus-interpreter subset of Moybyte's WAMR fork ("Decisions" above), copied by `tools/vendor_wamr.py` at the commit `wamr_vendor.json` records (`make vendor-wamr`; `tests/test_wamr_vendor.py` holds the copy to the fork) |
-| the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no WASI, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
+| the build | `micropython.cmake`: the runtime as its own static library -- AOT plus WAMR's classic interpreter (no JIT, no libc-wasi, no builtin libc); `MOY_WASM_FAST_INTERP` picks the fast interpreter instead, unset on every console board (#158: classic costs less flash for a fallback tier that is never the speed path) |
 | the binding | `modmoy_wasm.c`: read a module file, run it on a thread, report; a cart's session, AOT or interpreted |
 | the session | `moy_wasm_session.h`: the C surface moycore drives a compiled cart through -- the browser's engine (`native/moy_wasm_web`) implements it too |
 | the key | `moy_wasm_key.h`: the provenance key an AOT module must carry, per chip, its compiled-code FORMAT VERSION, and the layout of its signature -- main.wasm on the interpreter carries none and needs none |
 | the footprint | `moy_wasm_footprint.h`: what a load takes -- the pool, the block a module file is read into, the run stack -- stated once for the engine, the Player's fit check and the host twin |
 | the thread | `moy_wasm_thread.c`: the run's pthread, stack placed per board; a cart's par lanes are made the same way |
+| WASI | `moy_wasi.c`, `moy_wasi.h`: WASI preview1's imports for a compiled command, adapters over the shell's C; `modmoy_wasm.c`'s `command()` runs one in a session of its own ("A command") |
 
 Which boards take it is `board.toml` data: each console board's
 `[[native.shared.take]]` and the headless Zero's denial, each with its reason;
@@ -34,16 +35,18 @@ product), with the owner's later calls dated where they land.
   surface, there is no firmware symbol table to version, and the cart's memory
   is one block its manifest sizes. The author's toolchain is clang. C apps as
   ELF modules against a versioned OS interface are a tier too (owner,
-  2026-11-01; #227, #246): trusted native code behind Unknown sources, where
-  wasm stays the sealed one the store lists.
+  2026-11-01; #227, #246): trusted native code under the consent its
+  install asks for (`full_access`, "Full access to the console"), where wasm
+  stays the sealed one the store lists.
 - **A per-chip module is native code, trusted only by provenance.** The
   sandbox is in the compiler's output, not the loader, so a board loads a
   module only when its key matches and its signature verifies ("Provenance").
   A module for another chip or format is never opened (the interpreter plays
   the cart); a present signature that does not verify is refused.
-- **Signing is the default, not a lock (owner, 2026-09-29):** "Unknown
-  sources". The store compiles and signs what it lists, so its carts never
-  need the switch.
+- **Signing is the default, not a lock (owner, 2026-09-29):** an unsigned
+  module loads only for a cart whose consent grants `full_access`, and there
+  is no console-wide switch (owner, 2026-11-02). The store compiles and signs
+  what it lists, so its carts never need that consent.
 - **A moy-spec binding, not a Moybyte runtime.** The import table is the verb
   table, which is the spec's subject: SPEC.md §16, an optional binding beside
   Lua (2026-09-30). A host without the tier refuses the runtime cleanly
@@ -87,9 +90,37 @@ product), with the owner's later calls dated where they land.
 - **Cart storage is the board's**: the store's card, or its internal volume
   without one. Assets are read through the cart's own folder and nothing else.
 - **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
-  `writable` paths, kept beside the carts store in `written/<cart>/`
-  (`runtime/cart_files.py`) on every tier, untouched by an install, an update
-  or a push. A user's own files are a separate capability (#231).
+  `writable` paths, kept beside the carts store in its app folder
+  `apps/<id>/` (`runtime/cart_files.py`) on every tier, untouched by an
+  install, an update or a push. A user's own files are a separate
+  capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
+  §2), which a compiled app reaches by its `moybyte.app` imports
+  (`moybyte_pick`, the item a handle its `moybyte_item_read` and
+  `item_write` take; `docs/app_api_v1.md` §10) and a game holds none of.
+- **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
+  (2026-11-08).** A command's imports are a table of natives registered
+  under WASI's module name (`moy_wasi.h`), each over the C a shell built-in
+  calls: the session's descriptors, its files tree under the command's
+  permissions, its variables; and `moybyte.os`, the calls a WASI program
+  shares with an ELF module: the service model's (`moy_send`, `moy_on`),
+  beside its event descriptor (`moy_wasi.h`, THE EVENT DESCRIPTOR), the OS
+  log (`moy_log`), and the console calls `moy_open_with`, `moy_pick` and
+  the app's own service's start (`moy_service_start`), posted on the VM's
+  queue as a native service's are (`moy_wasi.c`, THE CONSOLE CALLS), and
+  the notifications and badges (`moy_notify`, `moy_award`, `moy_progress`,
+  the kernel's queue, `native/moy_kernel/moy_notes.h`), the wakes (`moy_every`,
+  `moy_after`, `moy_at`, `moy_cancel`, each heard as the system's message
+  carrying its id), the files, nav, prefs, clipboard, device and item rows,
+  `moy_service_stop`, `moy_service_running` and `share`, run for the grant the
+  program's start made (THE APP ROWS). libc-wasi would reach the IDF's POSIX and VFS
+  past the session's pipes and the permissions, and brings a socket and
+  thread layer; the table leaves the vendored runtime and the compiler as
+  they are, so `MOY_WASM_FORMAT_VERSION` did not move and no installed
+  module went stale. The build keeps `WASM_ENABLE_LIBC_WASI=0`. The rows
+  carry libc-wasi's signatures exactly: wamrc knows them, so a module's
+  compiled code turns each `*` argument into a native pointer at the call
+  site and calls the native directly, whatever the row says, and the
+  interpreter must hand over the same pointer.
 - **Doom lives in moybyte-org/carts, never in the firmware** (GPL glue,
   2026-09-26; the WAD given away unmodified from that site, owner, 2026-10-03;
   `THIRD_PARTY.md`). Which boards fit it is #158's.
@@ -107,8 +138,8 @@ moy_wasm.result()        # waits (the VM lock released), then a dict
 allow_unsigned=False)` reads the
 module file through the VFS (the T-Deck's SD and the P4s' flash store look the
 same) into a PSRAM buffer, checks its signature (see Provenance; a refused
-module ends the run at once, with no thread; `allow_unsigned` is what the
-Unknown sources setting gives a cart's load) and starts a thread that does,
+module ends the run at once, with no thread; `allow_unsigned` is what a
+cart's consent to `full_access` gives its load) and starts a thread that does,
 `loops` times over: load, check the key, instantiate, call `export(*args)`
 with i32 arguments, and unload. `stack`/`psram_stack` override the board's
 setting and `pool` the pool's sizing rule, for a measurement: a module's
@@ -146,8 +177,8 @@ of its module's).
 
 ## A cart's session
 
-A compiled cart the Player runs is a session: the same signature check
-(with the console's Unknown sources setting as it stands at that load),
+A compiled cart the Player runs is a session: the same admission (with the
+cart's consent as it stands at that load),
 thread, pool, load and provenance check as a run, held open for the cart's
 life, with moycore — the host half, which owns the console — supplying the
 callbacks (`moy_wasm_session.h`). The thread calls them once the runtime is up (moycore
@@ -165,7 +196,16 @@ SPEC.md §16.12) -- are C over the kernel's volume
 (`native/moy_store/moy_files.h`) and run on the task, whose stack is internal
 where an internal-flash write needs it and whose mount table the volume is
 resolved through. No request calls Python.
-One session at a time, never beside a `start()` run.
+A session per compiled run, as many as memory allows, never beside a
+`start()` run. One runtime serves them all, up while any session is: the
+first session's thread makes it and the last one's takes it down. Each
+session keeps its own pool, sized by the footprint rule for its module, and
+the runtime allocates a session's load, instance, exec envs and import
+table registration from that session's pool (an allocator over the pools,
+`modmoy_wasm.c`), so a session's close gives back what it took; the
+runtime's own structures come from PSRAM's heap. The calls act on the
+current session (`moy_wasm_session_use`), and a session's close unregisters
+its import tables, which the runtime would otherwise keep pointing into.
 
 **A cart's `par` items run on the session's lanes** (SPEC.md §16.10's
 "The cart's own work across the cores"): one thread on each core but the
@@ -190,6 +230,15 @@ reports 0 lanes whenever the live session is running main.wasm rather than an
 AOT module): no sibling-instance trick is attempted over the interpreter's
 module, so a cart's `par` items run in declaration order on the calling core.
 
+**A cart's timed lanes run on the P4s** (`MOY_WASM_TIMED_LANES`,
+`docs/os_2026-11/hardware.md` §2): where a module exports `moy_audio` or
+`moy_timer`, the OS calls it from a high-priority thread on the core the
+session is not on, each a sibling instance as `par`'s lanes are, AOT or
+interpreted alike, under a deadline monitor that strikes a lane whose call
+runs long. `moy_wasm_session.h` is the contract, `moy_wasm_tlane.c` the code,
+`moy_wasm.tlanes()` the meter; the interpreter's pool carries their room
+(`moy_wasm_footprint.h`). The S3s have none.
+
 Where a board finds a cart's compiled module is host policy: `<main>.<chip>.f<format>.aot`
 beside `main.wasm` in the cart's folder, `CHIP`/`FORMAT` naming this engine's
 chip and compiled-code format version (`tools/wasm_cart.py`'s `aot_name`
@@ -202,6 +251,11 @@ module by this console's own name is not refused** (2026-09-30, "A cart
 survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
 `main.wasm` itself on the interpreter instead, with no key and no signature,
 and the Player's notice says it needs an update to run at full speed (below).
+A module that loaded and ran its `_init` (`moycore.wasm_ran`) is past every
+reason to retry: an error from it is a trap in the cart's own code, shown on
+the stop card as the cart's error, on the VM-stopped path
+(`native/moy_play/moy_play_stop.c`) as on the VM's. The Deep Init fixture
+traps in `_init` and counts its runs in a written file to hold both to it.
 The sync RPC
 declines binary files, so neither a module nor `main.wasm` crosses between a
 browser and a board (`runtime/moy_sync.py`): a compiled cart plays where it
@@ -219,16 +273,72 @@ costs; the resolve is a few milliseconds. Each suite pins a floor for that
 fixture and for the hello cart (`tests/test_*_on_glass.py`), measured with WiFi
 off, the state a cart plays in.
 
+## A command
+
+A cart whose manifest says `"type": "command"` and `"runtime": "wasm"` is a
+WASI program: its module's `_start` run in the shell's session when the
+shell spawns its name (`runtime/shell/sh_door.py`, `docs/os_2026-11/system.md`
+section 1). `command_start()` opens a session of its own for it, as the
+Player's glue opens a cart's (its module for this console where the cart
+carries one, `main.wasm` on the interpreter otherwise or when that one is
+refused for anything but tamper evidence, `device/moycore_glue.py`'s
+`WasmRuntime`), registers the WASI table when the runtime is up, refuses a
+module importing anything but WASI, `moybyte.term` and `moybyte.os` or exporting no
+`_start` once it is loaded, begins its call into `_start` on the session's
+thread and answers at once, making whichever session was current current
+again. The run then goes in steps (`moy_wasi.h`, "IN STEPS"): each
+`command_step()` serves the natives' bodies, which hop from the session's
+thread to the MicroPython task (`moy_wasm_on_vm`, which finds the session by
+its thread), for a few milliseconds inside the door's crossing with the
+shell's session entered, so a body reaches the session's descriptors and
+files as a built-in does and the console's frame goes on between the steps;
+`command_stop()` ends the run as Ctrl-C does. A clock's wait (`sleep`)
+waits on the session's thread, never in a hop. In the foreground the shell
+door steps the run as a job, either compiled tier's alike
+(`runtime/shell/sh_door.py`); with `&` the glue steps it to its end, feeding
+the task watchdog. A command's exit status is `proc_exit`'s, 0 when
+`_start` returns; a trap answers -1 with its message, a module that would
+not run -3. The host runs the same table over its WAMR, `_start` on a thread
+of its own stepped the same way (`runtime/host/moyhost_wasm.c`'s
+`hw_wasi_start`).
+
+## A service
+
+A cart whose manifest says `"type": "service"` and `"runtime": "wasm"` and
+carries no source is a WASI service, the scheduler's as any service is
+(`runtime/system/scheduler.py`, COMPILED SERVICES; `moy_wasi.h`, A
+SERVICE): a run with no shell session, its argv its cart's id, no env, no
+preopen, stdin empty, stdout and stderr the OS log's lines under its pid,
+its calls run in place on its own task with no hop. `service_start()` opens
+a session of its own for it, its module chosen as a command's is, its task
+on a Lua service's core and priority (`MOY_WASM_SVC_CORE`,
+`MOY_WASM_SVC_PRIO`), and begins its call into `_start` there; the VM's task
+never serves it. Several run at once, each a session. `service_stop()`
+hangs its event descriptor up and waits `MOY_WASI_STOP_US` for `_start` to
+return, then kills it (137); the watchdog (`moy_wasi_watch`) runs over the live
+ones once a frame as a job of the kernel loop's while one lives, and
+`service_reap()`, at the scheduler's poll, which a returned `_start` wants
+(`moy_evq.h`, THE VM'S WAKE), runs it too and closes the session of each
+that returned, answering its exit status (a trap's is 134, its line in
+the OS log); `service_info()` reads its linear memory and its wakes' time.
+A killed service's instance is terminated, which its `_start` reads at its
+next import call ("Stopping a run" below), so a wake that calls none runs
+on until it does. The task is on core 0 on the P4s and core 1 on the S3s
+(`MOY_WASM_SVC_CORE`, as a Lua service's). The host runs the same C, each service's
+`_start` on a pthread of its own, apart from the command's one job
+(`runtime/host/moyhost_wasm.c`'s `hw_wasi_service`).
+
 ## Where the memory goes
 
 Nothing is held between runs: the module allocates no memory at boot, so what
-it costs the idle desk is its static data (about 0.6 KB of internal RAM) and
-nothing else. During a run:
+it costs the idle desk is its static data (about 0.25 KB of internal RAM) and
+nothing else; a run's state is PSRAM, taken by the first `start`. During a run:
 
 | what | where |
 |---|---|
 | the module file | PSRAM, read once; a run keeps it for its passes, a cart's session frees it once the module is loaded (below) |
 | the runtime's pool (module and instance structures, the module's data segments, the loader's relocation tables while it relocates, the exec env) | PSRAM, `MOY_WASM_POOL_BYTES` (256 KB; 320 KB on the P4 boards, whose loader holds more) plus a quarter of the module (`MOY_WASM_POOL_SHARE`), allocated at the run's start and freed at its end |
+| the import tables | flash: the WASI, `moybyte.term`, `moybyte.os` and `moybyte.app` rows are const, in their names' strcmp order (`tools/gen_os_table.py` generates the last two that way), and the fork's `wasm_runtime_register_natives_sorted` registers them where they are, refusing a table out of order (`tests/test_wasm_native_tables.py`). Only libmoy's verb table, moy-spec's and not in that order, is copied to PSRAM per cart run for WAMR to sort. Each registration's node (20 bytes) comes from PSRAM's heap, not the session's pool (`moy_wasm_register_rows`) |
 | the AOT text | PSRAM: the S3 fetches it through the instruction-bus alias, the P4's external RAM carries no PMP entry |
 | linear memory, AOT data sections, any runtime allocation of 1 KB or more | PSRAM only (`WASM_ESPIDF_PSRAM_THRESHOLD` in the fork's esp-idf platform) |
 | the run's stack | per board, `MOY_WASM_STACK_BYTES` / `MOY_WASM_STACK_PSRAM` in `mpconfigboard.h`: 16 KB in PSRAM on every board |
@@ -265,7 +375,21 @@ greeting check in every suite is the guard.
 The AOT native-stack check is live: the run hands the runtime its stack's low
 end plus a 2 KB guard (`wasm_runtime_set_native_stack_boundary`), and the fork
 reports the calling task's real stack start where upstream reported none. An
-overflow traps as "native stack overflow".
+overflow traps as "native stack overflow". A session's trap carries the
+numbers the check compared, from the session thread's stack's low end at the
+open: `[stack <low end>+<how far it has moved> bound +<the env's boundary> set
++<the boundary handed to it> free <least free> frame <largest entry check>
+here|elsewhere]`, the last word saying whether the env was last entered on the
+session's thread. A trap with bound and set at the guard, entered here, a
+small frame and plenty free is one the check should not have made. The P4
+suites' Deep Wasm fixture recurses without end to read them. The table the
+check reads its frame sizes from is a data section, and the loader gives a
+data section only its mapping's alignment; RISC-V code addresses an entry as
+the table's `%hi` with the entry's offset in its `%lo` alone, which reads
+4 KB away (a trap of exactly that shape) when the 16-aligned table sits 8
+bytes short of a 0x800 boundary. So the fork's ESP-IDF `os_mmap` starts
+every mapping on a 64-byte boundary, and `tests/test_wasm_module.py` holds
+every section these flags emit to it.
 
 ## A cart too big for the board
 
@@ -320,6 +444,16 @@ whole data cache and toggled the instruction cache off and on, which faults the
 other core if it is executing from flash or PSRAM at that moment — and on a
 console it always is. The P4 does the same range sync plus `fence.i`. The
 on-glass load/unload loop under a live cart and WiFi is the guard.
+
+A sync covers whole 64-byte lines, and on the P4 its invalidate also drops the
+data cache's copy of each line (L1D and L2), so a line the text shared with
+another heap block would lose a write another task had made there. The fork's
+ESP-IDF `os_mmap` therefore starts every mapping on a 64-byte boundary and
+rounds its size up to whole lines, so no other allocation shares a line with
+a mapping; `tests/test_wamr_espidf_mmap.py` compiles the vendored
+`espidf_memmap.c` on the host and holds every sync to its mapping's lines.
+The S3's invalidate reaches only its separate instruction cache, through the
+fetch-only alias, so it has no such edge.
 
 ## Provenance
 
@@ -408,41 +542,51 @@ runs it and wants 0.
 module, then an RSA signature (PKCS#1 v1.5, SHA-256), its length and the magic
 `moybyte-sig1`; the signature covers a text naming the chip, the module's
 length and its sha256, so every byte of the module -- the key section included
--- is under it (`moy_wasm_key.h` states the layout and the text, and
-`tools/wasm_module.py` reads them from there). The check runs on the
-MicroPython task the moment the file is read, before the thread exists: the
-engine hashes the module and hands the text to `moy_ota.verify_sig`, the one
-body every OTA manifest is checked with, against the keys the image trusts
-(`moy_ota.OTA_PUBLIC_KEYS`). An unsigned module, a malformed trailer, a
-signature for another chip, a byte changed anywhere or a key the image does not
-trust is refused as `refused: unsigned module` / `malformed signature` /
-`bad signature`, and the runtime never sees it -- an unsigned module only
-while the owner's Unknown sources setting is off (below).
-`tools/wasm_module.py` signs every module it builds with the OTA signing key
-(`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen` writes) and
-`verify` answers as a board would (`--unknown-sources` as a board with the
-setting on); `--unsigned` builds a module with no signature, and so does
+-- is under it (`moy_wasm_key.h` states the layout and the text, the magic is
+`native/moy_net/moy_ota.h`'s, and `tools/wasm_module.py` reads them from
+there). The module is ADMITTED by one call, `moy_ota_admit_module`
+(`native/moy_net/moy_ota.h`), the same the native tier's loader makes
+(`native/moy_elf/`): on the MicroPython task the moment the file is read,
+before the thread exists, it hashes the module and checks the text with the
+RSA body every OTA manifest is checked with, against the keys the image
+trusts. A malformed trailer, a signature for another chip, a byte changed
+anywhere or a key the image does not trust is refused as `refused: malformed
+signature` / `bad signature`, and the runtime never sees it; an unsigned
+module is `refused: unsigned module` unless the cart's consent admits it
+(below). Until the signature verifies, the trailer is the only part of the
+file anything parses -- its magic, its length and the signature -- and the
+module itself is only hashed; the AOT loader first reads a byte of a
+module that verified or that the consent admits unsigned
+(`tools/wasm_fuzz.py`'s `aot_*` targets fuzz both sides of that line).
+`tools/wasm_module.py` signs every module it builds with the OTA
+signing key (`$MOYBYTE_OTA_SIGNING_KEY`, else the file `make ota-keygen`
+writes) and its `verify` IS the board's call, through the host's binding
+(`runtime/host/net_binding.py`; `--consented` answers for a cart granted
+`full_access`); `--unsigned` builds a module with no signature, and so does
 `tools/wasm_cart.py --unsigned` for a whole cart.
 
-### Unknown sources
+### An unsigned module
 
-Signing is the default, not a lock (owner, 2026-09-29).
-Settings -> UNKNOWN SOURCES, off by default and turned on past a warning, lets
-a module with **no** signature load AT FULL SPEED (native trust), so someone
-who rebuilds a cart from its source -- Doom from moybyte-org/carts, their
-own game -- runs it on their own console. The setting is the console's
-(`ws.unknown_sources`, persisted in `system.json`, on every tier); the engine
-is told it per load: `moycore_glue.WasmRun` hands it to `moycore.wasm_open`,
-which hands it to `moy_wasm_session_open` as `allow_unsigned`, and
-`verify_module` reads it on the MicroPython task before the runtime sees a
-byte, as it reads the signature.
+Signing is the default, not a lock (owner, 2026-09-29). A module with **no**
+signature loads AT FULL SPEED (native trust) for a cart whose consent grants
+`full_access`: the install prompt's "Full access to the console", the one line
+that says what native code can do; there is no console-wide switch
+(`docs/os_2026-11.md` section 1). So
+someone who rebuilds a cart from its source -- Doom from moybyte-org/carts,
+their own game -- adds `full_access` to its manifest and runs it on their own
+console; a cart pushed by hand has no consent record and is asked for its
+permissions, `full_access` among them, on its first run. The consent is the cart's (`app_perms.run_admits_unsigned`); the
+engine is told it per load: `moycore_glue.WasmRun` hands it to
+`moycore.wasm_open`, which hands it to `moy_wasm_session_open` as
+`allow_unsigned`, and `moy_ota_admit_module` reads it on the MicroPython task
+before the runtime sees a byte, after the signature.
 
-**With the setting off an unsigned module is IGNORED, not refused**
+**Without the consent an unsigned module is IGNORED, not refused**
 ("A cart survives its firmware" above): `WasmRun` catches
 the engine's `refused: unsigned module` and retries the open on the
-interpreter, `main.wasm` itself, which needs neither signature nor switch, so
-the cart plays regardless -- natively when the switch is on, interpreted with
-a short "isn't signed" notice when it is off. The same retry covers a
+interpreter, `main.wasm` itself, which needs neither signature nor consent, so
+the cart plays regardless -- natively with `full_access` granted, interpreted with
+a short "isn't signed" notice without it. The same retry covers a
 corrupted or mismatched AOT module (rare: its file name matched this
 console's chip and format, its content did not; that one reads as "needs an
 update", the same as no module at all) and a module calling a helper this
@@ -453,7 +597,7 @@ PRESENT but does not verify is the one case that still refuses to the
 ordinary error panel, because that module was changed after it was signed,
 which is not staleness.
 
-| the module file | setting off | setting on |
+| the module file | no `full_access` | `full_access` granted |
 |---|---|---|
 | signed with a key the image trusts | loads natively | loads natively |
 | no signature trailer | interpreter, "isn't signed" | loads natively |
@@ -464,8 +608,8 @@ which is not staleness.
 | no module by this console's name at all | interpreter, "needs an update" | interpreter, "needs an update" |
 | calls a helper this firmware's runtime does not register (the loader's `resolve symbol <name> failed`) | interpreter, "console needs an update" | interpreter, "console needs an update" |
 
-Whatever passes signing goes on to the provenance key, which is checked
-either way: the setting says nothing about which format or chip a module was
+Whatever is admitted goes on to the provenance key, which is checked
+either way: the consent says nothing about which format or chip a module was
 built for. In the ordinary case the key never even matters for staleness,
 because the FILE NAME already encodes chip and format (Provenance above) --
 what the key still guards against is a same-named file whose content lies.
@@ -575,7 +719,7 @@ the margin and the classic-vs-fast decision are #158's.
 **The engine never decides to fall back; `device/moycore_glue.WasmRun` does**,
 in Python: it looks for this console's own module by name first, and only
 opens the interpreter when there is none, or when the one it found does not
-check out for a reason that is not tamper evidence (Unknown sources, ESP 88's
+check out for a reason that is not tamper evidence (an unsigned module, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
 `runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
 (`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
@@ -601,9 +745,30 @@ board restarting. `tests/on_glass.py`'s `wasm_runaway_runs_to_its_end` pins the
 current answer. A cart's session is ended the same way
 (`moy_wasm_session_terminate`), by the Player's runaway watch
 (`native/moy_play/moy_play.h`). A `par` item is no different: the call that handed it over
-waits for it, so an item that never returns holds the cart where it is.
+waits for it, so an item that never returns holds the cart where it is. A
+command stops at its next import: each WASI call checks the shell's Ctrl-C
+and the door's budget first (`moy_wasi.h`). A loop calling none runs on
+while the console goes on, but its stop (Ctrl-C, the budget) waits on the
+console's task until the loop returns.
 
 ## Testing
+
+- `tests/test_wasi_commands.py`: WASI commands built unchanged by wasi-sdk
+  and rustc's `wasm32-wasip1` (`tools/wasm_cart.py`), run in the Terminal's
+  session on the host's WAMR: args, env, stdio through pipes and
+  redirections, exit codes, files under the `files` permission and none
+  without it, the clocks, random, `term_size`, Ctrl-C, the budget, a trap,
+  a module a command cannot run, the background; on glass,
+  `tests/on_glass.py`'s `wasi_commands_run` (cat and the Rust hello on their
+  modules, the probe on the interpreter) over the serial face.
+
+- `tests/test_wasi_services.py`: a WASI service on the host's WAMR, started
+  by the scheduler on a thread of its own: listed, a ping answered with a
+  pong, its stdout in the OS log, its stop the descriptor's end of file, an
+  end by itself into its restart policy, a wake that never polls again
+  struck out, killed and terminated, and a console without the tier
+  refusing one; the glue's half over a stubbed `moy_wasm` is
+  `tests/test_moycore_glue.py`'s.
 
 - `tests/test_wamr_vendor.py`: the copy is the fork at the pinned commit (read
   from the clone's git objects when `experiments/wasm_aot/wamr` has it), the
@@ -621,18 +786,13 @@ waits for it, so an item that never returns holds the cart where it is.
   preprocesses it (#229: the P4's rv32f table lacked `__fixsfdi` and
   `__fixunssfdi`). CI fetches the pinned compilers for it and fails rather
   than skips without them.
-- `tests/test_wasm_signing.py`: the signature, through the device's own
-  `moy_ota.verify_sig` with a throwaway key -- a signed module verifies and
+- `tests/test_wasm_signing.py`: the admission, executing the board's own
+  `moy_ota_admit_module` with a throwaway key -- a signed module verifies and
   comes back as it was built; a byte changed anywhere, the key section
   included, another chip's signature, another key's, an unsigned module and a
-  malformed trailer are refused -- and the table above, each kind of file with
-  Unknown sources off and on, through the tool's twin of `verify_module`; and
+  malformed trailer are refused -- and the table above, each kind of file
+  without and with the consent; that the consent is `full_access` granted; and
   that only the two tamper-evidence refusals are what `WasmRun` never retries.
-- `tests/test_unknown_sources.py`: the setting -- off on a fresh console,
-  persisted, the warning before it turns on, off at once, the dev channel's
-  `unknown_sources 0|1` -- and that an unsigned cart plays on the interpreter
-  with the toast (switch off) or natively with none (switch on), never the
-  old blocking notice.
 - `tests/test_moycore_glue.py`: the device glue's `WasmRun` over a fake moycore
   (the arguments `wasm_open` gets, AOT and interpreted), the retry -- an
   unsigned or key-mismatched AOT open falls back to the interpreter and
@@ -640,6 +800,14 @@ waits for it, so an item that never returns holds the cart where it is.
   at all goes straight to the interpreter with one `wasm_open` call -- and the
   runtime's fit report (what it asks `footprint()`, sizing against main.wasm
   itself when there is no module for this chip).
+- `tests/test_wasm_hostile.py`: what fuzzing the engine kept
+  (`tests/fixtures/wasm_fuzz/`, its README), replayed through the fork's
+  runtime at the pin as the host builds it and, where the machine has a
+  32-bit libc, through each chip's AOT loader, admission and key check
+  (`tools/wasm_fuzz.py`, which fuzzes the same harnesses under libFuzzer);
+  and an import a par item makes refused on the app ABI's table as on
+  libmoy's. `tests/test_wasi_commands.py`'s hostile test drives WASI's
+  imports raw with the arguments a hostile module passes.
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
   for Linux at this pin (`runtime/wasm_binding.py`, which always runs
   main.wasm directly -- there is no per-chip AOT concept on the host) — the
@@ -678,10 +846,9 @@ waits for it, so an item that never returns holds the cart where it is.
   nothing, as a missing file does. **The interpreter tier, on every board**:
   a cart with no module, one built for another chip, and one named for a
   stale format all play on the interpreter with the short "needs an update"
-  notice and the hello cart's greeting check; an unsigned cart follows
-  Unknown sources -- the interpreter and its "isn't signed" notice with the
-  switch off, native and no notice with it on, a tampered one still refused
-  either way. The suites build the
+  notice and the hello cart's greeting check; an unsigned cart follows its
+  consent -- the interpreter and its "isn't signed" notice without `full_access`,
+  native and no notice with it, a tampered one still refused either way. The suites build the
   modules with the pinned compilers (`python3 tools/wasm_module.py
   compilers`), sign them with the OTA signing key (a suite without it skips
   the wasm checks, saying why), and push them into the board's store: the

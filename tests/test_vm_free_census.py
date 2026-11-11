@@ -70,6 +70,11 @@ def test_the_compiled_carts_run_with_no_vm(tmp_path):
         if (man.get("moybyte") or {}).get("type") == "app":
             continue        # a compiled app's verdict reads its module: test_wasm_app.py
         d = _cart(tmp_path, "c%d.moy" % i, man, main=man.get("main", "main.wasm"))
+        if (man.get("moybyte") or {}).get("type") in ("command", "service"):
+            # a command runs in the shell and a service on a task of its own,
+            # neither as the Player's run
+            assert moy_play.census(d)[1:] == (False, "type"), path
+            continue
         assert moy_play.census(d) == ("wasm", True, "free"), path
         assert moy_play.census(d, wasm=False) == ("wasm", False, "absent"), path
 
@@ -86,7 +91,8 @@ def test_each_clause_keeps_the_vm_by_name(tmp_path):
     assert verdict("a.moy") == ("lua", True, "free")
     assert verdict("b.moy", type="app") == ("lua", False, "type")
     assert verdict("c.moy", type="tool") == ("lua", False, "type")
-    for perm in ("network", "console", "pins", "files", "files:pictures", "prefs", "telepathy"):
+    for perm in ("network", "console", "pins", "files", "files:pictures", "prefs", "telepathy",
+                 "lease:uart1"):
         assert verdict("p_%s.moy" % perm.replace(":", "_"),
                        permissions=["graphics", perm]) == ("lua", False, "permission"), perm
     assert verdict("d.moy", permissions=["graphics", "input", "audio", "multiplayer"]) \

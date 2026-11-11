@@ -66,7 +66,7 @@ SEEDING RECIPE (the formats are not guessable -- three wrong guesses cost a run
 each):
 
   * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
-           (files/docs/<name>.md), so the file's text IS the page's text.
+           (files/Documents/<name>.md), so the file's text IS the page's text.
   * cart:  moy_catalogue.create(title, root, src=...) then
            ws.carts.apply(moy_catalogue.catalogue(root)).
   * There is no load_code(path); reading a cart's source goes through

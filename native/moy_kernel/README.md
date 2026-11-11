@@ -5,7 +5,26 @@ board's entry and the VM service (`moy_kernel.c`), the frame loop
 (`moy_loop.h`), the crash record and the boot decision (`moy_crash.h`), the
 recovery floor and first light (`moy_recovery.h`, `moy_boot.h`), the idle
 ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
-(`moy_devch.h`) and the kernel's I2C bus (`moy_bus.h`). Each header states how
+(`moy_devch.h`), the OS log (`moy_log.h`, the ring every writer shares and
+the dev channel's `log` word reads), the scheduler's callback guard
+(`modmoy_guard.c`, the VM abort), the lease table (`moy_lease.h`, the
+resources a process holds raw, safe from any task under its one lock), a
+compiled program's device handles over it (`moy_dev.h`, served on the
+caller's own task, the buses they drive, `moy_devbus.h`, and the device APIs
+whose drivers' verbs it reaches weakly, `moy_dev_kinds.h`), the lock the app ABI's seqlock writers and the tiers' service tables take
+(`moy_lock.h`), the process table (`moy_proc.h`, a row per
+Lua or compiled run the Player launches), the service model's three pieces
+(`moy_evq.h`, every process's event queue and the one wait; `moy_super.h`,
+the one supervisor of background callbacks; `moy_vmq.h`, the one queue of
+calls into the VM's task; the module `moy_evq`, `modmoy_evq.c`), a compiled
+app's or game's screen handed to the console (`moy_screen_slot.h`), the
+bar's status items, which a compiled program writes on its own task and the
+console reads to draw (`moy_status.h`), the queue in front of the
+console's notifications and the achievements process, which a program's
+`notify`, `award` and `progress` reach on its own task (`moy_notes.h`), the
+items handed to processes, which a compiled program's `item_read` and
+`item_write` read and write on its own task (`moy_items.h`), and the
+kernel's I2C bus (`moy_bus.h`). Each header states how
 its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 (handles, PSRAM, stopping the VM), and `native/moy_play/moy_play.h` the
 memory shares. The design record is `docs/history/native_kernel_2026-09.md`
@@ -51,6 +70,11 @@ and its sprint docs beside it.
   cancelled (owner, 2026-11-01, #246), its memory motive met by the VM stop.
 - **The recovery floor is native**, because a kernel that reboots into a
   Python launcher has no floor when the VM cannot start (`moy_recovery.h`).
+  Its screen is the recovery console (owner, #246: the terminal is mostly C,
+  and the console is the same component): the Terminal's C face under the
+  reason and the choices (`native/moy_sh/moy_sh_floor.h`), fed by the board's
+  C input drivers through the kernel's input table, the card mounted from C
+  as it opens.
 - **Not built, by decision (2026-09-27):** a retained widget tree, in any
   language (`docs/surface_model_v1.md` L7); an interim memory mechanism (a
   release protocol, a soft-reset backstop and heap arenas were drafted and

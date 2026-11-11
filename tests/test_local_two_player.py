@@ -30,14 +30,14 @@ class _Stack:
 
 
 class _FakeBle:
-    """The kernel's BLE keyboard machine (native/moy_input/moy_hid.c) over a
-    stack that accepts everything: `state` drives it to ready or away, and
+    """The kernel's BLE keyboard machine (native/moy_input/moy_hid.c), a
+    keyboard picked, over a stack that accepts everything: `state` drives it to ready or away, and
     the two verbs the console calls are the machine's."""
 
     ADDR = (0, b"\x01\x02\x03\x04\x05\x06")
 
     def __init__(self, table, connected=True):
-        self.m = _mi.HidMachine(table, _Stack())
+        self.m = _mi.HidMachine(table, _Stack(), preferred=self.ADDR)
         self.src = self.m.src
         self.m.started(True)
         if connected:

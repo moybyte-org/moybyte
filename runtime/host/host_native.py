@@ -14,6 +14,11 @@ ctypes-loads that one path -- the dynamic loader hands each the same handle,
 so a state one sets is the state every other reads. There is no state to copy
 across and no forwarder between libraries.
 
+The C shell (native/moy_sh) is the one part that is not a Part: dash's
+sources compile under a shim of their own, so runtime/host/moy_sh.py builds
+them as a static archive, as a board builds its own static library, and the
+library links it whole.
+
 Two parts are taken only where their prerequisites are: the compiled-cart run
 (runtime/host/moyhost_wasm.c and native/moy_wasm) where WAMR builds for the host
 (runtime/wasm_binding.wamr), and the user-files layer and the C image decoder
@@ -47,6 +52,9 @@ CACHE = os.path.join(native_build.ROOT, ".build", "host")
 # face of the public UI API.
 CFLAGS = native_build.BASE_CFLAGS + [
     "-DMOY_PIXEL_RGB565=1", "-DMOY_WITH_LUA=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
+    # The web host's folders are a developer machine's: a tmp_path under a
+    # long TMPDIR runs past a board's 96 bytes.
+    "-DMOY_WEB_PATH_MAX=4096",
     "-Wno-double-promotion", "-Wno-float-conversion",
     # Newer compilers (GCC 14, CI's) refuse an implicit declaration; older
     # ones only warn, so a missing feature macro passed here and failed there.
@@ -71,12 +79,12 @@ def _module(name):
 def parts(verbose=False):
     """([Part], extra cflags, link flags): what the library is made of here."""
     out = [_module("runtime." + m).PART for m in (
-        "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_loop",
-        "moy_play", "net_binding")]
+        "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop", "moy_evq",
+        "moy_play", "net_binding", "elf_binding")]
     spike = _module("tools.moy_index_spike")
     out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
-    cflags, link = [], ["-lm"]
+    cflags, link = [], ["-lm", "-lpthread", "-ldl"]
     uf = _module("runtime.moy_ufiles_binding")
     if os.path.isdir(uf.UZLIB):
         out += [uf.part(), _module("runtime.moy_play").IMG_PART]
@@ -88,6 +96,14 @@ def parts(verbose=False):
         out.append(_module("runtime.lua_binding").WASM_PART)
         cflags += ["-DMOY_WASM=1", "-isystem", inc, "-DMOYHOST_WAMR_PIN=%s" % wasm.pin()]
         link = [lib, "-lm", "-lpthread", "-ldl"]
+    sh = _module("runtime.moy_sh").archive(ASAN if os.environ.get("MOYHOST_ASAN") else (),
+                                           verbose)
+    if sh is not None:
+        link = link + ["-Wl,--whole-archive", sh, "-Wl,--no-whole-archive"]
+    seal = _module("runtime.seal_binding").archive(
+        ASAN if os.environ.get("MOYHOST_ASAN") else (), verbose)
+    if seal is not None:
+        link = link + ["-Wl,--whole-archive", seal, "-Wl,--no-whole-archive"]
     return out, cflags, link
 
 

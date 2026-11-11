@@ -53,6 +53,8 @@
 // deletion commit records what that cost).
 
 #include "modmoycore_int.h"
+#include "moycore_svc.h"
+#include "py/mperrno.h"
 
 // -- helpers -----------------------------------------------------------------
 
@@ -179,6 +181,44 @@ static int push_mp_to_lua(lua_State *L, mp_obj_t v)
                          "(objects stay python-side; use the glue handles)");
 }
 
+// -- what a run keeps against the gc --------------------------------------------
+//
+// Each run row's Python objects (its registered callables, its layer restore
+// state, its last view() answer, its p8 machine's buffers) live in one rooted
+// list, KEEP_N entries a row, so the gc keeps them for exactly their run.
+enum { KEEP_CALLS, KEEP_LR, KEEP_VIEW, KEEP_P8MEM, KEEP_P8ROM, KEEP_N };
+
+static mp_obj_t *keep_items(void)
+{
+    mp_obj_t l = MP_STATE_VM(moycore_keep);
+    if (l == MP_OBJ_NULL) return NULL;
+    size_t n = 0;
+    mp_obj_t *items = NULL;
+    mp_obj_list_get(l, &n, &items);
+    return items;
+}
+
+static mp_obj_t keep_get(int k)
+{
+    mp_obj_t *items = keep_items();
+    mp_obj_t o = items ? items[RUN.slot * KEEP_N + k] : mp_const_none;
+    return o == mp_const_none ? MP_OBJ_NULL : o;
+}
+
+// MP_OBJ_NULL clears, and allocates nothing (a close with no VM writes it).
+static void keep_set(int k, mp_obj_t o)
+{
+    mp_obj_t *items = keep_items();
+    if (items == NULL) {
+        if (o == MP_OBJ_NULL) return;
+        mp_obj_t l = mp_obj_new_list(MOYCORE_RUNS * KEEP_N, NULL);
+        mp_obj_list_get(l, &(size_t){0}, &items);
+        for (size_t i = 0; i < MOYCORE_RUNS * KEEP_N; i++) items[i] = mp_const_none;
+        MP_STATE_VM(moycore_keep) = l;
+    }
+    items[RUN.slot * KEEP_N + k] = o == MP_OBJ_NULL ? mp_const_none : o;
+}
+
 static int l_tramp(lua_State *L)
 {
     int n = lua_gettop(L);
@@ -190,7 +230,7 @@ static int l_tramp(lua_State *L)
     for (int i = 0; i < n; i++) {
         args[i] = lua_to_mp(L, i + 1);
     }
-    mp_obj_t fn = mp_obj_subscr(MP_STATE_VM(moycore_calls),
+    mp_obj_t fn = mp_obj_subscr(keep_get(KEEP_CALLS),
                                 MP_OBJ_NEW_SMALL_INT(idx), MP_OBJ_SENTINEL);
     mp_obj_t ret = mp_const_none;
     if (!call_py(fn, (size_t)n, args, &ret)) {
@@ -201,8 +241,9 @@ static int l_tramp(lua_State *L)
 
 // -- the p8 machine and the shim's map walk: moycore_lua.c --------------------
 
-// p8_memory(mem, rom) -- register the machine's buffers (65536 and 0x4300
-// bytes, writable). Rooted in the VM state so the gc keeps them; None clears.
+// p8_memory(mem, rom) -- the machine's buffers (65536 and 0x4300 bytes,
+// writable) for the next run_begin, which the run keeps against the gc; None
+// gives it no machine.
 static mp_obj_t mod_p8_memory(mp_obj_t mem_obj, mp_obj_t rom_obj)
 {
     uint8_t *mem = NULL, *rom = NULL;
@@ -235,10 +276,10 @@ static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
 {
     if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
-    mp_obj_t calls = MP_STATE_VM(moycore_calls);
+    mp_obj_t calls = keep_get(KEEP_CALLS);
     if (calls == MP_OBJ_NULL) {
         calls = mp_obj_new_list(0, NULL);
-        MP_STATE_VM(moycore_calls) = calls;
+        keep_set(KEEP_CALLS, calls);
     }
     size_t n = 0;
     mp_obj_t *items = NULL;
@@ -313,7 +354,7 @@ static void layer_restore_drop(void)
     if (RUN.layers.blit_state) moy_gfx_k_layer_forget(RUN.layers.blit_state);
     RUN.layers.blit = NULL;
     RUN.layers.blit_state = NULL;
-    MP_STATE_VM(moycore_lr) = MP_OBJ_NULL;
+    keep_set(KEEP_LR, MP_OBJ_NULL);
 }
 
 // layer_restore(state) -- draw_layer through the screen canvas's restore
@@ -329,7 +370,7 @@ static mp_obj_t mod_layer_restore(mp_obj_t st)
         void *p = moycore_buf_w(st, &len);
         if (len < moy_gfx_k_layer_size() || ((uintptr_t)p & 3u) != 0)
             mp_raise_ValueError(MP_ERROR_TEXT("layer_restore: not a restore state"));
-        MP_STATE_VM(moycore_lr) = st;
+        keep_set(KEEP_LR, st);
         RUN.layers.blit = layer_blit;
         RUN.layers.blit_state = p;
     }
@@ -340,9 +381,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_layer_restore_obj, mod_layer_restore);
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
-//           snap, audio_q, pmem_bytes, cfg, flags, vm)
+//           snap, audio_q, pmem_bytes, cfg, flags, vm, app)
 //
 // Builds the console and opens the VM with libmoy's verb table -- and STOPS.
+// `app` is the app's run, moy_app's `run()` (moycore_app_run), whose role
+// names the Lua state opens, or None for a run with none.
 // `vm` False builds the console alone, for a compiled cart: wasm_open() then
 // hands it to the engine instead of a Lua state.
 // The cart is loaded by load() afterwards, because between the two the host
@@ -354,14 +397,33 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_layer_restore_obj, mod_layer_restore);
 // compositor presents, the sheet and tilemap the project holds, the snapshot
 // and queue the loop refreshes. Nothing is copied and nothing is allocated
 // here except the VM.
+// The app's run a launch hands over: the bytes moy_app's `run()` answers (a
+// moy_app_run_t, native/moy_app/moy_app_run.h), read in place for the open
+// that copies it, or NULL for None and in an image without native/moy_app.
+const struct moy_app_run *moycore_app_run(mp_obj_t o)
+{
+    if (o == mp_const_none) return NULL;
+#if MOYCORE_APP
+    size_t n = 0;
+    const void *p = moycore_buf_r(o, &n);
+    if (n != sizeof(moy_app_run_t))
+        mp_raise_ValueError(MP_ERROR_TEXT("moycore: not an app run"));
+    return (const struct moy_app_run *)p;
+#else
+    return NULL;
+#endif
+}
+
 static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 {
-    if (n_args != 14) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 14 args"));
+    if (n_args != 15) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 15 args"));
+    const struct moy_app_run *app = moycore_app_run(a[14]);
     int vm = mp_obj_is_true(a[13]);
-    if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
-                               MP_ERROR_TEXT("moycore: a run is already open"));
-    memset(&RUN, 0, sizeof(RUN));
-    MP_STATE_VM(moycore_view) = MP_OBJ_NULL;   // may name a heap a soft reset reset
+    if (moycore_run_new() == NULL)
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: every run row is held"));
+    for (int k = 0; k < KEEP_N; k++) keep_set(k, MP_OBJ_NULL);   // may name a reset heap
+    keep_set(KEEP_P8MEM, MP_STATE_VM(moycore_p8mem));
+    keep_set(KEEP_P8ROM, MP_STATE_VM(moycore_p8rom));
     // #211's two meters belong to the RUN, so they start here and survive
     // close() -- the report is read at the exit boundary, after the VM is gone.
     moycore_lua_meters_reset();
@@ -457,13 +519,14 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
         RUN.c.con.rng = lock_seed;
     }
 
+    mp_obj_t hnd = MP_OBJ_NEW_SMALL_INT(moycore_run_handle(&RUN));
     if (!vm) {
         // A compiled cart: the console and nothing on it until wasm_open().
         RUN.open = 1;
-        return mp_const_none;
+        return hnd;
     }
     char err[64];
-    if (moycore_lua_open(err, sizeof(err)) != 0) {
+    if (moycore_lua_open(app, err, sizeof(err)) != 0) {
         mp_raise_msg_varg(RUN.L == NULL ? &mp_type_MemoryError : &mp_type_RuntimeError,
                           MP_ERROR_TEXT("%s"), err);
     }
@@ -471,9 +534,9 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     moycore_prof_n = 0;
     moycore_lprof_forget();              // ...and the old one's hook died with it
     RUN.open = 1;
-    return mp_const_none;
+    return hnd;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_begin);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 15, 15, mod_run_begin);
 
 // Run one chunk. Shared by exec() and load(); the only difference between them
 // is whether _init follows.
@@ -520,9 +583,11 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
-// load(chunks) -> None, or the error text. `chunks` is a sequence of
+// load(chunks, layout=None) -> None, or the error text. `chunks` is a sequence of
 // (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
-// gives. Call AFTER any register()s and any exec()s.
+// gives. Call AFTER any register()s and any exec()s. `layout`, a responsive
+// app's (w, h, fs), is what its `_layout` hears before `_init`
+// (moycore_lua_load_finish).
 //
 // A LIST rather than one chunk, and the list has to be run HERE rather than
 // through exec(), because two things bracket the cart and a caller doing it by
@@ -531,10 +596,22 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 // (`spr = __moy_p8_spr or spr`), so wrapping after it leaves every draw call
 // the cart makes going to the unwrapped original -- which is silent, and
 // `verbs` is the only meter that sees this tier at all.
-static mp_obj_t mod_load(mp_obj_t chunks_obj)
+static mp_obj_t mod_load(size_t n_args, const mp_obj_t *args)
 {
+    mp_obj_t chunks_obj = args[0];
     if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
+    int32_t lay[3];
+    const int32_t *layout = NULL;
+    if (n_args > 1 && args[1] != mp_const_none) {
+        size_t nl = 0;
+        mp_obj_t *l = NULL;
+        mp_obj_get_array(args[1], &nl, &l);
+        if (nl != 3)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: load's layout is (w, h, fs)"));
+        for (int i = 0; i < 3; i++) lay[i] = (int32_t)mp_obj_get_int(l[i]);
+        layout = lay;
+    }
     size_t nchunks = 0;
     mp_obj_t *chunks = NULL;
     mp_obj_get_array(chunks_obj, &nchunks, &chunks);
@@ -550,11 +627,32 @@ static mp_obj_t mod_load(mp_obj_t chunks_obj)
     }
     // _init, then the collector settled (moycore_lua_load_finish).
     char err[192];
-    if (moycore_lua_load_finish(err, sizeof(err)) != 0)
+    if (moycore_lua_load_finish(layout, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_load_obj, mod_load);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_load_obj, 1, 2, mod_load);
+
+// layout(w, h, fs) -> True, False, or the error text: the current run's
+// `_layout` called (a Lua cart's global, a compiled cart's export) where it
+// defines one, False where it defines none. A responsive app's surface
+// changed (docs/app_api_v1.md §3); its first call is load's or wasm_open's.
+static mp_obj_t mod_layout(mp_obj_t w, mp_obj_t h, mp_obj_t fs)
+{
+    char err[192];
+    int rc;
+    int32_t a = (int32_t)mp_obj_get_int(w), b = (int32_t)mp_obj_get_int(h);
+    int32_t c = (int32_t)mp_obj_get_int(fs);
+#if MOYCORE_WASM
+    if (RUN.wasm) rc = moycore_wasm_layout(a, b, c, err, sizeof(err));
+    else
+#endif
+    if (RUN.L) rc = moycore_lua_layout(a, b, c, err, sizeof(err));
+    else return mp_const_false;
+    if (rc < 0) return mp_obj_new_str(err, strlen(err));
+    return mp_obj_new_bool(rc > 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_layout_obj, mod_layout);
 
 // gc() -> the VM's heap in KB after a FULL collect, or None with no run.
 //
@@ -761,9 +859,8 @@ void moycore_close_c(void)
     moycore_prof_n = 0;
     moycore_lprof_forget();              // the hook went with it; the table is ours
     moycore_run_close(&RUN.c);
-    RUN.c.snap = NULL;
-    RUN.c.aq = NULL;
-    MP_STATE_VM(moycore_calls) = MP_OBJ_NULL;   // un-root: the gc may reclaim
+    for (int k = 0; k < KEEP_N; k++) keep_set(k, MP_OBJ_NULL);   // un-root: the gc may reclaim
+    moycore_run_end(&RUN);
 }
 
 static mp_obj_t mod_close(void)
@@ -782,11 +879,10 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
 {
 #if MOYCORE_WASM
-    if (RUN.open) {
-        snprintf(err, n, "moycore: a run is already open");
+    if (moycore_run_new() == NULL) {
+        snprintf(err, n, "moycore: every run row is held");
         return 1;
     }
-    memset(&RUN, 0, sizeof(RUN));
     moycore_lua_meters_reset();
     moy_canvas_init(&RUN.c.canvas, (moy_pixel *)o->fb, o->w, o->h);
 #ifdef MOY_PIXEL_RGB565
@@ -814,7 +910,8 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
     moycore_whead_len = o->head_len;
     moycore_wpages = o->pages;
     int rc = moycore_wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
-                                o->swapped, o->allow_unsigned, o->interp, err, n);
+                                o->swapped, o->allow_unsigned, o->interp, o->ring, o->app,
+                                o->layout, err, n);
     moycore_whead = NULL;
     moycore_whead_len = 0;
     return rc;
@@ -825,11 +922,23 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
 #endif
 }
 
-// The VM is going (native/moy_kernel's soft reset): a run still open closes
-// with it, while its objects are still the VM's.
+// The kernel's stop (native/moy_kernel): nonzero while the VM goes for a VM
+// stop rather than a soft reset. Weak, for an image without the stop.
+int moy_kernel_stop_pending(void) __attribute__((weak));
+
+// The VM is going (native/moy_kernel's soft reset, a VM stop's included): a
+// run still open closes with it, while its objects are still the VM's; the
+// Lua services run on through a VM stop and end with a soft reset.
 void moycore_vm_stop(void)
 {
-    if (RUN.open) moycore_close_c();
+    for (int i = 0; i < MOYCORE_RUNS; i++) {
+        moycore_run *r = moycore_run_at(i);
+        if (r == NULL || !r->open) continue;
+        moycore_run_use(r);
+        moycore_close_c();
+    }
+    moycore_svc_vm_stop(moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() != 0);
+    MP_STATE_VM(moycore_keep) = MP_OBJ_NULL;    // the list is the heap going
 }
 
 // get_global_len(name) -- a table global's length (Lua's #t), or None: the
@@ -895,7 +1004,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 static mp_obj_t mod_view(void)
 {
     if (!RUN.open || RUN.c.con.view_w <= 0) return mp_const_none;
-    mp_obj_t last = MP_STATE_VM(moycore_view);
+    mp_obj_t last = keep_get(KEEP_VIEW);
     if (last != MP_OBJ_NULL) {
         mp_obj_tuple_t *lt = MP_OBJ_TO_PTR(last);
         if (MP_OBJ_SMALL_INT_VALUE(lt->items[0]) == RUN.c.con.view_w
@@ -907,13 +1016,38 @@ static mp_obj_t mod_view(void)
     t[0] = MP_OBJ_NEW_SMALL_INT(RUN.c.con.view_w);
     t[1] = MP_OBJ_NEW_SMALL_INT(RUN.c.con.view_h);
     last = mp_obj_new_tuple(2, t);
-    MP_STATE_VM(moycore_view) = last;
+    keep_set(KEEP_VIEW, last);
     return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_view_obj, mod_view);
 
 static mp_obj_t mod_active(void) { return mp_obj_new_bool(RUN.open); }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
+
+// use(h) -- the run run_begin answered `h` made current, so every call after
+// acts on it: True, or False when no run holds `h` any more.
+static mp_obj_t mod_use(mp_obj_t h_obj)
+{
+    moycore_run *r = moycore_run_of((uint32_t)mp_obj_get_int(h_obj));
+    if (r == NULL) return mp_const_false;
+    moycore_run_use(r);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_use_obj, mod_use);
+
+// runs() -- how many runs are open at once.
+static mp_obj_t mod_runs(void) { return MP_OBJ_NEW_SMALL_INT(moycore_run_count()); }
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_runs_obj, mod_runs);
+
+// heap(h) -- run `h`'s Lua heap in bytes, Lua's own count; None for no run
+// or one with no VM.
+static mp_obj_t mod_heap(mp_obj_t h_obj)
+{
+    moycore_run *r = moycore_run_of((uint32_t)mp_obj_get_int(h_obj));
+    if (r == NULL || r->L == NULL) return mp_const_none;
+    return mp_obj_new_int_from_uint(moycore_run_heap(r));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_heap_obj, mod_heap);
 
 // set_sram_floor(kb) -> the effective kb. Clamped [16, 256]; returns the
 // compiled default unchanged on a build with no region to choose between, so
@@ -1014,6 +1148,108 @@ static mp_obj_t mod_pool_check(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
+// -- the Lua tier's services (moycore_svc.h) ---------------------------------
+//   svc_start(pid, name, src[, env[, app]]) -> h   svc_stop(h)   svc_reap(h)
+//                                 (src: its one script, or its scripts as
+//                                  (text, chunkname) pairs in load order,
+//                                  a None chunkname the service's own;
+//                                  app: its app's run, moy_app's `run()`)
+//   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
+//   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
+
+static void svc_check(int rc)
+{
+    static const int err[] = { 0, MP_EBADF, MP_ENOSPC, MP_ENOMEM, MP_EINVAL };
+    if (rc != MOYCORE_SVC_OK) {
+        mp_raise_OSError(rc > 0 && rc < (int)(sizeof(err) / sizeof(err[0])) ? err[rc] : MP_EIO);
+    }
+}
+
+static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
+{
+    moycore_svc_chunk_t one;
+    moycore_svc_chunk_t *chunks = &one;
+    size_t count = 1;
+    if (mp_obj_is_str(args[2])) {
+        one.src = mp_obj_str_get_data(args[2], &one.n);
+        one.name = NULL;
+    } else {
+        mp_obj_t *items;
+        mp_obj_get_array(args[2], &count, &items);
+        chunks = m_new(moycore_svc_chunk_t, count);
+        for (size_t i = 0; i < count; i++) {
+            mp_obj_t *pair;
+            mp_obj_get_array_fixed_n(items[i], 2, &pair);
+            chunks[i].src = mp_obj_str_get_data(pair[0], &chunks[i].n);
+            chunks[i].name = pair[1] != mp_const_none ? mp_obj_str_get_str(pair[1]) : NULL;
+        }
+    }
+    const char *env = NULL;
+    size_t envn = 0;
+    if (n_args > 3 && args[3] != mp_const_none) {
+        env = mp_obj_str_get_data(args[3], &envn);
+    }
+    const struct moy_app_run *app = n_args > 4 ? moycore_app_run(args[4]) : NULL;
+    uint32_t h;
+    int rc = moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
+                               chunks, count, env, envn, app, &h);
+    if (chunks != &one) {
+        m_del(moycore_svc_chunk_t, chunks, count);
+    }
+    svc_check(rc);
+    return mp_obj_new_int_from_uint(h);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 5, mod_svc_start);
+
+static mp_obj_t mod_svc_stop(mp_obj_t h)
+{
+    svc_check(moycore_svc_stop((uint32_t)mp_obj_get_int(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_stop_obj, mod_svc_stop);
+
+static mp_obj_t mod_svc_info(mp_obj_t h)
+{
+    moycore_svc_info_t i;
+    if (moycore_svc_info((uint32_t)mp_obj_get_int(h), &i) != MOYCORE_SVC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t t[8] = {
+        MP_OBJ_NEW_SMALL_INT(i.state), mp_obj_new_int(i.exit), mp_obj_new_int_from_uint(i.heap),
+        mp_obj_new_int_from_uint(i.cpu_us), MP_OBJ_NEW_SMALL_INT(i.strikes),
+        mp_obj_new_str(i.why, strlen(i.why)), MP_OBJ_NEW_SMALL_INT(i.wakes),
+        MP_OBJ_NEW_SMALL_INT(i.mail),
+    };
+    return mp_obj_new_tuple(8, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_info_obj, mod_svc_info);
+
+static mp_obj_t mod_svc_reap(mp_obj_t h)
+{
+    svc_check(moycore_svc_reap((uint32_t)mp_obj_get_int(h)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_reap_obj, mod_svc_reap);
+
+static mp_obj_t mod_svc_tasks(void)
+{
+    return mp_obj_new_bool(moycore_svc_tasks());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_tasks_obj, mod_svc_tasks);
+
+static mp_obj_t mod_svc_step(mp_obj_t now)
+{
+    return mp_obj_new_int_from_uint(moycore_svc_step((uint32_t)mp_obj_get_int_truncated(now)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_step_obj, mod_svc_step);
+
+static mp_obj_t mod_svc_reset(void)
+{
+    moycore_svc_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_reset_obj, mod_svc_reset);
+
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
@@ -1022,6 +1258,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layout),      MP_ROM_PTR(&mod_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
     // The compiled cart: 1 when the engine is in this build (wasm_open works).
@@ -1031,6 +1268,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_files_room),  MP_ROM_PTR(&moycore_files_room_obj) },
     { MP_ROM_QSTR(MP_QSTR_files_kept),  MP_ROM_PTR(&moycore_files_kept_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_quit),   MP_ROM_PTR(&moycore_wasm_quit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wasm_ran),    MP_ROM_PTR(&moycore_wasm_ran_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_table),  MP_ROM_PTR(&moycore_wasm_table_obj) },
     { MP_ROM_QSTR(MP_QSTR_take_frames), MP_ROM_PTR(&moycore_take_frames_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame),       MP_ROM_PTR(&moycore_frame_obj) },
@@ -1058,6 +1296,16 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
+    { MP_ROM_QSTR(MP_QSTR_use),         MP_ROM_PTR(&mod_use_obj) },
+    { MP_ROM_QSTR(MP_QSTR_runs),        MP_ROM_PTR(&mod_runs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_heap),        MP_ROM_PTR(&mod_heap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_start),   MP_ROM_PTR(&mod_svc_start_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_stop),    MP_ROM_PTR(&mod_svc_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_info),    MP_ROM_PTR(&mod_svc_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_reap),    MP_ROM_PTR(&mod_svc_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_tasks),   MP_ROM_PTR(&mod_svc_tasks_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_step),    MP_ROM_PTR(&mod_svc_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_svc_reset),   MP_ROM_PTR(&mod_svc_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },
@@ -1084,7 +1332,11 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_SNAP_KEY_DOWN), MP_ROM_INT(SNAP_KEY_DOWN) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_TEXTMODE), MP_ROM_INT(SNAP_TEXTMODE) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_QUIT),   MP_ROM_INT(SNAP_QUIT) },
-    { MP_ROM_QSTR(MP_QSTR_SNAP_WINDOW), MP_ROM_INT(SNAP_WINDOW) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_FACE), MP_ROM_INT(SNAP_FACE) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_ROOM_X), MP_ROM_INT(SNAP_ROOM_X) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_ROOM_Y), MP_ROM_INT(SNAP_ROOM_Y) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_ROOM_W), MP_ROM_INT(SNAP_ROOM_W) },
+    { MP_ROM_QSTR(MP_QSTR_SNAP_ROOM_H), MP_ROM_INT(SNAP_ROOM_H) },
     // ...and the audio queue's.
     { MP_ROM_QSTR(MP_QSTR_AQ_SLOTS),    MP_ROM_INT(AQ_SLOTS) },
     { MP_ROM_QSTR(MP_QSTR_AQ_MAX),      MP_ROM_INT(AQ_MAX) },
@@ -1104,14 +1356,11 @@ const mp_obj_module_t moycore_user_cmodule = {
 
 MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
 
-// The registered Python callables, held against the gc for the run's lifetime:
-// the Lua closures reference them only by INDEX, which the collector cannot
-// see. Cleared at close().
-MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
-MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_lr);
-// The compiled cart's open data file (`read`), held between its reads.
-// The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
+// What each run row keeps against the gc (keep_get): its registered Python
+// callables, which the Lua closures reference only by INDEX the collector
+// cannot see, its layer restore state, its last view() answer and its p8
+// machine's buffers. Cleared at the row's close.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_keep);
+// The PICO-8 machine's buffers p8_memory hands the next run_begin.
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);
-// The last view() answer, returned again while the declaration stands.
-MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_view);

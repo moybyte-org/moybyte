@@ -5,15 +5,14 @@ through `runtime/host/moy_spine_binding.py`. The suites run this twin beside the
 and hold the two to one log (tests/test_moy_spine.py, the random walk of
 tests/test_moy_spine_twins.py, the spine trace in tests/test_semantic_traces.py).
 
-Six components, each holding numbers and strings only -- no runtime's
+Five components, each holding numbers and strings only -- no runtime's
 object outlives a call into one (native/moy_kernel/moy_kernel.h):
 
   Table        a handle table: rows named by kinded, generation-checked ints
   AppRegistry  the registered system apps: id, title, text mode, min size
   BackStack    the process back-stack: kinds, launcher root at the bottom
   Returns      where a leaving surface lands: a run's caller, an app's return
-  Leases       the WiFi radio's holders, a closed set of tags
-  Settings     system.json as the store holds it: key -> the value's JSON text,
+  Settings     system/settings as the store holds it: key -> the value's JSON text,
                written through one setter that persists
 
 A handle is gen << GEN_SHIFT | kind << KIND_SHIFT | slot: never 0, always
@@ -59,6 +58,8 @@ KIND_CLIP = 9
 KIND_IMAGE = 10
 KIND_ACTOR = 11
 KIND_GRANT = 12
+KIND_LEASE = 13
+KIND_PROC = 14
 
 _SLOT_MASK = SLOTS - 1
 _KIND_MASK = 0xF
@@ -338,67 +339,24 @@ class Returns:
         return b
 
 
-LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev")
-
-
-def _lease_bit(tag):
-    if not isinstance(tag, str):
-        raise TypeError("a lease tag is a str")
-    for i in range(len(LEASE_TAGS)):
-        if LEASE_TAGS[i] == tag:
-            return 1 << i
-    raise ValueError("unknown lease tag %r" % tag)
-
-
-class Leases:
-    """The radio's holders as a mask over LEASE_TAGS. A hold is idempotent per
-    tag and releasing a tag nobody holds is not an error; an unknown tag is."""
-
-    def __init__(self):
-        self._mask = 0
-
-    def hold(self, tag):
-        """Take `tag`'s lease; the mask after."""
-        self._mask |= _lease_bit(tag)
-        return self._mask
-
-    def release(self, tag):
-        """Drop `tag`'s lease; the mask after (0: nobody holds the radio)."""
-        self._mask &= ~_lease_bit(tag)
-        return self._mask
-
-    def mask(self):
-        return self._mask
-
-    def held(self, tag):
-        return bool(self._mask & _lease_bit(tag))
-
-    def holders(self):
-        """The holding tags, in LEASE_TAGS order."""
-        return [LEASE_TAGS[i] for i in range(len(LEASE_TAGS))
-                if self._mask & (1 << i)]
-
-
 _KERNEL = []
 
 
 def kernel(fresh):
-    """(apps, back, returns, leases): the console's tables as the kernel's own
+    """(apps, back, returns): the console's tables as the kernel's own
     (docs/history/kernel_cartpath_2026-10.md section 5.4) -- one set per process, made
     at the first call and kept, so a VM stop leaves them for the next VM. The
     registry is cleared at every call (the console registers its apps at each
-    start); `fresh` also puts the back-stack, the return records and the
-    leases back as they are made, which every start but a return start asks
-    for."""
+    start); `fresh` also puts the back-stack and the return records back as
+    they are made, which every start but a return start asks for."""
     if not _KERNEL:
         apps = AppRegistry()
-        _KERNEL.extend((apps, BackStack(), Returns(apps), Leases()))
-    apps, back, returns, leases = _KERNEL
+        _KERNEL.extend((apps, BackStack(), Returns(apps)))
+    apps, back, returns = _KERNEL
     apps.__init__()
     if fresh:
         back.__init__()
         returns.__init__(apps)
-        leases.__init__()
     return tuple(_KERNEL)
 
 
@@ -447,7 +405,7 @@ def _value(text):
 
 
 class Settings:
-    """system.json as rows: one per top-level key, holding that value's JSON
+    """system/settings as rows: one per top-level key, holding that value's JSON
     text. `dump` is the file: the object json.dumps writes, keys in row order
     (a new key goes last). The rows are the store of record: `get` decodes a
     row to a fresh value, so nothing a caller does to what it got can change a
@@ -474,7 +432,7 @@ class Settings:
         was read is what is on disk, so the store is clean."""
         d = json.loads(text)
         if not isinstance(d, dict):
-            raise ValueError("system.json is not an object")
+            raise ValueError("system/settings is not an object")
         self.adopt(d)
         return len(self._keys)
 

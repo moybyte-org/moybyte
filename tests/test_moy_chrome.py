@@ -30,7 +30,7 @@ def ws(tmp_path_factory):
 def _both(ws, piece, *args):
     """The canvas after a replay, and a raw buffer after the raster, from the
     same cleared start."""
-    cv = ws.canvas
+    cv = ws.run.canvas
     cv.cls(0)
     mp = ui.chrome_inks(ws.theme_colors, NAMES)
     ops = getattr(mp, piece)(*args)
@@ -98,7 +98,7 @@ def test_a_run_the_kernel_drives_shows_the_banners_until_their_deadlines(ws):
     run's frame in the look of the theme chrome_inks handed over
     (moy_ui_unlock) until each deadline, and nothing after -- whatever theme
     the toolkit's ring of looks holds in which slot."""
-    cv = ws.canvas
+    cv = ws.run.canvas
     w, h = cv.w, cv.h
     pal = [cv._wire[cv._pal_map[i]] for i in range(64)]
     use_theme(ws, "night", "dark")      # a test above leaves another theme up

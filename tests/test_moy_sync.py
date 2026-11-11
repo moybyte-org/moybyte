@@ -39,11 +39,11 @@ def _bump_mtime(path):
     os.utime(path, (st.st_atime, st.st_mtime + 2))
 
 
-def _drain_batches(w, pin=None):
+def _drain_batches(w):
     """Every wire batch the watcher produces, acked ok -- the worker's pump."""
     out = []
     while True:
-        body = w.take_json(pin)
+        body = w.take_json()
         if not body:
             return out
         out.append(json.loads(body))
@@ -271,13 +271,13 @@ def test_publish_without_staged_tmp_is_an_error_not_a_truncation(tmp_path):
 
 
 def test_parse_batch_refuses_malformed_bodies():
-    none = (None, None, None)
+    none = (None, None)
     assert parse_batch(b"not json") == none
     assert parse_batch(b"[1,2]") == none
     assert parse_batch(json.dumps({"v": 99, "ops": []})) == none
     assert parse_batch(json.dumps({"v": 1, "ops": {}})) == none
-    ops, pin, root = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
-    assert (ops, pin, root) == ([], "77", "carts")
+    ops, root = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
+    assert (ops, root) == ([], "carts"), "a field the envelope no longer has is read past"
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +423,10 @@ def test_a_files_push_is_never_journaled(tmp_path):
     drawing pushed from a browser lands as a file and nothing else."""
     _store(tmp_path)
     files = _files_store(tmp_path)
-    apply_ops(str(files), [{"p": "drawings/sunset.moyimg", "t": "0,1,"}],
+    apply_ops(str(files), [{"p": "Pictures/sunset.moyimg", "t": "0,1,"}],
               root_id=moy_sync.FILES_ROOT_ID, journal=True)
-    assert (files / "drawings" / "sunset.moyimg").read_text() == "0,1,"
-    assert not (files / "drawings" / "journal").exists()
+    assert (files / "Pictures" / "sunset.moyimg").read_text() == "0,1,"
+    assert not (files / "Pictures" / "journal").exists()
     assert not any(p.name == "journal.jsonl" for p in files.rglob("*"))
 
 
@@ -502,18 +502,18 @@ def test_a_big_file_spans_batches_and_survives_a_mid_file_drop(tmp_path):
     assert published and "".join(parts) == big
 
 
-def test_take_json_carries_the_protocol_and_the_pin(tmp_path):
+def test_take_json_carries_the_protocol(tmp_path):
     root = _store(tmp_path)
     w = StoreWatcher(str(root))
     p = root / "hop.moy" / "main.py"
     p.write_text("v2")
     _bump_mtime(p)
     w.sweep()
-    doc = json.loads(w.take_json("1234"))
-    assert doc["v"] == moy_sync.PROTOCOL_V and doc["pin"] == "1234"
+    doc = json.loads(w.take_json())
+    assert doc["v"] == moy_sync.PROTOCOL_V and "pin" not in doc
     assert "root" not in doc, "a carts batch stays byte-shaped as v1 boards read it"
-    ops, pin, root = parse_batch(json.dumps(doc))
-    assert pin == "1234" and ops == doc["ops"] and root == "carts"
+    ops, root = parse_batch(json.dumps(doc))
+    assert ops == doc["ops"] and root == "carts"
 
 
 # ---------------------------------------------------------------------------
@@ -527,14 +527,14 @@ def _files_store(tmp_path, name="files"):
     """A files root shaped like a real one: two kinds, a folder-valued
     recording, and the two directories that must never travel."""
     root = tmp_path / name
-    (root / "drawings").mkdir(parents=True)
-    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
-    (root / "recordings" / "take_1").mkdir(parents=True)
-    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / "Pictures").mkdir(parents=True)
+    (root / "Pictures" / "sunset.moyimg").write_text("0,1,")
+    (root / "Recordings" / "take_1").mkdir(parents=True)
+    (root / "Recordings" / "take_1" / "part0.json").write_text("[1]")
     (root / ".history" / "drawings").mkdir(parents=True)
     (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
-    (root / "trash" / "drawings").mkdir(parents=True)
-    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    (root / ".Trash" / "drawings").mkdir(parents=True)
+    (root / ".Trash" / "drawings" / "gone.moyimg").write_text("9,")
     return root
 
 
@@ -549,8 +549,8 @@ def test_a_files_batch_names_its_root_and_a_v1_board_refuses_it():
     before files sync checks `v != 1` and answers "bad batch"; without the bump
     its apply would read `drawings/sunset.moyimg` as a cart-relative path and
     write it into the CARTS root, inventing a `drawings` cart on the shelf."""
-    body = _files_batch({"p": "drawings/sunset.moyimg", "t": "0,"})
-    ops, _pin, root = parse_batch(body)
+    body = _files_batch({"p": "Pictures/sunset.moyimg", "t": "0,"})
+    ops, root = parse_batch(body)
     assert root == FILES_ROOT_ID and len(ops) == 1
 
     def old_parse_batch(doc):                # the shipped v1 receiver, verbatim
@@ -566,9 +566,9 @@ def test_a_files_batch_misrouted_to_carts_would_have_made_a_bogus_cart(tmp_path)
     'simplifies' the two versions back into one."""
     root = _store(tmp_path)
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "drawings/sunset.moyimg", "t": "0,"}], "carts")
+        str(root), [{"p": "Pictures/sunset.moyimg", "t": "0,"}], "carts")
     assert (applied, errors) == (1, []) and shelf
-    assert (root / "drawings" / "sunset.moyimg").exists(), \
+    assert (root / "Pictures" / "sunset.moyimg").exists(), \
         "a carts receiver has no way to know this was never a cart"
 
 
@@ -576,10 +576,10 @@ def test_a_v1_batch_may_not_smuggle_another_root():
     """The version is what a v1 receiver checks, so the two must never be able
     to disagree about the same bytes."""
     assert parse_batch(json.dumps(
-        {"v": 1, "root": "files", "ops": []})) == (None, None, None)
+        {"v": 1, "root": "files", "ops": []})) == (None, None)
     assert parse_batch(json.dumps(
-        {"v": 2, "root": "wifi", "ops": []})) == (None, None, None)
-    assert parse_batch(json.dumps({"v": 2, "ops": []})) == (None, None, None)
+        {"v": 2, "root": "wifi", "ops": []})) == (None, None)
+    assert parse_batch(json.dumps({"v": 2, "ops": []})) == (None, None)
 
 
 def test_files_paths_must_start_with_a_kind_the_store_knows(tmp_path):
@@ -588,14 +588,14 @@ def test_files_paths_must_start_with_a_kind_the_store_knows(tmp_path):
     root = _files_store(tmp_path)
     applied, errors, _ = apply_ops(str(root), [
         {"p": ".history/drawings/sunset.jsonl", "t": "no"},
-        {"p": "trash/drawings/gone.moyimg", "t": "no"},
+        {"p": ".Trash/drawings/gone.moyimg", "t": "no"},
         {"p": "wifi.json", "t": "no"},
         {"p": "carts/hop.moy/main.py", "t": "no"},
-        {"p": "drawings/ok.moyimg", "t": "1,"},
+        {"p": "Pictures/ok.moyimg", "t": "1,"},
     ], FILES_ROOT_ID)
     assert applied == 1
     assert [i for i, _ in errors] == [0, 1, 2, 3]
-    assert (root / "drawings" / "ok.moyimg").read_text() == "1,"
+    assert (root / "Pictures" / "ok.moyimg").read_text() == "1,"
     assert (root / ".history" / "drawings" / "sunset.jsonl").read_text() \
         == '{"t": "kf"}\n'
 
@@ -604,22 +604,22 @@ def test_dc_deletes_an_item_and_never_a_whole_kind(tmp_path):
     """A recording is folder-valued and must die as a unit; a kind dir must
     not, or one item leaving our copy would wipe the peer's whole drawings."""
     root = _files_store(tmp_path)
-    _, errors, _ = apply_ops(str(root), [{"p": "drawings", "dc": 1}],
+    _, errors, _ = apply_ops(str(root), [{"p": "Pictures", "dc": 1}],
                              FILES_ROOT_ID)
-    assert errors and (root / "drawings").is_dir()
+    assert errors and (root / "Pictures").is_dir()
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "recordings/take_1", "dc": 1}], FILES_ROOT_ID)
+        str(root), [{"p": "Recordings/take_1", "dc": 1}], FILES_ROOT_ID)
     assert (applied, errors) == (1, [])
-    assert not (root / "recordings" / "take_1").exists()
-    assert (root / "recordings").is_dir(), "the kind dir survives its item"
+    assert not (root / "Recordings" / "take_1").exists()
+    assert (root / "Recordings").is_dir(), "the kind dir survives its item"
     assert not shelf, "the launcher renders no recordings"
 
 
 def test_a_files_batch_never_dirties_the_shelf(tmp_path):
     root = _files_store(tmp_path)
-    for ops in ([{"p": "drawings/new.moyimg", "t": "0,"}],
-                [{"p": "drawings/sunset.moyimg", "d": 1}],
-                [{"p": "docs/story.md", "t": "hi"}]):
+    for ops in ([{"p": "Pictures/new.moyimg", "t": "0,"}],
+                [{"p": "Pictures/sunset.moyimg", "d": 1}],
+                [{"p": "Documents/story.md", "t": "hi"}]):
         _, errors, shelf = apply_ops(str(root), ops, FILES_ROOT_ID)
         assert not errors and not shelf
 
@@ -629,9 +629,9 @@ def test_the_files_root_is_created_on_demand(tmp_path):
     makes something -- and the first thing a peer sends may BE that."""
     root = tmp_path / "files"
     applied, errors, _ = apply_ops(
-        str(root), [{"p": "drawings/first.moyimg", "t": "0,"}], FILES_ROOT_ID)
+        str(root), [{"p": "Pictures/first.moyimg", "t": "0,"}], FILES_ROOT_ID)
     assert (applied, errors) == (1, [])
-    assert (root / "drawings" / "first.moyimg").read_text() == "0,"
+    assert (root / "Pictures" / "first.moyimg").read_text() == "0,"
 
 
 def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
@@ -639,11 +639,11 @@ def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
     assert not w.sweep(), "the freshly pulled files root has nothing to tell"
     shipped = {rel for rel in w._snap}
-    assert shipped == {"drawings/sunset.moyimg", "recordings/take_1/part0.json"}
-    assert not any(r.startswith(".history/") or r.startswith("trash/")
+    assert shipped == {"Pictures/sunset.moyimg", "Recordings/take_1/part0.json"}
+    assert not any(r.startswith(".history/") or r.startswith(".Trash/")
                    for r in shipped)
     # A write inside either stays invisible, sweep after sweep.
-    p = root / "trash" / "drawings" / "gone.moyimg"
+    p = root / ".Trash" / "drawings" / "gone.moyimg"
     p.write_text("still here")
     _bump_mtime(p)
     assert not w.sweep()
@@ -653,16 +653,16 @@ def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
 def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     root = _files_store(tmp_path)
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
-    p = root / "drawings" / "sunset.moyimg"
+    p = root / "Pictures" / "sunset.moyimg"
     p.write_text("2,")
     _bump_mtime(p)
     w.sweep()
-    doc = json.loads(w.take_json("1234"))
+    doc = json.loads(w.take_json())
     assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED
-    assert doc["root"] == FILES_ROOT_ID and doc["pin"] == "1234"
-    ops, pin, root_id = parse_batch(json.dumps(doc))
-    assert (pin, root_id) == ("1234", FILES_ROOT_ID)
-    assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
+    assert doc["root"] == FILES_ROOT_ID
+    ops, root_id = parse_batch(json.dumps(doc))
+    assert root_id == FILES_ROOT_ID
+    assert ops == [{"p": "Pictures/sunset.moyimg", "t": "2,"}]
 
 
 def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
@@ -671,19 +671,19 @@ def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
     the file the board holds is the file the browser gets, byte for byte."""
     root = _files_store(tmp_path)
     applied, errors, shelf = apply_ops(
-        str(root), [{"p": "docs/story.md", "t": "# Chapter one\n\nIt began."}],
+        str(root), [{"p": "Documents/story.md", "t": "# Chapter one\n\nIt began."}],
         FILES_ROOT_ID)
     assert (applied, errors, shelf) == (1, [], False)
-    p = root / "docs" / "story.md"
+    p = root / "Documents" / "story.md"
     assert p.read_text() == "# Chapter one\n\nIt began."
     w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
     w.sweep()                                  # the first sweep is the baseline
     p.write_text("# Chapter two")
     _bump_mtime(p)
     assert w.sweep()
-    ops, _pin, root_id = parse_batch(w.take_json("1234"))
+    ops, root_id = parse_batch(w.take_json())
     assert root_id == FILES_ROOT_ID
-    assert ops == [{"p": "docs/story.md", "t": "# Chapter two"}]
+    assert ops == [{"p": "Documents/story.md", "t": "# Chapter two"}]
 
 
 def test_a_missing_files_root_is_an_empty_watcher_not_a_crash(tmp_path):
@@ -730,7 +730,6 @@ def _wired(tmp_path, files=True):
     wb._S["store_mode"] = None
     wb._S["watchers"] = wb._build_watchers(str(carts), False)
     wb._S.pop("sync_took", None)
-    wb._S.pop("sync_pin", None)
     return wb, carts
 
 
@@ -752,7 +751,7 @@ def test_the_pump_drains_carts_first_then_files(tmp_path):
     p = carts / "hop.moy" / "main.py"
     p.write_text("x = 2\n")
     _bump_mtime(p)
-    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d = tmp_path / "files" / "Pictures" / "sunset.moyimg"
     d.write_text("9,")
     _bump_mtime(d)
     first = json.loads(wb.sync_poll_json())
@@ -761,7 +760,7 @@ def test_the_pump_drains_carts_first_then_files(tmp_path):
     wb.sync_ack(True)
     second = json.loads(wb.sync_poll_json())
     assert second["root"] == FILES_ROOT_ID
-    assert second["ops"] == [{"p": "drawings/sunset.moyimg", "t": "9,"}]
+    assert second["ops"] == [{"p": "Pictures/sunset.moyimg", "t": "9,"}]
     wb.sync_ack(True)
     assert wb.sync_poll_json() == ""
 
@@ -770,7 +769,7 @@ def test_the_ack_goes_back_to_the_watcher_that_took(tmp_path):
     """Acking the wrong root would strand its batch in flight forever and
     requeue nothing -- the edit would be silently dropped."""
     wb, _carts = _wired(tmp_path)
-    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d = tmp_path / "files" / "Pictures" / "sunset.moyimg"
     d.write_text("9,")
     _bump_mtime(d)
     batch = json.loads(wb.sync_poll_json())
@@ -793,7 +792,7 @@ def test_sync_off_stops_both_roots(tmp_path):
 
 # ---------------------------------------------------------------------------
 # The console's own documents (moy_sync.SYSTEM_ROOT): a site-mode browser keeps
-# system.json, the badges and the edited icons in its OPFS. The JS half (the
+# system/settings, the badges and the edited icons in its OPFS. The JS half (the
 # OPFS apply and its crash-safety) is firmware/web_runner/store_test.mjs; the
 # reload itself is tests/test_web_system_persist.py. Their board half -- the
 # per-key merge, the pull, the parked batch -- is tests/test_system_sync.py.
@@ -806,13 +805,16 @@ def _console_dir(tmp_path):
     top = tmp_path / "moy"
     (top / "carts" / "hop.moy").mkdir(parents=True)
     (top / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
-    (top / "files" / "drawings").mkdir(parents=True)
-    (top / "system.json").write_text('{"theme": "dusk", "show_fps": false}')
-    (top / "achievements.json").write_text('{"unlocked": ["first_open"]}')
+    (top / "files" / "Pictures").mkdir(parents=True)
+    (top / "system").mkdir()
+    (top / "system" / "settings").write_text('show_fps = false\ntheme = "dusk"\n')
+    (top / "system.json").write_text('{"theme": "dusk"}')
+    (top / "achievements.json").write_text('{"v": 2, "found": {}}')
     (top / "shared.moygfx").write_bytes(bytes(range(40)))
     (top / "wifi.json").write_text('[{"ssid": "Home", "pw": "secret"}]')
     (top / "installed.json").write_text("{}")
-    (top / "system.json.bak").write_text("{}")
+    (top / "system" / "settings.bak").write_text("x")
+    (top / "system" / "sources").write_text("https://x/index.json\n")
     return top
 
 
@@ -825,25 +827,24 @@ def test_the_system_root_is_the_carts_folders_parent():
     assert moy_sync.SYSTEM_ROOT.path("/moy/carts") == "/moy"
     assert moy_sync.SYSTEM_ROOT.path("/sd/moybyte/carts") == "/sd/moybyte"
     assert moy_sync.SYSTEM_ROOT.endpoint == moy_sync.SYSTEM_PULL
-    assert moy_sync.SYSTEM_ROOT.wire_top == ("system.json", "achievements.json")
+    assert moy_sync.SYSTEM_ROOT.wire_top == ("system/settings",)
 
 
 def test_the_system_files_are_the_stores_own_names():
     """The list names moy_carts' sibling stores, so a renamed store cannot
     leave the browser keeping a file nothing writes."""
     from runtime import moy_carts
-    assert moy_sync.SYSTEM_FILES == (
-        moy_carts.SYSTEM_STORE_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
-        moy_carts.SHARED_SHEET_NAME)
+    assert moy_sync.SYSTEM_FILES == (moy_carts.SETTINGS_NAME, moy_carts.SHARED_SHEET_NAME)
     assert moy_carts.WIFI_STORE_NAME not in moy_sync.SYSTEM_FILES
 
 
 def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    assert set(w._snap) == {"system.json", "achievements.json", "shared.moygfx"}
+    assert set(w._snap) == {"system/settings", "shared.moygfx"}
     assert not w.sweep(), "the store as seeded has nothing to tell"
-    for name in ("wifi.json", "installed.json", "system.json.bak"):
+    for name in ("wifi.json", "installed.json", "system.json", "system/settings.bak",
+                 "system/sources", "achievements.json"):
         p = top / name
         p.write_text('{"changed": true}')
         _bump_mtime(p)
@@ -851,14 +852,14 @@ def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     c.write_text("x = 2\n")
     _bump_mtime(c)
     assert not w.sweep(), "a cart or a secret is not the console's own document"
-    p = top / "system.json"
-    p.write_text('{"theme": "night", "show_fps": false}')
+    p = top / "system" / "settings"
+    p.write_text('show_fps = false\ntheme = "night"\n')
     _bump_mtime(p)
     assert w.sweep()
     doc = json.loads(w.take_json())
     assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED and doc["root"] == "system"
-    assert doc["ops"] == [{"p": "system.json",
-                           "t": '{"theme": "night", "show_fps": false}'}]
+    assert doc["ops"] == [{"p": "system/settings",
+                           "t": 'show_fps = false\ntheme = "night"\n'}]
 
 
 def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
@@ -874,28 +875,28 @@ def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
 
 
 def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
-    """Each file is its own unit: `dc system.json` would ask a store to remove
+    """Each file is its own unit: `dc system/settings` would ask a store to remove
     a folder by that name."""
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    (top / "achievements.json").unlink()
+    (top / "shared.moygfx").unlink()
     assert w.sweep()
-    assert w.take() == [{"p": "achievements.json", "d": 1}]
+    assert w.take() == [{"p": "shared.moygfx", "d": 1}]
 
 
 def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):
     """A system batch parses as its own root and is never read as a carts
-    batch with `system.json` for a cart path: the C apply has no store for it,
+    batch with `system/settings` for a cart path: the C apply has no store for it,
     so nothing lands even where a caller hands it one (the VM merges it)."""
     body = json.dumps({"v": moy_sync.PROTOCOL_V_ROOTED, "root": "system",
-                       "ops": [{"p": "system.json", "t": "{}"}]})
-    ops, _pin, root_id = parse_batch(body)
-    assert root_id == "system" and ops == [{"p": "system.json", "t": "{}"}]
+                       "ops": [{"p": "system/settings", "t": ""}]})
+    ops, root_id = parse_batch(body)
+    assert root_id == "system" and ops == [{"p": "system/settings", "t": ""}]
     root = _store(tmp_path)
     applied, errors, _shelf = apply_ops(str(root), ops, root_id)
     assert applied == 0 and errors == [(0, "no such store")]
-    assert not (root / "system.json").exists()
-    assert not (tmp_path / "system.json").exists()
+    assert not (root / "system").exists()
+    assert not (tmp_path / "system").exists()
 
 
 def test_a_board_page_watches_its_documents_only_when_the_board_served_them(
@@ -924,8 +925,7 @@ def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
     wb._S["store_mode"] = "site"
     wb._S["watchers"] = wb._build_watchers(str(top / "carts"), True)
     wb._S.pop("sync_took", None)
-    wb._S.pop("sync_pin", None)
-    for p, text in ((top / "system.json", '{"theme": "night"}'),
+    for p, text in ((top / "system" / "settings", 'theme = "night"\n'),
                     (top / "carts" / "hop.moy" / "main.py", "x = 3\n")):
         p.write_text(text)
         _bump_mtime(p)
@@ -934,7 +934,7 @@ def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
     wb.sync_ack(True)
     second = json.loads(wb.sync_poll_json())
     assert second["root"] == "system"
-    assert second["ops"] == [{"p": "system.json", "t": '{"theme": "night"}'}]
+    assert second["ops"] == [{"p": "system/settings", "t": 'theme = "night"\n'}]
     wb.sync_ack(True)
     assert wb.sync_poll_json() == ""
     wb._S["store_mode"] = None
@@ -968,7 +968,7 @@ def _push_all(src, dst, journal=False):
         body = w.take_json()
         if not body:
             return sent, dirty
-        ops, _pin, rid = parse_batch(body)
+        ops, rid = parse_batch(body)
         applied, errors, shelf = apply_ops(str(dst), ops, rid, journal=journal)
         assert not errors, errors
         dirty = dirty or shelf

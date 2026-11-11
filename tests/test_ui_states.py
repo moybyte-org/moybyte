@@ -131,8 +131,8 @@ def test_every_state_resolves_on_all_twelve_theme_sets():
 def test_state_tokens_walk_the_alias_chain_in_c():
     """A state token the theme does not hold resolves through its alias chain
     (native/moy_ui), read here through the row kind's specs: hover's edge is
-    hover_cue (-> focus -> accent), pressed's field pressed (-> selection ->
-    hilite) and its ink pressed_ink (-> selection_ink -> ink)."""
+    hover_cue (-> focus -> accent), pressed's field pressed (-> sunk ->
+    hilite) and its ink pressed_ink (-> ink)."""
     th = {"panel": 60, "dim": 42, "accent": 9, "hilite": 5, "ink": 3,
           "title_ink": 0}
     assert ui_draw.state_colors(th, "row", ui_draw.HOVER)[2] == 9
@@ -140,7 +140,7 @@ def test_state_tokens_walk_the_alias_chain_in_c():
     assert (field, ink) == (5, 3)
     # A theme that DOES name the token wins over the chain; index 0 is a
     # value, not a miss.
-    th2 = dict(th, focus=0, selection=11)
+    th2 = dict(th, focus=0, sunk=11)
     assert ui_draw.state_colors(th2, "row", ui_draw.HOVER)[2] == 0
     assert ui_draw.state_colors(th2, "row", ui_draw.PRESSED)[0] == 11
     # A theme silent on every role paints the chain's literal fallback, and a

@@ -13,6 +13,10 @@
 #   HidMachine                   the BLE keyboard central's machine over a fake stack
 #   event                        a key event: its code and modifiers
 #   typed                        the byte a key event types
+#   InputTable.reader            the event rings' readers (moy_event.h): events, pending
+#   RingSource                   a source that is its ring alone: a lease's, a device API's
+#   pin_clock                    the records' clock, held for a test
+#   hid_usage                    a key event as its HID usage and modifiers
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/history/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
@@ -43,11 +47,11 @@ import os
 
 try:                                    # the host's runtime package
     from . import host_native, native_build
-    from .ticks import _ticks_ms
+    from .ticks import _ticks_ms, _ticks_us
 except ImportError:                     # loaded flat, runtime/ on sys.path
     import host_native
     import native_build
-    from ticks import _ticks_ms
+    from ticks import _ticks_ms, _ticks_us
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -61,9 +65,11 @@ HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 
 SOURCES = 8
+RING_SOURCES = 8              # sources that are a ring alone (moy_input.h)
 PLAYERS = 8
 UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
+_TICKS_US_MASK = (1 << 30) - 1  # and its ticks_us period: an event's stamp
 OK, STALE, FULL, NOMEM, BAD = range(5)
 
 CURSOR_IDLE_MS = 2000   # hide the trackball cursor after this long with no movement
@@ -80,6 +86,23 @@ KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
 KEY_PGUP, KEY_PGDN = 0x114, 0x115
 # The pointer's buttons, a bit each.
 PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
+
+# The event records (native/moy_input/moy_event.h): a record's fields in an
+# events() buffer, its kinds, the kind masks a reader takes, its provenance.
+EV_VERSION = 1
+EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = range(7)
+EV_FIELDS = 7
+(EV_KEY_DOWN, EV_KEY_UP, EV_TEXT, EV_BTN, EV_TOUCH_DOWN, EV_TOUCH_MOVE, EV_TOUCH_UP,
+ EV_EDGE, EV_UART, EV_LINK, EV_MEDIA, EV_NET, EV_BLE, EV_LORA, EV_WINCH, EV_USB,
+ EV_MIDI) = range(1, 18)
+EV_LOST = 18
+EV_KEYS = (1 << EV_KEY_DOWN) | (1 << EV_KEY_UP) | (1 << EV_TEXT)
+EV_TOUCH = (1 << EV_TOUCH_DOWN) | (1 << EV_TOUCH_MOVE) | (1 << EV_TOUCH_UP)
+EV_PAD = 1 << EV_BTN
+EV_ALL = (1 << 17) - 2
+PROV_ISR, PROV_FIFO, PROV_POLL = 0, 1, 2
+EV_DEPTH = 32
+EV_ISR_DEPTH_MAX = 64         # an ISR ring's ceiling unless a board raises it
 
 P_NONE = 0
 P_LIVE = 1                     # there is a pointer at all
@@ -128,6 +151,8 @@ class Pointer(ctypes.Structure):
 
 _SIGS = (
     ("moy_input_new", [_U8], _P),
+    ("moy_input_kernel", [], _P),
+    ("moy_input_vm_stop", [], None),
     ("moy_input_free", [_P], None),
     ("moy_input_source", [_P, ctypes.c_char_p, _U8, _PU32], _I),
     ("moy_input_source_player", [_P, _U32, ctypes.POINTER(_U8)], _I),
@@ -187,11 +212,50 @@ _SIGS = (
     ("moy_input_ptr_apply", [_P, _P, _U32], _I),
 )
 
+
+class _Event(ctypes.Structure):
+    _fields_ = [("t_us", _U32), ("src", ctypes.c_uint16), ("kind", _U8), ("prov", _U8),
+                ("a", ctypes.c_uint16), ("id", ctypes.c_uint16), ("b", _U32)]
+
+
+class _Ring(ctypes.Structure):
+    _fields_ = [("depth", _U32), ("head", _U32), ("count", _U32), ("drops", _U32),
+                ("prov", _U8), ("internal", _B), ("src", ctypes.c_uint16)]
+
+
+class _Isr(ctypes.Structure):
+    _fields_ = [("mux", _P), ("ring", _P)]
+
+
+_EV_SIGS = (
+    ("moy_input_ring_open", [_P, ctypes.c_char_p, _U8, _U32, _PU32], _I),
+    ("moy_input_radio", [_P, _U8, ctypes.c_bool, _U32, ctypes.POINTER(ctypes.c_bool)], _I),
+    ("moy_input_radio_source", [_P, _PU32], _I),
+    ("moy_input_radio_up", [_P, _U8], ctypes.c_bool),
+    ("moy_input_ring_close", [_P, _U32], _I),
+    ("moy_input_isr_attach", [_P, _U32, ctypes.POINTER(_Isr)], _I),
+    ("moy_input_isr_detach", [ctypes.POINTER(_Isr)], None),
+    ("moy_input_isr_put", [ctypes.POINTER(_Isr), _U8, ctypes.c_uint16, ctypes.c_uint16, _U32],
+     None),
+    ("moy_input_src_name", [_P, ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t], _I),
+    ("moy_input_source_events", [_P, _U32, _U8, _U32], _I),
+    ("moy_input_post", [_P, _U32, _U8, ctypes.c_uint16, ctypes.c_uint16, _U32], _I),
+    ("moy_input_ring_info", [_P, _U32, ctypes.POINTER(_Ring)], _I),
+    ("moy_input_reader", [_P, _U32, ctypes.POINTER(_I)], _I),
+    ("moy_input_reader_free", [_P, _I], _I),
+    ("moy_input_reader_only", [_P, _I, _U32], _I),
+    ("moy_input_events", [_P, _I, ctypes.POINTER(_Event), ctypes.c_size_t], ctypes.c_size_t),
+    ("moy_input_pending", [_P, _I], ctypes.c_size_t),
+    ("moy_input_now_us", [], _U32),
+    ("moy_input_pin_clock", [_U32], None),
+    ("moy_hid_usage", [_I32], ctypes.c_uint16),
+)
+
 _LIB = [None]
 
 
 # This module's share of the host's one library (runtime/host/host_native.py).
-PART = native_build.Part("input", ("moy_input.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
+PART = native_build.Part("input", ("moy_input.h", "moy_event.h", "moy_htab.h", "moy_touch.h", "moy_drivers.h",
                                    "moy_hid.h", "moy_touch.c", "moy_kbd.c", "moy_touchdev.c",
                                    "moy_hid.c"), (_INPUT, _SPINE), shim=_SHIM)
 
@@ -206,7 +270,7 @@ def _lib():
         if path is None:
             raise ImportError("moy_input: no C compiler for the host build")
         d = ctypes.CDLL(path)
-        for name, args, res in _SIGS + _DRV_SIGS:
+        for name, args, res in _SIGS + _DRV_SIGS + _EV_SIGS:
             fn = getattr(d, name)
             fn.argtypes = args
             fn.restype = res
@@ -320,6 +384,55 @@ class InputSource:
         """A one-shot key: delivered as this source's key for exactly one frame."""
         _check(_lib().moy_input_key(self.state._t, self.h, value), "key")
 
+    def set_events(self, prov, depth):
+        """This source's event ring made again, empty: `prov` (PROV_*) and
+        `depth` records."""
+        _check(_lib().moy_input_source_events(self.state._t, self.h, prov, depth), "events")
+
+    def post(self, kind, a=0, id=0, b=0):
+        """A record of the producer's own, stamped now."""
+        _check(_lib().moy_input_post(self.state._t, self.h, kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF), "post")
+
+    def ring(self):
+        """(depth, count, drops, prov, internal, src): this source's ring."""
+        g = _Ring()
+        _check(_lib().moy_input_ring_info(self.state._t, self.h, ctypes.byref(g)), "ring")
+        return (g.depth, g.count, g.drops, g.prov, g.internal, g.src)
+
+
+class RingSource:
+    """A source that is its ring alone (moy_input.h's ring sources). An ISR
+    source's post() is its ISR writer's put (moy_input_isr_put), which counts
+    its drops as readers find them."""
+
+    def __init__(self, table, h, prov):
+        self.table = table
+        self.h = h
+        self._isr = None
+        if prov == PROV_ISR:
+            self._isr = _Isr()
+            _check(_lib().moy_input_isr_attach(table._t, h, ctypes.byref(self._isr)), "isr")
+
+    def post(self, kind, a=0, id=0, b=0):
+        if self._isr is not None:
+            _lib().moy_input_isr_put(ctypes.byref(self._isr), kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF)
+            return
+        _check(_lib().moy_input_post(self.table._t, self.h, kind, a & 0xFFFF, id & 0xFFFF,
+                                     b & 0xFFFFFFFF), "post")
+
+    def ring(self):
+        """(depth, count, drops, prov, internal, src): this source's ring."""
+        g = _Ring()
+        _check(_lib().moy_input_ring_info(self.table._t, self.h, ctypes.byref(g)), "ring")
+        return (g.depth, g.count, g.drops, g.prov, g.internal, g.src)
+
+    def close(self):
+        if self._isr is not None:
+            _lib().moy_input_isr_detach(ctypes.byref(self._isr))
+        _check(_lib().moy_input_ring_close(self.table._t, self.h), "close")
+
 
 class InputTable:
     """The merged input every surface reads: the union of the sources, its
@@ -328,12 +441,13 @@ class InputTable:
 
     BUTTONS = NAMES
 
-    def __init__(self):
+    def __init__(self, _table=None):
         self.pointer = None         # the screen-space Pointer, once wired
         n = len(self.BUTTONS)
         assert self.BUTTONS == NAMES[:n]
         self._n = n
-        self._t = _lib().moy_input_new(n)
+        self._kept = _table is not None     # the kernel's: never freed
+        self._t = _table if _table is not None else _lib().moy_input_new(n)
         if not self._t:
             raise MemoryError("moy_input: no table")
         self._srcs = {}
@@ -343,7 +457,7 @@ class InputTable:
 
     def __del__(self):
         t = getattr(self, "_t", None)
-        if t and _LIB[0] is not None:
+        if t and _LIB[0] is not None and not self._kept:
             _LIB[0].moy_input_free(t)
             self._t = None
 
@@ -599,6 +713,83 @@ class InputTable:
         """Do the sources sit on more than one player slot?"""
         return _lib().moy_input_multi(self._t)
 
+    # -- the event rings -----------------------------------------------------
+    def reader(self, kinds=EV_ALL, only=0):
+        """A reader of `kinds` (a mask of 1 << kind): its number. `only`, a
+        ring source's handle, is the one source it reads."""
+        r = _I()
+        _check(_lib().moy_input_reader(self._t, kinds, ctypes.byref(r)), "reader")
+        if only:
+            rc = _lib().moy_input_reader_only(self._t, r.value, only)
+            if rc != OK:
+                _lib().moy_input_reader_free(self._t, r.value)
+                _check(rc, "reader")
+        return r.value
+
+    def reader_free(self, r):
+        _check(_lib().moy_input_reader_free(self._t, r), "reader")
+
+    def events(self, into, r):
+        """Reader `r`'s records into `into` (an array('i'), EV_FIELDS ints a
+        record, as many as fit), each stamp on the microsecond clock wrapping
+        at 2^30, time.ticks_us's on a board; answers how many."""
+        cap = len(into) // EV_FIELDS
+        if cap == 0:
+            return 0
+        buf = (_Event * cap)()
+        clock = _lib().moy_input_now_us()
+        ticks = _ticks_us()
+        n = _lib().moy_input_events(self._t, r, buf, cap)
+        for i in range(n):
+            e = buf[i]
+            k = i * EV_FIELDS
+            into[k + EV_T] = (ticks - ((clock - e.t_us) & 0xFFFFFFFF)) & _TICKS_US_MASK
+            into[k + EV_SRC] = e.src
+            into[k + EV_KIND] = e.kind
+            into[k + EV_PROV] = e.prov
+            into[k + EV_A] = e.a
+            into[k + EV_ID] = e.id
+            into[k + EV_B] = e.b - (1 << 32) if e.b & 0x80000000 else e.b
+        return n
+
+    def pending(self, r):
+        """How many records reader `r` has waiting (a gap counting one)."""
+        return _lib().moy_input_pending(self._t, r)
+
+    def ring_source(self, name, prov, depth=EV_DEPTH):
+        """A source that is its ring alone (a lease's, a device API's):
+        a RingSource, until its close()."""
+        h = _U32()
+        _check(_lib().moy_input_ring_open(self._t, name.encode(), prov, depth, ctypes.byref(h)),
+               "ring_source")
+        return RingSource(self, h.value, prov)
+
+    def radio(self, kind, up, why=0):
+        """A radio's state (EV_NET: WiFi has an address; EV_BLE: the BLE host
+        runs): True where it changed, and then posted to `radio_source()`'s
+        ring. What a board's drivers call in C, and the host's stand-ins here."""
+        changed = ctypes.c_bool()
+        _check(_lib().moy_input_radio(self._t, kind, bool(up), why & 0xFFFFFFFF,
+                                      ctypes.byref(changed)), "radio")
+        return changed.value
+
+    def radio_source(self):
+        """The ring source "radio" whose records are the radios' changes,
+        opened by the first ask: its handle."""
+        h = _U32()
+        _check(_lib().moy_input_radio_source(self._t, ctypes.byref(h)), "radio_source")
+        return h.value
+
+    def radio_up(self, kind):
+        return bool(_lib().moy_input_radio_up(self._t, kind))
+
+    def src_name(self, src):
+        """The name of the source whose records carry `src`, or None."""
+        buf = ctypes.create_string_buffer(32)
+        if _lib().moy_input_src_name(self._t, src & 0xFFFF, buf, 32) != OK:
+            return None
+        return buf.value.decode()
+
     def player_count(self):
         return len(self.source_players())
 
@@ -646,6 +837,17 @@ def pointer_state(inp, out):
 # None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
 # is the drivers' table, the one a board's console reads.
 
+def pin_clock(us):
+    """The records' clock held at `us` microseconds (0: the real one)."""
+    _lib().moy_input_pin_clock(us & 0xFFFFFFFF)
+
+
+def hid_usage(ev):
+    """The HID usage a key event's key is (low byte) and its modifiers (high
+    byte): a KEY record's `a`."""
+    return _lib().moy_hid_usage(ev)
+
+
 def event(code, mods=0):
     """The key event of `code` typed with `mods` held."""
     return code | (mods << MODS_AT)
@@ -692,8 +894,10 @@ _KERNEL = [None]
 
 
 def kernel():
+    """The kernel's table (moy_input_kernel): the one the boards' drivers, the
+    lease table's edge sources and a board's wakes share."""
     if _KERNEL[0] is None:
-        _KERNEL[0] = InputTable()
+        _KERNEL[0] = InputTable(_lib().moy_input_kernel())
     return _KERNEL[0]
 
 

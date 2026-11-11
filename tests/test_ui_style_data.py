@@ -205,7 +205,7 @@ def test_the_button_kinds_are_the_theme_models_in_its_order():
     assert tuple(d["button_kinds"]) == tuple(d["theme"]["look"]["button_kinds"]) == KINDS
     assert ui_draw.BUTTON_KINDS == KINDS
     assert chrome.look_fields()[2] == (
-        "fill", "ink", "border.w", "border.c", "shape", "r", "font", "bevel")
+        "fill", "ink", "border.w", "border.c", "shape", "r", "font", "bevel", "check")
     assert {k: tuple(tuple(_spec(x) for x in form) for form in forms)
             for k, forms in d["floors"].items()} == twin.FLOORS
 
@@ -409,10 +409,10 @@ toks = moy_ui.tokens()
 kinds = ("normal", "primary", "tonal", "danger", "toggle")
 moy_ui.use_depth(None, False)          # the default's: a key's radius is its key_r
 moy_ui.buttons_clear()
-moy_ui.buttons_set(None, 0, [12, 1, 200, 8, NONE, NONE, NONE, NONE])
-moy_ui.buttons_set(None, 2, [NONE, 9, NONE, NONE, 1, 40, 1, 1])
-moy_ui.buttons_set("calc", 1, [10, 0, OFF, OFF, 1, NONE, NONE, NONE])
-moy_ui.buttons_set("calc", 0, [NONE, NONE, 0, NONE, NONE, NONE, NONE, NONE])
+moy_ui.buttons_set(None, 0, [12, 1, 200, 8, NONE, NONE, NONE, NONE, NONE])
+moy_ui.buttons_set(None, 2, [NONE, 9, NONE, NONE, 1, 40, 1, 1, NONE])
+moy_ui.buttons_set("calc", 1, [10, 0, OFF, OFF, 1, NONE, NONE, NONE, NONE])
+moy_ui.buttons_set("calc", 0, [NONE, NONE, 0, NONE, NONE, NONE, NONE, NONE, NONE])
 for name in moy_ui.themes():
     for light in (False, True):
         row = moy_ui.theme(name, light)[0]
@@ -534,72 +534,79 @@ def _marked(name, light, draw, size=(120, 40)):
 
 
 def test_on_is_the_current_mark_and_focus_the_focus_mark():
-    """Under Moy Day a row's `on` is the current plate (value at 0.14 over the
-    surface), not the ON field, and its `focus` the 4 px edge bar on its
-    leading edge."""
+    """Under Moy Day a row's `on` is its declared tint (value at 0.18 over
+    the surface), not the ON field, and its `focus` the 4 px bar 2 px in
+    from its leading edge, with no plate of its own (owner, 2026-11-05)."""
     from runtime import ui_draw
     try:
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", on=True, focus=True))
-        plate = _px(cv, 60, 15)
-        assert plate not in (_word(th["surface"]), _word(th["value"]),
-                             _word(ui_draw.state_colors(th, "row_list", "on")[0]))
-        assert _px(cv, 11, 15) == _word(th["accent"])          # the edge bar
-        assert _px(cv, 15, 15) == plate
+        tint = _px(cv, 60, 15)
+        assert tint not in (_word(th["surface"]), _word(th["value"]),
+                            _word(ui_draw.state_colors(th, "row_list", "on")[0]))
+        assert _px(cv, 13, 15) == _word(th["accent"])          # the bar
+        assert _px(cv, 11, 15) == _px(cv, 17, 15) == tint
         ui_draw.marks(None, True)
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
-        # the focus edge stands on a light accent plate across the row (D-04)
-        lit = _px(cv, 60, 15)
-        assert lit not in (_word(th["surface"]), _word(th["accent"])) and ui_draw.marks()[1] == 1
+        # focused alone, the row is the bar and nothing under it
+        assert _px(cv, 60, 15) == _word(th["surface"]) and ui_draw.marks()[1] == 1
+        assert _px(cv, 13, 15) == _word(th["accent"])
     finally:
         ui_draw.use_depth(None, False)
 
 
-def test_a_current_bar_is_beside_a_row_and_under_a_chip():
-    """Blocks' current mark is the `bar` (DESIGN.md, the marks): 3 px of
-    `value` under a chip, and under a row's label (`current.row:
-    underline`, m07), none beside the row."""
+def test_a_cells_on_is_an_underline_and_a_rows_a_fill_under_blocks():
+    """Blocks declares a cell's `on` as a 3 px underline of `value` 2 px in
+    from the cell's foot, and a row's as the selection fill."""
     from runtime import ui_draw
     try:
-        cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.row(
-            cv, th, (10, 10, 100, 24), "Projects", kind="row_list", on=True))
-        value = _word(th["value"])
-        foot = [x for x in range(10, 110) if _px(cv, x, 32) == value]
-        assert foot and foot[0] > 12 and len(foot) > 20, "an underline under the label"
-        assert _px(cv, 10, 22) != value and _px(cv, 105, 32) != value
         cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.chip(
             cv, th, (10, 10, 100, 24), "", on=True))
-        assert _px(cv, 60, 31) == value and _px(cv, 10, 22) != value
+        value = _word(th["value"])
+        foot = [y for y in range(10, 34) if _px(cv, 60, y) == value]
+        assert len(foot) == 3 and foot[-1] < 34, foot
+        assert _px(cv, 60, 20) != value
+        cv, th = _marked("blocks", True, lambda d, cv, th: ui_draw.row(
+            cv, th, (10, 10, 100, 24), "", kind="row_list", on=True))
+        assert _px(cv, 60, 22) == _word(th["selection"])
     finally:
         ui_draw.use_depth(None, False)
 
 
-def test_the_focus_style_follows_the_size_class():
-    """Moy lifts a card (grown and raised, its rim the accent in Day), edge-bars a
-    part and underlines a small part; Contrast rings a card and inverts a
-    part, its ink flipped to black on yellow."""
+def test_the_marks_follow_the_item_kind():
+    """Moy rings a card and a cell (2 px, 2 px clear) and bars a row; a
+    card's lift is legal data (grown and raised); Contrast rings a card 3
+    wide 2 out and fills a row, its ink black on yellow."""
     from runtime import ui_draw
     try:
-        def card(d, cv, th):
-            ink, box = ui_draw.focus(cv, th, (40, 30, 60, 60), size="card")
-            assert ink is None and box == (35, 22, 70, 70)
-            cv.rect(*box, 0)
-            ui_draw.focus(cv, th, (40, 30, 60, 60), size="card", after=True)
-        cv, th = _marked("moy", True, card, (140, 120))
-        rim = _px(cv, 34, 50)                                  # the accent rim
-        assert rim not in (0xffff, _px(cv, 2, 50)) and rim & 0x1f > rim // 2048
+        got = []
+        cv, th = _marked("moy", True, lambda d, cv, th: got.append(ui_draw.focus(
+            cv, th, (20, 20, 20, 20), "card")), (60, 60))
+        assert got[0] == (None, (20, 20, 20, 20)), "no lift: the card's own box"
+        assert _px(cv, 30, 42) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 42)
+        assert _px(cv, 30, 40) != _word(th["accent"]), "the ring stands clear"
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.focus(
-            cv, th, (20, 20, 20, 20), size="small"))
-        assert _px(cv, 30, 37) == _word(th["accent"]) and _px(cv, 30, 30) != _px(cv, 30, 37)
+            cv, th, (20, 20, 20, 20), "cell"), (60, 60))
+        assert _px(cv, 30, 42) == _word(th["accent"])
+        _install({"format": 2, "name": "pl", "inherits": "moy",
+                  "look": {"marks": {"card": {"focus": {"lift": {"grow": 5, "rise": 3}}}}}})
+        try:
+            got = []
+            _marked("pl", True, lambda d, cv, th: got.append(ui_draw.focus(
+                cv, th, (40, 30, 60, 60), "card")), (140, 120))
+            assert got[0][1] == (35, 22, 70, 70)
+        finally:
+            _uninstall()
+            ui_draw.look_moved()
         cv, th = _marked("contrast", False, lambda d, cv, th: ui_draw.focus(
-            cv, th, (20, 10, 60, 60), size="card"), (100, 80))
+            cv, th, (20, 10, 60, 60), "card"), (100, 80))
         assert _px(cv, 15, 40) == _word(th["accent"])         # ring 3 wide, 2 out
         assert _px(cv, 18, 40) == _word(th["surface"])
         got = []
         cv, th = _marked("contrast", False, lambda d, cv, th: got.append(ui_draw.focus(
-            cv, th, (10, 10, 100, 20))))
-        assert _px(cv, 60, 15) == _word(th["accent"]) and got[0][0] == 0
+            cv, th, (10, 10, 100, 20), "row")))
+        assert _px(cv, 60, 15) == _word(th["accent"]) and _word(got[0][0]) == 0
     finally:
         ui_draw.use_depth(None, False)
 
@@ -631,46 +638,52 @@ def _contrast(a, b):
     return (hi + 0.05) / (lo + 0.05)
 
 
-def test_the_readability_check_holds_accent_on_the_current_plate():
-    """Where a theme's current mark is a plate, its focus colour clears 3:1 on
-    the plate: Moy's (Day 5.9, Night 5.2 in DESIGN.md) and Contrast's read
-    (its light mode's by the focus outline), and a theme whose accent sinks into its plate is reported (the bit past
-    the pairs)."""
+def test_the_loader_drops_a_mark_that_fails_the_checks():
+    """The seeds' marks pass the loader's checks (L1-L4 of
+    docs/media/focus_2026-11/README.md); a declared mark that fails one is
+    dropped to the engine's default and reported (the bit past the pairs):
+    a selected fill under 1.3:1 (L3), a bar under 3 px (L2), a focus mark
+    under 3:1 with no keyline (L1), a focus fill the colour of the on fill
+    (L4). A keyline of 2 px that clears both sides carries a mark (Contrast
+    Day's yellow). A tint too faint for L3 takes the least strength that
+    reads (a picked accent paler than the theme's own)."""
     import moy_ui
     from runtime import ui_draw
     pairs = len(_style()["theme"]["pairs"])
-    for seed in ("moy", "contrast"):
+    for seed in ("moy", "blocks", "contrast"):
         for light in (False, True):
             row, bad, rc = moy_ui.theme(seed, light)
             assert rc == 0 and not bad >> pairs & 1, (seed, light)
+            assert moy_ui.theme_marks(seed, light)[0] == 0, (seed, light)
     roles = dict(zip(moy_ui.theme_roles(), moy_ui.theme("moy", True)[0]))
     assert _contrast(roles["accent"], roles["surface"]) > 5
+
+    def dropped(look, light=True, base="moy"):
+        _install({"format": 2, "name": "pl", "inherits": base, "look": look})
+        try:
+            failed = moy_ui.theme_marks("pl", light)[0]
+            assert bool(moy_ui.theme("pl", light)[1] >> pairs & 1) == bool(failed)
+            return failed
+        finally:
+            _uninstall()
+            ui_draw.look_moved()
+
+    row_focus, row_on, cell_focus = 1 << 0, 1 << 1, 1 << 3
+    assert dropped({"marks": {"row": {"on": {"mark": "fill", "c": "surface_alt"}}}}) == row_on
+    assert dropped({"marks": {"row": {"on": {"alpha": 0.05}}}}) == 0
     _install({"format": 2, "name": "pl", "inherits": "moy",
-              "colors": {"light": {"accent": "#e3e6ed", "focus": "#e3e6ed"}},
-              "look": {"focus": {"color": "accent"},
-                       "current": {"style": "plate", "color": "ink", "alpha": 0.1}}})
+              "look": {"marks": {"row": {"on": {"alpha": 0.05}}}}})
     try:
-        assert moy_ui.theme("pl", True)[1] >> pairs & 1
+        alpha = moy_ui.theme_marks("pl", True)[2][1][5]
+        assert 13 < alpha <= 255 * 18 // 100 + 5, alpha
     finally:
         _uninstall()
         ui_draw.look_moved()
-    # Contrast's light yellow is 1.3:1 on white: an `invert` focus takes the
-    # part's place and lies on no plate, so only a mark drawn on the plate
-    # (an edge here) is held -- with the black outline its colour, without
-    # it the yellow.
-    _install({"format": 2, "name": "pl", "inherits": "contrast",
-              "look": {"light": {"focus": {"outline": [0, "#000000"]}}}})
-    try:
-        assert not moy_ui.theme("pl", True)[1] >> pairs & 1
-    finally:
-        _uninstall()
-        ui_draw.look_moved()
-    _install({"format": 2, "name": "pl", "inherits": "contrast",
-              "look": {"focus": {"style": "edge"}, "current": {"alpha": 0.42},
-                       "light": {"focus": {"outline": [0, "#000000"]}}}})
-    try:
-        assert moy_ui.theme("pl", True)[1] >> pairs & 1
-        assert not moy_ui.theme("pl", False)[1] >> pairs & 1
-    finally:
-        _uninstall()
-        ui_draw.look_moved()
+    assert dropped({"marks": {"row": {"focus": {"w": 2}}}}) == row_focus
+    assert dropped({"marks": {"cell": {"focus": {"c": "surface_alt"}}}}) & cell_focus
+    assert dropped({"marks": {"row": {"focus": {"mark": "fill", "c": "value"},
+                                      "on": {"mark": "fill", "c": "value"}}}}) & (row_focus | row_on)
+    assert dropped({"light": {"marks": {"row": {"focus": {"key": None}}}}},
+                   base="contrast") == row_focus
+    assert dropped({"light": {"marks": {"row": {"focus": {"key": None}}}}},
+                   light=False, base="contrast") == 0

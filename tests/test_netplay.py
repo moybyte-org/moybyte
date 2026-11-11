@@ -88,7 +88,7 @@ def _step(a, b, wire, frames=1):
 
 def _input_packet(session, newest, waiting, masks):
     return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
-                  waiting & 0xFF, waiting >> 8] + list(masks))
+                  waiting & 0xFF, waiting >> 8] + [0] * 10 + [255, 255, 0, 0, 0] + list(masks))
 
 
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
@@ -269,6 +269,28 @@ def test_the_tick_is_fixed_and_thirty_hertz():
     assert netplay.DELAY == 1, "matches START at one frame of delay (33ms)"
     assert netplay.DELAY_MAX == 2, "...and stall pressure can only raise it to two"
     assert netplay.REDUNDANCY == 4
+    assert a[0].delay_max == 2
+
+
+def test_a_sixty_hertz_match_keeps_its_times_and_halves_its_ticks():
+    """A cart paced 60 or "free" ticks at 60 in a match (owner, 2026-11-06:
+    "i dont want a higher delay"): one tick of delay is 16.7 ms. What is a TIME
+    stays one -- the delay's ceiling (66 ms: four ticks), the escalation window
+    (3 s) -- and 60 periods of 16 or 17 ms make exactly a second."""
+    wire = _Wire()
+    a, _b = _match(wire, tick_hz=60)
+    s = a[0]
+    assert abs(s.dt - 1.0 / 60.0) < 1e-9 and s.tick_hz == 60
+    assert s.delay_max == 4
+    assert s._m._m.s.escalate_ticks == 180 and s._m._m.s.escalate_at == 24
+    now, ticks = 1000, 0
+    while ticks < 61:
+        if s.due(now):
+            ticks += 1
+            if ticks == 1:
+                start = now
+        now += 1
+    assert now - 1 - start == 1000, "the 61st tick lands one second after the first"
 
 
 # -- hygiene ----------------------------------------------------------------
@@ -279,7 +301,7 @@ def test_a_packet_from_a_previous_match_is_ignored():
     wire = _Wire()
     a, b = _match(wire, session=7)
     (sa, _ra, _ia), _ = a, b
-    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0, 0, 0])
+    stale = bytearray([netplay.PROTO, netplay.T_INPUT, 3, 0, 0, 0xFF, 0] + [0] * 10 + [255, 255, 0, 0, 0] + [0, 0])
     assert sa.on_packet(bytes(stale)) is False
     stale[2] = 7
     assert sa.on_packet(bytes(stale)) is True
@@ -437,6 +459,92 @@ def test_even_one_tick_of_debt_is_dropped_not_burst_repaid():
     assert s.due(100 + s.tick_ms) is True, "the next tick is a full period out"
 
 
+def _played(s):
+    return tuple(s._m.held)
+
+
+def test_a_stalled_retry_never_resamples_a_frame_already_on_the_air():
+    """THE BRICK SIEGE DESYNC (2026-11-06). A stalled tick retries every loop
+    frame, and each retry used to write the kid's CURRENT buttons over the
+    frame it had already emitted. The peer keeps the first copy it hears, so a
+    button pressed or released during a stall played one way on this screen
+    and the other way on the peer's, for good: a tank two pixels apart by
+    frame 15 at 60% loss on the host's two-console harness."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 3)
+    played = {0: {}, 1: {}}
+    for k in range(40):
+        # A's kid toggles LEFT every loop frame; B's packets reach A only
+        # every third frame, so A stalls and retries with a new mask.
+        mask = 1 if k % 2 else 0
+        if k % 3 == 0:
+            wire.deliver(0, sa)
+        if sa.advance(mask):
+            played[0][sa.frame] = _played(sa)
+        wire.deliver(1, sb)
+        if sb.advance(0):
+            played[1][sb.frame] = _played(sb)
+    both = set(played[0]) & set(played[1])
+    assert len(both) > 5, "the premise: the match advanced through its stalls"
+    assert sa.stall_ticks > 3, "...and it did stall"
+    assert [f for f in sorted(both) if played[0][f] != played[1][f]] == [], \
+        "both consoles play the same buttons on every frame"
+
+
+def test_a_raise_writes_the_frame_it_skips_before_it_can_be_emitted():
+    """A raise moves the sampling lead from frame+1 to frame+2, so one frame
+    is never sampled. It is written with the raise's sample before any packet
+    carries it: a placeholder sent as 0 and later written as something else is
+    the resample bug by another door."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 3)
+    sa.delay = 2
+    wire.deliver(0, sa)
+    wire.deliver(1, sb)
+    f = sa.frame
+    assert sa.advance(0x08) in (True, False)
+    for g in (f + 1, f + 2):
+        assert sa._m._m.s.mine_f[g & 255] == g, "frame %d is on the tape" % g
+        assert sa._m._m.s.mine_m[g & 255] == 0x08
+
+
+def test_the_input_check_compares_every_checkpoint_and_names_a_parting():
+    """Every MOY_MATCH_CHECK_EVERY frames each console stamps the hash of
+    every input it applied, and every packet carries its newest stamp: a
+    delivery, ordering or delay bug -- the class the resample bug was -- is
+    named at the next checkpoint instead of painting two games. Always on: it
+    is the inputs alone, a byte a frame, in C."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    _step(a, b, wire, 100)
+    assert sa.checks >= 2 and sb.checks >= 2 and sa.desync < 0 and sb.desync < 0
+    sb._m._m.s.hist ^= 1                  # B's record of an applied frame parts
+    _step(a, b, wire, 40)
+    assert sa.desync > 0 and sa.desync_kind == 1, "the inputs, not the worlds"
+    assert sb.desync == sa.desync
+
+
+def test_the_world_check_compares_only_where_both_consoles_armed_it():
+    """The world half is a diag: a console that did not arm it stamps no
+    digest, and a digest is never compared against nothing."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa._m.arm_worlds(True)
+    sa.world = lambda: "only A looks"
+    sb.world = lambda: "B is not asked"
+    _step(a, b, wire, 100)
+    assert sa.checks >= 2 and sa.desync < 0
+    sb._m.arm_worlds(True)
+    _step(a, b, wire, 40)
+    assert sa.desync > 0 and sa.desync_kind == 2
+
+
 def test_stall_ticks_counts_ticks_not_retries():
     """The Player retries a stalled tick every loop frame now, so `stalls`
     (every stalled advance) inflates with the loop rate; `stall_ticks` is the
@@ -450,11 +558,14 @@ def test_stall_ticks_counts_ticks_not_retries():
     assert s.stalls == 5
 
 
-def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
-    """The adaptive delay: matches start at DELAY=1 (33ms); a window with
-    ESCALATE_AT distinct stalled ticks buys the second tick. Raise-only,
-    because a LOWER delay mid-match can overwrite an input frame the peer has
-    already played (the newer sample lands on an already-emitted frame)."""
+def test_the_peers_stall_pressure_raises_this_consoles_delay():
+    """The adaptive delay: matches start at DELAY=1 (33ms); a window in which
+    the PEER stalled ESCALATE_AT distinct ticks buys this console a tick,
+    because this console's lead is what the peer waits on (the 2026-11-06
+    P4 <-> Guition S3 match: the host stalled 4.6% of its ticks on the guest's
+    one-tick lead while raising its OWN delay, which served the guest, and
+    then lowered it again, four times in 90 s). With no clock the peer
+    reports no margin, so nothing brings it back down."""
     wire = _Wire()
     a, b = _match(wire)
     (sa, _ra, _ia), (sb, _rb, _ib) = a, b
@@ -462,7 +573,7 @@ def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
     # distinct one-tick stalls: every other iteration sa's inbox is withheld
     # until its advance has already failed once, so each is a stalled TICK
     # healed by a loop-frame retry -- the P4-pair pattern, not one long outage
-    for k in range(3 * netplay.ESCALATE_TICKS):
+    for k in range(4 * netplay.ESCALATE_TICKS):
         if sa.advance(0) is False:
             wire.deliver(0, sa)          # the input lands; the retry heals it
             sa.advance(0)
@@ -471,14 +582,15 @@ def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
         if k % 2 == 0:
             wire.deliver(0, sa)
         if k == netplay.ESCALATE_TICKS - 10:
-            assert sa.delay == 1, "the FIRST window is formation grace, never a raise"
-    assert sa.delay == 2, "sustained stall pressure bought the second tick"
+            assert sb.delay == 1, "the FIRST window is formation grace, never a raise"
+    assert sb.delay == 2, "A's sustained stalls bought B's second tick"
+    assert sa.delay == 1, "...and B never stalled, so A's lead stays one"
     for _ in range(netplay.ESCALATE_TICKS + 10):
         sa.advance(0)
         sb.advance(0)
         wire.deliver(0, sa)
         wire.deliver(1, sb)
-    assert sa.delay == 2, "clean windows never lower it back"
+    assert sb.delay == 2, "with no margin reported, nothing lowers it"
 
 
 def test_the_delay_one_phase_controller_is_guest_only_and_gated():
@@ -503,7 +615,7 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
         wire.queues[1] = []
         t += 33
     assert guest._m_ema is not None, "the guest measured arrival margin"
-    assert host._m_ema is None, "the host never runs the controller"
+    assert host._m_ema is not None, "the host measures it too: it is the peer's report"
     # inputs were banked a full tick before each need, so the margin is FAT --
     # and a fat margin moves NOTHING (the slew is one-sided: only a thin
     # margin pushes the phase later; pulling earlier shaves margin for zero
@@ -520,12 +632,189 @@ def test_the_delay_one_phase_controller_is_guest_only_and_gated():
     nx1 = guest._next_ms
     assert guest.advance(0, t) is True
     assert guest._next_ms == nx1 + 1, "a thin margin pushes the guest's phase later"
+    host._m_ema = 5.0
+    h = host.frame
+    host._arr_f[h & 63] = h
+    host._arr_t[h & 63] = t - 2
+    h_nx = host._next_ms
+    host.advance(0, t)
+    assert host._next_ms == h_nx, "the host's clock is the anchor: it never slews"
     g_nx = guest._next_ms
     host.delay = 2
     guest.delay = 2
     host.advance(0, t)
     guest.advance(0, t)
     assert guest._next_ms == g_nx, "at DELAY=2 the controller is off"
+
+
+def test_the_lock_meter_says_where_the_tick_rate_went():
+    """PERF's lock= (2026-11-07): the ms of the tick schedule a console gave
+    up, per second, split by why -- a tick that came due a whole period late
+    with nothing stalled is this console's own frame (`late`), a slot that
+    passes while a tick waits on the peer is the peer's (`stall`) -- then
+    the delay and the margin. Their sum over the tick's ms is what the
+    match's ticks/s fell short by."""
+    wire = _Wire()
+    (host, _rh, _ih), (guest, _rg, _ig) = _match(wire, delay=1)
+    t = 1000
+    assert host.lock(t) == (None, None, None, 33, None), "the window opens"
+    for s in (host, guest):
+        s.due(t)
+        assert s.advance(0, t) is False         # frame 0 waits on the other
+    wire.deliver(0, host)
+    wire.deliver(1, guest)
+    assert host.advance(0, t + 5) is True       # a stall inside its slot costs nothing
+    assert host.due(t + 99)                     # a frame ran two ticks long
+    assert host.late_ms == 66 and host.stall_ms == 0
+    assert host.advance(0, t + 99) is True      # frame 1's input was banked
+    assert host.due(t + 132)
+    assert host.advance(0, t + 132) is False    # frame 2's is not
+    assert host.due(t + 166)                    # its slot passes, stalled
+    assert host.late_ms == 66 and host.stall_ms in (33, 34)
+    late, stall, slew, delay, margin = host.lock(t + 500)
+    assert (late, stall, slew, delay) == (132, host.stall_ms * 2, 0, 33)
+    assert margin is None, "the wire timed no arrival, so no margin is known"
+    assert host.lock(t + 1500)[:3] == (0, 0, 0), "one reader: the window was spent"
+
+
+def _timed_match(wire, t, frames, a, b, masks=None, lag=0):
+    """Both consoles tick at 30 Hz on a clock; each packet lands `lag` ms
+    after its sender's tick. Returns the buttons each console played, by
+    frame."""
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    played = ({}, {})
+    for k in range(frames):
+        m = masks(k) if masks else 0
+        for i, s in enumerate((sa, sb)):
+            s.due(t)
+            if s.advance(m if i == 0 else 0, t):
+                played[i][s.frame] = _played(s)
+        for i, s in ((1, sb), (0, sa)):
+            for p in wire.queues[i]:
+                s.on_packet(p, t + lag)
+            wire.queues[i] = []
+        t += 33
+    return t, played
+
+
+def test_the_delay_comes_back_down_when_the_peer_has_a_tick_to_spare():
+    """The delay's way down (2026-11-06, a design choice beside the 60 Hz
+    tick). The peer reports how early this console's inputs reach it; a
+    whole clean window of at least a tick plus LOWER_GUARD_MS to spare, two
+    windows after the last change, lowers the delay a tick. Sample-once makes
+    the drop safe without agreement: the frames already sampled keep their
+    buttons, and the drop only skips one sample -- both consoles play the
+    same buttons on every frame through it, and the input check agrees."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 2
+    _t, played = _timed_match(wire, 1000, 3 * netplay.ESCALATE_TICKS + 20, a, b,
+                              masks=lambda k: (k // 7) % 3)
+    assert sa.delay == 1 and sb.delay == 1, "a tick to spare buys the tick back"
+    assert sa.lowers == 1 and sa.raises == 0
+    both = set(played[0]) & set(played[1])
+    assert [f for f in sorted(both) if played[0][f] != played[1][f]] == []
+    assert sa.desync < 0 and sb.desync < 0 and sa.checks > 3
+
+
+def test_the_delay_stays_up_while_the_margin_is_under_a_tick():
+    """An input that lands less than a tick plus the guard before it is
+    needed would stall at one tick less: the delay holds."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 2
+    _timed_match(wire, 1000, 4 * netplay.ESCALATE_TICKS, a, b, lag=33)
+    assert sa.peer_margin is not None and sa.peer_margin < 33 + 8
+    assert sa.delay == 2 and sb.delay == 2 and sa.lowers == 0
+
+
+def test_a_sixty_hertz_match_that_cannot_keep_its_rate_steps_down_to_thirty():
+    """A 60 Hz match bound by a console's frame (the Guition S3 held a Brick
+    Siege Lua match to 47.7 ticks/s, 2026-11-06) steps down to 30 Hz for the
+    rest of the match: the host decides after a settled window under
+    STEP_BAR% of the rate and names a frame STEP_LEAD on, the guest hears it
+    in the packet that carries the host's input for that frame, and from
+    there both tick at 30 with a dt of 1/30. The match's clock runs on across
+    the step without a jump, and the delay keeps its ms."""
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa.delay = sb.delay = 4                 # 66.7 ms at 60 Hz
+    t = 1000
+    for _ in range(3 * 180 + 80):          # 45 ticks a second
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 22
+    f0 = sa.step_from
+    assert f0 is not None and f0 == sb.step_from and f0 > 2 * 180
+    assert sa.frame > f0 and sb.frame > f0
+    assert sa.tick_hz == 30 and sb.tick_hz == 30
+    assert sa.tick_ms == 33 and sa.delay_max == 2
+    assert sa.delay == 2 and sb.delay == 2, "4 ticks of 16.7 ms are 2 of 33.3"
+    assert [sa.dt_at(f) for f in (f0 - 1, f0)] == [1 / 60, 1 / 30]
+    assert all(sa.dt_at(f) == sb.dt_at(f) for f in range(0, sa.frame + 10))
+    assert [sa.ms(f) for f in (f0 - 1, f0, f0 + 1, f0 + 2)] == \
+        [(f0 - 1) * 1000 // 60, f0 * 1000 // 60, f0 * 1000 // 60 + 33,
+         f0 * 1000 // 60 + 66]
+    assert sa.desync < 0 and sb.desync < 0
+
+
+def test_a_match_that_keeps_its_rate_stays_at_sixty():
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    t = 1000
+    for k in range(4 * 180):               # 60 a second: 16, 17, 17 ms
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 16 if k % 3 == 0 else 17
+    assert sa.step_from is None and sb.step_from is None
+    assert sa.tick_hz == 60 and sb.tick_hz == 60
+
+
+def test_a_forced_rate_never_steps_down():
+    """`link rate 60` holds the host's rate however slowly the match ticks:
+    the diag that measures what a pair does at 60."""
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    sa._m._m.s.hold = True
+    t = 1000
+    for _ in range(4 * 180):
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 22
+    assert sa.step_from is None and sa.tick_hz == 60 and sb.tick_hz == 60
+
+
+def test_a_stepped_match_never_steps_back_up():
+    """The step is one way: a match at 30 after a step ticking at full pace
+    stays at 30, and a later notice of another step is not taken."""
+    wire = _Wire()
+    a, b = _match(wire, tick_hz=60)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    t = 1000
+    for k in range(3 * 180 + 80 + 6 * 90):
+        for s in (sa, sb):
+            s.due(t)
+            s.advance(0, t)
+        wire.deliver(1, sb)
+        wire.deliver(0, sa)
+        t += 22 if k < 3 * 180 + 80 else 33
+    f0 = sa.step_from
+    assert f0 is not None and sa.tick_hz == 30 and sb.tick_hz == 30
+    assert sa.step_from == f0 and sb.step_from == f0
 
 
 # -- the shared random stream ------------------------------------------------
@@ -714,6 +1003,7 @@ def test_the_console_reports_no_session_as_None_never_as_a_rate(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.netplay is None
     assert ws.perf_net() is None
+    assert ws.perf_lock() is None
 
 
 def test_the_console_asks_the_live_session_for_the_rate(tmp_path):
@@ -738,3 +1028,24 @@ def test_perf_sample_does_not_spend_the_meters_window(tmp_path):
     for _ in range(4):
         ws.perf_sample()
     assert ws.netplay.asked == []
+
+
+def test_a_retry_or_a_resend_waits_out_the_lock():
+    """A loop whose frames between ticks are cheap sent on every pass and
+    flooded the air: Python matches ran at 80% of their tick with half
+    their ticks stalled (2026-11-06). A due tick always sends; a stalled
+    retry or a resend goes out at most every LOCK_MS, until the stalled
+    tick's input arrives: that retry ticks at once."""
+    wire = _Wire()
+    a, b = _match(wire)
+    sa = a[0]
+    lock = netplay.LOCK_MS
+    assert sa.gate(1000, False) is True
+    assert sa.gate(1000 + lock - 1, False) is False
+    assert sa.gate(1000 + lock - 1, True) is True, "a due tick never waits"
+    assert sa.gate(1000 + 2 * lock - 1, False) is True
+    assert _step(a, b, wire) == [(False, False)] and sa.waiting
+    t = 1000 + 2 * lock
+    assert sa.gate(t, False) is False, "nothing new arrived"
+    wire.deliver(0, sa)
+    assert sa.gate(t, False) is True, "the missing input arrived"

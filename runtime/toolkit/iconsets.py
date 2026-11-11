@@ -60,13 +60,16 @@ SLOTS = (
     "paste", "layout", "slides", "background", "bubble", "align_l", "align_c", "align_r",
     "trans_none", "trans_fade", "trans_swipe", "brush", "resize", "pointer", "grid",
     "volume", "loop", "trophy", "lock", "heart", "spark", "smile", "key", "secret",
+    "pause", "prev", "next", "stop", "retry", "minus", "plus", "playlist",
+    "equalizer", "pulse", "moymesh",
 )
 SLOT = {n: i for i, n in enumerate(SLOTS)}
 # The shell's own icon kinds (chrome._ICON's) by the slot they draw.
 # ...and the shell's apps whose id is not their slot's name (the desk's
 # tiles, a window's line icon and its chip draw an app by its id).
 ALIASES = {"edit": "pencil", "gear": "settings", "batt": "battery", "artwork": "paint",
-           "appearance": "palette", "myart": "art"}
+           "appearance": "palette", "myart": "art", "jukebox": "music",
+           "terminal": "code"}
 FIRST = 0x21                  # slot n's byte in a mask file is FIRST + n (tools/make_icons.py)
 SIZES = (24, 20, 16)          # the mask sizes, largest first
 KINDS = ("smooth", "pixel")

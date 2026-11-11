@@ -1,6 +1,6 @@
 // moy_spine's MicroPython binding: the kernel's spine (moy_htab.h, moy_route.h,
 // moy_settings.h) as the module runtime/moy_spine.py is, name for name -- Table,
-// AppRegistry, BackStack, Returns, Leases, Settings, StaleHandle and the
+// AppRegistry, BackStack, Returns, Settings, StaleHandle and the
 // constants. The same binding serves the interface suite and the spine trace;
 // which build takes it is MOY_SPINE_IMPL (tools/moy_index_spike.py's header).
 //
@@ -16,10 +16,10 @@
 // interned str (a qstr, made once per kind), so top(), has() and index() on the
 // frame path allocate nothing. An object a constructor made frees its C state in
 // __del__, so the collector reclaims what the Python twin's garbage would. The
-// console's registry, back-stack, return records and leases are not those:
+// console's registry, back-stack and return records are not those:
 // kernel() hands it views of the kernel's own tables (moy_route.h's
 // moy_spine_kernel), whose finalisers free nothing, so a VM stop's sweep leaves
-// the routes and the leases for the next VM.
+// the routes for the next VM.
 //
 // A handle is an int; one outside 1 .. 2**30 - 1 names no row. A Table keeps its
 // rows' objects in a gc array beside the C table (a row of the C table is empty:
@@ -511,10 +511,15 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // -- BackStack ---------------------------------------------------------------------
 
+// `top_q` is the top's kind as a qstr, interned when the top last changed
+// (`top_kind`): the console asks `top()` several times a frame, and interning
+// searches the qstr pools, a few tens of us a call on cold caches.
 typedef struct {
     mp_obj_base_t base;
     moy_back_t *b;
     bool own;
+    qstr top_q;
+    moy_kind_t top_kind;
 } back_obj_t;
 
 static moy_back_t *back_of(mp_obj_t self) {
@@ -530,6 +535,7 @@ static mp_obj_t back_make_new(const mp_obj_type_t *type, size_t n_args,
         no_memory();
     }
     o->own = true;
+    o->top_q = MP_QSTRnull;
     return MP_OBJ_FROM_PTR(o);
 }
 
@@ -583,7 +589,13 @@ static mp_obj_t back_restore(mp_obj_t self, mp_obj_t kinds) {
 static MP_DEFINE_CONST_FUN_OBJ_2(back_restore_obj, back_restore);
 
 static mp_obj_t back_top(mp_obj_t self) {
-    return kind_obj(moy_back_top(back_of(self)));
+    back_obj_t *o = MP_OBJ_TO_PTR(self);
+    const moy_kind_t *k = moy_back_top(o->b);
+    if (o->top_q == MP_QSTRnull || !moy_kind_is(&o->top_kind, k->s, k->len)) {
+        o->top_q = qstr_from_strn(k->s, k->len);
+        o->top_kind = *k;
+    }
+    return MP_OBJ_NEW_QSTR(o->top_q);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(back_top_obj, back_top);
 
@@ -760,112 +772,6 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &returns_locals
     );
 
-// -- Leases ------------------------------------------------------------------------
-
-typedef struct {
-    mp_obj_base_t base;
-    moy_leases_t *l;
-    bool own;
-} leases_obj_t;
-
-static moy_leases_t *leases_of(mp_obj_t self) {
-    return ((leases_obj_t *)MP_OBJ_TO_PTR(self))->l;
-}
-
-static mp_obj_t leases_make_new(const mp_obj_type_t *type, size_t n_args,
-                                size_t n_kw, const mp_obj_t *args) {
-    mp_arg_check_num(n_args, n_kw, 0, 0, false);
-    leases_obj_t *o = mp_obj_malloc_with_finaliser(leases_obj_t, type);
-    o->l = moy_leases_new(&spine_mem);
-    if (o->l == NULL) {
-        no_memory();
-    }
-    o->own = true;
-    return MP_OBJ_FROM_PTR(o);
-}
-
-// The bit of a lease tag: TypeError for a non-str, ValueError for one outside
-// the table.
-static uint32_t lease_arg(mp_obj_t tag) {
-    size_t n;
-    const char *s = str_arg(tag, &n, MP_ERROR_TEXT("a lease tag is a str"));
-    uint32_t bit = moy_lease_bit(s, n);
-    if (bit == 0u) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("unknown lease tag %s"),
-                          s);
-    }
-    return bit;
-}
-
-static mp_obj_t leases_hold(mp_obj_t self, mp_obj_t tag) {
-    size_t n;
-    lease_arg(tag);
-    const char *s = mp_obj_str_get_data(tag, &n);
-    uint32_t mask;
-    moy_leases_hold(leases_of(self), s, n, &mask);
-    return MP_OBJ_NEW_SMALL_INT(mask);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(leases_hold_obj, leases_hold);
-
-static mp_obj_t leases_release(mp_obj_t self, mp_obj_t tag) {
-    size_t n;
-    lease_arg(tag);
-    const char *s = mp_obj_str_get_data(tag, &n);
-    uint32_t mask;
-    moy_leases_release(leases_of(self), s, n, &mask);
-    return MP_OBJ_NEW_SMALL_INT(mask);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(leases_release_obj, leases_release);
-
-static mp_obj_t leases_mask(mp_obj_t self) {
-    return MP_OBJ_NEW_SMALL_INT(moy_leases_mask(leases_of(self)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(leases_mask_obj, leases_mask);
-
-static mp_obj_t leases_held(mp_obj_t self, mp_obj_t tag) {
-    return bool_obj(moy_leases_mask(leases_of(self)) & lease_arg(tag));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(leases_held_obj, leases_held);
-
-static mp_obj_t leases_holders(mp_obj_t self) {
-    uint32_t mask = moy_leases_mask(leases_of(self));
-    mp_obj_t out = mp_obj_new_list(0, NULL);
-    for (uint32_t i = 0; i < MOY_LEASE_TAGS; i++) {
-        if (mask & (1u << i)) {
-            const char *tag = moy_lease_tag(i);
-            mp_obj_list_append(out, MP_OBJ_NEW_QSTR(qstr_from_strn(tag, strlen(tag))));
-        }
-    }
-    return out;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(leases_holders_obj, leases_holders);
-
-static mp_obj_t leases_del(mp_obj_t self_in) {
-    leases_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->own) {
-        moy_leases_free(self->l);
-    }
-    self->l = NULL;
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(leases_del_obj, leases_del);
-
-static const mp_rom_map_elem_t leases_locals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_hold), MP_ROM_PTR(&leases_hold_obj) },
-    { MP_ROM_QSTR(MP_QSTR_release), MP_ROM_PTR(&leases_release_obj) },
-    { MP_ROM_QSTR(MP_QSTR_mask), MP_ROM_PTR(&leases_mask_obj) },
-    { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&leases_held_obj) },
-    { MP_ROM_QSTR(MP_QSTR_holders), MP_ROM_PTR(&leases_holders_obj) },
-    { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&leases_del_obj) },
-};
-static MP_DEFINE_CONST_DICT(leases_locals, leases_locals_table);
-
-static MP_DEFINE_CONST_OBJ_TYPE(
-    leases_type, MP_QSTR_Leases, MP_TYPE_FLAG_NONE,
-    make_new, leases_make_new,
-    locals_dict, &leases_locals
-    );
-
 // -- Settings ----------------------------------------------------------------------
 
 static const mp_obj_type_t settings_type;
@@ -1008,7 +914,7 @@ static mp_obj_t settings_decode(const char *j, size_t n) {
 
 static mp_obj_t settings_load(mp_obj_t self, mp_obj_t text) {
     size_t n;
-    const char *s = str_arg(text, &n, MP_ERROR_TEXT("system.json is a str"));
+    const char *s = str_arg(text, &n, MP_ERROR_TEXT("the settings text is a str"));
     uint32_t rows;
     int rc = moy_settings_load(settings_of(self), s, n, &rows);
     if (rc != MOY_SETTINGS_OK) {
@@ -1034,34 +940,100 @@ static mp_obj_t settings_adopt(mp_obj_t self, mp_obj_t d) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(settings_adopt_obj, settings_adopt);
 
+// fn(ctx) under the settings lock (moy_settings.h, THE SETTINGS LOCK), let go
+// on a raise too: the kernel's rows are a program's task's as well.
+static mp_obj_t settings_locked(mp_obj_t (*fn)(void *), void *ctx) {
+    moy_settings_lock();
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t r = fn(ctx);
+        nlr_pop();
+        moy_settings_unlock();
+        return r;
+    }
+    moy_settings_unlock();
+    nlr_jump(nlr.ret_val);
+}
+
+typedef struct {
+    moy_settings_t *s;
+    const char *k;
+    size_t kn;
+} row_arg_t;
+
+// The row's text as a str, or MP_OBJ_NULL: copied while the lock holds it.
+static mp_obj_t row_text(void *ctx) {
+    row_arg_t *a = ctx;
+    const char *j;
+    size_t jn;
+    if (!moy_settings_get(a->s, a->k, a->kn, &j, &jn)) {
+        return MP_OBJ_NULL;
+    }
+    return mp_obj_new_str_copy(&mp_type_str, (const byte *)j, jn);
+}
+
 static mp_obj_t settings_get(size_t n_args, const mp_obj_t *args) {
-    size_t kn, jn;
-    const char *k = settings_key(args[1], &kn), *j;
-    if (!moy_settings_get(settings_of(args[0]), k, kn, &j, &jn)) {
+    row_arg_t a = { settings_of(args[0]), NULL, 0 };
+    a.k = settings_key(args[1], &a.kn);
+    mp_obj_t t = settings_locked(row_text, &a);
+    if (t == MP_OBJ_NULL) {
         return n_args > 2 ? args[2] : mp_const_none;
     }
+    size_t jn;
+    const char *j = mp_obj_str_get_data(t, &jn);
     return settings_decode(j, jn);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(settings_get_obj, 2, 3, settings_get);
 
 static mp_obj_t settings_text(mp_obj_t self, mp_obj_t key) {
-    size_t kn, jn;
-    const char *k = settings_key(key, &kn), *j;
-    if (!moy_settings_get(settings_of(self), k, kn, &j, &jn)) {
-        return mp_const_none;
-    }
-    return mp_obj_new_str_copy(&mp_type_str, (const byte *)j, jn);
+    row_arg_t a = { settings_of(self), NULL, 0 };
+    a.k = settings_key(key, &a.kn);
+    mp_obj_t t = settings_locked(row_text, &a);
+    return t == MP_OBJ_NULL ? mp_const_none : t;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(settings_text_obj, settings_text);
 
-static mp_obj_t settings_dump(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
+static mp_obj_t dump_locked(void *ctx) {
+    moy_settings_t *s = ctx;
     vstr_t vstr;
     vstr_init_len(&vstr, moy_settings_dump(s, NULL, 0));
     moy_settings_dump(s, vstr.buf, vstr.len);
     return mp_obj_new_str_from_vstr(&vstr);
 }
+
+static mp_obj_t settings_dump(mp_obj_t self) {
+    return settings_locked(dump_locked, settings_of(self));
+}
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_dump_obj, settings_dump);
+
+// load_file(text) -> the lines passed over: the rows are the settings file's
+// (moy_settings_load_file, the file's one reader).
+static mp_obj_t settings_load_file(mp_obj_t self, mp_obj_t text) {
+    size_t n;
+    const char *s = str_arg(text, &n, MP_ERROR_TEXT("the settings text is a str"));
+    uint32_t rows, passed;
+    int rc = moy_settings_load_file(settings_of(self), s, n, &rows, &passed);
+    if (rc != MOY_SETTINGS_OK) {
+        raise_settings(rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(passed);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(settings_load_file_obj, settings_load_file);
+
+// file() -> the settings file's text for the rows (moy_settings_file, its one
+// writer).
+static mp_obj_t file_locked(void *ctx) {
+    moy_settings_t *s = ctx;
+    vstr_t vstr;
+    vstr_init_len(&vstr, moy_settings_file(s, NULL, 0));
+    moy_settings_file(s, vstr.buf, vstr.len);
+    return mp_obj_new_str_from_vstr(&vstr);
+}
+
+static mp_obj_t settings_file(mp_obj_t self) {
+    return settings_locked(file_locked, settings_of(self));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(settings_file_obj, settings_file);
 
 // The write hook, when the store is dirty: True when it is clean afterwards.
 static mp_obj_t settings_flush(mp_obj_t self_in) {
@@ -1155,8 +1127,8 @@ static mp_obj_t settings_delete(size_t n_args, const mp_obj_t *pos_args,
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(settings_delete_obj, 2, settings_delete);
 
-static mp_obj_t settings_keys(mp_obj_t self) {
-    moy_settings_t *s = settings_of(self);
+static mp_obj_t keys_locked(void *ctx) {
+    moy_settings_t *s = ctx;
     uint32_t n = moy_settings_count(s);
     mp_obj_list_t *out = MP_OBJ_TO_PTR(mp_obj_new_list(n, NULL));
     for (uint32_t i = 0; i < n && i < out->len; i++) {
@@ -1166,6 +1138,10 @@ static mp_obj_t settings_keys(mp_obj_t self) {
         out->items[i] = mp_obj_new_str_copy(&mp_type_str, (const byte *)k, kn);
     }
     return MP_OBJ_FROM_PTR(out);
+}
+
+static mp_obj_t settings_keys(mp_obj_t self) {
+    return settings_locked(keys_locked, settings_of(self));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(settings_keys_obj, settings_keys);
 
@@ -1198,6 +1174,8 @@ static const mp_rom_map_elem_t settings_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&settings_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_keys), MP_ROM_PTR(&settings_keys_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&settings_dump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_load_file), MP_ROM_PTR(&settings_load_file_obj) },
+    { MP_ROM_QSTR(MP_QSTR_file), MP_ROM_PTR(&settings_file_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&settings_del_obj) },
 };
 static MP_DEFINE_CONST_DICT(settings_locals, settings_locals_table);
@@ -1211,7 +1189,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 // -- CrashGuard: the strike ledger over the settings rows ----------------------------
 
 // runtime/shell/crash_guard.py's CrashGuard, call for call: the slot's text is read
-// with moy_settings_get and written with the same persisting write Settings.set
+// with moy_settings_get, copied under the settings lock, and written with the same persisting write Settings.set
 // makes. The OPEN id is mirrored through the hook set_mirror() was given (the
 // kernel's moy_crash.arm), called as hook(role, id or None).
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_spine_mirror);
@@ -1261,13 +1239,13 @@ static guard_obj_t *guard_of(mp_obj_t self) {
 
 // The slot's text, or NULL when the store has no row for the key.
 static const char *guard_slot(guard_obj_t *g, size_t *n) {
-    size_t kn;
-    const char *k = str_arg(g->key, &kn, MP_ERROR_TEXT("a ledger key is a str"));
-    const char *j;
-    if (!moy_settings_get(settings_of(g->store), k, kn, &j, n)) {
+    row_arg_t a = { settings_of(g->store), NULL, 0 };
+    a.k = str_arg(g->key, &a.kn, MP_ERROR_TEXT("a ledger key is a str"));
+    mp_obj_t t = settings_locked(row_text, &a);
+    if (t == MP_OBJ_NULL) {
         return NULL;
     }
-    return j;
+    return mp_obj_str_get_data(t, n);
 }
 
 static mp_obj_t as_str(mp_obj_t o) {
@@ -1471,13 +1449,13 @@ static mp_obj_t mod_set_mirror(mp_obj_t hook) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_mirror_obj, mod_set_mirror);
 
-// kernel(fresh) -> (apps, back, returns, leases): views of the kernel's own
+// kernel(fresh) -> (apps, back, returns): views of the kernel's own
 // tables (moy_route.h's moy_spine_kernel), made at the first call and never
 // freed, so a VM stop leaves them for the next VM. The views own nothing: their
 // finalisers free no table. The registry is cleared at every call (the console
-// registers its apps at each start); `fresh` also puts the back-stack, the
-// return records and the leases back as they are made, which every start but a
-// return start asks for.
+// registers its apps at each start); `fresh` also puts the back-stack and the
+// return records back as they are made, which every start but a return start
+// asks for.
 static mp_obj_t mod_kernel(mp_obj_t fresh) {
     const moy_spine_kernel_t *k = moy_spine_kernel(&spine_mem);
     if (k == NULL) {
@@ -1487,7 +1465,6 @@ static mp_obj_t mod_kernel(mp_obj_t fresh) {
     if (mp_obj_is_true(fresh)) {
         moy_back_reset(k->back);
         moy_returns_reset(k->returns);
-        moy_leases_reset(k->leases);
     }
     apps_obj_t *a = mp_obj_malloc_with_finaliser(apps_obj_t, &apps_type);
     a->a = k->apps;
@@ -1495,16 +1472,13 @@ static mp_obj_t mod_kernel(mp_obj_t fresh) {
     back_obj_t *b = mp_obj_malloc_with_finaliser(back_obj_t, &back_type);
     b->b = k->back;
     b->own = false;
+    b->top_q = MP_QSTRnull;
     returns_obj_t *r = mp_obj_malloc_with_finaliser(returns_obj_t, &returns_type);
     r->r = k->returns;
     r->apps = MP_OBJ_FROM_PTR(a);
     r->own = false;
-    leases_obj_t *l = mp_obj_malloc_with_finaliser(leases_obj_t, &leases_type);
-    l->l = k->leases;
-    l->own = false;
-    mp_obj_t t[4] = { MP_OBJ_FROM_PTR(a), MP_OBJ_FROM_PTR(b), MP_OBJ_FROM_PTR(r),
-                      MP_OBJ_FROM_PTR(l) };
-    return mp_obj_new_tuple(4, t);
+    mp_obj_t t[3] = { MP_OBJ_FROM_PTR(a), MP_OBJ_FROM_PTR(b), MP_OBJ_FROM_PTR(r) };
+    return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
 
@@ -1512,7 +1486,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_kernel_obj, mod_kernel);
 // rows (moy_spine_kernel's), which outlive the VM, writing through `save`. Its
 // finaliser frees no row and takes its saver away, so with no VM a dirty row
 // waits for the next start's view. `fresh` empties the rows, as every start but
-// a return start asks (the console loads system.json into them next).
+// a return start asks (the console loads system/settings into them next).
 static mp_obj_t mod_kernel_settings(mp_obj_t save, mp_obj_t fresh) {
     const moy_spine_kernel_t *k = moy_spine_kernel(&spine_mem);
     if (k == NULL) {
@@ -1533,23 +1507,12 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_kernel_settings_obj, mod_kernel_settings);
 
 // -- the module --------------------------------------------------------------------
 
-static const mp_rom_obj_tuple_t lease_tags_tuple = {
-    { &mp_type_tuple }, MOY_LEASE_TAGS,
-    {
-        MP_ROM_QSTR(MP_QSTR_web), MP_ROM_QSTR(MP_QSTR_update),
-        MP_ROM_QSTR(MP_QSTR_settings), MP_ROM_QSTR(MP_QSTR_cart),
-        MP_ROM_QSTR(MP_QSTR_link), MP_ROM_QSTR(MP_QSTR_carts),
-        MP_ROM_QSTR(MP_QSTR_dev),
-    },
-};
-
 static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_spine) },
     { MP_ROM_QSTR(MP_QSTR_Table), MP_ROM_PTR(&table_type) },
     { MP_ROM_QSTR(MP_QSTR_AppRegistry), MP_ROM_PTR(&apps_type) },
     { MP_ROM_QSTR(MP_QSTR_BackStack), MP_ROM_PTR(&back_type) },
     { MP_ROM_QSTR(MP_QSTR_Returns), MP_ROM_PTR(&returns_type) },
-    { MP_ROM_QSTR(MP_QSTR_Leases), MP_ROM_PTR(&leases_type) },
     { MP_ROM_QSTR(MP_QSTR_Settings), MP_ROM_PTR(&settings_type) },
     { MP_ROM_QSTR(MP_QSTR_StaleHandle), MP_ROM_PTR(&stale_type) },
     { MP_ROM_QSTR(MP_QSTR_CrashGuard), MP_ROM_PTR(&guard_type) },
@@ -1574,6 +1537,7 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KIND_IMAGE), MP_ROM_INT(MOY_KIND_IMAGE) },
     { MP_ROM_QSTR(MP_QSTR_KIND_ACTOR), MP_ROM_INT(MOY_KIND_ACTOR) },
     { MP_ROM_QSTR(MP_QSTR_KIND_GRANT), MP_ROM_INT(MOY_KIND_GRANT) },
+    { MP_ROM_QSTR(MP_QSTR_KIND_LEASE), MP_ROM_INT(MOY_KIND_LEASE) },
     { MP_ROM_QSTR(MP_QSTR_STAYED), MP_ROM_INT(MOY_GOTO_STAYED) },
     { MP_ROM_QSTR(MP_QSTR_PUSHED), MP_ROM_INT(MOY_GOTO_PUSHED) },
     { MP_ROM_QSTR(MP_QSTR_RETURNED), MP_ROM_INT(MOY_GOTO_RETURNED) },
@@ -1583,7 +1547,6 @@ static const mp_rom_map_elem_t moy_spine_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ROUTE_EDITOR), MP_ROM_INT(MOY_ROUTE_EDITOR) },
     { MP_ROM_QSTR(MP_QSTR_ROUTE_APP), MP_ROM_INT(MOY_ROUTE_APP) },
     { MP_ROM_QSTR(MP_QSTR_ROUTE_WINDOW), MP_ROM_INT(MOY_ROUTE_WINDOW) },
-    { MP_ROM_QSTR(MP_QSTR_LEASE_TAGS), MP_ROM_PTR(&lease_tags_tuple) },
 };
 static MP_DEFINE_CONST_DICT(moy_spine_globals, moy_spine_globals_table);
 

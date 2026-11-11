@@ -7,6 +7,7 @@
 #   Peer              a console the link can hear
 #   EspNowNet         net.* over the link
 #   EspNowLink        the radio's bring-up and the link's actions
+#   EspNowLink.open_port  a process's port: its messages, apart from the game's
 #   launch_cart       the guest's half: open the cart a host named
 """The unified, transport-neutral MULTIPLAYER layer (#65).
 
@@ -69,6 +70,27 @@ class _Slot:
         # every slot, aligned with the local InputState.begin_frame().
         self._pressed = self._held - self._prev
         self._prev = set(self._held)
+
+    def set_mask(self, mask, names):
+        """Held from `mask` (bit i is names[i]) and the press edge against
+        the last call, in one step and in place: a lockstep tick sets both
+        slots every tick, and two new sets a slot a tick were most of what a
+        match's frame allocated."""
+        held, prev, pressed = self._held, self._prev, self._pressed
+        bit = 1
+        for name in names:
+            if mask & bit:
+                if name in prev:
+                    pressed.discard(name)
+                else:
+                    pressed.add(name)
+                held.add(name)
+                prev.add(name)
+            else:
+                held.discard(name)
+                prev.discard(name)
+                pressed.discard(name)
+            bit <<= 1
 
     def held(self, name):
         return name in self._held
@@ -315,9 +337,20 @@ try:
 except ImportError:                     # CPython: the host's ctypes module
     from runtime import moy_play as _mp
 
-PROTO = 1
-T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE = 1, 2, 3, 4, 5, 6
+PROTO = 3
+T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
+# A process's port (moy_match.h, PORTS): the sender rule it opens with, and
+# what the port calls answer where they fail.
+FROM_ANY, FROM_MATCH = 0, 1
+PORT_BAD, PORT_FULL, PORT_BUSY, PORT_ABSENT, PORT_DOWN, PORT_AGAIN = -1, -2, -3, -4, -5, -6
+# The ports' send budget (moy_match.h, THE SEND BUDGET): frames/s and burst.
+PORT_RATE, PORT_BURST = 10, 4
+PORTS_RATE, PORTS_BURST = 30, 8
+LIVE_RATE, LIVE_BURST = 10, 1
+PORT_MSG_MAX = 240                      # MOY_MATCH_MSG_MAX
 TICK_HZ = 30
+TICK_FAST = 60
+LOCK_MS = 16                            # moy_match.h's MOY_MATCH_LOCK_MS
 DELAY = 1
 DELAY_MAX = 2
 ESCALATE_TICKS = 90
@@ -343,9 +376,11 @@ def mask_of(state, buttons, player=None):
     """An input's held buttons as one byte, in `buttons` order. `held`, not
     `pressed`: both consoles derive edges from consecutive held masks."""
     m = 0
-    for i, name in enumerate(buttons):
+    bit = 1
+    for name in buttons:                # enumerate allocates a tuple a button
         if state.held(name, player):
-            m |= 1 << i
+            m |= bit
+        bit <<= 1
     return m
 
 
@@ -385,6 +420,33 @@ class _SendIo:
         pass
 
 
+def _plain(v, depth):
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return repr(v)
+    if depth > 0 and isinstance(v, (list, tuple)):
+        return "[" + ",".join(_plain(x, depth - 1) or "?" for x in v) + "]"
+    if depth > 0 and isinstance(v, dict):
+        ks = [k for k in v if isinstance(k, (int, str))]
+        ks.sort(key=repr)
+        return "{" + ",".join("%r:%s" % (k, _plain(v[k], depth - 1) or "?") for k in ks) + "}"
+    return None
+
+
+def world_text(ns):
+    """A Python cart's world as text, for the desync check's world digest:
+    every global that is data (names with a leading underscore are the
+    console's), three containers deep. Objects and functions are not the
+    world."""
+    out = []
+    for k in sorted(ns):
+        if k[:1] == "_":
+            continue
+        t = _plain(ns[k], 3)
+        if t is not None:
+            out.append(k + "=" + t)
+    return "\n".join(out)
+
+
 class LockstepSession:
     """One two-console match as the console sees it: the C session
     (moy_lockstep_*) and its two global players' slots in `router`, both
@@ -408,18 +470,19 @@ class LockstepSession:
             if config:
                 cfg = json.dumps(config)
             _m.begin(index, seed, session, cfg)
-            _m.tick_ms = int(1000 // tick_hz)
+            _m.rate(tick_hz)
             _m.delay = delay
             _m.redundancy = redundancy
         self._m = _m
         self._buttons = buttons
-        self.dt = 1.0 / tick_hz
         self.index = int(_m.index)
         self.peer = 1 - self.index
         self.seed = int(_m.seed)
         self.session = int(_m.session)
         self.config = _decode_config(_m.config)
         self._router = router
+        self.world = None               # the cart's world as text, for the check
+        self._lock_was = None           # lock()'s window: (ms, its counters)
         self.local = self.remote = None
         if router is not None:
             # Both slots are the session's and NOT auto-advanced: their edges
@@ -434,10 +497,14 @@ class LockstepSession:
     def __getattr__(self, name):
         if name in ("frame", "delay", "redundancy", "stalls", "stall_ticks",
                     "waiting", "dead", "packets_in", "packets_out",
-                    "last_peer_frame", "peer_need", "tick_ms"):
-            return getattr(self.__dict__["_m"], name)
+                    "last_peer_frame", "peer_need", "tick_ms", "delay_max", "raises",
+                    "lowers", "peer_margin", "step_from", "tick_hz", "desync",
+                    "desync_kind", "checks", "late_ms", "stall_ms", "slew_ms"):
+            # self._m, never self.__dict__: on a board __dict__ is a copy
+            # of the instance's attributes, made at every read.
+            return getattr(self._m, name)
         if name in ("_next_ms", "_m_ema", "_last_sent", "_tps_ms"):
-            return getattr(self.__dict__["_m"], name[1:])
+            return getattr(self._m, name[1:])
         raise AttributeError(name)
 
     def __setattr__(self, name, value):
@@ -460,11 +527,35 @@ class LockstepSession:
     def due(self, now_ms):
         return self._m.due(now_ms)
 
+    def gate(self, now_ms, due):
+        """May this pass send (moy_lockstep_gate): a due tick and a stalled
+        one whose input arrived always, another retry or a resend at most
+        every LOCK_MS."""
+        return self._m.gate(now_ms, due)
+
+    @property
+    def dt(self):
+        """The next tick's dt (frame `frame`'s)."""
+        return 1.0 / self._m.hz_at(self._m.frame)
+
+    def dt_at(self, f):
+        """Frame `f`'s dt: 1/its tick, which a step down moves at a frame
+        both consoles agree on."""
+        return 1.0 / self._m.hz_at(f)
+
+    def ms(self, f):
+        """The match's clock after `f` ticks, in ms (time() in a match)."""
+        return self._m.ms(f)
+
     def advance(self, held_mask, now_ms=None):
         """One lockstep frame: True simulate (both slots now hold this frame's
         buttons and the random stream starts from the frame's seed), False
         STALL. Never blocks, never guesses."""
-        if self._m.advance(held_mask, now_ms) != 1:
+        m = self._m
+        w = self.world
+        if w is not None and m.world_due():
+            m.world(w())
+        if m.advance(held_mask, now_ms) != 1:
             return False
         held = self._m.held
         self._apply(self.local, held[self.index])
@@ -474,11 +565,8 @@ class LockstepSession:
         return True
 
     def _apply(self, slot, mask):
-        if slot is None:
-            return
-        for i, name in enumerate(self._buttons):
-            slot.set_held(name, bool(mask & (1 << i)))
-        slot.begin_frame()
+        if slot is not None:
+            slot.set_mask(mask, self._buttons)
 
     def _frame_seed(self, f):
         return _mp.seed_of(self.seed, f)
@@ -496,6 +584,30 @@ class LockstepSession:
         """Ticks per second since the last call: the PERF line's net=. ONE
         reader -- it consumes its window."""
         return self._m.tps(now_ms)
+
+    def lock(self, now_ms):
+        """Where the tick rate went since the last call, the PERF line's
+        lock=: (late, stall, slew, delay, margin). The first three are ms of
+        the tick schedule given up per second -- this console's own frames
+        running a whole tick long (a collection, a heavy frame), its waits
+        on the peer's input, and the guest's phase moved later -- so their
+        sum over the tick's ms is the ticks a second the match lost. Then
+        the input delay in ms, and the ms before it needed them that the
+        peer's inputs landed (None before any). ONE reader -- it consumes
+        its window."""
+        m = self._m
+        now = (m.late_ms, m.stall_ms, m.slew_ms)
+        was = self._lock_was
+        self._lock_was = (now_ms, now)
+        hz = m.tick_hz or TICK_HZ
+        e = m.m_ema
+        tail = (m.delay * 1000 // hz, None if e is None else int(e + 0.5))
+        if was is None:
+            return (None, None, None) + tail
+        ms = (now_ms - was[0]) & 0x3FFFFFFF
+        if ms <= 0:
+            return (None, None, None) + tail
+        return tuple((now[i] - was[1][i]) * 1000 // ms for i in range(3)) + tail
 
     def close(self):
         for i in (self.index, self.peer):
@@ -575,10 +687,27 @@ class _RadioIo:
     def recover(self):
         return self._link._cycle_radio()
 
+    def channel(self, set_to):
+        """The station's channel (moy_match.h's io `channel`), negated while
+        it is associated; `set_to` > 0 moves a free one there."""
+        w = self._link.wlan
+        pinned = bool(w.isconnected())
+        if set_to > 0 and not pinned:
+            w.config(channel=set_to)
+        ch = int(w.config("channel") or 0)
+        return -ch if pinned else ch
+
 
 class EspNowLink:
     """The console's half of the radio link: the radio's bring-up and
     teardown, the session's slots and the actions the C link leaves.
+
+    Two kinds of holder keep the radio up: the game in front (`start` and
+    `stop`, the Player's, around a run with the "multiplayer" permission)
+    and a process's open port (`open_port` and `close_port`, its `net`
+    handle's: runtime/system/dev_handles.py). The radio stops when the last
+    of them lets go; a game's stop with a port open ends the match and
+    leaves the radio up, its beacon at the launcher's.
 
     `radio`, `wlan` and `launch(ws, title) -> bool` are injectable; left None
     on a board, the radio is the kernel's (`moy_net.Link`'s ring) and the link
@@ -652,10 +781,16 @@ class EspNowLink:
             return 0 if m is None else getattr(m, name)
         raise AttributeError(name)
 
+    _game = False                       # the game in front holds the radio
+
     # -- lifecycle --
     def start(self):
-        """Bring the radio up with the measured recipe. Idempotent; a board
+        """The game's radio up with the measured recipe. Idempotent; a board
         with no ESP-NOW degrades to an inactive link, never a crash."""
+        self._game = True
+        return self._up()
+
+    def _up(self):
         if self.active:
             return True
         try:
@@ -715,7 +850,17 @@ class EspNowLink:
             return False
 
     def stop(self, ws=None):
+        """The game's radio let go: the match ends, and the radio stops
+        unless a process's port holds it."""
+        self._game = False
         self.end_match(ws)
+        if self._m is not None and self._m.ports_open():
+            self._m.announce("", 0)
+            self._m.action()            # the stopped run's request, as stop() drops it
+            return
+        self._down()
+
+    def _down(self):
         if self.radio is not None:
             try:
                 self.radio.active(False)
@@ -732,6 +877,56 @@ class EspNowLink:
 
     def broadcast(self, payload):
         return self.active and self._m.broadcast(payload)
+
+    # -- a process's ports --
+    def open_port(self, port, frm=FROM_ANY):
+        """Port `port` (1..65535) opened, the radio brought up for it: 0, or
+        PORT_BAD, PORT_FULL (every slot taken), PORT_BUSY (open already),
+        PORT_DOWN (no radio)."""
+        if not 0 < port <= 0xFFFF:
+            return PORT_BAD
+        if not self._up():
+            return PORT_DOWN
+        return self._m.port_open(port, frm)
+
+    def close_port(self, port):
+        """Port `port` closed, what waits on it dropped; the last port's close
+        stops the radio when no game holds it."""
+        if self._m is None:
+            return PORT_ABSENT
+        rc = self._m.port_close(port)
+        if not self._game and not self._m.ports_open():
+            self._down()
+        return rc
+
+    def port_send(self, port, body):
+        """One broadcast message on open `port`: 0, PORT_BAD (more than
+        PORT_MSG_MAX bytes), PORT_ABSENT (not open), PORT_DOWN, or PORT_AGAIN
+        (past the send budget: nothing sent)."""
+        if self._m is None:
+            return PORT_DOWN
+        return self._m.port_send(port, body, self._ticks_ms())
+
+    def port_take(self, port, cap=PORT_MSG_MAX):
+        """(sender's MAC, bytes) of the oldest message on `port`, None with
+        none, PORT_FULL where it is longer than `cap` (it waits on), or
+        PORT_ABSENT."""
+        return PORT_ABSENT if self._m is None else self._m.port_take(port, cap)
+
+    def port_drops(self, port):
+        return -1 if self._m is None else self._m.port_drops(port)
+
+    def port_sent(self, port):
+        return -1 if self._m is None else self._m.port_sent(port)
+
+    def port_refused(self, port):
+        return -1 if self._m is None else self._m.port_refused(port)
+
+    def port_waiting(self, port):
+        return -1 if self._m is None else self._m.port_waiting(port)
+
+    def ports_open(self):
+        return 0 if self._m is None else self._m.ports_open()
 
     # -- the frame --
     def drain_input(self, budget=DRAIN_MAX):
@@ -763,6 +958,9 @@ class EspNowLink:
         if s is not None:
             if ws.netplay is not s:
                 ws.netplay = s
+            if s.desync >= 0 and self._said != (s.session, s.desync):
+                self._said = (s.session, s.desync)
+                self._say_desync(ws)
         elif ws.netplay is not None and isinstance(ws.netplay, LockstepSession) \
                 and ws.netplay._m is m:
             ws.netplay = None
@@ -779,14 +977,48 @@ class EspNowLink:
             print("Moybyte link: no cart named %r here" % title)
             self.end_match(ws)
 
+    _said = None
+
+    def _say_desync(self, ws):
+        """The match's desync on the screen: two worlds that disagree are
+        said, never left to paint two plausible games."""
+        notice = getattr(ws, "notice", None)
+        if notice is None:
+            return
+        try:
+            try:
+                import ui_draw as _ud
+            except ImportError:
+                from runtime import ui_draw as _ud
+            notice(_ud.s("notice.out_of_sync"), _ud.s("notice.out_of_sync_why"), "warn")
+        except Exception as exc:  # noqa: BLE001 -- a notice must never kill a frame
+            print("Moybyte link: notice failed:", exc)
+
+    def check_worlds(self, on=True):
+        """Arm the desync check's world half (a diag: a digest of the cart's
+        world at every checkpoint, compared only where both consoles armed it)."""
+        if self._m is None:
+            self.start()
+        if self._m is not None:
+            self._m.arm_worlds(bool(on))
+
     def _dispatch(self, ws, mac, msg):
         if self._m is not None:
             self._m.dispatch(mac, msg, self._ticks_ms())
             self.sync(ws)
 
     # -- pairing --
-    def announce(self, cart="", state=0):
+    rate_force = None                   # a dev force of the tick (30 or 60), else the cart's
+
+    def announce(self, cart="", state=0, fps=None):
+        """What this console sits on, in its beacon: the cart, and the tick it
+        holds for it (`match_rate` of the cart's pace; `link rate` forces
+        it). A host starts the match at the lower of the two."""
         if self._m is not None:
+            if self.rate_force:
+                self._m.set_rate(self.rate_force, True)
+            else:
+                self._m.set_rate(match_rate(fps), False)
             self._m.announce(cart or "", state)
 
     def candidate(self, cart):
@@ -797,7 +1029,8 @@ class EspNowLink:
 
     def offer(self, ws, cart, router=None, seed=None):
         """At a multiplayer cart's start: a peer on the same cart makes this
-        run a match (the lower MAC hosts). The host's tuning rides START."""
+        run a match (the lower MAC hosts). The host's tuning rides START, and
+        so does its tick: the lower of the two consoles' (`announce`)."""
         if not self.active:
             return False
         cfg = getattr(ws, "config", None) if ws is not None else None
@@ -838,14 +1071,33 @@ class EspNowLink:
             "peers": [(p.name, p.board, p.cart, p.state) for p in self.peers.values()],
             "rx": self.rx, "tx": self.tx, "drops": self.drops,
             "recovers": self.recovers,
+            "channel": None if m is None else (-m.ch if m.pinned else m.ch),
             "error": self.error or (m.error if m is not None and m.error else None),
             "match": None if s is None else {
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
-                "stall_ticks": s.stall_ticks, "delay": s.delay,
+                "stall_ticks": s.stall_ticks, "delay": s.delay, "hz": s.tick_hz,
+                "raises": s.raises, "lowers": s.lowers, "peer_margin": s.peer_margin,
+                "step_from": s.step_from,
                 "m_ema": s._m_ema, "waiting": s.waiting, "in": s.packets_in,
                 "out": s.packets_out, "peer_frame": s.last_peer_frame,
+                "checks": s.checks, "desync": None if s.desync < 0 else s.desync,
+                "desync_kind": ("inputs", "worlds")[s.desync_kind - 1]
+                if s.desync >= 0 else None,
             },
+            "world_check": bool(m.world_check) if m is not None else None,
         }
+
+
+def match_rate(fps):
+    """The tick a console says it holds for a cart paced `fps` (its
+    manifest's): 60 for a cart whose logic runs at 60 or is dt-scaled
+    ("free"), else 30. A match that cannot keep 60 steps down."""
+    if fps == "free":
+        return TICK_FAST
+    try:
+        return TICK_FAST if int(fps) >= TICK_FAST else TICK_HZ
+    except (TypeError, ValueError):
+        return TICK_HZ
 
 
 def _cart_buttons():

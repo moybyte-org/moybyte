@@ -81,6 +81,7 @@ def test_the_scenarios_cover_the_fold_as_a_whole():
                  "fold_snap_a_full_queue_is_one_memcpy",
                  "fold_snap_disarm_fence_and_reset_wait",
                  "fold_snap_timeout_retires_the_engine",
+                 "fold_snap_release_gives_the_engine_back",
                  "fold_snap_timeout_on_the_feeder_is_bounded",
                  "fold_snap_crop_bands_match_the_raster",
                  # A COMPILED CART'S FRAME from its own memory: the arm, both
@@ -257,3 +258,40 @@ def test_the_twin_panel_verbs_stay_byte_identical(verb):
         encoding="utf-8")
     assert _normalised(lcd, "lcd", verb) == _normalised(axs, "axs", verb), (
         "moy_lcd_%s and moy_axs_%s have drifted apart" % (verb, verb))
+
+
+def test_a_runs_end_gives_the_fold_scratch_back_behind_its_fences():
+    """The fold's snapshot is a game-sized PSRAM buffer (150 KB for 320x240)
+    only a play frame uses, so Player.release_world gives it back through
+    DeviceCanvas.release_fold -- and only after every reader is waited out,
+    as the compiled cart's frame scratch closes (moycore_glue's close). The
+    snapshot engine goes at every run's end, scratch or not (`fold_release`):
+    one kept for the session left its GDMA channels and descriptor lists in
+    the middle of the internal heap."""
+    from types import SimpleNamespace
+    from device import device_canvas as dc
+    log = []
+
+    class Comp:
+        def __getattr__(self, name):
+            if name in ("fold_release", "fold_fence", "snap_fence",
+                        "disarm_scale_fold"):
+                return lambda: log.append(name)
+            raise AttributeError(name)
+
+    def scratch(tag):
+        return SimpleNamespace(release=lambda: log.append("release " + tag))
+
+    cv = SimpleNamespace(_comp=Comp(), _snap_scratch=scratch("snap"),
+                         _view_scratch=scratch("view"), _snap_live=True)
+    dc.DeviceCanvas.release_fold(cv)
+    assert log == ["fold_release", "fold_fence", "snap_fence", "disarm_scale_fold",
+                   "release snap", "release view"]
+    assert cv._snap_scratch is None and cv._view_scratch is None
+    assert cv._snap_live is False
+    log.clear()
+    dc.DeviceCanvas.release_fold(cv)        # nothing held: only the engine goes
+    assert log == ["fold_release"]
+    player = runtime_file("player.py").read_text(encoding="utf-8")
+    world = player[player.index("def release_world"):]
+    assert world.index("release_run_canvas()") < world.index('"release_fold"')

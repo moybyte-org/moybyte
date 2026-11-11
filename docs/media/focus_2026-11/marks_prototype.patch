@@ -1,0 +1,604 @@
+diff --git a/native/moy_ui/moy_ui_api.c b/native/moy_ui/moy_ui_api.c
+index 0cd7f8d67..3f1a96bd4 100644
+--- a/native/moy_ui/moy_ui_api.c
++++ b/native/moy_ui/moy_ui_api.c
+@@ -1848,6 +1848,8 @@ moy_ui_box_t mua_card_of(const moy_ui_ctx_t *c) {
+                           (int16_t)(c->page.w - 2 * in), 0};
+ }
+ 
++int moy_ui_kmark_declared(int kind, int state);
++
+ // A stacked row b of an open group shows: its marks (MOY_UI_F_FOCUS,
+ // MOY_UI_F_ON) are kept for the card's foot -- whether or not a shift
+ // frame's floor draws the row.
+@@ -1869,7 +1871,8 @@ void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stack
+     // draws a rule
+     const moy_ui_marks_t *m = moy_ui_marks();
+     int st = m->style[MOY_UI_MARK_PART];
+-    int fills = m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
++    int fills = m->active && !moy_ui_kmark_declared(0, 0)
++                && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
+     int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && fills;
+     int own = (marks & MOY_UI_F_FOCUS) && fills;
+     // a row the page's foot cuts inside its fade draws no rule: the fade
+@@ -2198,7 +2201,7 @@ void mua_vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t label)
+ void mua_vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
+                    int kind, int st, const moy_ui_over_t *o, const moy_ui_vrow_t *r) {
+     clip_t k;
+-    int f = mua_mark_flags(st, o) & ~MOY_UI_F_ON;
++    int f = mua_mark_flags(st, o) & (moy_ui_kmark_declared(0, 1) ? ~0 : ~MOY_UI_F_ON);
+     if (mua_audit_on && c->n_cur > 0) {
+         const moy_ui_box_t sb = c->cur[c->n_cur - 1].b;
+         if (sb.x == b.x && sb.y == b.y && sb.w == b.w && sb.h == b.h) {
+diff --git a/native/moy_ui/moy_ui_api_table.c b/native/moy_ui/moy_ui_api_table.c
+index 3efa7a300..83d73a32a 100644
+--- a/native/moy_ui/moy_ui_api_table.c
++++ b/native/moy_ui/moy_ui_api_table.c
+@@ -1047,7 +1047,11 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
+     c->dlg_id = id;
+     c->dlg_card = card;
+     // the buttons at its foot, right-aligned, recorded left to right
++    // the buttons keep a focus ring's reach and 4 pixels clear between them
+     int gap = 8 * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
++    if ((moy_ui_mark_reach(MOY_UI_MARK_PART) + 4) * fs > gap) {
++        gap = (moy_ui_mark_reach(MOY_UI_MARK_PART) + 4) * fs;
++    }
+     int bw[8];
+     int total = 0;
+     if (nb > 8) {
+diff --git a/native/moy_ui/moy_ui_depth.c b/native/moy_ui/moy_ui_depth.c
+index 9f98b975b..7acee328d 100644
+--- a/native/moy_ui/moy_ui_depth.c
++++ b/native/moy_ui/moy_ui_depth.c
+@@ -3,6 +3,7 @@
+ // frame, its shadow and its outline's fringe and a card's shadow drawn with
+ // them through moy_shape (native/moy_gfx/moy_shape.h).
+ 
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -104,8 +105,62 @@ static uint8_t alpha_of(const moy_theme_look_t *lk, const char *name, int dflt)
+     return (uint8_t)((v < 0 ? 0 : v > 100 ? 100 : v) * 255 / 100);
+ }
+ 
++// A theme's declared mark per item kind and state (`marks.<kind>.<state>`):
++// `mark` one of KM_*, -1 where the look declares none (the older keys draw).
++enum { KM_NONE = 0, KM_FILL, KM_TINT, KM_BAR, KM_RING, KM_INSET, KM_OUTLINE, KM_UNDERLINE };
++enum { KK_ROW = 0, KK_CELL = 1, KK_CARD = 2 };
++enum { KS_FOCUS = 0, KS_ON = 1, KS_BOTH = 2 };
++typedef struct {
++    int8_t mark, w, gap, key_w;
++    int16_t c;
++    uint8_t alpha;
++    int32_t key_c;
++} kmark_t;
++static kmark_t s_km[3][3];
++static moy_ui_box_t s_on_box;      // the box the last on mark was drawn on
++static int s_on_ci = -1;           // its fill's colour token (-1: no fill)
++static int s_corners = 15;         // the corners a row's fill rounds
++
++static int s_danger = -1;          // the danger ink of the row being focused
++
++// A danger row's ink (-1: none) for the focus mark about to be drawn: a fill
++// it would not clear 4.5:1 on gives way to an inset line, the ink kept.
++void moy_ui_kmark_danger(int ink) {
++    s_danger = ink;
++}
++
++int moy_ui_kmark_declared(int kind, int state) {
++    return s_km[kind][state].mark >= 0;
++}
++
++static void kmarks_of(const moy_theme_look_t *lk) {
++    static const char *const kinds[3] = {"row", "cell", "card"};
++    static const char *const states[3] = {"focus", "on", "both"};
++    char n[40];
++    for (int k = 0; k < 3; k++) {
++        for (int st = 0; st < 3; st++) {
++            kmark_t *km = &s_km[k][st];
++            snprintf(n, sizeof(n), "marks.%s.%s.mark", kinds[k], states[st]);
++            km->mark = (int8_t)num(leaf(lk, n), -1);
++            snprintf(n, sizeof(n), "marks.%s.%s.c", kinds[k], states[st]);
++            km->c = num(leaf(lk, n), -1);
++            snprintf(n, sizeof(n), "marks.%s.%s.w", kinds[k], states[st]);
++            km->w = (int8_t)num(leaf(lk, n), 2);
++            snprintf(n, sizeof(n), "marks.%s.%s.gap", kinds[k], states[st]);
++            km->gap = (int8_t)num(leaf(lk, n), 0);
++            snprintf(n, sizeof(n), "marks.%s.%s.alpha", kinds[k], states[st]);
++            km->alpha = alpha_of(lk, n, 100);
++            snprintf(n, sizeof(n), "marks.%s.%s.key.w", kinds[k], states[st]);
++            km->key_w = (int8_t)whole(lk, n, 0);
++            snprintf(n, sizeof(n), "marks.%s.%s.key.c", kinds[k], states[st]);
++            km->key_c = leaf(lk, n);
++        }
++    }
++}
++
+ // The marks of a look read with its defaults (DESIGN.md, the marks).
+ static void marks_of(moy_ui_marks_t *m, const moy_theme_look_t *lk, int light) {
++    kmarks_of(lk);
+     m->dark = (uint8_t)!light;
+     int st = num(leaf(lk, "focus.style"), MOY_UI_FOCUS_RING);
+     m->style[MOY_UI_MARK_PART] = (uint8_t)st;
+@@ -699,8 +754,107 @@ static int ink_over(const dd_t *d, int ci) {
+     return 2126 * r + 7152 * g + 722 * b > 1400000 ? 0 : 7;
+ }
+ 
++// The kind a mark on box b is (KK_*): a card by its class, a row three times
++// as wide as tall or one marked beside (`side`), else a cell.
++static int km_kind(moy_ui_box_t b, int cls, int flags) {
++    if (cls == MOY_UI_MARK_CARD) {
++        return KK_CARD;
++    }
++    if (flags & MOY_UI_MARK_CELL) {
++        return KK_CELL;
++    }
++    return (flags & MOY_UI_MARK_SIDE) || b.w >= 3 * b.h ? KK_ROW : KK_CELL;
++}
++
++// The ink over a mark's colour token `ci`: the selection's own ink over the
++// selection, else black or white, the one that clears it.
++static int km_ink(const dd_t *d, int ci) {
++    if (ci == moy_ui_token(d->look, MOY_UI_T_SELECTION)) {
++        return moy_ui_token(d->look, MOY_UI_T_SELECTION_INK);
++    }
++    return ink_over(d, ci);
++}
++
++// Mark `k` on box (x, y, w, h) of radius r at font scale f; `under` the token
++// of the fill it lands on (-1: none), whose ink an undeclared colour takes.
++// The ink the content takes on it, or -1.
++static int km_draw(const dd_t *d, const kmark_t *k, int x, int y, int w, int h, int r, int f,
++                   int under, int alpha) {
++    int ci = k->c >= 0 ? moy_ui_token(d->look, k->c)
++             : under >= 0 ? km_ink(d, under) : moy_ui_token(d->look, MOY_UI_T_ACCENT);
++    uint16_t c = d->row->pal[moy_ui_pidx(ci)];
++    int t = k->w * f, g = k->gap * f, kw = k->key_w * f;
++    uint16_t kc = kw > 0 && set(k->key_c) ? val(d, k->key_c) : 0;
++    int bx = x, by = y, bw = w, bh = h, br = r;       // the shape a keyline rings
++    int ink = -1;
++    switch (k->mark) {
++        case KM_FILL:
++            if (alpha >= 255 && r > 0 && s_corners != 15) {
++                moy_shape_paint_t p = solid(c);
++                rrect(d, x, y, w, h, r, s_corners, s_depth.stepped, MOY_SHAPE_ALL, &p, 0, 0, -1,
++                      NULL);
++            } else {
++                tint(d, x, y, w, h, r, c, alpha, NULL);
++            }
++            ink = alpha >= 255 ? km_ink(d, ci) : -1;
++            break;
++        case KM_TINT:
++            tint(d, x, y, w, h, r, c, k->alpha * alpha / 255, NULL);
++            break;
++        case KM_BAR: {
++            int in = h > 8 * f ? 2 * f : 0;
++            bx = x + g, by = y + in, bw = t, bh = h - 2 * in, br = 0;
++            tint(d, bx, by, bw, bh, 0, c, alpha, NULL);
++            break;
++        }
++        case KM_RING: {
++            int o = g + t;
++            bx = x - o, by = y - o, bw = w + 2 * o, bh = h + 2 * o, br = r ? r + o : 0;
++            ring_a(d, bx, by, bw, bh, br, t, c, alpha);
++            break;
++        }
++        case KM_INSET:
++        case KM_OUTLINE: {
++            int o = k->mark == KM_INSET ? g : 0;
++            bx = x + o, by = y + o, bw = w - 2 * o, bh = h - 2 * o, br = r > o ? r - o : 0;
++            ring_a(d, bx, by, bw, bh, br, t, c, alpha);
++            break;
++        }
++        case KM_UNDERLINE:
++            bx = x + g, by = y + h - t - f, bw = w - 2 * g, bh = t, br = 0;
++            tint(d, bx, by, bw, bh, 0, c, alpha, NULL);
++            break;
++        default:
++            return -1;
++    }
++    if (kw > 0 && set(k->key_c)) {
++        if (k->mark == KM_INSET || k->mark == KM_OUTLINE || k->mark == KM_FILL
++            || k->mark == KM_TINT) {
++            // a line or a fill keys inside its own edge, never over a neighbour
++            int e = k->mark == KM_FILL || k->mark == KM_TINT ? 0 : t;
++            ring_a(d, bx + e, by + e, bw - 2 * e, bh - 2 * e, br > e ? br - e : 0, kw, kc, alpha);
++        } else {
++            ring_a(d, bx - kw, by - kw, bw + 2 * kw, bh + 2 * kw, br ? br + kw : 0, kw, kc,
++                   alpha);
++        }
++    }
++    return ink;
++}
++
++// How far a declared focus mark of kind `kk` reaches outside its box.
++static int km_reach(int kk) {
++    const kmark_t *k = &s_km[kk][KS_FOCUS];
++    if (k->mark == KM_RING) {
++        return k->gap + k->w + k->key_w;
++    }
++    return k->mark == KM_FILL || k->mark == KM_TINT ? k->key_w : 0;
++}
++
+ int moy_ui_mark_reach(int cls) {
+     const moy_ui_marks_t *m = &s_marks;
++    if (s_km[cls == MOY_UI_MARK_CARD ? KK_CARD : KK_CELL][KS_FOCUS].mark >= 0) {
++        return km_reach(cls == MOY_UI_MARK_CARD ? KK_CARD : KK_CELL);
++    }
+     int o = m->outline_w;
+     switch (m->style[cls < 0 || cls > 2 ? 0 : cls]) {
+         case MOY_UI_FOCUS_RING:
+@@ -751,6 +905,16 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int
+     }
+     *ink = -1;
+     if (flags & MOY_UI_MARK_INK) {
++        int kc = moy_ui_mark_class(b, cls, fs);
++        const kmark_t *fk = &s_km[km_kind(b, kc, flags)][KS_FOCUS];
++        if (m->active && fk->mark >= 0) {
++            if (fk->mark == KM_FILL) {
++                dd_t d;
++                open_dd(s, &d, 0);
++                *ink = km_ink(&d, moy_ui_token(s->look, fk->c >= 0 ? fk->c : MOY_UI_T_ACCENT));
++            }
++            return MOY_UI_OK;
++        }
+         if (m->active) {
+             int st = m->style[moy_ui_mark_class(b, cls, fs)];
+             int ci = moy_ui_token(s->look, m->color);
+@@ -775,6 +939,53 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int
+     int st = m->style[cls];
+     int ci = moy_ui_token(d.look, m->color);
+     uint16_t c = d.row->pal[moy_ui_pidx(ci)];
++    int kk = km_kind(b, cls, flags);
++    const kmark_t *fk = &s_km[kk][KS_FOCUS];
++    if (fk->mark >= 0 && !(flags & MOY_UI_MARK_PILL)) {
++        if (flags & MOY_UI_MARK_RING) {
++            // the part's own fill would hide the row's mark: the cell's
++            fk = &s_km[KK_CELL][KS_FOCUS];
++            kk = KK_CELL;
++        }
++        if (after) {
++            return MOY_UI_OK;
++        }
++        if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
++            s_marks.drawn++;
++        }
++        int f = fs < 1 ? 1 : fs;
++        int both = s_on_box.w > 0 && x + w / 2 >= s_on_box.x
++                   && x + w / 2 < s_on_box.x + s_on_box.w && y + h / 2 >= s_on_box.y
++                   && y + h / 2 < s_on_box.y + s_on_box.h;
++        int under = both ? s_on_ci : -1;
++        s_corners = (flags & (MOY_UI_MARK_TOP | MOY_UI_MARK_FOOT)) == 0 ? 15
++                    : ((flags & MOY_UI_MARK_TOP) ? MOY_SHAPE_TL | MOY_SHAPE_TR : 0)
++                          | ((flags & MOY_UI_MARK_FOOT) ? MOY_SHAPE_BL | MOY_SHAPE_BR : 0);
++        kmark_t line;
++        if (s_danger >= 0 && fk->mark == KM_FILL) {
++            int32_t la = moy_theme_lum_of(s_danger),
++                    lb = moy_theme_lum_of(moy_ui_token(d.look, fk->c >= 0 ? fk->c
++                                                                          : MOY_UI_T_ACCENT));
++            int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
++            if (2 * (hi + 500) < 9 * (lo + 500)) {
++                line = *fk;
++                line.mark = KM_INSET;
++                line.w = 3;
++                line.gap = 0;
++                fk = &line;
++            }
++        }
++        int got = km_draw(&d, fk, x, y, w, h, r, f, under, 255);
++        if (both && s_km[kk][KS_BOTH].mark >= 0) {
++            int fci = fk->mark == KM_FILL
++                      ? moy_ui_token(d.look, fk->c >= 0 ? fk->c : MOY_UI_T_ACCENT) : under;
++            km_draw(&d, &s_km[kk][KS_BOTH], x, y, w, h, r, f, fci, 255);
++        }
++        s_corners = 15;
++        s_on_box.w = 0;
++        *ink = got;
++        return MOY_UI_OK;
++    }
+     if (flags & MOY_UI_MARK_RING) {
+         if (!after) {
+             focus_ring_of(&d, m, x, y, w, h, r, c);
+@@ -923,6 +1134,15 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags,
+     // fill's selection ink under its own
+     int own = m->cur_ink >= 0 ? moy_ui_token(d.look, m->cur_ink) : -1;
+     if (flags & MOY_UI_MARK_INK) {
++        int fs1 = fs < 1 ? 1 : fs;
++        const kmark_t *ok = &s_km[km_kind(b, moy_ui_mark_class(b, MOY_UI_MARK_AUTO, fs1), flags)]
++                                  [KS_ON];
++        if (ok->mark >= 0) {
++            *ink = ok->mark == KM_FILL && !back
++                   ? km_ink(&d, moy_ui_token(d.look, ok->c >= 0 ? ok->c : MOY_UI_T_SELECTION))
++                   : ok->mark == KM_TINT ? own : -1;
++            return MOY_UI_OK;
++        }
+         if (m->cur_style == MOY_UI_CUR_FILL && !back) {
+             *ink = moy_ui_token(d.look, MOY_UI_T_SELECTION_INK);
+         } else if (m->cur_style == MOY_UI_CUR_PLATE && back && m->cur_alpha >= 255) {
+@@ -934,6 +1154,20 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags,
+     }
+     *ink = own;
+     fs = fs < 1 ? 1 : fs;
++    {
++        int kk = km_kind(b, moy_ui_mark_class(b, MOY_UI_MARK_AUTO, fs), flags);
++        const kmark_t *ok = &s_km[kk][KS_ON];
++        if (ok->mark >= 0) {
++            s_on_box = b;
++            s_on_ci = ok->mark == KM_FILL
++                      ? moy_ui_token(d.look, ok->c >= 0 ? ok->c : MOY_UI_T_SELECTION) : -1;
++            int got = km_draw(&d, ok, b.x, b.y, b.w, b.h, r, fs, -1, back ? 153 : 255);
++            // a fill's own ink; a tint keeps the theme's second cue
++            // (`current.ink`); a line leaves the row's ink as it is
++            *ink = got >= 0 ? got : ok->mark == KM_TINT ? own : -1;
++            return MOY_UI_OK;
++        }
++    }
+     if ((flags & MOY_UI_MARK_SIDE) && !(flags & MOY_UI_MARK_KEEP)
+         && m->cur_row == MOY_UI_CUR_ROW_UNDERLINE) {
+         return MOY_UI_OK;               // the row underlines its label
+diff --git a/native/moy_ui/moy_ui_parts.c b/native/moy_ui/moy_ui_parts.c
+index bb8d7c161..78227451a 100644
+--- a/native/moy_ui/moy_ui_parts.c
++++ b/native/moy_ui/moy_ui_parts.c
+@@ -10,6 +10,10 @@
+ #include "moy_theme.h"
+ #include "moy_ui.h"
+ 
++// the theme's declared marks (moy_ui_depth.c)
++int moy_ui_kmark_declared(int kind, int state);
++void moy_ui_kmark_danger(int ink);
++
+ typedef struct {
+     const moy_ui_sink_t *s;
+     moy_canvas_row_t *row;
+@@ -558,7 +562,9 @@ static moy_ui_box_t tab_box(const pd_t *d, const pf_t *f, moy_ui_box_t b, const
+             return (moy_ui_box_t){(int16_t)x, (int16_t)(b.y + (b.h - ph) / 2), (int16_t)ow,
+                                   (int16_t)ph};
+         }
+-        x += ow + (d->desk ? 4 : 2) * d->fs;
++        // apart by the focus ring's reach, so a ring keeps clear of the next label
++        int apart = (d->desk ? 4 : 2) * d->fs, reach = moy_ui_mark_reach(MOY_UI_MARK_PART) * d->fs;
++        x += ow + (moy_ui_kmark_declared(1, 0) && reach > apart ? reach : apart);
+     }
+     return (moy_ui_box_t){0, 0, 0, 0};
+ }
+@@ -657,13 +663,30 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
+         }
+         danger = lab;
+     }
++    if ((flags & MOY_UI_F_ON) && moy_ui_kmark_declared(0, 1)) {
++        int mf = 0, mr = 0;
++        moy_ui_box_t mb = on_card ? on_card_mark(&d, b, r->first, 0, &mf, &mr) : b;
++        int oi = current(s, &d, mb, mr, -1, MOY_UI_MARK_SIDE);
++        if (oi >= 0) {
++            lab = ink = dim = oi;
++        }
++    }
+     if (flags & MOY_UI_F_DISABLED) {
+         lab = ink = dim = moy_ui_disabled() >= 0 ? moy_ui_disabled() : dim;
++    } else if ((flags & MOY_UI_F_FOCUS) && kind == MOY_UI_V_TABS
++               && moy_ui_kmark_declared(1, 0)) {
++        // a tab strip is a row of cells: its focus is the cell's mark on
++        // the current tab (drawn with it, below)
+     } else if (flags & MOY_UI_F_FOCUS) {
+         int mi = -1, mf = 0, mr = 0;
+         moy_ui_box_t mb = on_card ? on_card_mark(&d, b, r->first, 0, &mf, &mr) : b;
++        moy_ui_kmark_danger(danger);
+         moy_ui_focus_in(s, mb, MOY_UI_MARK_PART, mr, mf, d.fs, NULL, &mi, 0);
++        moy_ui_kmark_danger(-1);
+         lab = mi >= 0 ? mi : ink;
++        if (mi >= 0 && moy_ui_kmark_declared(0, 0)) {
++            ink = dim = mi;
++        }
+         if (mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
+             // the whole row is on the mark: its controls too take the
+             // mark's ink, the mark's colour showing through them
+@@ -809,6 +832,11 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
+                 int c = dim;
+                 if (i == r->cur) {
+                     c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, lab, 0);
++                    if ((flags & MOY_UI_F_FOCUS) && moy_ui_kmark_declared(1, 0)) {
++                        int mi = -1;
++                        moy_ui_focus_in(s, o, MOY_UI_MARK_PART, (d.desk ? 6 : 4) * d.fs,
++                                        MOY_UI_MARK_CELL, d.fs, NULL, &mi, 0);
++                    }
+                 }
+                 text(&d, &fl, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
+             }
+@@ -1935,6 +1963,9 @@ static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int l
+     int st = m->style[MOY_UI_MARK_PART];
+     *flags = 0;
+     *r = 0;
++    if (moy_ui_kmark_declared(0, 0)) {
++        st = MOY_UI_FOCUS_EDGE;     // a declared row mark lands inside the card's line
++    }
+     if (d->desk || (st != MOY_UI_FOCUS_INVERT && st != MOY_UI_FOCUS_EDGE)) {
+         return b;
+     }
+@@ -1947,7 +1978,8 @@ static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int l
+         *r = *flags && cr > 0 ? cr : 0;
+     }
+     f = f > 0 ? f : 0;
+-    int top = first ? f : 0, foot = last ? f : 0;
++    // under a declared mark a row's fill starts under the rule over it
++    int top = first ? f : moy_ui_kmark_declared(0, 0) ? d->fs : 0, foot = last ? f : 0;
+     return (moy_ui_box_t){(int16_t)(b.x + f), (int16_t)(b.y + top), (int16_t)(b.w - 2 * f),
+                           (int16_t)(b.h - top - foot)};
+ }
+@@ -2678,6 +2710,7 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
+         fh += grow;
+         fy = b.y + 2 * d.fs;
+     }
++    int ringed = focused && !(card && moy_ui_kmark_declared(0, 0));
+     int ty = fy + line_dy;
+     int x = b.x + pad, right = b.x + b.w - pad;
+     if (label.n) {
+@@ -2701,14 +2734,14 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
+     uint16_t under = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+     int fc = moy_ui_token(d.look, m->color);
+     fc = fc >= 0 && ratio_ge(pal(&d, fc), under, 3, 1) ? fc : -1;  // Contrast's yellow on white
+-    int ring_c = !focused ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
++    int ring_c = !ringed ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
+                  : invert ? mi
+                  : fc >= 0 ? fc
+                            : tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+     // at rest the look's field outline where it names one (`field.border`)
+     int32_t fb = moy_ui_display()->field_c;
+-    uint16_t ring = !focused && set(fb) ? val(&d, fb) : pal(&d, ring_c);
+-    if (focused) {
++    uint16_t ring = !ringed && set(fb) ? val(&d, fb) : pal(&d, ring_c);
++    if (ringed) {
+         rrect(&d, f.x - d.fs, f.y - d.fs, f.w + 2 * d.fs, f.h + 2 * d.fs, r ? r + d.fs : 0, 0, 0,
+               d.fs, ring);
+     }
+@@ -2716,7 +2749,7 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
+     // box's own, focused or not
+     rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
+           d.fs, edge >= 0 ? pal(&d, edge) : ring);
+-    if (focused) {
++    if (ringed) {
+         int fi = -1;
+         moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &fi, 0);
+     }
+diff --git a/native/moy_ui/style.json b/native/moy_ui/style.json
+index 3cde176bf..24c195fef 100644
+--- a/native/moy_ui/style.json
++++ b/native/moy_ui/style.json
+@@ -5,8 +5,8 @@
+   "aliases": {
+     "hover": ["dim"],
+     "hover_cue": ["focus", "accent"],
+-    "pressed": ["selection", "hilite"],
+-    "pressed_ink": ["selection_ink", "ink"],
++    "pressed": ["sunk", "hilite"],
++    "pressed_ink": ["ink"],
+     "disabled_ink": ["ink_dim"],
+     "disabled_edge": ["dim"]
+   },
+@@ -152,7 +152,7 @@
+   "metrics": {
+     "button": {"pad": 2, "icon": 16, "glyph": 12, "edge": 1, "align": 1, "icon_gap": 6},
+     "chip": {"clip": 4, "min_x": 2, "min_y": 1, "edge": 1, "align": 1},
+-    "row": {"pad": 4, "icon": 16, "glyph": 14, "gap": 1, "edge": 1, "stack": 20, "stack_desk": 28, "stack_gap": 2},
++    "row": {"pad": 10, "icon": 16, "glyph": 14, "gap": 1, "edge": 1, "stack": 20, "stack_desk": 28, "stack_gap": 2},
+     "cell": {"pad": 2, "caption": 14, "indent": 2, "icon": 16, "glyph": 14, "edge": 1},
+     "tab": {"gap": 2, "pad": 3, "icon": 16},
+     "status": {"rule": 1, "pad": 3, "gap": 2, "dy": 1},
+@@ -164,7 +164,7 @@
+     "game_icon_btn": {"pad": 2, "glyph": 16, "label": 19, "ring": 7, "ink": 0},
+     "mini_btn": {"pad_x": 2, "pad_y": 2, "ink": 0},
+     "dialog": {"edge": 1, "fill": 2, "ring": 7},
+-    "group": {"inset": 6, "pad": 10, "r": 8, "caption": 19, "caption_desk": 26, "gap": 3},
++    "group": {"inset": 6, "pad": 12, "r": 8, "caption": 19, "caption_desk": 26, "gap": 3},
+     "value_row": {"gap": 5, "gap_desk": 8, "chev": 3, "chev_desk": 4, "switch_w": 20, "switch_h": 10,
+                   "track": 84, "track_desk": 120, "dot": 11, "dot_desk": 16, "dot_step": 15,
+                   "dot_step_desk": 24, "seg": 12, "seg_desk": 18, "key": 15, "key_desk": 20,
+@@ -1159,6 +1159,15 @@
+         ["current.alpha", "num", 0, 1, [0.14, 0.24]], ["current.row", "enum", ["plate", "outline", "underline"]],
+         ["current.ink", "role"],
+         ["sel_back", "colour"],
++        ["marks.row.focus.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.row.focus.c", "role"], ["marks.row.focus.w", "int", 0, 8, null], ["marks.row.focus.gap", "int", 0, 8, null], ["marks.row.focus.alpha", "num", 0, 1, null], ["marks.row.focus.key", "line"],
++        ["marks.row.on.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.row.on.c", "role"], ["marks.row.on.w", "int", 0, 8, null], ["marks.row.on.gap", "int", 0, 8, null], ["marks.row.on.alpha", "num", 0, 1, null], ["marks.row.on.key", "line"],
++        ["marks.row.both.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.row.both.c", "role"], ["marks.row.both.w", "int", 0, 8, null], ["marks.row.both.gap", "int", 0, 8, null], ["marks.row.both.alpha", "num", 0, 1, null], ["marks.row.both.key", "line"],
++        ["marks.cell.focus.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.cell.focus.c", "role"], ["marks.cell.focus.w", "int", 0, 8, null], ["marks.cell.focus.gap", "int", 0, 8, null], ["marks.cell.focus.alpha", "num", 0, 1, null], ["marks.cell.focus.key", "line"],
++        ["marks.cell.on.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.cell.on.c", "role"], ["marks.cell.on.w", "int", 0, 8, null], ["marks.cell.on.gap", "int", 0, 8, null], ["marks.cell.on.alpha", "num", 0, 1, null], ["marks.cell.on.key", "line"],
++        ["marks.cell.both.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.cell.both.c", "role"], ["marks.cell.both.w", "int", 0, 8, null], ["marks.cell.both.gap", "int", 0, 8, null], ["marks.cell.both.alpha", "num", 0, 1, null], ["marks.cell.both.key", "line"],
++        ["marks.card.focus.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.card.focus.c", "role"], ["marks.card.focus.w", "int", 0, 8, null], ["marks.card.focus.gap", "int", 0, 8, null], ["marks.card.focus.alpha", "num", 0, 1, null], ["marks.card.focus.key", "line"],
++        ["marks.card.on.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.card.on.c", "role"], ["marks.card.on.w", "int", 0, 8, null], ["marks.card.on.gap", "int", 0, 8, null], ["marks.card.on.alpha", "num", 0, 1, null], ["marks.card.on.key", "line"],
++        ["marks.card.both.mark", "enum", ["none", "fill", "tint", "bar", "ring", "inset", "outline", "underline"], null], ["marks.card.both.c", "role"], ["marks.card.both.w", "int", 0, 8, null], ["marks.card.both.gap", "int", 0, 8, null], ["marks.card.both.alpha", "num", 0, 1, null], ["marks.card.both.key", "line"],
+         ["disabled", "colour"], ["danger_ink", "colour"],
+         ["bar.edge", "enum", ["top", "bottom"]], ["bar.h", "int", 16, 64, 40],
+         ["bar.style", "enum", ["flat", "grad", "glass"]], ["bar.fill", "paint"],
+diff --git a/native/moy_ui/themes/blocks.json b/native/moy_ui/themes/blocks.json
+index 9606b003f..4d9610d3f 100644
+--- a/native/moy_ui/themes/blocks.json
++++ b/native/moy_ui/themes/blocks.json
+@@ -41,6 +41,11 @@
+     "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 },
+                "outline": [1, "#ffffff"] },
+     "current": { "row": "underline" },
++    "marks": { "row": { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
++                        "on": { "mark": "fill", "c": "selection" },
++                        "both": { "mark": "bar", "w": 4, "gap": 2, "c": "selection_ink" } },
++               "cell": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "accent" } },
++               "card": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "accent" } } },
+     "icons": { "kind": "smooth", "set": "default" },
+     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+                                "primary": { "font": "op" } } },
+@@ -57,7 +62,7 @@
+     "disabled": "#9c95a4", "danger_ink": "#b3261e",
+     "buttons": { "normal": { "fill": "#f4ecdc", "border": [0, "#1a1530"] },
+                  "tonal": { "fill": "#ffd23f", "ink": "#1a1530", "border": [0, "#1a1530"] },
+-                 "danger": { "ink": "#1a1530" } },
++                 "danger": { "ink": "#b3261e" } },
+     "lcd_border": [2, "#1a1530"],
+     "keycap": { "fill": "#ffffff", "border": [1.25, "#1a1530"] },
+     "backdrop": {
+diff --git a/native/moy_ui/themes/contrast.json b/native/moy_ui/themes/contrast.json
+index 03d3c1031..ce7cc473c 100644
+--- a/native/moy_ui/themes/contrast.json
++++ b/native/moy_ui/themes/contrast.json
+@@ -41,13 +41,18 @@
+       "dk": { "title": 17, "key": 26, "op": 28, "result": 50 } },
+     "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3, "gap": 2 } },
+     "current": { "style": "plate", "ink": "value_ink" }, "accents": false,
++    "marks": { "row": { "focus": { "mark": "fill", "c": "focus" },
++                        "on": { "mark": "inset", "w": 3, "gap": 2, "c": "value" },
++                        "both": { "mark": "inset", "w": 2, "gap": 3 } },
++               "cell": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "focus" } },
++               "card": { "focus": { "mark": "ring", "w": 3, "gap": 2, "c": "focus" } } },
+     "icons": { "kind": "smooth", "set": "default" },
+     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+       "primary": { "font": "op" } } },
+     "win_r": 4, "card_r": 4, "key_r": 4,
+     "win": { "header": "fill", "rule": 2 },
+     "dark": {
+-      "current": { "alpha": 1 }, "disabled": "#5c5c5c",
++      "current": { "alpha": 1 }, "disabled": "#8f8f8f",
+       "tile_outline": [2, "#ffffff"],
+       "card": { "frame": [2, "#ffffff"] },
+       "win": { "frame": [2, "#ffffff"], "frame_back": [2, "#ffffff"] },
+@@ -61,7 +66,10 @@
+       "keycap": { "border": [1.25, "#ffffff"] }
+     },
+     "light": {
+-      "current": { "alpha": 1 }, "disabled": "#949494",
++      "current": { "alpha": 1 }, "disabled": "#6b6b6b",
++      "marks": { "row": { "focus": { "key": [2, "#000000"] } },
++                 "cell": { "focus": { "key": [2, "#000000"] } },
++                 "card": { "focus": { "key": [2, "#000000"] } } },
+       "tile_outline": [2, "#000000"],
+       "card": { "frame": [2, "#000000"] },
+       "focus": { "outline": [2, "#000000"] },
+diff --git a/native/moy_ui/themes/moy.json b/native/moy_ui/themes/moy.json
+index ce80da78a..eb54a00f8 100644
+--- a/native/moy_ui/themes/moy.json
++++ b/native/moy_ui/themes/moy.json
+@@ -39,6 +39,10 @@
+   },
+   "look": {
+     "focus": { "style": "edge", "card": "lift", "small": "edge", "ring": { "w": 2, "gap": 2 } },
++    "marks": { "row": { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
++                        "on": { "mark": "tint", "c": "value" } },
++               "cell": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" } },
++               "card": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" } } },
+     "current": { "style": "plate", "ink": "ink_accent" }, "shadow_back": 0.3,
+     "icons": { "kind": "smooth", "set": "default" },
+     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+@@ -46,6 +50,7 @@
+     "dark": {
+       "fam": "inter",
+       "focus": { "lift": { "rim": ["#b6a8f7", 0.6] }, "plate": { "alpha": 0.14 } },
++      "marks": { "row": { "on": { "alpha": 0.24 } } },
+       "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
+       "win": { "header": "bar", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"],
+                "fill_back": "#0f1127" },
+@@ -63,6 +68,7 @@
+     "light": {
+       "fam": "daysans",
+       "focus": { "lift": { "rim": ["#4c3fd6", 0.6] }, "plate": { "alpha": 0.12 } },
++      "marks": { "row": { "on": { "alpha": 0.18 } } },
+       "shadow": ["soft", "#1b2040", 0.18, 16, 8],
+       "win": { "header": "bar", "fill_back": "#e3e6ed" },
+       "field": { "border": "#8f94a3" },

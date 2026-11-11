@@ -24,16 +24,16 @@ def test_open_machine_wallpaper_is_static_moy64_cart(tmp_path):
     assert not ws.wallpaper.is_animating(1 / 60)
 
     ws.wallpaper.draw(0)
-    first = bytes(ws.canvas._buf)
+    first = bytes(ws.run.canvas._buf)
     # "MOY64 cart": every pixel is a palette entry, and these four are in it.
     # to_indices is EXACT and strict -- it raises on a word no index produces,
     # which is the "used <= set(range(64))" half of the old assertion.
-    used = set(host_canvas.indices_of(ws.canvas))
+    used = set(host_canvas.indices_of(ws.run.canvas))
     assert {0, 1, 10, 13}.issubset(used)
 
     # No RNG or time state: repeated draws produce the same quiet construction field.
     ws.wallpaper.draw(1 / 60)
-    assert bytes(ws.canvas._buf) == first
+    assert bytes(ws.run.canvas._buf) == first
 
 
 def test_open_machine_wallpaper_is_in_device_seed_order():

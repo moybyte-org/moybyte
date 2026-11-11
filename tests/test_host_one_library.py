@@ -69,7 +69,7 @@ def _wasm():
 
 
 def _pixels(ws):
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -106,7 +106,7 @@ def test_a_page_draws_the_same_pixels_in_every_runtime_under_moy(tmp_path, varia
         open_cart(ws, title)
         drv = make_drv(ws)
         drv.frame(_DT)
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         got = []
         for _ in range(3):
             _frame(drv)
@@ -116,7 +116,7 @@ def test_a_page_draws_the_same_pixels_in_every_runtime_under_moy(tmp_path, varia
             _frame(drv)
             _frame(drv)
             got.append(_pixels(ws))
-        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.exit()
         shots[name] = got
     assert set(shots) == set(titles) and all(len(v) == 3 for v in shots.values())

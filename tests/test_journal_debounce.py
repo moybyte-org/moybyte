@@ -93,20 +93,20 @@ def test_idle_autosave_does_not_award_achievement(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     _open_code(ws, "def _draw():\n    cls(4)\n")
     notes = []
-    ws.ach.note = lambda *a, **k: notes.append(a)
+    ws.ach.award = lambda *a, **k: notes.append(a)
     ws.history.edit_ms = C._ticks_ms() - 5000
     ws.frame(1 / 30)
     assert not ws.editor.dirty                       # the autosave committed
-    assert not any(a and a[0] == "code_save" for a in notes)   # but awarded nothing
+    assert not any(a and a[0] == "first_code" for a in notes)  # but awarded nothing
 
 
 def test_manual_save_still_awards_achievement(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     _open_code(ws, "def _draw():\n    cls(5)\n")
     notes = []
-    ws.ach.note = lambda *a, **k: notes.append(a)
+    ws.ach.award = lambda *a, **k: notes.append(a)
     assert ws.save_code() is True                    # explicit SAVE
-    assert any(a and a[0] == "code_save" for a in notes)   # awards "Code Wizard"
+    assert any(a and a[0] == "first_code" for a in notes)  # awards "Code Wizard"
 
 
 def test_no_pending_edit_costs_nothing(tmp_path):

@@ -860,6 +860,8 @@ def _look(th, roles):
          "extern const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES];",
          "extern const char *const moy_theme_leaf_names[MOY_THEME_LEAVES];",
          "extern const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS];",
+         "// moy_theme_fields' indexes in strcmp order of their paths: a key's binary search.",
+         "extern const uint16_t moy_theme_field_order[MOY_THEME_LOOK_FIELDS];",
          "extern const char *const moy_theme_look_groups[MOY_THEME_LOOK_GROUPS];",
          "extern const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES];",
          "extern const char *const moy_theme_btn_kinds[MOY_THEME_BTN_KINDS];",
@@ -891,6 +893,10 @@ def _look(th, roles):
     c.append("};\n")
     c.append("const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {")
     c.extend(field_rows(fields))
+    c.append("};\n")
+    order = sorted(range(len(fields)), key=lambda i: fields[i][0].encode())
+    c.append("const uint16_t moy_theme_field_order[MOY_THEME_LOOK_FIELDS] = {")
+    c.extend("    %s," % ", ".join(str(i) for i in order[j:j + 16]) for j in range(0, len(order), 16))
     c.append("};\n")
     c.append("const moy_theme_field_t moy_theme_btn_fields[%d] = {" % len(btn))
     c.extend(field_rows([(p.split(".", 2)[2], t, lv) for p, t, lv in btn]))

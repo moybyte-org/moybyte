@@ -5,6 +5,7 @@ My Art)."""
 import os
 
 from runtime import artwork, host_app, moy_carts
+from ws_helpers import settle_badges  # noqa: E402
 
 _DT = 1.0 / 30.0
 
@@ -30,6 +31,7 @@ def _idle(ws, n=40):
     """Frames with nothing marked: the console's idle branch, where My Art
     makes the pictures its cards owe (an unlock banner on a wall clock
     would hold the frames painting)."""
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(n):
         ws.frame(_DT)
@@ -127,7 +129,7 @@ def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
 
     def read_cover(blob, pix, w, h):
         assert not getattr(app, "_in_draw", False), "a picture made inside the draw"
-        made.append(ws._frames_drawn)
+        made.append(ws.frame_state.frames_drawn)
         return real(blob, pix, w, h)
     monkeypatch.setattr(artwork, "read_cover", read_cover)
     monkeypatch.setattr(app, "draw", drawing)
@@ -246,7 +248,7 @@ def test_a_settled_page_paints_nothing(tmp_path):
     ws._dirty = True
     for _ in range(4):
         drv.frame(_DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(10):
         drv.frame(_DT)
-    assert ws._frames_drawn == drawn, "an idle page painted"
+    assert ws.frame_state.frames_drawn == drawn, "an idle page painted"

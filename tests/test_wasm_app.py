@@ -8,7 +8,13 @@ the host's WAMR, the load's grant check and the VM-free verdict's clauses.
   * the same module one permission short is refused at load, the import named;
   * tests/fixtures/wasm/app_shell.moy imports a shell-served row, and the
     verdict keeps the VM for it with the import as its `why` (moy_play's
-    census, over native/moy_app's table as on a board).
+    census, over native/moy_app's table as on a board);
+  * tests/fixtures/wasm/app_talk.moy, a C app, makes the console calls a
+    Python and a Lua app make (docs/app_api_v1.md sections 8 and 9): it pings
+    the Echo service and reads the answer as its event record, notifies,
+    awards the badge it declares, hears its alarm as the system's message and
+    writes the OS log, each under the permission it is under on every tier,
+    and reads an item handed to it by its window event.
 """
 
 import json
@@ -16,7 +22,8 @@ import os
 
 import pytest
 
-from runtime import host_app, moy_loop
+from runtime import host_app, moy_evq, moy_loop, notifications, os_log, scheduler as S
+from runtime import moy_log as L
 from tools import wasm_cart
 from ws_helpers import open_cart
 
@@ -26,6 +33,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "wasm")
 ROLES = os.path.join(FIXTURES, "app_roles.moy")
 SHELL = os.path.join(FIXTURES, "app_shell.moy")
+TALK = os.path.join(FIXTURES, "app_talk.moy")
+ECHO = os.path.join(ROOT, "tests", "fixtures", "apps", "echo_lua.moy")
 _DT = 1.0 / 30.0
 
 
@@ -74,10 +83,14 @@ def test_a_compiled_app_reaches_prefs_and_theme_with_no_upcall(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path))
     t0 = moy_loop.upcalls()[1]
+    h0 = moy_app.wasm_hops()
     open_cart(ws, "App Roles Wasm")
-    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     _frames(ws, 10)
-    assert ws.player.cart_error is None, ws.player.cart_error
+    hops, _us, _work, here = (b - a for a, b in zip(h0, moy_app.wasm_hops()))
+    assert here >= 2 and hops == 0, "prefs rows not answered here: %r" % (
+        (h0, moy_app.wasm_hops()),)
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
     from runtime import moy_play
     books = moy_play.info()[5]
     assert tuple(books) == (0, 0, 0, 0, 0, 0), "the run crossed into Python: %r" % (books,)
@@ -101,7 +114,7 @@ def test_the_same_module_one_permission_short_is_refused_naming_the_import(tmp_p
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path, perms=[]))
     open_cart(ws, "App Roles Wasm")
-    err = ws.player.cart_error or ""
+    err = ws.run.player.cart_error or ""
     assert "moybyte.app.prefs_get" in err, err
     assert "prefs" in err.split("moybyte.app.prefs_get", 1)[1], err
 
@@ -117,7 +130,7 @@ def test_a_module_that_declares_no_extension_reaches_no_role(tmp_path):
         json.dump(man, f)
     ws = host_app.build_workstation(root)
     open_cart(ws, "App Roles Wasm")
-    err = ws.player.cart_error or ""
+    err = ws.run.player.cart_error or ""
     assert "moybyte.app.prefs_get" in err and "extensions it declares" in err, err
 
 
@@ -133,12 +146,318 @@ def test_the_verdict_keeps_the_vm_for_a_shell_import(tmp_path):
     assert moy_play.census(roles) == ("wasm", True, "free")
     assert moy_play.census(shell) == ("wasm", False,
                                       "import moybyte.app.theme_set_variant")
-    # A role whose permission the manifest does not name is no VM-free pass:
-    # the native set's rule is unchanged for every other permission.
+    # A `lease:<row>` is the kernel's device table's, served on the program's
+    # own task: the permission keeps no VM (a lease a VM process holds does,
+    # at the stop's verdict: test_a_compiled_app_holds_leases_by_handle...).
     p = os.path.join(roles, "manifest.json")
     with open(p) as f:
         man = json.load(f)
+    for perms in (["prefs", "lease:uart1"], ["prefs", "lease:gpio"]):
+        man["moybyte"]["permissions"] = perms
+        with open(p, "w") as f:
+            json.dump(man, f)
+        assert moy_play.census(roles) == ("wasm", True, "free"), perms
+    # A role whose permission the manifest does not name is no VM-free pass:
+    # the native set's rule is unchanged for every other permission.
     man["moybyte"]["permissions"] = ["prefs", "net"]
     with open(p, "w") as f:
         json.dump(man, f)
     assert moy_play.census(roles) == ("wasm", False, "permission")
+
+
+
+def _talk(tmp_path, off=(), prep=None):
+    """App Talk opened beside the running Echo service, its permissions `off`
+    turned off in Settings first and `prep(ws)` run: its process's OS log
+    lines after its frames and the scheduler's serves, and its pid."""
+    import shutil
+    _binding_or_skip()
+    if S._svc() is None:
+        pytest.skip("no Lua runtime on this host")
+    try:
+        built = str(tmp_path / "built" / "app_talk.moy")
+        wasm_cart.build(TALK, built)
+    except wasm_cart.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    shutil.copytree(built, os.path.join(root, "app_talk.moy"))
+    shutil.copytree(ECHO, os.path.join(root, "echo_lua.moy"))
+    ws.carts.rescan()
+    echo = S.start_cart(ws, next(c for c in ws.carts.all if c["title"] == "Echo"))
+    assert echo is not None
+    for perm in off:
+        ws.consent.turn("local.talk", perm, False)
+    if prep is not None:
+        prep(ws)
+    since = L.next()
+    try:
+        open_cart(ws, "Talk")
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
+        pid = ws.run.player.pid
+        for _ in range(4):
+            S.SCHED.mail()
+            S.SCHED.poll()
+            S.SCHED.tick(0)
+            _frames(ws, 1)
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    finally:
+        S.SCHED.stop(echo)
+    return ws, pid, [t for _s, _t, _l, q, t in os_log.records(since, 256) if q == pid]
+
+
+@pytest.fixture
+def talk(tmp_path):
+    """_talk, its run closed after, so its queue goes with it."""
+    held = []
+
+    def run(off=(), prep=None):
+        got = _talk(tmp_path, off, prep)
+        held.append(got[:2])
+        return got
+    yield run
+    for ws, pid in held:
+        ws.exit()
+        assert not moy_evq.has(pid), "the run's queue closes with it"
+
+
+def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(talk):
+    ws, pid, lines = talk()
+    assert "send 1" in lines, lines
+    assert "heard pong from local.echo [42]" in lines, lines
+    note = [ln for ln in lines if ln.startswith("notify ")]
+    assert note and int(note[0].split()[1]) > 0, lines
+    assert [(n.summary, n.body, n.pid) for n in notifications.NOTES.list
+            if n.pid == pid] == [("Talk", "Sent a ping", pid)]
+    assert "award 1" in lines, lines
+    assert ws.ach.has("local.talk", "hello"), "the badge it declares is found"
+    at = [ln for ln in lines if ln.startswith("at ")]
+    assert at and int(at[0].split()[1]) > 0, lines
+    assert "heard moybyte.at from system [%s]" % at[0].split()[1] in lines, lines
+    assert "new_name note" in lines, lines          # a files row its permission grants
+
+
+@pytest.mark.parametrize("synced", [True, False])
+def test_a_compiled_app_reads_the_wall_clock_and_its_local_time(talk, synced):
+    """moybyte_clock: the wall clock in Unix seconds, answered where it is
+    called; with 1 the console's local time, the door's Python half's
+    (runtime/system/wallclock.py's zone), ABSENT while NTP has not answered."""
+    from runtime import wallclock as wc
+
+    def prep(_ws):
+        wc.set_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+        wc._kernel[:] = [lambda: int(synced), True]
+    try:
+        t0 = wc.now()
+        _ws, _pid, lines = talk(prep=prep)
+        t1 = wc.now()
+        unix = [int(ln.split()[1]) for ln in lines if ln.startswith("clock ")]
+        local = [int(ln.split()[1]) for ln in lines if ln.startswith("local ")]
+        assert len(unix) == 1 and t0 <= unix[0] <= t1, (t0, lines, t1)
+        if synced:
+            assert local == [unix[0] + wc.offset(unix[0])], lines
+            assert wc.offset(unix[0]) != 0, "Belgrade is east of UTC"
+        else:
+            assert local == [-8], lines                     # MOY_APP_ABSENT
+    finally:
+        wc.set_zone(wc.UTC)
+        wc._kernel[:] = [None, False]
+
+
+def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(talk):
+    """moybyte_after and moybyte_every answer their timer's id and go off as
+    the system's message "moybyte.timer" carrying it; moybyte_cancel ends a
+    timer of the app's own and no other process's. Past TIMERS_MAX (its
+    alarm, its two timers and the minute-long ones) a timer answers FULL;
+    the one it keeps goes with its run."""
+    from runtime import moybyte
+    ws, pid, lines = talk()
+    once = [ln for ln in lines if ln.startswith("after ")]
+    rep = [ln for ln in lines if ln.startswith("every ")]
+    assert once and int(once[0].split()[1]) > 0, lines
+    assert rep and int(rep[0].split()[1]) > 0, lines
+    assert "heard moybyte.timer from system [%s]" % once[0].split()[1] in lines, lines
+    ticks = [ln for ln in lines if ln == "heard moybyte.timer from system [%s]"
+             % rep[0].split()[1]]
+    assert ticks and "cancel 1" in lines, lines
+    assert lines.count("cancel 1") == 1, "a tick after the cancel is a cancel of none"
+    other = L.spawn("other")
+    assert moy_evq.open(other, "other", "", False) == moy_evq.OK
+    rc, theirs = moy_evq.timer(other, 60000)
+    assert rc == moy_evq.OK
+    assert not moy_evq.timer_cancel(pid, theirs), "another process's timer is not its own"
+    assert moy_evq.timers(other) == 1
+    moy_evq.close(other)
+    assert "timers %d -2" % (moybyte.TIMERS_MAX - 3) in lines, lines
+    assert "uncap %d" % (moybyte.TIMERS_MAX - 4) in lines, lines
+    assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]
+    ws.exit()
+    assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
+    assert moy_evq.timers(pid) == 0
+
+
+def test_a_compiled_app_hears_an_item_handed_to_it_and_reads_it(talk):
+    from runtime import intents
+    ws, pid, _lines = talk()
+    since = L.next()
+    assert ws.run.player.window_event("moy_open", intents.Grant("text/plain", "r", data=b"a gift"))
+    _frames(ws, 2)
+    lines = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
+    heard = [ln for ln in lines if ln.startswith("heard moy_open from system [")]
+    assert heard and heard[0].endswith(', "text/plain", "r", null]'), lines
+    assert "item a gift" in lines, lines
+
+
+def test_a_compiled_app_is_refused_what_its_permissions_do_not_grant(talk):
+    _ws, _pid, lines = talk(off=("notifications", "alarms"))
+    assert "notify -4" in lines and "at -4" in lines, lines      # MOY_APP_DENIED
+    assert "heard pong from local.echo [42]" in lines, lines     # messages need none
+
+
+@pytest.mark.parametrize("off", [(), ("lease:gpio", "lease:uart1")])
+def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
+    """moybyte_dev_* (native/moy_kernel/moy_dev.h's pin, pins and UART, over
+    its buses' host twin): a pin the app drives and
+    reads back, a UART it writes and reads through its peer, each DENIED with
+    its `lease:<row>` turned off; the pin it keeps is BUSY to a Python
+    program while it runs and safe once its run ends. A `pins` handle
+    (its own permission, no lease's) drives gpio20 high and reads it back,
+    one a process, and its run's end leaves the pin safe."""
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import board_config
+    from runtime import leases, moybyte
+    from runtime import moy_lease as N
+    from runtime.host import bus_sim, lease_sim
+    leases.stand_in(lease_sim, board_config.lease_spec(
+        os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")))
+    lease_sim.reset()
+    bus_sim.reset()
+    bus_sim.loopback(1, True)
+    try:
+        ws, pid, lines = talk(off)
+        got = [ln for ln in lines if ln.startswith("dev_")]
+        assert [ln for ln in lines if ln.startswith("pins_")] == [
+            "pins_open 1", "pins_get 1", "pins_again -11"], lines
+        assert N.pin_state(20) & N.PIN_OUT and N.sim_get(20) == 1
+        if not off:
+            assert got == ["dev_open 1", "dev_get 1", "dev_write 4", "dev_read ping",
+                           "dev_close 0"], lines
+            assert N.pin_state(6) & N.PIN_OUT and N.held() == 2
+            # The compiled app's leases are no VM's: the stop's verdict
+            # (native/moy_play/moy_play_stop.c) reads moy_lease_held(VM).
+            assert N.held(N.VM) == 0
+            with pytest.raises(OSError) as e:
+                leases.LEASES.take(moybyte.SHELL, "gpio6")
+            assert e.value.errno == 16                                  # EBUSY
+            ws.exit()
+            assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE == N.pin_state(20)
+            # A Python program's lease is a machine object in the VM: it
+            # keeps the VM.
+            leases.LEASES.take(moybyte.SHELL, "gpio6")
+            assert N.held(N.VM) == 1
+        else:
+            assert got == ["dev_open -4", "dev_get -8", "dev_write -8", "dev_read -8",
+                           "dev_close -8"], lines                       # DENIED, ABSENT
+            assert N.held() == 1                                         # the pins'
+            ws.exit()
+            assert N.held() == 0 and N.pin_state(20) == N.PIN_SAFE
+    finally:
+        for p in list(leases.LEASES.held):
+            leases.LEASES.sweep(p)
+        N.reset()
+        leases.stand_in(None, None)
+
+
+def test_a_compiled_app_talks_on_a_port_of_the_radio_link_by_handle(talk):
+    """A `net` handle from a wasm app (runtime/system/dev_handles.py, docs/
+    netplay_v1.md Ports): its "talk" on port 7 reaches a second console's
+    port 7 from this console's MAC; the second console's message on port 7
+    is the app's record and one on port 8 is not; its run's end closes the
+    port and the radio goes down. The two consoles share
+    tests/test_espnow_link.py's fake air."""
+    from runtime import players as P
+    from test_espnow_link import _Air, _Clock, _FakeRadio, _FakeWlan
+    air, clock = _Air(), _Clock()
+
+    def make(mac, name):
+        radio, wlan = _FakeRadio(air, mac), _FakeWlan(mac)
+        radio.wlan = wlan
+        return P.EspNowLink(board="p4", name=name, ticks_ms=clock, radio=radio, wlan=wlan)
+
+    peer = make(b"\x02" * 6, "Bo")
+    assert peer.open_port(7) == 0 and peer.open_port(8) == 0
+
+    def prep(ws):
+        ws.link = make(b"\x01" * 6, "Ada")
+
+    ws, pid, lines = talk(prep=prep)
+    assert [ln for ln in lines if ln.startswith("net_")] == ["net_open 1", "net_write 4"], lines
+    peer.poll()
+    assert peer.port_take(7) == (b"\x01" * 6, b"talk") and peer.port_take(8) is None
+    since = L.next()
+    assert peer.port_send(7, b"hi there") == 0 and peer.port_send(8, b"not yours") == 0
+    ws.link.poll()
+    _frames(ws, 2)
+    heard = [t for _s, _t, _l, q, t in os_log.records(since, 64)
+             if q == pid and t.startswith("net_")]
+    assert heard == ["net_heard 2 7 hi there"], heard
+    ws.exit()
+    assert ws.link.ports_open() == 0 and not ws.link.active
+
+
+def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):
+    """A `lora` handle's LoRaWAN words from a wasm app (the kernel's handle
+    table, native/moy_kernel/moy_dev.h): its join=otaa keys reach the air as a join request the
+    network server (runtime/host/lora_sim.py) accepts, the radio busy while
+    the join runs and an uplink before it ABSENT; the join completes on the
+    handle the app keeps, and its run's end lets the radio go."""
+    from runtime import moy_lora as N
+    from runtime.host import lora_sim
+    keys = [bytes.fromhex(k) for k in ("70B3D57ED0050001", "0000000000000000",
+                                       "8E3F2A1B0C9D8E7F6A5B4C3D2E1F0A9B")]
+    lora_sim.install()
+    try:
+        ws, pid, lines = talk()
+        got = [ln for ln in lines if ln.startswith("lora_")]
+        assert got == ["lora_open 1", "lora_join 0", "lora_busy 1", "lora_uplink -8"], lines
+        req, freq, sf, *_ = lora_sim.sent()
+        accept = lora_sim.Network(*keys).answer(req)
+        assert accept is not None
+        due = N.step(1000)
+        N.step(due)
+        assert lora_sim.air(accept, freq, sf)
+        N.step(due + 20)
+        assert N.owner() == pid and N.joined()[0]
+        ws.exit()
+        assert N.owner() == 0
+    finally:
+        lora_sim.remove()
+
+
+def test_a_compiled_app_s_status_item_hears_its_panel_and_goes_with_its_run(talk):
+    """moybyte_status_* (runtime/system/status_items.py): an item in the bar
+    with a described panel, a description no kind reads refused BAD (-7), a
+    removed item's handle ABSENT (-8); a press in the panel, the shell's
+    (status_items.Panel), reaches the app as the system's message
+    "moybyte.status" [item, id, value]; the run's end sweeps the item."""
+    from runtime.status_items import ITEMS, ON
+    ws, pid, lines = talk()
+    shown = [ln for ln in lines if ln.startswith("status_")]
+    assert shown[0].startswith("status_show ") and int(shown[0].split()[1]) > 0, lines
+    h = int(shown[0].split()[1])
+    assert shown[1:] == ["status_panel 0", "status_bad -7", "status_state 0",
+                         "status_remove 0", "status_gone -8"], lines
+    it = ITEMS.of(pid, h)
+    assert it is not None and it.visible and it.state == ON and it.icon == "music"
+    assert [it.pid for it in ITEMS.shown] == [pid], "the removed one left the bar"
+    assert it.section.n == 4 and it.section.label[0] == "Talk" and it.section.v[3] == 3
+    since = L.next()
+    it.section._press(1, 1)                 # Say hi pressed
+    it.section._press(3, 7)                 # Volume stepped
+    _frames(ws, 2)
+    heard = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
+    assert heard == ['heard moybyte.status from system [%d, "hi", 1]' % h,
+                     'heard moybyte.status from system [%d, "vol", 7]' % h], heard
+    ws.exit()
+    assert ITEMS.of(pid, h) is None and ITEMS.count() == 0, "the run's end sweeps it"

@@ -7,27 +7,30 @@
 
 static int16_t s_tones[6] = {-1, -1, -1, -1, -1, -1};
 
-void moy_ui_text_tones(const int16_t tones[6]) {
+static void moy_ui_text_tones_w(const int16_t tones[6]) {
     memcpy(s_tones, tones, sizeof(s_tones));
 }
 
-static moy_ui_trow_t *s_trows;
-static uint32_t *s_starts;
+void moy_ui_text_tones(const int16_t tones[6]) {
+    moy_ui_theme_write(1);
+    moy_ui_text_tones_w(tones);
+    moy_ui_theme_write(0);
+}
 
-// Line i's rows at `cols` columns: its breaks into s_starts (the first
+// Line i's rows at `cols` columns: its breaks into starts (the first
 // TEXT_WRAP_ROWS of them), the count answered.
-static int text_line_rows(const moy_ui_lines_t *L, int32_t i, int wrap, int cols, int sgr,
-                          const uint8_t **p, size_t *n) {
+static int text_line_rows(uint32_t *starts, const moy_ui_lines_t *L, int32_t i, int wrap,
+                          int cols, int sgr, const uint8_t **p, size_t *n) {
     *p = L->get(L->src, i, n);
     if (*p == NULL) {
         *n = 0;
         *p = (const uint8_t *)"";
     }
     if (!wrap) {
-        s_starts[0] = 0;
+        starts[0] = 0;
         return 1;
     }
-    return moy_ui_text_wrap(*p, *n, cols, sgr, s_starts, TEXT_WRAP_ROWS);
+    return moy_ui_text_wrap(*p, *n, cols, sgr, starts, TEXT_WRAP_ROWS);
 }
 
 static int tone_of(int look, int tt) {
@@ -42,12 +45,13 @@ static int tone_of(int look, int tt) {
 }
 
 // The visual row line `line` starts on, where each line wraps at `cols`.
-static int32_t text_row_of(const moy_ui_lines_t *L, int32_t line, int cols, int sgr) {
+static int32_t text_row_of(uint32_t *starts, const moy_ui_lines_t *L, int32_t line, int cols,
+                           int sgr) {
     int32_t row = 0;
     for (int32_t i = 0; i < line && i < L->n; i++) {
         const uint8_t *p;
         size_t n;
-        row += text_line_rows(L, i, 1, cols, sgr, &p, &n);
+        row += text_line_rows(starts, L, i, 1, cols, sgr, &p, &n);
     }
     return row;
 }
@@ -58,7 +62,8 @@ static int32_t text_row_of(const moy_ui_lines_t *L, int32_t line, int cols, int 
 // touching) clip as one, so a row that crosses from one into the next is
 // laid out and drawn once.
 static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int32_t *v,
-                       int nrows, moy_ui_span_t err, moy_ui_span_t find) {
+                       const moy_ui_trow_t *trows, int nrows, moy_ui_span_t err,
+                       moy_ui_span_t find) {
     rc_t in = mua_rc_of(b);
     uint32_t bit = 1;
     for (int i = 0; i < c->fl_n; i++, bit <<= 1) {
@@ -74,7 +79,7 @@ static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, 
     for (int ok = mua_clip_row(c, &k, s, b, 0, b); ok; ok = mua_clip_next(&k)) {
         if (k.c == NULL) {
             // no pieces: the one clip there is
-            moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
+            moy_ui_text_paint(NULL, s, v, trows, nrows, err, find, 1);
             continue;
         }
         rc_t p = {st[MOY_ST_CX0], st[MOY_ST_CY0], st[MOY_ST_CX1], st[MOY_ST_CY1]};
@@ -107,7 +112,7 @@ static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, 
         st[MOY_ST_CY0] = q[i].y0;
         st[MOY_ST_CX1] = q[i].x1;
         st[MOY_ST_CY1] = q[i].y1;
-        moy_ui_text_paint(NULL, s, v, s_trows, nrows, err, find, 1);
+        moy_ui_text_paint(NULL, s, v, trows, nrows, err, find, 1);
     }
     memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
 }
@@ -132,12 +137,12 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
                              int32_t out[2]) {
     o = mua_over(o);
     out[0] = out[1] = 0;
-    s_trows = moy_ui_text_scratch();
-    s_starts = moy_ui_text_breaks();
+    moy_ui_trow_t *trows = moy_ui_text_scratch(c->inst);
+    uint32_t *starts = moy_ui_text_breaks(c->inst);
     if (c->n_nest >= MOY_UI_API_NEST) {
         return MOY_UI_API_DEEP;
     }
-    if (id.n == 0 || s_trows == NULL) {
+    if (id.n == 0 || trows == NULL) {
         return 0;
     }
     mua_group_close(c, s);
@@ -145,8 +150,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     moy_font_info_t fi;
     // the caller's font where it names a loaded one, outside a cart's code
     uint32_t font = (uint32_t)opt[MOY_UI_TXO_FONT];
-    if (font == 0 || moy_ui_cmask() != 127 || !moy_font_info(font, &fi)) {
-        font = moy_ui_font(MOY_UI_FONT_MONO, &fi);
+    if (font == 0 || s->cart || !moy_font_info(font, &fi)) {
+        font = moy_ui_font(s->cart, MOY_UI_FONT_MONO, &fi);
     }
     int cell = (fi.w > 0 ? fi.w : 8) * fs, th, lh;
     if (font != 0 && fi.first == 0) {
@@ -198,7 +203,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     uint32_t rid = mua_hash(id.p, id.n, TEXT_SALT);
     moy_ui_keep_t *k0 = mua_keep_of(c, rid);
     // the view's record: a view new to the context starts a fresh one
-    moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 1);
+    moy_ui_tview_t *w = moy_ui_text_view_of(c->inst, c, rid, 1);
     if (w != NULL && k0 == NULL) {
         memset(&w->gen, 0, sizeof(*w) - offsetof(moy_ui_tview_t, gen));
         moy_ui_text_reset(&w->t);
@@ -215,7 +220,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         for (int32_t i = 0; i < L->n; i++) {
             const uint8_t *p;
             size_t n;
-            total += text_line_rows(L, i, 1, cols, sgr, &p, &n);
+            total += text_line_rows(starts, L, i, 1, cols, sgr, &p, &n);
         }
         if (w != NULL) {
             w->gen = gen;
@@ -249,7 +254,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         most = most < 0 ? 0 : most;
         int32_t aim_to = -1;
         if (opt[MOY_UI_TXO_TOP] >= 0) {
-            int32_t row = wrap ? text_row_of(L, opt[MOY_UI_TXO_TOP], cols, sgr)
+            int32_t row = wrap ? text_row_of(starts, L, opt[MOY_UI_TXO_TOP], cols, sgr)
                                : opt[MOY_UI_TXO_TOP];
             aim_to = row * lh;
             aim_to = aim_to > most ? most : aim_to;
@@ -328,7 +333,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     int32_t top = v[MOY_UI_TV_TOP];
     if (!wrap) {
         for (int i = 0; i < nrows; i++) {
-            moy_ui_trow_t *r = &s_trows[i];
+            moy_ui_trow_t *r = &trows[i];
             int32_t ln = top + i;
             r->ca = 0;
             r->a = 0;
@@ -345,7 +350,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         for (int32_t i = 0; i < L->n && got < nrows; i++) {
             const uint8_t *p;
             size_t n;
-            int m = text_line_rows(L, i, 1, cols, sgr, &p, &n);
+            int m = text_line_rows(starts, L, i, 1, cols, sgr, &p, &n);
             if (row + m <= top) {
                 row += m;
                 continue;
@@ -354,9 +359,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
                 if (row < top) {
                     continue;
                 }
-                moy_ui_trow_t *r = &s_trows[got++];
-                uint32_t a = j < TEXT_WRAP_ROWS ? s_starts[j] : (uint32_t)n;
-                uint32_t e = j + 1 < m && j + 1 < TEXT_WRAP_ROWS ? s_starts[j + 1] : (uint32_t)n;
+                moy_ui_trow_t *r = &trows[got++];
+                uint32_t a = j < TEXT_WRAP_ROWS ? starts[j] : (uint32_t)n;
+                uint32_t e = j + 1 < m && j + 1 < TEXT_WRAP_ROWS ? starts[j + 1] : (uint32_t)n;
                 r->p = p;
                 r->n = (uint32_t)n;
                 r->a = a;
@@ -369,8 +374,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
             }
         }
         for (; got < nrows; got++) {
-            s_trows[got].p = NULL;
-            s_trows[got].line = -1;
+            trows[got].p = NULL;
+            trows[got].line = -1;
         }
         out[0] = out[0] < 0 ? 0 : out[0];
     }
@@ -387,7 +392,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
             int fh = FADE_H * fs;
             mua_floor_add(c, (rc_t){b.x, b.y + b.h - fh, b.x + b.w, b.y + b.h}, 1);
         }
-        int planned = t != NULL && moy_ui_text_plan(t, v, s_trows, nrows, err, find);
+        int planned = t != NULL && moy_ui_text_plan(t, v, trows, nrows, err, find);
         if (!planned || c->sh_view == rid) {
             // no record to say which rows moved, or a move drawn as rows: all of them
             mua_floor_add(c, mua_rc_of(b), 1);
@@ -415,12 +420,12 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         }
     }
     int64_t was = moy_text_print_font_use(font);
-    text_paint(c, s, b, v, nrows, err, find);
+    text_paint(c, s, b, v, trows, nrows, err, find);
     if (was >= 0) {
         moy_text_print_font_use((uint32_t)was);
     }
     if (t != NULL) {
-        moy_ui_text_note(t, v, s_trows, nrows, err, find);
+        moy_ui_text_note(t, v, trows, nrows, err, find);
         // where its rows lay, for a hit test
         w->x = b.x;
         w->y = b.y;
@@ -433,7 +438,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         w->off = v[MOY_UI_TV_OFF];
         w->rows = nrows;
         for (int i = 0; i < nrows; i++) {
-            const moy_ui_trow_t *r = &s_trows[i];
+            const moy_ui_trow_t *r = &trows[i];
             w->line[i] = r->line;
             w->ca[i] = r->p != NULL ? r->ca : 0;
             w->cb[i] = r->p == NULL ? 0 : !wrap ? -1
@@ -446,9 +451,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     if (k != NULL) {
         k->b = content;
     }
-    mua_no_foot = opt[MOY_UI_TXO_MARK] != 0;
+    c->no_foot = opt[MOY_UI_TXO_MARK] != 0;
     mua_nest_close(c, s, 1);
-    mua_no_foot = 0;
+    c->no_foot = 0;
     return 0;
 }
 
@@ -457,7 +462,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
 int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
                        int32_t out[2]) {
     out[0] = out[1] = 0;
-    const moy_ui_tview_t *w = moy_ui_text_view_of(c, mua_hash(id.p, id.n, TEXT_SALT), 0);
+    const moy_ui_tview_t *w =
+        moy_ui_text_view_of(c->inst, c, mua_hash(id.p, id.n, TEXT_SALT), 0);
     if (w == NULL || w->lh <= 0 || px < w->x || px >= w->x + w->w || py < w->y
         || py >= w->y + w->h) {
         return 0;
@@ -479,7 +485,7 @@ int moy_ui_api_text_at(const moy_ui_ctx_t *c, moy_ui_span_t id, int px, int py,
 int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t lines) {
     uint32_t rid = mua_hash(id.p, id.n, TEXT_SALT);
     moy_ui_keep_t *k = mua_keep_of(c, rid);
-    const moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 0);
+    const moy_ui_tview_t *w = moy_ui_text_view_of(c->inst, c, rid, 0);
     if (k == NULL || w == NULL || w->wrap || w->lh <= 0 || w->h <= 0
         || (k->sc.flags & MOY_UI_SCROLL_DRAG)) {
         return 0;                       // its pass aims it (a wrapped view's rows are its pass's)
@@ -513,7 +519,7 @@ int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines
                            int32_t line, int32_t col) {
     uint32_t rid = mua_hash(id.p, id.n, TEXT_SALT);
     moy_ui_keep_t *k = mua_keep_of(c, rid);
-    const moy_ui_tview_t *w = moy_ui_text_view_of(c, rid, 0);
+    const moy_ui_tview_t *w = moy_ui_text_view_of(c->inst, c, rid, 0);
     if (k == NULL || w == NULL || w->lh <= 0 || w->h <= 0 || line < 0
         || (k->sc.flags & MOY_UI_SCROLL_DRAG)) {
         return 0;                       // a view new to the context, or held by a finger
@@ -521,20 +527,20 @@ int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines
     // the visual row (line, col) lies on, and the rows the lines make
     int32_t row = line, total = L->n;
     if (w->wrap) {
-        s_starts = moy_ui_text_breaks();
-        if (s_starts == NULL) {
+        uint32_t *starts = moy_ui_text_breaks(c->inst);
+        if (starts == NULL) {
             return 0;
         }
         total = 0;
         for (int32_t i = 0; i < L->n; i++) {
             const uint8_t *p;
             size_t n;
-            int m = text_line_rows(L, i, 1, w->at_cols, w->sgr, &p, &n);
+            int m = text_line_rows(starts, L, i, 1, w->at_cols, w->sgr, &p, &n);
             if (i == line) {
                 row = total;
                 // the last of its rows that starts at or before the column
                 for (int j = 1; col >= 0 && j < m && j < TEXT_WRAP_ROWS
-                                && moy_ui_text_cols(p, s_starts[j], w->sgr) <= col; j++) {
+                                && moy_ui_text_cols(p, starts[j], w->sgr) <= col; j++) {
                     row = total + j;
                 }
             }
@@ -564,7 +570,8 @@ int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines
 }
 
 void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int y1) {
-    moy_ui_tview_t *w = moy_ui_text_view_of(c, mua_hash(id.p, id.n, TEXT_SALT), 0);
+    moy_ui_tview_t *w = moy_ui_text_view_of(c->inst, c,
+                                            mua_hash(id.p, id.n, TEXT_SALT), 0);
     if (w == NULL || y1 <= y0) {
         return;
     }
@@ -575,4 +582,9 @@ void moy_ui_api_text_cover(const moy_ui_ctx_t *c, moy_ui_span_t id, int y0, int 
     }
     w->over0 = y0 < w->over0 ? y0 : w->over0;
     w->over1 = y1 > w->over1 ? y1 : w->over1;
+}
+
+int moy_ui_recs_tones(moy_ui_rec_t *r) {
+    r[0] = (moy_ui_rec_t){s_tones, NULL, sizeof(s_tones)};
+    return 1;
 }

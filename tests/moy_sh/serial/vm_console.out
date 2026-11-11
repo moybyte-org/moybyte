@@ -1,0 +1,47 @@
+> sh ps
+SH   PID  PPID KIND     STATE      NAME
+SH   100     0 shell    running    sh
+SH     0     0 kernel   running    kernel
+SH     1     0 shell    running    console
+SH     7     1 service  background achievements
+SH end 0
+> sh perm grant moybyte.paint camera
+SH console perm: grant moybyte.paint camera
+SH end 0
+> sh lease
+SH console lease:
+SH console lease: step 1
+SH console lease: step 2
+SH end 0
+> sh notify hi | wc -l
+SH notify: not served here
+SH 1
+SH end 0
+> sh service stop 7
+SH console service: stop 7
+SH service: not served here
+SH end 1
+> sh hello world
+SH hello from the console
+SH end 0
+> sh kill 1
+SH sh: 1: kill: Operation not permitted
+SH 
+SH end 1
+> sh kill 7
+SH end 0
+> sh cat /proc/7/status
+SH Name:	achievements
+SH Pid:	7
+SH end 0
+> sh ls /proc
+SH 1/  7/
+SH end 0
+> sh free | grep python
+SH python       2000000     500000    1500000
+SH end 0
+> sh df /
+SH Folder                           Size         Used         Free
+SH /                             1048576       524288       524288
+SH end 0
+[exit 0]

@@ -170,16 +170,21 @@ class FakeMoycore(types.ModuleType):
         # A retry (native/moy_wasm/README.md, "A cart survives its
         # firmware") calls wasm_open a second time; set this to a list to
         # answer each call in turn instead of the same wasm_open_err always.
+        # An answer given as (text, True) is a trap after the module loaded
+        # and its _init ran: the session stays open (wasm_ran) and, as the C
+        # does, a further wasm_open before close() raises.
         self.wasm_open_errs = None
+        self.layout_ans = True
+        self.ran = False
         self.owed_frame = None
         self.owed_lut = None
         self.kept = False
-        for verb in ("run_begin", "register", "exec", "load", "tick",
+        for verb in ("run_begin", "register", "exec", "load", "layout", "tick",
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
-                     "get_global", "wasm_open", "take_frames", "frame",
+                     "get_global", "wasm_open", "wasm_ran", "take_frames", "frame",
                      "frame_settle", "frame_presented", "frame_kept",
-                     "layer_bind", "scene_put", "image_put"):
+                     "layer_bind", "scene_put", "image_put", "use", "heap"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
 
@@ -200,6 +205,14 @@ class FakeMoycore(types.ModuleType):
             raise TypeError("run_begin: %d args" % RB_ARITY)
         self.run_begin_args = a
         self._log("run_begin")
+        return 9                          # the run's row, as the C's handle
+
+    def _use(self, h):
+        # Not logged: every call into a run makes its row current first.
+        return h == 9
+
+    def _heap(self, h):
+        return 4096 if h == 9 else None
 
     def rb(self, field):
         """One `run_begin` argument, by the C's own parameter name."""
@@ -219,10 +232,18 @@ class FakeMoycore(types.ModuleType):
         self._log("exec", src, chunk)
         return self.exec_err
 
-    def _load(self, chunks):
-        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname).
-        self._log("load", list(chunks))
+    def _load(self, chunks, layout=None):
+        # SPEC.md 4: the WHOLE cart in one call -- a list of (src, chunkname),
+        # and an app's (w, h, fs) for its `_layout` before `_init`.
+        if layout is None:
+            self._log("load", list(chunks))
+        else:
+            self._log("load", list(chunks), layout)
         return self.load_err
+
+    def _layout(self, w, h, fs):
+        self._log("layout", w, h, fs)
+        return self.layout_ans
 
     def _tick(self, dt):
         self._log("tick", dt)
@@ -247,6 +268,7 @@ class FakeMoycore(types.ModuleType):
 
     def _close(self):
         self.closes += 1
+        self.ran = False
         self._log("close")
 
     def _active(self):
@@ -266,9 +288,20 @@ class FakeMoycore(types.ModuleType):
 
     def _wasm_open(self, *a):
         self._log("wasm_open", *a)
+        if self.ran:
+            raise RuntimeError("moycore: wasm_open wants a run begun with vm=False")
         if self.wasm_open_errs is not None:
-            return self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
-        return self.wasm_open_err
+            err = self.wasm_open_errs.pop(0) if self.wasm_open_errs else None
+        else:
+            err = self.wasm_open_err
+        if isinstance(err, tuple):
+            err, self.ran = err
+        else:
+            self.ran = err is None
+        return err
+
+    def _wasm_ran(self):
+        return self.ran
 
     def _take_frames(self, on, palette=True):
         self._log("take_frames", on, palette)
@@ -369,10 +402,7 @@ class FakeInput:
     """
 
     def __init__(self, **kw):
-        self.cart_start_ms = 0
         self.last_key = 0
-        self.game_view = None
-        self.view_writes = []
         self.mask_calls = []
         self._held = set()
         self._pressed = set()
@@ -443,9 +473,7 @@ class MinimalInput:
     `_refresh` at once.
     """
 
-    cart_start_ms = 0
     last_key = 0
-    game_view = None
 
     def __init__(self, held=(), pressed=()):
         self._held = set(held)
@@ -461,22 +489,48 @@ class MinimalInput:
         return name in self._pressed
 
 
-class _ViewRecordingInput(FakeInput):
-    """`ws.input.game_view` is a plain attribute; this counts the writes so
-    `_sync_view`'s skip-when-unchanged is observable rather than inferred."""
+class FakePlayer:
+    """The Player's `ui_room()`: None, a game's whole canvas, unless a test
+    sets an app's content_rect; and its `ui_face()`, a game's 0 unless a test
+    sets one."""
+
+    def __init__(self):
+        self.room = None
+        self.face = 0
+
+    def ui_room(self):
+        return self.room
+
+    def ui_face(self):
+        return self.face
+
+
+class FakeRun:
+    """The run the glue plays in (procs.Run's fields it reads). `view` is a
+    plain attribute; this counts the writes so `_sync_view`'s
+    skip-when-unchanged is observable rather than inferred."""
+
+    def __init__(self, canvas, project=None, start=0):
+        self.canvas = canvas
+        self.project = project
+        self.audio = None
+        self.cart_frame = None
+        self.view_writes = []
+        self.view = None
+        self.cart_start_ms = start
+        self.player = FakePlayer()
 
     def __setattr__(self, name, value):
-        if name == "game_view":
-            self.__dict__.setdefault("view_writes", []).append(value)
+        if name == "view" and "view_writes" in self.__dict__:
+            self.view_writes.append(value)
         object.__setattr__(self, name, value)
 
 
 class FakeWs:
-    def __init__(self, canvas=None, inp=None, project=None, pmem=None):
-        self.canvas = canvas if canvas is not None else FakeCanvas()
+    def __init__(self, canvas=None, inp=None, project=None, pmem=None, start=0):
+        self.run = FakeRun(canvas if canvas is not None else FakeCanvas(),
+                           project, start)
         self.input = inp if inp is not None else FakeInput()
-        if project is not None:
-            self.project = project
         if pmem is not None:
             self.pmem = pmem
 
@@ -598,8 +652,8 @@ class World:
     def run(self, ws=None, ns=None, src=LUA_SRC):
         self.ws = FakeWs() if ws is None else ws
         self.ns = make_ns() if ns is None else ns
-        if getattr(self.ws, "audio", None) is None:
-            self.ws.audio = NsSession(self.ns)
+        if self.ws.run.audio is None:
+            self.ws.run.audio = NsSession(self.ns)
         return self.mod.MoycoreRun(self.ws, self.ns, src)
 
     def close(self):
@@ -658,6 +712,21 @@ def test_run_begin_is_called_with_the_arity_the_c_demands(w):
     an argument added on one side of the wall is a cart that will not start."""
     w.run()
     assert len(w.core.run_begin_args) == RB_ARITY == len(RB_FIELDS)
+
+
+def test_the_runs_app_run_reaches_the_open_and_never_the_globals(w):
+    """The Player's app run rides the namespace (`_moy_app`, moy_app's
+    `run()`) into run_begin, whose Lua state copies it: the run's own grant
+    (native/moy_app/moy_app_run.h). It is no verb, so nothing registers it."""
+    run = bytes(range(24))
+    w.run(ns=make_ns(_moy_app=run))
+    assert w.core.rb("app") is run
+    assert "_moy_app" not in w.core.registered
+
+
+def test_a_game_hands_no_app_run(w):
+    w.run()
+    assert w.core.rb("app") is None
 
 
 def test_run_begin_receives_the_live_framebuffer_and_its_dimensions(w):
@@ -954,20 +1023,25 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     `files` permission, so its trampolines exist only for a cart that earned
     it and the prelude guards its whole block on their presence. Asserted in
     both states below rather than exempted, because "registered when granted"
-    is the actual invariant and a rename would still break it."""
+    is the actual invariant and a rename would still break it. The app names
+    that read the Python face's tables (`__themes`, `__files_badge`) are gated
+    the same way, on the role their permission names."""
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
-    # Fields and a metamethod, not handles: a layer's id, canvas and edited
-    # mark, an image's id. And the layer and scene natives are the RUNTIME's
+    # Fields, a metamethod and the prelude's own functions, not handles: a
+    # layer's id, canvas and edited mark, an image's id, and the `moybyte`
+    # table's fire, event and grant, which the console's chunks call. And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index"}
+    fields = {"__id", "__img", "__c", "__e", "__index",
+              "__moybyte_fire", "__moybyte_event", "__moybyte_grant"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
-    gated = {n for n in wanted if n.startswith("__ed_")}
+    gated = {n for n in wanted
+             if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
     assert gated, "the editor handles vanished from the prelude"
     got = {n for n in w.core.registered if n.startswith("__")}
     assert wanted - gated == got, "an UNGATED handle is missing"
@@ -999,6 +1073,22 @@ def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
     w.run(ns=make_ns(open_editor=lambda name=None, mode=None: None))
     wanted = set(re.findall(r"__ed_\w+", PRELUDE_HANDLES))
     assert wanted <= {n for n in w.core.registered if n.startswith("__")}
+
+
+def test_the_app_tables_are_registered_for_a_run_holding_their_roles(w):
+    """`themes()` and `files.badge` answer from the Python face's tables;
+    the role names themselves are the run's C (native/moy_app/moy_app_lua.h)
+    and never a trampoline."""
+    class Files:
+        def badge(self, name):
+            return "TXT"
+
+    w.run(ns=make_ns(themes=lambda: ["moy", "contrast"], files=Files(),
+                     prefs=object(), set_theme=lambda name: None,
+                     open_app=lambda app_id: False))
+    reg = w.core.registered
+    assert {"__themes", "__files_badge"} <= set(reg)
+    assert not {"themes", "files", "prefs", "set_theme", "open_app"} & set(reg)
 
 
 def test_the_paint_images_go_to_the_run_before_the_prelude(w):
@@ -1140,7 +1230,6 @@ def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
         inp.set_button("up", True)
         inp.set_button("b", True)
         inp.begin_frame()
-        inp.cart_start_ms = 0
         world = World()
         try:
             run = world.run(ws=FakeWs(inp=inp))
@@ -1187,17 +1276,14 @@ def test_the_run_begin_snapshot_declares_one_player_before_any_frame(w):
 
 
 def test_the_time_slot_is_elapsed_since_the_cart_started(w):
-    inp = FakeInput(cart_start_ms=1000)
-    run = w.run(ws=FakeWs(inp=inp))
+    run = w.run(ws=FakeWs(start=1000))
     w.clock.ms = 1750
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 750
 
 
-def test_an_input_with_no_cart_clock_leaves_the_time_slot_alone(w):
-    inp = FakeInput()
-    del inp.cart_start_ms
-    run = w.run(ws=FakeWs(inp=inp))
+def test_a_run_with_no_cart_clock_leaves_the_time_slot_alone(w):
+    run = w.run(ws=FakeWs(start=None))
     w.clock.ms = 500
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 0
@@ -1211,7 +1297,7 @@ def test_the_host_import_path_reads_the_same_clock():
     world = World(flat_ticks=False)
     try:
         assert world.mod._since_ms is ticks._since_ms
-        run = world.run(ws=FakeWs(inp=FakeInput(cart_start_ms=ticks._ticks_ms() - 5000)))
+        run = world.run(ws=FakeWs(start=ticks._ticks_ms() - 5000))
         run._refresh()
         assert 5000 <= run.snap[C_CONSTS["SNAP_TIME_MS"]] < 6000
     finally:
@@ -1222,7 +1308,7 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
     """It was an `import` statement executed once per frame."""
     assert w.mod._since_ms == w.clock.since_ms
     sys.modules["ticks"] = None                  # gone mid-run: still fine
-    run = w.run(ws=FakeWs(inp=FakeInput(cart_start_ms=0)))
+    run = w.run(ws=FakeWs(start=0))
     w.clock.ms = 42
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_TIME_MS"]] == 42
@@ -1292,13 +1378,41 @@ def test_the_last_typed_key_crosses_as_an_int_and_none_reads_zero(w):
     assert run.snap[C_CONSTS["SNAP_KEY"]] == 0
 
 
+def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
+    """The Player's ui_room() is the snapshot's room on a Python-driven tick
+    too, the browser's: an app's ui.page lies in its content_rect()."""
+    ws = FakeWs(inp=FakeInput())
+    run = w.run(ws=ws)
+    room = [C_CONSTS["SNAP_ROOM_" + k] for k in "XYWH"]
+    ws.run.player.room = (0, 18, 320, 222)
+    run._refresh()
+    assert [run.snap[i] for i in room] == [0, 18, 320, 222]
+    ws.run.player.room = None
+    run._refresh()
+    assert [run.snap[i] for i in room] == [0, 0, 0, 0]
+
+
+def test_the_ui_face_crosses_whole(w):
+    """The Player's ui_face() is the snapshot's face word as it is: the RUN
+    face reads its bits and its font scale (moy_ui_wasm.h)."""
+    ws = FakeWs(inp=FakeInput())
+    run = w.run(ws=ws)
+    ws.run.player.face = 1 | 2 | 4 | 3 << 8
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_FACE"]] == 1 | 2 | 4 | 3 << 8
+    ws.run.player.face = 0
+    run._refresh()
+    assert run.snap[C_CONSTS["SNAP_FACE"]] == 0
+
+
 def test_the_slot_numbers_are_bound_once_at_construction(w):
     """They were a module attribute lookup per frame, a dozen times a frame."""
     run = w.run()
     for name in ("SNAP_BTN", "SNAP_BTNP", "SNAP_BTN_P1", "SNAP_BTNP_P1",
                  "SNAP_PLAYERS", "SNAP_TIME_MS", "SNAP_TOUCH_X",
                  "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN", "SNAP_TOUCH_MS",
-                 "SNAP_KEY"):
+                 "SNAP_KEY", "SNAP_FACE", "SNAP_ROOM_X", "SNAP_ROOM_Y",
+                 "SNAP_ROOM_W", "SNAP_ROOM_H"):
         delattr(w.core, name)
     run._refresh()                       # reads nothing off the module
     assert run.snap[run._I_KEY] == 0
@@ -1320,7 +1434,7 @@ def test_a_frame_refreshes_then_ticks_then_syncs_the_view_then_drains(w):
     run._update(0.033)
     assert w.core.verbs() == ["tick"]
     assert run.snap[C_CONSTS["SNAP_BTN"]] != 0        # refreshed before tick
-    assert inp.game_view == (128, 120)
+    assert run.ws.run.view == (128, 120)
     assert ("music_stop",) in w.ns["_log"]
     assert run.aq[0] == 0
 
@@ -1364,31 +1478,30 @@ def test_a_swapped_framebuffer_is_retargeted_and_a_steady_one_is_not(w):
 
 def test_a_view_declared_in_init_lands_before_the_first_frame(w):
     """`_init` runs inside `run_begin`, so a cart that declares its region
-    there must reach `ws.input.game_view` at construction."""
+    there must reach `ws.run.view` at construction."""
     w.core.view_value = (128, 120)
     run = w.run()
-    assert run.ws.input.game_view == (128, 120)
+    assert run.ws.run.view == (128, 120)
 
 
 def test_an_unchanged_view_costs_one_comparison_and_no_write(w):
-    inp = _ViewRecordingInput()
     w.core.view_value = (128, 120)
-    run = w.run(ws=FakeWs(inp=inp))
-    writes = len(inp.view_writes)
+    run = w.run()
+    r = run.ws.run
+    writes = len(r.view_writes)
     run._sync_view()
     run._sync_view()
-    assert len(inp.view_writes) == writes
+    assert len(r.view_writes) == writes
 
 
 def test_a_cart_that_changes_its_region_at_runtime_is_followed(w):
-    inp = _ViewRecordingInput()
-    run = w.run(ws=FakeWs(inp=inp))
+    run = w.run()
     w.core.view_value = (64, 64)
     run._sync_view()
-    assert inp.game_view == (64, 64)
+    assert run.ws.run.view == (64, 64)
     w.core.view_value = None
     run._sync_view()
-    assert inp.game_view is None
+    assert run.ws.run.view is None
 
 
 def test_a_console_without_the_field_is_fine(w):
@@ -1426,7 +1539,7 @@ def test_an_empty_queue_costs_one_read(w):
 
 
 def test_every_op_is_one_call_on_the_runs_audio_session(w):
-    """One kernel call per queued command, on the run's session (ws.audio),
+    """One kernel call per queued command, on the run's session (ws.run.audio),
     in the queue's order."""
     run = w.run()
     _queue(run,
@@ -1605,9 +1718,9 @@ def test_closing_persists_pmem_and_then_closes_the_vm(w):
 
 def test_closing_drops_the_registry_that_pins_the_editors(w):
     run = w.run(ns=make_ns(open_editor=lambda name=None, mode=None: object()))
-    assert run._pins == []
+    wakes = len(run._pins)                  # the run's wakes (lua_ext.end_handles)
     w.core.registered["__ed_open"]("notes", "")
-    assert len(run._pins) == 1
+    assert len(run._pins) == wakes + 1
     run.close()
     assert run._pins is None
 
@@ -1830,16 +1943,20 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped,
-         allow_unsigned, interp, writable) = world.core.calls[1]
+         allow_unsigned, interp, writable, ring, app, layout) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
-        # a console that never turned Unknown sources on loads signed modules only
+        # a cart that does not ask for "full_access" loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
         # the cart declares no writable paths; its files are moycore's C
         assert writable is None
+        # nor an audio ring: `snd` keeps moy-spec's queue
+        assert ring == 0
+        # nor an app run, nor a layout: the namespace hands neither for a game
+        assert app is None and layout is None
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1863,31 +1980,63 @@ def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert len(call) == 10 and call[9] == "saves/\0options.cfg"
+        assert len(call) == 13 and call[9] == "saves/\0options.cfg"
+        assert call[11] is None
     finally:
         world.close()
 
 
-def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
-    """The owner's switch rides every load as it stands at that load: the
-    engine lets a module with no signature through only when it is on, and a
-    flip reaches the next cart started."""
+def test_the_compiled_apps_run_reaches_the_binding(tmp_path):
+    """The Player's app run (moy_app's `run()`, on the namespace) goes to
+    wasm_open, which the run holds for its imports from the app extension
+    and its load's grant check (native/moy_app/moy_app_wasm.h)."""
     cart, _main = _compiled(tmp_path)
-    for on in (True, False, True):
+    run = bytes(range(24))
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        world.mod.WasmRun(ws, make_ns(_moy_app=run), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open" and call[11] is run
+    finally:
+        world.close()
+
+
+def test_the_cart_s_audio_ring_reaches_the_binding(tmp_path):
+    """The manifest's "audio_ring" (docs/os_2026-11/hardware.md section 2) is
+    `snd`'s queue depth, which wasm_open hands moycore for the board's ring."""
+    cart, _main = _compiled(tmp_path)
+    cart["audio_ring"] = 256
+    world = _wasm_world()
+    try:
+        ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+        world.mod.WasmRun(ws, make_ns(), None)
+        call = world.core.calls[1]
+        assert call[0] == "wasm_open" and call[10] == 256
+    finally:
+        world.close()
+
+
+def test_the_load_asks_the_engine_what_the_cart_s_consent_says_now(tmp_path):
+    """The cart's consent rides every load as it stands at that load
+    (app_perms.run_admits_unsigned): the engine lets a module with no
+    signature through only for a cart granted "full_access"."""
+    cart, _main = _compiled(tmp_path)
+    for native in (True, False, True):
         world = _wasm_world()
         try:
-            ws = FakeWs(project=_CartProject(cart))
-            ws.unknown_sources = on
+            perms = ["full_access"] if native else []
+            ws = FakeWs(project=_CartProject(dict(cart, permissions=perms)))
             world.mod.WasmRun(ws, make_ns(), None)
             assert world.core.calls[1][0] == "wasm_open"
-            assert world.core.calls[1][7] is on
+            assert world.core.calls[1][7] is native
         finally:
             world.close()
 
 
 def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
-    """The engine's refusal for a module with no signature (Unknown sources
-    off) is not tamper evidence, so WasmRun retries the open on the
+    """The engine's refusal for a module with no signature (its cart not
+    granted "full_access") is not tamper evidence, so WasmRun retries the open on the
     interpreter -- main.wasm itself -- instead of raising
     (native/moy_wasm/README.md, "A cart survives its firmware",
     2026-09-30). The cart plays; run.interp says so, and interp_cause says
@@ -1956,7 +2105,7 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
-         _writable) = opens[0]
+         _writable, _ring, _app, _layout) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:
@@ -2044,6 +2193,28 @@ def test_a_key_mismatch_retries_then_a_trap_still_closes_the_console(tmp_path):
         ws = FakeWs(project=_CartProject(cart))
         with pytest.raises(RuntimeError, match="a trap in _init"):
             world.mod.WasmRun(ws, make_ns(), None)
+        assert world.core.closes == 1
+    finally:
+        world.close()
+
+
+def test_a_trap_in_init_is_the_carts_own_error_and_never_retries(tmp_path):
+    """A module that loaded and ran its _init is past every reason to retry
+    on the interpreter: a trap there is the cart's own error (here the
+    native stack check's, with its note), so WasmRun raises it, closes the
+    session once, and never opens the cart a second time -- which would run
+    _init twice, or be refused by the session still open."""
+    cart, _main = _compiled(tmp_path)
+    world = _wasm_world()
+    trap = ("Exception: native stack overflow [stack 0x4ff00000+0 bound +2048 "
+            "set +2048 free 13000 frame 96 here]")
+    world.core.wasm_open_errs = [(trap, True)]
+    try:
+        ws = FakeWs(project=_CartProject(cart))
+        with pytest.raises(RuntimeError) as exc:
+            world.mod.WasmRun(ws, make_ns(), None)
+        assert str(exc.value) == trap
+        assert [c[0] for c in world.core.calls].count("wasm_open") == 1
         assert world.core.closes == 1
     finally:
         world.close()
@@ -2248,7 +2419,7 @@ def test_a_compiled_cart_takes_its_frames_where_the_canvas_shows_them(tmp_path):
         assert ("take_frames", True, True) in world.core.calls
         assert world.core.verbs().index("take_frames") > world.core.verbs().index(
             "wasm_open")
-        assert ws.cart_frame is run.frame
+        assert ws.run.cart_frame is run.frame
         assert (run.frame.w, run.frame.h) == (320, 240)
         assert len(bytes(run.frame.lut)) == 512
     finally:
@@ -2265,7 +2436,7 @@ def test_a_canvas_without_a_palette_resolve_takes_only_direct_colour(tmp_path):
         ws.sys_canvas = DirectColourCanvas()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert ("take_frames", True, False) in world.core.calls
-        assert ws.cart_frame is run.frame
+        assert ws.run.cart_frame is run.frame
     finally:
         world.close()
 
@@ -2280,7 +2451,7 @@ def test_a_canvas_that_cannot_show_them_keeps_the_blit(tmp_path):
                 ws.sys_canvas = canvas
             run = world.mod.WasmRun(ws, make_ns(), None)
             assert "take_frames" not in world.core.verbs()
-            assert run.frame is None and getattr(ws, "cart_frame", None) is None
+            assert run.frame is None and getattr(ws.run, "cart_frame", None) is None
         finally:
             world.close()
 
@@ -2354,7 +2525,7 @@ def test_closing_the_run_lets_go_of_the_frame_before_the_console(tmp_path):
         world.core.close = lambda: (order.append(("console",)), real())
         run.close()
         assert order == [("frame", "the compositor"), ("console",)]
-        assert ws.cart_frame is None and run.frame is None
+        assert ws.run.cart_frame is None and run.frame is None
     finally:
         world.close()
 
@@ -2422,4 +2593,131 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
         world.core.kept = False                      # a verb wrote the canvas
         assert cf.take() is None
     finally:
+        world.close()
+
+
+# -- a WASI command (native/moy_wasm/moy_wasi.h) -----------------------------------
+
+
+def _command_world(tmp_path, chips, answers, end=(0, None)):
+    """A compiled command's cart and a glue whose moy_wasm.command_start
+    answers `answers` in turn, logging each call's arguments, and whose run,
+    once started, steps twice and ends with `end`."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cart, _main = _compiled(tmp_path, chips=chips)
+    world = _wasm_world()
+    calls = []
+    steps = [(-100, None), (-100, None), end]
+
+    def command_start(*a):
+        calls.append(a)
+        return answers.pop(0)
+    mod = sys.modules["moy_wasm"]
+    mod.command_start = command_start
+    mod.command_step = lambda max_ms: steps.pop(0)
+    mod.command_stop = lambda: (130, None)
+    world.mod._moy_wasm = mod
+    return world, cart, calls
+
+
+def test_a_command_runs_its_module_for_this_console_with_its_folders(tmp_path):
+    import hashlib
+    world, cart, calls = _command_world(tmp_path, ("esp32s3",), [(0, None)])
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.command(cart, ["cat", "x"], ["files", "files/docs"], 0, 30000) == (0, None)
+        (path, sha, interp, unsigned_ok, argv, roots, bg, budget, run), = calls
+        assert path == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
+        main = open(cart["path"] + "/main.wasm", "rb").read()
+        assert sha == hashlib.sha256(main).hexdigest() and interp is False
+        assert unsigned_ok is False and argv == ("cat", "x")
+        assert roots == "files\0files/docs\0" and (bg, budget, run) == (0, 30000, None)
+    finally:
+        world.close()
+
+
+def test_a_command_with_no_module_or_a_refused_one_runs_on_the_interpreter(tmp_path):
+    world, cart, calls = _command_world(tmp_path, (), [(0, None)], end=(3, None))
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.command(cart, ["probe"], ()) == (3, None)
+        assert calls[0][:3] == (cart["path"] + "/main.wasm", None, True)
+        assert calls[0][5] is None                  # no files at all
+    finally:
+        world.close()
+    world, cart, calls = _command_world(
+        tmp_path / "b", ("esp32s3",), [(-3, "refused: unsigned module"), (0, None)])
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (0, None)
+        assert [c[2] for c in calls] == [False, True]
+    finally:
+        world.close()
+
+
+def test_a_foreground_command_is_a_job_in_steps(tmp_path):
+    """The door's job contract (runtime/shell/sh_door.py): start leaves the
+    run going in the foreground, step answers RUNNING until its end, cancel
+    is Ctrl-C's."""
+    world, cart, calls = _command_world(tmp_path, (), [(0, None), (0, None)], end=(7, None))
+    try:
+        rt = world.mod.WasmRuntime(FakeWs())
+        assert rt.start(cart, ["probe", "sleep"], (), 42, 30000) == (0, None)
+        assert calls[0][6:] == (0, 30000, None)     # the foreground: no bg pid
+        assert [rt.step(42, 8) for _ in range(3)] == [
+            (rt.RUNNING, None), (rt.RUNNING, None), (7, None)]
+        assert rt.start(cart, ["probe"], (), 43, 30000) == (0, None)
+        assert rt.cancel(43) == (130, None)
+    finally:
+        world.close()
+
+
+def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
+    world, cart, calls = _command_world(tmp_path / "ref", ("esp32s3",),
+                                        [(-3, "refused: bad signature")])
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (
+            -3, "refused: bad signature")
+        assert len(calls) == 1
+    finally:
+        world.close()
+    world, cart, calls = _command_world(tmp_path / "unr", ("esp32s3",), [(0, None)],
+                                        end=(-1, "unreachable"))
+    try:
+        assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (-1, "unreachable")
+        assert len(calls) == 1
+    finally:
+        world.close()
+
+
+def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
+    """The scheduler's compiled-service contract (runtime/system/scheduler.py,
+    COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
+    has: the module for this console where the cart carries one, main.wasm
+    on the interpreter where it is refused."""
+    world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])
+    try:
+        mod = world.mod._moy_wasm
+        rt = world.mod.WasmRuntime(FakeWs())
+        starts = []
+        answers = ["refused: unsigned module", None]
+
+        def service_start(*a):
+            starts.append(a)
+            return answers.pop(0)
+        mod.service_start = service_start
+        mod.service_stop = lambda pid: 0
+        mod.service_reap = lambda: [(9, 7)]
+        mod.service_info = lambda pid: (65536, 120)
+        assert rt.service(cart, 9, run=b"grant") is None
+        assert [a[2] for a in starts] == [False, True]          # its module, then main.wasm
+        assert starts[1][0] == cart["path"] + "/main.wasm" and starts[1][4:] == (9, cart.get("id") or "", b"grant")
+        assert rt.figures(9) == (65536, 120) and rt.reap() == [(9, 7)] and rt.stop(9) == 0
+        starts.clear()
+        answers[:] = ["refused: bad signature"]
+        assert rt.service(cart, 10) == "refused: bad signature"
+        assert len(starts) == 1                                  # tamper evidence: never retried
+    finally:
+        for name in ("service_start", "service_stop", "service_reap", "service_info"):
+            if hasattr(world.mod._moy_wasm, name):
+                delattr(world.mod._moy_wasm, name)
         world.close()

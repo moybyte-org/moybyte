@@ -109,7 +109,7 @@ if not hasattr(ws, '_type_installed'):
         if ws._tn > 0:
             ws._tc += 1
             if ws._tc % 4 == 0:
-                fe = ws.player._focus_editor
+                fe = ws.run.player._focus_editor
                 if fe is not None:
                     fe.key(ord(ws._ts[ws._tn % len(ws._ts)]))
                     ws._tn -= 1
@@ -441,7 +441,7 @@ class Run:
             for cx, cy in steps:
                 sx, sy = cart_xy(cx, cy)
                 b.tap(sx, sy, settle=1.5)
-            if pb.pyval(b, "ws.player._focus_editor is not None"):
+            if pb.pyval(b, "ws.run.player._focus_editor is not None"):
                 got = True
                 break
         self.rows.append({"name": "notes: editor focused", "ok": got})
@@ -705,7 +705,6 @@ def gate(board, out, port):
     py = sys.executable
     tool = lambda name: os.path.join(HERE, name)  # noqa: E731
     pa = ["--port", port] if port != "auto" else []
-    windowed = None
 
     def step(name, argv, log):
         if argv[2:3] in ([tool("p4_bench.py")], [tool("p4_perf.py")]):
@@ -719,7 +718,6 @@ def gate(board, out, port):
         print("   rc=%d in %.0f s" % (rc, time.time() - t0), flush=True)
         return rc
 
-    o = lambda suffix: os.path.join(out, "%s_%s" % (board, suffix))  # noqa: E731
     bp = [py, tool("board.py"), board] + pa
     step("reboot", bp + ["reboot"], "%s_reboot.log" % board)
     step("wait", bp + ["wait"], "%s_wait.log" % board)
@@ -727,6 +725,24 @@ def gate(board, out, port):
     for cart in UI_PAGES:
         step("push %s" % os.path.basename(cart), bp + ["push", cart],
              "%s_push.log" % board)
+    try:
+        _gate_runs(board, out, py, tool, pa, bp, step)
+    finally:
+        titles = [_title(c) for c in UI_PAGES]
+        step("remove the pages", bp + [
+            "py", "[ws.carts.delete(c) for c in list(ws.carts.all) "
+            "if c['title'] in %r] and 0" % (titles,)], "%s_remove.log" % board)
+        step("desk", bp + ["desk"], "%s_desk.log" % board)
+
+
+def _title(cart):
+    with open(os.path.join(ROOT, cart, "manifest.json")) as f:
+        return json.load(f)["title"]
+
+
+def _gate_runs(board, out, py, tool, pa, bp, step):
+    o = lambda suffix: os.path.join(out, "%s_%s" % (board, suffix))  # noqa: E731
+    windowed = None
     me = [py, "-u", os.path.abspath(__file__), "--board", board] + pa
     step("shell", me + ["--out", out], "%s_shell.log" % board)
     bench = [py, "-u", tool("p4_bench.py"), "--board", board] + pa
@@ -753,7 +769,6 @@ def gate(board, out, port):
     perf = [py, "-u", tool("p4_perf.py"), "--board", board] + pa
     step("roster", perf, "%s_roster.log" % board)
     step("roster --diag", perf + ["--diag"], "%s_roster_diag.log" % board)
-    step("desk", bp + ["desk"], "%s_desk.log" % board)
 
 
 # -- --report: the tables ------------------------------------------------------

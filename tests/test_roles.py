@@ -1,5 +1,5 @@
-"""The app ABI's role table (`native/moy_app/roles.json`, #224 sprint 5) and
-the nets held to it.
+"""The app ABI's role table (the role rows of `native/os_calls.json`, #224
+sprint 5) and the nets held to it.
 
 The table is one row per verb an app reaches through its `AppContext`: the
 role, the verb, where it is served, the permission that grants it to a user
@@ -10,6 +10,9 @@ restates it equal to it:
 - `app_context.ROLES` is the table's roles, in its order;
 - every role object `AppContext` builds answers exactly the table's verbs, and
   every shell row is a method of the server the console registers for it;
+- a `proc:<name>` row is the process's (system_carts/moybyte.<name>.moy): a
+  message it wakes on, or a function of its main, and a method of the link the
+  console registers for the role;
 - the grant column is the C policy's permission map (`moy_app.perms()`);
 - the C rows are native/moy_app's, in the table's order, and its role
   objects answer exactly them;
@@ -21,7 +24,6 @@ over a real store on CPython and on the T-Deck's own desktop; its "uncalled"
 line is the coverage ratchet.
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -30,23 +32,27 @@ import pytest
 from ws_helpers import build_ws
 
 from runtime import app_context as _ac
+from tools import gen_os_table
 import moy_app
 
 ROOT = Path(__file__).resolve().parent.parent
-TABLE = ROOT / "native" / "moy_app" / "roles.json"
-SERVERS = ("shell", "c")
+SERVERS = ("shell", "c", "call")
+# A kernel or Python row a compiled app imports is the door's too.
+DOOR_ONLY = ("kernel", "python")
+PROC = "proc:"
 
 
 def _rows():
-    return json.loads(TABLE.read_text())["rows"]
+    return gen_os_table.role_table()
 
 
 def _verbs():
-    """Each role's verbs but the toolkit's, which no AppContext object serves
-    (app_context.TOOLKIT; tests/test_ui_wasm.py drives its rows)."""
+    """Each role's verbs but those of the roles no AppContext object serves:
+    the toolkit's (app_context.TOOLKIT; tests/test_ui_wasm.py drives its
+    rows) and the console calls' (shell_servers.ConsoleCalls)."""
     out = {}
     for r in _rows():
-        if r["role"] == _ac.TOOLKIT:
+        if r["role"] not in _ac.ROLES:
             continue
         out.setdefault(r["role"], []).append(r["verb"])
     return out
@@ -59,7 +65,8 @@ def test_the_table_is_well_formed():
         key = (r["role"], r["verb"])
         assert key not in seen, "row twice: %s.%s" % key
         seen.add(key)
-        assert r["server"] in SERVERS, r
+        assert r["server"] in SERVERS or r["server"].startswith(PROC) or (
+            r["server"] in DOOR_ONLY and r["wasm"] is not None), r
         assert r["wasm"] is None or isinstance(r["wasm"], str), r
 
 
@@ -96,15 +103,18 @@ def test_each_role_object_answers_exactly_its_rows(role):
 def test_the_c_rows_are_native_moy_apps_in_the_tables_order():
     c_rows = [r["role"] + "." + r["verb"] for r in _rows() if r["server"] == "c"]
     assert c_rows == list(moy_app.rows())
-    assert tuple(_verbs()) + (_ac.TOOLKIT,) == tuple(moy_app.roles())
+    assert tuple(moy_app.roles()) == tuple(gen_os_table.roles(gen_os_table.load()))
+    assert _ac.TOOLKIT in moy_app.roles()
 
 
 def test_the_import_adapter_is_the_tables_wasm_column():
     """A row with a wasm type is one native of native/moy_app/moy_app_wasm.c,
     imported from module moybyte.app as <role>_<verb> at that type, in the
-    table's order; a row without one has no native."""
-    want = [(r["role"] + "_" + r["verb"], r["wasm"], i)
-            for i, r in enumerate(_rows()) if r["wasm"] is not None]
+    import names' strcmp order (WAMR registers the table where it is, never
+    sorted at run time); a row without one has no native."""
+    want = sorted(((r["role"] + "_" + r["verb"], r["wasm"], i)
+                   for i, r in enumerate(_rows()) if r["wasm"] is not None),
+                  key=lambda t: t[0].encode())
     assert list(moy_app.wasm_rows()) == want
 
 
@@ -127,7 +137,7 @@ def test_the_ui_fixture_imports_every_ui_row():
 
 def test_the_role_doors_table_is_the_tables_rows():
     """The ROLE door names a row by its index here (moy_app_role), so the C's
-    table is roles.json row for row."""
+    table is the source's row for row."""
     assert list(moy_app.table()) == [r["role"] + "." + r["verb"] for r in _rows()]
 
 
@@ -138,17 +148,43 @@ def test_the_doors_shell_rows_take_their_servers_arguments():
     import inspect
     from runtime import shell_servers as ss
     rows = {r["role"] + "." + r["verb"]: r for r in _rows()}
+    from runtime import achievements
     servers = {"theme": ss.ThemeServer, "nav": ss.NavServer,
-               "notify": ss.NotifyServer, "wallpaper": ss.WallpaperServer}
+               "notify": achievements.NotifyRole, "wallpaper": ss.WallpaperServer,
+               "moybyte": ss.ConsoleCalls}
     for name, kinds in ss.DOOR_ARGS.items():
         r = rows[name]
-        assert r["server"] == "shell", name
+        # a C row run where it is called hands the door what C does not own
+        # (moybyte.dev_*, native/moy_kernel/moy_dev.h)
+        assert r["server"] in ("shell", "call", "c") + DOOR_ONLY or r["server"].startswith(PROC), name
         role, verb = name.split(".")
         params = list(inspect.signature(getattr(servers[role], verb)).parameters.values())[2:]
         assert len(params) >= len(kinds), (name, kinds)
         for p, k in zip(params, kinds):
             assert (p.default is not inspect.Parameter.empty) == (k == "o"), (name, p.name, k)
         assert all(p.default is not inspect.Parameter.empty for p in params[len(kinds):]), name
+
+
+def test_the_console_calls_are_the_door_rows_of_the_moybyte_role():
+    """Each `moybyte` row the door decodes is a method of the door's
+    console-call server, which runs the `moybyte` module's function of the
+    same name where a Python program holds one (the rest are a compiled
+    app's own: its granted items' and its device
+    handles', runtime/system/dev_handles.py, and its status item's, a
+    Python program's being `moybyte.status`); a method no row
+    names is a call nothing can reach."""
+    from runtime import shell_servers as ss
+    from runtime import moybyte
+    rows = [r for r in _rows() if r["server"] == "call"]
+    assert all(r["role"] == "moybyte" for r in rows)
+    door = {n.split(".")[1] for n in ss.DOOR_ARGS if n.startswith("moybyte.")}
+    have = {n for n in dir(ss.ConsoleCalls) if not n.startswith("_")}
+    assert have == door
+    py = {r["name"][8:] for r in gen_os_table.load()["rows"]
+          if r["name"] in ss.DOOR_ARGS and r["name"] in (r.get("py") or ())}
+    assert py == door - {"item_read", "item_write"} - {
+        v for v in door if v.startswith("dev_") or v.startswith("status_")}
+    assert all(callable(getattr(moybyte, v)) for v in py)
 
 
 def test_the_shell_rows_are_the_servers_methods():
@@ -159,7 +195,7 @@ def test_the_shell_rows_are_the_servers_methods():
     from runtime import shell_servers as ss
     servers = {"theme": ss.ThemeServer,
                "carts": ss.CartsServer,
-               "nav": ss.NavServer, "notify": ss.NotifyServer,
+               "nav": ss.NavServer,
                "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
     shell = {}
     for r in _rows():
@@ -175,14 +211,76 @@ def test_the_shell_rows_are_the_servers_methods():
             assert params[:2] == ["self", "g"], (role, v, params)
 
 
+def _proc_rows():
+    out = {}
+    for r in _rows():
+        if r["server"].startswith(PROC):
+            out.setdefault(r["server"][len(PROC):], []).append(r)
+    return out
+
+
+def test_the_achievements_process_serves_the_notify_role():
+    """The notify role's rows moved to the achievements process
+    (docs/os_2026-11/processes.md section 8): every one of them, and none
+    else, is `proc:achievements`, and the grant stays `never`."""
+    procs = _proc_rows()
+    assert set(procs) == {"achievements"}
+    assert [r["verb"] for r in procs["achievements"]] == ["award", "groups", "today"]
+    assert all(r["role"] == "notify" and r["grant"] == "never" and r["wasm"] is None
+               for r in procs["achievements"])
+
+
+def test_the_proc_rows_are_the_processs_and_the_links():
+    """Each `proc:<name>` row is a method of the role's link, taking the
+    grant first (the link is what the console registers,
+    runtime/system/achievements.py): a message the process wakes on
+    (`moybyte.on(verb, fn)`), or a read of what the process keeps."""
+    import ast
+    import inspect
+    from runtime import achievements
+    links = {"achievements": achievements.NotifyRole}
+    messages = {"achievements": {"award", "progress"}}
+    for name, rows in _proc_rows().items():
+        src = (ROOT / "system_carts" / ("moybyte.%s.moy" % name) / "main.py").read_text()
+        tree = ast.parse(src)
+        ons = {c.args[0].value for c in ast.walk(tree)
+               if isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "on"
+               and isinstance(c.args[0], ast.Constant)}
+        assert ons == messages[name]
+        verbs = {r["verb"] for r in rows}
+        cls = links[name]
+        have = {n for n in dir(cls) if not n.startswith("_") and callable(getattr(cls, n))}
+        assert have == verbs, sorted(have ^ verbs)
+        for v in have:
+            assert list(inspect.signature(getattr(cls, v)).parameters)[:2] == ["self", "g"]
+
+
+# The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR): no permission
+# grants them, and the C's holding check passes them for every grant.
+_FLOOR = {x["role"]: "floor" for x in gen_os_table.load()["roles"] if x["grant"] == "floor"}
+
+
 def test_the_grant_column_is_the_permission_map():
     perm_for = {}
     for perm, role in moy_app.perms():
         perm_for[role] = perm
     for r in _rows():
-        want = perm_for.get(r["role"], "never")
+        want = perm_for.get(r["role"], _FLOOR.get(r["role"], "never"))
         assert r["grant"] == want, "%s.%s grant %r, the map says %r" % (
             r["role"], r["verb"], r["grant"], want)
+
+
+def test_the_grant_column_is_the_permission_tables():
+    """A role a manifest permission grants is the permission table's
+    `role:<role>` row (runtime/shell/app_perms.py): the install prompt names
+    exactly the grants the policy can make."""
+    by_role = {}
+    for r in gen_os_table.load()["permissions"]:
+        if r["grants"].startswith("role:"):
+            by_role[r["grants"][5:]] = r["perm"]
+    for r in _rows():
+        assert r["grant"] == by_role.get(r["role"], _FLOOR.get(r["role"], "never")), (
+            r["role"], r["verb"])
 
 
 def _doc_table():

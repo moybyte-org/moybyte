@@ -14,9 +14,9 @@
 
 native/moy_kernel/modmoy_loop.c  vm_up  4  counted CONSOLE SERVICE: the loop's dispatcher, counted by moy_loop.c's up(); a VM-up run launched within the boot's first HEALTHY_LOOPS frames counts one SERVICE, the OTA-healthy confirm (moy_loop.c's once bit), once a boot
 native/moy_kernel/modmoy_loop.c  vm_role  1  counted ROLE: the ROLE door's dispatcher (moy_loop_role), a compiled app's call of a role row the Python console serves, one per call, on the VM's task
+native/moy_kernel/modmoy_guard.c  guard_call  2  binding: a wake's callback the Python scheduler runs under the VM abort, inside the SERVICE crossing it runs in (the host's frame: the DRIVER's)
 native/moycore/modmoycore.c  call_py  1  counted APP: a Lua cart's trampoline into a name a VM-kept run registered
 native/moy_wasm/modmoy_wasm.c  read_module  1  binding: a module's bytes read for the Python glue's open
-native/moy_wasm/modmoy_wasm.c  verify_module  1  binding: the module's signature, checked for the Python glue's open
 native/moy_store/modmoy_store.c  int_or  1  binding: a store verb's argument
 native/moy_store/modmoy_store.c  mod_seed  2  binding: the seed's progress callback and an entry's int
 native/moy_store/modmoy_ufiles.c  json_call  1  binding: a sidecar's records decoded and an op batch encoded, for the Python caller

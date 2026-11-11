@@ -1,0 +1,12 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 20000, "steps": [
+  {"note": "A BOARD-served page. A compiled cart's module never crosses the carts pull, so the cart comes in as a dropped zip and plays from the page's VFS; what it writes is in the apps root, which the board serves and takes.", "wait": 2500},
+  {"file": "$MOY_DROP", "as": "__zip"},
+  {"js": "WORKER.postMessage({t:'import',name:window.__zipName,buf:window.__zip}),'sent'"},
+  {"wait": 3000},
+  {"js": "window.__moyImported || 'nothing imported'"},
+  {"js": "WORKER.postMessage({t:'open',cart:'local.wasm_files.moy'}),'opened'"},
+  {"wait": 4000},
+  {"js": "__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, pmem: s.pmem}))"},
+  {"note": "let the sweep + POST /sync carry what the cart wrote (1s pump cadence)", "wait": 6000},
+  {"shot": "board_apps"}
+]}

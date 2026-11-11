@@ -1,11 +1,11 @@
 # Map (grep -n a name to jump there):
 #   Root                one syncable store, described by data
 #   root_by_id          the Root for a wire root id
-#   parse_batch         a POST body -> (ops, pin, root id)
+#   parse_batch         a POST body -> (ops, root id)
 #   apply_ops           apply one batch into a store (the kernel's C)
 #   key_class           which Settings cross between a board and its page
 #   system_pull         a board's /console.json document
-#   merge_system        a browser's system.json into a board's Settings
+#   merge_system        a browser's system/settings into a board's Settings
 #   SystemReceiver      a board's apply of a system batch (the VM's)
 #   StoreWatcher        detect a store's changes and queue them as batches
 #   StoreWatcher.sweep  one pass over the store
@@ -63,8 +63,12 @@ the same watcher into a site-mode browser's OPFS, and between a board and the
 page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
 board is of record, its C parks a system batch for the VM, and the VM merges
 it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
-the badges a union. A board's pin, update channel and UNKNOWN SOURCES are
-never sent to a page and never taken from one.
+the badges among them (the achievements process's prefs row, a cart
+namespace's, crossing whole: the later writer's row wins, so badges found
+on both sides between two syncs keep only one side's). A board's pin, update channel and NTP server are never
+sent to a page and never taken from one, and its consent records stay its own. A fourth root, the apps'
+private folders (`apps/<id>/<key>`, what a compiled cart wrote: `APPS_ROOT`),
+crosses between a board and the page it serves, every file as bytes.
 
 One body, three consumers, so the two sides cannot disagree about the wire:
 
@@ -89,22 +93,23 @@ One body, three consumers, so the two sides cannot disagree about the wire:
     variant, and it is a watcher argument rather than a second wire rule.
 
 What deliberately does NOT sync, recorded so it is not read as a gap:
-  * Top-level files beside the cart folders (system.json, wifi.json, the
+  * The files beside the cart folders (system/settings, wifi.json, the
     shared sheet) never cross the WIRE: each console keeps its own, a board's
-    system.json carries its pin and its crash ledger, and wifi.json is a
+    settings carry its pin and its crash ledger, and wifi.json is a
     secret. The pull skips non-directories at the root and `apply_ops`
     refuses single-segment file paths outright. The console's own documents
     (`SYSTEM_FILES`) are the third root, `SYSTEM_ROOT`: a SITE-mode browser
-    keeps all of them in its own OPFS; a board serves system.json's portable
-    rows and achievements.json through its VM (`system_pull`) and merges a
-    page's changes to those two (`merge_system`, `merge_achievements`), while
-    the edited icons and the shared sheet stay on each console.
+    keeps all of them in its own OPFS; a board serves its settings' portable
+    rows through its VM (`system_pull`) and merges a page's changes to them
+    (`merge_system`), while the edited icons and the shared sheet stay on
+    each console.
   * In the files root, anything whose first segment is not one of the
-    user-files kinds (moy_store_base.FILE_KIND_NAMES) -- which is how `files/.history/` and `files/trash/`
-    stay home, in BOTH directions, with no second skip list to keep in step.
+    shared folders (moy_store_base.SHARED_FOLDERS) -- which is how
+    `files/.history/` and `files/.Trash/` stay home, in BOTH directions, with
+    no second skip list to keep in step.
     `.history` is the files layer's journal-equivalent (#111 op sidecars), so
     it stays for the same reason journal/ does: each side keeps its own undo
-    history. `trash` is a LOCAL recovery bin, and syncing a deletion that is
+    history. `.Trash` is a LOCAL recovery bin, and syncing a deletion that is
     still recoverable here but not there turns last-writer-wins into data
     loss -- a peer would land the trashed copy back as a live file, or drop
     the only copy the kid could still restore.
@@ -117,13 +122,14 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
     BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
     `*.moygfx` (BINARY_SUFFIXES; docs/history/theming_2026-09.md §9 phase 6 step 2):
-    as base64, `"b"` where text rides as `"t"`.
+    as base64, `"b"` where text rides as `"t"`. The apps root is the one
+    root whose every file crosses so (`Root.binary`).
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
 request cap; the client sends ONE batch at a time and waits for the answer,
 so ops apply in order):
 
-    {"v": 1, "pin": "<optional>", "ops": [
+    {"v": 1, "ops": [
       {"p": "cart.moy/main.py", "t": "<whole text>"},        # atomic write
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 0},  # chunked: begin
       {"p": "cart.moy/big.lua", "t": "<piece>", "part": 1},  #   ...append
@@ -137,14 +143,14 @@ so ops apply in order):
 A files batch is the same ops under a VERSION BUMP that names its root:
 
     {"v": 2, "root": "files", "ops": [
-      {"p": "drawings/sunset.moyimg", "t": "<whole text>"},
-      {"p": "recordings/take_1", "dc": 1}]}                  # a folder item
+      {"p": "Pictures/sunset.moyimg", "t": "<whole text>"},
+      {"p": "Recordings/take_1", "dc": 1}]}                  # a folder item
 
 The bump is the back-compat mechanism, and it is a safety property rather
 than politeness. A board flashed before this reads `v != 1` and answers 400
 "bad batch"; without the bump its `apply_ops` would happily take
-`drawings/sunset.moyimg` for a cart-relative path and write it into the CARTS
-root, inventing a `drawings` cart on the kid's shelf. A refusal is the only
+`Pictures/sunset.moyimg` for a cart-relative path and write it into the CARTS
+root, inventing a `Pictures` cart on the kid's shelf. A refusal is the only
 acceptable failure. `v: 1` keeps the carts batch byte-identical to what those
 boards already parse, so the pull-and-push loop they have keeps working
 untouched -- and a v1 batch that tries to smuggle a `root` key is refused too.
@@ -152,19 +158,28 @@ In practice no files batch is ever aimed at such a board: the browser only
 builds a files watcher when the board answered GET /files.json (web_boot),
 so the version check is the second line of defense, not the first.
 
-A system batch names the third root the same way, and carries the two
-documents a board takes from its page:
+A system batch names the third root the same way, and carries the one
+document a board takes from its page:
 
     {"v": 2, "root": "system", "ops": [
-      {"p": "system.json", "t": "<the page's whole system.json>"},
-      {"p": "achievements.json", "t": "{\"unlocked\": [...]}"}]}
+      {"p": "system/settings", "t": "<the page's whole settings file>"}]}
 
     -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
 
-Its pull is GET /console.json (`?pin=`), `system_pull`'s document in the
+Its pull is GET /console.json, `system_pull`'s document in the
 pull's shape. Both are the VM's: a board without them (firmware before this
 root) answers the batch 400 and the pull 404, and the page then builds no
 system watcher and keeps its Settings and badges in the tab.
+
+An apps batch names the fourth root, every write a `"b"`:
+
+    {"v": 2, "root": "apps", "ops": [
+      {"p": "pong/hiscore", "b": "<base64>"},
+      {"p": "tetris", "dc": 1}]}                             # an app's folder
+
+Its pull is GET /apps.json, every value `{"b": ...}`. A name holding '~' (a
+write staged on its way to its key) never crosses, and a board without the
+root answers the batch 400 and the pull 404.
 
 A chunked file spans REQUESTS when it must (a 200KB main.lua cannot fit one
 64KB POST): parts accumulate in `<path>.tmp` on the receiver and only `pub`
@@ -187,14 +202,15 @@ except ImportError:  # host / CPython: the runtime package
     from runtime.moy_fs import _crc32
 
 try:
-    from moy_net import encode_batch, sync_batch, sync_apply
+    from moy_net import encode_batch, sync_batch, sync_apply, sync_path, sync_song
 except ImportError:  # pragma: no cover - host package lane
     from runtime.net_binding import (encode_batch, sync_batch,
-                                     sync_apply)
+                                     sync_apply, sync_path, sync_song)
 try:
-    from moy_store_base import cart_path, store_path, USER_NS_KEY
+    from moy_store_base import apps_root, cart_path, store_path, USER_NS_KEY
 except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_store_base import cart_path, store_path, USER_NS_KEY
+    from runtime.moy_store_base import (apps_root, cart_path, store_path,
+                                        USER_NS_KEY)
 
 try:
     import binascii as _binascii
@@ -211,6 +227,7 @@ PROTOCOL_V = 1
 PROTOCOL_V_ROOTED = 2
 CARTS_ROOT_ID = "carts"
 FILES_ROOT_ID = "files"
+APPS_ROOT_ID = "apps"
 # ROOT_IDS is derived from the registry (below files_root, which a Root needs to
 # name its path); it stays importable under this name for callers that had it.
 
@@ -227,10 +244,9 @@ BATCH_BUDGET = 32 * 1024
 # `{"b": ...}` as a value in a pull bundle. A binary chunk is BINARY_PART bytes,
 # which is PART_MAX characters of base64 exactly, so every piece decodes on its
 # own. Every other binary file stays home (the module docstring says why). The
-# rule has three more copies, each pinned to this one by its test:
+# rule has two more copies, each pinned to this one by its test:
 # native/moy_net/moy_sync_apply.c and moy_webhost.c (tests/test_moy_sync.py,
-# tests/test_moy_webhost.py) and firmware/web_runner/moy_store.mjs
-# (tests/test_web_store.py).
+# tests/test_moy_webhost.py).
 BINARY_FILES = ("cover.png",)
 BINARY_SUFFIXES = (".fnt", ".moygfx")
 BINARY_PART = PART_MAX * 3 // 4
@@ -335,21 +351,33 @@ def _moy_carts():
     return _CARTS[0]
 
 
-def file_kinds():
-    """The names a files-root path may start with: the user-files layer's
-    kinds as the on-card layout names them (moy_store_base.FILE_KIND_NAMES,
-    which tests/test_userfiles_parity.py holds to native/moy_store's registry),
-    so a kind added there reaches the wire by default. The layout and not the
+def file_folders():
+    """The names a files-root path may start with: the shared folders as the
+    on-card layout names them (moy_store_base.SHARED_FOLDERS, which
+    tests/test_userfiles_parity.py holds to native/moy_store's registry), so a
+    folder added there reaches the wire by default. The layout and not the
     layer, because the Zero serves and takes these folders without carrying
     the layer.
 
-    This ONE allowlist is also what keeps `files/.history/` and `files/trash/`
-    home in both directions: neither is a kind, so no walker descends into them
-    and no op naming one is ever applied. Returns None when there is no store
-    module to ask, which every caller reads as "refuse", never as "allow".
+    This ONE allowlist is also what keeps `files/.history/` and `files/.Trash/`
+    home in both directions: neither is a shared folder, so no walker descends
+    into them and no op naming one is ever applied. Returns None when there is
+    no store module to ask, which every caller reads as "refuse", never as
+    "allow".
     """
     mc = _moy_carts()
-    return None if mc is None else mc.FILE_KIND_NAMES
+    return None if mc is None else mc.SHARED_FOLDERS
+
+
+def kind_dir_of(rel):
+    """The folder of the user-files kind a files-root path `rel` lies in (the
+    deepest of moy_store_base.FILE_KIND_DIRS it is under), or None."""
+    mc = _moy_carts()
+    best = None
+    for d in (mc.FILE_KIND_DIRS.values() if mc is not None else ()):
+        if rel.startswith(d + "/") and (best is None or len(d) > len(best)):
+            best = d
+    return best
 
 
 def files_root(carts_root):
@@ -364,13 +392,12 @@ def files_root(carts_root):
 # branch scattered through the wire parser, the apply, the webhost endpoints,
 # the browser watchers and the OPFS store. Every per-root behaviour that used to
 # be such a branch is a field on its Root, so ADDING A STORE is one entry and
-# nothing else moves. Three ship: carts, the #108 user files, and the console's
-# own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's).
+# nothing else moves. Four ship: carts, the #108 user files, the console's
+# own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's) and
+# the apps' private folders (`APPS_ROOT`).
 #
-# The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
-# by tests/test_web_store.py, because a STATIC host has no server to ask for it --
-# the roots are ours and few, so a mirrored constant is honest where a fetched
-# manifest would only move the coupling.
+# The browser's store reads this list from its own VM (`roots_json`, the
+# worker's bindStore), so a static host needs no server to ask for it.
 # ---------------------------------------------------------------------------
 
 
@@ -385,20 +412,29 @@ class Root:
                it rather than misapply its paths.
       path     (carts_root) -> where this store lives. Carts IS carts_root; the
                files root is its sibling.
-      kinds    the first path segment must be a user-files kind (`file_kinds`) --
-               which is also what keeps `.history`/`trash` home, in both
+      kinds    the first path segment must be a shared folder (`file_folders`) --
+               which is also what keeps `.history`/`.Trash` home, in both
                directions, with no second skip list.
       site_keep_journal
                in SITE mode (the browser's OPFS is of record) this root's watcher
                sweeps `journal/` too, so the kid's undo history survives the tab.
                Only carts relaxes; the files layer's history is `.history/`
                sidecars, a different mechanism that stays home either way.
-      top      None, or the store is these TOP-LEVEL FILES of its directory and
-               nothing else: no folder, no other name (`SYSTEM_FILES`). A
-               whole-folder delete never applies to one.
+      top      None, or the store is these NAMED FILES of its directory and
+               nothing else, each a path in it (`SYSTEM_FILES`: one is
+               `system/settings`). A whole-folder delete never applies to one.
       wire_top
                None, or the files of `top` a BOARD-mode batch may carry (the
                rest stay on each console): `SYSTEM_WIRE_FILES`.
+      binary   every file crosses as bytes, whatever its name (the apps root).
+      site     False: a SITE-mode page neither seeds nor watches this root,
+               because another keeper is its one writer there (the apps
+               root's: moy_store.commitWritten). A board-served page does both.
+      skip     None, or the name predicate this root's watcher sweeps with
+               in either mode, in place of the wire's `_skip`.
+      dc       None, or the (least, most) segments a whole-folder delete of
+               this root names (most None: no bound) -- the receiving C's
+               rule, which the browser's store applies too (`roots_json`).
 
     What a receiver does per root -- the carts root journals and dirties the
     shelf, a whole-cart delete is one segment, the files root is made on its
@@ -407,7 +443,8 @@ class Root:
     """
 
     def __init__(self, id, wire, path, endpoint, kinds=False,
-                 site_keep_journal=False, top=None, wire_top=None):
+                 site_keep_journal=False, top=None, wire_top=None,
+                 binary=False, site=True, skip=None, dc=None):
         self.id = id
         self.wire = wire
         self._path = path
@@ -416,6 +453,10 @@ class Root:
         self.site_keep_journal = site_keep_journal
         self.top = top
         self.wire_top = wire_top
+        self.binary = binary
+        self.site = site
+        self._skip = skip
+        self.dc = dc
 
     def path(self, carts_root):
         return self._path(carts_root)
@@ -424,7 +465,14 @@ class Root:
         """What a watcher over this root will NOT sweep -- the wire's `_skip` by
         default (None lets StoreWatcher supply it), relaxed to keep the journal
         only for the one root+mode that is of record in the browser."""
+        if self._skip is not None:
+            return self._skip
         return skip_keep_journal if (site and self.site_keep_journal) else None
+
+    def watch_read(self):
+        """How a watcher over this root reads a file: as bytes for a `binary`
+        root, None (the name's own rule, `_read_payload`) for every other."""
+        return _read_bytes if self.binary else None
 
     def watch_top(self, site):
         """The top-level files a watcher over this root sweeps: all of `top` in
@@ -434,7 +482,7 @@ class Root:
 
 CARTS_ROOT = Root(
     CARTS_ROOT_ID, PROTOCOL_V, lambda carts_root: carts_root, "/carts.json",
-    site_keep_journal=True)
+    site_keep_journal=True, dc=(1, 1))
 
 FILES_ROOT = Root(
     # A lambda, not the bare `files_root` reference, so the name resolves at CALL
@@ -442,24 +490,27 @@ FILES_ROOT = Root(
     # here and the endpoint 404s, exactly as it should, per call rather than per
     # registry construction.
     FILES_ROOT_ID, PROTOCOL_V_ROOTED, lambda carts_root: files_root(carts_root),
-    "/files.json", kinds=True)
+    "/files.json", kinds=True, dc=(2, None))
 
 # The console's own documents, the files a board keeps BESIDE its carts
-# folder (moy_carts' sibling stores): the Settings rows and everything else
-# `ws.system` holds, the earned badges and the shared sprite sheet. A site-mode browser is its own
+# folder (moy_carts' sibling stores): `system/settings` (the Settings rows and
+# everything else `ws.system` holds, the badges among the apps' prefs) and the
+# shared sprite sheet. A site-mode browser is its own
 # console, so it keeps them in its own OPFS the way a board keeps them on its
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
-# indexes.json (the serving host's, read at boot), installed.json and written/
-# (each has its own crash-safe keeper, moy_store.commitInstall /
-# commitWritten), and install/ (staging).
+# system/sources (the serving host's, written at boot), pkg/ (the cached
+# indexes), installed.json (its own crash-safe keeper,
+# moy_store.commitInstall), apps/ (a root of its own, below) and install/
+# (staging).
 SYSTEM_ROOT_ID = "system"
-SYSTEM_FILES = ("system.json", "achievements.json", "shared.moygfx")
+SYSTEM_SETTINGS = "system/settings"
+SYSTEM_FILES = (SYSTEM_SETTINGS, "shared.moygfx")
 # What crosses between a board and the page it serves: the pull, and the
 # documents a system batch may carry. The shared sheet stays on each console
 # in board mode.
 SYSTEM_PULL = "/console.json"
-SYSTEM_WIRE_FILES = ("system.json", "achievements.json")
+SYSTEM_WIRE_FILES = (SYSTEM_SETTINGS,)
 
 
 def system_root(carts_root):
@@ -471,13 +522,33 @@ def system_root(carts_root):
 SYSTEM_ROOT = Root(
     # v2 + its own root name: a board's C parks a batch of it for the VM
     # (`SystemReceiver`), and firmware older than this root REFUSES it (its
-    # moy_sync.c named only carts and files), never reading `system.json` as a
-    # cart path. A board-served page watches it only when the board answered
+    # moy_sync.c named only carts and files), never reading `system/settings`
+    # as a cart path. A board-served page watches it only when the board answered
     # its pull, so no batch of it is aimed at such firmware at all.
     SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, SYSTEM_PULL,
     top=SYSTEM_FILES, wire_top=SYSTEM_WIRE_FILES)
 
-SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT)
+
+
+def skip_staged(name):
+    """`_skip`, and a name holding '~': an app's write staged on its way to
+    its key (cart_files' "~part"/"~done"), which no key ever holds."""
+    return "~" in name or _skip(name)
+
+
+# The apps' private folders (docs/os_2026-11/between_apps.md section 2):
+# `apps/<id>/<key>`, the files a compiled cart wrote (runtime/carts/cart_files.py).
+# Every file crosses as bytes, a write staged on its way to its key stays home,
+# and a whole-folder delete is one app. ONE WRITER PER MODE: on a board-served
+# page the board is of record -- the page pulls `/apps.json` and its watcher
+# pushes what a cart wrote in the tab -- and in SITE mode the browser's keeper
+# (moy_store.commitWritten, whole or nothing per SPEC.md 16.12) is the only
+# thing that writes OPFS apps/, so this root is neither seeded nor swept there.
+APPS_ROOT = Root(
+    APPS_ROOT_ID, PROTOCOL_V_ROOTED, apps_root, "/apps.json",
+    binary=True, site=False, skip=skip_staged, dc=(1, 1))
+
+SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT, APPS_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
 _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 
@@ -485,6 +556,131 @@ _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 def root_by_id(root_id):
     """The Root for a wire root id, or None."""
     return _ROOT_BY_ID.get(root_id)
+
+
+# The files root's folder of songs (moy_net.h's MOY_SYNC_MUSIC): a browser's
+# store keeps them and the VFS never holds one (firmware/web_runner/media_link.py).
+MUSIC = "Music"
+
+
+def roots_json(carts_root):
+    """The registry as the browser's store reads it (moy_store.mjs's `bind`),
+    each root's directory under `carts_root`; the files root names its folder
+    of songs."""
+    out = []
+    for r in SYNC_ROOTS:
+        d = {"id": r.id, "vfs": r.path(carts_root),
+             "endpoint": r.endpoint.lstrip("/"),
+             "top": list(r.top) if r.top is not None else None,
+             "binary": r.binary, "site": r.site}
+        if r.id == FILES_ROOT_ID:
+            d["songs"] = MUSIC
+        out.append(d)
+    return _json.dumps(out)
+
+
+def seeds(root_id, site, served):
+    """Whether a page seeds `root_id` before its console boots: a page a
+    board serves the roots its board served (`served`; the carts always),
+    which is what keeps a board flashed before a root from being sent a batch
+    it refuses; a site-mode page every root it keeps itself (`Root.site`),
+    served or not, so a drawing made there has somewhere to persist."""
+    root = root_by_id(root_id)
+    if root is None:
+        return False
+    if site:
+        return root.site
+    return served or root_id == CARTS_ROOT_ID
+
+
+def reload_json():
+    """The roots a page a board serves pulls again when the board's carts
+    change (the worker's reload), as JSON ids, the carts first: every root
+    of files the console reads from its store, never the console's own
+    documents (a root of named files), which the live console holds and
+    sends back itself."""
+    return _json.dumps([r.id for r in SYNC_ROOTS if r.top is None])
+
+
+def local_segs(root_id, rel, dc=False):
+    """How many segments `rel` has as a path the browser's store of record
+    for `root_id` keeps (moy_store.mjs), 0 when it keeps none there: the
+    receiving C's path rule with the journal kept (`sync_path`), then the
+    root's shape -- a whole-folder delete (`dc`) within the root's arity, one
+    of the named files of a root of them, an app's `<id>/<key>` with no '~',
+    else a file inside a folder (a top-level file of a carts or files store is
+    system state beside it, never the kid's work)."""
+    root = root_by_id(root_id)
+    n = sync_path(rel, 1) if root is not None else 0
+    if not n:
+        return 0
+    if dc:
+        if root.dc is None or n < root.dc[0] or (root.dc[1] is not None and n > root.dc[1]):
+            return 0
+        return n
+    if root.top is not None:
+        return n if rel in root.top else 0
+    if root_id == APPS_ROOT_ID:
+        return n if n == 2 and "~" not in rel else 0
+    return n if n >= 2 else 0
+
+
+# The folders below a root's own a sweep walks (StoreWatcher._walk_dir):
+# deeper than this nothing is swept, so no store of record holds a file
+# there and a browser's store reads none back (moy_store.mjs's walk).
+WALK_DEPTH = 6
+
+
+def local_folder(root_id, rel):
+    """Whether the browser's store of record for `root_id` reads folder `rel`
+    (moy_store.mjs's walk): a folder a sweep walks, `WALK_DEPTH` below the
+    root's own at most, whose name the receiving C's path rule takes with
+    the journal kept."""
+    n = sync_path(rel, 1) if root_by_id(root_id) is not None else 0
+    return 0 < n <= WALK_DEPTH + 1
+
+
+def local_song(rel):
+    """Whether `rel` of a files store is a song of its music folder, which
+    the browser's store keeps out of the VFS (`MUSIC`, moy_sync_song)."""
+    folder, _, name = rel.partition("/")
+    return folder == MUSIC and sync_path(rel, 1) == 2 and sync_song(name)
+
+
+def folders_json(path):
+    """The folders of `path` the wire carries, sorted, as JSON: the browser's
+    export picker lists a shelf's carts by it."""
+    return _json.dumps(sorted(n for n, d in _entries(path) if d and not _skip(n)))
+
+
+# The cart folders the served bundle held when the carts root was seeded
+# (`seed_store`), or None before a seed: the carts this page's console got
+# from the site that serves it.
+_SERVED = [None]
+
+
+def served_carts():
+    return _SERVED[0]
+
+
+def seed_store(root_id, src, carts_root):
+    """What a store of record takes from the served bundle staged at `src`
+    (the browser's, on a static host): the carts by `moy_seed.seed_folders`,
+    every other root the bundle whole when it holds none of its files yet.
+    The same report either way: {"first", "wrote", "removed"}. The carts'
+    served folders stay behind for `served_carts`."""
+    try:
+        import moy_seed
+    except ImportError:  # pragma: no cover - host fallback
+        from runtime import moy_seed
+    root = root_by_id(root_id)
+    dest = root.path(carts_root)
+    if root_id == CARTS_ROOT_ID:
+        got = moy_seed.seed_folders(src, dest)
+        _SERVED[0] = tuple(got.pop("served"))
+        return got
+    return moy_seed.adopt_bundle(src, dest, root.top,
+                                 root.watch_skip(True) or _skip)
 
 
 def _entries(path, _listdir=None, _isdir=None):
@@ -576,16 +772,19 @@ def _read_text(path):
     return _retry_io(_open, None)
 
 
-def _read_payload(path):
-    """What a watcher ships of the file at `path`: its text, its BYTES for a
-    BINARY_FILES name, or None (skip it). Retried on OSError like `_read_text`."""
-    if not is_binary(path):
-        return _read_text(path)
-
+def _read_bytes(path):
+    """The file at `path` as bytes, every file of a `binary` root. Retried on
+    OSError like `_read_text`."""
     def _open():
         with open(path, "rb") as f:
             return f.read()
     return _retry_io(_open, None)
+
+
+def _read_payload(path):
+    """What a watcher ships of the file at `path`: its text, its BYTES for a
+    BINARY_FILES name, or None (skip it). Retried on OSError like `_read_text`."""
+    return _read_bytes(path) if is_binary(path) else _read_text(path)
 
 
 def _stat_file(path):
@@ -607,21 +806,21 @@ def _stat_file(path):
 
 
 def parse_batch(body):
-    """The POST body -> (ops, pin, root_id) or (None, None, None) on anything
+    """The POST body -> (ops, root_id) or (None, None) on anything
     malformed. Which store a batch speaks for is the C's rule: a v1 batch is
     carts by definition (one that names another root is refused, never read as
     carts), a v2 batch names a v2 root, and anything else is refused -- a
     receiver never guesses where a path lands."""
     got = sync_batch(body)
     if got is None:
-        return None, None, None
-    root_id, pin, ops = got
-    return _json.loads(ops), pin, root_id
+        return None, None
+    root_id, ops = got
+    return _json.loads(ops), root_id
 
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     """Apply one batch's `ops` into the store at path `root`, whose SHAPE is
-    `root_id` ("carts" or "files", what parse_batch returned).
+    `root_id` (what parse_batch returned).
 
     Returns (applied, errors, shelf_dirty): how many ops landed, [(index,
     reason)] for the first eight that did not (a bad op skips, it never aborts
@@ -635,11 +834,11 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     line and a cursor per file), which is why a scratch receiver (the
     convergence harness) passes False.
     """
-    kinds = file_kinds()
+    kinds = file_folders()
     applied, errors, shelf, _refused = sync_apply(
         root, root if root_id == FILES_ROOT_ID else None,
         None if kinds is None else tuple(kinds), root_id, _json.dumps(ops),
-        journal)
+        journal, root if root_id == APPS_ROOT_ID else None)
     return applied, errors, shelf
 
 
@@ -659,8 +858,9 @@ BOARD = "board"         # never sent to a browser, never taken from one
 # Every key a console writes, by what crossing does to it; a key not named here
 # (a retired setting, one added without an entry) is LOCAL. A PORTABLE key
 # carries the shape its value must have to be taken (None: any JSON value).
-# BOARD keys guard the board: its pairing pin, its update channel, and whether
-# it loads unsigned code -- a page must never be able to turn that on.
+# BOARD keys guard the board: its pairing pin, its update channel and the NTP
+# server its certificate dates rest on. The consent records (`consent`, which
+# admit unsigned code through `full_access`) are LOCAL: a page's are ignored.
 SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),
@@ -685,17 +885,18 @@ SYSTEM_KEYS = {
     "diag_sd": (LOCAL, None),
     "app_guard": (LOCAL, None),
     "wallpaper_guard": (LOCAL, None),
+    "service_restart": (LOCAL, None),
     "win_full": (LOCAL, None),
-    "web_pin": (BOARD, None),
+    "tz": (LOCAL, None),
     "ota_channel": (BOARD, None),
-    "unknown_sources": (BOARD, None),
+    "ntp_server": (BOARD, None),
 }
 
 # The app prefs namespaces (native/moy_app's `<ns>_<key>` rows) a page may
 # change: a system app's by its PREFS_NS (tests/test_moy_sync.py holds every
 # app that takes the prefs role to this list), and any cart's, whose namespace
 # is its id and so carries a dot.
-SYSTEM_PREFS_NS = ("paint",)
+SYSTEM_PREFS_NS = ("paint", "music")
 
 # The keys whose values name carts by PATH (`<carts root>/<folder>`). They cross
 # as folder names and land under the receiver's own carts root: a cart's folder
@@ -704,7 +905,7 @@ CART_PATH_KEYS = ("favorites", "desk_mru", "plays")
 
 
 def key_class(key):
-    """PORTABLE, LOCAL or BOARD for a system.json key."""
+    """PORTABLE, LOCAL or BOARD for a settings key."""
     got = SYSTEM_KEYS.get(key)
     if got is not None:
         return got[0]
@@ -749,45 +950,39 @@ def rebase_value(key, value, carts_root):
     return value
 
 
-def system_pull(rows, badges):
-    """The /console.json document: `{"system.json": text, "achievements.json":
-    text}` -- the PORTABLE rows of `rows` (a Settings), cart paths as folder
-    names, and `badges` (an `Achievements.doc()`) as achievements.json holds
-    it."""
+def system_pull(rows):
+    """The /console.json document: `{"system/settings": text}` -- the
+    PORTABLE rows of `rows` (a Settings) as the settings file holds them,
+    cart paths as folder names."""
     doc = {}
     for key in rows.keys():
         if key_class(key) == PORTABLE:
             doc[key] = rebase_value(key, rows.get(key), None)
-    return {"system.json": _json.dumps(doc),
-            "achievements.json": _moy_carts().achievements_text(badges)}
+    return {SYSTEM_SETTINGS: _moy_carts().settings_text(doc)}
 
 
 def rebase_system(text, carts_root):
-    """A pulled system.json's text with its cart folders re-rooted under this
-    console's `carts_root`, or None when it is not a JSON object."""
-    try:
-        doc = _json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(doc, dict):
-        return None
+    """A pulled settings file's text with its cart folders re-rooted under
+    this console's `carts_root`."""
+    mc = _moy_carts()
+    doc = mc.parse_settings(text)
     for key in CART_PATH_KEYS:
         if key in doc:
             doc[key] = rebase_value(key, doc[key], carts_root)
-    return _json.dumps(doc)
+    return mc.settings_text(doc)
 
 
 def merge_system(rows, text, carts_root):
-    """Merge a browser's system.json `text` into the Settings `rows`: each
+    """Merge a browser's settings file `text` into the Settings `rows`: each
     PORTABLE key whose value differs is set (cart paths re-rooted under
     `carts_root`), and a PORTABLE key the document no longer has is deleted --
     unless the document is empty, which says nothing. LOCAL and BOARD keys,
     and a value of the wrong shape, are passed over. One write for the lot.
-    Returns the keys that changed; ValueError when `text` is not a JSON object.
+    Returns the keys that changed; TypeError when `text` is not text.
     """
-    doc = _json.loads(text)
-    if not isinstance(doc, dict):
-        raise ValueError("not an object")
+    if not isinstance(text, str):
+        raise TypeError("not text")
+    doc = _moy_carts().parse_settings(text)
     changed = []
     for key in doc:
         if key_class(key) != PORTABLE or not _shape_ok(key, doc[key]):
@@ -806,46 +1001,29 @@ def merge_system(rows, text, carts_root):
     return changed
 
 
-def merge_achievements(text, award):
-    """Award every badge a browser's achievements.json `text` holds through
-    `award(id, day)`, with the day it was found there -- a union, never a
-    replacement: a badge one console earned is never taken away by the
-    other's list. How many were new; ValueError when the text is not
-    achievements.json's format."""
-    doc = _moy_carts().achievements_doc(_json.loads(text))
-    if doc is None:
-        raise ValueError("not achievements.json")
-    n = 0
-    for i, day in doc["found"].items():
-        if award(i, day):
-            n += 1
-    return n
-
-
 class SystemReceiver:
     """A board's apply for system batches (the C parks them for the VM): a
-    `system.json` goes through `merge_system`, an `achievements.json` through
-    `merge_achievements`, a document sent in parts is held here until its
+    `system/settings` goes through `merge_system`, a document sent in parts is held here until its
     `pub` (a part 0 starts it again). A delete, a binary op and any other file
     are refused: a page cannot take a console's documents away."""
 
     def __init__(self):
         self._parts = {}
 
-    def apply(self, ops, rows, award, carts_root):
+    def apply(self, ops, rows, carts_root):
         """(applied, [(index, reason)], changed keys) of one batch's `ops`."""
         applied = 0
         errors = []
         changed = []
         for i, op in enumerate(ops if isinstance(ops, list) else ()):
-            why = self._one(op, rows, award, carts_root, changed)
+            why = self._one(op, rows, carts_root, changed)
             if why is None:
                 applied += 1
             elif len(errors) < 8:
                 errors.append((i, why))
         return applied, errors, changed
 
-    def _one(self, op, rows, award, carts_root, changed):
+    def _one(self, op, rows, carts_root, changed):
         if not isinstance(op, dict):
             return "bad op"
         p = op.get("p")
@@ -872,12 +1050,9 @@ class SystemReceiver:
         if type(text) is not str:
             return "not a document"
         try:
-            if p == "system.json":
-                for key in merge_system(rows, text, carts_root):
-                    if key not in changed:
-                        changed.append(key)
-            else:
-                merge_achievements(text, award)
+            for key in merge_system(rows, text, carts_root):
+                if key not in changed:
+                    changed.append(key)
         except (ValueError, TypeError):
             return "bad document"
         return None
@@ -1031,35 +1206,45 @@ class StoreWatcher:
         the file is its own unit and a plain `d` is the right op.
 
         In the carts root the unit is the cart folder. In the files root it is
-        the ITEM -- `<kind>/<name>` -- and only for a path deeper than that: a
-        flat drawing is one file, and shipping `dc drawings/x.moyimg` would ask
-        the receiver to rmtree a file (which quietly does nothing), while a kind
-        dir is never a unit at all, or losing one recording would delete the
-        peer's whole recordings folder.
+        the ITEM of a folder-valued kind -- `Recordings/<take>`,
+        `Documents/Stories/<story>` -- and only for a path deeper than its
+        kind's folder: a flat drawing is one file, and shipping `dc
+        Pictures/x.moyimg` would ask the receiver to rmtree a file (which
+        quietly does nothing), while a kind's folder is never a unit at all,
+        or losing one sheet would delete the peer's whole `Pictures/Sprites`.
         """
         if self.top is not None:
             return None                       # each file is its own unit
         parts = rel.split("/")
         if self.root_id != FILES_ROOT_ID:
             return parts[0]
-        return parts[0] + "/" + parts[1] if len(parts) > 2 else None
+        d = kind_dir_of(rel)
+        if d is None:
+            return None
+        rest = rel[len(d) + 1:].split("/")
+        return d + "/" + rest[0] if len(rest) > 1 else None
 
     def _walk(self):
         """Yield (rel, size, mtime) for every syncable file, skip-filtered at
         every level. A store of named top-level files (`top`, the system root)
         is those files and nothing beside them; in every other root top-level
         FILES are never syncable, and in the files root a top-level dir must be
-        a known kind -- which is what leaves `.history` and `trash` unwalked."""
+        a shared folder -- which is what leaves `.history` and `.Trash` unwalked."""
         if self.top is not None:
-            for name, isdir in self._sorted_entries(self.root):
-                if isdir or name not in self.top:
+            listed = {}
+            for name in sorted(self.top):
+                head, _, leaf = name.rpartition("/")
+                if head not in listed:
+                    listed[head] = self._sorted_entries(
+                        store_path(self.root, head) if head else self.root)
+                if (leaf, False) not in listed[head]:
                     continue
                 full = store_path(self.root, name)
                 st = _stat_file(full) if self._listdir is None else (0, 0)
                 if st is not None:
                     yield name, st[0], st[1]
             return
-        kinds = file_kinds() if self.root_id == FILES_ROOT_ID else None
+        kinds = file_folders() if self.root_id == FILES_ROOT_ID else None
         for top, isdir in self._sorted_entries(self.root):
             if not isdir or self.skip(top):
                 continue
@@ -1069,7 +1254,7 @@ class StoreWatcher:
                 yield item
 
     def _walk_dir(self, path, prefix, depth):
-        if depth > 6:
+        if depth > WALK_DEPTH:
             return
         for name, isdir in self._sorted_entries(path):
             if self.skip(name):
@@ -1197,7 +1382,7 @@ class StoreWatcher:
             self._partial = None
         return budget
 
-    def take_json(self, pin=None):
+    def take_json(self):
         """The next batch as wire JSON. A carts batch keeps the v1 shape older
         boards parse; any other root rides v2 + an explicit `root`, which is
         what makes those boards REFUSE it instead of misapplying its paths."""
@@ -1206,8 +1391,8 @@ class StoreWatcher:
             return ""
         root = root_by_id(self.root_id) or CARTS_ROOT
         if root.wire == PROTOCOL_V:
-            return encode_batch(PROTOCOL_V, None, ops, pin)
-        return encode_batch(root.wire, root.id, ops, pin)
+            return encode_batch(PROTOCOL_V, None, ops)
+        return encode_batch(root.wire, root.id, ops)
 
     def ack(self, ok):
         """Settle the in-flight batch. ok=False requeues everything it carried

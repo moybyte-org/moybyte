@@ -50,11 +50,58 @@ static ppa_client_handle_t s_srm = NULL;
 static ppa_client_handle_t s_fill = NULL;
 
 // Async fence (the composite-overlap lever): every submitted transaction bumps
-// s_submitted; the PPA's done ISR bumps s_done. sync() spins until they meet.
+// s_submitted; the PPA's done ISR bumps s_done. sync() waits until they meet.
 // Single-writer per counter (main thread writes s_submitted, ISR writes s_done),
-// so no atomics needed -- just volatile for fresh reads across the spin.
+// so no atomics needed -- just volatile for fresh reads across the wait.
 static volatile uint32_t s_submitted = 0;
 static volatile uint32_t s_done = 0;
+
+// A fence BLOCKS: its task parks on s_fence_sem, which every retirement gives
+// while a fence is parked, and re-checks its count when woken. A fence that
+// polled the clock instead held its core for the whole composite. BINARY, as
+// s_rb_ppa_sem below is: a banked give costs a waiter one extra check, never
+// a missed retirement, because the waiter counts itself parked BEFORE its
+// last check.
+static SemaphoreHandle_t s_fence_sem = NULL;
+static volatile uint32_t s_fence_parked = 0;
+
+// The retirement's store is ordered before the parked count's load, as the
+// waiter's count is before its check: one of the two always sees the other.
+static void fence_wake_from_isr(BaseType_t *hp) {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (s_fence_parked && s_fence_sem != NULL) {
+        xSemaphoreGiveFromISR(s_fence_sem, hp);
+    }
+}
+
+static void fence_wake(void) {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (s_fence_parked && s_fence_sem != NULL) {
+        xSemaphoreGive(s_fence_sem);
+    }
+}
+
+// Park until `done()` or the deadline, woken by fence_wake*. False: the
+// deadline passed first.
+static bool fence_park(bool (*done)(const void *arg), const void *arg, int64_t deadline) {
+    while (!done(arg)) {
+        int64_t left = deadline - esp_timer_get_time();
+        if (left <= 0) {
+            return false;
+        }
+        if (s_fence_sem == NULL) {
+            continue;                             // no semaphore: the poll
+        }
+        __atomic_fetch_add(&s_fence_parked, 1, __ATOMIC_SEQ_CST);
+        if (!done(arg)) {
+            xSemaphoreTake(s_fence_sem, 1);       // a tick: the bound on a lost wake
+        }
+        __atomic_fetch_sub(&s_fence_parked, 1, __ATOMIC_SEQ_CST);
+    }
+    // A wake this fence took may have been another's: pass it on.
+    fence_wake();
+    return true;
+}
 
 static volatile uint32_t s_timeouts = 0;
 
@@ -88,6 +135,7 @@ static bool ppa_trans_done_cb(ppa_client_handle_t client,
     // submit (see rb_worker), so this counter has two writers now.
     __atomic_fetch_add(&s_done, 1, __ATOMIC_RELAXED);
     BaseType_t hp = pdFALSE;
+    fence_wake_from_isr(&hp);
     if (user_data != NULL) {
         // A bounce band: the SRAM band it read is free again, and the worker
         // may be blocked on exactly that.
@@ -111,21 +159,25 @@ static inline uint32_t ppa_inflight(void) {
 // Wait until at most `keep` transactions remain. False = it gave up.
 //
 // Every fence in this module goes through here, because a completion that never
-// fires would otherwise spin forever INSIDE the frame loop. Giving up cannot
+// fires would otherwise park the frame loop forever. Giving up cannot
 // raise -- a fence runs where a throw would take the desktop down -- so
 // s_timeouts is the only place such a failure is ever visible.
+static bool inflight_at_most(const void *keep) {
+    return ppa_inflight() <= *(const uint32_t *)keep;
+}
+
 static bool ppa_wait(uint32_t keep) {
-    int64_t deadline = esp_timer_get_time() + PPA_FENCE_TIMEOUT_US;
-    while (ppa_inflight() > keep) {
-        if (esp_timer_get_time() > deadline) {
-            s_timeouts++;
-            // Counters bankrupt, rather than leave a phantom in flight that
-            // every LATER fence waits out too. Safe only because a failed
-            // fence's caller always bails instead of reusing the buffer it
-            // waited on -- a new caller that reuses it breaks this.
-            s_done = s_submitted;
-            return false;
-        }
+    if (ppa_inflight() <= keep) {
+        return true;
+    }
+    if (!fence_park(inflight_at_most, &keep, esp_timer_get_time() + PPA_FENCE_TIMEOUT_US)) {
+        s_timeouts++;
+        // Counters bankrupt, rather than leave a phantom in flight that
+        // every LATER fence waits out too. Safe only because a failed
+        // fence's caller always bails instead of reusing the buffer it
+        // waited on -- a new caller that reuses it breaks this.
+        s_done = s_submitted;
+        return false;
     }
     return true;
 }
@@ -158,6 +210,9 @@ static mp_obj_t moy_ppa_init(void) {
     }
     if (s_submit_lock == NULL) {
         s_submit_lock = xSemaphoreCreateMutex();
+    }
+    if (s_fence_sem == NULL) {
+        s_fence_sem = xSemaphoreCreateBinary();
     }
     ppa_event_callbacks_t cbs = { .on_trans_done = ppa_trans_done_cb };
     ppa_client_register_event_callbacks(s_srm, &cbs);
@@ -778,6 +833,7 @@ static void rb_worker(void *arg) {
                 // waits on a transaction that never existed.
                 s_rb_busy[k] = false;
                 __atomic_fetch_add(&s_done, 1, __ATOMIC_RELAXED);
+                fence_wake();
                 s_timeouts++;
                 s_rb_t_submit++;
             }
@@ -1239,7 +1295,14 @@ static uint32_t s_snap_wait_us;
 static bool snap_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
     (void)h; (void)e; (void)arg;
     s_snap_busy = false;
-    return false;
+    BaseType_t hp = pdFALSE;
+    fence_wake_from_isr(&hp);
+    return hp == pdTRUE;
+}
+
+static bool snap_landed(const void *arg) {
+    (void)arg;
+    return !s_snap_busy;
 }
 
 static void snap_wait_inner(void) {
@@ -1248,10 +1311,8 @@ static void snap_wait_inner(void) {
         return;
     }
     int64_t t0 = esp_timer_get_time();
-    int64_t deadline = t0 + PPA_FENCE_TIMEOUT_US;
     MP_THREAD_GIL_EXIT();
-    while (s_snap_busy && esp_timer_get_time() < deadline) {
-    }
+    fence_park(snap_landed, NULL, t0 + PPA_FENCE_TIMEOUT_US);
     MP_THREAD_GIL_ENTER();
     if (s_snap_busy) {
         s_snap_busy = false;
@@ -1266,35 +1327,44 @@ static void snap_wait_inner(void) {
 //   (64-aligned, at least the span long), by DMA when the engine takes it;
 //   fence with snap_wait(). A frame that already sits where its copy would
 //   land -- the last frame shown, shown again -- is not copied.
-static mp_obj_t moy_ppa_snap(mp_obj_t scratch_in, mp_obj_t frame_in) {
-    mp_buffer_info_t scr, fr;
-    mp_get_buffer_raise(scratch_in, &scr, MP_BUFFER_WRITE);
-    mp_get_buffer_raise(frame_in, &fr, MP_BUFFER_READ);
-    uintptr_t a0 = (uintptr_t)fr.buf & ~(uintptr_t)63u;
-    size_t off = (size_t)((uintptr_t)fr.buf - a0);
-    size_t span = (off + fr.len + 63u) & ~(size_t)63u;
-    if (fr.len == 0 || scr.len < span || ((uintptr_t)scr.buf & 63u) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("snap scratch"));
+// snap's body, shared with the kernel's front: the frame's offset in `scr`,
+// or -1 where `scr` cannot hold the span.
+static long snap_do(uint8_t *dst, size_t len, const uint8_t *frame, size_t n) {
+    uintptr_t a0 = (uintptr_t)frame & ~(uintptr_t)63u;
+    size_t off = (size_t)((uintptr_t)frame - a0);
+    size_t span = (off + n + 63u) & ~(size_t)63u;
+    if (n == 0 || len < span || ((uintptr_t)dst & 63u) != 0) {
+        return -1;
     }
-    uint8_t *dst = (uint8_t *)scr.buf;
     snap_wait_inner();
-    if ((const uint8_t *)fr.buf == dst + off) {
-        return MP_OBJ_NEW_SMALL_INT(off);
+    if (frame == dst + off) {
+        return (long)off;
     }
     if (!s_snap_dead && rb_dma_install()) {
         s_snap_busy = true;
         esp_err_t err = esp_async_memcpy(s_mcp, dst, (void *)a0, span, snap_done_cb, NULL);
         if (err == ESP_OK) {
             s_snaps++;
-            return MP_OBJ_NEW_SMALL_INT(off);
+            return (long)off;
         }
         s_snap_busy = false;
         if (err == ESP_ERR_INVALID_ARG) {
             s_snap_dead = true;
         }
     }
-    memcpy(dst + off, fr.buf, fr.len);
+    memcpy(dst + off, frame, n);
     s_snaps_sync++;
+    return (long)off;
+}
+
+static mp_obj_t moy_ppa_snap(mp_obj_t scratch_in, mp_obj_t frame_in) {
+    mp_buffer_info_t scr, fr;
+    mp_get_buffer_raise(scratch_in, &scr, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(frame_in, &fr, MP_BUFFER_READ);
+    long off = snap_do((uint8_t *)scr.buf, scr.len, (const uint8_t *)fr.buf, fr.len);
+    if (off < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("snap scratch"));
+    }
     return MP_OBJ_NEW_SMALL_INT(off);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(moy_ppa_snap_obj, moy_ppa_snap);
@@ -1429,8 +1499,8 @@ static mp_obj_t moy_ppa_wait(mp_obj_t keep_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_ppa_wait_obj, moy_ppa_wait);
 
 // sync(): block until every submitted transaction has completed (the fence for a
-// non-blocking composite). The PPA DMA runs on its own; this is a short busy-wait
-// only reached when the caller deliberately overlaps then fences.
+// non-blocking composite). The PPA DMA runs on its own; the caller's task
+// parks until it lands (fence_park).
 static mp_obj_t moy_ppa_sync(void) {
     ppa_wait(0);
     return mp_const_none;
@@ -1604,6 +1674,29 @@ static mp_obj_t moy_ppa_shift_in_stats(void) {
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_shift_in_stats_obj, moy_ppa_shift_in_stats);
+
+// The kernel's front (native/moy_glass's front ops): a compiled cart's frame
+// scaled from its memory, queued (moy_ppa_k_sync fences it); 0, the driver's
+// error, or -1 before init.
+int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src,
+                       int sw, int sh, int scale) {
+    if (s_srm == NULL) {
+        return -1;
+    }
+    mp_int_t blk[4] = {0, 0, sw, sh};
+    return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
+                       scale < 1 ? 1 : scale, blk, PPA_TRANS_MODE_NON_BLOCKING);
+}
+
+// ...and its snapshot into `scr`: snap()'s copy, the frame's offset in
+// `scr`, or -1 where `scr` cannot hold it.
+long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n) {
+    return snap_do(scr, len, frame, n);
+}
+
+void moy_ppa_k_snap_wait(void) {
+    snap_wait_inner();
+}
 
 // The kernel's teardown (native/moy_glass): no snapshot and no transaction
 // still reads or writes a buffer the VM is about to free.

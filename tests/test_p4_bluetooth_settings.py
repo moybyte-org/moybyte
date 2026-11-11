@@ -125,3 +125,35 @@ def test_picker_actions_toggle_scan_select_save_and_forget(tmp_path):
     sl._bt_action("forget")
     assert svc.calls[-1] == ("forget",)
     assert sl.bt_devices == []
+
+
+def test_a_first_keyboard_is_picked_by_touch_alone(tmp_path):
+    """A touch board with nothing picked connects no keyboard on its own
+    (moy_hid.h's RECONNECT): the panel says to scan, and Scan, then a tap on
+    a keyboard found, picks it -- no key pressed anywhere."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"),
+                                    sys_size=(1024, 600), font_scale=2,
+                                    windowed=False)
+    svc = ws.keyboard = FakeBluetoothKeyboard()
+    found = svc.rows
+    svc.rows, svc.preferred, svc.name = [], None, None
+    ws.open_settings()
+    drv = host_app.ConsoleDriver(ws)
+    sl = ws.settings_layer
+
+    def tap(host, id):
+        drv.frame(1 / 30)
+        x, y, w, h = host.box(id)
+        drv.click(x + w // 2, y + h // 2)
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+
+    tap(sl._host, "Bluetooth keyboard")
+    assert sl.bt_view and sl.bt_msg == "Scan, then pick a keyboard."
+    tap(sl._sub, "Scan")
+    assert svc.calls[-1] == ("scan",)
+    svc.rows, svc.state = found, "choose"       # the picker's scan heard two
+    tap(sl._sub, "bt1")
+    assert svc.calls[-1] == ("connect", found[1][0])
+    assert sl.bt_msg == "Connecting and saving..."

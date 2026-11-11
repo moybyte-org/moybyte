@@ -213,11 +213,23 @@ void moy_theme_uninstall(void);
 // The role row of theme `name` in `variant` (the MOY_UI_TOKENS tokens, then
 // the content roles): every role set (a flag 0 or 1).
 // An unknown name resolves as the default. *unreadable gets one bit per pair
-// of style.json's theme.pairs that misses the contrast floor, then the
-// plate's and the code roles' (above). MOY_THEME_OK, or
+// of style.json's theme.pairs that misses the contrast floor, then one for
+// marks the legibility checks dropped (moy_theme_marks) and the code
+// roles' (above). MOY_THEME_OK, or
 // MOY_THEME_CHAIN / MOY_THEME_NOMEM with the default's row written instead.
 int moy_theme_resolve(const char *name, size_t n, int variant,
                       int32_t row[MOY_THEME_ROLES], uint32_t *unreadable);
+
+// The marks theme `name` draws in `variant` (moy_ui.h, the marks): each
+// kind's and state's declaration over the engine's default, into
+// out[MOY_UI_ITEMS * MOY_UI_MSTATES], kind major, for `row` its resolved
+// role row. A declaration the legibility checks fail (L1-L4,
+// docs/media/focus_2026-11/README.md) is dropped to the default, its bit
+// (1 << (kind * MOY_UI_MSTATES + state)) set in the answer; *warn (where
+// given) is L8's: the selected row's, the Primary's and a Toggle-on's fills
+// are not all apart.
+uint32_t moy_theme_marks(const char *name, size_t n, int variant, const int32_t *row,
+                         moy_ui_mark_t *out, int *warn);
 
 // Theme `name`'s look in `variant`: each leaf from the nearest package that
 // sets it, its variant's object before its shared one; with `defaults`, a

@@ -13,6 +13,8 @@
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
 //   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"key":"z","mods":["ctrl"]}
 //   {"key":"Meta"} (a modifier alone) {"click":[x,y],"mods":["shift"]}
+//   {"dblclick":[x,y]} (two clicks back to back, the second with Chrome's
+//                       clickCount 2, as a person's double click arrives)
 //   {"wheel":[x,y,dx,dy]} {"middle":[x0,y0,x1,y1,steps]} {"js":"..."} {"note":"..."}
 //   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
 //                                           (an ArrayBuffer, for the drop paths)
@@ -74,39 +76,62 @@ const profile = process.env.MOY_PROFILE
 // debug port" and would be a red run about the runner, not about the console.
 // The page under test is served from 127.0.0.1 out of our own dist/, so the
 // sandbox is not what is keeping anything out.
-const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
-const chrome = spawn(CHROME, [
-    "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
-    "--no-first-run", "--no-default-browser-check", "--disable-gpu",
-    "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
-], { stdio: ["ignore", "ignore", "pipe"] });
-
-const wsUrl = await new Promise((ok, err) => {
-    let buf = "";
-    // ON TIMEOUT, SAY WHAT CHROME SAID. Without this the message is "chrome
-    // did not report a debug port" and nothing else, which is true of a
-    // missing browser, a dead zygote, a locked profile and a runner that was
-    // merely slow -- four different fixes behind one sentence. It cost a CI
-    // session on 2026-09-10: the job failed twice, reproducibly, and the log
-    // could not distinguish "Chrome is broken here" from "20s was not enough",
-    // while a container proved the FLAGS were fine (Chrome 153 prints the URL
-    // under both `--headless=new` and `--headless`).
-    const t = setTimeout(() => err(new Error(
-        "chrome did not report a debug port in 20s.\n" +
-        "  chrome:  " + CHROME + "\n" +
-        "  flags:   " + EXTRA.join(" ") + "\n" +
-        "  profile: " + profile + "\n" +
-        "  exited:  " + (chrome.exitCode === null
-            ? "no, still running" : "yes, code " + chrome.exitCode) + "\n" +
-        "  stderr:  " + (buf ? buf.slice(-1200) : "(nothing at all)"))), 20000);
-    chrome.on("error", (e) => { clearTimeout(t); err(
-        new Error("chrome would not start (" + CHROME + "): " + e.message)); });
-    chrome.stderr.on("data", (d) => {
-        buf += d;
-        const m = buf.match(/ws:\/\/[^\s]+/);
-        if (m) { clearTimeout(t); ok(m[0]); }
+// MOY_CHROME_ARGS is a scenario's own: a JSON list, one flag an item, spaces
+// kept (`--host-resolver-rules=MAP board.test 127.0.0.1` serves a page from a
+// name that is not localhost, so it has no secure context, as a board's does).
+const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean)
+    .concat(JSON.parse(process.env.MOY_CHROME_ARGS || "[]"));
+// A Chrome still running when the wait ends gets one more launch with a longer
+// wait: on the Pages runners it prints D-Bus warnings and then takes over 20 s
+// to report its port (every stable-site build from 2026-11-05 16:50). A Chrome
+// that exited, or would not start, is not retried.
+// Its audio is muted: a scenario that plays music never reaches the speakers.
+function launch(waitMs) {
+    const chrome = spawn(CHROME, [
+        "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
+        "--no-first-run", "--no-default-browser-check", "--disable-gpu",
+        "--window-size=1280,800", "--hide-scrollbars", "--mute-audio", ...EXTRA, "about:blank",
+    ], { stdio: ["ignore", "ignore", "pipe"] });
+    const url = new Promise((ok, err) => {
+        let buf = "";
+        // ON TIMEOUT, SAY WHAT CHROME SAID. Without this the message is "chrome
+        // did not report a debug port" and nothing else, which is true of a
+        // missing browser, a dead zygote, a locked profile and a runner that was
+        // merely slow -- four different fixes behind one sentence.
+        const t = setTimeout(() => { const e = new Error(
+            "chrome did not report a debug port in " + waitMs / 1000 + "s.\n" +
+            "  chrome:  " + CHROME + "\n" +
+            "  flags:   " + EXTRA.join(" ") + "\n" +
+            "  profile: " + profile + "\n" +
+            "  exited:  " + (chrome.exitCode === null
+                ? "no, still running" : "yes, code " + chrome.exitCode) + "\n" +
+            "  stderr:  " + (buf ? buf.slice(-1200) : "(nothing at all)"));
+            e.running = chrome.exitCode === null; err(e); }, waitMs);
+        chrome.on("error", (e) => { clearTimeout(t); err(
+            new Error("chrome would not start (" + CHROME + "): " + e.message)); });
+        chrome.stderr.on("data", (d) => {
+            buf += d;
+            const m = buf.match(/ws:\/\/[^\s]+/);
+            if (m) { clearTimeout(t); ok(m[0]); }
+        });
     });
-});
+    return { chrome, url };
+}
+
+let { chrome, url: firstUrl } = launch(45000);
+let wsUrl;
+try {
+    wsUrl = await firstUrl;
+} catch (e) {
+    if (!e.running) throw e;
+    console.error(e.message + "\n  -- launching once more, waiting 90s");
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill();
+    await gone;
+    const again = launch(90000);
+    chrome = again.chrome;
+    wsUrl = await again.url;
+}
 
 let msgId = 0;
 const pending = new Map();
@@ -263,6 +288,16 @@ for (const step of scenario.steps || []) {
             await mouse("mouseReleased", step.click[0], step.click[1], "left", 1, m);
             await sleep(step.settle ?? 400);
         }
+        if (step.dblclick) {
+            const p = await toPage(step.dblclick[0], step.dblclick[1]);
+            for (const n of [1, 2]) {
+                for (const type of ["mousePressed", "mouseReleased"]) {
+                    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y,
+                        button: "left", clickCount: n, buttons: type === "mousePressed" ? 1 : 0 });
+                }
+            }
+            await sleep(step.settle ?? 400);
+        }
         if (step.wheel) {
             // {"wheel":[x,y,dx,dy]}: one wheel event, its deltas in pixels
             // (Chrome's 100 a notch), over a canvas point.
@@ -369,9 +404,18 @@ for (const step of scenario.steps || []) {
 if (logs.length) { console.log("-- page console --"); for (const l of logs.slice(-25)) console.log("  " + l); }
 // The default profile is this run's own and goes with it; a pinned one
 // (MOY_PROFILE) is the caller's to keep.
+// Closed as a person closes it, so what the page put in its storage is on
+// disk for the next run on a pinned profile: a SIGTERM drops the last few
+// seconds of localStorage (a key paired just before the end). The kill is
+// for a Chrome that does not go.
 const chromeGone = new Promise((r) => chrome.once("exit", r));
-chrome.kill();
-await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
+send("Browser.close").catch(() => {});
+const closed = await Promise.race([chromeGone.then(() => true),
+                                   new Promise((r) => setTimeout(() => r(false), 5000))]);
+if (!closed) {
+    chrome.kill();
+    await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
+}
 server.close();
 // Chrome's helpers can still be writing into it for a moment after the main
 // process exits; a profile that will not go is left, never a failed run.

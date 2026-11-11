@@ -42,6 +42,7 @@
 #endif
 
 #include "moy_devch.h"
+#include "moy_evq.h"
 #include "moy_loop.h"
 
 // The modules' loop entries (weak: an image without the module has none).
@@ -50,6 +51,7 @@ void moy_input_loop_pointer(uint32_t now, bool click, bool swallow) __attribute_
 void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge) __attribute__((weak));
 void moy_input_loop_tail(void) __attribute__((weak));
 void moy_match_kernel_poll(uint32_t now) __attribute__((weak));
+void moy_tty_tail(void) __attribute__((weak));
 void moy_glass_loop_present(void) __attribute__((weak));
 void moy_glass_loop_fence(void) __attribute__((weak));
 void moy_glass_loop_idle(void) __attribute__((weak));
@@ -185,6 +187,12 @@ static void b_tail(uint32_t now, bool drew) {
     if (moy_match_kernel_poll != NULL) {
         moy_match_kernel_poll(now);
     }
+    // A stream face's hop (native/moy_tty: SSH's and the web terminal's):
+    // what its shell does in the store or across the door into Python runs
+    // on this task.
+    if (moy_tty_tail != NULL) {
+        moy_tty_tail();
+    }
     // The idle-band drain: the overlapped flush returns with bands queued,
     // and a frame the console's gate skipped never reaches the flush that
     // would drain them, so an idle frame leaves nothing in flight before
@@ -257,9 +265,10 @@ static void *b_alloc(size_t n) {
     #endif
 }
 
-// The webhost wants its Python half while it joins, serves or says goodbye.
+// The webhost wants its Python half while it joins, serves or says goodbye,
+// and the scheduler its `woken` while a service's task wants the VM.
 static uint32_t b_services(void) {
-    uint32_t bits = 0;
+    uint32_t bits = moy_evq_wants() != 0u ? MOY_SVC_TASKS : 0u;
     #if MOY_LOOP_ESP && defined(MOY_NET_WIFI) && MOY_NET_WIFI
     moy_wc_state_t wc;
     moy_wc_state(&wc);

@@ -79,6 +79,7 @@ def test_a_run_in_front_names_its_cart_and_leaves_the_console_meters_absent(tmp_
     ws.perf_push(loop, front=True)
     assert loop.v.pop("cart") == "Coin Quest"
     assert loop.v.pop("net") is None
+    assert loop.v.pop("lock") is None
     assert loop.v == {k: None for k in ("draw", "flush", "logic", "render",
                                         "chrome", "wmr", "wmw", "wms", "home",
                                         "tick", "miss")}

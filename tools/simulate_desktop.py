@@ -145,13 +145,23 @@ def save_gif(images, path, scale):
     print("wrote %s (%d frames, %dx%d)" % (path, len(frames), images[0][0] * scale, images[0][1] * scale))
 
 
-def _open_named_cart(ws, cart_path, carts_dir):
-    """Copy a named .moy into the store (if needed), select and open it."""
+def _stage_named_cart(cart_path, carts_dir):
+    """The store path of the .moy at `cart_path`, copied over whatever the store
+    holds under its name on every launch, so the run is the source folder as it
+    is now. A cart already in the store is its own source and stays put."""
+    import shutil
     name = os.path.basename(os.path.normpath(cart_path))
     dst = os.path.join(carts_dir, name)
-    if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
-        import shutil
+    if os.path.abspath(cart_path) != os.path.abspath(dst):
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
         shutil.copytree(cart_path, dst)
+    return dst
+
+
+def _open_named_cart(ws, cart_path, carts_dir):
+    """Copy a named .moy into the store, select and open it."""
+    dst = _stage_named_cart(cart_path, carts_dir)
     cat = host_app.moy_catalogue
     ws.launcher.items = [c for c in (cat.load(e["h"])
                                      for e in cat.catalogue(ws.carts_root)) if c]
@@ -198,6 +208,10 @@ def run_live(driver, dt, scale):
              pygame.K_PAGEUP: mi.KEY_PGUP, pygame.K_PAGEDOWN: mi.KEY_PGDN}
     for n in range(12):
         named[getattr(pygame, "K_F%d" % (n + 1))] = mi.KEY_F1 + n
+    # A keyboard's media keys, as their consumer-page usages (moy_media.h).
+    media_keys = {getattr(pygame, n): u for n, u in (
+        ("K_AUDIOPLAY", 0xCD), ("K_AUDIONEXT", 0xB5), ("K_AUDIOPREV", 0xB6),
+        ("K_VOLUMEUP", 0xE9), ("K_VOLUMEDOWN", 0xEA)) if hasattr(pygame, n)}
     held_mods = set()
 
     def mods_now():
@@ -228,6 +242,8 @@ def run_live(driver, dt, scale):
             elif ev.type in (pygame.KEYDOWN, pygame.KEYUP) and ev.key in mod_keys:
                 (held_mods.add if ev.type == pygame.KEYDOWN else held_mods.discard)(ev.key)
                 driver.set_mods(mods_now())
+            elif ev.type == pygame.KEYDOWN and ev.key in media_keys:
+                driver.media_key(media_keys[ev.key])
             elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if driver.takes_escape() or driver.in_code_editor():
                     driver.escape()       # a menu closes, Settings or an app steps back
@@ -312,7 +328,7 @@ def main():
     ap.add_argument("--size", default="320x240", metavar="WxH",
                     help="system canvas size (default 320x240 = the T-Deck panel)")
     ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
-                    help="initial system-UI font scale 1/2/3 (system.json overrides)")
+                    help="initial system-UI font scale 1/2/3 (system/settings overrides)")
     # The Picotron-style windowed WM (#73, the P4 "One" presentation tier): the
     # launcher is the desktop and every app opens as a draggable window. Needs a
     # big --size (ignored at 320x240).
@@ -324,7 +340,7 @@ def main():
     sys_size = parse_size(args.size)
     ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
                                     font_scale=args.font_scale,
-                                    windowed=args.windowed)
+                                    windowed=args.windowed, kernel_input=True)
     # Live windowed run -> the mix to the speakers (#16). Headless / scripted
     # runs pull it and discard it, so they stay deterministic + device-free.
     if not args.demo and args.script is None:

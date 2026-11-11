@@ -14,6 +14,7 @@ sys.path.insert(0, ROOT)
 from runtime import editor_panes as P      # noqa: E402
 from runtime import host_app                # noqa: E402
 from runtime import ui                      # noqa: E402
+from ws_helpers import quiesce, settle_badges  # noqa: E402
 
 FULL_1024 = (6, 46, 1012, 548)              # full screen: the row is the top 40 px
 STRIP_1024 = (6, 90, 1012, 504)             # the pictures' title-strip frame
@@ -196,11 +197,12 @@ def test_moving_focus_commits_nothing_and_a_switch_commits_only_dirty_panes(desk
 
 def _painted(ws, drv, n=4):
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(n):
         drv.frame(DT)
-    return ws._frames_drawn - drawn
+    return ws.frame_state.frames_drawn - drawn
 
 
 def test_a_clean_switch_paints_once_and_a_commit_paints_again(desk):
@@ -255,6 +257,7 @@ def _shows_what_a_whole_repaint_shows(ws, drv):
     """The frames after an input, with no input of their own, leave the
     glass as a whole repaint of the same state draws it."""
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -345,7 +348,7 @@ def test_a_sheet_pick_sets_the_sprite_and_the_brush_and_a_slide_previews(desk):
 
 def _card_bodies_hidden(ws, drv, keys, monkeypatch, label):
     from runtime import editor_desk
-    ws.pointer.visible = False
+    quiesce(ws)
     d = ws.editor_desk
 
     def shot(key):
@@ -381,13 +384,14 @@ def test_a_settled_workspace_paints_nothing(desk):
     for key in P.KEYS:
         ws.editor_desk.switch(key)
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(8):
             drv.frame(DT)
-        assert ws._frames_drawn == drawn, "an idle %s workspace painted" % key
+        assert ws.frame_state.frames_drawn == drawn, "an idle %s workspace painted" % key
 
 
 def test_a_handheld_never_loads_the_desk_editor(tmp_path):
@@ -544,13 +548,28 @@ def test_closing_the_editor_ends_its_playtest(desk):
         drv.frame(DT)
     assert ws.wm._wins["desktop"].docked
     released = []
-    orig = ws.player.release_world
-    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    orig = ws.run.player.release_world
+    ws.run.player.release_world = lambda: (released.append(1), orig())[1]
     ws.wm.close_window_kind("menu")
     for _ in range(3):
         drv.frame(DT)
     assert released and "desktop" not in ws.wm._wins
     assert not ws.wm.stack.has("desktop") and "menu" not in ws.wm._wins
+
+
+def test_closing_the_editor_ends_the_run_it_started_for_play(desk):
+    """The Editor starts its cart for PLAY without showing it; closing the
+    Editor before any playtest ends that run too, so its process is no
+    longer the one the shell acts as (the browser's Music, opened next from
+    the desk, was refused as the cart)."""
+    from runtime import moy_log as L
+    ws, drv = desk
+    pid = ws.run.player.pid
+    assert pid and L.current() == pid and "desktop" not in ws.wm._wins
+    ws.wm.close_window_kind("menu")
+    for _ in range(3):
+        drv.frame(DT)
+    assert ws.run.player.pid is None and L.current() == L.SHELL
 
 
 def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
@@ -570,7 +589,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
     ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
     for _ in range(3):
         drv.frame(DT)
-    assert game.docked is None and not game.minimized and not ws.player.paused
+    assert game.docked is None and not game.minimized and not ws.run.player.paused
     assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed
     assert not ws.editor_app.playing(), "the Editor's Play is Play again"
     ws.wm.close_window_kind("menu")
@@ -578,7 +597,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
         drv.frame(DT)
     assert ws.wm.window_kinds() == ["desktop"] and ws.wm._wins["desktop"] is game
     assert game.docked is None and not game.minimized
-    assert ws.wm._focus == "desktop" and not ws.player.paused
+    assert ws.wm._focus == "desktop" and not ws.run.player.paused
 
 
 def _contents(d):
@@ -881,13 +900,14 @@ def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     ws, drv, d, me, S = _sound(desk)
     S.open_rename(d)
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 # -- the Blocks workspace's palette and made code --------------------------------------
@@ -973,13 +993,14 @@ def test_a_blocks_carts_panes_hide_the_cards_body_too(blocks_desk, monkeypatch):
 def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
     ws, drv = blocks_desk
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 def test_an_actor_picked_in_the_scene_pane_opens_its_scripts(blocks_desk):
@@ -1050,8 +1071,8 @@ def test_a_reference_map_pick_inserts_its_mget_call(desk):
 
 def test_the_log_names_an_error_and_takes_the_caret_to_its_line(desk):
     ws, drv, d = _reference(desk, "log")
-    ws.player.cart_error = "NameError: foo"
-    ws.player.crash_line = 12
+    ws.run.player.cart_error = "NameError: foo"
+    ws.run.player.crash_line = 12
     ws._dirty = True
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("log")
@@ -1065,13 +1086,14 @@ def test_a_settled_reference_paints_nothing_on_any_tab(desk):
     for tab in ("sounds", "maps", "log"):
         _ws, _drv, d = _reference(desk, tab)
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         for _ in range(4):
             drv.frame(DT)
-        drawn = ws._frames_drawn
+        drawn = ws.frame_state.frames_drawn
         for _ in range(8):
             drv.frame(DT)
-        assert ws._frames_drawn == drawn, tab
+        assert ws.frame_state.frames_drawn == drawn, tab
 
 
 # -- the Code pane's header ------------------------------------------------------------
@@ -1122,18 +1144,20 @@ def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
     _tap(drv, ord("2"), 1)
     _press(drv, d, "pane 0 code more")
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 def _code_ready(ws, drv):
     _tap(drv, ord("2"), 1)                      # Code: the Code pane focused
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
@@ -1221,12 +1245,12 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
     root.shift_last = shift_last
 
     def frame():
-        n = a._frames_drawn
+        n = a.frame_state.frames_drawn
         da.frame(DT)
         db.frame(DT)
-        if a._frames_drawn != n:
+        if a.frame_state.frames_drawn != n:
             shot = bytes(root._buf)
-            assert shot == bytes(b.wm._root_canvas._buf), "frame %d" % a._frames_drawn
+            assert shot == bytes(b.wm._root_canvas._buf), "frame %d" % a.frame_state.frames_drawn
             held.append(shot)
             root._comp.last = shot
             root._buf[:] = held[-2]
@@ -1287,11 +1311,11 @@ def test_the_playtest_runs_on_its_own_map_and_scenes(desk):
     ws, drv = desk
     _tap(drv, ord("4"), 1)                       # World: the Scene beside the Run slot
     _play(drv)
-    pr = ws.project
+    pr = ws.run.project
     assert ws.editor_app.playing()
     assert pr.play_map is not pr.tilemap and pr.play_map.cells == pr.tilemap.cells
     assert pr.play_scenes is not pr.scenes
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     assert ns["_moy_scenes"] is pr.play_scenes
     was, mine = pr.play_map.mget(0, 0), pr.tilemap.mget(1, 0)
     pr.tilemap.mset(0, 0, was + 1)               # an edit in the Editor's map
@@ -1307,7 +1331,7 @@ def test_a_scene_edit_during_the_playtest_waits_for_restart_and_wears_the_dot(de
     app = ws.editor_app
     _tap(drv, ord("4"), 1)
     _play(drv)
-    pr = ws.project
+    pr = ws.run.project
     name = ws.scene_ui.scene_name
     se = ws.scene_ui.sceneedit
     se.sel = 0
@@ -1322,7 +1346,7 @@ def test_a_scene_edit_during_the_playtest_waits_for_restart_and_wears_the_dot(de
 
 def test_play_takes_an_edited_map_in_place_and_keeps_an_unedited_runs_msets(desk):
     ws, _drv = desk
-    pr = ws.project
+    pr = ws.run.project
     pr.play_world(True)
     pm = pr.play_map
     pm.mset(2, 0, 9)                             # the run's own change
@@ -1344,20 +1368,21 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     win = ws.wm._wins["desktop"]
     _press(drv, d, "pane 1 pause")
     drv.frame(DT)
-    assert d.paused and ws.player.paused and win.minimized
+    assert d.paused and ws.run.player.paused and win.minimized
     assert d._still is not None                  # the still, dimmed under Play
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn, "a paused Run slot painted"
+    assert ws.frame_state.frames_drawn == drawn, "a paused Run slot painted"
     gx, gy, gw, gh = d._still
     _click(drv, gx + gw // 2, gy + gh // 2)      # the still's Play goes on
     drv.frame(DT)
-    assert not d.paused and not ws.player.paused and not win.minimized
+    assert not d.paused and not ws.run.player.paused and not win.minimized
     assert win.docked and ws.wm._order[-1] == "desktop"
 
 
@@ -1369,7 +1394,7 @@ def test_restart_and_stop_end_the_pause(desk):
     d.pause(True)
     drv.frame(DT)
     _play(drv)                                   # Ctrl+Enter: Restart
-    assert not d.paused and not ws.player.paused and ws.wm._wins["desktop"].docked
+    assert not d.paused and not ws.run.player.paused and ws.wm._wins["desktop"].docked
     d.pause(True)
     drv.frame(DT)
     _tap(drv, ord("."), 1)                       # Stop
@@ -1464,13 +1489,14 @@ def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
     _press(drv, d, "pane %d head more" % _scene_game(d))
     assert d.part_state.get("head more") is not None
     ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(4):
         drv.frame(DT)
-    drawn = ws._frames_drawn
+    drawn = ws.frame_state.frames_drawn
     for _ in range(8):
         drv.frame(DT)
-    assert ws._frames_drawn == drawn
+    assert ws.frame_state.frames_drawn == drawn
 
 
 # -- the pad's rows -------------------------------------------------------------------------
@@ -1543,6 +1569,8 @@ def test_select_start_plays_and_restarts_and_start_alone_is_the_console_key(desk
     monkeypatch.setattr(ws, "system_key", lambda: opened.append(1))
     pad["held"], pad["pressed"] = set(), {"start"}
     drv.frame(DT)
+    pad["pressed"] = set()
+    drv.frame(DT)                       # the console's key acts as it comes up
     assert opened == [1]
 
 

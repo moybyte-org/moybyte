@@ -3,9 +3,9 @@
 // row). runtime/carts/cart_files.py is the reference, rule for rule, and
 // tests/test_moy_files.py holds the two together.
 //
-// WHERE: beside the carts store, `written/<cart>/`, <cart> the cart folder's
-// name less ".moy", so an install, an update or a push replaces the cart's
-// folder and never touches them.
+// WHERE: beside the carts store, the app's private folder `apps/<id>/`, <id>
+// the cart folder's name less ".moy", so an install, an update or a push
+// replaces the cart's folder and never touches them.
 //
 // ONE FLAT FOLDER PER CART: a path is one file named by its KEY: a-z, 0-9,
 // '_', '-' and an inner '.' as they are, every other byte '%' and two

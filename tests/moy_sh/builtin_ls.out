@@ -1,0 +1,16 @@
+$ mkdir -p d/sub; echo abc > d/f.txt; touch d/.hidden
+$ ls d
+f.txt  sub/
+$ ls -a d
+.hidden  f.txt  sub/
+$ ls -1 d
+f.txt
+sub
+$ ls -l d | grep f.txt | wc -l
+1
+$ ls d/f.txt
+d/f.txt
+$ ls nosuch; echo status=$?
+ls: nosuch: No such file or directory
+status=1
+[exit 0]

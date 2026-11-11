@@ -1,0 +1,19 @@
+$ # if, for, while, until, case, break and continue
+$ if [ 1 -lt 2 ]; then echo less; elif true; then echo never; else echo no; fi
+less
+$ for i in 1 2 3 4; do [ $i = 2 ] && continue; [ $i = 4 ] && break; echo i=$i; done
+i=1
+i=3
+$ n=0; while [ $n -lt 3 ]; do n=$((n + 1)); done; echo n=$n
+n=3
+$ until [ $n -eq 0 ]; do n=$((n - 1)); done; echo n=$n
+n=0
+$ for f in a.moy b.txt c; do case $f in *.moy) echo cart $f;; *.txt|*.md) echo doc $f;; *) echo other $f;; esac; done
+cart a.moy
+doc b.txt
+other c
+$ false || echo or; true && echo and; ! false && echo not
+or
+and
+not
+[exit 0]

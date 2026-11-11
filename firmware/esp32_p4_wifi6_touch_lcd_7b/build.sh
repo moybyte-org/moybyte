@@ -10,7 +10,7 @@
 # SHARED half of the build lives in tools/esp32_build_lib.sh since 2026-08-17;
 # what stays here is this board's patch ladder and sdkconfig facts. Output
 # flashes at offset 0x2000:
-#   esptool --port /dev/ttyACM0 --baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin
+#   tools/board.py p4 flash   (board.toml [flash] has the offset, rate and stub)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,6 +109,9 @@ moybyte_patch_gc_meters
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# FatFS's long-name buffer on the calling task's stack, which the re-entrant
+# oofatfs needs (mpconfigboard.h, tools/patch_fatfs_lfn.py).
+moybyte_patch_fatfs_lfn
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
@@ -124,6 +127,11 @@ moybyte_patch_thread_state_tls
 #     the wake.
 moybyte_patch_stdin_ring
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console's start.
 # This board's console is the CH343's UART, whose ISR is installed with the
 # port and takes every byte as it arrives.
@@ -137,12 +145,21 @@ moybyte_patch_lfs_sizes
 # This console has no card in play: carts live on the internal flash VFS (the
 # moy_sd denial in board.toml says the same for the T-Deck's module).
 
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap. A
+# P4's 32 MB keeps the stock doubling; MOYBYTE_GC_GROW_MAX is the S3 boards' alone.
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
 # heap, and that define is set by the two S3 boards' mpconfigboard.h alone, so a
 # call here reserves 0 -- the patch applies and the cap computes to nothing.
 # Whether a P4 with 32MB of PSRAM wants a reserve at all is unmeasured (#58);
 # the day it is, the board sets the define and takes the call back.
+
+# DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
+# SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
+
+# The MSC endpoint buffer, CFG_TUD_MSC_EP_BUFSIZE 8192 here, is PSRAM taken at
+# the drive's first start instead of 8 KB of the idle desk's internal .bss.
+moybyte_patch_tinyusb_msc_psram
 
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and

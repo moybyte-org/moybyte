@@ -45,6 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RUNNER = ROOT / "firmware" / "web_runner"
 DIST = RUNNER / "dist"
+DIST_SITE = RUNNER / "dist_site"            # build.sh --site: the site's, with the shell
 CHROME = os.environ.get("MOY_CHROME", "google-chrome")
 
 BUILD = "firmware/web_runner/build.sh"
@@ -56,8 +57,17 @@ FEATURES = {
              "dist/worker.js predates the sync client"),
     "store": (lambda: (DIST / "moy_store.mjs").exists(),
               "dist/ predates the browser store (no moy_store.mjs)"),
-    "pin": (lambda: "__moyPinRestore" in (DIST / "index.html").read_text(),
-            "dist/index.html predates the in-page pin prompt"),
+    # The apps' private folders as a sync root (the store takes the VM's
+    # registry, which has it), and the worker's `open`.
+    "apps": (lambda: ("roots_json" in (DIST / "worker.js").read_text()
+                      and 'm.t === "open"' in (DIST / "worker.js").read_text()),
+             "dist/ predates the apps root (no registry from the VM, or no "
+             "open message in the worker)"),
+    # The sign-in: the page's pairing prompt and the browser's end of the
+    # crypto (native/moy_net/moy_seal_web.c) in the wasm.
+    "signin": (lambda: ("__moySignIn" in (DIST / "index.html").read_text()
+                        and "moy_sw_hello" in (DIST / "micropython.mjs").read_text()),
+               "dist/ predates the sign-in (no pairing prompt, or no moy_sw_* in the wasm)"),
     # #194. Two halves, both of which can be stale on their own: the page has
     # to carry the report card, and the WASM has to carry the frozen converter.
     # A dist/ with the first and not the second imports nothing and says so in
@@ -83,6 +93,28 @@ FEATURES = {
     "firstrun": (lambda: ("moyScheme" in (DIST / "index.html").read_text()
                           and b"start_edit" in (DIST / "micropython.wasm").read_bytes()),
                  "dist/ predates the first-run theme and the start option"),
+    # The web terminal: the page's socket pump, and a face of the board's
+    # shell frozen into the wasm the boards bake.
+    "term": (lambda: ("termPump" in (DIST / "worker.js").read_text()
+                      and b"link_want" in (DIST / "micropython.wasm").read_bytes()),
+             "dist/ predates the board-served Terminal (no term pump, or no link face)"),
+    # Music (#251): the worker's media reads, and the media service with its
+    # browser face frozen into the wasm.
+    "media": (lambda: ("mediaGet" in (DIST / "worker.js").read_text()
+                       and b"media_link" in (DIST / "micropython.wasm").read_bytes()),
+              "dist/ predates Music in the browser (no media reads, or no media_link "
+              "frozen in the wasm)"),
+    # The site's console runs the shell itself (build.sh --site, dist_site/).
+    "site_shell": (lambda: ((DIST_SITE / "micropython.wasm").exists()
+                            and b"neofetch" in (DIST_SITE / "micropython.wasm").read_bytes()),
+                   "no dist_site/ with the shell in it -- build it with %s --site" % BUILD),
+    # ...and its WASI commands: the worker's command engine, and the
+    # adapter's rows exported from the site's wasm.
+    "site_wasi": (lambda: ((DIST_SITE / "worker.js").exists()
+                           and "moyCommand" in (DIST_SITE / "worker.js").read_text()
+                           and "moy_web_cmd_row" in (DIST_SITE / "micropython.mjs").read_text()),
+                  "dist_site/ predates WASI commands in the browser -- build it with "
+                  "%s --site" % BUILD),
 }
 
 
@@ -165,13 +197,24 @@ class Host:
     206 with those bytes and is written down in `ranges`, as GitHub Pages
     answers one; a preflight (OPTIONS) is refused with 405, as Pages refuses
     it, and written down in `preflights` -- a page that needed one could not
-    have read the host."""
+    have read the host. `referer` False refuses a request that names its
+    page (a Referer) with an empty 403, as SomaFM's stations refuse one from a
+    github.io or localhost page, and writes it down in `refused`.
 
-    def __init__(self, cors):
+    A station in `icy` ({path: (metaint, body with its metadata, name)})
+    answers a request asking for its ICY metadata (`Icy-MetaData: 1`) with
+    that body and its `icy-metaint` and `icy-name`, which the page can read
+    where `expose`; with CORS it answers the preflight that asking makes, as
+    Radio Paradise's do. `asked_icy` writes down whether each GET asked."""
+
+    def __init__(self, cors, referer=True, expose=False):
         self.files = {}
+        self.icy = {}
+        self.asked_icy = []
         self.asked = []
         self.ranges = []
         self.preflights = []
+        self.refused = []
         host = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -180,13 +223,43 @@ class Host:
 
             def do_OPTIONS(self):
                 host.preflights.append(self.path)
-                self.send_response(405)
+                if cors and host.icy:
+                    self.send_response(204)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Headers", "Icy-MetaData")
+                else:
+                    self.send_response(405)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
             def do_GET(self):
                 path = self.path.split("?", 1)[0]
                 host.asked.append(path)
+                ask = self.headers.get("Icy-MetaData") == "1"
+                host.asked_icy.append((path, ask))
+                icy = host.icy.get(path) if ask else None
+                if icy is not None and not (not referer and self.headers.get("Referer")):
+                    metaint, body, name = icy
+                    self.send_response(200)
+                    if cors:
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                    if expose:
+                        self.send_header("Access-Control-Expose-Headers", "icy-metaint, icy-name")
+                    self.send_header("icy-metaint", str(metaint))
+                    self.send_header("icy-name", name)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if not referer and self.headers.get("Referer"):
+                    host.refused.append((path, self.headers.get("Referer")))
+                    self.send_response(403)
+                    if cors:
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 body = host.files.get(path)
                 m = re.match(r"bytes=(\d+)-(\d+)$", self.headers.get("Range") or "")
                 if body is not None and m:
@@ -232,6 +305,34 @@ def serve(site, port):
     pytest.fail("serve.py never answered")
 
 
+# What the page's audio played: a tap on its output after the sink
+# (page_core.html, THE SINK) into `window.__pcm`, counting the blocks that
+# carried sound, the loudest sample, and the zero crossings (a 1 kHz tone
+# crosses zero about 2,000 times a second of what sounded, at the context's
+# rate, which the console's output is made at). A context runs only after a
+# gesture: a scenario without one launches Chrome with AUTOPLAY.
+PCM_SPY = """(() => {
+  const sp = actx.createScriptProcessor(4096, 1, 1);
+  window.__pcm = {frames: 0, peak: 0, n: 0, cross: 0, last: 0, rate: actx.sampleRate};
+  sp.onaudioprocess = (e) => {
+    const d = e.inputBuffer.getChannelData(0), p = window.__pcm;
+    let any = false;
+    for (let i = 0; i < d.length; i++) {
+      const v = Math.round(d[i] * 32768);
+      if (!v) continue;
+      any = true; p.n++; p.peak = Math.max(p.peak, Math.abs(v));
+      if ((v < 0) !== (p.last < 0) && p.last) p.cross++;
+      p.last = v;
+    }
+    if (any) p.frames++;
+  };
+  audioOut.connect(sp); sp.connect(actx.destination);
+  window.__spy = sp;
+  return 'spying';
+})()"""
+AUTOPLAY = {"MOY_CHROME_ARGS": json.dumps(["--autoplay-policy=no-user-gesture-required"])}
+
+
 def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
         device=None, scheme=None):
     """One browsershot scenario against `base` in the Chrome profile
@@ -275,8 +376,7 @@ def get_carts_taps(n=3):
         return [r[0] + r[2] // 2, r[1] + r[3] // 2]
     with tempfile.TemporaryDirectory() as d:
         ws = host_app.build_workstation(os.path.join(d, "carts"))
-        with open(os.path.join(d, cart_index.INDEXES_NAME), "w") as f:
-            json.dump({"indexes": [repo.url("index.json")]}, f)
+        cart_index.save_sources(os.path.join(d, "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
         app = ws._apps_by_id["getcarts"]
         ws.open_app(app)

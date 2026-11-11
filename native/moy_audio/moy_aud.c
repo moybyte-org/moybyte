@@ -18,6 +18,29 @@
 
 #if MOY_AUD_BOARD
 #include "esp_heap_caps.h"
+#include "py/mpconfig.h"        // the board's MOY_AUDIO_STEREO (mpconfigboard.h)
+#endif
+
+#if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
+#define AUD_STEREO 1
+#endif
+#if defined(AUD_STEREO) || !MOY_AUD_BOARD
+#define AUD_UP2 1
+#endif
+
+#if !MOY_AUD_BOARD
+#define OUT_PIECE 64            // the output-rate render's upsampled source, frames
+// The output-rate render (moy_aud_render_out): the sessions' mix upsampled
+// 2x, then carried linearly to the output's rate, `pos` the place between
+// `prev` and `cur` in Q16 of a source frame.
+typedef struct {
+    int rate;                   // the output's, 0: the mix's own
+    moy_aud_up_t up;
+    int16_t src[OUT_PIECE];
+    int have, at;
+    uint32_t pos;
+    int16_t prev, cur;
+} aud_out_t;
 #endif
 
 typedef struct {
@@ -47,7 +70,9 @@ typedef struct {
     uint32_t focus_h;
     int rate;
     int console;                // 0..7
-    // a compiled cart's stream
+    // the background stream (the media service)
+    moy_aud_bg_fn bg;
+    // the render-ahead stream (moy_audio_snd.h)
     moy_stream pcm;
     int16_t *pcm_ring;
     int pcm_on;
@@ -58,9 +83,16 @@ typedef struct {
     int32_t *trace;
     uint32_t trace_n;
     int trace_on;
+#ifdef AUD_STEREO
+    moy_aud_up_t up;            // the stereo output's upsampler
+#endif
+#if !MOY_AUD_BOARD
+    aud_out_t out;
+#endif
 } aud_t;
 
 static aud_t A = {.rate = 22050, .console = 7};
+#define ONE16 65536u
 
 // -- memory: PSRAM on a board, the C heap elsewhere ----------------------------
 
@@ -601,10 +633,33 @@ int moy_aud_rate(void) {
     return A.rate;
 }
 
-void moy_aud_render(int16_t *out, int n) {
-    if (n <= 0) {
-        return;
+// Whether the focused session makes a sound: a voice, a track, the beep or a
+// sample voice (moy_aud_active's mask, read under the lock the caller holds).
+static int sounding(const aud_sess_t *r) {
+    for (int i = 0; i < MOY_A_CHANNELS; i++) {
+        if (r->a->v[i].owner) {
+            return 1;
+        }
     }
+    if (r->a->track != NULL || r->a->bleft > 0) {
+        return 1;
+    }
+    for (int i = 0; i < MOY_AUD_SAMPLE_VOICES; i++) {
+        if (r->sv[i].pcm != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void moy_aud_bg(moy_aud_bg_fn fn) {
+    moy_aud_lock();
+    A.bg = fn;
+    moy_aud_unlock();
+}
+
+// The lock for a render, the longest wait for it counted.
+static void render_lock(void) {
     if (!moy_aud_trylock()) {           // held: time how long for
         uint64_t t0 = moy_aud_now_us();
         moy_aud_lock();
@@ -613,18 +668,24 @@ void moy_aud_render(int16_t *out, int n) {
             A.st.lock_wait_us_max = (uint32_t)wait;
         }
     }
-    aud_sess_t *r = A.focus;
+}
+
+// What the mix's rate carries, `n` frames: the focused session's synth and
+// sample voices, or silence.
+static void render_sessions(aud_sess_t *r, int16_t *out, int n) {
     if (r != NULL) {
         moy_audio_render(r->a, out, n);
         mix_samples(r, out, n);
     } else {
         memset(out, 0, (size_t)n * sizeof(int16_t));
     }
-    if (A.pcm_on) {
-        moy_stream_mix(&A.pcm, out, n, A.rate, r != NULL ? effective(r) : A.console);
-    }
+}
+
+// `n` output frames rendered, `samples` of them in `out`: the counters, and
+// then the lock let go.
+static void render_done(const int16_t *out, int samples, int n) {
     A.st.rendered += (uint32_t)n;
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < samples; i++) {
         if (out[i] != 0) {
             A.st.loud_at = A.st.rendered;
             break;
@@ -641,6 +702,145 @@ void moy_aud_render(int16_t *out, int n) {
     }
     moy_aud_unlock();
 }
+
+void moy_aud_render(int16_t *out, int n) {
+    if (n <= 0) {
+        return;
+    }
+    render_lock();
+    aud_sess_t *r = A.focus;
+    render_sessions(r, out, n);
+    if (A.pcm_on) {
+        moy_stream_mix(&A.pcm, out, n, A.rate, r != NULL ? effective(r) : A.console);
+    }
+    if (A.bg != NULL) {
+        A.bg(out, n, A.console, r != NULL && sounding(r));
+    }
+    render_done(out, n, n);
+}
+
+#ifdef AUD_UP2
+
+// The interpolated phase's taps, one side, nearest first: sinc at half an
+// input frame and on, under a Kaiser window (beta 7.5) 2 x MOY_AUD_UP_TAPS
+// frames wide, in Q14, the two sides summing to exactly 16384. Q14 keeps the
+// sum in 32 bits whatever the input: |a pair| <= 65,535 and one side's |taps|
+// sum to 22,666, so |acc| < 2^31.
+static const int16_t UP_G[MOY_AUD_UP_TAPS] = {
+    10419, -3442, 2029, -1411, 1058, -828, 663, -539, 442, -363, 299, -246,
+    201, -163, 132, -106, 84, -65, 50, -38, 28, -21, 15, -10, 7, -4, 2, -1,
+};
+
+void moy_aud_up2(moy_aud_up_t *u, const int16_t *in, int n, int16_t *out) {
+    const uint32_t span = 2u * MOY_AUD_UP_TAPS;
+    for (int i = 0; i < n; i++) {
+        u->h[u->at] = u->h[u->at + span] = in[i];
+        u->at = u->at + 1u == span ? 0u : u->at + 1u;
+        // The history, oldest first, is h[at .. at + span): the frame
+        // MOY_AUD_UP_TAPS back plays as it was, then the point between it
+        // and the next, its taps reaching out to both sides.
+        const int16_t *lo = &u->h[u->at + MOY_AUD_UP_TAPS - 1u];
+        const int16_t *hi = lo + 1;
+        int32_t acc = 8192;
+        for (int m = 0; m < MOY_AUD_UP_TAPS; m++) {
+            acc += UP_G[m] * ((int32_t)lo[-m] + hi[m]);
+        }
+        acc >>= 14;
+        out[2 * i] = *lo;
+        out[2 * i + 1] = (int16_t)(acc > 32767 ? 32767 : acc < -32768 ? -32768 : acc);
+    }
+}
+
+#endif
+
+#ifdef AUD_STEREO
+
+#define ST_PIECE 64             // output frames rendered under one hold of the lock
+
+void moy_aud_render_st(int16_t *out, int n) {
+    int16_t mono[ST_PIECE / 2], up[ST_PIECE];
+    for (int off = 0; off + 1 < n; off += ST_PIECE) {
+        int k = (n - off < ST_PIECE ? n - off : ST_PIECE) & ~1;
+        int16_t *o = out + 2 * off;
+        render_lock();
+        aud_sess_t *r = A.focus;
+        render_sessions(r, mono, k / 2);
+        moy_aud_up2(&A.up, mono, k / 2, up);
+        if (A.pcm_on) {
+            moy_stream_mix(&A.pcm, up, k, 2 * A.rate, r != NULL ? effective(r) : A.console);
+        }
+        for (int i = 0; i < k; i++) {
+            o[2 * i] = o[2 * i + 1] = up[i];
+        }
+        if (A.bg != NULL) {
+            A.bg(o, k, A.console, r != NULL && sounding(r));
+        }
+        render_done(o, 2 * k, k);
+    }
+}
+
+#endif
+
+#if !MOY_AUD_BOARD
+
+void moy_aud_out_rate_set(int rate) {
+    moy_aud_lock();
+    A.out.rate = rate > 0 && rate != A.rate ? rate : 0;
+    memset(&A.out.up, 0, sizeof(A.out.up));
+    A.out.have = A.out.at = 0;
+    A.out.pos = 0;
+    A.out.prev = A.out.cur = 0;
+    moy_aud_unlock();
+}
+
+int moy_aud_out_rate_get(void) {
+    return A.out.rate > 0 ? A.out.rate : A.rate;
+}
+
+// The next frame of the sessions' mix at twice its rate.
+static int16_t out_src(aud_sess_t *r) {
+    aud_out_t *o = &A.out;
+    if (o->at >= o->have) {
+        int16_t mono[OUT_PIECE / 2];
+        render_sessions(r, mono, OUT_PIECE / 2);
+        moy_aud_up2(&o->up, mono, OUT_PIECE / 2, o->src);
+        o->have = OUT_PIECE;
+        o->at = 0;
+    }
+    return o->src[o->at++];
+}
+
+void moy_aud_render_out(int16_t *out, int n) {
+    if (A.out.rate == 0) {
+        moy_aud_render(out, n);
+        return;
+    }
+    if (n <= 0) {
+        return;
+    }
+    render_lock();
+    aud_out_t *o = &A.out;
+    aud_sess_t *r = A.focus;
+    uint32_t step = (uint32_t)(((uint64_t)(2u * (uint32_t)A.rate) << 16) / (uint32_t)o->rate);
+    for (int i = 0; i < n; i++) {
+        while (o->pos >= ONE16) {
+            o->prev = o->cur;
+            o->cur = out_src(r);
+            o->pos -= ONE16;
+        }
+        out[i] = (int16_t)(o->prev + (int32_t)(((int64_t)(o->cur - o->prev) * o->pos) >> 16));
+        o->pos += step;
+    }
+    if (A.pcm_on) {
+        moy_stream_mix(&A.pcm, out, n, o->rate, r != NULL ? effective(r) : A.console);
+    }
+    if (A.bg != NULL) {
+        A.bg(out, n, A.console, r != NULL && sounding(r));
+    }
+    render_done(out, n, n);
+}
+
+#endif
 
 int moy_aud_dump(uint32_t s, int16_t *out, int n) {
     aud_sess_t *r = sess_of(s);
@@ -695,7 +895,7 @@ size_t moy_aud_trace_read(int32_t *rows, size_t max) {
     return n;
 }
 
-// -- a compiled cart's stream (moy_audio_snd.h) ------------------------------------
+// -- the render-ahead stream (moy_audio_snd.h) -------------------------------------
 
 // The stream's ring, made ahead of the first compiled cart (the kernel calls
 // it before the VM's first area, so a stopped run's ring is not left inside
@@ -706,19 +906,69 @@ void moy_aud_reserve(void) {
     }
 }
 
-int moy_audio_snd_open(void) {
-    size_t bytes = MOY_AUDIO_SND_DEPTH * sizeof(int16_t);
-    if (!moy_aud_out_plays()) {
+// THE SHARES' RINGS row (native/moy_play/moy_play.h's MOY_SHARE_RINGS;
+// tests/test_audio_ring.py holds the two equal). The ledger is weak: a build
+// without native/moy_play (the host's library, the browser) counts nothing.
+#define AUD_SHARE_RINGS 2
+int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
+void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+
+// A ring deeper than the reserved one: PSRAM alone on a board.
+static int16_t *deep_alloc(size_t bytes) {
+#if MOY_AUD_BOARD
+    return heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return calloc(1, bytes);
+#endif
+}
+
+// The open's own ring, if it took one, freed and its row given back. With the
+// stream off: the feeder no longer reads it.
+static void deep_free(void) {
+    if (A.pcm.ring == NULL || A.pcm.ring == A.pcm_ring) {
+        return;
+    }
+#if MOY_AUD_BOARD
+    heap_caps_free(A.pcm.ring);
+#else
+    free(A.pcm.ring);
+#endif
+    if (moy_share_give != NULL) {
+        moy_share_give(AUD_SHARE_RINGS, A.pcm.cap * (uint32_t)sizeof(int16_t));
+    }
+    A.pcm.ring = A.pcm_ring;
+}
+
+int moy_audio_snd_open(uint32_t depth) {
+    if (depth == 0u) {
+        depth = MOY_AUDIO_SND_DEPTH;
+    }
+    if (depth < MOY_AUDIO_SND_MIN || depth > MOY_AUDIO_SND_MAX || !moy_aud_out_plays()) {
         return 0;
     }
     if (A.pcm_ring == NULL) {
-        A.pcm_ring = aud_alloc(bytes);
+        A.pcm_ring = aud_alloc(MOY_AUDIO_SND_DEPTH * sizeof(int16_t));
         if (A.pcm_ring == NULL) {
             return 0;
         }
     }
+    moy_audio_snd_close();
+    int16_t *ring = A.pcm_ring;
+    if (depth > MOY_AUDIO_SND_DEPTH) {
+        uint32_t bytes = depth * (uint32_t)sizeof(int16_t);
+        if (moy_share_take != NULL && moy_share_take(AUD_SHARE_RINGS, bytes) != 0) {
+            return -1;
+        }
+        ring = deep_alloc(bytes);
+        if (ring == NULL) {
+            if (moy_share_give != NULL) {
+                moy_share_give(AUD_SHARE_RINGS, bytes);
+            }
+            return -1;
+        }
+    }
     moy_aud_lock();
-    moy_stream_init(&A.pcm, A.pcm_ring, MOY_AUDIO_SND_DEPTH, MOY_AUDIO_SND_RATE);
+    moy_stream_init(&A.pcm, ring, depth, MOY_AUDIO_SND_RATE);
     A.pcm_on = 1;
     moy_aud_unlock();
     return 1;
@@ -737,6 +987,15 @@ uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n) {
     return r;
 }
 
+void moy_audio_snd_mute(void) {
+    moy_aud_lock();
+    if (A.pcm_on) {
+        moy_stream_clear(&A.pcm);
+    }
+    A.pcm_on = 0;
+    moy_aud_unlock();
+}
+
 void moy_audio_snd_close(void) {
     moy_aud_lock();
     if (A.pcm_on) {
@@ -744,10 +1003,11 @@ void moy_audio_snd_close(void) {
     }
     A.pcm_on = 0;
     moy_aud_unlock();
+    deep_free();
     moy_aud_out_shallow(0);
 }
 
-int moy_aud_snd_counts(uint32_t c[4], int *open) {
+int moy_aud_snd_counts(uint32_t c[5], int *open) {
     if (A.pcm_ring == NULL) {
         return 0;
     }
@@ -756,6 +1016,7 @@ int moy_aud_snd_counts(uint32_t c[4], int *open) {
     c[1] = A.pcm.out;
     c[2] = A.pcm.starved;
     c[3] = moy_stream_room(&A.pcm);
+    c[4] = A.pcm.cap;
     *open = A.pcm_on;
     moy_aud_unlock();
     return 1;

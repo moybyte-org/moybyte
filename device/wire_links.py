@@ -79,19 +79,24 @@ class CartNet:
     """`ws.cart_net` on a board: Get Carts' transport (runtime/carts/cart_index.py),
     the shape the host's urllib one has (runtime/host/host_app.py).
 
-        online()   dial the saved network if the link is down and WAIT for it
-                   (moy_ota.wait_online)
+        dial()     dial it and return at once: a request on a worker's task
+                   waits for the link there (moy_net_dialing)
+        ready()    the link polled (moy_ota.poll_online): True up, None
+                   while the dial runs (the first call dials), False once
+                   its budget passed
         open(url)  GET with redirects followed (a GitHub release asset is a
                    302 to its CDN)
 
     and `out_of_memory()`, which cart_index asks after a fetch fails, so a
-    console whose internal RAM is spent says so. TLS verifies no certificate:
-    cart_index checks every file against its index's sha256. The radio is the
+    console whose internal RAM is spent says so. TLS verifies the server's
+    certificate (native/moy_net/moy_ota.h), and cart_index checks every file
+    against its index's sha256 besides. The radio is the
     app's lease (`ws.wifi_hold("carts")`), never this."""
 
     def __init__(self, wifi, autoconnect=None):
         self.wifi = wifi
         self.autoconnect = autoconnect
+        self._dialled = None        # ticks_ms of the dial ready() waits on
 
     def _up(self):
         try:
@@ -99,15 +104,24 @@ class CartNet:
         except Exception:  # noqa: BLE001 -- a radio that cannot say is down
             return False
 
-    def online(self):
+    def _dial(self):
+        return self.autoconnect(self.wifi)
+
+    def dial(self):
+        if self.wifi is None or self.autoconnect is None or self._up():
+            return
+        try:
+            self._dial()
+        except Exception:  # noqa: BLE001 -- the request reports what failed
+            pass
+
+    def ready(self):
         if self.wifi is None:
             return False
         import moy_ota
-        return moy_ota.wait_online(self._up, None if self.autoconnect is None
-                                   else self._dial)
-
-    def _dial(self):
-        return self.autoconnect(self.wifi)
+        up, self._dialled = moy_ota.poll_online(
+            self._up, None if self.autoconnect is None else self._dial, self._dialled)
+        return up
 
     def open(self, url):
         import moy_net
@@ -144,8 +158,8 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     # nobody to talk to).
     try:
         from players import make_link
-        ws.link = make_link(board=link_id,
-                            name=ws.system.get("name", link_id))
+        from ssh_service import name as console_name
+        ws.link = make_link(board=link_id, name=console_name(ws))
         ws.net = ws.link.net
     except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
         log("boot", "link unavailable: %s" % exc)

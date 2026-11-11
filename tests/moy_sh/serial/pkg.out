@@ -1,0 +1,69 @@
+> sh pkg list
+SH end 0
+> sh mkdir -p /sd/moybyte/carts/jet.moy /sd/moybyte/carts/doom.moy /sd/moybyte/carts/mine.moy /sd/moybyte/apps/jet /sd/moybyte/apps/doom /sd/moybyte/system
+SH end 0
+> sh printf '{"title": "Jet", "id": "kenny.jet"}' > /sd/moybyte/carts/jet.moy/manifest.json
+SH end 0
+> sh printf 'pass\n' > /sd/moybyte/carts/jet.moy/main.py
+SH end 0
+> sh printf '{"title": "Doom"}' > /sd/moybyte/carts/doom.moy/manifest.json
+SH end 0
+> sh printf 'pass\n' > /sd/moybyte/carts/doom.moy/main.py
+SH end 0
+> sh printf 'pass\n' > /sd/moybyte/carts/mine.moy/main.py
+SH end 0
+> sh printf 'x' > /sd/moybyte/apps/jet/options.cfg
+SH end 0
+> sh printf 'x' > /sd/moybyte/apps/doom/options.cfg
+SH end 0
+> sh printf '{"version": 1, "carts": {"jet.moy": {"id": "kenny.jet", "index": "", "name": "Jet", "version": 3, "module": null, "files": {}}, "doom.moy": {"id": "id.doom", "index": "", "name": "Doom \\u00e9t\\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}' > /sd/moybyte/installed.json
+SH end 0
+> sh printf 'consent = {"kenny.jet": {"perms": ["network"], "off": []}, "doom": {"perms": [], "off": []}}\ntheme = "dusk"\n' > /sd/moybyte/system/settings
+SH end 0
+> sh pkg list
+SH kenny.jet 3 installed Jet
+SH id.doom 1 installed Doom été
+SH end 0
+> sh pkg list extra
+SH pkg: needs the console
+SH end 1
+> sh pkg remove -y kenny.jet
+SH kenny.jet removed
+SH end 0
+> sh pkg remove mine.moy nope
+SH pkg: mine.moy: not installed by pkg
+SH pkg: nope: not installed by pkg
+SH end 1
+> sh pkg list
+SH id.doom 1 installed Doom été
+SH end 0
+> sh cat /sd/moybyte/installed.json
+SH {"version": 1, "carts": {"doom.moy": {"id": "id.doom", "index": "", "name": "Doom \u00e9t\u00e9", "version": 1, "module": null, "files": {}}, "gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files
+SH ": {}}}}
+SH end 0
+> sh ls /sd/moybyte/carts /sd/moybyte/apps
+SH /sd/moybyte/carts:
+SH doom.moy/  mine.moy/
+SH /sd/moybyte/apps:
+SH doom/
+SH end 0
+> sh settings get consent
+SH {"doom": {"perms": [], "off": []}}
+SH end 0
+> sh pkg remove id.doom
+SH id.doom removed
+SH end 0
+> sh cat /sd/moybyte/installed.json
+SH {"version": 1, "carts": {"gone.moy": {"id": "kenny.gone", "index": "", "name": "Gone", "version": 2, "module": null, "files": {}}}}
+SH end 0
+> sh settings
+SH consent = {}
+SH theme = "dusk"
+SH end 0
+> sh pkg install kenny.jet
+SH pkg: needs the console
+SH end 1
+> sh pkg remove
+SH pkg: needs the console
+SH end 1
+[exit 0]

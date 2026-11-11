@@ -11,15 +11,18 @@ A compiled cart's portable artifact is its `main.wasm` (moy-spec SPEC.md
 16.1), and no module is ever committed here: a cart in
 this tree carries its SOURCE -- `src/main.wat` -- and this assembles it with the
 vendored `tools/wat.py` (pure Python: no wabt, no wasm-ld, no network) into the
-manifest's `main`. Everything else in the folder, `src/` included, is copied as
+manifest's `main`. A WASI command may carry `src/main.c` or `src/main.rs`
+instead, built by wasi-sdk or rustc's `wasm32-wasip1` as any program is
+(`assemble`). Everything else in the folder, `src/` included, is copied as
 it is, so the Code tab has the source to show.
 
 `--chip` adds the per-chip AOT module a board loads, built by
 `tools/wasm_module.py` with the pinned compiler, carrying the provenance key
 that board's build wants and signed with the OTA signing key (that tool says
 where the key comes from). `--unsigned` leaves the signature off: a board runs
-such a module only while its owner has Settings -> UNKNOWN SOURCES on, which
-is how a cart rebuilt from its source runs on its builder's own console.
+such a module natively only for a cart whose consent grants "full_access" (its
+manifest asks for it), which is how a cart rebuilt from its source runs on its
+builder's own console.
 
 A `.moy` carries `main.wasm` plus any number of these, one per chip and
 compiled-code format version it has been built for (SPEC.md 16: "a host may
@@ -34,9 +37,16 @@ running engine's own chip and format, `_moy_wasm.CHIP`/`_moy_wasm.FORMAT`) and
 this console's engine has moved past is simply the wrong file name -- it is
 never opened, never refused, and the cart runs on the interpreter instead
 (native/moy_wasm/README.md, "A cart survives its firmware").
+
+An app's own service (`"moybyte": {"entries": {"service": "<stem>.wasm"}}`,
+docs/app_api_v1.md section 7) is a WASI command built the same way from
+`src/<stem>.wat`, `.c` or `.rs` into `<stem>.wasm`, with its per-chip modules
+`aot_name(<stem>.wasm, chip)` beside it, signed alike; the cart's own `main`
+may be a Python or Lua script, which is copied as it is.
 """
 
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -48,7 +58,11 @@ if ROOT not in sys.path:
 
 from tools import wat  # noqa: E402
 
-SOURCE = os.path.join("src", "main.wat")
+def service_entry(man):
+    """The `.wasm` service entry the manifest declares, or None."""
+    got = (man.get("moybyte") or {}).get("entries")
+    f = got.get("service") if isinstance(got, dict) else None
+    return f if isinstance(f, str) and f.endswith(".wasm") and "/" not in f else None
 
 
 def aot_name(main, chip, format=None):
@@ -67,28 +81,180 @@ def manifest(cart):
         return json.load(f)
 
 
+class ToolchainMissing(RuntimeError):
+    """The cart's source needs a compiler this machine lacks."""
+
+
+def assemble(src, stem="main"):
+    """The module the cart at `src` builds from its source: `src/main.wat`
+    by the vendored assembler; a WASI command's `src/main.c` by wasi-sdk's
+    clang (`tools/jet_cart.py` finds or fetches it) or `src/main.rs` by
+    rustc for `wasm32-wasip1`, each as the toolchain builds any program,
+    with no flag of ours but the SDK's headers on a C program's include path
+    (`moybyte/os.h`: the event descriptor and the moybyte.os imports) and,
+    for a C cart that is no WASI program (an app or a game: no command or
+    service, and no app whose manifest says `"wasi": true`, a WASI command
+    the Player runs, drawing with the toolkit it links: sdk/include/moybyte/
+    ui.h over `libmoyui`), clang's reactor model, so the exports it names (`_init`,
+    `_update`, `_draw`) are its loop and no `_start` or `main` is linked,
+    and its memory fixed at the manifest's `memory` pages, as a cart's is;
+    its DWARF stripped (`strip_debug`). A `stem` other than main is an app's
+    service entry, `src/<stem>.*`, always a WASI command."""
+    wat_src = os.path.join(src, "src", stem + ".wat")
+    if os.path.isfile(wat_src):
+        with open(wat_src, encoding="utf-8") as f:
+            return wat.assemble(f.read())
+    import subprocess
+    import tempfile
+    c_src = os.path.join(src, "src", stem + ".c")
+    rs_src = os.path.join(src, "src", stem + ".rs")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "main.wasm")
+        if os.path.isfile(c_src):
+            from tools import jet_cart
+            sdk = jet_cart.wasi_sdk()
+            if sdk is None:
+                raise ToolchainMissing("no wasi-sdk")
+            cmd = [os.path.join(sdk, "bin", "clang"), "--target=wasm32-wasip1",
+                   "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"), "-O2",
+                   "-I", os.path.join(ROOT, "sdk", "include"), "-o", out, c_src]
+            man = manifest(src)
+            ven = man.get("moybyte") or {}
+            if stem == "main" and ven.get("type") not in ("command", "service") \
+                    and ven.get("wasi") is not True:
+                mem = "%d" % (int(man.get("memory") or 1) * 65536)
+                cmd[-3:-3] = ["-mexec-model=reactor", "-Wl,--initial-memory=" + mem,
+                              "-Wl,--max-memory=" + mem]
+            if stem == "main" and ven.get("type") == "app" and ven.get("wasi") is True:
+                cmd += ["-Wl,--gc-sections", libmoyui(sdk)]
+        elif os.path.isfile(rs_src):
+            rustc = shutil.which("rustc")
+            if rustc is None or not rust_wasip1():
+                raise ToolchainMissing("no rustc with the wasm32-wasip1 target")
+            cmd = [rustc, "--target", "wasm32-wasip1", "-O", "--edition", "2021",
+                   "-o", out, rs_src]
+        else:
+            raise FileNotFoundError("%s has no src/%s.wat, .c or .rs" % (src, stem))
+        # a sanitizer the caller's process preloads (tools/asan_pytest.sh) is not the compiler's
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
+        with open(out, "rb") as f:
+            return strip_debug(f.read())
+
+
+def libmoyui(sdk):
+    """The toolkit a WASI app links (sdk/include/moybyte/ui.h): tools/elf_cart.py's
+    UI_SOURCES built for wasm32-wasip1 with wasi-sdk at `sdk`, once per
+    content, into .build/sdk/wasm32/."""
+    import hashlib
+    import subprocess
+    from tools import elf_cart
+    clang = os.path.join(sdk, "bin", "clang")
+    ar = os.path.join(sdk, "bin", "llvm-ar")
+    flags = ["--target=wasm32-wasip1", "--sysroot=" + os.path.join(sdk, "share", "wasi-sysroot"),
+             "-O2", "-ffunction-sections", "-fdata-sections", "-DMOY_PIXEL_RGB565=1"]
+    h = hashlib.sha256(repr((clang, flags)).encode())
+    heads = []
+    for d in elf_cart.UI_DIRS + [elf_cart.LIBMOY, elf_cart.SDK_INCLUDE]:
+        heads += sorted(glob.glob(os.path.join(d, "**", "*.h"), recursive=True))
+    for p in elf_cart.UI_SOURCES + heads:
+        h.update(os.path.relpath(p, ROOT).encode())
+        with open(p, "rb") as f:
+            h.update(f.read())
+    out_dir = os.path.join(ROOT, ".build", "sdk", "wasm32", "ui-" + h.hexdigest()[:16])
+    lib = os.path.join(out_dir, "libmoyui.a")
+    if os.path.exists(lib):
+        return lib
+    tmp = out_dir + ".%d.tmp" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+    inc = ["-I", elf_cart.SDK_INCLUDE, "-I", elf_cart.LIBMOY]
+    for d in elf_cart.UI_DIRS:
+        inc += ["-I", d]
+    env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+    objs = []
+    for src in elf_cart.UI_SOURCES:
+        o = os.path.join(tmp, "ui_%s_%s.o" % (os.path.basename(os.path.dirname(src)),
+                                               os.path.basename(src)[:-2]))
+        subprocess.run([clang] + flags + inc + ["-c", src, "-o", o], check=True,
+                       capture_output=True, env=env)
+        objs.append(o)
+    subprocess.run([ar, "rcs", os.path.join(tmp, "libmoyui.a")] + objs, check=True,
+                   capture_output=True, env=env)
+    if os.path.isdir(out_dir):
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        os.replace(tmp, out_dir)
+    return lib
+
+
+def strip_debug(blob):
+    """`blob` less its DWARF (the `.debug_*` custom sections a toolchain's
+    libraries carry in), as a release build's strip leaves it: the code, the
+    data and every other section byte for byte."""
+    out = bytearray(blob[:8])
+    i = 8
+    while i < len(blob):
+        start = i
+        sid = blob[i]
+        i += 1
+        n = shift = 0
+        while True:
+            b = blob[i]
+            i += 1
+            n |= (b & 0x7F) << shift
+            shift += 7
+            if b < 0x80:
+                break
+        body = blob[i:i + n]
+        i += n
+        if sid == 0 and body[1:1 + body[0]].startswith(b".debug_"):
+            continue
+        out += blob[start:i]
+    return bytes(out)
+
+
+def rust_wasip1():
+    """Whether rustc here has the wasm32-wasip1 standard library."""
+    import subprocess
+    rustc = shutil.which("rustc")
+    if rustc is None:
+        return False
+    got = subprocess.run([rustc, "--print", "target-libdir", "--target", "wasm32-wasip1"],
+                         capture_output=True, text=True,
+                         env={k: v for k, v in os.environ.items() if k != "LD_PRELOAD"})
+    return got.returncode == 0 and os.path.isdir(got.stdout.strip())
+
+
 def build(src, dst, chips=(), signed=True):
-    """Copy the cart at `src` to `dst`, assemble its source into its `main`,
-    and compile a module per chip, signed unless `signed` is False. Returns
-    {"main": path, chip: path, ...}."""
+    """Copy the cart at `src` to `dst`, assemble its source into its `main`
+    and its service entry's, and compile a module of each per chip, signed
+    unless `signed` is False. Returns {"main": path, chip: path, "service":
+    path, "service." + chip: path, ...}, the main's where it is compiled."""
     man = manifest(src)
-    if man.get("runtime") != "wasm":
-        raise ValueError("%s is not a compiled cart (runtime %r)"
+    entry = service_entry(man)
+    if man.get("runtime") != "wasm" and entry is None:
+        raise ValueError("%s is not a compiled cart (runtime %r) and has no wasm service"
                          % (src, man.get("runtime")))
-    main = man.get("main", "main.wasm")
     if os.path.isdir(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    with open(os.path.join(src, SOURCE), encoding="utf-8") as f:
-        blob = wat.assemble(f.read())
-    out = {"main": os.path.join(dst, main)}
-    with open(out["main"], "wb") as f:
-        f.write(blob)
-    if chips:
-        from tools import wasm_module
-        for chip in chips:
-            out[chip] = os.path.join(dst, aot_name(main, chip))
-            wasm_module.build(blob, chip, out[chip], signed=signed)
+    jobs = []
+    if man.get("runtime") == "wasm":
+        jobs.append(("main", "main", man.get("main", "main.wasm")))
+    if entry is not None:
+        jobs.append(("service", entry[:-5], entry))
+    out = {}
+    for key, stem, name in jobs:
+        blob = assemble(src, stem)
+        out[key] = os.path.join(dst, name)
+        with open(out[key], "wb") as f:
+            f.write(blob)
+        if chips:
+            from tools import wasm_module
+            for chip in chips:
+                k = chip if key == "main" else key + "." + chip
+                out[k] = os.path.join(dst, aot_name(name, chip))
+                wasm_module.build(blob, chip, out[k], signed=signed)
     return out
 
 
@@ -101,7 +267,7 @@ def main(argv):
                          "esp32p4); repeatable")
     ap.add_argument("--unsigned", action="store_true",
                     help="leave the modules' signatures off (a board runs them "
-                         "only with Unknown sources on)")
+                         "natively only for a cart granted \"full_access\")")
     args = ap.parse_args(argv)
     for name, path in sorted(build(args.cart, args.out, args.chip,
                                    signed=not args.unsigned).items()):

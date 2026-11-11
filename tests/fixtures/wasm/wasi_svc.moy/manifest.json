@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Service Wasi",
+  "id": "wasi.svc",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "moybyte": {"type": "service", "permissions": []}
+}

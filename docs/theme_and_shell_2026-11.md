@@ -148,12 +148,8 @@ Nothing is pending the owner.
   installed from the store brings its own font files in its package, as
   packages do.
 - **Focus and current are theme properties** (owner, 2026-10-15: "make it a
-  property, easy to change later"): `focus` draws by size class and
-  `current` is a plate, a fill or a bar (`DESIGN.md`, the marks). Moy lifts
-  its cards, edge-bars its rows on a light plate, underlines its small
-  parts and marks current with a `value` plate; Blocks and Contrast keep a
-  ring on cards and `invert` elsewhere, Blocks' current an underline and
-  Contrast's a solid ink plate.
+  property, easy to change later"); since 2026-11-05 a theme declares them
+  per item kind and state as `marks` (§3.3, `DESIGN.md`, the marks).
 - **Button kinds replace per-app roles** (owner, 2026-10-15).
 - **Theme colours are RGB** (2026-10-15, GAPS 1). This reverses theming's
   2026-09 decline of RGB (§12.1). A cart's colour stays `& 63`.
@@ -165,8 +161,9 @@ Nothing is pending the owner.
   (D-03.2); the desk's toolbar is the mockup's padded tabs, undo, redo and
   Play at the right (D-03.3); the playtest opens at 2× over the Editor
   (D-03.4); the symbol keys follow the last input (D-17); Play reads
-  Restart and Stop while a playtest runs (D-23); a restored game lands on
-  its pause menu (D-25); and the sprite tab is PICO-8's tool set with a
+  Restart and Stop while a playtest runs (D-23); a minimised game is
+  paused (D-25: the console holds it, no `update` and no `draw`, owner
+  2026-11-03, `docs/os_2026-11/processes.md` §1); and the sprite tab is PICO-8's tool set with a
   more menu, a sprite map and compact parts (D-15, D-11, D-22). Steps 23,
   24 and 25 say how each is built.
 - **Themes and chrome, the owner's calls on design review round 3**
@@ -186,11 +183,8 @@ Nothing is pending the owner.
     it. A popover hung from its own control (an app's picker, a bar
     widget's calendar, Wi-Fi or power) does not dim, and keeps painting its
     rect alone over a playtest's quiet frames.
-  - D-04: Moy keeps its focus edge and lays a light accent plate under the
-    focused part (0.12 in Day, 0.14 in Night), which takes a card's
-    corners on its first and last rows and is the line between the focused
-    row and its neighbours, which draw no rule against it; Day's lifted
-    hero wears an accent rim; a window behind takes `win.fill_back` on a
+  - D-04: Moy keeps its focus bar (its plate went with §1.5); a window
+    behind takes `win.fill_back` on a
     `bar` header (Day `#e3e6ed`, Night `#0f1127`), a smaller shadow
     (`shadow_back` 0.3) and its controls in the `disabled` ink.
   - D-05 ("don't be too harsh"): a field's outline 3:1 or better
@@ -200,16 +194,17 @@ Nothing is pending the owner.
     and the empty Name field's "Your name" in the `disabled` ink (the
     override block's `hint`, `docs/ui_api_2026-10.md` §3).
   - D-12: no rim on any cover, Contrast's included; none had one.
-  - D-14: Contrast's current is a solid ink plate with inverse text
-    (`current.ink: value_ink`; an outline in a window behind and on the
-    code editor's current line, whose code keeps its colours), its
+  - D-14: Contrast's selected cell is a fill of the ink with inverse text
+    (`value_ink`) and its selected row the 3 px frame (§1.5, owner
+    2026-11-05), each an outline in a window behind and on the code
+    editor's current line, whose code keeps its colours; its
     hierarchy weight and size (`dim` is its ink), its desk tiles and Moy
     button framed always (`tile_outline`, `bar.sys_line`), and Appearance
     offers it no accents (`accents: false`).
-  - m04: a disabled key's plate fades half way to the surface with its
-    ink. m07 and m17: Blocks' current is the underline -- a row's label
-    underlined (`current.row: underline`), a ring the chosen swatch, a fill
-    focus. m08: Calc's display ink is the plain ink (Moy's `lcd_ink`). m15:
+  - m04: a disabled key is drawn as §1.5's disabled button. m07 and m17:
+    Blocks' selected cell is the underline and a ring the chosen swatch;
+    its rows are §1.5's (2026-11-05): the ink bar for focus, the purple fill
+    for selected. m08: Calc's display ink is the plain ink (Moy's `lcd_ink`). m15:
     a toggle's knob is one colour in a mode, the state on the track. A
     current mark draws as in a window behind only where the shell says so,
     never because the input is touch.
@@ -258,6 +253,75 @@ Nothing is pending the owner.
 6. The text area is a public `ui` verb (`ui.text_view`), consistent with the rest of the API,
    so any app (a chat app, a terminal) gets a text area and restyles it
    through the theme and the per-call overrides.
+
+### 1.5 Focus, status items and the control center (owner, 2026-11-05)
+
+Decided over the Music mock-ups (`docs/media/music_2026-11/README.md`, the
+renders the owner chose from):
+
+1. **One focus grammar, declared per theme** (owner, 2026-11-05;
+   `docs/media/focus_2026-11/README.md`). Each theme declares its marks per
+   item kind (row, cell, card) and state (focus, on, both) in `marks`
+   (§3.3); nothing is hard-coded, and the loader holds them legible. Moy's
+   default: selected is a `value` tint; a focused ROW is the left accent
+   bar alone, 4 px on the T-Deck; focused and selected is the tint and the
+   bar; a focused button, tab, cell or card is a 2 px ring 2 px clear of it
+   (its cards ring, without the lift; lift-and-ring stays legal data). The
+   bar's items and the home's tabs take the cell's ring, with no plate, and
+   the bar keeps the ring's room so nothing moves on focus. Contrast's
+   selected row is a 3 px frame inside the row, not a second fill, so its
+   one fill (yellow) means focus. Marks stay at the strength the renders
+   show (owner: "they seem visible enough"). Touch shows neither.
+2. **Dialogs** wash the page at 70%. Their bodies wrap, and a dialog's verb
+   can be disabled (`o.disabled`). A disabled button keeps the surface and
+   its border, its label dimmed.
+3. **Hint strips** stand 8 px in from both edges and drop their lesser
+   hints before Back. A field shows no letter key's hint, Mic is a field's
+   cancel only (`ACT_KEYS`), and a pad's change is ← →.
+4. **Fields** fill their rect outside a group, stand their text 8 px inside
+   the box, and take a caller's border in place of their own (`o.border`,
+   the danger ink for a field in error).
+5. **Scrolled views** carry a 2 px thumb in the dim ink on a track in the
+   border's. The thumb is the engine's on a scroll region or
+   placed table the app gives no gen (the control center's): a view under a
+   gen moves its pixels on a shift frame (`docs/surface_model_v1.md` §14.7),
+   and a thumb moving along it is no row the move carries.
+6. **Apps put status items in the bar** (`moybyte.status`,
+   `runtime/system/status_items.py`): one preallocated record an item, swept
+   with its process, its section drawn as that process. On the desk an
+   item is a cell in the bar's right zone, its icon in its state's ink (the
+   accent, the `paused` content role, the danger ink), which opens its
+   menu, a popover hung from it, and wears the selected fill while that is
+   open. On a handheld the items' icons join the status cluster (the T-Deck
+   shows Music's ♫ while it plays), and the cluster -- items, Wi-Fi,
+   battery -- is ONE focus stop that opens the control center. A
+   compiled program's item (owner, 2026-11-09, on #246) is an icon in a
+   state and an optional panel of rows it describes -- text, buttons, a
+   toggle, a slider (`moybyte.status_show` to `status_remove`,
+   `docs/app_api_v1.md` §10) -- which the shell draws in the same menu
+   and card (`status_items.Panel`); the items themselves, a Python
+   program's too, are the kernel's table (`native/moy_kernel/
+   moy_status.h`), which a compiled program writes on its own task, VM or
+   no VM, and the bar reads; a press reaches the program as the
+   message `moybyte.status`, and it never draws into the bar. Icon alone,
+   text rows or a full panel are one mechanism: an item with no panel (or
+   a Python item with no section) has no menu, and a tap on it opens its
+   app, on a handheld its card's one Open row.
+7. **The handheld control center** grew from the battery's component
+   (`popover.ControlCenter`): the console's card (Volume, Brightness,
+   Wi-Fi), then each app's section as a card under its app's name, in one
+   scroll region with a thumb, its first view ending 6 px under the first
+   app's card, over a 50% scrim. The battery has no row: the bar's glyph
+   shows it low (the danger ink under 15%) and charging (a bolt), and
+   Settings keeps its exact level.
+8. **A paused game shows the bar** on a handheld, so the cluster and the
+   control center are reachable from the pause card.
+9. **Stop & play.** When the VM must stop for a compiled game and the
+   music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
+   Cancel (focused) and Stop & play, which stops the stream and opens the
+   game (`Player._music_keeps_the_vm`, `Workstation.ask_stop_music`).
+10. The system menu has no Stop music row: the music app's status item is
+    where a stream stops.
 
 ## 2. The theme package
 
@@ -337,9 +401,9 @@ frozen 2026-10-11, `surfaces` and `frame` defined 2026-10-12, `fonts` and
   ones, then a `dark` and a `light` object of the mode's own, which come
   first. A field is a colour, a paint (a colour, `"vibrancy"`, a list of
   colours or `[t, colour]` stops, or `{"stops", "mode"}` with `smooth`,
-  `dither` or `steps:N`), a name of its list (`focus.color` and
-  `current.color` name a role), an integer or a number (in hundredths, each
-  clamped to its range; `focus.plate.alpha` and `current.alpha` default
+  `dither` or `steps:N`), a name of its list (a mark's `c` and `ink` name a
+  role), an integer or a number (in hundredths, each
+  clamped to its range; `focus.plate.alpha` and a tint's `alpha` default
   differently per mode), a bool, a short text, or an array
   of those (`[width, colour]` for a line, `["soft", colour, alpha, blur,
   dy]` or `["hard", colour, dx, dy]` for a shadow); `null` is explicitly
@@ -455,7 +519,7 @@ existing theme keeps its pixels. The surface painter's five (2026-10-12):
 | role | what it is | derived from |
 |---|---|---|
 | `shade_hi`, `shade_lo`, `shade_dark` | the bevel shades a surface's edges draw in (§3.4) | `hilite` (white in the light variant), `dim`, black |
-| `ink_accent` | emphasis text on the surface: the web console's pin | `accent`; `ink` in the light variant |
+| `ink_accent` | emphasis ink on the surface: the "+ New" card's plus | `accent`; `ink` in the light variant |
 | `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
 
 The last two are what were once `light_chrome()` branches
@@ -470,7 +534,7 @@ in format 2, each with its modes' tables, embedded in every image by
 `runtime/shell/chrome.py`'s `theme_colors(name, variant)` is its Python face.
 `runtime/shell/appearance.py`'s `set_theme` installs a set and writes it into
 native/moy_app's live token table. The persisted settings are `theme` and
-`theme_variant` in `system.json`; the wallpaper is the theme's (D6) and has
+`theme_variant` in `system/settings`; the wallpaper is the theme's (D6) and has
 no row. There is no reader for old settings beyond that: under the no-migrations rule a stored name that no
 package provides (a seed `docs/history/look_2026-10.md` step 27 deleted: `night`,
 `indigo`, `berry`, `forest`, `slate`, `machine`, `platinum`, `win95`,
@@ -553,6 +617,58 @@ parts that paint surfaces (§3.4). Ruled 2026-10-12: an emboss is three
 draws, the effect's copy up and left, the label's colour down and right, then
 the label; an effect draws only in a role of the token row, since a content
 role is not in the row a look resolves against.
+
+**Marks** (owner, 2026-11-05; the design and its renders are
+`docs/media/focus_2026-11/README.md`). A theme declares how focus and
+selection look under `look.marks`, per item kind and state, shared or per
+mode (a `dark` or `light` look's `marks` wins leaf by leaf):
+
+```json
+"marks": {
+  "row":  { "focus": { "mark": "bar", "w": 4, "gap": 2, "c": "accent" },
+            "on":    { "mark": "tint", "c": "value", "alpha": 0.18 } },
+  "cell": { "focus": { "mark": "ring", "w": 2, "gap": 2, "c": "accent" } },
+  "card": { "focus": { "mark": "ring", "w": 2, "gap": 2,
+                       "lift": { "grow": 5, "rise": 3, "rim": ["#4c3fd6", 0.6] } } }
+}
+```
+
+- **Kinds.** A `row` is a value row, a list, table or menu row and a
+  field's row; a `cell` a button, chip, tab, segment, tool or swatch; a
+  `card` a grid's card or a home tile. Every call site names its kind (the
+  engine's `MOY_UI_ITEM_*`, `ui_draw.focus(item=...)`), never its size.
+- **States.** `focus` (where the keys act), `on` (selected, current) and
+  `both` (focused and selected: drawn over the two, its `c` by default the
+  ink that reads on the focus or on fill under it).
+- **Marks.** `fill` (the item's box in `c`, its content in `ink`, by
+  default the ink that reads on it), `tint` (`c` at `alpha` over the
+  ground), `bar` (`w` wide, `gap` in from the leading edge, inset 2 px top
+  and foot), `ring` (outside the box, `gap` clear), `inset` (a frame `w`
+  wide, `gap` inside the box), `outline` (a frame on the box's edge),
+  `underline` (`w` high, `gap` above the foot) and `none`. `key` is a
+  keyline `[width, colour]`: inside a fill, tint or frame, outside a ring
+  or bar. `w`, `gap` and `alpha` default by mark.
+- **Defaults.** A slot a theme leaves silent is the engine's: a row's focus
+  the 4 px bar, a cell's and a card's a 2 px ring 2 px clear, all in
+  `accent`; `on` a `value` tint (0.14 light, 0.24 dark); `both` none.
+- **The checks.** The loader (`moy_theme_marks`) holds a theme's marks to
+  the README's L1-L4 per mode: a focus mark 3:1 on the card and the panel
+  or carried by a keyline that clears both (L1), with a fill's ink 4.5:1
+  on it; a bar 3 px or wider, a ring and an underline 2 (L2); `on` 1.3:1 on
+  the rest ground, or 1.2:1 with an ink 3:1 apart (L3); rest, focus, on and
+  both apart, two fills 3:1 apart, a mark over an on fill 3:1 against it
+  (L4). A declared slot that fails is dropped to the default and noted,
+  as a bad surface is (§6); a tint too faint for L3 (a picked accent paler
+  than the theme's own) takes the least alpha that reads instead. One fill
+  colour for selected, Primary and Toggle on is a warning (L8), which a
+  Primary's border or a Toggle's check (`buttons.<kind>.check`) answers.
+  The rendered checks (L1/L2, L3, L5, L6, L9) are
+  `tests/test_focus_marks.py`'s, over `tools/focus_shots.py`'s sheets.
+- **The lift.** `marks.card.focus.lift` raises a focused card on a shadow,
+  grown by `grow`, up by `rise`, with a `rim` ring after its content; no
+  seed lifts (Moy's cards ring), and the data stays legal.
+- `focus.plate.alpha` is the bar's pill plate: an OS widget's or a home
+  tab's focus, drawn in the cell's focus colour.
 
 ### 3.4 Surfaces: a one-line grammar, compiled once
 
@@ -881,9 +997,12 @@ builds least:
     title clear of its buttons and the game canvas unchanged.
 - **App carts.** `ui` is the real toolkit, handed to every `type: "app"` cart,
   and those carts lay out in 8px cells and `print` in petme128. A theme font
-  therefore reaches app carts **only together with** a published `text_w()` and
-  line metrics; until then a cart's code runs inside the app-cart boundary
-  (`ui.cart_text`, below), so its `ui` and its `print` draw petme128.
+  therefore reaches a cart's own text **only together with** a published
+  `text_w()` and line metrics; until then a cart's code runs inside the
+  app-cart boundary (`ui.cart_text`, below), so its `print` draws petme128.
+  The `ui` verbs measure their own text, so a responsive app's (one that
+  defines `_layout`) draw in the look on every tier (`docs/app_api_v1.md`
+  section 3); a game's and a fixed app's draw petme128.
 - **Legibility.** A theme font has a text-size floor tied to #203's chrome
   floor: `chrome.text_scale_floor` reads the same declared diagonal, with the
   same opt-in, and answers the font scale at which the `ui` font's ascent
@@ -940,7 +1059,10 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
   - **The app-cart boundary** is `ui.cart_text`: on while a cart's code runs
     (its body, `_layout`, `_init`, `_update`, `_draw`; a wallpaper cart's
     frame), every role and the print font read petme128, and the shell's
-    come back after. A compiled run's canvas is petme128 already (step 2).
+    come back after. A responsive app's mode (`CART_APP`) keeps its print
+    and its colours inside while its `ui` verbs' sinks are outside. A
+    run's page on the RUN face draws as a cart's, petme128, unless its
+    snapshot's face names the look (`moy_ui_wasm.h`).
     A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
     Notes) runs outside it: its page is the verbs' and its note the editor
     handle's, both in the look's colours and faces; a copy of it is a
@@ -1086,7 +1208,7 @@ Per variant, with B the source's row and R the result, R starting as B:
    true.
 2. **Accent** (none when the source's own is kept). `accent`, `title`,
    `title_active`, `selection` and `value` take A, and so does a lifted
-   card's rim (`look.focus.lift.rim`) where the source's is its `accent`. Each of `edge`, `border`,
+   card's rim (`look.marks.card.focus.lift.rim`) where the source's is its `accent`. Each of `edge`, `border`,
    `hilite`, `shade_hi`, `bar_edge` and `desktop_pattern` whose B value is
    B's `title` or B's `accent` — a role the source tied to its identity
    colour — takes A. `focus` and `ink_accent` take the first of A, deep and
@@ -1470,7 +1592,7 @@ thing in both modes; what differs is only the container a component opens in
 | `close` | the X, for a layout that wants it; the shipped themes place none | the stack depth above the mode's floor | the exit model's close: pop the top; on a P4's home, `leave_console()` | 16×16 / 16×16 |
 | `zone` | the surface's lent zone: its chips (PLAY, CHANGE, SEARCH on the home; the Editor's title, status), headed by the back chevron where the bar has a way back and no `close` | the surface's zone generation | the chevron: the way back; the rest the surface's `zone_tap` | 64×16, flexes / horizontal only |
 | `title` | the surface's title | the title string | — | 24×8, flexes / dropped |
-| `clock` | `HH:MM` | the minute | the calendar component | 40×8 / 16×16 (two lines) |
+| `clock` | `HH:MM` in the console's time zone, `--:--` until the clock is synced (`docs/os_2026-11/hardware.md` §1) | the minute | the calendar component | 40×8 / 16×16 (two lines) |
 | `wifi` | the wifi glyph | `_wifi_icon_kind()` | the wifi component (§8.6): the Settings panel as a popover hung from the widget, in both modes | 16×16 / 16×16 |
 | `battery` | the battery glyph | the level bucket | the power component: Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings (owner, 2026-10-13) | 16×16 / 16×16 |
 | `chips` | the taskbar's window chips (desktop mode) | `_chip_sig` | focus, minimise, restore as today | one chip 24×16, flexes / icon chips 16×16 each |
@@ -1634,8 +1756,8 @@ The calc/appearance/artwork heads take
 `moy_app_surface_t` holds `cx, cy, cw, ch` where it held `bar_h`, written by
 the same two writers (`console._surface_write`, `_LayoutCtx.install`) with
 `Workstation.app_content_rect()`, the rect the exitable strip leaves the
-RUNNING app's screen; the C answers `bar_h` as its `cy`. `roles.json` carries
-`surface.content_rect` (`server: c`, `grant: never`, `wasm: null`, as `bar_h`
+RUNNING app's screen; the C answers `bar_h` as its `cy`. `native/os_calls.json` carries
+`surface.content_rect` (`server: c`, a row of a `never` role, no import, as `bar_h`
 is) and the role table's drift tests (`tests/test_roles.py`) move with it.
 `runtime/shell/system_api.py` publishes `content_rect()` ungated beside `bar_h()` —
 an app-API global, not a cart verb (the verb table and moy-spec are
@@ -1675,7 +1797,9 @@ strip — is declined (§12.2).
 anchored to a widget's cell, opening into the content side of its bar (down
 from a top bar, up from a bottom one, inward from a side bar), its width the
 larger of its content's minimum and today's popup width, clamped to the
-glass; one open at a time; it closes on a tap outside, on the anchor tapped
+glass, its height at most the room from its anchor to the glass's far edge
+(`popover_room`), where a component's rows tighten (the month's weeks) or
+scroll (Wi-Fi's networks, a status menu's section); one open at a time; it closes on a tap outside, on the anchor tapped
 again, on B or stop, and on Esc from a BLE keyboard, where arrows move and
 Enter activates — exactly the `sysmenu` layer's rules. That layer is the
 one popover layer, with the system menu as its first content; the system
@@ -1762,7 +1886,10 @@ the battery's line over Settings' Volume and Brightness sliders, the
 calendar is `ui.month`, and the battery's level reads None on every board
 today (no board measures one), its line then reading Battery. An app that
 asks for the Wi-Fi page (`Workstation.open_wifi_panel`) still gets Settings'
-page in console mode.
+page in console mode. An app's status item's menu (`popover.StatusMenu`)
+and its card in the handheld's control center draw the app's section as
+its process, a compiled program's being the shell's drawer of the rows it
+described (§1.5).
 
 **The keys reach the bar** (owner call 2026-10-26), in console mode on every
 board and the browser. Up past the top of the surface under a bar (on
@@ -1775,33 +1902,36 @@ lent tools and the zone's targets (the Editor's tabs, undo, redo and Play,
 them, confirm opens one as a tap on it does (a widget's popover over the
 bar, focus staying on the widget under it; a tab, the keys going down into
 it), down, back and stop come off
-it; the focused item takes the bar's focus pill (below), and
+it; the focused item takes the bar's focus ring (below), and
 the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
 confirm and back, in the input's own keys). A caret keeps up for itself, so
 the Code tab and the theme mode's Config walk no focus onto the bar: their
 bar is a touch's, and the system menu's Home is their way out. The desk's
 windows keep their own ways.
 
-**The bar's focus mark is the pill** (owner call 2026-10-27), in the tabs'
-shape whatever the theme's focus style (`ui_draw.focus`'s `pill`,
-`MOY_UI_MARK_PILL`): a plate of the focus colour under the item and a ring
-round it, the theme's `focus.outline` outside the ring, so the item keeps its
-own ink -- an invert theme's mark would blot a 16-pixel icon out. On the OS
-widgets it is one height, the system tile's and its ring, centred across the
-bar (`BarLayer._pill`); on the zone's targets it is their rect and a ring
-round it.
+**The bar's focus mark is the ring** (owner calls 2026-10-27 and 2026-11-05),
+in the tabs' shape whatever the theme's marks (`ui_draw.focus`'s `pill`,
+`MOY_UI_MARK_PILL`): a ring in the cell's focus colour round the item and
+the cell's focus keyline outside it, with no plate, so the item keeps its
+own ink -- a fill would blot a 16-pixel icon out. On the OS widgets it
+is one height, the system tile's, centred across the bar
+(`BarLayer._pill`); on a handheld the status cluster wears one ring round
+its icons; on the zone's targets it is their rect and a ring round it. The
+bar's item whose popover is open (the cluster's control center, a desk
+status item's menu) wears the cell's `on` mark (§1.5); on an opaque fill
+(Contrast's) the items in it take the fill's ink.
 
 **The home's tabs and the bar's items are one row** (owner calls
 2026-10-27). Where the bar holds the tabs (the handheld's home: the T-Deck,
 the Guition S3, the browser), left and right walk the bar's items and the
 tabs in their order on the screen -- on the T-Deck the system button, Games,
-Mine, Apps, Make, Wi-Fi, the battery and the clock -- and stop at the row's
+Mine, Apps, Make, the status cluster and the clock -- and stop at the row's
 ends (`BarLayer.focus_beside_tabs`, `_tabs_split`); up stays, the row being
 the top line, and down and back go to the cards from anywhere on it. The
 walk moves a focus and opens nothing: confirm opens the tab the focus is on
 and takes the keys to its cards, or opens a bar item as a tap on it does; Q
 and E open the previous and the next tab at once, and a tap opens a tab at
-once (`LauncherHomeLayer.focused_tab`). The focused tab wears the pill and
+once (`LauncherHomeLayer.focused_tab`). The focused tab wears the ring and
 the open one its current mark, so the two read apart; the hint strip names
 the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
 bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
@@ -1813,11 +1943,11 @@ along the row that drifts a pulse or two down stays on it; a pause frees it
 **The Editor's tabs and the bar's items are one row too** (owner call
 2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
 system button, Config, Blocks, Code, Sprites, Map, Scene, Music, undo, redo,
-Play, the battery and the clock, walked in that order and stopping at the
-ends. The walk moves the focus pill and opens nothing; confirm on a tab opens
+Play, the status cluster and the clock, walked in that order and stopping at the
+ends. The walk moves the focus ring and opens nothing; confirm on a tab opens
 it and takes the keys down into it (`EditorApp.zone_opened`, the theme
 mode's two tabs the same), confirm on undo or redo runs it and the keys stay
-on the row, and a tap opens a tab at once. The focused tab wears the pill and
+on the row, and a tap opens a tab at once. The focused tab wears the ring and
 the open one its current mark. The desk Editor's workspaces are a window's
 row, switched by their chords (`EditorDesk._chord`), and the keys do not walk
 it.
@@ -1896,7 +2026,7 @@ is dropped from its slot and noted; the bar stays; then §8.7's rule runs on
 what is left. A value the key does not take resolves up the inheritance
 chain and ends at the seed. Only §8.7's rule and a structural failure replace
 the whole layout. The same rule applies to the user's pick (§8.9): a
-`system.json` copied from a `--windowed` host onto a T-Deck resolves its
+`system/settings` copied from a `--windowed` host onto a T-Deck resolves its
 layout the T-Deck's way. Every rule is exercised on every golden config
 with one fixture layout that triggers each drop.
 

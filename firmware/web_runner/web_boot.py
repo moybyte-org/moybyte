@@ -24,8 +24,8 @@ Scope: the FULL console, both presentation tiers -- `can_manage=True`, so the
 Make tile and the editors are reachable in the browser. Every write lands in the
 browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
 page's store of record is: a site-mode page's OPFS -- the carts with their
-journals and pmem, the drawings, and the console's own documents (system.json,
-achievements.json, the shared sheet), so a reload comes back on the same shelf,
+journals and pmem, the drawings, and the console's own documents
+(system/settings with the badges among its rows, the shared sheet), so a reload comes back on the same shelf,
 theme, Settings and badges -- or the serving board for its carts, files,
 portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
 /console.json leaves them in the tab). A page with no OPFS keeps everything in
@@ -40,7 +40,8 @@ JS contract (see worker.js):
                                      JSON string; the PIXELS travel separately
     fb_addr() / fb_len()          -> the framebuffer's wasm-heap address and
                                      byte length, read by the worker
-    apply_events_json(text)       -> feed an {"events":[...]} JSON text batch
+    apply_events_json(text)       -> queue an {"events":[...]} JSON text batch
+                                     for the next step
     open_cart(name)               -> select+run a cart by folder name or title
     gpio_enable(pins_json)        -> the host answered POST /gpio: wire the
                                      pin verbs (absent otherwise -- see #9)
@@ -55,55 +56,116 @@ import moy_carts
 import moy_catalogue
 import web_canvas
 import web_input
+import web_vfs
 from input import InputState
 from audio_session import PcmPump
 
 _S = {}          # the runner singletons: ws / canvas / driver / sink
-# The rate the page's worklet resamples from: the mix is made at it.
-_AUDIO_RATE_HZ = 11025
+# The output's rate: the page's AudioContext's (audio_rate), so the page plays
+# the samples one for one. The sessions mix at _MIX_RATE_HZ, as on every
+# board, and the C upsamples that mix once to the output's rate
+# (moy_aud_render_out); an MP3 is resampled once, in C, to it.
+_MIX_RATE_HZ = 22050
+_AUDIO_RATE_HZ = [_MIX_RATE_HZ]
+_AUDIO_RATE_MIN, _AUDIO_RATE_MAX = 8000, 192000
 
 
-# The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
-# Deep enough to ride out a late frame (wasm GC pause, phone jank -- the 20ms
-# scheduling margin alone was the owner-reported crackle), shallow enough that
-# a game sfx mixed into the stream isn't noticeably late.
-_AUDIO_TARGET = 0.12
+def audio_rate(hz):
+    """The page's AudioContext's sample rate, before boot: the output is made
+    at it. 0 (no Web Audio) keeps the default."""
+    hz = int(hz)
+    if _AUDIO_RATE_MIN <= hz <= _AUDIO_RATE_MAX:
+        _AUDIO_RATE_HZ[0] = hz
+
+
+# The depth the page's sink is kept at: deep enough to ride out a late frame
+# (wasm GC pause, phone jank) and the lag of the sink's count, shallow enough
+# that a game sfx mixed into the stream isn't noticeably late.
+_AUDIO_TARGET = 0.15
 _AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
 
 
 class _RunnerPump(PcmPump):
-    """The page's pull of the kernel's mix (#170 round 3 -- the owner's
-    "crackle and slowdown" report): the page reports how many seconds of PCM
-    it still has scheduled (step_frame_json's audio_ahead), and tick() renders
-    whatever refills that to _AUDIO_TARGET instead of exactly rate*dt, so one
-    late frame eats cushion, not the stream. Without the report (ahead < 0)
-    it renders rate*dt. Nothing is rendered while nothing sounds, so a silent
-    frame ships no audio. step_frame_json drains take_pcm() into the frame
-    payload and the page's playPCM plays the finished samples."""
+    """The page's pull of the kernel's mix, by count: the page's sink reports
+    the samples it has played (`played`, step_frame_json's), the pull knows
+    the ones it sent, and tick() renders what tops the difference up to
+    _AUDIO_TARGET, so the stream is taken at the sink's own rate, a late
+    frame eats depth and never the stream. Every sample rendered is sent, in
+    order (`at` counts them), so the sink can tell an underrun from a gap.
+    With no sink (`played` < 0) it renders rate*dt and sends nothing.
+    Nothing is rendered while nothing sounds; the first chunk after that is
+    `fresh`, a stream starting, not one the sink ran dry under. A frame's
+    samples wait in `_buf` (`n` of them) for step_frame_json to hand the
+    worker their address."""
 
     def __init__(self):
-        PcmPump.__init__(self, _AUDIO_RATE_HZ)
-        self.ahead = -1.0
+        PcmPump.__init__(self, _MIX_RATE_HZ)
+        out = _AUDIO_RATE_HZ[0]
+        if self._na is not None:
+            self._na.set_out_rate(out)
+        self.rate = out
+        self.played = -1
+        self.sent = 0
+        self.n = 0
+        self.idle = True
+        self.fresh = False
         self._buf = bytearray(int(self.rate * _AUDIO_MAX_STEP) * 2 + 64)
 
     def tick(self, dt):
-        if self.ahead >= 0.0:
-            want = _AUDIO_TARGET - self.ahead
-            if want > _AUDIO_MAX_STEP:
-                want = _AUDIO_MAX_STEP
-            n = int(self.rate * want) if want > 0 else 0
-        else:
-            n = int(self.rate * dt) if dt > 0 else 0
-        cap = len(self._buf) // 2
-        if n > cap:
-            n = cap
         na = self._na
-        if n <= 0 or na is None or not na.active():
+        if na is None or not (na.active() or _media_open()):
+            self.idle = True
             return
-        buf = memoryview(self._buf)[:n * 2]
-        na.render(buf, n)
-        self.last_pcm = bytes(buf)
+        if self.played >= 0:
+            n = int(self.rate * _AUDIO_TARGET) - (self.sent + self.n - self.played)
+            cap = int(self.rate * _AUDIO_MAX_STEP)
+            if n > cap:
+                n = cap
+        else:
+            n = self.frames(dt)
+        room = len(self._buf) // 2 - self.n
+        if n > room:
+            n = room
+        if n <= 0:
+            return
+        if self.idle:
+            self.idle = False
+            self.fresh = True
+        na.render_out(memoryview(self._buf)[self.n * 2:(self.n + n) * 2], n)
+        self.n += n
         self.rendered += n
+
+    def take(self):
+        """This frame's samples for the sink: (count, first's index, fresh),
+        None when there are none or no sink."""
+        n, self.n = self.n, 0
+        if n <= 0 or self.played < 0:
+            return None
+        at = self.sent
+        self.sent += n
+        fresh, self.fresh = self.fresh, False
+        return n, at, fresh
+
+
+_MEDIA = []
+
+
+def _media():
+    """The media service's module, None where the image has none."""
+    if not _MEDIA:
+        try:
+            import moy_media
+            _MEDIA.append(moy_media)
+        except ImportError:
+            _MEDIA.append(None)
+    return _MEDIA[0]
+
+
+def _media_open():
+    """Whether the media service holds a stream: the mix then sounds with no
+    session focused."""
+    m = _media()
+    return m is not None and m.pid() != 0
 
 
 class _PointerSink:
@@ -182,7 +244,7 @@ WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"), ("pad", "pad"))
 DESK_DIAGONAL_IN = 7.0
 
 
-def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
+def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
          windowed=False, font_scale=0, hud=True, coarse=False, scheme=None):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
@@ -308,15 +370,15 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     ws.cart_keep = seams[1]
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
+    ws.media_net = _media_net(ws, _S.get("store_mode"), carts_root)
     # The Moybyte shell's achievements are gamification for the kid console,
     # which the console page is, as on a board; they are no part of the
     # one-cart player (`cart`: an export, the gallery, a kiosk bundle), whose
-    # frames are the cart's. The trigger is the Achievements core's note()
-    # (ach.note("open", ...) -> toast "First Steps", which console.py's own
-    # _draw_toast renders, so stubbing achievements_ui alone is not enough):
-    # the player kills the core's verbs.
+    # frames are the cart's. The shell's own sends go quiet (`ws.ach.mute`:
+    # opening the cart would be "First Steps"), and no find raises the
+    # banner, which console.py's own _draw_toast renders.
     if cart:
-        ws.ach.note = lambda *a, **k: None
+        ws.ach.mute = True
         ws.ach.toast = None
         ws._achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
@@ -358,7 +420,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     #
     # A caller that wants clean frames passes hud=False. Otherwise the chip is
     # the Settings SHOW FPS row's, as on a board: the boot's settings apply
-    # (wire_workstation_core) already set it from the stored system.json.
+    # (wire_workstation_core) already set it from the stored settings.
     if not hud:
         ws.show_fps = False
         ws.perf_hud = False
@@ -397,9 +459,29 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
     _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
+    _site_carts_made(ws)
     if cart:
         open_cart(cart)
     return True
+
+
+def _site_carts_made(ws):
+    """The carts this page got from the site that serves it are its console's
+    own, seeded like a board's: each is recorded as made on this console
+    (`Consent.made`), so its first run asks nothing. They are the folders the
+    seed found in the served bundle (`moy_sync.served_carts`), or every cart
+    on the shelf when no seed ran (the bundle went whole into a store with
+    no OPFS: mode "none"). A board's page runs the board's carts under the
+    board's records, and a cart dropped onto the page arrived as files:
+    asked on its first run."""
+    if _S.get("store_mode") not in ("site", "none"):
+        return
+    import app_perms
+    import moy_sync
+    served = moy_sync.served_carts()
+    ws.consent.made(*[app_perms.app_id(c) for c in ws.carts.all
+                      if served is None
+                      or (c.get("path") or "").rsplit("/", 1)[-1] in served])
 
 
 def _cart_seams(ws, mode):
@@ -417,20 +499,51 @@ def _cart_seams(ws, mode):
     already says out loud."""
     if mode == "board":
         return None, None, None, "board"
-    if mode not in ("site", "none"):
+    link = _worker_link(ws, mode)
+    if link is None:
         return None, None, None, None
+    import carts_link
+    keep = carts_link.WebCartKeep(link) if mode == "site" else None
+    return carts_link.WebCartNet(link), keep, link.pick, None
+
+
+def _worker_link(ws, mode):
+    """The queue to the worker's pump (`carts_link.CartsLink`), one a page:
+    Get Carts' fetches and keeps in a page that keeps its carts, Music's
+    reads in every page. None before a mode is known."""
+    if _S.get("carts") is not None:
+        return _S["carts"]
+    if mode not in ("site", "none", "board"):
+        return None
     try:
         import carts_link
     except ImportError as exc:       # never block a boot
         print("carts link unavailable:", exc)
-        return None, None, None, None
+        return None
 
     def _wake():
         ws._dirty = True
     link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
     _S["carts"] = link
-    keep = carts_link.WebCartKeep(link) if mode == "site" else None
-    return carts_link.WebCartNet(link), keep, link.pick, None
+    return link
+
+
+def _media_net(ws, mode, carts_root):
+    """`ws.media_net` (media_link.py): the songs and URLs Music plays from
+    the page's bytes -- the browser's OPFS songs or the serving board's, and
+    the page's fetch -- where the media service is in the image."""
+    link = _worker_link(ws, mode)
+    if link is None:
+        return None
+    if _media() is None:
+        return None
+    try:
+        import media_link
+        from moy_store_base import files_root
+    except ImportError:
+        return None
+    import moy_sync
+    return media_link.WebMediaNet(link, files_root(carts_root) + "/" + moy_sync.MUSIC)
 
 
 def _cart_landed(folder):
@@ -459,17 +572,16 @@ def carts_event_json(text):
 
 
 def _rebase_system(carts_root):
-    """The pulled system.json's cart folders under this VFS's `carts_root`
-    (they cross as folder names, `moy_sync.CART_PATH_KEYS`), before the
-    Workstation reads it."""
+    """The pulled settings' cart folders under this VFS's `carts_root` (they
+    cross as folder names, `moy_sync.CART_PATH_KEYS`), before the Workstation
+    reads them."""
     import moy_sync
-    path = moy_sync.system_root(carts_root) + "/system.json"
+    path = moy_sync.system_root(carts_root) + "/" + moy_sync.SYSTEM_SETTINGS
     try:
         with open(path) as f:
             text = moy_sync.rebase_system(f.read(), carts_root)
-        if text is not None:
-            with open(path, "w") as f:
-                f.write(text)
+        with open(path, "w") as f:
+            f.write(text)
     except OSError:
         pass                             # nothing pulled: the defaults
 
@@ -491,6 +603,8 @@ def _build_watchers(carts_root, site, seeded=None):
     try:
         import moy_sync
         for root in moy_sync.SYNC_ROOTS:
+            if site and not root.site:
+                continue                 # another keeper writes it here
             if seeded is not None:
                 if root.id not in seeded:
                     continue             # the host does not serve it
@@ -505,7 +619,7 @@ def _build_watchers(carts_root, site, seeded=None):
                 continue                 # not seeded -> not watched
             out[root.id] = moy_sync.StoreWatcher(
                 path, root_id=root.id, skip=root.watch_skip(site),
-                top=root.watch_top(site))
+                top=root.watch_top(site), read=root.watch_read())
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         return {}
@@ -520,6 +634,62 @@ def _watchers():
     import moy_sync
     ws = _S.get("watchers") or {}
     return [ws[r.id] for r in moy_sync.SYNC_ROOTS if r.id in ws]
+
+
+def page_boot(carts_root, query_json, coarse=False, scheme=""):
+    """`boot` the console a page's address asks for (`query_json`: its query
+    string's pairs), on the page's `(pointer: coarse)` and its colour scheme
+    ("dark" or "light"; anything else is the default). Call `page_start`
+    after anything else that needs the live console (`update_enable`).
+
+    TIER SELECT (#73/#175). The DESKTOP desk is the default everywhere (owner
+    call 2026-08-14) -- on moybyte.com and on a board serving its own console
+    alike. It was the handheld 320x240 tier, which made the full-size product
+    the thing you had to know a url parameter to see.
+      ?handheld=1  the 320x240 console (the phone-shaped one)
+      ?size=WxH    override the desk's panel size (1024x600)
+      ?cart=NAME   that cart; a bundle of one cart names it without asking
+      ?desktop=1   the desk even with a cart named
+    A single ?cart=<name> still implies handheld: that url is the one-cart
+    player (moy export / the gallery), where a desk around one game is chrome
+    nobody asked for. The served carts are the bundle's
+    (`moy_sync.served_carts`), else the shelf's."""
+    import moy_sync
+    q = json.loads(query_json)
+    names = moy_sync.served_carts()
+    if names is None:
+        names = json.loads(moy_sync.folders_json(carts_root))
+    cart = q.get("cart") or (names[0] if len(names) == 1 else None)
+    desktop = not q.get("handheld") and bool(q.get("desktop") or not cart)
+    scheme = scheme if scheme in ("dark", "light") else None
+    if desktop:
+        w, h = 1024, 600
+        size = q.get("size") or ""
+        wh = size.split("x")
+        if len(wh) == 2 and wh[0].isdigit() and wh[1].isdigit():
+            w, h = int(wh[0]), int(wh[1])
+        boot(carts_root, None, w, h, True, coarse=coarse, scheme=scheme)
+    else:
+        boot(carts_root, cart=cart, coarse=coarse, scheme=scheme)
+    _S["page_start"] = (q.get("edit"), q.get("tab"), desktop, cart, len(names))
+    return ""
+
+
+def page_start():
+    """What a page's address starts the console on (after `page_boot`):
+    ?edit=<cart>[&tab=code|paint|map|...] opens that cart in the Editor
+    (`start_edit`), where a plain visit lands on the home; a desk with a cart
+    named opens it; and the one-cart player of a bundle of one cart is a
+    kiosk -- the exit gesture restarts the game instead of dropping into the
+    shell, because the game IS the page."""
+    edit, tab, desktop, cart, served = _S.pop("page_start")
+    if edit:
+        start_edit(edit, tab or None)
+    if desktop and cart:
+        open_cart(cart)
+    if not desktop and served == 1 and cart:
+        kiosk(cart)
+    return ""
 
 
 def kiosk(name):
@@ -669,20 +839,70 @@ def start_edit(name, tab=None):
     not a thing the visitor did, and a banner over the first frame would hide
     the code the start option is there to show. Returns edit_cart's JSON."""
     ws = _S["ws"]
-    note, ws.ach.note = ws.ach.note, lambda *a, **k: None
+    was, ws.ach.mute = ws.ach.mute, True
     try:
         return edit_cart(name, tab)
     finally:
-        ws.ach.note = note
+        ws.ach.mute = was
 
 
-def import_p8_json(path, name, out_dir):
-    """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194).
+def drop_kind(name, head_json):
+    """What a file dropped on the page is, from its name and its first bytes
+    (`head_json`, a JSON list of them): "song" for one Music keeps
+    (moy_sync.local_song), "p8" for a PICO-8 cart, else "archive" (a `.moy`
+    export, a zip). A text cart is known by its name, a `.p8.png` by its
+    bytes too: a BBS cart saved by a person is named anything, and the only
+    other thing the page imports is a zip, so a PNG is a cart attempt and
+    `png_problem` says so kindly when it is a holiday photo."""
+    import moy_sync
+    base = name.rsplit("/", 1)[-1]
+    if moy_sync.local_song(moy_sync.MUSIC + "/" + base):
+        return "song"
+    low = base.lower()
+    if low.endswith(".p8") or low.endswith(".p8.png"):
+        return "p8"
+    import p8_writer
+    return "p8" if p8_writer.looks_like_png(bytes(json.loads(head_json))) else "archive"
+
+
+def import_p8_json(path, name, root):
+    """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194) in
+    the store `root`, named by the store's import rule
+    (moy_carts.import_base): web_p8's report, with the folder as `dir`.
 
     Lazily imported so the console boots without the converter in RAM: a session
     that never drops a cart never pays for it."""
     import web_p8
-    return web_p8.import_p8_json(path, name, out_dir)
+    out_dir = moy_carts.import_target(root, moy_carts.import_base(name))
+    r = json.loads(web_p8.import_p8_json(path, name, out_dir))
+    r["dir"] = out_dir.rsplit("/", 1)[-1]
+    return json.dumps(r)
+
+
+def import_archive_json(path, name, root):
+    """A dropped `.moy` archive at `path` onto the shelf `root`
+    (moy_carts.import_archive), the archive removed after: {"dir": the
+    folder it landed in} or {"error": why not}."""
+    import os
+    try:
+        got = moy_carts.import_archive(path, root, name=name)
+    except Exception as exc:  # noqa: BLE001 -- a bad zip is a message
+        got = exc
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    if isinstance(got, Exception):
+        return json.dumps({"error": str(got) or "not a zip file"})
+    if got is None:
+        return json.dumps({"error": "nothing in that zip looked like a cart"})
+    return json.dumps({"dir": got.rsplit("/", 1)[-1]})
+
+
+def export_cart(path, dest):
+    """The cart folder at `path` packed to `dest` as a `.moy` archive
+    (moy_carts.pack, the wire's skip rule): the number of files."""
+    return moy_carts.pack(path, dest)
 
 
 def _cart_title():
@@ -691,7 +911,7 @@ def _cart_title():
 
 
 def _audio_rate():
-    return _AUDIO_RATE_HZ
+    return _AUDIO_RATE_HZ[0]
 
 
 def assets_json():
@@ -760,42 +980,48 @@ def fb_len():
     return len(_S["canvas"]._buf)
 
 
-def step_frame_json(dt, audio_ahead=-1.0):
+def step_frame_json(dt, played=-1):
     """Advance the console one frame.
 
     Returns "" when the console skipped the redraw (#44 dirty gate: nothing
-    moved) and there is no audio to ship -- the page then simply keeps the
+    moved) and there are no samples to ship -- the page then simply keeps the
     pixels it already has. Otherwise a small JSON string carrying what does not
-    live in the framebuffer: whether it painted, the cart title, the input hint,
-    and this frame's finished PCM. `audio_ahead` is the page's scheduled-ahead
-    audio depth in seconds (-1 = not reported): _RunnerPump tops the cushion
-    back up to target each frame (the crackle fix, #170).
+    live in the framebuffer: whether it painted, the cart title, the input
+    hint, and this frame's samples: `pcm` of them at heap address `pa`, `at`
+    the first's index in the stream and `fresh` whether it starts one
+    (_RunnerPump.take). `played` is the page's sink's count of samples
+    played (-1 = no sink): _RunnerPump tops its depth up from it.
 
-    The PIXELS are not in here. The worker reads them from fb_addr()/fb_len()
-    when `paint` is set.
+    The PIXELS and the SAMPLES are not in here. The worker reads them from
+    fb_addr()/fb_len() when `paint` is set, and from `pa` when `pcm` is.
     """
     ws = _S["ws"]
     au = getattr(ws, "audio_out", None)
-    if au is not None and hasattr(au, "ahead"):
-        au.ahead = float(audio_ahead)
-    painted_before = ws._frames_drawn
+    if au is not None and hasattr(au, "played"):
+        au.played = int(played)
+    painted_before = ws.frame_state.frames_drawn
+    pulled = au.rendered if au is not None and hasattr(au, "rendered") else None
+    _feed_events()
     _S["driver"].frame(dt)
-    painted = ws._frames_drawn != painted_before
-    # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
-    # frame) -- the page plays it through its AudioWorklet ring.
-    pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
-    audio_b64 = ""
-    if pcm and any(pcm):
-        import binascii
-        audio_b64 = binascii.b2a_base64(pcm).decode().strip()
-    if not painted and not audio_b64:
+    painted = ws.frame_state.frames_drawn != painted_before
+    if pulled is not None and au.rendered == pulled and _media_open():
+        # The media stream sounds with no Player pulling the mix (the shell,
+        # an app): a board's feeder task pulls it, the page's frame here.
+        au.tick(dt)
+    took = au.take() if (au is not None and hasattr(au, "take")) else None
+    if not painted and took is None:
         return ""
-    return json.dumps({
+    out = {
         "paint": 1 if painted else 0,
         "cart": _cart_title(),
-        "audio": audio_b64,
         "input": web_input.effective_input_kinds(ws),
-    })
+    }
+    if took is not None:
+        import uctypes
+        out["pcm"], out["at"] = took[0], took[1]
+        out["fresh"] = 1 if took[2] else 0
+        out["pa"] = uctypes.addressof(au._buf)
+    return json.dumps(out)
 
 
 def _edit_state(ws):
@@ -820,8 +1046,20 @@ def _edit_state(ws):
         lay = getattr(ws, "code_layout", None)
         if lay is not None and out["tab"] == "code":
             out["autoscroll"] = ws.code_layer.autoscrolling()
-            # where the text lies on the glass: x of column 0, y of the top row
-            out["grid"] = [ws.code_layer._text_x0(lay, ed), lay.y0, lay.cell, lay.lh]
+            # where the text lies on the glass: x of column 0, y of the top
+            # row. On the desk the Code tab lays out in its pane's body
+            # (EditorDesk.laid_out), the pane in the Editor window's content.
+            ox = oy = 0
+            desk = getattr(ws, "_editor_desk", None)
+            got = desk.laid_out("code") if desk is not None else None
+            if got is not None:
+                (ox, oy, _w, _h), lay = got
+                win = getattr(getattr(ws, "wm", None), "_wins", {}).get("menu")
+                if win is not None:
+                    cx, cy = win.content_rect()[:2]
+                    ox, oy = ox + cx, oy + cy
+            out["grid"] = [ox + ws.code_layer._text_x0(lay, ed), oy + lay.y0,
+                           lay.cell, lay.lh]
     return out
 
 
@@ -829,26 +1067,46 @@ def state_json():
     """The console's `state`: the dev channel's one-line snapshot -- the keys
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
-    audio pull mixed, frames it found none, the room, whether it is open) and
+    audio pull mixed, frames it found none, the room, whether it is open, its
+    depth), the page's pull (`pcm`: its rate, the samples it sent the
+    page's sink and the sink's count of those it played), and
     the running cart's first eight pmem slots, the earned badges' ids, the
-    Settings rows as the console holds them and whether the FPS chip shows,
-    for a harness driving the page (`window.__moyState()`)."""
+    Settings rows as the console holds them, whether the FPS chip shows and
+    the store's sync (`sync`: the batches its far end has taken, and whether
+    one is on its way), the Terminal's grid as lines (`term`, None before
+    it first opens), the media stream's `now()` (`media`, None with no run)
+    and how its last run ended (`media_last`, dev_media.last), for a harness
+    driving the page
+    (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
-    st["ach"] = sorted(_S["ws"].ach.unlocked)
+    st["ach"] = sorted(_S["ws"].ach.doc().get("system", {}).get("found", {}))
     st["system"] = json.loads(_S["ws"].system.dump() or "{}")
     st["show_fps"] = bool(_S["ws"].show_fps)
+    st["sync"] = {"acked": _S.get("sync_acked", 0),
+                  "busy": any(w.busy() for w in _watchers())}
     st["edit"] = _edit_state(_S["ws"])
+    term = getattr(getattr(_S["ws"], "terminal_app", None), "face", None)
+    st["term"] = term.lines() if term is not None else None
     try:
         import moy_audio
         sc = moy_audio.snd_counts()
     except (ImportError, AttributeError):
         sc = None
     st["snd"] = list(sc) if sc is not None else None
+    au = getattr(_S["ws"], "audio_out", None)
+    st["pcm"] = {"rate": au.rate, "sent": au.sent, "played": au.played} \
+        if hasattr(au, "sent") else None
+    try:
+        import dev_media
+        st["media"] = dev_media.now()
+        st["media_last"] = dev_media.last()
+    except ImportError:
+        st["media"] = st["media_last"] = None
     # The running cart's first pmem slots, where a fixture reports its checks:
     # the run's flush, which hands a moved image to the console's pmem to be
     # kept at the next boundary as the periodic flush does, then its image.
-    run = getattr(getattr(_S["ws"], "player", None), "_lua", None)
+    run = getattr(_S["ws"].run.player, "_lua", None)
     flush = getattr(run, "flush_pmem", None)
     if flush is not None:
         flush()
@@ -891,10 +1149,23 @@ def store_mode(mode=None, seeded=None):
     return ""
 
 
-def sync_config(pin=None):
-    """The page's ?pin= (if any), forwarded by the worker after init -- it
-    rides inside every batch body, where the board's WebHost checks it."""
-    _S["sync_pin"] = pin or None
+def site_sources(carts_root, doc_json):
+    """The shelves whoever serves a site-mode page chose (its indexes.json:
+    {"indexes": [url, ...]}) as the console's `system/sources`
+    (cart_index.save_sources), a board's twin. A page a board serves browses
+    the board's own, and a page with none the console's default shelves.
+    Called after `store_mode` and before `boot`."""
+    if _S.get("store_mode") == "board":
+        return ""
+    try:
+        doc = json.loads(doc_json)
+    except ValueError:
+        return ""
+    urls = doc.get("indexes") if isinstance(doc, dict) else None
+    if not isinstance(urls, list):
+        return ""
+    import cart_index
+    cart_index.save_sources(carts_root, [u for u in urls if isinstance(u, str)])
     return ""
 
 
@@ -916,11 +1187,18 @@ def sync_poll_json():
             return ""
     for w in live:
         w.sweep()
-        body = w.take_json(_S.get("sync_pin"))
+        body = w.take_json()
         if body:
             _S["sync_took"] = w.root_id
             return body
     return ""
+
+
+def sync_root():
+    """The root id of the batch `sync_poll_json` last handed out: the store a
+    site-mode page applies it into."""
+    import moy_sync
+    return _S.get("sync_took") or moy_sync.CARTS_ROOT_ID
 
 
 def sync_ack(ok):
@@ -933,6 +1211,8 @@ def sync_ack(ok):
     w = watchers.get(_S.get("sync_took") or moy_sync.CARTS_ROOT_ID)
     if w is not None:
         w.ack(bool(ok))
+    if ok:
+        _S["sync_acked"] = _S.get("sync_acked", 0) + 1
     return ""
 
 
@@ -1045,7 +1325,7 @@ def update_poll_json():
     there is nothing to send it answers "" and `update_wants_poll` decides
     whether to GET instead."""
     u = _S.get("update")
-    return u.take_json(_S.get("sync_pin")) if u is not None else ""
+    return u.take_json() if u is not None else ""
 
 
 def update_wants_poll():
@@ -1078,7 +1358,7 @@ def gpio_poll_json():
     """The next batch of queued pin ops, or "" -- the worker POSTs it to the
     relative /gpio of whoever served the page, exactly like the sync push."""
     g = _S.get("gpio")
-    return g.take_json(_S.get("sync_pin")) if g is not None else ""
+    return g.take_json() if g is not None else ""
 
 
 def gpio_ack_json(ok, text=""):
@@ -1100,6 +1380,83 @@ def gpio_off():
     return ""
 
 
+# -- the Terminal's link to the serving board's shell --------------------------------
+#
+# The Terminal's face on the bundle a board bakes is a face of that board's
+# shell (native/moy_sh/moy_sh_link.h): its `remote` app's grid is the board's
+# bytes and its keys go back. The worker owns the socket (GET /term on the
+# board, native/moy_tty's bridge) and moves what these hand it, between
+# frames; nothing here waits on the network.
+
+_TERM_NONE = 9                          # MOY_SH_LINK_NONE
+
+
+def _link():
+    """The C face's link ends, or None (the site's console runs its own shell)."""
+    try:
+        import moy_sh
+    except ImportError:
+        return None
+    return moy_sh if hasattr(moy_sh, "link_want") else None
+
+
+def term_enable(on):
+    """Whether this page has a board's shell to reach: a board-served page
+    does; any other says so in the Terminal and never asks."""
+    sh = _link()
+    _S["term"] = bool(on) and sh is not None
+    _S["term_rest"] = b""
+    if sh is not None and not on:
+        sh.link_state(_TERM_NONE, 0)
+    return ""
+
+
+def term_poll_json():
+    """What the Terminal asks of the socket since the last poll, or "":
+    {"want": 1 (open) | 2 (close), "cols", "rows", "size": [c, r], "out": [byte, ...]}.
+    The bytes the board sent that the grid had no room for go in first."""
+    sh = _link() if _S.get("term") else None
+    if sh is None:
+        return ""
+    rest = _S.get("term_rest")
+    if rest:
+        _S["term_rest"] = rest[sh.link_in(rest):]
+    want, cols, rows, sized = sh.link_want()
+    out = sh.link_out()
+    if not (want or sized or out):
+        return ""
+    d = {}
+    if want:
+        d["want"] = want
+        d["cols"] = cols
+        d["rows"] = rows
+    if sized:
+        d["size"] = [cols, rows]
+    if out:
+        d["out"] = list(out)
+    return json.dumps(d)
+
+
+def term_feed(b64):
+    """The board's bytes (base64, as the worker carries them) into the grid."""
+    sh = _link() if _S.get("term") else None
+    if sh is None:
+        return ""
+    import binascii
+    data = _S.get("term_rest", b"") + binascii.a2b_base64(b64)
+    _S["term_rest"] = data[sh.link_in(data):]
+    return ""
+
+
+def term_state(state, n=0):
+    """What became of the socket (MOY_SH_LINK_*), said in the Terminal."""
+    sh = _link() if _S.get("term") else None
+    if sh is not None:
+        _S["term_rest"] = b""
+        sh.link_state(int(state), int(n))
+    return ""
+
+
 def idle_collect():
     """Run the deferred split-heap collect NOW -- called by the worker on a
     quiet streak (and as a bounded periodic guard), so the full mark+sweep
@@ -1112,6 +1469,23 @@ def idle_collect():
 
 
 def apply_events_json(text):
-    """Feed a browser {"events":[...]} JSON text batch through the ONE shared
-    decode path (the same wire format the WS transports speak)."""
-    web_input.apply_ws_text(text, _apply)
+    """Queue a browser {"events":[...]} JSON text batch for the next frame,
+    which feeds it through the ONE shared decode path (the same wire format
+    the WS transports speak)."""
+    web_input.apply_ws_text(text, _S.setdefault("evq", []).extend)
+
+
+def _feed_events():
+    """One frame's share of the queued events, in order: all of them, or as
+    many as keep each change of the pointer its own frame; the next frame
+    takes the rest (`web_input.frame_cut`)."""
+    q = _S.get("evq")
+    if not q:
+        return
+    n = web_input.frame_cut(q)
+    if n == len(q):
+        _S["evq"] = []
+        _apply(q)
+    else:
+        _S["evq"] = q[n:]
+        _apply(q[:n])

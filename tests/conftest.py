@@ -212,7 +212,8 @@ def _theme_reset():
     ui_draw.use_depth(None, False)
     ui_draw.theme_uninstall()
     ui_draw.cart_text(False)
-    for role in ("ui", "title", "mono", "caption", "key", "op", "result"):
+    for role in ("ui", "title", "mono", "caption", "key", "op", "result", "tap",
+                 "tap_caption"):
         ui_draw.use_font(role, 0)
     ui_draw.use_hero(0)
     ui_draw.print_font(0)
@@ -273,6 +274,42 @@ def _console_state_fresh():
     ui_draw.console_reset()
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "first_run: the test's carts are asked before their first run "
+        "(app_perms.asks_first), as a cart that arrived as files is")
+
+
+# Whether the running test is marked `first_run` (`_carts_are_made_here`).
+_FIRST_RUN = [False]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _carts_are_made_here():
+    """A test writes its carts as files (`moy_carts.create`, a fixture copied
+    into the store), which on a console is a cart that arrived as files and
+    is asked for its permissions on its first run (`app_perms.asks_first`).
+    Every test's carts, a module fixture's included, stand for carts made on
+    the console, never asked; a test of the first-run prompt is marked
+    `first_run` (`_first_run_marked`)."""
+    try:
+        from runtime import app_perms
+    except ImportError:
+        yield
+        return
+    real = app_perms.asks_first
+    app_perms.asks_first = lambda cart, rec: _FIRST_RUN[0] and real(cart, rec)
+    yield
+    app_perms.asks_first = real
+
+
+@pytest.fixture(autouse=True)
+def _first_run_marked(request):
+    _FIRST_RUN[0] = request.node.get_closest_marker("first_run") is not None
+    yield
+    _FIRST_RUN[0] = False
+
+
 # What `_cover_budget_unbounded` raises the cover slice to: every cover builds
 # inside the frame that asks for it.
 COVER_SLICE_UNBOUNDED = 10 ** 9
@@ -297,18 +334,100 @@ def _cover_budget_unbounded(monkeypatch):
 def _webhost_switched_off():
     """The kernel's webhost and its switch are one per process (native/moy_net),
     as they are one per board, and a host's `handle_http` keeps whatever store,
-    pin and routes a switch still on its port was configured with ("never
+    sign-in and routes a switch still on its port was configured with ("never
     re-point a kernel host that serves"). A test that left the switch joining,
     serving or in its goodbye window handed a later test on the worker another
-    host's pin and routes (a 403 for a pinless /gpio batch, a 404 for
-    /console.json), or a 503 `closing`. After each test the switch is off and
-    the host stopped now, as a fresh process has them; a process that never
-    loaded the library has neither."""
+    host's sign-in and routes (a 401 for an unsealed /gpio batch, a 404 for
+    /console.json), or a 503 `closing`. After each test the switch is off, the
+    host stopped now with its sign-in off (its sessions, keys and wrong tries
+    forgotten) and the browser's end (tests/seal_client.py) signed out, as a
+    fresh process has them; a process that never loaded the library has
+    neither."""
     yield
     nb = sys.modules.get("runtime.net_binding")
     if nb is None or nb._LIB[0] is None:
         return
     nb.wc_off()
     nb.web_stop()
+    nb.web_auth(None)            # the next folder starts its backoff afresh
+    nb._LIB[0].moy_sw_reset()
     nb.web_events()
     nb.wc_poll()                 # a switch in its goodbye sees the host stopped
+
+
+def _processes_reset():
+    L = sys.modules.get("runtime.moy_log")
+    if L is not None:
+        L.current(L.SHELL)
+    for name in ("runtime.leases", "runtime.devices"):
+        m = sys.modules.get(name)
+        if m is not None:
+            gate = getattr(m, "LEASES", m)
+            gate.grants = None
+    F = sys.modules.get("runtime.front")
+    if F is not None:
+        F.FRONT.bind(None, None)
+    N = sys.modules.get("runtime.notifications")
+    if N is not None and (N.NOTES.list or N.NOTES.banner is not None):
+        N.NOTES.reset()
+    E = sys.modules.get("runtime.moy_evq")
+    if E is not None and E._LIB[0] is not None:
+        E.notes_reset()             # the kernel's notifications and badges (moy_notes.h)
+        E.items_reset()             # ...and the items handed to processes (moy_items.h)
+    SI = sys.modules.get("runtime.status_items")
+    if SI is not None:
+        SI.ITEMS.sync()
+        for it in SI.ITEMS.slots:
+            if it.pid:
+                SI.ITEMS._free(it)
+    DM = sys.modules.get("runtime.dev_media")
+    if DM is not None:
+        DM._HEARD[0] = None
+    SL = sys.modules.get("runtime.shell_layout")
+    if SL is not None:
+        SL.ITEMS[0] = 0
+    A = sys.modules.get("runtime.achievements")
+    if A is not None:
+        A.end()
+    S = sys.modules.get("runtime.scheduler")
+    if S is not None:
+        sched = S.SCHED
+        w = sched.wakes
+        w.ended, w.opener = sched._ended, sched._open
+        w.service = sched.own
+        for pid in [p.pid for p in sched.procs.values() if p.state == S.EXITED]:
+            del sched.procs[pid]
+
+
+@pytest.fixture(autouse=True)
+def _processes_fresh():
+    """Whose code runs, who grants what and what the processes posted are
+    one per process, as they are one per board: the kernel's current process
+    (`moy_log.current`), which a run makes itself until it ends; the lease
+    and device gates (`leases.LEASES.grants`, `devices.grants`), which a
+    Workstation binds to its running set as it boots; the notifications
+    (`notifications.NOTES`), whose banner stays up BANNER_MS of wall time;
+    the apps' status items (`status_items.ITEMS`) with the count the bar
+    packs for them (`shell_layout.ITEMS`), which a console brings level only
+    at its next frame; and the achievements process (`achievements.end`),
+    which serves its queue on whichever console frames next. A test that left a game running handed every later
+    test on the worker that game's pid, one that built a Workstation handed
+    it that console's grants, so the shell's own reads (a /dev file) and a
+    bare process's lease were refused as another's; a badge an earlier
+    test's achievements process posted into the next test's console stayed
+    up as a banner, which keeps a console animating and draws over the bar;
+    and an item freed after its console's last frame left the count at 1, so
+    the next console's first layout placed the bar's cells around a status
+    item it did not have; a badge the shell sent as a test ended was served
+    in the next test's console, whose banner took a tap meant for the page. Each test starts, and leaves, the shell current,
+    the gates unbound (the front's among them, `front.FRONT`), no
+    notification, no status item and no achievements process, as a fresh VM has them before its
+    console boots. The scheduler is one per VM too: a `Scheduler` built over
+    the shared wakes takes their hooks (a badge's goal read from ITS rows, so
+    a game of the next test's coalesced with no goal), and a crashed
+    service's row stays until the task manager's Close (a later test's task
+    list held another's crashed service); each test starts with `SCHED`'s
+    hooks and no exited row."""
+    _processes_reset()
+    yield
+    _processes_reset()

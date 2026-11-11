@@ -484,7 +484,7 @@ def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
               for j in range(y + 2 * fs, y + sw - 2 * fs)}
     assert inside == {swatch} and sw - 4 * fs >= sw // 2
     cx, cy, cell = _cell(lay, pe, 3, 3)
-    reach = ui_draw.mark_reach("part")
+    reach = ui_draw.mark_reach("cell")
     for o in (1, reach + 1):
         assert _px(ws, cx - 1 - o, cy + cell // 2) == surface, o
 

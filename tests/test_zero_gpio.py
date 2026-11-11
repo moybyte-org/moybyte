@@ -52,10 +52,10 @@ def _pins_fresh(tmp_path):
     nb._pins(())
 
 
-def handle(method, body, pin=None, query="/gpio"):
-    """One /gpio request through the kernel's router, as the Zero's webhost
-    answers it."""
-    h = moy_webhost.WebHost(str(ROOT / "nonexistent-carts"), pin=pin)
+def handle(method, body, query="/gpio"):
+    """One /gpio request through the kernel's router, as an open host (no
+    sign-in) answers it."""
+    h = moy_webhost.WebHost(str(ROOT / "nonexistent-carts"))
     return h.handle_http(method, query, body)
 
 
@@ -63,11 +63,8 @@ def _doc(resp):
     return json.loads(resp.split(b"\r\n\r\n", 1)[1])
 
 
-def _batch(ops, pin=None):
-    doc = {"v": 1, "ops": ops}
-    if pin:
-        doc["pin"] = pin
-    return json.dumps(doc).encode()
+def _batch(ops):
+    return json.dumps({"v": 1, "ops": ops}).encode()
 
 
 def _touched(n):
@@ -83,14 +80,16 @@ def _touched(n):
     (43, "UART0"), (44, "UART0"),                        # the serial console
     (0, "boot strapping"), (45, "strapping"), (46, "strapping"),
     (3, "the strict call"),                              # D2, held back
+    (7, "LoRa SPI"), (8, "LoRa SPI"), (9, "LoRa SPI"),   # D8-D10, the Wio-SX1262
+    (38, "LoRa RF switch"), (41, "LoRa CS"),
 ])
 def test_a_pin_the_board_needs_is_not_in_the_allowlist(n, why):
     assert n not in PINS, why
 
 
 def test_the_allowlist_is_exactly_the_xiaos_spare_pads_plus_its_led():
-    # D0=1 D1=2 D3=4 D4=5 D5=6 D8=7 D9=8 D10=9, and 21 = the on-board user LED.
-    assert PINS == (1, 2, 4, 5, 6, 7, 8, 9, 21)
+    # D0=1 D1=2 D3=4 D4=5 D5=6, and 21 = the on-board user LED.
+    assert PINS == (1, 2, 4, 5, 6, 21)
 
 
 @pytest.mark.parametrize("op, word", [
@@ -172,6 +171,45 @@ def test_an_input_is_pulled_up_so_an_unwired_pin_is_not_noise():
 # -- the endpoint ------------------------------------------------------------
 
 
+# -- the lease table (moy_lease.h): the page's pins are leases like a cart's ----
+
+
+@pytest.fixture
+def leases():
+    from runtime.host import moy_lease as L
+    L.reset()
+    L.offer("gpio:" + ",".join(str(p) for p in PINS))
+    yield L
+    nb.web_stop()                       # drops the page's leases
+    L.reset()
+
+
+def test_a_pin_a_cart_holds_is_busy_to_the_page_and_never_touched(leases):
+    cart = leases.take(42, leases.GPIO, 0, (2,), leases.PINS)
+    d = _doc(handle("POST", _batch([{"p": 2, "mode": "out", "v": 1},
+                                    {"p": 2, "mode": "read"},
+                                    {"p": 4, "mode": "out", "v": 1}])))
+    assert d["ok"] == 1
+    assert [why for _i, why in d["err"]] == ["pin 2: busy", "pin 2: busy"]
+    assert not _touched(2)
+    assert leases.of_pin(2) == cart
+
+
+def test_a_page_s_write_holds_the_pin_until_the_webhost_stops(leases):
+    handle("POST", _batch([{"p": 5, "mode": "out", "v": 1}]))
+    h = leases.of_pin(5)
+    assert h, "the write took the pin's lease"
+    owner, cls, _unit, flags, pins, _edges = leases.get(h)
+    assert (cls, pins) == (leases.GPIO, (5,)) and flags & leases.PINS and owner
+    with pytest.raises(OSError):
+        leases.take(42, leases.GPIO, 0, (5,), leases.PINS)
+    d = _doc(handle("POST", _batch([{"p": 5, "mode": "out", "v": 0},
+                                    {"p": 5, "mode": "read"}])))
+    assert d["ok"] == 2 and d["reads"] == {"5": 0}, "its own lease is no stranger"
+    nb.web_stop()
+    assert leases.of_pin(5) == 0
+
+
 def test_get_answers_the_allowlist_for_a_human():
     body = handle("GET", b"")
     assert b"200 OK" in body
@@ -198,41 +236,29 @@ def test_a_malformed_batch_is_a_400(body, status):
     assert not any(_touched(n) for n in range(64))
 
 
-def test_the_pin_gate_refuses_a_page_that_does_not_carry_it():
+def test_the_sign_in_gates_both_methods_and_a_paired_page_drives_the_pins(tmp_path):
+    """A board with its sign-in on answers /gpio to a paired page's sealed
+    request alone: an unsealed batch -- the probe included -- is refused
+    before an op is read, and drives nothing."""
+    import seal_client
+    (tmp_path / "system").mkdir()
+    h = moy_webhost.WebHost(str(ROOT / "nonexistent-carts"), auth=str(tmp_path / "system"))
     ops = [{"p": 1, "mode": "out", "v": 1}]
-    assert b"403" in handle("POST", _batch(ops), pin="4242")
-    assert b"403" in handle("POST", _batch(ops, pin="0000"), pin="4242")
+    assert b"401" in h.handle_http("POST", "/gpio", _batch(ops))
+    assert b"401" in h.handle_http("POST", "/gpio", _batch([]))
+    assert b"401" in h.handle_http("GET", "/gpio", b"")
     assert not _touched(1), "a refused batch still drove a pin"
-    assert b"200 OK" in handle("POST", _batch(ops, pin="4242"), pin="4242")
+    page = seal_client.Browser(h.handle_http)
+    page.pair_token(nb.web_token())
+    st, doc = page.json("POST", "/gpio", {"v": 1, "ops": ops})
+    assert st == 200 and doc["ok"] == 1
     assert nb._pin_state(1) == (2, 1)
-
-
-def test_the_probe_goes_through_the_pin_gate_too():
-    """So a page opened without the board's ?pin= learns it has no pins BEFORE
-    the verbs exist, rather than after every write it makes comes back 403."""
-    assert b"403" in handle("POST", _batch([]), pin="4242")
-
-
-def test_the_gpio_get_is_gated_too_now():
-    """THE PIN GATES EVERYTHING (2026-08-25). It carries its pin the only place
-    a GET can, and an unpinned board answers everyone as before."""
-    assert b"403" in handle("GET", b"", pin="4242")
-    assert b"403" in handle("GET", b"", pin="4242", query="/gpio?pin=0000")
-    r = handle("GET", b"", pin="4242", query="/gpio?pin=4242")
-    assert b"200 OK" in r and b'"pins"' in r
-    assert b"200 OK" in handle("GET", b"", pin=None)
+    st, doc = page.json("GET", "/gpio")
+    assert st == 200 and "pins" in doc
 
 
 def test_a_method_that_is_neither_is_a_405():
     assert b"405" in handle("PUT", _batch([]))
-
-
-def test_a_board_with_no_pin_set_accepts_a_page_that_sends_one():
-    """The gate is the BOARD's, not the page's: a stray ?pin= must not lock a
-    kid out of a board that was never configured with one."""
-    assert b"200 OK" in handle(
-        "POST", _batch([{"p": 1, "mode": "out", "v": 1}], pin="1111"), pin=None)
-    assert nb._pin_state(1) == (2, 1)
 
 
 def test_a_console_board_has_no_gpio_route():
@@ -290,12 +316,6 @@ def test_reading_a_pin_subscribes_it_and_answers_from_the_last_batch():
     assert link.read(2) == 1
     # ...and it stays subscribed, so the value keeps refreshing.
     assert json.loads(link.take_json())["ops"] == [{"p": 2, "mode": "read"}]
-
-
-def test_the_page_pin_rides_every_batch():
-    link, _ = _link()
-    link.write(1, 1)
-    assert json.loads(link.take_json("4242"))["pin"] == "4242"
 
 
 def test_a_failed_post_requeues_its_writes():
@@ -367,9 +387,9 @@ def test_a_batch_the_browser_builds_is_one_the_board_understands():
 
     link.write(21, 0)
     link.read(2)
-    body = link.take_json("4242")
+    body = link.take_json()
 
-    answer = handle("POST", body.encode(), pin="4242")
+    answer = handle("POST", body.encode())
     assert b"200 OK" in answer
     link.ack(True, answer.split(b"\r\n\r\n", 1)[1].decode())
 
@@ -381,8 +401,8 @@ def test_a_batch_the_browser_builds_is_one_the_board_understands():
 def test_the_probe_the_worker_sends_is_the_one_the_board_answers():
     """worker.js probes with an empty batch and reads `pins` back; web_boot then
     builds the link from that list. This is that handshake, minus the fetch."""
-    probe = json.dumps({"v": 1, "ops": [], "pin": "4242"}).encode()
-    doc = _doc(handle("POST", probe, pin="4242"))
+    probe = json.dumps({"v": 1, "ops": []}).encode()
+    doc = _doc(handle("POST", probe))
     link = GpioLink(doc["pins"])
     assert link.write(21, 1) is True
     assert link.write(44, 1) is False

@@ -24,6 +24,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
         [cc, "-std=c99", "-g", "-O1", "-fsanitize=address,undefined",
          "-fno-sanitize-recover=all", "-I", INPUT, "-I", SPINE,
          os.path.join(INPUT, "fuzz_input.c"), os.path.join(INPUT, "moy_input.c"),
+         os.path.join(INPUT, "moy_hid.c"),
          "-o", exe],
         capture_output=True, text=True)
     assert build.returncode == 0, build.stderr

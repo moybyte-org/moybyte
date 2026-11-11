@@ -27,7 +27,10 @@ appears to be corrupted" on every boot and the console never starts. So the
 flash reads the board's table (0x8000) before it writes, and when the image's
 table puts the store somewhere else it erases the new store's first sectors
 too, and says so. Same table, same store: nothing extra is erased and the
-store survives the flash.
+store survives the flash. The coredump partition is held the same way: when
+the image's table puts it where the board's did not, its bytes are whatever
+the old table kept there, so the flash erases it and the console reads no dump
+until a panic writes one.
 
 `--before` and `--after` come from the toml, because how a board enters and
 leaves the ROM loader is a hardware fact and not a preference. The T-Deck
@@ -40,6 +43,13 @@ which reads exactly like an image that did not take, and the verb stayed when
 the board moved to USB-Serial/JTAG rather than changing two things at once.
 That fact lives in the board's own toml, which this file reads.
 
+`stub` picks the flasher stub esptool uploads, and every esptool run of a
+flash takes it as `ESPTOOL_STUB_VERSION` (read from 4.12, the variable behind
+esptool's hidden `--stub-version`; 5.x defaults to 2). An older esptool ignores
+it and runs its own stub, so the flash is slower, never wrong. A board without
+the key gets esptool's default. The Waveshare P4 declares 2, and its board.toml
+says why.
+
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
 current board (both of this session's T-Deck flashes ran plain esptool); it
@@ -47,6 +57,7 @@ survives for the legacy Makefile variants that still name it.
 """
 
 import argparse
+import os
 import struct
 import subprocess
 import sys
@@ -59,13 +70,17 @@ sys.path.insert(0, str(ROOT))
 from tools import board_config  # noqa: E402
 
 
-def _esptool(chip, port, baud, *args):
+def _esptool(chip, port, baud, *args, stub=None):
     cmd = [sys.executable, "-m", "esptool", "--chip", chip, "--port", port]
     if baud:
         cmd += ["--baud", str(baud)]
     cmd += list(args)
-    print("+", " ".join(cmd))
-    return subprocess.call(cmd)
+    if stub is None:
+        print("+", " ".join(cmd))
+        return subprocess.call(cmd)
+    env = dict(os.environ, ESPTOOL_STUB_VERSION=str(stub))
+    print("+ ESPTOOL_STUB_VERSION=%s" % stub, " ".join(cmd))
+    return subprocess.call(cmd, env=env)
 
 
 PT_OFFSET = 0x8000   # ESP-IDF's default table offset, which every board here keeps
@@ -73,6 +88,7 @@ PT_SIZE = 0xC00      # the entries; the rest of the sector is the signature area
 _ENTRY = struct.Struct("<2sBBII16sI")   # magic, type, subtype, offset, size, label, flags
 _MAGIC = b"\xaa\x50"
 _TYPE_DATA = 1
+_SUBTYPE_COREDUMP = 3
 _STORE_LABELS = ("vfs", "ffat")   # the names MicroPython's startup looks for
 STORE_ERASE = 0x2000   # the filesystem's first two blocks: LittleFS's root pair
 
@@ -110,6 +126,21 @@ def moved_store(board_table, image_table):
     return new if new and new != store_of(parse_table(board_table)) else None
 
 
+def coredump_of(entries):
+    """(offset, size) of a table's coredump partition, or None."""
+    for _label, typ, sub, off, size in entries:
+        if typ == _TYPE_DATA and sub == _SUBTYPE_COREDUMP:
+            return (off, size)
+    return None
+
+
+def moved_coredump(board_table, image_table):
+    """The image's coredump partition when the board's table has none at that
+    place, else None."""
+    new = coredump_of(parse_table(image_table))
+    return new if new and new != coredump_of(parse_table(board_table)) else None
+
+
 def _describe_store(store):
     if store is None:
         return "none"
@@ -129,13 +160,14 @@ def _image_table(image, offset):
     return blob if len(blob) == PT_SIZE else None
 
 
-def _read_board_table(chip, port, baud, before):
+def _read_board_table(chip, port, baud, before, stub=None):
     """(esptool's return code, the board's table sector)."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "table.bin"
         args = ["--before", str(before)] if before else []
         rc = _esptool(chip, port, baud, *args, "--after", "no_reset",
-                      "read_flash", hex(PT_OFFSET), hex(PT_SIZE), str(out))
+                      "read_flash", hex(PT_OFFSET), hex(PT_SIZE), str(out),
+                      stub=stub)
         return rc, out.read_bytes() if out.exists() else b""
 
 
@@ -193,11 +225,13 @@ def flash(board_dir, port, verify=True):
         sys.exit("no image at %s -- build it first (make firmware-build-...)"
                  % image)
     baud = fl.get("baud")
+    stub = fl.get("stub")
     # 0) where the image puts the store, against where the board has it.
-    new_store = None
+    new_store = new_core = None
     image_table = _image_table(image, int(str(fl["offset"]), 0))
     if image_table:
-        rc, board_table = _read_board_table(chip, port, baud, fl.get("before"))
+        rc, board_table = _read_board_table(chip, port, baud, fl.get("before"),
+                                           stub)
         if rc:
             return rc
         new_store = moved_store(board_table, image_table)
@@ -207,16 +241,26 @@ def flash(board_dir, port, verify=True):
                   "formats a fresh filesystem; the store re-seeds"
                   % (_describe_store(store_of(parse_table(board_table))),
                      _describe_store(new_store), STORE_ERASE))
+        new_core = moved_coredump(board_table, image_table)
+        if new_core:
+            print("!! this image's partition table places the coredump partition at "
+                  "%#x+%#x: it is erased" % new_core)
     # 1) otadata erase, FIRST and with no reset after -- see the module
     #    docstring for why the order is load-bearing.
     if fl.get("otadata_offset"):
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
-                      str(fl["otadata_offset"]), str(fl.get("otadata_size", "0x2000")))
+                      str(fl["otadata_offset"]), str(fl.get("otadata_size", "0x2000")),
+                      stub=stub)
         if rc:
             return rc
     if new_store:
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
-                      hex(new_store[0]), hex(STORE_ERASE))
+                      hex(new_store[0]), hex(STORE_ERASE), stub=stub)
+        if rc:
+            return rc
+    if new_core:
+        rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
+                      hex(new_core[0]), hex(new_core[1]), stub=stub)
         if rc:
             return rc
     # 2) the merged image at the board's offset.
@@ -225,7 +269,7 @@ def flash(board_dir, port, verify=True):
         args += ["--before", str(fl["before"])]
     args += ["--after", str(fl.get("after", "hard_reset")), "write_flash",
              str(fl["offset"]), str(image)]
-    return _esptool(chip, port, baud, *args)
+    return _esptool(chip, port, baud, *args, stub=stub)
 
 
 def monitor(board_dir, port):

@@ -15,13 +15,27 @@ The tick trio is RE-EXPORTED from the shared `runtime/toolkit/ticks.py`
 (one body, 2026-08-17 -- this module used to carry its own copy, one of nine in
 the tree), so the device tier's import surface (`from device_util import
 _ticks_ms`) is unchanged; `moybyte_diag` is imported lazily + fully guarded so
-its absence is a no-op.
+its absence is a no-op. Every diag line is also a record of the OS log
+(native/moy_kernel/moy_log.h) under the shell, at info.
 """
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+
+try:                                    # the OS log, on every tier
+    import moy_log as _log
+except ImportError:                     # an image without the kernel
+    _log = None
+
+
+def _log_line(tag, msg):
+    if _log is not None:
+        try:
+            _log.write(_log.INFO, _log.SHELL, tag, msg)
+        except Exception:
+            pass
 
 
 def sram_census(stage):
@@ -61,6 +75,7 @@ def _diag_note(tag, msg):
     (the audio/wifi/keyboard backends): lazily import moybyte_diag and persist +
     print the line (logp). Falls back to a plain print if diag is unavailable.
     Fully guarded -- a diag failure here must never affect the caller."""
+    _log_line(tag, msg)
     try:
         import moybyte_diag
 
@@ -79,6 +94,7 @@ def _diag_log(tag, msg, diag):
     useful). logp() does both; falls back to a plain print if diag is absent.
     `diag` is the already-imported module (or None) -- this is the hot-path
     variant used inside run_desktop, avoiding a per-call import."""
+    _log_line(tag, msg)
     if diag is not None:
         try:
             diag.logp(tag, msg)

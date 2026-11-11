@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import host_app  # noqa: E402
+from ws_helpers import settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -32,9 +33,11 @@ def _running_cart(tmp_path):
     ws.launcher.sel = 0
     ws.open()                      # PLAY the first seed cart -> screen "desktop"
     ws._splash_until = None
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0            # drop any "First Steps" toast so the overlays are static
     for _ in range(2):
         drv.frame(DT)
@@ -88,9 +91,11 @@ def test_static_launcher_stack_is_memoized(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.look.select_wallpaper(None, persist=False)
     ws._splash_until = None
+    settle_badges(ws)
     ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0
     a = ws.wm.draw_stack()
     calls = _count_rebuilds(ws)

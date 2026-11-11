@@ -36,7 +36,12 @@ the BACKEND behind them -- the OTA flow every other board runs off its own
 Settings screen, driven here by a state machine in the poll loop because this
 board has no screen to put it on. The browser console this board serves is
 where a person triggers it and watches it, which is the whole point of the
-endpoints being pin-gated JSON rather than a UI.
+endpoints being sealed JSON rather than a UI.
+
+A browser signs in with a device key it got by pairing once with this board's
+password (the setup form sets it; native/moy_net/moy_webhost.c's header and
+docs/os_2026-11/system.md section 3), and every route but the bundle and the
+marker is sealed to its session.
 
 Runs on the board's own frozen image (`build.sh` -> MOYBYTE_ZERO). STA is the
 SERVING mode: the SoftAP lane measured too weak for the old streaming view and
@@ -57,7 +62,8 @@ except ImportError:                  # host: this module is import-only there
 ROOT = "/moy"
 CARTS_DIR = ROOT + "/carts"
 WIFI_STORE = ROOT + "/wifi.json"
-ZERO_STORE = ROOT + "/zero.json"   # this board's own name + write pin (setup)
+ZERO_STORE = ROOT + "/zero.json"   # this board's own name (setup)
+SYSTEM_DIR = ROOT + "/system"      # the sign-in's: `password` (setup), `webkeys`
 # The OTA directory (the pending marker; the image streams into the inactive
 # slot). On the internal VFS because there is no card
 # slot on this board at all -- moy_ota's default names /sd/update, which every
@@ -119,23 +125,54 @@ def identity():
 # got an empty console and no hint that a second, cabled step existed. There is
 # no second step now.
 #
-# ONLY WHAT IS MISSING, and this board is where that rule differs from the
-# console boards'. On a console board the store is a CACHE of the image's
-# built-ins, so #47 re-seeds a cart whose baked version is newer and accepts
-# that on-device edits to a built-in's code are discarded. Here the store is the
-# RECORD -- it is the only copy of a cart a kid made in the browser, it has a
-# `moy_journal` history behind it, and `seed_builtins` names a folder by the
-# TITLE slug, so a kid's edited "Hop Quest" is exactly what a version bump would
-# overwrite. So the gate is PRESENCE, not version.
+# AN EMPTY STORE, ONCE (owner, 2026-11-07). On a console board the store is a
+# CACHE of the image's built-ins, so #47 re-seeds a cart whose baked version is
+# newer. Here the store is the RECORD -- the only copy of a cart a kid made in
+# the browser, with a `moy_journal` history behind it -- so the image seeds a
+# store with no cart in it and leaves one with carts alone: a built-in the kid
+# deleted stays deleted, a kid's edited built-in is never rewritten, and a newer
+# image's new built-in does not reach a Zero already in use. A seed that did not
+# finish (a power cut, provision.sh's Ctrl-C) leaves SEEDING behind, and the
+# next boot writes what is still missing; a store emptied by hand is a new one.
 #
-# It was EMPTINESS until 2026-08-30, gating the whole roster on the store having
-# no cart at all, and that was too coarse in both directions. A cart that is not
-# there has nothing to overwrite, so refusing to write it protects nothing --
-# and the two things it cost were real: a new built-in could never reach a Zero
-# that had been used once (`Pin Light` shipped and no Zero could receive it),
-# and a seed interrupted by a power cut left a part-seeded store that the next
-# boot read as "not empty" and never finished. Per-cart presence fixes both and
-# gives up nothing: a kid's cart is still never rewritten.
+# SEED_RESERVE is the room a seed leaves: it stops while that much of the store
+# is still free, so the system folder (the password, the SSH host key, the
+# browsers' keys) and a kid's own carts always fit. The store is 896 KiB since
+# 2026-11-07, and the roster build.sh bakes is cut to fit it beside the reserve
+# (board.toml's [roster]). 96 KiB, not the 128 first set: the whole roster
+# leaves 28 of the store's 224 blocks (112 KiB) free (owner, 2026-11-07: all
+# five games, the reserve lowered as far as that takes, never below 64 KiB).
+SEED_RESERVE = 96 * 1024
+SEEDING = ".seeding"                # beside the carts folder, while a seed runs
+
+
+def _seeding_mark(root):
+    return root.rsplit("/", 1)[0] + "/" + SEEDING
+
+
+def _exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def _free_bytes(root):
+    try:
+        st = os.statvfs(root)
+    except (OSError, AttributeError):
+        return None
+    return st[0] * st[3]
+
+
+def seed_room(root=ROOT, reserve=None):
+    """True while more than `reserve` (SEED_RESERVE) bytes of the store are
+    free; a store whose free space cannot be read is not held back."""
+    if reserve is None:
+        reserve = SEED_RESERVE
+    free = _free_bytes(root)
+    return free is None or free > reserve
 
 
 def store_is_empty(root=CARTS_DIR):
@@ -170,10 +207,11 @@ def _space_note(root):
 
 
 def seed_carts(root=CARTS_DIR):
-    """Write any of the image's baked carts that this store is MISSING.
+    """Write the image's baked carts into an EMPTY store, or finish a seed
+    that did not end (SEEDING), up to SEED_RESERVE.
 
-    Returns the count written -- 0 on the ordinary warm boot, where this walks
-    the roster doing one directory stat per cart and inflates nothing.
+    Returns the count written -- 0 on the ordinary warm boot, which is one
+    listing of the store and inflates nothing.
 
     Best-effort in every direction, because none of the ways this can fail may
     cost the board its job -- which is serving whatever carts it DOES have. An
@@ -181,37 +219,18 @@ def seed_carts(root=CARTS_DIR):
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
 
-    TWO CONSEQUENCES, both said out loud because neither is obvious:
-
-      - a built-in a kid DELETED comes back on the next boot, because "missing"
-        is all this can see and a deletion leaves exactly that. The alternative
-        is a tombstone file, which is a store format change for a case a reflash
-        also undoes.
-      - a built-in that ships BROKEN cannot be fixed in place here. The console
-        boards take a #47 version bump and replace their copy; this board reads
-        presence and will not, so a new image with the fix in it changes
-        nothing. That is the price of never overwriting a kid's cart, and it is
-        the right way round on the board holding the only copy -- but it means
-        the recovery is manual and worth knowing. It needs no cable: the sync
-        protocol already has a whole-cart delete, and the pin rides in the BODY
-        for a POST (a `?pin=` on this endpoint is refused -- moy_webhost reads
-        `doc["pin"]`, which is what the protocol envelope declares):
-
-            curl -X POST http://<board>/sync -H "Content-Type: application/json" \
-                 -d '{"v":1,"pin":"NNNN","ops":[{"p":"hop_quest.moy","dc":1}]}'
-
-        That removes it, journal and all -> `{"err": [], "ok": 1}`. The next
-        BOOT seeds the image's copy, so it still wants a power cycle; there is
-        no reset endpoint. `./provision.sh --carts` forces the push over USB if
-        the board is in your hand -- but prefer the POST: an `mpremote` command
-        stops the console, and getting back out of that has its own failure mode
-        (the README's hardware notes).
-
-    It bit immediately. `Pin Light` shipped crashing on its first frame
-    (2026-08-30, colour names where the draw verbs take indices), and the three
-    console boards took the fix from a version bump while this one had to have
-    the folder removed.
+    A built-in that ships BROKEN cannot be fixed in place here: the console
+    boards take a #47 version bump, and this board never rewrites a cart. It
+    needs no cable: the sync protocol has a whole-cart delete, `{"v":1,"ops":
+    [{"p":"hop_quest.moy","dc":1}]}` POSTed to /sync from a paired page (the
+    browser console's own sync does it, and a script does it through
+    tests/seal_client.py's Browser, since every request is sealed), and the
+    browser pushes its own copy back. `./provision.sh --carts` forces the
+    image roster's push over USB.
     """
+    mark = _seeding_mark(root)
+    if not _exists(mark) and not store_is_empty(root):
+        return 0
     try:
         from carts_data import CARTS_Z
     except ImportError:
@@ -227,34 +246,51 @@ def seed_carts(root=CARTS_DIR):
         import ticks
 
         moy_carts.ensure_dirs(root)
+        with open(mark, "w") as f:
+            f.write("1")
         # SAID BEFORE it starts, not only after. This runs before the radio and
-        # writes ~763 KB across 155 files to the internal VFS, so on a first
-        # boot it is the longest silence in the log -- and on a board with no
-        # screen a silence is what a hang looks like.
+        # writes the roster to the internal VFS, so on a first boot it is the
+        # longest silence in the log -- and on a board with no screen a
+        # silence is what a hang looks like.
         missing = sum(1 for t, _v, _b in CARTS_Z
                       if not moy_carts._exists(moy_carts.cart_path(
                           root, moy_carts.cart_folder(t, moy_carts.BUILTIN_NS))))
         if missing:
             print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()
-        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True)
+        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True,
+                                        room=lambda: seed_room(root))
         elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
-        if not written:
-            return 0
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
+        _unmark(mark)
         print("ZERO seed: FAILED (the store may be partly seeded):", exc,
               _space_note(root))
         return 0
-    print("ZERO seed: %d carts inflated from the image in %d ms"
-          % (written, elapsed))
+    # Only an interrupted seed (a KeyboardInterrupt, a power cut) keeps the
+    # mark: an ended one, or one that failed, is not tried again.
+    _unmark(mark)
+    if not written:
+        return 0
+    left = missing - written
+    print("ZERO seed: %d carts inflated from the image in %d ms %s%s"
+          % (written, elapsed, _space_note(root),
+             " -- %d left out, the store's reserve" % left if left > 0 else ""))
     return written
+
+
+def _unmark(mark):
+    try:
+        os.remove(mark)
+    except OSError:
+        pass
 
 
 def connect(wait_ms=15000, hostname=None):
     """Join the first known network that answers, over the kernel's WiFi
     driver, and answer to `hostname`.local. Returns the STA IP or None. The
-    wait is per-network and generous for the same reason moy_ota's
-    ensure_online waits: cold association routinely outlives a short poll."""
+    wait is per-network and generous for the same reason moy_ota's DIAL_MS
+    is: cold association routinely outlives a short poll. The Zero is
+    headless, so this blocking wait holds no frame."""
     moy_net.wifi_on()
     st = moy_net.wifi_status()
     if st[2] and st[4]:
@@ -284,13 +320,13 @@ def connect(wait_ms=15000, hostname=None):
 # Every other board triggers and reports an update on its own glass: Settings ->
 # UPDATE ONLINE draws a CHECKING screen, a progress bar, and the verdict of the
 # last install. This board has no glass, so the SAME OtaUpdater is driven by the
-# state machine below and reported as JSON on two pin-gated endpoints.
+# state machine below and reported as JSON on two sealed endpoints.
 #
 # THE DECISION, stated here because the README points at it: the TRIGGER is a
 # request, not a timer. A boot-time CHECK runs (once, after the running image
 # has certified itself) and its result is printed on serial and cached for
-# `GET /update`; it does not install. Installing is `POST /update` carrying the
-# pin -- the same act of consent that gates every other write to this board.
+# `GET /update`; it does not install. Installing is `POST /update` from a paired
+# browser -- the same act of consent that gates every other write to this board.
 #
 # THERE IS NO EXCEPTION, and there was one until 2026-08-29 (owner call): an
 # `"ota_auto": true` in /moy/zero.json made the boot check install what it
@@ -311,9 +347,8 @@ def connect(wait_ms=15000, hostname=None):
 #
 # HOW A HUMAN LEARNS IT HAPPENED, all three ways, none of them a UI:
 #   * serial -- every transition prints a `ZERO ota:` line, and the boot line
-#     names the running label; the cable is how a pin reaches a human on this
-#     board anyway.
-#   * `GET /update?pin=NNNN` -- the running version/label/channel/slot, the
+#     names the running label.
+#   * `GET /update` from a paired page -- the running version/label/channel/slot, the
 #     PREVIOUS install's verdict (moy_ota.boot_check: installed, or rolled back
 #     by the bootloader), and live progress.
 #   * the page itself -- the browser console is baked into the image, so a
@@ -457,6 +492,9 @@ class ZeroUpdate:
         want, self._want = self._want, None
         if want in ("check", "check+download"):
             found = self._check()
+            if found is None:
+                self._want = want          # the link is dialled: ask next iteration
+                return True
             if found and want == "check+download":
                 self._begin_download()
             return True
@@ -474,7 +512,7 @@ class ZeroUpdate:
 
     def boot_check_once(self):
         """Queue the once-per-boot manifest check. It LOOKS and never installs
-        -- installing takes a request carrying the pin, and there is no setting
+        -- installing takes a paired browser's request, and there is no setting
         that changes that (see the ota_auto note in this module's header).
 
         Deliberately called only after the running image has been CONFIRMED
@@ -498,6 +536,8 @@ class ZeroUpdate:
         self.staged = None
         self.nothing_published = False
         m = self.ota.check_online(self._channel)
+        if m is None and getattr(self.ota, "pending", False):
+            return None
         if m is None:
             if self.ota.absent:
                 self.state = "none"
@@ -530,9 +570,9 @@ class ZeroUpdate:
             return
         try:
             # The updater streams STRAIGHT INTO THE SLOT, which this board
-            # needs: the whole filesystem is smaller than the image (1.375MB
-            # against ~2.9MB), so a staged copy cannot fit on an EMPTY volume
-            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.25MB.
+            # needs: the whole filesystem is smaller than the image (896KB
+            # against ~3.5MB), so a staged copy cannot fit on an EMPTY volume
+            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.5MB.
             self.ota.begin_download(self.manifest)
         except Exception as exc:         # noqa: BLE001 -- bad url / non-200
             self.state = "error"
@@ -673,7 +713,7 @@ class ZeroUpdate:
                              staged=self.staged)
 
 
-def _frozen_or_pushed(names=("zero_host", "zero_setup",
+def _frozen_or_pushed(names=("zero_host", "zero_setup", "zero_shell",
                              "moy_webhost", "moy_sync", "moy_carts")):
     """Which of the image's own modules a PUSHED copy is shadowing.
 
@@ -691,6 +731,14 @@ def _frozen_or_pushed(names=("zero_host", "zero_setup",
         except OSError:
             pass
     return out
+
+
+def _has_password():
+    try:
+        with open(SYSTEM_DIR + "/password") as f:
+            return f.read(6) == "$moy2$"
+    except OSError:
+        return False
 
 
 def host_class():
@@ -746,9 +794,10 @@ def serve():
         # board, and a board nobody fills in stays reachable until someone does.
         print("ZERO no wifi -- hosting the setup AP")
         import zero_setup
-        zero_setup.run(WIFI_STORE, ZERO_STORE)
+        zero_setup.run(WIFI_STORE, ZERO_STORE, SYSTEM_DIR)
         return
-    host = host_class()(CARTS_DIR, pin=me.get("pin"))
+    _mkdir(SYSTEM_DIR)
+    host = host_class()(CARTS_DIR, auth=SYSTEM_DIR)
     ota, task = make_updater(me)
     host.update = task
     if task is not None:
@@ -758,18 +807,15 @@ def serve():
         # after an unattended update wants to see first.
         task.boot_check()
     host.start(ip)
-    # The pin is PRINTED, and printed as part of the url. A page reaches this
-    # board's write half (POST /sync, POST /gpio, POST /update) by carrying
-    # `?pin=`, so a pin nobody is told is a board that silently refuses every
-    # edit made on it. Serial is the right channel for it: reading this line
-    # takes the cable.
-    pin = me.get("pin")
-    # Built by `paired_url()` rather than reassembled here: that is the one
-    # body that knows a port is spelled only when it is not 80, so this line
-    # cannot drift from the url the console's own screens show.
+    # Built by `url()` rather than reassembled here: that is the one body that
+    # knows a port is spelled only when it is not 80. A browser pairs with the
+    # password the setup form set; with none, nothing can (no screen for a
+    # pairing code), so the line says so.
+    has_pw = _has_password()
     print("ZERO serving %s  (mDNS %s.local)%s"
-          % (host.paired_url(), name,
-             "" if pin else "  [no pin -- writes are open]"))
+          % (host.url(), name,
+             "" if has_pw else "  [no password: no browser can pair -- run the setup "
+                               "form again, or provision.sh --password]"))
     if ota is not None:
         print("ZERO firmware %s (%s, %s)"
               % (ota.version_label(), ota.channel(), ota.slot()))
@@ -779,11 +825,22 @@ def serve():
         # guarantees: these modules are running from /, not from this build.
         print("ZERO NOTE: pushed copies are SHADOWING the image for:",
               ", ".join(shadowed))
+    # The terminal over SSH (zero_shell): the server where a password is set,
+    # its sessions' hops served by this loop's `tail()`.
+    try:
+        import zero_shell
+        zero_shell.start(CARTS_DIR, name, host)
+        tail = zero_shell.tail
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO ssh: unavailable:", exc)
+        tail = None
     while True:
         # The console boards poll between frames; this board HAS no frames, so
         # a short sleep is its whole duty cycle. 10ms keeps a page load snappy
         # while idling at ~zero.
         host.poll()
+        if tail is not None:
+            tail()
         if task is not None:
             # THE ROLLBACK CONFIRM, on the only evidence this board has: the
             # host is up and the loop is still going round. `serving` is the

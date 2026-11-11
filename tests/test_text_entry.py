@@ -288,7 +288,7 @@ def test_new_script_commit_creates_the_file_and_opens_it_in_code(tmp_path):
         cl._prompt_key(ord(ch))
     cl._prompt_key(13)
     assert cl.prompt is None
-    cart = ws.project.cart
+    cart = ws.run.project.cart
     assert "helpers.lua" in moy_carts.cart_sources(cart)
     assert ws.menu_view == "code"
     assert ws.code_file == "helpers.lua"
@@ -309,7 +309,7 @@ def test_new_script_refuses_a_bad_or_taken_name_and_stays_open(tmp_path):
     assert cl.prompt is not None and cl.prompt.msg == "There's a file with that name."
     cl._prompt_key(27)
     assert cl.prompt is None and not ws.input.text_mode
-    assert moy_carts.cart_sources(ws.project.cart) == ["main.lua"]
+    assert moy_carts.cart_sources(ws.run.project.cart) == ["main.lua"]
 
 
 def test_new_script_is_closed_by_a_cart_switch(tmp_path):

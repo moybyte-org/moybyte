@@ -219,10 +219,10 @@ if not hasattr(ws, '_ahook'):
             return _of(dt)
         if ws._force:
             gc.collect()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         m0 = gc.mem_alloc()
         r = _of(dt)
-        if ws._frames_drawn != n0:
+        if ws.frame_state.frames_drawn != n0:
             ws._al.append((gc.mem_alloc() - m0, ws._cur, ws._cnt))
         # Reset at frame END, not entry: handle_input/handle_pointer run OUTSIDE
         # ws.frame (moy_runtime run_desktop), so resetting on entry threw away
@@ -266,9 +266,9 @@ if not hasattr(ws, '_chook'):
             return _ofc(dt)
         t = time.ticks_ms()
         m0 = gc.mem_alloc()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         r = _ofc(dt)
-        if ws._frames_drawn != n0:
+        if ws.frame_state.frames_drawn != n0:
             ms = time.ticks_diff(time.ticks_ms(), t)
             m1 = gc.mem_alloc()
             ws._nf += 1

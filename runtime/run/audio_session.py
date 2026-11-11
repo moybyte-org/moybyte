@@ -20,8 +20,17 @@ is still there for the Music editor to edit and the store to save.
 import json
 
 # The owners a session is opened for. The kernel keys "at most one session"
-# on these.
-OWNERS = {"cart": 1, "music_editor": 2, "wallpaper": 3}
+# on these: each run of the running set has its own (runtime/shell/procs.py).
+OWNERS = {"cart": 1, "music_editor": 2, "wallpaper": 3,
+          "cart2": 4, "cart3": 5, "cart4": 6}
+SESSIONS = 4        # native/moy_audio/moy_aud.h's MOY_AUD_SESSIONS
+
+_LIVE = []          # the sessions holding a handle, oldest first
+
+
+def live():
+    """How many sessions hold a row of the kernel's table now."""
+    return len(_LIVE)
 
 _NA = [None]        # [module] once resolved; False: this tier has none
 
@@ -73,7 +82,16 @@ class AudioSession:
         self._pushed = None
         self._rev = -1
         if na is not None:
-            self.h = na.open(OWNERS[owner])
+            for s in _LIVE:
+                if s.owner == owner:
+                    s._gone()       # the kernel closes an owner's last session
+                    break
+            try:
+                self.h = na.open(OWNERS[owner])
+            except MemoryError:     # every row taken: this session is silent
+                self.h = 0
+                return
+            _LIVE.append(self)
             self._push()
             if focus:
                 na.focus(self.h)
@@ -99,6 +117,8 @@ class AudioSession:
         """A newer open for this owner closed this session (on a host, another
         console in the same process): from now on its verbs do nothing."""
         self.h = 0
+        if self in _LIVE:
+            _LIVE.remove(self)
 
     # -- SPEC.md 8.2 ------------------------------------------------------
 
@@ -182,6 +202,8 @@ class AudioSession:
             except ValueError:
                 pass
             self.h = 0
+            if self in _LIVE:
+                _LIVE.remove(self)
 
 
 class PcmPump:
@@ -192,7 +214,7 @@ class PcmPump:
     cart's `snd` queue on the host (`wasm_binding.HostWasmRun`), mixed in after
     the synth under the console's level."""
 
-    def __init__(self, rate=11025):
+    def __init__(self, rate=22050):
         self.rate = int(rate)
         self._na = native()
         if self._na is not None:

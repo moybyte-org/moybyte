@@ -100,7 +100,7 @@ def test_the_paused_game_dims_once_and_comes_back_whole(tmp_path):
     ws = _ws(tmp_path, HANDHELD, "dark")
     ws.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     _frames(ws, 6, dirty=False)
     cv = ws.glass_canvas
     frozen = bytes(cv._buf)               # the frame the pause holds

@@ -7,7 +7,8 @@ reads (no ADC, or a voltage no cell rests at). It reads at most every
 REFRESH_MS, since the bar and the popover ask every frame they draw, as the
 mean of SAMPLES calibrated reads through a LiPo's resting curve. A charger
 holds the cell above its resting voltage, so on USB the level reads high: the
-T-Deck has no charge-status line to tell the two apart.
+T-Deck has no charge-status line to tell the two apart. A read allocates
+nothing (tests/test_frame_alloc.py): the bar asks on every frame it paints.
 """
 
 try:
@@ -40,7 +41,8 @@ def percent(mv):
     lo_mv, lo_p = CURVE[0]
     if mv <= lo_mv:
         return lo_p
-    for hi_mv, hi_p in CURVE[1:]:
+    for i in range(1, len(CURVE)):      # by index: a slice of CURVE is a new tuple
+        hi_mv, hi_p = CURVE[i]
         if mv <= hi_mv:
             return lo_p + (hi_p - lo_p) * (mv - lo_mv) // (hi_mv - lo_mv)
         lo_mv, lo_p = hi_mv, hi_p

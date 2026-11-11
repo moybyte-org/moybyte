@@ -1,0 +1,9 @@
+$ uname
+Moybyte
+$ uname -s
+Moybyte
+$ uname -a | wc -w
+2
+$ [ "`uname -s`" = "Haiku" ] || echo not-haiku
+not-haiku
+[exit 0]

@@ -270,15 +270,19 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
 
 
 def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
-    """The wifi widget's target is the Settings WIFI panel, the one wifi
-    implementation (docs/theme_and_shell_2026-11.md §8.6): in console mode too
-    its popover hung from the widget (docs/history/look_2026-10.md step 33), over
-    whatever ran; never a cart."""
+    """On a handheld the Wi-Fi is part of the status cluster, which opens the
+    control center; its Wi-Fi row opens the Settings WIFI panel, the one wifi
+    implementation (docs/theme_and_shell_2026-11.md §8.6), in its popover
+    hung from the widget, over whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open and ws.sysmenu.widget == "battery"   # the control center
+    ws.close_popover()
+    ws.toggle_popover("wifi")                   # its Wi-Fi row's way
     drv.frame(1 / 30)
     assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
     assert ws.screen == "launcher" and ws.cart is None   # nothing was launched
@@ -294,7 +298,7 @@ def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path
     widget, no Settings window, the lease held while it is open."""
     from ws_helpers import build_desktop_ws
     from runtime import host_app
-    ws = build_desktop_ws(tmp_path)
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     lay = ws.wm._root_ctx.layout
@@ -327,7 +331,7 @@ def _run_a_cart(tmp_path):
                             type="tool")
     ws.carts.rescan()
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     assert ws.screen == "desktop"
     ws._dirty = True
     drv.frame(1 / 30)
@@ -341,10 +345,10 @@ def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
     body and compare the band byte-for-byte."""
     from runtime.host_canvas import make_system_canvas
     ws, drv = _run_a_cart(tmp_path)
-    cached = _bar_rows(ws.canvas)                 # what the cache+blit produced
+    cached = _bar_rows(ws.run.canvas)                 # what the cache+blit produced
     # Direct render of the identical state onto a clean canvas.
-    direct = make_system_canvas(ws.canvas.w, ws.canvas.h)
-    direct.palette = ws.canvas.palette
+    direct = make_system_canvas(ws.run.canvas.w, ws.run.canvas.h)
+    direct.palette = ws.run.canvas.palette
     ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key("tool"))
     assert _bar_rows(direct) == cached
     # And it's a REAL picture (icons + glyph + text), not a blank band.
@@ -414,12 +418,12 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
     cost is one flat copy, not a re-render). Count blit_strip calls over several frames."""
     ws, drv = _run_a_cart(tmp_path)
     calls = [0]
-    orig = ws.canvas.blit_strip
+    orig = ws.run.canvas.blit_strip
 
     def counting(layer, dx=0, dy=0):
         calls[0] += 1
         return orig(layer, dx, dy)
-    ws.canvas.blit_strip = counting
+    ws.run.canvas.blit_strip = counting
     for _ in range(4):
         ws._dirty = True                          # crashed frames are static unless dirty
         drv.frame(1 / 30)

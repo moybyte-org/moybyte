@@ -148,11 +148,30 @@ def open_cart(ws, title):
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
     ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
 
 
 def make_drv(ws):
     return host_app.ConsoleDriver(ws)
+
+
+def settle_badges(ws=None):
+    """Serve the achievements process's queued events now (the console's
+    next frames would, before they draw, a queue's MOY_EVQ_BATCH a frame),
+    and write what its row holds unwritten (the write it makes SAVE_MS
+    later): an unlock banner they raise is then up before a test takes it
+    down, and the row reads what the events made it."""
+    from runtime import scheduler
+    s = scheduler.SCHED
+    for _ in range(64):
+        s.mail()
+        if not s.wakes.queued and not s.svc_mail:
+            break
+    for p in list(s.procs.values()):
+        ns = p.ns
+        if p.state != scheduler.EXITED and ns and "SAVE_MS" in ns and "_later" in ns:
+            s._guarded(p.pid, ns["_later"])
+    return ws
 
 
 def quiesce(ws):
@@ -162,7 +181,8 @@ def quiesce(ws):
 
     The DEADLINE is what takes an overlay down (#209 landing B) -- the shell's
     own flat field, not the payload on `ws.ach`, which is read only while that
-    deadline is up."""
+    deadline is up. The badges' queued events run first (`settle_badges`)."""
+    settle_badges(ws)
     ws.pointer.visible = False
     ws._toast_until = 0
 
@@ -171,9 +191,9 @@ def no_unlock_banner(ws):
     """Every badge already found, so nothing a test opens raises the unlock
     banner (achievements_ui), whose card at the top of the glass would cover
     the pixels it reads."""
-    from runtime.widgets import ACHIEVEMENTS
-    for a in ACHIEVEMENTS:
-        ws.ach.unlocked.setdefault(a[0], 0)
+    from runtime import achievements
+    settle_badges(ws)
+    ws.ach.seed({a["id"]: 0 for a in achievements.SHELL})
     return ws
 
 

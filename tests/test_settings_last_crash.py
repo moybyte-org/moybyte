@@ -64,3 +64,35 @@ def test_the_panel_lines_name_what_stopped_and_what_ran():
     assert "PC 4200ABCD  CAUSE 0" in lines
     assert lines[-1] == "CONSOLE HUNG: NO FRAME IN 15S"
     assert crash_lines(dict(REC, id=None))[1] == "NO APP OPEN"
+
+
+def test_a_core_dump_in_flash_is_on_the_page_and_the_row_without_a_record(
+        tmp_path, monkeypatch):
+    _kernel(monkeypatch, None)
+    monkeypatch.setattr(settings_layer, "core_dump", lambda: 40960)
+    cleared = []
+    monkeypatch.setattr(settings_layer, "clear_core_dump", lambda: cleared.append(1) or True)
+    ws, drv = _open(tmp_path)
+    sl = ws.settings_layer
+    assert sl._value("crash", "crash") == "Dump"
+    sl.open_crash()
+    drv.frame(DT)                       # the dump's line and its button draw
+    assert crash_lines(None, 40960)[-1] == "CORE DUMP 40 KB IN FLASH"
+
+
+def test_the_page_clears_the_dump_on_its_button(tmp_path, monkeypatch):
+    _kernel(monkeypatch, REC)
+    size = [40960]
+    monkeypatch.setattr(settings_layer, "core_dump", lambda: size[0])
+
+    def clear():
+        size[0] = None
+        return True
+    monkeypatch.setattr(settings_layer, "clear_core_dump", clear)
+    ws, drv = _open(tmp_path)
+    ws.settings_layer.open_crash()
+    drv.frame(DT)
+    drv.press("a")                      # the page's first button: Clear core dump
+    drv.frame(DT)
+    assert size[0] is None
+    assert ws.settings_layer.crash_view is True

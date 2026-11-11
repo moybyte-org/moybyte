@@ -11,8 +11,10 @@
 // It reads the task name, the uptime and the text only while the flash cache
 // is on, so a panic inside a flash operation still leaves PC, cause, address
 // and backtrace. The next boot's intake adds the reset reason, copies it to
-// NVS (every board's table has an nvs partition, so no core-dump partition)
-// and clears the RTC copy. `crc` covers every byte after itself, so a record
+// NVS (every board's table has an nvs partition) and clears the RTC copy.
+// After the wrapper, the IDF's panic handler writes the whole core dump to
+// the coredump partition on a board whose table has one (moy_kernel_dump,
+// tools/coredump.py). `crc` covers every byte after itself, so a record
 // is either whole or absent: power-on garbage, or a wrapper that died
 // half-way, reads as none. A VM that dies with the board up is recorded by the
 // VM service; a hang is the task watchdog's panic (moy_kernel.c).
@@ -47,7 +49,7 @@ extern "C" {
 #endif
 
 #define MOY_CRASH_MAGIC     0x4D4F5943u      // "MOYC"
-#define MOY_CRASH_VERSION   1
+#define MOY_CRASH_VERSION   2
 #define MOY_KSTATE_MAGIC    0x4D4F594Bu      // "MOYK"
 
 // What stopped the console. FAULT..DEBUG come from the panic handler; RESET is
@@ -74,7 +76,7 @@ enum { MOY_ROLE_NONE = 0, MOY_ROLE_APP, MOY_ROLE_WALLPAPER, MOY_ROLE_GAME };
 
 #define MOY_CRASH_ID_LEN    24
 #define MOY_CRASH_TASK_LEN  16
-#define MOY_CRASH_WHAT_LEN  32
+#define MOY_CRASH_WHAT_LEN  28
 
 typedef struct {
     uint32_t magic;
@@ -92,6 +94,7 @@ typedef struct {
     uint8_t core;
     uint8_t role;                    // MOY_ROLE_* of `id`
     uint8_t reset;                   // esp_reset_reason(), set at intake
+    uint32_t pid;                    // the process `id` ran as (moy_log.h's), 0 unknown
     char task[MOY_CRASH_TASK_LEN];
     char id[MOY_CRASH_ID_LEN];       // what the ledger held OPEN
     char what[MOY_CRASH_WHAT_LEN];   // the abort message, exception name or VM error
@@ -112,10 +115,20 @@ enum {
     MOY_WHY_VM_START,                // the console's boot ended before boot_ok
     MOY_WHY_BOOT_LOOP,               // MOY_BOOT_LOOP_STARTS starts, none proven
     MOY_WHY_HEAP,                    // the VM's first heap area was not there
+    MOY_WHY_CRASHES,                 // the console crashed `crash_limit` boots in a row
 };
 
 // Dev-only one-shots, armed over the dev channel for the gate.
 enum { MOY_TEST_NONE = 0, MOY_TEST_VM_START, MOY_TEST_HEAP };
+
+// THE CRASH COUNT: a boot whose intake takes a record of the console's own
+// (a crash no app, wallpaper or game was open in: role NONE, a record the
+// panic wrapper or the VM service wrote) counts one; a clean boot starts the
+// count over; an app's, a wallpaper's or a game's crash leaves it, the strike
+// ledger's to count. At `crash_limit` crashes in a row (MOY_CRASH_LIMIT
+// unless the console set another, 0 never) the next boot opens the recovery
+// console, and a choice made there starts the count over.
+#define MOY_CRASH_LIMIT 3
 
 // Four starts in a row with no boot_ok send the next boot to the recovery
 // screen. Four, not three: a wallpaper that kills the board strikes out in the
@@ -133,6 +146,9 @@ typedef struct {
     char open_app[MOY_CRASH_ID_LEN];
     char open_wallpaper[MOY_CRASH_ID_LEN];
     char open_game[MOY_CRASH_ID_LEN];
+    uint32_t open_game_pid;          // the open game's process, 0 unknown
+    uint8_t crashes;                 // the console's crashes in a row (THE CRASH COUNT)
+    uint8_t crash_limit;             // the count that opens the recovery console, 0 never
 } moy_kstate_t;
 
 typedef struct {
@@ -157,6 +173,10 @@ void moy_kstate_open(moy_kstate_t *st);
 // one-shots and counts the start it decides on.
 moy_boot_decision_t moy_boot_decide(moy_kstate_t *st);
 
+// This boot's intake into the crash count: `rec` the record it took, NULL
+// for a clean boot.
+void moy_kstate_intake(moy_kstate_t *st, const moy_crash_rec_t *rec);
+
 // The console painted its first frame: the boot-loop count starts over.
 void moy_boot_proven(moy_kstate_t *st);
 
@@ -164,6 +184,11 @@ void moy_boot_proven(moy_kstate_t *st);
 // the app's when one is open, else the game's, else the wallpaper's.
 void moy_kstate_arm(moy_kstate_t *st, int role, const char *id);
 int moy_kstate_open_id(const moy_kstate_t *st, const char **id);
+// The process the GAME role's id runs as (the kernel's Player arms it with
+// the run that ticks), and the pid a record of `role` names: the game's for
+// GAME, else 0.
+void moy_kstate_arm_pid(moy_kstate_t *st, uint32_t pid);
+uint32_t moy_kstate_open_pid(const moy_kstate_t *st, int role);
 
 #ifdef __cplusplus
 }

@@ -520,7 +520,7 @@ def test_console_runs_wallpaper_and_config_drives_content(tmp_path):
     for _ in range(10):
         ws.frame(1 / 30)
     assert len(ws.ns["stars"]) == ws.config.get("star_count", 80)  # config drove it
-    assert probe.drew_something(ws.canvas)                         # drew something
+    assert probe.drew_something(ws.run.canvas)                         # drew something
 
 
 def test_console_runs_game_cart_and_scores(tmp_path):
@@ -602,7 +602,7 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
         open_tab()
         ws.mark_dirty()
         ws.frame(1 / 30)
-        cv = ws.canvas
+        cv = ws.run.canvas
         for (x, y) in strips:
             assert cv.pix(x, y) != FLOOD, \
                 "%s leaked the cart at %d,%d" % (open_tab.__name__, x, y)
@@ -629,7 +629,7 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
         if ws.ns.get("won", 0.0) > 0.0:
             won = True
     assert most == coins and won            # collected every coin and won the round
-    assert probe.drew_something(ws.canvas)  # the map() blit drew the ground
+    assert probe.drew_something(ws.run.canvas)  # the map() blit drew the ground
 
 
 def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
@@ -660,7 +660,7 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
         states.add(ws.ns["state"])
     assert best_score > 0                   # destroyed at least one enemy (scored)
     assert states != {0}                    # reached a win or game-over (round ended)
-    assert probe.distinct_pixels(ws.canvas) > 3   # the map()/sprites drew the battlefield
+    assert probe.distinct_pixels(ws.run.canvas) > 3   # the map()/sprites drew the battlefield
 
 
 def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
@@ -672,7 +672,7 @@ def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     _open_cart(ws, "Brick Siege")
     ns = ws.ns
     TS = ns["TS"]
-    tm = ws.project.play_map                # the run's own map (E-02)
+    tm = ws.run.project.play_map                # the run's own map (E-02)
     # find a brick and a steel cell in the loaded field
     brick = steel = None
     for y in range(tm.h):
@@ -719,7 +719,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    assert (ws.canvas.w, ws.canvas.h) == (320, 240)     # same surface as the device
+    assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)     # same surface as the device
     assert ws.launcher.items                            # seeded system carts
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # launcher renders
@@ -895,13 +895,14 @@ def test_mouse_aliases_touch_as_tic80_tuple():
 def test_time_advances_with_cart_clock():
     from runtime import host_app
     from runtime import console as C
-    inp = StubInput()
-    inp.cart_start_ms = C._ticks_ms()
-    api = host_app.make_api(_Stub(), inp, {})
+    from runtime.procs import Run
+    run = Run()
+    run.cart_start_ms = C._ticks_ms()
+    api = host_app.make_api(_Stub(), StubInput(), {}, run=run)
     t0 = api["time"]()
     assert t0 >= 0
     # Move the start back 50ms; time() = now - start must grow accordingly.
-    inp.cart_start_ms = C._ticks_diff(inp.cart_start_ms, 50)
+    run.cart_start_ms = C._ticks_diff(run.cart_start_ms, 50)
     assert api["time"]() >= t0 + 50
 
 
@@ -1354,7 +1355,7 @@ def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     assert me.size == 2
     mx, my = _mv0(ws)
     me.n = 5
-    cols = ws.project.sheet.cols
+    cols = ws.run.project.sheet.cols
     cx, cy = me.cam_x, me.cam_y
     drv.click(mx + 2, my + 2)                # tap the top-left visible cell
     drv.frame(1 / 30)
@@ -1740,9 +1741,9 @@ def test_cart_using_clip_camera_flip_runs_and_resets_between_frames(tmp_path):
     drv.frame(1 / 30)
     assert ws.cart_error is None
     # After the frame the canvas draw state is back to defaults (UI drew clean).
-    assert ws.canvas._cam_x == 0 and ws.canvas._cam_y == 0
-    assert ws.canvas._clip_x1 == ws.canvas.w and ws.canvas._clip_y1 == ws.canvas.h
-    assert list(ws.canvas._pal_map) == list(range(64))
+    assert ws.run.canvas._cam_x == 0 and ws.run.canvas._cam_y == 0
+    assert ws.run.canvas._clip_x1 == ws.run.canvas.w and ws.run.canvas._clip_y1 == ws.run.canvas.h
+    assert list(ws.run.canvas._pal_map) == list(range(64))
 
 
 def test_background_declares_color_and_image_backdrops():
@@ -1785,19 +1786,19 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("type") == "game")
     ws.open()
-    ws.project.cart["src"] = (
+    ws.run.project.cart["src"] = (
         "def _init():\n"
         "    background(col('red'))\n"
         "def _draw():\n"
         "    rect(0, 0, 8, 8, col('white'))\n"
     )
     assert ws._start()
-    ws.player.tick(1 / 30)
+    ws.run.player.tick(1 / 30)
     red = chrome.color("red")
     white = chrome.color("white")
-    assert ws.canvas.pix(0, 0) == white           # the actor drew over the backdrop
-    assert ws.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
-    ws.canvas.pix(100, 100, white)                # scribble...
-    ws.player.tick(1 / 30)
-    assert ws.canvas.pix(100, 100) == red, (
+    assert ws.run.canvas.pix(0, 0) == white           # the actor drew over the backdrop
+    assert ws.run.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
+    ws.run.canvas.pix(100, 100, white)                # scribble...
+    ws.run.player.tick(1 / 30)
+    assert ws.run.canvas.pix(100, 100) == red, (
         "the declared background must reclaim the frame before each tick")

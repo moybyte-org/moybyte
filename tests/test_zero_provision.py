@@ -24,8 +24,8 @@ What is left here is what is genuinely this script's:
     offers is a DEV LOOP, and its file list comes from board.toml;
   * the pushed copies SHADOW the image (MicroPython searches / before .frozen),
     so the push is opt-in and there is a way to undo it;
-  * the pin, because since 2026-08-25 a board with no pin is a board serving its
-    whole store to the network.
+  * the board's password, because a Zero has no screen for a pairing code: a
+    board with none is one no browser can pair with.
 """
 
 import re
@@ -106,27 +106,36 @@ def test_the_browser_console_rides_this_boards_image():
     assert "/moy/web" not in SCRIPT, "provisioning re-grew a storage bundle"
 
 
-def test_provisioning_mints_a_pin_when_the_board_has_none():
-    """A USB-provisioned Zero never went through the AP setup form that mints
-    one, so until 2026-08-25 it had none -- and with the pin now gating every
-    read, none means the whole store is public. Minted ON THE BOARD so the
-    "is there one?" check and the write are the same read of the same
-    filesystem, and KEPT when there is one: re-running this script must never
-    rotate a pin somebody has already scanned into a phone."""
-    assert "== pairing pin" in SCRIPT
-    assert "zero.json" in SCRIPT
-    assert "ZEROPIN new" in SCRIPT and "ZEROPIN kept" in SCRIPT
-    # The kept branch is what makes it idempotent; assert it is guarded on the
-    # EXISTING value rather than on the file merely being there (a zero.json
-    # written by an older setup carries a name and no pin).
-    assert "if not d.get('pin'):" in SCRIPT
+def test_provisioning_sets_the_password_as_a_hash_and_keeps_one_already_there():
+    """`--password` asks twice, never echoed, and writes the HASH where the
+    sign-in reads it (the system folder's `password`, as `passwd` writes it);
+    without the flag a password already on the board is left alone."""
+    assert "--password) SET_PASSWORD=1" in SCRIPT
+    assert 'read -rsp' in SCRIPT
+    assert "ssh_service.hashed(" in SCRIPT
+    assert "/moy/system/password" in SCRIPT
+    body = SCRIPT[SCRIPT.index('if [ "${SET_PASSWORD}" = "1" ]'):SCRIPT.index("== pairing")]
+    assert "PW1}" not in body.split("HASH=")[1].split("board_write")[1], \
+        "the password itself reached the board"
 
 
-def test_provisioning_prints_the_paired_url_and_says_so_when_it_cannot():
-    """The pin is the whole pairing gesture: a page that does not carry it sees
-    a prompt with nothing to type into it. And a board that ended up without one
-    must SAY so -- silence there reads as success."""
+def test_a_write_the_board_refuses_stops_provisioning():
+    """A full store refuses a mkdir and the write under it (2026-11-07: the
+    password never landed and the script said done). Every write is checked
+    on the board, and a refusal exits non-zero with what the board said."""
+    helper = SCRIPT[SCRIPT.index("board_write() {"):SCRIPT.index("board_mkdir() {")]
+    assert "grep -qx 'MOYOK'" in helper and "exit 1" in helper
+    assert "if e.args[0] != 17: raise" in SCRIPT
+    body = SCRIPT[SCRIPT.index('echo "== dirs"'):SCRIPT.index("== pairing")]
+    assert "except OSError: pass" not in body
+    for what in ('board_write "wifi.json"', 'board_write "the password"',
+                 "board_mkdir /moy/system"):
+        assert what in body, what
+
+
+def test_provisioning_says_how_to_pair_and_says_so_when_it_cannot():
+    """A board with a password is paired from its address; one without must
+    SAY that no browser can pair -- silence there reads as success."""
     tail = SCRIPT[SCRIPT.index("== reboot into the host"):]
-    assert "?pin=${PIN}" in tail
-    assert "PAIRED URL" in tail
-    assert "WARNING" in tail and "anyone on the network" in tail
+    assert "http://${NAME}.local/" in tail
+    assert "WARNING" in tail and "no browser can pair" in tail

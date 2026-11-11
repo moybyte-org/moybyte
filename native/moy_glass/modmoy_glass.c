@@ -896,25 +896,49 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
 
 #if MOY_GLASS_PRESENT
 //
-// front(comp[, game]) gives the kernel's Player this compositor as the two
-// ends of a run in the loop's foreground: where the run's frame is drawn and
-// how it reaches the glass. A banded compositor's game canvas IS the panel,
-// drawn straight into the back buffer and presented as the console presents
-// it. A DSI compositor's run draws into the game canvas `game` -- (buf, w, h,
-// ox, oy, scale, smooth) -- which each present scales into the back buffer:
-// the PPA's bilinear scale where the board has it and `smooth` holds, the
-// CPU kernel's nearest one otherwise, then the switch. front(None) withdraws.
+// front(comp[, game[, frames]]) gives the kernel's Player this compositor as
+// the two ends of a run in the loop's foreground: where the run's frame is
+// drawn and how it reaches the glass. A banded compositor's game canvas IS the
+// panel, drawn straight into the back buffer and presented as the console
+// presents it (`game` None). A DSI compositor's run draws into the game canvas
+// `game` -- (buf, w, h, ox, oy, scale, smooth[, bezel]) -- which each present
+// scales into the back buffer: the PPA's bilinear scale where the board has
+// it and `smooth` holds, the CPU kernel's nearest one otherwise, then the
+// switch. Every scan buffer is cleared black once, unless `bezel` is false:
+// the glass around the game is the console's to keep (a full-screen window on
+// the desk, every scan buffer already holding it). A banded panel larger than
+// its game canvas (the Guition S3's) takes `game` and the fold's `scratch` --
+// (buf, w, h, ox, oy, scale, smooth, scratch) -- and each present snapshots
+// the canvas into the scratch, which the flush resolves band by band with the
+// bezel around it (moy_fold.h), as the console's blit_game does.
+//
+// `frames`, a 64-aligned PSRAM buffer (the run's CartFrame scratch), lets a
+// compiled run's frame go to the glass from the cart's memory, as the
+// console's present_frame sends it: on a DSI board the PPA scales it into the
+// back buffer and the GDMA copies it into `frames`; on a banded one the frame
+// fold snapshots it into `frames` and the flush resolves it band by band
+// (moy_fold_arm_frame). The copy is the frame the binding writes into the
+// canvas if the cart draws before its next blit. None: the board shows only
+// its canvas, and the Player keeps a compiled run in the console's frame.
+// front(None) withdraws.
 
 typedef struct {
     uint16_t *(*canvas)(void *ctx, int *w, int *h);
     void (*present)(void *ctx, bool drew);
     bool (*map)(void *ctx, int32_t *x, int32_t *y);
     void *ctx;
+    bool (*frame)(void *ctx, const uint8_t *px, const uint16_t *lut, const uint8_t **kept);
+    void (*frame_fence)(void *ctx);
 } glass_front_ops_t;                    // moy_play.h's moy_front_ops_t, field for field
 
 void moy_play_front_ops(const glass_front_ops_t *ops) __attribute__((weak));
 int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src,
                     int sw, int sh, int scale) __attribute__((weak));
+int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src,
+                       int sw, int sh, int scale) __attribute__((weak));
+long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n)
+    __attribute__((weak));
+void moy_ppa_k_sync(void) __attribute__((weak));
 // moy_gfx_kernels.h's nearest-neighbour upscale (moy_gfx is in every console).
 void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
                       const uint16_t *src, size_t scap, int sw, int sh, int scale);
@@ -926,7 +950,16 @@ static struct {
     uint16_t *game;
     int gw, gh, ox, oy, scale;
     bool smooth;
+    uint8_t *scr;                       // the fold's scratch (a banded game canvas)
+    size_t scr_len;
+    uint8_t *fr;                        // `frames`: a compiled frame's copy
+    size_t fr_len;
+    uint32_t shown;                     // frames shown from the cart's memory
+    size_t kept_off;                    // where the last one's copy sits in `frames`
+    uint8_t kept_fmt;                   // ...and its layout: moy_fold's LE565 1, IDX8 2
 } G;
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_frames);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_scr);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_comp);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_front_game);
 
@@ -957,6 +990,71 @@ static bool front_identity(void *ctx, int32_t *x, int32_t *y) {
     glass_banded_obj_t *c = ctx;
     return *x >= 0 && *y >= 0 && *x < c->w && *y < c->h;
 }
+
+#if MOY_GLASS_BANDED
+// The run draws once the last snapshot has read the canvas.
+static uint16_t *front_fold_canvas(void *ctx, int *w, int *h) {
+    (void)ctx;
+    moy_fold_snap_fence();
+    *w = G.gw;
+    *h = G.gh;
+    return G.game;
+}
+
+static void front_fold_present(void *ctx, bool drew) {
+    glass_banded_obj_t *c = ctx;
+    if (!drew) {
+        return;
+    }
+    moy_fold_fence();                   // the last flush has read the scratch
+    bool async_copy = false;
+    if (!moy_fold_arm_snap((const uint8_t *)G.game, (size_t)G.gw * (size_t)G.gh * 2u, 0,
+                           G.scr, G.scr_len, G.gw, G.gh, 0, G.gw, G.ox, G.oy, G.scale,
+                           (int)c->w, (int)c->h, &async_copy)) {
+        // Geometry the fold cannot express: the bezel and the scale on the CPU.
+        size_t n;
+        uint16_t *dst = view_px(c->fbs[c->b.back], &n);
+        memset(dst, 0, n * 2u);
+        mg_blit565_scale(dst, n, (int)c->w, (int)c->h, G.ox, G.oy, G.game,
+                         (size_t)G.gw * (size_t)G.gh, G.gw, G.gh, G.scale);
+    }
+    moy_banded_present(&c->b);
+}
+
+// A compiled run's frame, from the cart's memory: the frame fold snapshots it
+// into `frames` and the flush resolves it band by band -- the palette or the
+// byte order, the scale and the bezel -- so no canvas holds it (moy_fold.h).
+// The snapshot reads the cart's memory until the next frame's fence; the
+// flush reads only the copy.
+static bool front_banded_frame(void *ctx, const uint8_t *px, const uint16_t *lut,
+                               const uint8_t **kept) {
+    glass_banded_obj_t *c = ctx;
+    if (G.fr == NULL) {
+        return false;
+    }
+    size_t n = (size_t)G.gw * (size_t)G.gh * (lut != NULL ? 1u : 2u);
+    size_t off = 0;
+    bool async_copy = false;
+    moy_fold_fence();                   // the last flush has read the copy
+    if (!moy_fold_arm_frame(px, n, lut != NULL ? MOY_FOLD_IDX8 : MOY_FOLD_LE565, lut,
+                            G.fr, G.fr_len, G.gw, G.gh, 0, 0, G.gw, G.gh, G.ox, G.oy,
+                            G.scale, (int)c->w, (int)c->h, NULL, 0, NULL, 0, &off,
+                            &async_copy)) {
+        return false;
+    }
+    moy_banded_present(&c->b);
+    G.shown++;
+    G.kept_off = off;
+    G.kept_fmt = lut != NULL ? 2 : 1;
+    *kept = G.fr + off;
+    return true;
+}
+
+static void front_banded_frame_fence(void *ctx) {
+    (void)ctx;
+    moy_fold_snap_fence();
+}
+#endif
 #endif
 
 static uint16_t *front_dsi_canvas(void *ctx, int *w, int *h) {
@@ -983,7 +1081,158 @@ static void front_dsi_present(void *ctx, bool drew) {
     moy_dsi_present(&c->d, false);
 }
 
-static bool front_dsi_map(void *ctx, int32_t *x, int32_t *y) {
+// A compiled run's frame, from the cart's memory: the PPA's scale into the
+// back buffer, queued, then the GDMA's copy into the scratch, the show
+// queued behind the scale (moy_dsi_present's deferred composite). The scale
+// goes first: its submit writes the frame's cache lines back, which the
+// copy then reads. Both read the cart's memory until the next frame's
+// fence (front_dsi_frame_fence, and moy_dsi_present_pending before it).
+static bool front_dsi_frame(void *ctx, const uint8_t *px, const uint16_t *lut,
+                            const uint8_t **kept) {
+    glass_dsi_obj_t *c = ctx;
+    if (lut != NULL || G.fr == NULL || moy_ppa_k_scale_nb == NULL || moy_ppa_k_snap == NULL) {
+        return false;                   // a palette frame: ESP-IDF has no palette scale
+    }
+    size_t n;
+    uint16_t *dst = view_px(mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(c->d.back),
+                                          MP_OBJ_SENTINEL), &n);
+    if (moy_ppa_k_scale_nb(dst, (int)c->w, (int)c->h, G.ox, G.oy, px, G.gw, G.gh,
+                           G.scale) != 0) {
+        return false;
+    }
+    c->d.composite_pending = true;
+    long off = moy_ppa_k_snap(G.fr, G.fr_len, px, (size_t)G.gw * (size_t)G.gh * 2u);
+    moy_dsi_present(&c->d, false);
+    G.shown++;
+    G.kept_off = (size_t)off;
+    G.kept_fmt = 1;
+    *kept = G.fr + off;                 // the bind sized and aligned it: never -1
+    return true;
+}
+
+static void front_dsi_frame_fence(void *ctx) {
+    (void)ctx;
+    if (moy_ppa_k_sync != NULL) {
+        moy_ppa_k_sync();
+    }
+}
+
+// The rotated compositor (the Guition P4): every front frame is a quiet
+// direct game frame of moy_rot_flush -- the game canvas, or a compiled
+// frame's snapshot in `frames`, scaled and rotated straight into a scan
+// buffer by queued PPA ops, the show at the loop's pre-frame hook
+// (moy_rot_present_pending), as the console's quiet play frames go. A buffer
+// the stale lists bring current with a full rotate reads the paint buffer,
+// which the game is scaled into first (`paint`). The snapshot is read by the
+// queued op, never the cart's memory, so the fence before the cart's next
+// hook is the snapshot's alone.
+void moy_ppa_k_snap_wait(void) __attribute__((weak));
+static mp_obj_array_t front_rot_kept;   // the snapshot, as the queued op's source
+
+static mp_obj_t front_rot_quiet(void) {
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(front_rot_quiet_obj, front_rot_quiet);
+
+static mp_obj_t front_rot_paint(void) {
+    glass_rot_obj_t *c = G.ops.ctx;
+    size_t n;
+    uint16_t *dst = view_px(c->bufs[MOY_ROT_PAINT0 + c->r.pi], &n);
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(c->bufs[MOY_ROT_GAME], &sb, MP_BUFFER_READ);
+    if (!(moy_ppa_k_scale != NULL
+          && moy_ppa_k_scale(dst, (int)c->r.w, (int)c->r.h, G.ox, G.oy, sb.buf, G.gw, G.gh,
+                             G.scale) == 0)) {
+        mg_blit565_scale(dst, n, (int)c->r.w, (int)c->r.h, G.ox, G.oy, sb.buf,
+                         sb.len / 2u, G.gw, G.gh, G.scale);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(front_rot_paint_obj, front_rot_paint);
+
+static void front_rot_flush(glass_rot_obj_t *c, mp_obj_t src, bool frame) {
+    moy_rot_game_t *g = &c->r.game;
+    g->sw = G.gw;
+    g->sh = G.gh;
+    g->ox = G.ox;
+    g->oy = G.oy;
+    g->scale = G.scale;
+    g->direct = true;
+    g->frame = frame;
+    g->bx = 0;
+    g->by = 0;
+    g->bw = (int16_t)G.gw;
+    g->bh = (int16_t)G.gh;
+    g->rows = 0;
+    g->npatch = 0;
+    c->bufs[MOY_ROT_GAME] = src;
+    c->bufs[MOY_ROT_PIC] = mp_const_none;
+    c->paint = MP_OBJ_FROM_PTR(&front_rot_paint_obj);
+    c->quiet = MP_OBJ_FROM_PTR(&front_rot_quiet_obj);
+    c->r.has_game = true;
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    moy_rot_flush(&c->r);
+    c->paint = c->quiet = mp_const_none;
+}
+
+static void front_rot_present(void *ctx, bool drew) {
+    if (drew) {
+        front_rot_flush(ctx, MP_STATE_VM(moy_glass_front_game), false);
+    }
+}
+
+static bool front_rot_frame(void *ctx, const uint8_t *px, const uint16_t *lut,
+                            const uint8_t **kept) {
+    if (lut != NULL || G.fr == NULL || moy_ppa_k_snap == NULL) {
+        return false;                   // a palette frame: ESP-IDF has no palette scale
+    }
+    size_t n = (size_t)G.gw * (size_t)G.gh * 2u;
+    if (moy_ppa_k_sync != NULL) {
+        moy_ppa_k_sync();               // nothing reads the last copy now
+    }
+    long off = moy_ppa_k_snap(G.fr, G.fr_len, px, n);
+    mp_obj_array_t *v = &front_rot_kept;
+    v->base.type = &mp_type_memoryview;
+    v->typecode = 'B';
+    v->free = 0;
+    v->len = n;
+    v->items = G.fr + off;
+    front_rot_flush(ctx, MP_OBJ_FROM_PTR(v), true);
+    G.shown++;
+    G.kept_off = (size_t)off;
+    G.kept_fmt = 1;
+    *kept = G.fr + off;
+    return true;
+}
+
+static void front_rot_frame_fence(void *ctx) {
+    (void)ctx;
+    if (moy_ppa_k_snap_wait != NULL) {
+        moy_ppa_k_snap_wait();
+    }
+}
+
+// `frames` (the third argument) taken: a 64-aligned buffer with room for
+// the gw x gh frame's 64-aligned span and a palette frame's colours. False:
+// none given, or one too small, and the compositor shows only its canvas.
+#define FRONT_FRAMES_SLACK 640u         // the span's slack and moy_fold's LUT bytes
+static bool front_frames(size_t n_args, const mp_obj_t *a) {
+    if (n_args < 3 || a[2] == mp_const_none) {
+        return false;
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[2], &b, MP_BUFFER_WRITE);
+    if (((uintptr_t)b.buf & 63u) != 0
+            || b.len < (size_t)G.gw * (size_t)G.gh * 2u + FRONT_FRAMES_SLACK) {
+        return false;
+    }
+    G.fr = b.buf;
+    G.fr_len = b.len;
+    MP_STATE_VM(moy_glass_front_frames) = a[2];
+    return true;
+}
+
+static bool front_game_map(void *ctx, int32_t *x, int32_t *y) {
     (void)ctx;
     int32_t gx = (*x - G.ox) / G.scale, gy = (*y - G.oy) / G.scale;
     bool in = *x >= G.ox && *y >= G.oy && gx < G.gw && gy < G.gh;
@@ -1000,19 +1249,69 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         moy_play_front_ops(NULL);
         MP_STATE_VM(moy_glass_front_comp) = MP_OBJ_NULL;
         MP_STATE_VM(moy_glass_front_game) = MP_OBJ_NULL;
+        MP_STATE_VM(moy_glass_front_scr) = MP_OBJ_NULL;
+        MP_STATE_VM(moy_glass_front_frames) = MP_OBJ_NULL;
         return mp_const_true;
     }
     memset(&G, 0, sizeof(G));
+    MP_STATE_VM(moy_glass_front_frames) = MP_OBJ_NULL;
     if (false) {
+#if MOY_GLASS_BANDED
+    } else if (mp_obj_is_type(a[0], &glass_banded_type) && n_args > 1
+               && a[1] != mp_const_none) {
+        mp_obj_t *g;
+        mp_obj_get_array_fixed_n(a[1], 8, &g);
+        size_t n;
+        G.game = view_px(g[0], &n);
+        G.gw = (int)mp_obj_get_int(g[1]);
+        G.gh = (int)mp_obj_get_int(g[2]);
+        G.ox = (int)mp_obj_get_int(g[3]);
+        G.oy = (int)mp_obj_get_int(g[4]);
+        G.scale = (int)mp_obj_get_int(g[5]);
+        mp_buffer_info_t sb;
+        mp_get_buffer_raise(g[7], &sb, MP_BUFFER_WRITE);
+        G.scr = sb.buf;
+        G.scr_len = sb.len;
+        glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+        if (G.scale < 1 || n < (size_t)G.gw * (size_t)G.gh || G.ox < 0 || G.oy < 0
+                || G.ox + G.gw * G.scale > c->w || G.oy + G.gh * G.scale > c->h) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
+        G.ops.canvas = front_fold_canvas;
+        G.ops.present = front_fold_present;
+        G.ops.map = front_game_map;
+        if (front_frames(n_args, a)) {
+            G.ops.frame = front_banded_frame;
+            G.ops.frame_fence = front_banded_frame_fence;
+        }
+        MP_STATE_VM(moy_glass_front_game) = g[0];
+        MP_STATE_VM(moy_glass_front_scr) = g[7];
+#endif
 #ifdef MOY_GLASS_BANDED_TYPE
     } else if (mp_obj_is_type(a[0], &glass_banded_type)) {
+        glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
         G.ops.canvas = front_banded_canvas;
         G.ops.present = front_banded_present;
         G.ops.map = front_identity;
+#if MOY_GLASS_BANDED
+        G.gw = (int)c->w;
+        G.gh = (int)c->h;
+        G.scale = 1;
+        if (front_frames(n_args, a)) {
+            G.ops.frame = front_banded_frame;
+            G.ops.frame_fence = front_banded_frame_fence;
+        }
+#else
+        (void)c;
+#endif
 #endif
     } else if (mp_obj_is_type(a[0], &glass_dsi_type) && n_args > 1) {
         mp_obj_t *g;
-        mp_obj_get_array_fixed_n(a[1], 7, &g);
+        size_t ng;
+        mp_obj_get_array(a[1], &ng, &g);
+        if (ng < 7 || ng > 8) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
         size_t n;
         G.game = view_px(g[0], &n);
         G.gw = (int)mp_obj_get_int(g[1]);
@@ -1025,36 +1324,109 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
             mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
         }
         G.dsi = true;
-        // The bezel: every scan buffer black once, so none shows what the
-        // screen before the run left around the game.
         glass_dsi_obj_t *c = MP_OBJ_TO_PTR(a[0]);
-        size_t nf;
-        mp_obj_t *fv;
-        mp_obj_get_array(c->fbs, &nf, &fv);
-        for (size_t i = 0; i < nf; i++) {
-            size_t k;
-            uint16_t *p = view_px(fv[i], &k);
-            memset(p, 0, k * 2u);
+        if (G.ox < 0 || G.oy < 0 || G.ox + G.gw * G.scale > c->w
+                || G.oy + G.gh * G.scale > c->h) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
+        if (moy_ppa_k_snap != NULL && front_frames(n_args, a)) {
+            G.ops.frame = front_dsi_frame;
+            G.ops.frame_fence = front_dsi_frame_fence;
+        }
+        // The bezel: every scan buffer black once, so none shows what the
+        // screen before the run left around the game -- unless the console
+        // keeps it.
+        moy_dsi_fence(&c->d);
+        if (ng < 8 || mp_obj_is_true(g[7])) {
+            size_t nf;
+            mp_obj_t *fv;
+            mp_obj_get_array(c->fbs, &nf, &fv);
+            for (size_t i = 0; i < nf; i++) {
+                size_t k;
+                uint16_t *p = view_px(fv[i], &k);
+                memset(p, 0, k * 2u);
+            }
         }
         G.ops.canvas = front_dsi_canvas;
         G.ops.present = front_dsi_present;
-        G.ops.map = front_dsi_map;
+        G.ops.map = front_game_map;
+        MP_STATE_VM(moy_glass_front_game) = g[0];
+    } else if (mp_obj_is_type(a[0], &glass_rot_type) && n_args > 1) {
+        mp_obj_t *g;
+        size_t ng;
+        mp_obj_get_array(a[1], &ng, &g);
+        if (ng < 7 || ng > 8) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
+        size_t n;
+        G.game = view_px(g[0], &n);
+        G.gw = (int)mp_obj_get_int(g[1]);
+        G.gh = (int)mp_obj_get_int(g[2]);
+        G.ox = (int)mp_obj_get_int(g[3]);
+        G.oy = (int)mp_obj_get_int(g[4]);
+        G.scale = (int)mp_obj_get_int(g[5]);
+        glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+        if (G.scale < 1 || n < (size_t)G.gw * (size_t)G.gh || G.ox < 0 || G.oy < 0
+                || G.ox + G.gw * G.scale > c->r.w || G.oy + G.gh * G.scale > c->r.h) {
+            mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
+        }
+        if (front_frames(n_args, a)) {
+            G.ops.frame = front_rot_frame;
+            G.ops.frame_fence = front_rot_frame_fence;
+        }
+        // The bezel: every scan and paint buffer black once, every scan
+        // buffer then current -- unless the console keeps the glass.
+        glass_shift_fence(c->ppa, &c->shift_fly);
+        moy_rot_fence(&c->r);
+        if (moy_ppa_k_sync != NULL) {
+            moy_ppa_k_sync();
+        }
+        if (ng < 8 || mp_obj_is_true(g[7])) {
+            for (int i = 0; i < MOY_ROT_PAINT0 + 2; i++) {
+                size_t k;
+                uint16_t *p = view_px(c->bufs[i], &k);
+                memset(p, 0, k * 2u);
+            }
+            for (int i = 0; i < 3; i++) {
+                c->r.stale_full[i] = false;
+                c->r.nstale[i] = 0;
+            }
+        }
+        G.ops.canvas = front_dsi_canvas;
+        G.ops.present = front_rot_present;
+        G.ops.map = front_game_map;
         MP_STATE_VM(moy_glass_front_game) = g[0];
     } else {
-        return mp_const_false;          // a compositor with no front (rotated)
+        return mp_const_false;
     }
     G.ops.ctx = MP_OBJ_TO_PTR(a[0]);
     MP_STATE_VM(moy_glass_front_comp) = a[0];
     moy_play_front_ops(&G.ops);
     return mp_const_true;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_front_obj, 1, 2, glass_front);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_front_obj, 1, 3, glass_front);
+
+// front_stats() -> (frames the front showed from the cart's memory since the
+// bind, where the last one's copy sits in `frames`, its layout: 1 RGB565, 2
+// indices), or None with no `frames` bound: the on-glass suites' proof that a
+// compiled front shows its frames.
+static mp_obj_t glass_front_stats(void) {
+    if (G.fr == NULL) {
+        return mp_const_none;
+    }
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(G.shown),
+                      mp_obj_new_int_from_uint((mp_uint_t)G.kept_off),
+                      MP_OBJ_NEW_SMALL_INT(G.kept_fmt) };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(glass_front_stats_obj, glass_front_stats);
 
 #endif // MOY_GLASS_PRESENT
 
 static const mp_rom_map_elem_t glass_globals_table[] = {
     #if MOY_GLASS_PRESENT
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&glass_front_obj) },
+    { MP_ROM_QSTR(MP_QSTR_front_stats), MP_ROM_PTR(&glass_front_stats_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_glass) },
     { MP_ROM_QSTR(MP_QSTR_buf), MP_ROM_PTR(&glass_buf_obj) },

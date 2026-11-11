@@ -1,0 +1,4 @@
+$ df
+Folder                           Size         Used         Free
+/                             1048576       524288       524288
+[exit 0]

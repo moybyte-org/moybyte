@@ -107,6 +107,19 @@ int moy_net_link(uint32_t *ip) {
     return *ip != 0;
 }
 
+// No station dials on the host: a request never waits for one.
+int moy_net_dialing(void) {
+    return 0;
+}
+
+// THE NETWORK'S GATE (moy_net.h): the host's network is the machine's, open,
+// unless a test models a station, whose link moy_net_host_link_ip is.
+int moy_net_host_station;
+
+int moy_net_online(void) {
+    return !moy_net_host_station || moy_net_host_link_ip != 0;
+}
+
 // The board's pins, standing in for the Zero's: a table a test sets, the
 // levels driven, and an input that reads its pull-up.
 uint8_t moy_net_host_pins[16];
@@ -126,6 +139,12 @@ int moy_gpio_drive(int pin, int level) {
     moy_net_host_mode[pin] = 2;
     moy_net_host_level[pin] = level;
     return 0;
+}
+
+void moy_gpio_reset(int pin) {
+    if (pin >= 0 && pin < 64) {
+        moy_net_host_mode[pin] = 0;
+    }
 }
 
 int moy_gpio_sense(int pin) {

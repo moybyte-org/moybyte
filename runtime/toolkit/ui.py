@@ -181,6 +181,9 @@ _TUPLE = type(())
 _LIST = type([])            # `list` is the verb below
 
 
+_ROWS = ("subs", "icons", "counts", "tags", "marks")     # MOY_UI_OR_*'s order
+
+
 def _over(o):
     """The override table as the engine reads it: the dict where the module
     takes one, else its block (moy_ui_api.h); None for none."""
@@ -188,6 +191,12 @@ def _over(o):
         return None
     if _OVER_DICT:
         return o
+    return _block(o)
+
+
+def _block(o):
+    """The override block of table `o` (a frame of its own: its many locals
+    would cost the dict's path a heap frame under MicroPython)."""
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
     hint = o.get("hint")
@@ -207,11 +216,24 @@ def _over(o):
     at = o.get("at")
     shift = o.get("shift")
     fade = o.get("fade")
+    sig = o.get("signal")
+    vals = o.get("values")
+    check = o.get("check")
+    rows = [o.get(k) for k in _ROWS]
+    card = o.get("card")
+    tag = o.get("tag")
+    foc = o.get("focus")
+    more = 1 if o.get("follow") else 0     # the second word of flags (MOY_UI_O2_*)
+    rmask = 0
+    for i in range(5):
+        if rows[i] is not None:
+            rmask |= 1 << i
     flags = None
     if (wash is not None or lead is not None or gen is not None or part is not None or bar
             or axis or snap or offset is not None or spill is not None or keep is not None
             or ov is not None or whole or across is not None or at is not None or shift
-            or fade):
+            or fade or sig is not None or vals is not None or check or rmask
+            or card or tag is not None or foc is not None or more):
         flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
                  | (4 if gen is not None else 0) | (16 if part is not None else 0)
                  | (32 if bar else 0) | (1024 if axis else 0) | (2048 if snap else 0)
@@ -219,7 +241,11 @@ def _over(o):
                  | (16384 if keep is not None else 0) | (32768 if ov is not None else 0)
                  | (65536 if whole else 0) | (131072 if across is not None else 0)
                  | (262144 if at is not None else 0) | (524288 if shift else 0)
-                 | (1048576 if fade else 0))
+                 | (1048576 if fade else 0) | (2097152 if sig is not None else 0)
+                 | (4194304 if vals is not None else 0) | (8388608 if check else 0)
+                 | (16777216 if wash == "view" else 0) | (33554432 if rmask else 0)
+                 | (67108864 if card else 0) | (134217728 if tag is not None else 0)
+                 | (268435456 if foc is not None else 0) | (536870912 if more else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
@@ -243,6 +269,25 @@ def _over(o):
         tail += _pack("<i", int(at))
     if fade:
         tail += _pack("<i", int(fade))
+    if sig is not None:
+        tail += _pack("<i", int(sig))
+    if vals is not None:
+        vb = "\0".join([str(v) for v in vals]).encode("utf-8")
+        tail += _pack("<i", len(vb)) + vb
+    if rmask:
+        tail += _pack("<i", rmask)
+        for r in rows:
+            if r is not None:
+                rb = "\0".join([str(v) for v in r]).encode("utf-8")
+                tail += _pack("<i", len(rb)) + rb
+    if tag is not None:
+        tb = str(tag).encode("utf-8")
+        tail += _pack("<i", len(tb)) + tb
+    if foc is not None:
+        fb = str(foc).encode("utf-8")
+        tail += _pack("<i", len(fb)) + fb
+    if more:
+        tail += _pack("<i", more)
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -258,9 +303,10 @@ def _hint(b):
 
 
 def page(title, o=None):
-    """A page filling the app's surface (or `at`'s rect) under `title`, its
-    rows stacking from the top: the content rect `(x, y, w, h)`. Its id is
-    its title, or `o.id` where two pages share one."""
+    """A page filling the app's surface (or `at`'s rect), its rows stacking
+    from the top: the content rect `(x, y, w, h)`. `title` draws in no
+    page: it is the title the frame lends the host's bar where `bar` lends
+    none. Its id is its title, or `o.id` where two pages share one."""
     t = _T
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
 
@@ -320,7 +366,14 @@ def slider(label, v, lo, hi, o=None):
 def list(label, items, cur, o=None):
     """Rows of `items` under `label`, `cur` (from 0, -1 none) wearing the
     current mark; up and down move in it until its first or last row, and
-    activation makes the focused row current: the new `cur`."""
+    activation makes the focused row current: the new `cur`. `o.values` is
+    a text a row at its right in the dim ink, `o.check` the check icon on
+    the current row. `o.subs` makes each row two-line: its item the title,
+    its sub the caption line under it, its value the time on the title's
+    line; `o.icons` leads each row with an icon (an entry "@" and a name:
+    that person's initials on a disc), `o.counts` puts a badge at its
+    right ("" or 0 none; a row with one draws its title in `value`),
+    `o.tags` a pill after its title and `o.marks` an icon there."""
     t = _T
     k = type(items)
     b = items if _SEQ and (k is _TUPLE or k is _LIST) else \
@@ -934,9 +987,15 @@ def text_view(id, lines, o=None, err=None, find=None, into=None):
 def field(label, text, max=32, o=None):
     """A line of text the keyboard types into while it is focused, at most
     `max` bytes: `(text, done)`, `done` True the frame Enter is pressed in
-    it. An empty field shows `o`'s `hint`, dim."""
+    it. An empty field shows `o`'s `hint`, dim; `o.border` (a role, "danger"
+    for a field in error) is its box's border in place of its own."""
     t = _T
-    raw = str(text).encode("utf-8")[:max]
+    raw = str(text).encode("utf-8")
+    if len(raw) > max:
+        n = max
+        while n > 0 and (raw[n] & 0xC0) == 0x80:
+            n -= 1                  # never half a character
+        raw = raw[:n]
     b = bytearray(max)
     b[:len(raw)] = raw
     r = _C.api_field(t[0], t[1], t[2], label, b, len(raw), _over(o))
@@ -948,7 +1007,10 @@ def dialog(title=None, buttons=(), kind="primary", o=None):
     its `buttons` at its foot (the last of `kind`, the others normal) and its
     body the rows stacked until `dialog()` ends it; while it is drawn nothing
     under it takes input, and focus opens on its body's first stop, else its
-    first button. The button activated this frame (from 0), -1 none."""
+    first button, or with `o.focus` the button of that label (a confirm
+    that changes something opens on Cancel). `o.disabled` turns its last
+    button (its verb) off: drawn as there and off, never a stop. The button activated this frame (from 0),
+    -1 none."""
     t = _T
     if title is None:
         return _C.api_dialog(t[0], t[1], t[2], "", b"", 0, None)
@@ -968,7 +1030,9 @@ def popover(id=None, w=0, o=None):
     `popover()` ends it; while it is drawn nothing outside it takes input.
     True, or False the frame a press outside the card or Esc dismissed it
     (the app then stops drawing it). With `o.wash` it washes what it
-    covers, as a dialog does: a row's or a card's menu."""
+    covers, as a dialog does: a row's or a card's menu; with `o.wash`
+    "view" only the view its anchor lies in (the scroll region `at` was
+    called in, else the page), all but the anchor and its ring."""
     t = _T
     if id is None:
         _C.api_popover(t[0], t[1], t[2], "", 0, None)
@@ -1043,6 +1107,43 @@ def card(title, sub="", o=None):
     return _C.api_card(t[0], t[1], t[2], title, sub, _over(o))
 
 
+_BB = array("i", [0, -1, 0, 75, 4, 0])     # ui.bubble's options (moy_ui_api.h's MOY_UI_BBO_*)
+CUT = 16                                  # ui.bubble's state bit: its text was cut
+
+
+def bubble(text, side="in", o=None):
+    """A chat's bubble, a stop: `text` wrapped to `o.max` (0.75) of the
+    page's width inside its gutters, at most `o.lines` (4; 0 no limit)
+    lines, the last cut with an ellipsis. `side` "in" sits at the left on
+    `surface_alt` with `o.head` (the sender) and `o.signal` (0..4 bars, the
+    signal glyph after the head); "out" ends at the right in `value`, or
+    with `o.tone` "failed" as your colour's tint. `o.status` is a caption
+    line under it ("Sending...", or failed, the warn icon and "Not sent" in
+    the danger ink); `o.anchor` rings it while a popover hangs from it.
+    Stacked, else at `at`'s rect's top across its width: `(x, y, w, h,
+    state)`, the bubble's rect (its height the block's, with its status
+    line) and the state bits, `CUT` where its text was
+    cut."""
+    b = _BB
+    b[0] = 1 if side == "out" else 0
+    head = status = ""
+    if o:
+        sig = o.get("signal")
+        b[1] = -1 if sig is None else int(sig)
+        b[2] = 1 if o.get("tone") == "failed" else 0
+        m = o.get("max")
+        b[3] = 75 if m is None else int(m * 100 + 0.5)
+        n = o.get("lines")
+        b[4] = 4 if n is None else int(n)
+        b[5] = 1 if o.get("anchor") else 0
+        head = o.get("head") or ""
+        status = o.get("status") or ""
+    else:
+        b[1], b[2], b[3], b[4], b[5] = -1, 0, 75, 4, 0
+    t = _T
+    return _C.api_bubble(t[0], t[1], t[2], text, head, status, b, _over(o))
+
+
 def empty(icon, title, lines=()):
     """An empty page's head, centred in `at`'s rect (else the page's next
     row): `icon` on a disc of `value`, `title`, then `lines` in the dim ink,
@@ -1050,6 +1151,16 @@ def empty(icon, title, lines=()):
     The y under it."""
     t = _T
     return _C.api_empty(t[0], t[1], t[2], icon, title, _opts(lines))
+
+
+def note(icon, lines):
+    """A note on the page, part of it and no stop: `icon` ("warn" in the
+    danger label tone, else in `value`) and `lines`' paragraphs, each
+    wrapped in the caption face, the first in `ink` and the rest dim, on a
+    card inset to the page's gutters. Stacked, else at `at`'s rect's top.
+    The y under it."""
+    t = _T
+    return _C.api_note(t[0], t[1], t[2], icon, _opts(lines))
 
 
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
@@ -1085,7 +1196,8 @@ def month(year, mon, today=0):
     seven columns from Monday, the weekend's dim and day `today` (0 none)
     bold on a disc of `value`. On the desk and under touch its head holds
     the previous and next month's chevrons: -1 or 1 the frame one is
-    pressed, else 0."""
+    pressed, else 0. A rect shorter than `month_h` tightens its weeks' rows
+    to fit it."""
     t = _T
     return _C.api_month(t[0], t[1], t[2], "%s %d" % (MONTHS[mon - 1], year), "MTWTFSS",
                         weekday(year, mon, 1), month_days(year, mon), today)

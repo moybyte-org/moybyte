@@ -48,7 +48,7 @@ RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title).
 _TITLES = {"menu": "Editor", "projects": "Projects",
-           "settings": "Settings", "update": "Update"}
+           "settings": "Settings", "update": "Update", "tasks": "Tasks"}
 # The Editor's title in its theme mode (runtime/editors/theme_editor.py).
 THEME_TITLE = "Theme"
 # The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
@@ -59,10 +59,10 @@ _PLAY = "Play"
 
 # The title icon of a window no app cart draws (`_win_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
-                "update": "get", "desktop": "run"}
+                "update": "get", "desktop": "run", "tasks": "run"}
 # ...and the slot of an icon set (runtime/toolkit/iconsets.py) each draws.
 _ICON_SLOTS = {"menu": "code", "projects": "projects", "settings": "settings",
-               "update": "getcarts", "desktop": "run"}
+               "update": "getcarts", "desktop": "run", "tasks": "layout"}
 # `win.header`'s `fill` (style.json's theme.look enum: plain, fill, bar, grad),
 # whose focused header is the `value` colour and its title and icon `value_ink`.
 _HEAD_FILL = 1
@@ -140,7 +140,7 @@ class WindowChrome:
         """Whether `win` is a game's window: the player's, running a game.
         The player's window running a window-bound app cart (Notes) is an
         app window, full screen as every app's is: its row, its title."""
-        return win.kind == "desktop" and not self.ws.app_window_canvas
+        return win.kind == "desktop" and not self.ws.run.app_window_canvas
 
     def _full_chrome(self, win, focused, quiet):
         """A full-screen window's row on the root canvas: the band's ground
@@ -244,7 +244,7 @@ class WindowChrome:
         ws = self.ws
         if self._theme_doc(win) is not None:
             return "palette"
-        if win.kind == "desktop" and ws.app_window_canvas and ws.cart:
+        if win.kind == "desktop" and ws.run.app_window_canvas and ws.cart:
             name = str(ws.cart.get("id") or "")
             name = name[name.rfind(".") + 1:]
             if name in _iconsets.SLOT:
@@ -435,11 +435,14 @@ class WindowChrome:
 
     def _win_title(self, win):
         ws = self.ws
+        p = getattr(win, "proc", None)
+        if p is not None:
+            return p.title()                  # a running set's game
         if win.kind == "desktop":
             t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
             if getattr(self, "_play_intent", None) == "dev":
                 return _PLAY + _title_sep() + t       # a playtest from the Editor
-            lent = ws.bar_layer._lent("tool") if ws.app_window_canvas else None
+            lent = ws.bar_layer._lent("tool") if ws.run.app_window_canvas else None
             if lent is not None and lent[0]:
                 return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
@@ -473,7 +476,7 @@ class WindowChrome:
             t = self.ws.app_title(win.kind) or t  # the chip names the app
         for sep in (_SEP_DOT, _SEP_ASCII):
             at = t.find(sep)
-            if at > 0 and win.kind == "desktop" and self.ws.app_window_canvas:
+            if at > 0 and win.kind == "desktop" and self.ws.run.app_window_canvas:
                 return t[:at]                     # an app's chip names the app
             if at > 0 and win.kind == "desktop":
                 return t[at + len(sep):]          # a playtest's chip names the cart
@@ -483,13 +486,11 @@ class WindowChrome:
 
     def _win_btns(self, win):
         """The frame's optional strip buttons for `win` (ui_draw.FRAME_*):
-        minimize on every window, a running game's too (`_minimize` holds
-        its run while it is hidden), so every frame has one control set; and
+        minimize on every window, a running game's too (`_minimize`
+        minimises its run while it is hidden), so every frame has one control set; and
         the back chevron while its app has a page of it open
         (docs/history/look_2026-10.md step 27a), which the chrome's freeze signature
         carries."""
-        if win.kind == "desktop":
-            return _ui_draw.FRAME_MIN
         if self.ws.app_has_page(win.kind):
             return _ui_draw.FRAME_MIN | _ui_draw.FRAME_BACK
         return _ui_draw.FRAME_MIN
@@ -753,12 +754,11 @@ class WindowChrome:
         sc = self._root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
-        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized,
-                     getattr(self._wins[k], "held", False))
+        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
-            self._outside_f = self.ws._frames_drawn
+            self._outside_f = self.ws.frame_state.frames_drawn
             got = self._chips_cell()
             if got is not None:
                 bx, by, bw, bh = got[0][1]
@@ -782,8 +782,7 @@ class WindowChrome:
         focused window's chip raised under the current mark, another open
         window's in the dim ink. The focused chip's content takes the ink the
         look gives current content (Moy's accent), the plate's second cue. A
-        minimized window's chip keeps the chrome's ink, and a held game's
-        icon is the pause glyph: the state is the icon (D-25)."""
+        minimized window's chip keeps the chrome's ink."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
@@ -792,9 +791,7 @@ class WindowChrome:
             ink = (current if focused else
                    th["chrome_ink"] if win.minimized else th["chrome_ink_dim"])
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
-            if win.minimized and getattr(win, "held", False):
-                self._pause_glyph(sc, slot, ink)
-            elif not self.ws.draw_icon(self._icon_slot(win), slot, ink, sc):
+            if not self.ws.draw_icon(self._icon_slot(win), slot, ink, sc):
                 img = self._win_icon_img(win)
                 if img is not None:
                     iw = getattr(img, "w", 16) or 16
@@ -803,17 +800,6 @@ class WindowChrome:
                 else:
                     self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
-
-    @staticmethod
-    def _pause_glyph(sc, slot, ink):
-        """A held game's icon: the pause glyph, two bars in `ink` centred
-        in the icon's slot, as a media player shows a held track."""
-        x, y, w, h = slot
-        bw, bh, gap = w * 2 // 9, h * 2 // 3, w // 6
-        bx = x + (w - 2 * bw - gap) // 2
-        by = y + (h - bh) // 2
-        sc.rect(bx, by, bw, bh, ink)
-        sc.rect(bx + bw + gap, by, bw, bh, ink)
 
     def _chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a

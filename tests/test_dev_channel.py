@@ -20,6 +20,7 @@ import types
 import pytest
 
 from runtime import moy_input
+from runtime.console_perf import FrameState
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
                                  heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
@@ -86,6 +87,7 @@ class FakeWS:
         self._psave_ms = 300000
         self._psave_asleep = False
         self.input = moy_input.HostInputTable()
+        self.frame_state = FrameState()
 
 
 def make(ws=None, **kw):
@@ -170,7 +172,8 @@ def test_state_reports_the_sram_headroom_the_run_had_or_none():
     class PlayerWS(FakeWS):
         def __init__(self, report):
             FakeWS.__init__(self)
-            self.player = type("P", (), {"sram_report": lambda _s: report})()
+            self.run = type("R", (), {})()
+            self.run.player = type("P", (), {"sram_report": lambda _s: report})()
 
     tipped = {"sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
     assert _remote_state(PlayerWS(tipped))["sram"] == tipped
@@ -337,6 +340,9 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
     permission, so a two-board bench needs a way in from outside one."""
     ws, ch = make()
     ws.link = FakeLink()
+    held = []
+    ws.wifi_hold = lambda tag: held.append(tag)
+    ws.wifi_release = lambda tag: held.remove(tag)
 
     def said():
         """The one LINK line the command prints, parsed. Every branch reports,
@@ -352,6 +358,7 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
 
     ch.run(ws, "link on")
     assert ws.link.active is True and said()["active"] is True
+    assert held == ["link"]                   # the radio's row, as the Player's arm takes
 
     ch.run(ws, "link cart Brick Siege")
     assert ws.link.announced == [("Brick Siege", 1)]
@@ -359,6 +366,7 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
 
     ch.run(ws, "link off")
     assert ws.link.active is False and said()["active"] is False
+    assert held == []
 
 
 # -- `recv`: the raw upload, off the board -------------------------------------

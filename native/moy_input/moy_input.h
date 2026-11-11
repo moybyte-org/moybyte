@@ -84,8 +84,40 @@
 // While every source sits on one slot, that slot's view is the union and
 // every other slot's is empty.
 //
-// A handle is the spine's: gen << 12 | MOY_KIND_SRC << 8 | slot, generation 1
-// (a source is never released). Slot 0 is the table's own source, "local".
+// THE EVENTS (moy_event.h; docs/os_2026-11/hardware.md section 2). Every
+// source has a ring of event records beside its latch, written by the same
+// call under the same lock: a held bit that changes is a BTN record, a key
+// level that changes a KEY_UP for the old and a KEY_DOWN (and TEXT, when it
+// types) for the new, a one-shot key all three at once, a pointer sample that
+// goes down, moves or lifts a TOUCH record. A write that changes nothing
+// writes no record, so a poller re-asserting its level each frame costs none.
+// The merge reads the latches; a reader reads the records. A ring is made with
+// the source, MOY_EV_DEPTH deep and stamped POLL; moy_input_source_events
+// names its provenance and depth (an ISR's ring is internal RAM, any other the
+// table's). A full ring drops its oldest record, counted against the source
+// (moy_input_ring_info) when a reader of its kind had not read it, and against
+// that reader, which reads a LOST record where the gap was. A reader is a
+// cursor per source and a kind mask; it starts at the records written after it.
+//
+// RING SOURCES (hardware.md section 2): a source a lease or a device API
+// brings is its ring alone, no latch: made with moy_input_ring_open, ended
+// with moy_input_ring_close (its handle then stale), MOY_INPUT_RING_SOURCES of
+// them beside the latch sources, read by the same readers. A ring a task
+// writes (FIFO, POLL) is written with moy_input_post and taken from THE
+// SHARES' RINGS row (native/moy_play/moy_play.h) like every task's ring; an
+// ISR's is internal RAM, under the kernel's internal cap, and is written only
+// through a moy_input_isr_t (moy_input_isr_put), which touches nothing but the
+// ring, its lock and the clock, so it is safe from an IRAM ISR where its text
+// is IRAM (MOY_INPUT_ISR_IRAM) and from any other ISR anywhere. Its drops are
+// counted where they are seen: a reader whose cursor the writer passed reads
+// a LOST record for every record it missed, whatever their kind, when it
+// reads any kind the ring has held, and the source counts each such record
+// once.
+//
+// A handle is the spine's: gen << 12 | MOY_KIND_SRC << 8 | slot. A latch
+// source's generation is 1 (it is never released), and slot 0 is the table's
+// own source, "local". A ring source's slot follows the latch slots and its
+// generation moves when it closes. A record's `src` is gen << 8 | slot.
 
 #ifndef MOY_INPUT_H
 #define MOY_INPUT_H
@@ -93,6 +125,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "moy_event.h"
 
 // ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
 // board is recognised by the header it has.
@@ -105,6 +139,8 @@
 #define MOY_INPUT_BUTTONS 16u
 #define MOY_INPUT_HOST_BUTTONS 8u
 #define MOY_INPUT_SOURCES 8u
+#define MOY_INPUT_RING_SOURCES 8u   // sources that are a ring alone
+#define MOY_INPUT_RINGS (MOY_INPUT_SOURCES + MOY_INPUT_RING_SOURCES)
 #define MOY_INPUT_PLAYERS 8u
 #define MOY_INPUT_UNION 0xFFu
 #define MOY_INPUT_KEYQ 8u           // one-shot keys a source queues
@@ -129,6 +165,20 @@
 #endif
 #ifndef MOY_INPUT_BALL_COAST_RATE
 #define MOY_INPUT_BALL_COAST_RATE 20
+#endif
+// The ISR writer's text (moy_input_isr_put, moy_edge's ISR): IRAM where a
+// board's board.toml [input] isr_iram says so (both P4s), so an ISR source
+// stays hot through a collection; elsewhere flash, which costs an idle board
+// no internal RAM and serves an ISR installed without ESP_INTR_FLAG_IRAM (the
+// cache-off window masks it). An IRAM ISR calls it only where it is IRAM.
+#ifndef MOY_INPUT_ISR_IRAM
+#define MOY_INPUT_ISR_IRAM 0
+#endif
+#if defined(MOY_INPUT_BOARD) && MOY_INPUT_ISR_IRAM
+#include "esp_attr.h"
+#define MOY_INPUT_ISR_TEXT IRAM_ATTR
+#else
+#define MOY_INPUT_ISR_TEXT
 #endif
 #define MOY_INPUT_REP_MAX 255u      // a frame's count for one button, saturated
 #define MOY_INPUT_POINTER_LINGER_MS 1500
@@ -219,11 +269,19 @@ moy_input_t *moy_input_new(uint8_t nbuttons);
 void moy_input_free(moy_input_t *t);
 // The drivers' table: all fifteen buttons, made on first call, never freed.
 moy_input_t *moy_input_kernel(void);
+// The VM's end (a stop, a soft reset): every reader of the kernel's table
+// the VM's processes took freed (modmoy_input's reader), since the table
+// outlives the VM and a reader the ending VM held would stay taken. A
+// kernel reader (moy_input_reader_kept: a compiled program's device handle,
+// native/moy_kernel/moy_dev.h) runs on through the stop.
+void moy_input_vm_stop(void);
 uint8_t moy_input_nbuttons(const moy_input_t *t);
 
 // The source named `name` (1 .. MOY_INPUT_NAME bytes), made on first ask with
 // `player`; asking again returns the same handle and leaves its player alone.
 int moy_input_source(moy_input_t *t, const char *name, uint8_t player, uint32_t *h);
+// The name of source `h`, a latch's or a ring's; MOY_INPUT_STALE once a ring
+// has closed. A driver keeps its ring while its handle still names it.
 int moy_input_source_name(const moy_input_t *t, uint32_t h, char *out, size_t n);
 int moy_input_source_player(const moy_input_t *t, uint32_t h, uint8_t *player);
 int moy_input_set_player(moy_input_t *t, uint32_t h, uint8_t player);
@@ -246,6 +304,82 @@ int32_t moy_input_source_typing(const moy_input_t *t, uint32_t h);
 // This source's pointer sample, which stands until it writes another.
 int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
                     bool fresh);
+
+// -- the event rings --
+// The source's ring made again with `prov` (MOY_EV_ISR, _FIFO, _POLL) and
+// `depth` records (a power of two, at most MOY_EV_DEPTH_MAX), empty; a
+// producer names them before it first writes.
+int moy_input_source_events(moy_input_t *t, uint32_t h, uint8_t prov, uint32_t depth);
+// A record a producer writes itself (a kind no latch has), stamped now.
+int moy_input_post(moy_input_t *t, uint32_t h, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
+typedef struct {
+    uint32_t depth, head, count, drops;
+    uint8_t prov;
+    bool internal;
+    uint16_t src;                   // the records' `src`
+} moy_input_ring_info_t;
+int moy_input_ring_info(const moy_input_t *t, uint32_t h, moy_input_ring_info_t *out);
+// The name of the source whose records carry `src` (moy_event_t.src), or
+// MOY_INPUT_STALE when none does now.
+int moy_input_src_name(const moy_input_t *t, uint16_t src, char *out, size_t n);
+
+// A ring source (above): `name` (1 .. MOY_INPUT_NAME bytes), `prov` and `depth`
+// as moy_input_source_events takes them. MOY_INPUT_FULL when every ring slot is
+// taken, MOY_INPUT_NOMEM when its ring is not (RINGS refused it, or the heap).
+int moy_input_ring_open(moy_input_t *t, const char *name, uint8_t prov, uint32_t depth,
+                        uint32_t *h);
+// The source ended: its ring freed and given back, every reader's cursor on it
+// gone, its handle stale. An ISR writer is detached before this.
+int moy_input_ring_close(moy_input_t *t, uint32_t h);
+// An ISR's writer: internal RAM, the producer's. moy_input_isr_attach points it
+// at an ISR ring source (MOY_INPUT_BAD for a source that is not one);
+// moy_input_isr_detach makes every later put a no-op, under the ring's lock, so
+// an ISR still running on the other core writes nothing once it returns.
+typedef struct moy_input_ring moy_input_ring_t;
+typedef struct {
+    void *mux;                      // the table's lock (portMUX_TYPE on a board)
+    moy_input_ring_t *volatile ring;
+} moy_input_isr_t;
+int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w);
+void moy_input_isr_detach(moy_input_isr_t *w);
+// One record, stamped now; callable from an ISR (MOY_INPUT_ISR_TEXT).
+void moy_input_isr_put(moy_input_isr_t *w, uint8_t kind, uint16_t a, uint16_t id, uint32_t b);
+// -- the radios (docs/os_2026-11/between_apps.md section 4) --
+// WiFi (MOY_EV_NET: the station has an address) and BLE (MOY_EV_BLE: the host
+// has synced with its controller) coming up and going down, kept on the table
+// and posted on a change, and only on one, to its ring source "radio" as a
+// record of that kind: `a` 1 up, 0 down; `b` why it went down (the station's
+// disconnect reason, NimBLE's reset reason), 0 when it was put down. Their
+// drivers call moy_input_radio from their own tasks (native/moy_net/moy_wifi.c,
+// native/moy_input/moy_hid.c and moy_ble_task.c); *changed (NULL for none)
+// says whether the state changed. MOY_INPUT_BAD for another kind. The source
+// is opened by the first ask for it (moy_input_radio_source), so a change
+// before any is kept and not posted; MOY_INPUT_RADIO_DEPTH records deep, the
+// changes being rare.
+#define MOY_INPUT_RADIO_DEPTH 8u
+int moy_input_radio(moy_input_t *t, uint8_t kind, bool up, uint32_t why, bool *changed);
+int moy_input_radio_source(moy_input_t *t, uint32_t *h);
+// Whether that radio is up (false for another kind).
+bool moy_input_radio_up(const moy_input_t *t, uint8_t kind);
+// A reader of `kinds` (MOY_EV_BIT of each; MOY_EV_ALL) into *r; MOY_INPUT_FULL
+// when MOY_EV_READERS are taken.
+int moy_input_reader(moy_input_t *t, uint32_t kinds, int *r);
+int moy_input_reader_free(moy_input_t *t, int r);
+// A reader as moy_input_reader makes one, kept through a VM stop: the
+// kernel's own, freed by its taker.
+int moy_input_reader_kept(moy_input_t *t, uint32_t kinds, int *r);
+// Reader r reads source `h` alone (a lease's ring, routed to its process), or
+// every source again for h 0. Once that source closes the reader reads nothing.
+int moy_input_reader_only(moy_input_t *t, int r, uint32_t h);
+// Up to `n` of the reader's records, oldest first across its sources, its
+// cursors past them; a LOST record stands where a gap was. Allocates nothing.
+size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n);
+// How many records (a gap counting one) the reader has waiting.
+size_t moy_input_pending(moy_input_t *t, int r);
+// The records' clock: microseconds, wrapping at 2^32 (a test pins it; 0: the
+// real one).
+uint32_t moy_input_now_us(void);
+void moy_input_pin_clock(uint32_t us);
 
 // -- the frame --
 // The latches merged, the edges and the repeats computed; `now` is the
@@ -294,6 +428,10 @@ uint32_t moy_input_rep_word(const moy_input_t *t);
 uint32_t moy_input_key_repeats(const moy_input_t *t, int32_t *ev);
 int32_t moy_input_last_key(const moy_input_t *t);    // the byte the frame's key event types
 int32_t moy_input_key_event(const moy_input_t *t);   // the frame's key event
+// Between merges, for a run that holds the frame (the shell's Ctrl-C,
+// native/moy_sh/moy_sh_screen.h): whether a source's latch holds now, or has
+// queued, a key that types `byte`, or holds one of `buttons`.
+bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons);
 void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write of an event; the next source write heals it
 uint8_t moy_input_mods(const moy_input_t *t);
 // The frame's wheel notches, every source's summed.

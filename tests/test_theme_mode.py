@@ -164,11 +164,11 @@ def test_config_saves_through_the_look_and_refuses_softly(tmp_path):
     ws = build_ws(tmp_path)
     doc = _open(ws)
     d = json.loads(doc.ed.text())
-    d["colors"]["dark"]["panel"] = 3
+    d["colors"]["dark"]["panel"] = 0
     doc.ed.set_text(json.dumps(d, indent=2))
     doc.ed.dirty = True
     assert doc.save_config(soft=True) == (True, "")
-    assert json.loads((_package(ws) / "theme.json").read_text())["colors"]["dark"]["panel"] == 3
+    assert json.loads((_package(ws) / "theme.json").read_text())["colors"]["dark"]["panel"] == 0
     doc.ed.set_text("{ not json")
     doc.ed.dirty = True
     ok, badge = doc.save_config(soft=True)

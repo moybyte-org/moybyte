@@ -1,0 +1,30 @@
+{
+  "format": "moy-1",
+  "version": 1,
+  "title": "Moy Mesh",
+  "id": "moymesh",
+  "runtime": "lua",
+  "main": "main.lua",
+  "sources": [
+    "mesh.lua",
+    "main.lua"
+  ],
+  "description": "Text messages on the LoRa radio: Meshtastic's channels, and direct messages to a node under its key. Works with Meshtastic.",
+  "moybyte": {
+    "type": "app",
+    "permissions": [
+      "lora",
+      "prefs",
+      "clipboard"
+    ],
+    "required": [
+      "lora",
+      "prefs"
+    ],
+    "entries": {
+      "service": "service.lua"
+    },
+    "config": {},
+    "edit": []
+  }
+}

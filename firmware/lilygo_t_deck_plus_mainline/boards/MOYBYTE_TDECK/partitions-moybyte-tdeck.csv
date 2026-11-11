@@ -16,10 +16,17 @@
 # re-seeds). OTA never rewrites the table, so such a board keeps installing
 # updates into its old slots while the image still fits them.
 #
+# The coredump partition (owner, 2026-11-03, docs/os_2026-11/processes.md
+# section 10) sits right after ota_1: a panic writes an ESP-IDF ELF core dump
+# there (sdkconfig.board), tools/coredump.py reads it over the cable, and
+# Settings -> LAST CRASH clears it. 128 KiB holds every task's TCB and the used
+# part of its stack with room for a deep VM stack; it came off the vfs.
+#
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
 ota_0,    app,  ota_0,   0x20000,  0x700000,
 ota_1,    app,  ota_1,   0x720000, 0x700000,
-vfs,      data, fat,     0xE20000, 0x1E0000,
+coredump, data, coredump, 0xE20000, 0x20000,
+vfs,      data, fat,     0xE40000, 0x1C0000,

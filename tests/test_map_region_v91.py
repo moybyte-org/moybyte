@@ -179,7 +179,7 @@ def _cell_px(ws, cx, cy):
 def test_ui_marquee_drag_sets_selection(tmp_path):
     ws, drv = _open_map(tmp_path)
     me = ws.map_ui.mapedit
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     if me is None or tm is None:
         return
     ws.map_ui.map_tool = "select"
@@ -198,7 +198,7 @@ def test_ui_marquee_drag_sets_selection(tmp_path):
 def test_ui_copy_button_then_tap_pastes(tmp_path):
     ws, drv = _open_map(tmp_path)
     me = ws.map_ui.mapedit
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     if me is None or tm is None:
         return
     # Seed two known tiles, then select + copy + tap-paste elsewhere.
@@ -227,7 +227,7 @@ def test_ui_copy_button_then_tap_pastes(tmp_path):
 def test_ui_tap_without_clip_clears_selection(tmp_path):
     ws, drv = _open_map(tmp_path)
     me = ws.map_ui.mapedit
-    tm = ws.project.tilemap
+    tm = ws.run.project.tilemap
     if me is None or tm is None:
         return
     ws.map_ui.map_tool = "select"

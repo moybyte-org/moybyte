@@ -32,6 +32,7 @@ match), and its own comment says the guard matters more than the edit.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1114,11 +1115,11 @@ def test_ci_keeps_its_own_cache_settings(tmp_path):
 # -- the frozen manifest --------------------------------------------------------
 
 
-def _manifest(tmp_path):
+def _manifest(tmp_path, port_manifest=""):
     mods = tmp_path / "modules"
     mods.mkdir(exist_ok=True)
     out = tmp_path / "manifest.py"
-    r = sh("moybyte_frozen_manifest '%s'" % out, MODULES_DIR=str(mods))
+    r = sh("moybyte_frozen_manifest '%s' %s" % (out, port_manifest), MODULES_DIR=str(mods))
     assert r.returncode == 0, r.stderr
     return mods, out.read_text(encoding="utf-8")
 
@@ -1127,6 +1128,21 @@ def test_the_manifest_freezes_the_board_tree_at_opt_3(tmp_path):
     mods, text = _manifest(tmp_path)
     assert 'include("$(PORT_DIR)/boards/manifest.py")' in text
     assert 'freeze("%s", opt=3)' % mods in text
+
+
+def test_a_board_names_its_own_micropython_manifest(tmp_path):
+    """The Zero freezes MicroPython's modules through its own manifest, in
+    place of the port's default set."""
+    mods, text = _manifest(tmp_path, "/b/manifest.py")
+    assert 'include("/b/manifest.py")' in text
+    assert "boards/manifest.py" not in text
+    assert 'freeze("%s", opt=3)' % mods in text
+
+
+def test_the_zero_freezes_its_own_micropython_manifest():
+    build = (ROOT / "firmware/seeed_xiao_esp32s3_zero/build.sh").read_text(encoding="utf-8")
+    assert 'moybyte_frozen_manifest "${MANIFEST}" "${BOARD_DIR}/manifest.py"' in build
+    assert (ROOT / "firmware/seeed_xiao_esp32s3_zero/boards/MOYBYTE_ZERO/manifest.py").is_file()
 
 
 def test_the_fingerprint_moves_when_any_frozen_source_changes(tmp_path):
@@ -1613,3 +1629,188 @@ def test_a_changed_board_header_starts_genhdr_afresh(tmp_path):
     assert _config_guard(bd, out) is True
     hdr.write_text("#define MICROPY_PY_BLUETOOTH (0)\n", encoding="utf-8")
     assert _config_guard(bd, out) is False
+
+
+# -- an unchanged build compiles nothing; a changed input is rebuilt -----------
+
+
+def test_an_unchanged_generated_file_keeps_its_mtime_and_a_changed_one_moves(
+        tmp_path):
+    out = tmp_path / "gen.h"
+    for text in ("A\n", "A\n"):
+        r = sh("printf '%s' | moybyte_write_if_changed '%s'" % (text, out))
+        assert r.returncode == 0, r.stderr
+        os.utime(out, (1, 1))
+    assert out.stat().st_mtime == 1 and out.read_text() == "A\n"
+    sh("printf 'B\\n' | moybyte_write_if_changed '%s'" % out)
+    assert out.read_text() == "B\n" and out.stat().st_mtime > 1
+    assert out.stat().st_mode & 0o044 == 0o044       # readable, not mktemp's 0600
+    assert [p.name for p in tmp_path.iterdir()] == ["gen.h"]
+
+
+def _frozen(tmp_path, manifest_text, mpy_cross=b"mpy-cross v1", board_h="#define A (1)\n"):
+    """A port build dir with frozen output in it, then the guard over it.
+    Returns (frozen_mpy survived, frozen_content.c survived)."""
+    mpy = tmp_path / "mpy"
+    (mpy / "mpy-cross" / "build").mkdir(parents=True, exist_ok=True)
+    (mpy / "mpy-cross" / "build" / "mpy-cross").write_bytes(mpy_cross)
+    manifest = tmp_path / "manifest.py"
+    manifest.write_text(manifest_text)
+    bout = tmp_path / "build-X"
+    (bout / "frozen_mpy").mkdir(parents=True, exist_ok=True)
+    (bout / "frozen_mpy" / "a.mpy").write_bytes(b"M")
+    (bout / "frozen_content.c").write_text("frozen")
+    board = tmp_path / "board"
+    board.mkdir(exist_ok=True)
+    (board / "mpconfigboard.h").write_text(board_h)
+    r = sh("moybyte_frozen_guard '%s'" % bout, MPY_DIR=str(mpy),
+           MANIFEST=str(manifest), BOARD_DIR=str(board))
+    assert r.returncode == 0, r.stderr
+    return ((bout / "frozen_mpy" / "a.mpy").exists(),
+            (bout / "frozen_content.c").exists())
+
+
+HEAD = 'freeze("/m", opt=3)\n'
+
+
+def test_the_frozen_output_survives_an_unchanged_build(tmp_path):
+    text = HEAD + "# frozen-source fingerprint: aaa\n"
+    assert _frozen(tmp_path, text) == (False, False)    # no record: afresh
+    assert _frozen(tmp_path, text) == (True, True)
+
+
+def test_a_deleted_module_regenerates_the_frozen_content(tmp_path):
+    """makemanifest only rebuilds what is NEWER, and a deleted module leaves
+    nothing newer: the fingerprint moving is what drops frozen_content.c."""
+    _frozen(tmp_path, HEAD + "# frozen-source fingerprint: aaa\n")
+    assert _frozen(tmp_path, HEAD + "# frozen-source fingerprint: bbb\n") \
+        == (True, False)
+
+
+def test_a_board_config_change_regenerates_the_frozen_content(tmp_path):
+    """frozen_content.c names the qstrs the C build provides: a module the
+    board turns off (MICROPY_PY_FRAMEBUF) takes `fill` with it."""
+    text = HEAD + "# frozen-source fingerprint: aaa\n"
+    _frozen(tmp_path, text)
+    assert _frozen(tmp_path, text, board_h="#define A (0)\n") == (True, False)
+
+
+def test_a_new_freeze_option_or_compiler_recompiles_every_module(tmp_path):
+    _frozen(tmp_path, HEAD + "# frozen-source fingerprint: aaa\n")
+    assert _frozen(tmp_path, 'freeze("/m", opt=1)\n'
+                   "# frozen-source fingerprint: aaa\n") == (False, False)
+    _frozen(tmp_path, HEAD + "# frozen-source fingerprint: aaa\n")
+    assert _frozen(tmp_path, HEAD + "# frozen-source fingerprint: aaa\n",
+                   mpy_cross=b"mpy-cross v2") == (False, False)
+
+
+def test_the_manifest_is_rewritten_only_when_its_text_moves(tmp_path):
+    mods = tmp_path / "modules"
+    mods.mkdir()
+    (mods / "console.py").write_text("A = 1\n", encoding="utf-8")
+    out = tmp_path / "manifest.py"
+    _manifest(tmp_path)
+    os.utime(out, (1, 1))
+    _manifest(tmp_path)
+    assert out.stat().st_mtime == 1
+    (mods / "console.py").write_text("A = 2\n", encoding="utf-8")
+    _manifest(tmp_path)
+    assert out.stat().st_mtime > 1
+
+
+def _git_tree(path):
+    path.mkdir()
+    git = ["git", "-C", str(path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    (path / "f").write_text("f")
+    subprocess.run(git + ["add", "f"], check=True)
+    subprocess.run(git + ["commit", "-qm", "x"], check=True)
+
+
+def test_make_submodules_runs_only_when_its_inputs_moved(tmp_path):
+    mpy = tmp_path / "mpy"
+    _git_tree(mpy)
+    bd = tmp_path / "boards" / "B"
+    bd.mkdir(parents=True)
+    (bd / "mpconfigboard.cmake").write_text("set(X 1)\n")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    calls = tmp_path / "calls"
+    (fake / "make").write_text("#!/bin/sh\necho \"$@\" >> '%s'\n" % calls)
+    (fake / "make").chmod(0o755)
+    path = "%s:%s" % (fake, os.environ.get("PATH", "/usr/bin:/bin"))
+
+    def run():
+        r = sh("moybyte_submodules '%s'" % (tmp_path / "build-B"),
+               MPY_DIR=str(mpy), BOARD_DIR=str(bd), PATH=path)
+        assert r.returncode == 0, r.stderr
+        return len(calls.read_text().splitlines()) if calls.exists() else 0
+
+    assert run() == 1
+    assert run() == 1                       # nothing moved: skipped
+    (bd / "mpconfigboard.cmake").write_text("set(X 2)\n")
+    assert run() == 2                       # the board def moved
+
+
+LOCK = """
+moybyte_configure_lock
+held() { flock -n "${MOYBYTE_LOCK_DIR}/esp-configure.lock" true && echo free || echo held; }
+echo "before: $(held)"
+printf '%s\\n' '-- Configuring done' 'NOTICE: Processing 3 dependencies' \\
+  | moybyte_phase_watch "${MOYBYTE_LOCK_DIR}/marks" >/dev/null
+echo "configuring: $(held)"
+printf '%s\\n' '[1/9] Building C object a.c.obj' \\
+  | moybyte_phase_watch "${MOYBYTE_LOCK_DIR}/marks" >/dev/null
+echo "compiling: $(held)"
+"""
+
+
+@pytest.mark.skipif(not shutil.which("flock"), reason="no flock(1)")
+def test_the_configure_lock_is_held_until_the_first_compiled_step(tmp_path):
+    """Two builds race on the component manager's cache only while they
+    configure: the lock covers that and lets go when compiling starts, so a
+    second build's compile runs beside the first's."""
+    r = sh(LOCK, MOYBYTE_LOCK_DIR=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.split("\n")[:3] == ["before: held", "configuring: held",
+                                        "compiling: free"]
+
+
+# The stock lines tools/patch_gc_grow_step.py anchors on: gc_try_add_heap's
+# rounding of the new area's size, between the doubling and the allocation.
+_GC_C_GROW_STOCK = (
+    "    // Round up size to the nearest multiple of BYTES_PER_BLOCK.\n"
+    "    total_heap = (total_heap + BYTES_PER_BLOCK - 1) & (~(BYTES_PER_BLOCK - 1));\n"
+    "\n"
+    "    DEBUG_printf(\"total_heap \" UINT_FMT \" bytes\\n\", total_heap);\n"
+    "\n"
+    "    size_t to_alloc = MIN(avail, MAX(total_heap, needed));\n"
+)
+
+
+def _grow(tmp_path, text=_GC_C_GROW_STOCK):
+    (tmp_path / "py").mkdir(exist_ok=True)
+    gc_c = tmp_path / "py" / "gc.c"
+    gc_c.write_text(text, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "patch_gc_grow_step.py"),
+                        str(tmp_path)], capture_output=True, text=True)
+    return gc_c, r
+
+
+def test_the_gc_grow_step_patch_caps_the_area_before_it_is_allocated(tmp_path):
+    gc_c, r = _grow(tmp_path)
+    assert r.returncode == 0, r.stderr
+    src = gc_c.read_text(encoding="utf-8")
+    cap = src.index("total_heap = (size_t)(MOYBYTE_GC_GROW_MAX);")
+    assert src.index("#ifdef MOYBYTE_GC_GROW_MAX") < cap < src.index("size_t to_alloc")
+    # `needed` still wins over the cap: the allocation line is stock.
+    assert "MIN(avail, MAX(total_heap, needed))" in src
+    _gc, again = _grow(tmp_path, src)
+    assert again.returncode == 0 and _gc.read_text(encoding="utf-8") == src
+
+
+def test_a_gc_grow_step_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    text = _GC_C_GROW_STOCK.replace("& (~(BYTES_PER_BLOCK - 1))", "& ~(BYTES_PER_BLOCK - 1)")
+    gc_c, r = _grow(tmp_path, text)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert gc_c.read_text(encoding="utf-8") == text

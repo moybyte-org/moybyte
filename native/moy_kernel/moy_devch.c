@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "moy_devch.h"
+#include "moy_log.h"
 #include "moy_loop.h"
 
 enum { G_NONE, G_TAP, G_SWIPE, G_DRAG };
@@ -28,7 +29,10 @@ static struct {
     gesture_t g;
     uint8_t *back;              // bytes handed back, taken before getc's
     uint32_t back_n, back_i;
+    char *state;                // `state`'s line while a run is in front
 } D;
+
+#define STATE_CAP 1024
 
 #define BACK_CAP 1024
 
@@ -200,15 +204,20 @@ static bool parse_u32(const char *s, uint32_t *out) {
 // hands them to the console) ---------------------------------------------------
 
 bool moy_play_front_live(void) __attribute__((weak));
+bool moy_play_panel_up(void) __attribute__((weak));
 bool moy_play_front_end(int why) __attribute__((weak));
 size_t moy_play_state_json(char *out, size_t n) __attribute__((weak));
 
+// A run in front, or the panel a stopped run left: either holds the frame,
+// and the run's words are the kernel's.
 static bool front(void) {
-    return moy_play_front_live != NULL && moy_play_front_live();
+    return (moy_play_front_live != NULL && moy_play_front_live())
+           || (moy_play_panel_up != NULL && moy_play_panel_up());
 }
 
 // `state` while a run is in front is the kernel's: the console's frame is not
 // running, and asking it would be a crossing in the very run being measured.
+// With a stopped run's panel up there is no VM to ask.
 static bool w_state(int argc, char **argv, const char *line) {
     (void)argc;
     (void)argv;
@@ -216,15 +225,18 @@ static bool w_state(int argc, char **argv, const char *line) {
     if (!front() || moy_play_state_json == NULL) {
         return false;
     }
-    static char buf[1024];
-    memcpy(buf, "STATE ", 6);
-    buf[6] = 0;
-    moy_play_state_json(buf + 6, sizeof(buf) - 6);
-    moy_loop_say_line(buf);
+    if (D.state == NULL && (D.state = moy_loop_alloc(STATE_CAP)) == NULL) {
+        return false;
+    }
+    memcpy(D.state, "STATE ", 6);
+    D.state[6] = 0;
+    moy_play_state_json(D.state + 6, STATE_CAP - 6);
+    moy_loop_say_line(D.state);
     return true;
 }
 
-// `end`: the run in front ends (the console's next frame takes its route).
+// `end`: the run in front ends (the console's next frame takes its route), or
+// a stopped run's panel is released and the VM starts again.
 static bool w_end(int argc, char **argv, const char *line) {
     (void)argc;
     (void)argv;
@@ -318,12 +330,58 @@ static bool w_bl(int argc, char **argv, const char *line) {
     return true;
 }
 
+// `log [LEVEL] [+SEQ] [NAME]`: the OS log (moy_log.h), every record at
+// LEVEL or more severe (debug: all), from record SEQ on, of the processes
+// whose name holds NAME; one `LOG` line a line, then `LOG end`. The kernel's,
+// so it answers with no VM running.
+static bool w_log(int argc, char **argv, const char *line) {
+    (void)line;
+    int level = MOY_LOG_DEBUG;
+    uint32_t since = 0;
+    const char *name = NULL;
+    for (int i = 1; i < argc; i++) {
+        int lv = moy_log_level_of(argv[i], strlen(argv[i]));
+        if (lv >= 0) {
+            level = lv;
+        } else if (argv[i][0] == '+') {
+            since = (uint32_t)strtoul(argv[i] + 1, NULL, 10);
+        } else {
+            name = argv[i];
+        }
+    }
+    moy_log_dump(since, level, name, moy_loop_say_line);
+    return true;
+}
+
+// `sh LINE`: LINE in the C shell's serial session (native/moy_sh/
+// moy_sh_board.h: weak, so an image without the shell hands it to the
+// console), answered `SH <line>` a line and `SH end <status>`, `SH more` or
+// `SH exit <status>`. The kernel's, so it answers with no VM running.
+bool moy_sh_board_line(const char *text) __attribute__((weak));
+bool moy_sh_board_break(void) __attribute__((weak));
+
+static bool w_sh(int argc, char **argv, const char *line) {
+    (void)argc;
+    (void)argv;
+    if (moy_sh_board_line == NULL) {
+        return false;
+    }
+    line += 2;
+    if (*line == ' ' || *line == '\t') {
+        line++;
+    }
+    moy_sh_board_line(line);
+    return true;
+}
+
 static const moy_devch_word_t KERNEL_WORDS[] = {
+    {"log", w_log},
     {"power", w_power},
     {"bl", w_bl},
     {"state", w_state},
     {"end", w_end},
     {"run", w_run},
+    {"sh", w_sh},
 };
 
 int moy_devch_kernel_words(const moy_devch_word_t **out) {
@@ -445,6 +503,10 @@ bool moy_devch_poll(bool *quit) {
                 break;
             }
             D.rx++;
+            // Ctrl-C while the shell's serial run waits: that run's
+            if (c == 3 && moy_sh_board_break != NULL && moy_sh_board_break()) {
+                continue;
+            }
             if (c == '\n' || c == '\r') {
                 bool over = D.over;
                 D.over = false;

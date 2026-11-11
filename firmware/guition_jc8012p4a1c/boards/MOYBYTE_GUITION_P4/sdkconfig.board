@@ -30,10 +30,29 @@ CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
 # Custom partition table: the default 4MiBplus table caps the app at ~1.94MB
-# and the frozen console overflows it. OTA-shaped 2x7.5 MiB app slots + auto-vfs
-# tail; the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
+# and the frozen console overflows it. OTA-shaped 2x7.8125 MiB app slots + the
+# coredump partition + auto-vfs tail; the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
 # copies it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-p4.csv"
+
+# Core dumps (owner, 2026-11-03, docs/os_2026-11/processes.md section 10): a
+# panic writes an ELF core dump, CRC32-checked, to the table's coredump
+# partition, which tools/coredump.py reads over the cable and Settings ->
+# LAST CRASH clears; the next panic overwrites it. Task stacks may live in
+# PSRAM here (FREERTOS_TASK_CREATE_ALLOW_EXT_MEM), so the dump runs on a stack
+# of its own in internal RAM (the IDF's 1792-byte minimum for that case), and
+# a PSRAM stack is dumped like any other. Its logs stay on (~5 KB of internal
+# RAM, which this chip has room for): a dump that does not fit the partition
+# says so on the serial. The boot check only logs, so it is off. The
+# internal RAM's .bss, .data and heap are not captured (CAPTURE_DRAM): that
+# wants a partition the size of the RAM; the kernel's own table of loaded
+# modules is (COREDUMP_DRAM_ATTR, native/moy_elf/moy_elf_maps.h).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
+CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+CONFIG_ESP_COREDUMP_CHECK_BOOT=n
 
 # BLE notifications arrive from the C6 over ESP-Hosted in bursts, and the
 # upstream 24-buffer pool exhausted under keyboard autorepeat ("alloc_acl_from_ll
@@ -191,3 +210,30 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 # bounce, a record at a time. docs/history/kernel_survival_2026-10.md section 8; the
 # figures are #224's.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- the CA bundle -----------------------------------------------------------
+# Every https request but the updater's verifies the server's certificate
+# against ESP-IDF's bundle (esp_crt_bundle; native/moy_net/moy_net_port.c), the
+# common set: the roots of the CAs that issue nearly every public site's
+# certificate, kept in flash and read a root at a time. MicroPython's base
+# config turns the bundle off; a board without these lines refuses https for
+# apps (docs/os_2026-11/hardware.md section 1). Its flash cost is #246's.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
+# --- Curve25519 --------------------------------------------------------------
+# An app's moybyte.x25519 (native/moy_net/moy_crypto.h) is mbedTLS's
+# Montgomery ladder on Curve25519, which MicroPython's base config turns off;
+# without this line the row answers ABSENT.
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=y
+
+# NTP (native/moy_net/moy_wifi.c) asks the moment the station has an address:
+# a handshake waits for that answer, so lwIP's random first delay is off.
+CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
+# --- the PMP is the kernel's -------------------------------------------------
+# A native module runs in U-mode under the PMP layout moy_umode.c writes on
+# each core at start (native/moy_elf/README.md, "Isolation"). This option
+# would have the bootloader lock IDF's layout on core 0 first, and a P4 lock
+# holds until reset (no Smepmp); the app call it gates is replaced too.
+CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n

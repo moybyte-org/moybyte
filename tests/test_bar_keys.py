@@ -54,11 +54,10 @@ def _cell_x(ws, where, name):
 
 def _walk_to(ws, drv, name):
     """Right along the home's row (the bar's items and the tabs) onto the
-    bar's `name`."""
-    x = _cell_x(ws, "home", name)
+    bar's item `name` (a handheld's status cluster is "cluster")."""
     for _ in range(12):
         it = ws.bar_layer.focus_item
-        if it is not None and it[1][0] == x:
+        if it is not None and it[2] == name:
             return
         _press(drv, "right")
     raise AssertionError(name)
@@ -72,12 +71,14 @@ def test_the_homes_row_walks_onto_the_bar_and_opens_a_widget(tmp_path):
     _press(drv, "left")
     assert bl.focus == 0 and not ws.launcher_layer._tab_focus, \
         "left off the first tab is the item left of the tabs"
-    _walk_to(ws, drv, "wifi")
+    _walk_to(ws, drv, "cluster")
     k = bl.focus
     _press(drv, "right")
     assert bl.focus == k + 1, "right walks the bar's items"
+    _press(drv, "left")
     _press(drv, "a")
-    assert ws.sysmenu.open and ws.sysmenu.widget == "battery", "confirm opens its popover"
+    assert ws.sysmenu.open and ws.sysmenu.widget == "battery", \
+        "confirm on the status cluster opens the control center"
     _press(drv, "b")
     assert not ws.sysmenu.open and bl.focus is not None, "the popover closes onto the bar"
     _press(drv, "down")
@@ -90,7 +91,7 @@ def test_the_trackball_walks_the_bar(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
-    _walk_to(ws, drv, "wifi")
+    _walk_to(ws, drv, "cluster")
     assert ws.ball_steps()
     k = bl.focus
     drv.pan(1, 0)
@@ -181,7 +182,7 @@ def test_the_editors_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
     row = _editor_row(ws)
     assert [w for _x, w in row] == ["menu", "cards", "blocks", "code", "paint", "map",
                                     "scene", "music", "undo", "redo", "play",
-                                    "battery", "clock"]
+                                    "cluster", "clock"]
     _press(drv, "up")
     assert row[bl.focus][1] == "cards", "the keys land on the open tab"
     seen = []
@@ -228,7 +229,7 @@ def test_a_menu_over_the_bar_takes_the_keys(tmp_path):
 
 
 def test_the_bar_key_carries_the_focus():
-    assert 12 in bar_layer._KEY_ALWAYS and bar_layer._KEY_N == 13
+    assert 12 in bar_layer._KEY_ALWAYS and bar_layer._KEY_N == 14
 
 
 def test_the_homes_strip_names_the_bars_keys_while_on_it(tmp_path):
@@ -288,10 +289,9 @@ def test_the_keys_come_off_the_bar_when_its_surface_goes(tmp_path):
 def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
     from runtime import home_hints
     ws, drv = _home(tmp_path)
-    bl = ws.bar_layer
     _press(drv, "up")
     _press(drv, "left")
-    _walk_to(ws, drv, "battery")
+    _walk_to(ws, drv, "cluster")
     _press(drv, "a")
     assert ws.sysmenu.open and not ui_draw.on_bar()
     assert home_hints.modal_keys(ws) != ui_draw.BAR_KEYS
@@ -397,10 +397,10 @@ def test_the_theme_modes_config_names_no_trackball_on_the_tdeck():
                                            ("contrast", "dark"), ("contrast", "light"),
                                            ("blocks", "light"), ("blocks", "dark")])
 def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
-    """The bar's mark is the pill whatever the theme's focus style: a plate
-    under the item and a ring round it, so an invert theme's mark never
-    blots the icon out. Each status widget's icon box keeps more than one
-    colour under it, and the ring draws where the bar was plain."""
+    """The bar's mark is the ring whatever the theme's focus style, never a
+    plate, so an invert theme's mark never blots the icon out: the status
+    cluster's icons keep more than one colour under it, and the ring draws
+    where the bar was plain."""
     ws, drv = _home(tmp_path)
     ws.look.set_theme(theme, persist=False, variant=variant)
     for _ in range(2):
@@ -414,7 +414,7 @@ def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
         return bytes(cv._buf[k:k + 2])
     _press(drv, "up")
     _press(drv, "left")
-    for name in ("wifi", "battery"):
+    for name in ("cluster",):
         _walk_to(ws, drv, name)
         box, _r, _u = bl._pill("home", 0, bl.focus_item)
         r = bl.focus_item[1]

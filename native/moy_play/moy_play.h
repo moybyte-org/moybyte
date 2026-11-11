@@ -9,13 +9,15 @@
 //      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
 //      with the runtime "wasm" where the image carries native/moy_app;
 //   3. every permission is in the native set: graphics, input, audio,
-//      multiplayer -- or, for a compiled app, a role's permission, which
-//      passes when every row the module imports from the app extension is
-//      C-served (moy_play_vm_free_at). A permission the kernel does not know
-//      keeps the VM.
+//      multiplayer -- or, for a compiled app, a role's permission or a
+//      `lease:<row>`, which pass when every row the module imports from the
+//      app extension is C-served (moy_play_vm_free_at): the kernel's device
+//      table takes a compiled program's leases without MOY_LEASE_VM, and a
+//      lease a VM process holds keeps the VM at the stop's verdict instead
+//      (moy_play_stop.c). A permission the kernel does not know keeps the VM.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
-// `network`, `console`, `pins`, `files` and every `files:<kind>`, `prefs`, and
+// `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and
 // every role permission runtime/shell/system_api.py grants. The census pins the
 // verdict against every seed cart's and PICO-8 import's real manifest.
 //
@@ -51,8 +53,11 @@
 // and a game earns no strikes (no ledger counts the role). The board's kernel
 // is what arms it (moy_kernel_arm); an image without one arms nothing.
 //
-// THE PLAYER (moy_play.c). One run at a time, named by a handle that is
-// refused (STALE) once it ended. `launch`, before the runtime loads, reads
+// THE PLAYER (moy_play.c). MOY_PLAY_RUNS runs at once, each a row named by a
+// handle that is refused (STALE) once it ended; a launch with every row live
+// ends the oldest run for its own. Each run's frame makes its runtime's row
+// current (moycore_lua.h) and the crash record names the run that ticked
+// last. `launch`, before the runtime loads, reads
 // the cart's catalogue entry for its runtime and verdict, takes that
 // runtime's row from the map and mints the run's OWNER row in the glass
 // (moy_buf.h), which a Lua run's layer and image pixels are loans to;
@@ -106,8 +111,8 @@ enum {
 bool moy_play_vm_free(const moy_cat_entry_t *e, uint8_t *why);
 // The verdict with the cart's folder: a compiled app ("runtime": "wasm",
 // "type": "app") passes rule 2 where the image carries native/moy_app, and
-// rule 3 maps each permission through the role table -- a role's permission
-// passes when every import its module makes from the app extension
+// rule 3 maps each permission through the role table -- a role's permission,
+// and a `lease:<row>`, passes when every import its module makes from the app extension
 // (moybyte.app, native/moy_app/moy_app_wasm.h) is a C-served row, read from
 // the head of its main; one that imports a shell-served row keeps the VM
 // (WHY_IMPORT), the import named in `imp` ("moybyte.app.<name>").
@@ -123,8 +128,8 @@ bool moy_play_is_game(const moy_cat_entry_t *e);
 struct moy_input;                               // moy_input.h
 
 // Launch flags: on the tick model; the run's route is HOME (the launcher
-// started it, and its exit lands there); the owner's Unknown sources setting
-// (an unsigned compiled module may load).
+// started it, and its exit lands there); the cart's consent admits an
+// unsigned compiled module (moy_ota_admit_module's `consented`).
 enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 
 // THE SHARES (2026-10-05; configuration, derived from #224's measurements,
@@ -135,9 +140,9 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 //     Doom's footprint, plus one area of the Python heap at its boot size, so
 //     one growth of the heap before a cart starts cannot refuse it, rounded up
 //     to whole MiB;
-//   - native code holds AT MOST 1 MiB of PSRAM (panel buffers, flush slots,
-//     audio, driver buffers, the game canvas, the layer pool, the kernel's
-//     tables), which with the cart's floor leaves 3 MiB for the Python heap;
+//   - native code (panel buffers, flush slots, audio, driver buffers, the game
+//     canvas, the layer pool, the kernel's tables) and the Python heap, which
+//     grows by areas of at most 512 KB (MOYBYTE_GC_GROW_MAX), hold the rest;
 //     a board's MOY_GLASS_POOL_BYTES is cut from it;
 //   - the kernel costs AT MOST 4 KiB of internal SRAM net against sprint 0's
 //     baseline (free, largest block and low-water, all-internal and
@@ -147,27 +152,109 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 // internal figure on either board. A board's image headroom floor is
 // `[image] headroom_floor_kib` in its board.toml, with its reasons there.
 //
+// THE SHARES' ROWS (P2.1, 2026-11-04; configuration, KiB of PSRAM, read
+// against the budget each board's spike measured in #246): one line per
+// console board, named by its board.toml OTA id, and one row per kind of
+// memory the OS hands out beside the VM:
+//   PROCS  what the running set's apps hold together (admission,
+//          runtime/run/player_fit.py: a compiled cart's load footprint, else
+//          its canvas, and a Python world beside it), and the PSRAM the
+//          services hold beside the VM's heap (runtime/system/scheduler.py,
+//          THE SHARES: a compiled one's start and linear memory, a Lua one's
+//          stack and heap), counted at a service's start and at a game's
+//          admission. On the S3s it is the cart's floor above; on the P4s what a desk keeps free beside its
+//          Python heap's room to grow with a game running;
+//   MEDIA  the media service: its stream buffer, its decoded ring, and its
+//          decoder's state and task stack where internal SRAM could not take
+//          them (native/moy_media/moy_media.h, THE MEMORY);
+//   RINGS  every ring a task writes (an ISR's ring is internal, under the
+//          kernel's internal cap): the input table's event rings
+//          (native/moy_input/moy_input.c) and the render-ahead audio rings;
+//   ELF    loaded ELF text and data; a foreground C app's own counts in its
+//          PROCS need;
+//   LANES  the timed lanes' task stacks.
+// A row a board has no budget for is ABSENT (MOY_SHARE_ABSENT), never 0: the
+// fit check refuses every take from it, so nothing of that kind exists on
+// that board. An S3's rows are cut from what its desk keeps free above the
+// cart's floor after a game, WiFi up (a heap trace of both S3s, #246,
+// 2026-11-04: about 1 MB on the T-Deck, about 500 KB on the Guition S3): ELF
+// and LANES on both, MEDIA on the T-Deck alone. The Guition S3 is the "one
+// running thing" tier for media (owner, 2026-11-04): it has no MEDIA row, and
+// no speaker. A P4's line is what its desk keeps free with WiFi up,
+// less 3 MiB for its Python heap's next two doublings: the Guition P4's
+// rotated desk keeps about 10 MiB less than the Waveshare's, so its MEDIA and
+// ELF rows are half the Waveshare's. The image's own line is the one its mpconfigboard.h
+// names (MOY_SHARES_BOARD); a build that names none (the host, the browser,
+// the Zero) has no shares, and nothing it takes is counted.
+#define MOY_SHARE_ABSENT 0xFFFFFFFFu
+#define MOY_SHARE_NONE 0xFFFFFFFEu      // the build has no shares line
+enum {
+    MOY_SHARE_PROCS = 0, MOY_SHARE_MEDIA = 1, MOY_SHARE_RINGS = 2,
+    MOY_SHARE_ELF = 3, MOY_SHARE_LANES = 4, MOY_SHARE_ROWS = 5,
+};
+#define MOY_SHARES_LINES(X)                                         \
+    /*  board          PROCS  MEDIA             RINGS ELF               LANES */ \
+    X("tdeck",         4096,  192,              16,   256,              64)               \
+    X("guition_s3",    4096,  MOY_SHARE_ABSENT, 16,   256,              64)               \
+    X("p4",            7168,  1024,             256,  2048,             256)              \
+    X("guition_p4",    7168,  512,              256,  1024,             256)
+// The image's line: MOY_SHARES_BOARD, or the line `board` names when a host
+// stands in for a board (NULL: back to the image's own). 0, or -1 for a name
+// no line has (nothing changes).
+int moy_share_use(const char *board);
+// A row's cap in bytes on the line in use, MOY_SHARE_ABSENT, or MOY_SHARE_NONE.
+uint32_t moy_share_cap(uint8_t row);
+// `board`'s row (NULL: the line in use) in bytes, ABSENT or NONE.
+uint32_t moy_share_row(const char *board, uint8_t row);
+uint32_t moy_share_held(uint8_t row);
+// THE FIT CHECK: `n` more bytes of a row. 0 when they fit (and are counted
+// held), MOY_PLAY_FIT when the row is absent or they would pass its cap.
+// With no line everything fits and nothing is counted. The ledger takes no
+// lock: a take and its give happen where the taker is made and freed, on the
+// VM's task or at boot before it.
+int moy_share_take(uint8_t row, uint32_t n);
+void moy_share_give(uint8_t row, uint32_t n);
+// THE KILL THRESHOLD: the PSRAM free below which the shares can no longer be
+// kept, so a background process is killed (its moy_stop first): every
+// present row's cap less what it holds, PROCS's held being `procs_held`, the
+// running set's need. MOY_SHARE_NONE with no line.
+uint32_t moy_share_kill_below(uint32_t procs_held);
+//
 // THE STOP VERDICT: whether the launch stops the VM for the run, and when it
 // does not, the first clause that kept it, which the run's `info` names. The
 // policy is `need`: a VM-free run stops the VM only when its fit check fails
 // with the VM up. Only a launcher launch may stop it (KEEP_PLACE): a return
 // start rebuilds the launcher alone, and no other surface comes back after a
 // stop (owner, 2026-10-10; native/moy_app/README.md). A Python owner's WiFi
-// lease refuses a stop; the kernel's own holders (the link, the run) do not.
+// lease refuses a stop; the kernel's own holders (the link, the run, the media
+// service's run) do not. The media service plays on through a stop, so its
+// MEDIA row is not what a stop gives back: a cart that fits only with it too
+// is KEEP_MEDIA, and the console asks before it stops the music.
 enum {
     MOY_PLAY_STOPS = 0,         // the VM stops; the load follows the stop
     MOY_PLAY_KEEP_RULE = 1,     // the cart fails the VM-free rule
     MOY_PLAY_KEEP_LEVER = 2,    // the board has no stop (the P4s: ABSENCE)
     MOY_PLAY_KEEP_FITS = 3,     // it fits with the VM up, or has no fit to check
     MOY_PLAY_KEEP_PLACE = 4,    // its route is not HOME: only the launcher comes back
-    MOY_PLAY_KEEP_LEASE = 5,    // a Python owner holds a WiFi lease
+    MOY_PLAY_KEEP_LEASE = 5,    // a Python owner holds a WiFi lease or a hardware lease
     MOY_PLAY_KEEP_OTA = 6,      // an update is being written
     MOY_PLAY_KEEP_FRONT = 7,    // the board's kernel present cannot show its canvas
     MOY_PLAY_KEEP_BIG = 8,      // it would not fit with the VM stopped either: the
                                 // fit notice, with the VM up
-    MOY_PLAY_STOP_WHYS = 9,
+    MOY_PLAY_KEEP_MEDIA = 9,    // it fits with the VM stopped only with the media
+                                // service's memory too: the console asks first
+    MOY_PLAY_STOP_WHYS = 10,
 };
 const char *moy_play_stop_name(uint8_t why);
+// THE STOP'S FIT, the verdict's last clauses (pure, so the host tests them):
+// a compiled cart needing `total` bytes, `block` of them in one piece,
+// against PSRAM `free_` and its `largest` block with the VM up; `held` is
+// what a stop gives back (the VM's heap, the shell's idle session), `media`
+// what the media service's run holds (moy_share_held of its row, 0 with no
+// run). KEEP_FITS as it stands (never with `force`), STOPS with the stop's
+// bytes, KEEP_MEDIA with the music's too, else KEEP_BIG.
+uint8_t moy_play_stop_fit(uint64_t total, uint64_t block, uint64_t free_, uint64_t largest,
+                          uint64_t held, uint64_t media, bool force);
 // The board's half of the verdict (native/moy_play/moy_play_stop.c, a board
 // with the stop): every clause but the rule's. Weak: an image without it
 // keeps the VM (KEEP_LEVER). `fit` gets the fit check's reading with the VM
@@ -189,14 +276,18 @@ enum {                                          // why a run ended
 // libmoy's seven buttons are the input table's first seven bits.
 #define MOY_PLAY_BUTTON_MASK 0x7Fu
 #define MOY_PLAY_START_BIT 14           // moy_input's `start`: Super, the pause menu
-// A run handle's low byte: generation << 8 | this.
+// A run handle: its launch's number << 10 | its row << 8 | this.
 #define MOY_PLAY_TAG 0x5Au
+#define MOY_PLAY_RUNS 4u        // the runs at once: a power of two, the owner tags' count
 #define MOY_PLAY_UPC 6          // MOY_UPC_CLASSES, the loop's crossing classes
 
 typedef struct {
     int32_t x, y;               // the pointer in the cart's own coordinates
     int32_t touch;              // touch()'s flags: 1 live, 2 held, 4 the press edge
-    int32_t window;             // 1: the run's surface is a window's body (the desk)
+    int32_t face;               // how the run's ui frame draws: the console's
+                                // Player.ui_face (moy_ui_wasm.h's FACE_*)
+    int32_t room[4];            // an app's ui frame, its content_rect() (x, y, w, h);
+                                // w 0, a game's: the whole canvas
 } moy_play_in_t;
 
 typedef struct {
@@ -219,8 +310,9 @@ typedef struct {
     char title[48];             // the manifest's title, "" when it names none
     char id[24];                // the folder's stem: what the crash record names
     // The verdict's fit check, the VM up: the compiled cart's footprint (total,
-    // block), PSRAM free and its largest block then, and the VM's heap bytes a
-    // stop would give back. All 0: the verdict did not reach the fit.
+    // block), PSRAM free and its largest block then, and the bytes a stop
+    // would give back (the VM's heap and the serial shell's idle session).
+    // All 0: the verdict did not reach the fit.
     uint32_t fit[5];
     bool stuck;                 // the runaway watch ended its tick
 } moy_play_info_t;
@@ -240,12 +332,20 @@ int  moy_play_input(uint32_t run, const moy_play_in_t *in);
 // NEEDS_VM or STALE.
 int  moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t *out);
 int  moy_play_end(uint32_t run, int why);
+// A run held aside reads no input (`on`): its snapshot's buttons, key and
+// pointer read nothing until it is given back. STALE with no such run.
+int  moy_play_mute(uint32_t run, bool on);
 // A pause of `ms` the run did not live through (the pause menu): its time()
 // resumes where it stopped. STALE with no such run.
 int  moy_play_hold(uint32_t run, uint32_t ms);
-// The live run's info, or the last one's once it ended.
+// A run's info, live or ended, while its row has hosted no later run.
 int  moy_play_info(uint32_t run, moy_play_info_t *out);
-uint32_t moy_play_current(void);       // the live run, or 0
+uint32_t moy_play_current(void);       // the run launched last while live, or 0
+uint32_t moy_play_runs(void);          // how many runs are live
+uint32_t moy_play_run_at(uint32_t slot);   // row `slot`'s live run, or 0
+// A live Lua or compiled run's process row (native/moy_kernel/moy_proc.h), or
+// 0: a VM run, or none.
+uint32_t moy_play_proc(uint32_t run);
 // The calling task's stack high-water mark in bytes, MOY_PLAY_NO_STACK off a
 // board. FreeRTOS keeps the task's lifetime minimum, so a reading falls only
 // when the cart's path goes deeper than anything the task ran before it.
@@ -285,7 +385,6 @@ void moy_play_watch_budget(uint32_t ms);
 // snapshot then reads the session's two global players, and libmoy's random
 // stream starts from the frame's seed. False: no match, the run is solo.
 bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks);
-#define MOY_PLAY_LOCK_MS 16u            // a stall's retry and a resend: at most this often
 // The seed a matched run's console starts from (its _init draws from it):
 // true while the kernel's link has a live session.
 bool moy_play_lock_seed(uint32_t *seed);
@@ -298,6 +397,15 @@ bool moy_play_lock_seed(uint32_t *seed);
 // compositor gives the front its two ends (moy_front_ops_t); an image whose
 // board gives none keeps the console's foreground, which drives the same
 // Player through its frame upcall.
+//
+// A compiled run's frame is the canvas too, unless the board shows it from
+// the cart's memory (`frame`): its blits then leave their frames where the
+// cart made them (moycore_lua.h's hand-off), the board scales or folds one
+// to the glass from there and keeps a copy, and the front writes a frame
+// into the canvas only where it must (a banner over it, a layout the board
+// does not show). With the VM up the front takes such a run only from a
+// board that shows its frames: the console's own composite is what shows
+// them otherwise (CartFrame).
 //
 // The front hands the frame back to the console -- the run still live --
 // when the run needs it: the cart declared a view the board's present does
@@ -313,6 +421,17 @@ typedef struct {
     // A panel point into the run's canvas; false when outside it.
     bool (*map)(void *ctx, int32_t *x, int32_t *y);
     void *ctx;
+    // A compiled run's owed frame shown from the cart's memory, and
+    // presented: `px` is the canvas's size, little-endian RGB565 words, or
+    // with `lut` (its 256 wire colours) an index byte a pixel. True when the
+    // board showed it, `*kept` then the copy it keeps (alive until the cart's
+    // next blit, the canvas written from it if the cart draws before then)
+    // or NULL; false: the front writes the frame into the canvas and
+    // presents that. NULL: the board shows only its canvas.
+    bool (*frame)(void *ctx, const uint8_t *px, const uint16_t *lut, const uint8_t **kept);
+    // Nothing still reads the cart's memory or writes the copy `frame`
+    // kept: before the cart's next hook, and before the run leaves the front.
+    void (*frame_fence)(void *ctx);
 } moy_front_ops_t;
 #define MOY_PLAY_FREE_DT 0.1f           // a free-running cart's dt clamp
 void moy_play_front_ops(const moy_front_ops_t *ops);
@@ -323,10 +442,19 @@ bool moy_play_front_live(void);
 // One loop frame of the run in front, `dt_us` since the last: 1 drew, 0 did
 // not, -1 the front gave the frame back (the run ended, or needs the console).
 int moy_play_front_frame(uint32_t now, uint32_t dt_us);
-// End the run in front (the dev channel's `end`, a Ctrl-C): false with none.
+// End the run in front (the dev channel's `end`, a Ctrl-C), or release a
+// stopped run's panel: false with neither.
 bool moy_play_front_end(int why);
-// `state` while a run is in front: the kernel's JSON object (the shell's
-// screen is the run's), or "null" with none in front. The bytes written.
+// The panel a run the kernel stopped the VM for leaves when its load is
+// refused or it raises (moy_play_stop.c): `run`, ended, holds it up showing
+// `text`; 0 takes it down. While it is up
+// the VM stays down: the dev channel's `end` and `state` reach it as they
+// reach a run in front, and moy_play_front_end releases it.
+void moy_play_panel(uint32_t run, const char *text);
+bool moy_play_panel_up(void);
+// `state` while a run is in front or a stopped run's panel is up: the
+// kernel's JSON object (the shell's screen is the run's, or "panel"), or
+// "null" with neither. The bytes written.
 size_t moy_play_state_json(char *out, size_t n);
 // A Ctrl-C is waiting for the VM (the board's: weak, none elsewhere).
 bool moy_play_interrupt_pending(void) __attribute__((weak));

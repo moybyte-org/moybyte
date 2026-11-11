@@ -208,6 +208,15 @@ class HostCompositor:
         return True
 
 
+class DeskCompositor(HostCompositor):
+    """The desk's compositor: the P4s' DSI and rotated ones copy out of the
+    buffer the last frame drew into (`copy_last`) and name no buffer to read
+    in place, so a wash over the last frame copies it in first there as here.
+    `last` is still a test's ring of buffers presented in turn."""
+
+    last_buffer = None
+
+
 class ConsoleOwners(dict):
     """One console's lifetimes by tag (device_canvas `_owners`), which end
     with the console: a board's console lives as long as its process, a
@@ -441,11 +450,14 @@ def indices_of(cv, strict=True):
         for row in range(h))
 
 
-def make_system_canvas(w, h, font_scale=1):
+def make_system_canvas(w, h, font_scale=1, desk=False):
     """A system canvas of (w, h) over its own buffer -- the CHROME tier.
 
     The two-domain seam (#39) as two factories: the desktop/launcher/settings
     and every editor tab draw here and reflow with the size, while a running
-    cart draws on the fixed game canvas `make_canvas` returns.
+    cart draws on the fixed game canvas `make_canvas` returns. `desk`: the
+    windowed desk's root, over the compositor the desk boards have
+    (`DeskCompositor`).
     """
-    return _system_canvas_class()(HostCompositor(w, h), font_scale=font_scale)
+    comp = (DeskCompositor if desk else HostCompositor)(w, h)
+    return _system_canvas_class()(comp, font_scale=font_scale)

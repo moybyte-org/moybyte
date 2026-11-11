@@ -100,6 +100,8 @@ typedef struct {
     void (*msync)(void *ctx);               // single buffer: the writeback alone
     void (*ppa_sync)(void *ctx);            // every PPA op landed
     bool (*ppa_done)(void *ctx);            // ...without waiting; NULL: unknown
+    // A compiled cart's frame snapshot has landed (moy_ppa.snap); NULL: none.
+    void (*snap_wait)(void *ctx);
     uint32_t (*ticks_us)(void *ctx);
     // Panel refreshes since init (moy_dsi.refreshes); NULL: a show takes
     // effect when it returns.
@@ -134,7 +136,8 @@ void moy_dsi_present(moy_dsi_t *d, bool stamp);
 // DMA flies.
 void moy_dsi_show_landed(moy_dsi_t *d);
 // The loop's pre-frame hook: show what the last present deferred, fencing
-// only when the cart's next draw would overwrite a composite's source.
+// only when the cart's next draw would overwrite a composite's source -- the
+// game composite, and the snapshot of a compiled cart's frame beside it.
 void moy_dsi_present_pending(moy_dsi_t *d);
 // No PPA op in flight and no deferred show unpresented.
 void moy_dsi_fence(moy_dsi_t *d);

@@ -74,6 +74,7 @@ enum {
     MOY_VOL_KIND_POSIX = 1,
     MOY_VOL_KIND_FAT = 2,       // fs is a FATFS *
     MOY_VOL_KIND_LFS2 = 3,      // fs is an lfs2_t *
+    MOY_VOL_KIND_VM = 4,        // the volume table's: a mount only the VM's task works
 };
 
 typedef struct {
@@ -117,14 +118,93 @@ void moy_vol_unwind(void);                      // close every file still open
 // only its own moy_vol_close closes it. A compiled cart's session holds the
 // file it streams this way (moy_files.h).
 
+// THE STORE'S LOCK. Any task may make a store op: the VM's, a compiled or Lua
+// program's own, a service's, the kernel's frame while no VM runs. One
+// mutex (a FreeRTOS mutex on a board, a pthread one on the host and the
+// desktop, nothing in the threadless browser) keeps them apart, recursive
+// for its holder:
+//
+//   * a whole op holds it, from moy_vol_gate_enter to moy_vol_gate_leave
+//     (the bus gate inside it), and a working folder holds it from
+//     moy_vol_enter to moy_vol_leave, so a FAT volume's working folder moves
+//     only while one op owns the volume;
+//   * every call of the seam below takes it for itself, so the library's
+//     instance is never worked by two tasks at once;
+//   * VfsFat's calls take it through FatFS's own grant (oofatfs is built
+//     FF_FS_REENTRANT, each FATFS's sync object this lock where the volume is
+//     one a task can reach, moy_vol_fat_lockable), and KVfs's around each
+//     littlefs call (moy_kvfs.c), so the VM's Python waits for a program's op
+//     at a library call's edge and never inside one;
+//   * on the T-Deck the panel's kick takes it, so no frame starts while a
+//     task holds the card's bus (modmoy_lcd.c).
+//
+// An op that walks a folder entry by entry (a free name tried after another,
+// a tree copied file by file) calls moy_store_yield between entries: where
+// any task waits for the lock and the caller is not the VM's task, the caller
+// lets its holds and its bus gate go, waits until a waiter has taken the
+// lock, and takes them back at the same depth (the VM's task still first),
+// the bus gate draining whatever frame the VM began. The VM's task lets go for
+// nobody, and a caller holding a working folder (moy_vol_enter) does not let
+// go. So the VM, the T-Deck's next frame and another program each wait for
+// one entry of a program's walk, never for the walk; an entry another op
+// changed meanwhile is read as it now is.
+//
+// moy_store_unlock_to drops the calling task's holds down to `depth`, what a
+// raised call's unwind does with the depth it entered at. moy_store_lock_stats
+// is the meter: how many outermost holds, the longest, and the longest any
+// task and the VM's task waited (moy_store_on_vm, which the binding defines,
+// says which task that is; weak). `reset` zeroes it after reading.
+void moy_store_lock(void);
+void moy_store_unlock(void);
+int moy_store_lock_depth(void);         // the calling task's holds
+void moy_store_unlock_to(int depth);
+void moy_store_yield(void);
+uintptr_t moy_store_me(void);           // the calling task, never 0
+int moy_store_on_vm(void);
+typedef struct {
+    uint32_t holds;
+    uint32_t hold_us;                   // the longest outermost hold
+    uint32_t wait_us;                   // the longest wait, any task
+    uint32_t vm_wait_us;                // the longest wait of the VM's task
+    uint32_t waits;                     // the locks that found it held
+} moy_store_lock_stats_t;
+void moy_store_lock_stats(moy_store_lock_stats_t *out, int reset);
+
+// THE VOLUME TABLE: the volumes a task other than the VM's resolves a path
+// through, each a mount point and the instance under it, longest match first.
+// Only an instance whose sectors never enter the VM is listed: the kernel's
+// card over its native driver, the kernel's internal flash (KVfs), and POSIX
+// at "/". The kernel lists its own at their mounts (the card at /sd, the
+// flash at /), and the VM's binding lists what its mount table holds of them
+// at each change of that table (modmoy_store.c), so a path a task resolves
+// is the one the VM would. Every other mount of the VM's is listed too, as
+// MOY_VOL_KIND_VM, so a path under it is never taken for one under the volume
+// mounted above it. moy_vol_table_drop takes every entry over `fs` out (the
+// card lent out whole); moy_vol_table_at answers ENODEV for a path no entry
+// holds and for one under a mount of the VM's alone.
+#define MOY_VOL_TABLE_N 6u
+#define MOY_VOL_TABLE_AT 16u                 // a mount point, its NUL counted
+int moy_vol_table_set(const char *at, uint8_t kind, void *fs);
+void moy_vol_table_drop(void *fs);
+void moy_vol_table_clear(void);
+int moy_vol_table_at(const char *path, moy_vol_t *v, const char **rest);
+// Each mount point's first folder under "/" ("sd" for /sd), as moy_vol_mounts.
+int moy_vol_table_mounts(int (*fn)(void *arg, const char *name), void *arg);
+// The FAT instance whose FatFS calls take the lock (one: the card's, over its
+// native driver), or NULL. Set before its f_mount.
+void moy_vol_fat_lockable(void *fs);
+
 // The board's bus rule around an op on a card: on the T-Deck the card shares
 // the panel's SPI host, and the panel's driver registers a gate that drains
 // the flush and holds the next one off while `on` (moy_lcd's sd_guard, which
 // nests). NULL, the default, where a card has a bus of its own.
-// moy_vol_gate_enter takes the gate when `path` is on a FAT volume and a gate
-// is registered, and answers whether it did; moy_vol_gate_leave takes that
-// answer. A caller that touches the card from C brackets every op with the
-// two, as the Python store's session does.
+// moy_vol_gate_enter takes the store's lock, and the gate as well when `path`
+// is on a FAT volume and a gate is registered, and answers what it took for
+// moy_vol_gate_leave; or -1, nothing taken, when `path` is on no volume the
+// calling task can reach (a task other than the VM's, a path the volume table
+// does not hold): the op belongs on the VM's task. A caller that touches the
+// store from C brackets every op with the two, as the Python store's session
+// does.
 typedef void (*moy_vol_gate_fn)(int on);
 void moy_vol_set_gate(moy_vol_gate_fn fn);
 int moy_vol_gate_enter(const char *path);
@@ -133,6 +213,12 @@ void moy_vol_gate_leave(int entered);
 int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st);
 int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
                  void *ctx);
+// One entry of a listing with what its folder's own entry says of it, as
+// moy_vol_stat answers it (FAT's stamp, POSIX's stat; littlefs's mtime
+// attribute read per entry): a listing ordered by time stats nothing.
+typedef int (*moy_vol_scan_fn)(void *ctx, const char *name, size_t len,
+                               const moy_vol_stat_t *st);
+int moy_vol_scan(const moy_vol_t *v, const char *dir, moy_vol_scan_fn fn, void *ctx);
 int moy_vol_mkdir(const moy_vol_t *v, const char *path);
 int moy_vol_remove(const moy_vol_t *v, const char *path);
 // `dst` must not exist, on every backend, as FAT has it: EEXIST.
@@ -147,10 +233,13 @@ int moy_vol_replace(const moy_vol_t *v, const char *src, const char *dst);
 // the volume's own: f_chdir on the FATFS, which then looks a relative name up
 // in that folder alone, where a full path walks every folder above it again;
 // leave restores every working-folder field (cdir, and exFAT's cdc_*) as one,
-// so the VM's working folder is untouched. On littlefs and POSIX it is a path
-// prefix. A raised call leaves through moy_vol_unwind, which leaves too.
+// so the VM's working folder is untouched. The store's lock is held from enter
+// to leave, so no other task's call sees the folder moved. On littlefs and
+// POSIX it is a path prefix. A raised call leaves through moy_vol_unwind,
+// which leaves too.
 typedef struct moy_vol_here {
     struct moy_vol_here *next;      // what moy_vol_unwind leaves
+    uintptr_t who;                  // the task that entered it
     moy_vol_t v;
     char *dir;                      // the folder, NUL-terminated
     size_t dir_n;
@@ -167,10 +256,17 @@ const char *moy_vol_here_name(moy_vol_here_t *h, const char *name);
 void moy_vol_leave(moy_vol_here_t *h);
 
 // Imported from the host. moy_vol_at resolves `path` to the volume that owns
-// it and the path within it; moy_store_alloc is a call's scratch (zeroed),
+// it and the path within it (off the VM's task through the volume table, and
+// never raising there); moy_store_alloc is a call's scratch (zeroed), the
+// calling task's (what a raised call's unwind frees is its own task's alone),
 // moy_store_keep what outlives the call (the marker cache); both are freed by
 // moy_store_free with the size they were made with.
 int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
+// The folders mounted under the root beside the root's own volume ("sd" for
+// /sd), each once to `fn` until it answers non-zero (its answer returned).
+// Optional: a host with one volume over the whole tree defines none, and a
+// caller takes it weak.
+int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg);
 //
 // moy_store_tick is called at every open and every listing: on a board it
 // feeds the kernel's task watchdog when the frame loop has armed it, so a

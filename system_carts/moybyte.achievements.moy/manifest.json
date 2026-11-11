@@ -1,0 +1,24 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "Achievements",
+  "id": "moybyte.achievements",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "service",
+    "system": true,
+    "order": 370,
+    "permissions": [
+      "notifications",
+      "prefs"
+    ],
+    "receives": [
+      "award",
+      "progress"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

@@ -110,35 +110,35 @@ def test_a_finger_that_really_stops_still_reads_as_a_stop():
 
 def test_stale_frames_bank_their_time_for_the_next_real_sample(tmp_path):
     ws = build_ws(tmp_path)
-    ws._frame_dt_ms = DT
+    ws.frame_state.frame_dt_ms = DT
     p = ws.pointer
 
     p.fresh = True
     ws._tick_pointer_dt(p)
-    assert ws._pointer_dt_ms == DT
+    assert ws.frame_state.pointer_dt_ms == DT
 
     p.fresh = False
     ws._tick_pointer_dt(p)
-    assert ws._pointer_dt_ms is None       # measured nothing -> charge nothing
+    assert ws.frame_state.pointer_dt_ms is None       # measured nothing -> charge nothing
     ws._tick_pointer_dt(p)
-    assert ws._pointer_dt_ms is None
+    assert ws.frame_state.pointer_dt_ms is None
 
     p.fresh = True
     ws._tick_pointer_dt(p)
-    assert ws._pointer_dt_ms == DT * 3     # the two skipped frames, banked
+    assert ws.frame_state.pointer_dt_ms == DT * 3     # the two skipped frames, banked
     ws._tick_pointer_dt(p)
-    assert ws._pointer_dt_ms == DT         # ...and spent exactly once
+    assert ws.frame_state.pointer_dt_ms == DT         # ...and spent exactly once
 
 
 def test_banked_time_is_clamped_like_the_frame_tick(tmp_path):
     ws = build_ws(tmp_path)
-    ws._frame_dt_ms = DT
+    ws.frame_state.frame_dt_ms = DT
     ws.pointer.fresh = False
     for _ in range(50):                    # a long stall (the board slept, a GC hit)
         ws._tick_pointer_dt(ws.pointer)
     ws.pointer.fresh = True
     ws._tick_pointer_dt(ws.pointer)
-    assert ws._pointer_dt_ms == 100.0      # the physics can't be spiked by a hitch
+    assert ws.frame_state.pointer_dt_ms == 100.0      # the physics can't be spiked by a hitch
 
 
 # -- end to end: the shelf under a device-shaped sample stream ----------------

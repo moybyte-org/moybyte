@@ -106,3 +106,14 @@
 105 smile
 106 key
 107 secret
+108 pause
+109 prev
+110 next
+111 stop
+112 retry
+113 minus
+114 plus
+115 playlist
+116 equalizer
+117 pulse
+118 moymesh

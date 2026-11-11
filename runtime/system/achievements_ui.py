@@ -5,49 +5,46 @@
 #   AchievementsPage._popover   a badge opened: its tile, name, how and the day it was found
 #   desk_foot                   a desk Settings page's foot: a rule, a status, the keys
 """Achievements on the console (#21, docs/history/look_2026-10.md step 32): the
-hidden Easter eggs, Settings' Achievements page and the unlock banner's words.
+hidden Easter eggs, Settings' Achievements page and the unlock banner's burst.
 
-The achievement CORE is `widgets.Achievements` on the Workstation, wired by
-`console_notices.Notices.load_achievements`; the store's document is
-moy_carts' achievements.json. This module draws, and keeps the eggs; both
-reach the badges through their AppContext's `notify` role, which reads the
-core live (a store load replaces it).
+The badges are the achievements process's (runtime/system/achievements.py,
+docs/app_api_v1.md section 9): the console's own and every game's.
+This module draws, and keeps the eggs; both reach the badges through their
+AppContext's `notify` role.
 
 * The eggs: the Konami code on the home, seven taps on the bar's clock and
-  five on Settings' title, each awarding its hidden badge through
+  five on Settings' title, each awarding the console's hidden badge through
   `notify.award`. A first find shows the unlock banner ("You found a
   secret!", with confetti); a second shows nothing.
 * The page is a page of Settings (`SettingsLayer`, Settings' way back): the
-  count as `ui.progress`'s `count`, then "Found" and "To find", each a card
-  grid a row at a time (a row as tall as its tallest caption) of
-  `ui.card(name, how)` over the badge's `icon` tile, a locked one veiled
-  (`locked`) and a secret one "Secret" until found. Enter or a tap opens a
-  badge's `ui.popover`, hung from its card. The desk's foot names the
-  focused badge. Everything a frame draws is made when what it shows
-  changes, so an idle or scrolled frame allocates nothing.
+  count as `ui.progress`'s `count`, then a group a game (`notify.groups`:
+  the console's own first, then each game that declares a badge, then each
+  game gone from the shelf whose badges were found), each a card grid a row
+  at a time (a row as tall as its tallest caption) of `ui.card(name, how)`
+  over the badge's `icon` tile, a locked one veiled (`locked`), a secret
+  one "Secret" until found and a goal under way its count ("3 of 5").
+  Enter or a tap opens a badge's `ui.popover`, hung from its card: the day
+  it was found, or its goal's bar. The desk's foot names the focused badge.
+  Everything a frame draws is made when what it shows changes, so an idle
+  or scrolled frame allocates nothing.
 * The banner is native/moy_ui's `moy_ui_unlock`, drawn by the console
-  (`console_notices.Notices._draw_toast`) with the heads and the confetti's
-  burst named here.
+  (`console_notices.Notices._draw_toast`) with the head the process posted
+  and the confetti's burst named here.
 """
 
 try:
     import ui as _ui
     import layout_base as _lb
-    from widgets import ACHIEVEMENTS
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import layout_base as _lb
-    from runtime.widgets import ACHIEVEMENTS
 
 
 TITLE = "Achievements"
 NONE_LINE = "Play, draw and make things to find them."
 SECRET = "Secret"
 SECRET_HOW = "Keep exploring"
-FOUND, TO_FIND = "Found", "To find"
 NOT_FOUND = "Not found yet"
-HEAD_BADGE = "You found a badge!"
-HEAD_SECRET = "You found a secret!"
 BURST_MS = 420                 # the confetti's burst, from the banner's edges out
 DESK_IN = 20                   # a desk page's inset from its window's body, each side
 DESK_FOOT = 32                 # the desk window's foot: the focused badge and the keys
@@ -147,19 +144,31 @@ class AchievementsUI:
             self._notify.award("secret_door")
 
 
+def goal_line(value, goal):
+    """A goal under way, as its card and its popover say it."""
+    return "%d of %d" % (min(value, goal), goal)
+
+
 class _Card:
-    """One badge's card as the page draws it, made when the page's rows are."""
+    """One badge's card as the page draws it, made when the page's rows are:
+    `b` a badge of `notify.groups`, (id, title, icon, hint, goal, secret,
+    day, value), of app `app`'s."""
 
-    __slots__ = ("id", "title", "sub", "o", "cur", "icon", "got", "how", "status")
+    __slots__ = ("id", "title", "sub", "o", "cur", "icon", "got", "how", "status",
+                 "day", "goal", "value")
 
-    def __init__(self, a, got):
-        secret = a[3] and not got
-        self.id = "Badge " + a[0]
-        self.title = SECRET if secret else a[1]
-        self.sub = SECRET_HOW if secret else a[4]
-        self.icon = "secret" if secret else a[2]
+    def __init__(self, app, b):
+        got = b[6] is not None
+        secret = b[5] and not got
+        self.id = "Badge %s %s" % (app, b[0])
+        self.title = SECRET if secret else b[1]
+        self.how = SECRET_HOW if secret else b[3]
+        self.goal = b[4] if not got else None
+        self.value = b[7]
+        self.sub = goal_line(b[7], b[4]) if self.goal and b[7] > 0 else self.how
+        self.icon = "secret" if secret else b[2]
         self.got = got
-        self.how = self.sub
+        self.day = b[6]
         # a badge's card is the engine's alone: its picture's gen never moves
         self.o = {"id": self.id, "icon": self.icon, "gen": 0}
         if not got:
@@ -185,12 +194,13 @@ class AchievementsPage:
         self._focus = None            # the card focus moves to next frame
         self._pop_lines = ("", "")    # the open popover's how and state lines
         # the rows as `_cards` made them, and what they were made from
-        self._made_n = -1
+        self._made_groups = None
         self._made_w = -1
         self._made_desk = None
         self._made_gen = -1
         self._page_o = {"gen": 0}     # the page's override table: its gen moves with the rows
         self._head = ""
+        self._count = (0, 0)
         self._groups = ()             # ((caption, ((grid id, grid override, (_Card, ...)), ...)), ...)
         self._by_id = {}
         self._card = (0, 0)           # the pictures' size
@@ -228,28 +238,31 @@ class AchievementsPage:
         col = (w - 32 * fs) // cols
         return cols, pw, ph, 16 * fs + (col - pw) // 2
 
-    def _cards(self, w, desk, fs, n):
-        """The page's rows, made again when the badges found (`n` of them),
-        the page's width or the look (a face's widths) move."""
+    def _cards(self, w, desk, fs, groups):
+        """The page's rows, made again when the badges (`groups`, made anew
+        whenever what they say moves), the page's width or the look (a
+        face's widths) move."""
         gen = self._theme.gen()
-        if (n == self._made_n and w == self._made_w and desk == self._made_desk
+        if (groups is self._made_groups and w == self._made_w and desk == self._made_desk
                 and gen == self._made_gen):
             return
-        self._made_n, self._made_w, self._made_desk, self._made_gen = n, w, desk, gen
+        self._made_groups, self._made_w, self._made_desk, self._made_gen = groups, w, desk, gen
         self._page_o["gen"] += 1          # what the page shows moved
         cols, pw, ph, margin = self._geometry(w, desk, fs)
         self._card = (pw, ph)
         pad = 7 if desk else 5
         room = pw + 2 * pad * fs - 2 * fs
         _ui.face("ui")
-        groups = []
+        out = []
         self._by_id = {}
         k = 0
-        for cap, want in ((FOUND, True), (TO_FIND, False)):
-            has = self._notify.has
-            cards = [_Card(a, want) for a in ACHIEVEMENTS if has(a[0]) == want]
-            if not cards:
-                continue
+        n = total = 0
+        for app, cap, badges in groups:
+            cards = [_Card(app, b) for b in badges]
+            total += len(cards)
+            for c in cards:
+                if c.got:
+                    n += 1
             rows = []
             for i in range(0, len(cards), cols):
                 row = tuple(cards[i:i + cols])
@@ -266,21 +279,21 @@ class AchievementsPage:
                     o["top"] = 3 if i == 0 else 1
                 rows.append(("grid%d" % k, o, row))
                 k += 1
-            groups.append((cap, tuple(rows)))
+            out.append((cap, tuple(rows)))
         _ui.face()
-        self._groups = tuple(groups)
-        self._head = head_line(n, len(ACHIEVEMENTS))
+        self._groups = tuple(out)
+        self._head = head_line(n, total)
+        self._count = (n, total)
         self._foot_of = None
 
     def _open(self, c):
         """Open card `c`'s popover: its lines made now, once."""
-        notify = self._notify
-        aid = c.id[6:]
         if c.got:
-            state = day_line(notify.found_on(aid) or 0, notify.today())
+            state = day_line(c.day or 0, self._notify.today())
+        elif c.goal:
+            state = goal_line(c.value, c.goal)
         else:
-            got = notify.progress(aid)
-            state = "%d of %d" % got if got and got[0] else NOT_FOUND
+            state = NOT_FOUND
         self._pop_lines = (c.how, state)
         self.pop = c
         self._damage.all()
@@ -292,12 +305,12 @@ class AchievementsPage:
         `SettingsLayer`; on the desk its foot under it."""
         desk = _desk()
         fs = self._surf.font_scale() if not desk else 1
-        n = self._notify.count()
+        groups = self._notify.groups()
         po = self._page_o
         if not desk:
             # the page's rows (docs/history/scroll_and_text_2026-10.md §3.3): what
             # they show moves only with the cards made again
-            self._cards(rect[2], desk, fs, n)
+            self._cards(rect[2], desk, fs, groups)
         x, y, w, h = _ui.page("", None if desk else po)
         if desk:
             # the badges scroll in the body over the window's own foot
@@ -306,11 +319,12 @@ class AchievementsPage:
             _ui.scroll("Achievements", po)
         else:
             _ui.hints(_HINT_POP if self.pop is not None else _HINT_PAGE)
-        self._cards(w, desk, fs, n)
+        self._cards(w, desk, fs, groups)
         if self._focus is not None:
             _ui.focus(self._focus)
             self._focus = None
-        _ui.progress(self._head, n, len(ACHIEVEMENTS), _COUNT)
+        n, total = self._count
+        _ui.progress(self._head, n, total, _COUNT)
         if n == 0:
             _ui.label(NONE_LINE, _LINE)
         pw, ph = self._card
@@ -358,10 +372,15 @@ class AchievementsPage:
             how, state = self._pop_lines
             _ui.at(tx, r[1] + (6 if desk else 0), lw, lh + 4 * s)
             _ui.label(c.title, _NAME)
-            _ui.at(tx, r[1] + (6 if desk else 0) + lh + 4 * s, lw, lh)
-            _ui.label(how, _DIM)
-            _ui.at(tx, r[1] + (6 if desk else 0) + 2 * lh + 4 * s, lw, lh)
-            _ui.label(state, _VALUE if c.got else _DIM)
+            if c.goal:
+                # a goal under way: how it is found and its percent over its bar
+                _ui.at(tx, r[1] + (6 if desk else 0) + lh + 4 * s, lw, 2 * lh)
+                _ui.progress(how, max(0, min(c.value, c.goal)), c.goal)
+            else:
+                _ui.at(tx, r[1] + (6 if desk else 0) + lh + 4 * s, lw, lh)
+                _ui.label(how, _DIM)
+                _ui.at(tx, r[1] + (6 if desk else 0) + 2 * lh + 4 * s, lw, lh)
+                _ui.label(state, _VALUE if c.got else _DIM)
         _ui.popover()
 
 

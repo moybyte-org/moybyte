@@ -32,7 +32,9 @@ below is pre-injected as a global. (A cart can also be written in **Lua** —
 A Lua cart may be **more than one script**: the manifest lists them in `"sources"`
 and the console runs them in that order, each as its own chunk — so a `local` in one
 is invisible in the next and they share through globals. There is still no importing;
-the manifest declares the list and the console loads it (SPEC.md §4). A PICO-8 port is
+the manifest declares the list and the console loads it (SPEC.md §4). An app's Lua
+service runs the scripts listed before `main` ahead of its own entry, so the two halves
+share them (`docs/app_api_v1.md` §7). A PICO-8 port is
 the standing case, with its generated compat layer in `p8.lua` ahead of the `main.lua`
 a person opens — and one more script per PICO-8 tab after it, because tabs are where
 that cart's author put its structure.
@@ -78,11 +80,12 @@ def _draw():                 # every frame; render here
 | `_init()` | once at cart start (and on restart) | optional; reset your state here |
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
+| `_layout(w, h, fs)` | an app's, before `_init` and whenever its surface or font scale changes | optional; defining it makes an app responsive, in Python, Lua or a compiled app alike (`docs/app_api_v1.md` §3) |
 
 An app cart (`"type": "app"`) is the exception: it is drawn on change, its
 `_update` and `_draw` running while input or its page moves and not while it
 sits still (`docs/ui_api_2026-10.md`, "Drawn on change"), unless its
-manifest says `"animates": true` ("Turning a cart into an APP", below).
+manifest says `"animates": true` (`docs/app_api_v1.md` §3).
 
 ## Writing a cart in Lua (#67)
 
@@ -145,7 +148,8 @@ The few Lua-specific notes:
   **dict** (`a.flags`) is a table too, read as `a.flags.size` or
   `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
-  `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
+  `string.*`, `table.*` (no `load`/`require`; `io` and `os` only as an
+  app's, `docs/app_api_v1.md` §5).
 - A Lua cart's files are **source text**. A precompiled chunk (`luac` output,
   or anything opening with Lua's binary signature, `ESC "Lua"`) is refused at
   load with Lua's own "attempt to load a binary chunk" error, on every tier:
@@ -202,8 +206,9 @@ an imported PICO-8 cart always carries its own 30 or 60.
   the player resumes it. A cart can never read the device's console key (a keyboard's
   Super, a gamepad's Start, the Moy button, the T-Deck's Mic), in any input mode;
   tapping it opens the pause menu, whose **Quit** hands control back to whoever
-  launched the cart (the launcher, or the editor's PLAY). BACKSPACE is an ordinary
-  key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
+  launched the cart (the launcher, or the editor's PLAY). A keyboard's media keys
+  (play/pause, next, previous, volume) are the console's too: they reach the music
+  playing beside your cart, never your cart. BACKSPACE is an ordinary key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
   title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard types every key to `key()`, but a held key reads every frame it is down
@@ -657,8 +662,9 @@ def _update(dt):
     net.send((me.x, me.y))          # tell the friend where I am
 ```
 
-Both `net` and `on_net` are **only present** when the manifest grants
-`"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`).
+Both `net` and `on_net` are **only present** when the manifest asks for
+`"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`) —
+and are `None` while it is turned off in Settings.
 
 > **Keeping two consoles in step:** if both sides run the same game logic, seed your
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
@@ -666,15 +672,15 @@ Both `net` and `on_net` are **only present** when the manifest grants
 
 ## Pins — wires, lights and buttons (`#9`)
 
-Some consoles have a **spare pin header**: the Moybyte Zero is one, a little
-board with no screen that serves this console to your browser over WiFi. When
-your cart is running on a console like that, it gets two extra verbs and can
-turn things on and off in the real world.
+Some consoles have **spare pins**: both P4 consoles do, and so does the
+Moybyte Zero, a little board with no screen that serves this console to your
+browser over WiFi. When your cart is running on a console like that, it gets
+two extra verbs and can turn things on and off in the real world.
 
 | call | does |
 |---|---|
 | `pin_write(n, v)` | pin `n` goes high (`v` = 1) or low (`v` = 0). `True`/`False` work too |
-| `pin_read(n)` | the last level pin `n` reported — `0`, `1`, or `None` before the first answer |
+| `pin_read(n)` | the level of pin `n` — `0`, `1`; through the Zero the last level it reported, or `None` before the first answer |
 
 ```python
 LED = 21          # the Zero's own little light
@@ -694,12 +700,17 @@ can read it before running it. Without it the names are absent even on a console
 that has pins.
 
 **And the names are only there when the console has pins.** On moybyte.com, on a
-T-Deck or a P4, or in a browser tab you opened from a file, `pin_write` does
+T-Deck or a Guition S3, or in a browser tab you opened from a file, `pin_write` does
 not exist at all and using it is a `NameError` — the same rule as `wifi` and
 `net`. That is on purpose: a verb that pretends to work while nothing happens
 is the hardest possible bug for a kid to see.
 
-**They are not instant, and you should know how much.** Your cart runs in the
+**On a P4 they are instant**: the pin is the console's own, and your cart
+holds it until it stops (another cart asking for the same pin gets `False` and
+`None`). The first `pin_write` makes a pin an output, the first `pin_read` an
+input with nothing pulling it.
+
+**Through the Zero they are not instant, and you should know how much.** Your cart runs in the
 browser and the pins are on the board across the room, so a `pin_write` does
 not go down a wire — it is **queued**, and the page sends everything that piled
 up about **30 times a second**. So:
@@ -719,9 +730,10 @@ fast enough to bit-bang a protocol, and it is not meant to be.
 is **refused, never driven** — the board needs some of its pins to stay alive
 (its flash, its USB, its serial console), and a typo must not be able to reach
 them. Ask for a pin outside the list and the console says so once, and nothing
-happens. On the Zero the list is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
-`D0`, `D1`, `D3`, `D4`, `D5`, `D8`, `D9`, `D10`) plus `21`, the board's own
-built-in LED.
+happens (on a P4, the verb answers `False` or `None`). On the Zero the list
+is `1, 2, 4, 5, 6` (the pads marked
+`D0`, `D1`, `D3`, `D4`, `D5`; `D8`–`D10` are its LoRa radio's) plus `21`, the
+board's own built-in LED; on a P4 it is the free pins its README lists.
 
 > **On or off, and that is all — for now.** There is no `pin_pwm`, no servo and
 > no motor verb yet: driving a motor takes a driver board between the pin and
@@ -729,153 +741,15 @@ built-in LED.
 
 ## Turning a cart into an APP (`#181`)
 
-A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather than a game. The
-console runs it **with its own top bar** — a title and an X — so it can never trap
-you, and it can ask for a few of the console's own powers by naming them in
-`permissions`, exactly like `"multiplayer"` above. Both are Moybyte's own
-fields, so they live in the manifest's `"moybyte"` object (SPEC.md §3.1: an
-implementation's fields go under one key named after it; loose at the top
-level, a console reads them as absent):
-
-```json
-"moybyte": {
-  "type": "app",
-  "permissions": ["graphics", "input", "files:docs", "prefs"]
-}
-```
-
-| permission | what the cart gets |
-|---|---|
-| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
-| `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
-| `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
-| `appearance` | `set_theme(name)` / `themes()` |
-| `launch` | `open_app(id)` |
-| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
-
-Every app cart also gets five names with no permission needed, because they are
-how an app draws rather than what it may touch: **`screen()`** (the canvas),
-**`theme()`** (the console's live colors), **`content_rect()`** (`x, y, w, h`:
-the part of the screen the console's bar leaves you, wherever the bar sits —
-lay out inside it; in Lua it answers four values), **`bar_h()`** (its `y`, the
-rows above it) and **`ui`**, the console's own widget toolkit
-(buttons, rows, panels, rect maths). Storage answers `(value, error)`
-and never crashes, so there is no `try` to write.
-
-Anything you did not ask for **is not there** — no `carts`, no shell. Writing
-that name is an ordinary "name is not defined" error, like a typo.
-
-An app is drawn on change (the frame loop, above), so an idle one costs the
-console nothing. An app that moves on its own — a clock, a meter, an
-animation — says `"animates": true` beside its `type` and runs every frame
-like a game. One that lists `audio` in its permissions does too, since its
-sound is pulled in the frame:
-
-```json
-"moybyte": {"type": "app", "animates": true, "permissions": ["graphics", "input"]}
-```
-
-`system_carts/moybyte.notes.moy` is the worked example: it lists your notes, opens one
-through the editor handle below, and holds no text of its own. The full rules
-(what is never grantable, and how to make an app reflow to a big screen with
-`_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
-`docs/app_api_v1.md`.
-
-### The editor handle (`#112`)
-
-`open_editor` hands your cart the console's **own** text editor over one
-document. You draw it into a rect and forward taps; it does the text, the
-caret, the selection, wrap, undo, the clipboard, the Markdown rendering and
-the saving. There is no SAVE button to build: it writes on an idle pause and
-again when the cart exits, so a note is never lost by tapping X.
-
-| call | does |
-|---|---|
-| `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind — you cannot name one |
-| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files, or a project's own file on the Editor's Config tab), or `None` when there is none. Call it once in `_init` |
-
-The kind that arrives with `open_editor()` may be one you were never granted —
-a person chose that file, not your cart. One of them is a whole PROJECT:
-`project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
-`config.json`, the main program), reached only through the Config tab's
-Files so the cart loader re-reads the folder afterwards. You still just
-draw it; nothing about the handle changes.
-
-Everything else is on the handle you get back:
-
-| call | does |
-|---|---|
-| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen. On a `ui.page` given a `gen` it draws only the rows that changed (docs/ui_api_2026-10.md) |
-| `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
-| `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
-| `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |
-| `ed.focus(on)` / `ed.focused()` | take or release the keyboard. While a handle has it, the console types into it and your own `key()`/`keyp()` read nothing |
-| `ed.key(code)` | feed one byte yourself (an on-screen key), focused or not |
-| `ed.undo()` / `ed.redo()` | one step. `ed.can_undo()` / `ed.can_redo()` for dimming a button |
-| `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the clipboard. It is the CONSOLE's clipboard when your manifest asks for `clipboard`, and the document's own otherwise |
-| `ed.select_mode(on)` / `ed.selecting()` | turn SELECT mode on or off (no argument toggles). While it is on, a drag and the trackball EXTEND the selection instead of moving the caret — the only way to mark a range on a keyboard with no shift-arrow and no Ctrl |
-| `ed.has_selection()` / `ed.can_paste()` | is there anything to copy or cut, is there anything to paste — for dimming those buttons |
-| `ed.wraps()` | does this mode soft-wrap (`md`, `text`) or pan sideways (`code`, `json`) |
-| `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
-| `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
-| `ed.dirty()` | are there edits no save has taken yet |
-| `ed.can_run()` / `ed.run()` | is the document a program (`.py` / `.lua`), and RUN it: saved first, then run on the console's script screen, the way Files runs one. When it ends the console opens your cart again on the same document, the caret and the scroll where they were — `open_editor()` in `_init` hands it back. `run()` answers False when there is nothing to run, and `badge()` says why a run could not start |
-| `ed.text()` / `ed.set_text(s)` | the whole document as one string |
-| `ed.caret()` | `(row, col)` — for a "Ln 3, Col 12" strip |
-| `ed.scroll(rows, cols)` | pan the view without moving the caret |
-| `ed.name()` / `ed.mode()` | the document's name, and how it is being edited: `"md"` / `"code"` / `"json"` / `"text"` |
-| `ed.close()` | save and let it go (going back to a list) |
-
-**Markdown** is what a note is, and the handle renders it: `#` headings, `- [ ]`
-checkboxes you tick by tapping, `[[another note]]` links, and `![[a drawing]]`
-which puts one of Paint's pictures inline — by NAME, so your cart never handles
-the picture. PROSE wraps — a note and a `.txt` both — while code and JSON pan
-sideways instead, because breaking one of their lines would lie about the file.
-A JSON document arrives INDENTED however it was written, and saves the way the
-person sees it.
-
-```python
-def _init():
-    global ed
-    ed = open_editor() or open_editor("my notes")
-
-def _draw():
-    cls(0)
-    x, y, w, h = content_rect()
-    ed.draw(x + 4, y + 4, w - 8, h - 8)
-
-def _update(dt):
-    t = touch()
-    if t:
-        hit = ed.tap(t[0], t[1], t[2])
-        if hit and hit[0] == "link":
-            open_note(hit[1])                 # your skin decides what that means
-```
-
-```lua
-function _init()
-  ed = open_editor() or open_editor("my notes")
-end
-
-function _draw()
-  cls(0)
-  local x, y, w, h = content_rect()
-  ed:draw(x + 4, y + 4, w - 8, h - 8)
-end
-
-function _update(dt)
-  local x, y, click = touch()
-  if x ~= nil then
-    local verb, arg = ed:tap(x, y, click)
-    if verb == "link" then open_note(arg) end
-  end
-end
-```
-
-In Lua the handle is a table with the same verbs as methods (`ed:draw(...)`,
-`ed:tap(...)`), `nil` where Python returns `None`, and `ed:tap` answering two
-values rather than a pair — the same shape `make_layer` takes, for the same
-reason: only numbers and strings cross the Lua boundary.
+A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather
+than a game: the console runs it with its own bar, so it can never trap you,
+draws it on change, and hands it the powers its `permissions` name.
+Everything an app adds to this page (the manifest's `moybyte` fields, the
+`ui` verbs' place, files, prefs, the editor handle, permissions and consent,
+services, messages, the tiers) is `docs/app_api_v1.md`, the app author's
+guide. An app's background service lives in the same cart, named by
+`"moybyte": {"entries": {"service": file}}` beside `main`, and the app starts
+it with `moybyte.service_start()` (its §7).
 
 ## Scripts — a cart with no folder
 
@@ -1028,8 +902,16 @@ same here as on any other console that implements the spec.
 | `rnd(n=1.0)` | random float in `[0, n)` |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
-| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
+| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
+| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
+
+### Moybyte-side verbs
+
+A cart also reaches Moybyte's own OS through the `moybyte` module (`import
+moybyte` in Python; a Lua run holds the same `moybyte` table):
+notifications, alarms, opening with another app, picking a
+file, messages between processes and achievements. They are not moy-spec's,
+and `docs/app_api_v1.md` is their guide (§5 to §9).
 
 ---
 

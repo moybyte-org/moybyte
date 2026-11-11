@@ -59,6 +59,12 @@
 #define KV_CACHE 128                    // MIN(block, 4 * MAX(read, prog)), VfsLfs2's
 #define KV_ATTR_MTIME 1
 
+// Each littlefs call under the store's lock (native/moy_store/moy_vol.h, THE
+// STORE'S LOCK): the instance is the kernel's, and a program's task works it too.
+#include "moy_vol.h"
+#define KL(call) __extension__({ moy_store_lock(); __typeof__(call) r_ = (call); \
+    moy_store_unlock(); r_; })
+
 typedef struct {
     #if MOY_KVFS_FLASH
     const esp_partition_t *part;
@@ -211,13 +217,18 @@ lfs2_t *moy_kvol_lfs(void) {
         if (s_kv == NULL) {
             return NULL;
         }
-        int rc = lfs2_mount(&s_kv->lfs, &s_kv->cfg);
+        int rc = KL(lfs2_mount(&s_kv->lfs, &s_kv->cfg));
         #if MOY_KVFS_FLASH
-        if (rc < 0 && kv_blank(s_kv) && lfs2_format(&s_kv->lfs, &s_kv->cfg) == 0) {
-            rc = lfs2_mount(&s_kv->lfs, &s_kv->cfg);
+        if (rc < 0 && kv_blank(s_kv) && KL(lfs2_format(&s_kv->lfs, &s_kv->cfg)) == 0) {
+            rc = KL(lfs2_mount(&s_kv->lfs, &s_kv->cfg));
         }
         #endif
         s_kv->err = rc < 0 ? -rc : 0;
+        #if MOY_KVFS_FLASH
+        if (s_kv->err == 0) {
+            moy_vol_table_set("/", MOY_VOL_KIND_LFS2, &s_kv->lfs);
+        }
+        #endif
     }
     return s_kv->err == 0 ? &s_kv->lfs : NULL;
 }
@@ -225,12 +236,21 @@ lfs2_t *moy_kvol_lfs(void) {
 #if !MOY_KVFS_FLASH
 // The host's medium: its image as bytes, a new image (formatted when `img` is
 // NULL), mounted again either way. 0, or an errno.
+static int ram_load(const uint8_t *img, size_t n);
+
 int moy_kvol_ram_load(const uint8_t *img, size_t n) {
+    moy_store_lock();
+    int rc = ram_load(img, n);
+    moy_store_unlock();
+    return rc;
+}
+
+static int ram_load(const uint8_t *img, size_t n) {
     if (s_kv == NULL && (s_kv = kvol_new()) == NULL) {
         return MP_ENOMEM;
     }
     if (s_kv->err == 0) {
-        lfs2_unmount(&s_kv->lfs);
+        KL(lfs2_unmount(&s_kv->lfs));
     }
     size_t cap = (size_t)MOY_KVFS_RAM_BLOCKS * 4096u;
     if (img != NULL) {
@@ -240,9 +260,9 @@ int moy_kvol_ram_load(const uint8_t *img, size_t n) {
         memcpy(s_kv->ram, img, n);
     } else {
         memset(s_kv->ram, 0xff, cap);
-        lfs2_format(&s_kv->lfs, &s_kv->cfg);
+        KL(lfs2_format(&s_kv->lfs, &s_kv->cfg));
     }
-    int rc = lfs2_mount(&s_kv->lfs, &s_kv->cfg);
+    int rc = KL(lfs2_mount(&s_kv->lfs, &s_kv->cfg));
     s_kv->err = rc < 0 ? -rc : 0;
     return s_kv->err;
 }
@@ -381,7 +401,7 @@ static mp_obj_t kvfs_open(mp_obj_t self_in, mp_obj_t path_in, mp_obj_t mode_in) 
     o->cfg.attrs = o->attrs;
     o->cfg.attr_count = 1;
     const char *path = make_path(self, path_in);
-    int ret = lfs2_file_opencfg(self->lfs, &o->file, path, flags, &o->cfg);
+    int ret = KL(lfs2_file_opencfg(self->lfs, &o->file, path, flags, &o->cfg));
     if (ret < 0) {
         o->vfs = NULL;
         raise_lfs(ret);
@@ -393,7 +413,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(kvfs_open_obj, kvfs_open);
 static mp_uint_t file_read(mp_obj_t self_in, void *buf, mp_uint_t size, int *errcode) {
     kvfs_file_t *self = MP_OBJ_TO_PTR(self_in);
     file_check(self);
-    lfs2_ssize_t sz = lfs2_file_read(self->vfs->lfs, &self->file, buf, size);
+    lfs2_ssize_t sz = KL(lfs2_file_read(self->vfs->lfs, &self->file, buf, size));
     if (sz < 0) {
         *errcode = -sz;
         return MP_STREAM_ERROR;
@@ -405,7 +425,7 @@ static mp_uint_t file_write(mp_obj_t self_in, const void *buf, mp_uint_t size, i
     kvfs_file_t *self = MP_OBJ_TO_PTR(self_in);
     file_check(self);
     get_mtime(self->mtime);
-    lfs2_ssize_t sz = lfs2_file_write(self->vfs->lfs, &self->file, buf, size);
+    lfs2_ssize_t sz = KL(lfs2_file_write(self->vfs->lfs, &self->file, buf, size));
     if (sz < 0) {
         *errcode = -sz;
         return MP_STREAM_ERROR;
@@ -418,9 +438,9 @@ static mp_uint_t file_ioctl(mp_obj_t self_in, mp_uint_t request, uintptr_t arg, 
     if (request == MP_STREAM_SEEK) {
         file_check(self);
         struct mp_stream_seek_t *s = (struct mp_stream_seek_t *)arg;
-        int res = lfs2_file_seek(self->vfs->lfs, &self->file, s->offset, s->whence);
+        int res = KL(lfs2_file_seek(self->vfs->lfs, &self->file, s->offset, s->whence));
         if (res >= 0) {
-            res = lfs2_file_tell(self->vfs->lfs, &self->file);
+            res = KL(lfs2_file_tell(self->vfs->lfs, &self->file));
         }
         if (res < 0) {
             *errcode = -res;
@@ -431,7 +451,7 @@ static mp_uint_t file_ioctl(mp_obj_t self_in, mp_uint_t request, uintptr_t arg, 
     }
     if (request == MP_STREAM_FLUSH) {
         file_check(self);
-        int res = lfs2_file_sync(self->vfs->lfs, &self->file);
+        int res = KL(lfs2_file_sync(self->vfs->lfs, &self->file));
         if (res < 0) {
             *errcode = -res;
             return MP_STREAM_ERROR;
@@ -442,7 +462,7 @@ static mp_uint_t file_ioctl(mp_obj_t self_in, mp_uint_t request, uintptr_t arg, 
         if (self->vfs == NULL) {
             return 0;
         }
-        int res = lfs2_file_close(self->vfs->lfs, &self->file);
+        int res = KL(lfs2_file_close(self->vfs->lfs, &self->file));
         self->vfs = NULL;
         if (res < 0) {
             *errcode = -res;
@@ -518,9 +538,9 @@ static mp_obj_t ilistdir_next(mp_obj_t self_in) {
     }
     struct lfs2_info info;
     for (;;) {
-        int ret = lfs2_dir_read(self->vfs->lfs, &self->dir, &info);
+        int ret = KL(lfs2_dir_read(self->vfs->lfs, &self->dir, &info));
         if (ret == 0) {
-            lfs2_dir_close(self->vfs->lfs, &self->dir);
+            KL(lfs2_dir_close(self->vfs->lfs, &self->dir));
             self->vfs = NULL;
             return MP_OBJ_STOP_ITERATION;
         }
@@ -541,7 +561,7 @@ static mp_obj_t ilistdir_next(mp_obj_t self_in) {
 static mp_obj_t ilistdir_del(mp_obj_t self_in) {
     kvfs_ilistdir_t *self = MP_OBJ_TO_PTR(self_in);
     if (self->vfs != NULL) {
-        lfs2_dir_close(self->vfs->lfs, &self->dir);
+        KL(lfs2_dir_close(self->vfs->lfs, &self->dir));
         self->vfs = NULL;
     }
     return mp_const_none;
@@ -563,7 +583,7 @@ static mp_obj_t kvfs_ilistdir(size_t n_args, const mp_obj_t *args) {
     it->finaliser = ilistdir_del;
     it->is_str = is_str;
     it->vfs = NULL;
-    int ret = lfs2_dir_open(self->lfs, &it->dir, path);
+    int ret = KL(lfs2_dir_open(self->lfs, &it->dir, path));
     if (ret < 0) {
         raise_lfs(ret);
     }
@@ -574,7 +594,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kvfs_ilistdir_obj, 1, 2, kvfs_ilistdi
 
 static mp_obj_t kvfs_remove(mp_obj_t self_in, mp_obj_t path_in) {
     kvfs_t *self = MP_OBJ_TO_PTR(self_in);
-    int ret = lfs2_remove(self->lfs, make_path(self, path_in));
+    const char *path = make_path(self, path_in);
+    int ret = KL(lfs2_remove(self->lfs, path));
     if (ret < 0) {
         raise_lfs(ret);
     }
@@ -592,7 +613,8 @@ static mp_obj_t kvfs_rename(mp_obj_t self_in, mp_obj_t old_in, mp_obj_t new_in) 
         vstr_add_strn(&nu, vstr_str(&self->cur_dir), vstr_len(&self->cur_dir));
     }
     vstr_add_str(&nu, path);
-    int ret = lfs2_rename(self->lfs, old, vstr_null_terminated_str(&nu));
+    const char *to = vstr_null_terminated_str(&nu);
+    int ret = KL(lfs2_rename(self->lfs, old, to));
     vstr_clear(&nu);
     if (ret < 0) {
         raise_lfs(ret);
@@ -603,7 +625,8 @@ static MP_DEFINE_CONST_FUN_OBJ_3(kvfs_rename_obj, kvfs_rename);
 
 static mp_obj_t kvfs_mkdir(mp_obj_t self_in, mp_obj_t path_in) {
     kvfs_t *self = MP_OBJ_TO_PTR(self_in);
-    int ret = lfs2_mkdir(self->lfs, make_path(self, path_in));
+    const char *path = make_path(self, path_in);
+    int ret = KL(lfs2_mkdir(self->lfs, path));
     if (ret < 0) {
         raise_lfs(ret);
     }
@@ -616,7 +639,7 @@ static mp_obj_t kvfs_chdir(mp_obj_t self_in, mp_obj_t path_in) {
     const char *path = make_path(self, path_in);
     if (path[1] != '\0') {
         struct lfs2_info info;
-        int ret = lfs2_stat(self->lfs, path, &info);
+        int ret = KL(lfs2_stat(self->lfs, path, &info));
         if (ret < 0 || info.type != LFS2_TYPE_DIR) {
             mp_raise_OSError(MP_ENOENT);
         }
@@ -674,13 +697,13 @@ static mp_obj_t kvfs_stat(mp_obj_t self_in, mp_obj_t path_in) {
     kvfs_t *self = MP_OBJ_TO_PTR(self_in);
     const char *path = make_path(self, path_in);
     struct lfs2_info info;
-    int ret = lfs2_stat(self->lfs, path, &info);
+    int ret = KL(lfs2_stat(self->lfs, path, &info));
     if (ret < 0) {
         raise_lfs(ret);
     }
     mp_timestamp_t mtime = 0;
     uint8_t b[8];
-    if (lfs2_getattr(self->lfs, path, KV_ATTR_MTIME, b, sizeof(b)) == (lfs2_ssize_t)sizeof(b)) {
+    if (KL(lfs2_getattr(self->lfs, path, KV_ATTR_MTIME, b, sizeof(b))) == (lfs2_ssize_t)sizeof(b)) {
         uint64_t ns = 0;
         for (size_t i = sizeof(b); i > 0; --i) {
             ns = ns << 8 | b[i - 1];
@@ -710,7 +733,7 @@ static mp_obj_t kvfs_statvfs(mp_obj_t self_in, mp_obj_t path_in) {
     (void)path_in;
     kvfs_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t used = 0;
-    int ret = lfs2_fs_traverse(self->lfs, count_block, &used);
+    int ret = KL(lfs2_fs_traverse(self->lfs, count_block, &used));
     if (ret < 0) {
         raise_lfs(ret);
     }
@@ -761,7 +784,7 @@ static mp_import_stat_t kvfs_import_stat(void *self_in, const char *path) {
     struct lfs2_info info;
     mp_obj_str_t path_obj = { { &mp_type_str }, 0, 0, (const byte *)path };
     path = make_path(self, MP_OBJ_FROM_PTR(&path_obj));
-    if (lfs2_stat(self->lfs, path, &info) == 0) {
+    if (KL(lfs2_stat(self->lfs, path, &info)) == 0) {
         return info.type == LFS2_TYPE_REG ? MP_IMPORT_STAT_FILE : MP_IMPORT_STAT_DIR;
     }
     return MP_IMPORT_STAT_NO_EXIST;
@@ -788,7 +811,9 @@ bool moy_kvol_vm_mount(void) {
     if (lfs == NULL) {
         return false;
     }
+    moy_store_lock();
     lfs->mlist = NULL;
+    moy_store_unlock();
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_obj_t args[2] = {kvfs_new(), MP_OBJ_NEW_QSTR(MP_QSTR__slash_)};

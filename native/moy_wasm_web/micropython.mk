@@ -18,3 +18,12 @@ SRC_USERMOD_LIB_C += $(MOY_WASM_WEB_DIR)/libmoy/embed.c
 # embed.c includes moy_wasm.h by its bare name, from moycore's vendored libmoy.
 CFLAGS_USERMOD += -I$(MOY_WASM_WEB_DIR) -I$(MOY_WASM_WEB_DIR)/../moycore/libmoy \
 	-DMOY_WASM_JS=1
+
+# A WASI command (README.md, "A WASI command here"): the site's build only,
+# whose console runs the shell (MOY_WEB_SHELL=1, `build.sh --site`). The
+# adapter is native/moy_wasm's own moy_wasi.c, staged beside this by the
+# build, over WAMR's names for the page's engine (moy_wasi_web.c).
+ifeq ($(MOY_WEB_SHELL),1)
+SRC_USERMOD_LIB_C += $(MOY_WASM_WEB_DIR)/moy_wasi.c $(MOY_WASM_WEB_DIR)/moy_wasi_web.c
+CFLAGS_USERMOD += -DMOY_WASI_WEB=1
+endif

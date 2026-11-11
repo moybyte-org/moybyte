@@ -53,9 +53,9 @@ def test_every_row_ports_and_runs_on_the_real_player(tmp_path):
              + "".join(" op_%s()\n" % slug for slug, _e, _w, _p in B.OPS)
              + "end\nfunction _draw() cls(0) end\n")
     ws = _run_p8(tmp_path, body, frames=2, dt=1.0 / 30)
-    assert ws.player.cart_error is None, (
+    assert ws.run.player.cart_error is None, (
         "a row of OPS does not run: %s\n  rows: %s"
-        % (ws.player.cart_error, ", ".join(s for s, _e, _w, _p in B.OPS)))
+        % (ws.run.player.cart_error, ", ".join(s for s, _e, _w, _p in B.OPS)))
 
 
 def test_a_row_that_does_no_work_would_be_caught():

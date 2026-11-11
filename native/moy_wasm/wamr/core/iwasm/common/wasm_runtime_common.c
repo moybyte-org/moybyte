@@ -4753,8 +4753,17 @@ wasm_runtime_register_natives_raw(const char *module_name,
 }
 
 bool
+wasm_runtime_register_natives_sorted(const char *module_name,
+                                     const NativeSymbol *native_symbols,
+                                     uint32 n_native_symbols)
+{
+    return wasm_native_register_natives_sorted(module_name, native_symbols,
+                                               n_native_symbols);
+}
+
+bool
 wasm_runtime_unregister_natives(const char *module_name,
-                                NativeSymbol *native_symbols)
+                                const NativeSymbol *native_symbols)
 {
     return wasm_native_unregister_natives(module_name, native_symbols);
 }

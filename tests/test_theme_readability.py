@@ -225,20 +225,20 @@ def _wcag(a, b):
 @pytest.mark.parametrize("variant", VARIANTS)
 @pytest.mark.parametrize("seed", TH["seeds"])
 def test_the_code_roles_read_on_the_current_line(seed, variant):
-    """The code editor marks its current line with the current mark: where
-    that is a plate behind the line (`current.style` plate, `current.row`
-    plate), every code role holds text's 4.5:1 on the plate as well as on
-    the code surface (theme.code). An opaque plate (Contrast's) outlines
-    the code's line instead, as `current.row: outline` does, so its line
+    """The code editor marks its current line with a row's `on` mark: where
+    that is a tint behind the line, every code role holds text's 4.5:1 on
+    the tint as well as on the code surface (theme.code). An opaque mark
+    (Blocks' and Contrast's) outlines the code's line instead, so its line
     keeps the surface the code roles are held to."""
+    import moy_ui
     live = live_colors(seed, variant)
     ui_draw._C.theme_block(live.block, live.used)
-    lk = live.look[0]
-    if lk["current.style"] != 1 or lk["current.row"] != 0 or lk["current.alpha"] >= 100:
+    mark, c, _ink, _w, _gap, alpha = moy_ui.theme_marks(seed, variant == "light")[2][1][:6]
+    if mark != 2 or alpha >= 255:               # MOY_UI_MK_TINT
         return
     tokens = STYLE["tokens"]
-    s, val = _rgb(live.tokens[TH["code"]["bg"]]), _rgb(live.tokens[tokens[lk["current.color"]]])
-    k = lk["current.alpha"] / 100
+    s, val = _rgb(live.tokens[TH["code"]["bg"]]), _rgb(live.tokens[tokens[c]])
+    k = alpha / 255
     plate = tuple(round(s[i] + (val[i] - s[i]) * k) for i in range(3))
     low = {r: round(_wcag(_rgb(live.content[r]), plate), 2) for r in TH["code"]["roles"]
            if _wcag(_rgb(live.content[r]), plate) < 4.5}

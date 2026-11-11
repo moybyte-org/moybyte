@@ -1,0 +1,3 @@
+$ clear | wc -c
+11
+[exit 0]

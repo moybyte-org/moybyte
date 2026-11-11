@@ -57,6 +57,8 @@ from device_canvas import DeviceCanvas, _LayerComp, _owner_h
 import moy_input
 import wire_input
 import wire_links
+import moybyte
+import scheduler
 from mem_census import mark as _census
 
 
@@ -118,6 +120,7 @@ class Desktop:
         drawn = [0]
         rung = [0]
         idle_state = moy_loop.idle_state
+        fs = ws.frame_state
 
         def frame(dt):
             st = idle_state()
@@ -125,7 +128,7 @@ class Desktop:
                 rung[0] = st
                 ws.saver_state(st == moy_loop.SAVER)
             ws.frame(dt)
-            n = ws._frames_drawn
+            n = fs.frames_drawn
             if not boot.done:
                 boot.first_frame(ws)
             if ws.perf_capture and moy_loop.perf_due():
@@ -147,6 +150,7 @@ class Desktop:
             # counter against (the kernel's loop keeps it now).
             serial.env["pump"] = _FrameClock(moy_loop)
         service = make_service(ws, moy_loop)
+        _want_sched(moy_loop)
         moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
         moy_loop.fps(self.fps_cap)
         moy_loop.lit(boot.lit)
@@ -163,13 +167,30 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
     """`ws.front_bind`: give the kernel's Player this compositor as the ends
     of a run in the loop's foreground (moy_glass.front), answering whether it
     took. A banded board whose game canvas IS the panel presents it as is; a
-    DSI board scales the game canvas into console mode's rect, which the
-    desk world (a window's run) and a cart-declared view leave to the
-    console. A bind that took pushes the console's half of the PERF line
-    once for the run: the console's frame does not run while it is in front."""
+    banded panel larger than the game canvas folds it into console mode's
+    rect through the flush (the scratch is the system canvas's fold
+    snapshot, blit_game's); a DSI board scales the game canvas into that
+    rect. A compiled run's frame goes from the cart's memory where the run
+    has a CartFrame and the system canvas a `frame_scratch` (the scratch its
+    present_frame snapshots into, which the front's snapshot shares). The
+    rect is the WM's `play_viewport`: console mode's fullscreen game, or a
+    game full screen on the desk once the glass around it is still, whose
+    surround the bind keeps (no bezel cleared). A window's run and a
+    cart-declared view leave the run to the console. A bind that took pushes
+    the console's half of the PERF line once for the run: the console's
+    frame does not run while it is in front."""
+    fold = getattr(comp, "snap_scale_fold", None) is not None
+    frame_scratch = getattr(sys_canvas, "frame_scratch", None)
+
+    def frames():
+        cf = ws.run.cart_frame
+        if cf is None or frame_scratch is None:
+            return None
+        return frame_scratch(cf, game.w, game.h)
+
     def bind():
         if game is sys_canvas:
-            took = glass.front(comp)
+            took = glass.front(comp, None, frames())
         else:
             vp = getattr(ws.wm, "play_viewport", None)
             g = vp() if vp is not None else None
@@ -178,7 +199,14 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
             r = getattr(ws, "render_scale", 1)
             ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
             smooth = bool(getattr(type(sys_canvas), "_smooth", True))
-            took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+            if fold:
+                scr = sys_canvas.front_scratch(game.w, game.h)
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
+                                          scr), frames())
+            else:
+                bezel = getattr(ws.wm, "mode", None) != "desktop"
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
+                                          bezel), frames())
         if took:
             ws.perf_push(loop, front=True)
         return took
@@ -202,10 +230,32 @@ class _FrameClock:
         return self._loop.drawn()
 
 
+def _want_sched(loop):
+    """The scheduler's bit set whenever a wake is made, and now if one is."""
+    services = loop.services
+
+    def added():
+        services(services() | SVC_SCHED)
+    moybyte.WAKES.added = added
+    if moybyte.WAKES.list or moybyte.WAKES.queued:
+        added()
+
+
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, and the OTA confirm's pending marker, once. Answers the bits it still wants."""
+    says goodbye, the OTA confirm's pending marker, once, the scheduler's
+    `woken` while a service's task wants the VM (MOY_SVC_TASKS, the loop's
+    own bit), and the background scheduler while any wake is registered or a
+    message queued, with the frame's slack. Answers the bits it still
+    wants."""
+    slack = loop.slack
+    wakes = moybyte.WAKES
+    sched = scheduler.SCHED
+    tick = sched.tick
+    woken = sched.woken
+    sched.kernel_woken()
+
     def service(bits):
         keep = 0
         if bits & SVC_WEB:
@@ -222,11 +272,17 @@ def make_service(ws, loop):
                     upd.confirmed_by_kernel()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
+        if bits & SVC_TASKS:
+            woken()
+        if bits & SVC_SCHED or wakes.queued:
+            tick(slack())
+            if wakes.list or wakes.queued:
+                keep |= SVC_SCHED
         return keep
     return service
 
 
-SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
+SVC_WEB, SVC_UPDATE, SVC_HEALTHY, SVC_SCHED, SVC_TASKS = 1, 4, 8, 32, 64
 
 
 def bt_command(keyboard, comp=None):
@@ -273,6 +329,35 @@ def _stamp(kernel, part):
     stamp = getattr(kernel, "stamp", None)
     if stamp is not None:
         stamp(part)
+
+
+def wire_usb_drive(ws, carts_root, with_sd, log):
+    """`ws.usb_drive` (runtime/system/usb_drive.py) where the image has the
+    driver (native/moy_usbdisk): the store held closed and reopened through
+    the board's card gate, `with_sd`, which on the T-Deck drains the panel
+    first. On the card only: a store on the internal flash has nothing to
+    lend."""
+    try:
+        import moy_usbdisk
+    except ImportError:
+        return
+    import usb_drive
+
+    sd = with_sd if with_sd is not None else (lambda fn: fn())
+    on_card = str(carts_root).startswith(usb_drive.MOUNT + "/")
+
+    def volume():
+        import moy_sd
+        import moy_store
+        return moy_store.card(moy_sd.up())
+
+    ws.usb_drive = usb_drive.UsbDrive(
+        moy_usbdisk,
+        lambda: sd(usb_drive.hold_closed),
+        lambda: sd(lambda: usb_drive.reopen(volume)),
+        lambda: on_card,
+        dev_channel=moy_usbdisk.SERIAL)
+    log("boot", "usb drive %s" % ("ready" if on_card else "needs a card"))
 
 
 def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
@@ -377,6 +462,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     # hook and the web console, in that order (device/wire_links.py).
     wire_links.wire_links(ws, link_id, update_dir, carts_root, with_sd,
                           c6_updater, log, _census)
+    wire_usb_drive(ws, carts_root, with_sd, log)
     if after_services is not None:
         after_services(ws)
     _census("services")
@@ -425,7 +511,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     if returning:
         # The stopped run ended in the kernel: its radio leases, which the
         # kernel's table kept through the stop, go as a plain exit's do.
-        ws.player.release_radio()
+        ws.run.player.release_radio()
         rec = kernel.resume()
         if rec:
             ws.resume_launcher(rec)

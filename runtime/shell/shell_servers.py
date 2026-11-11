@@ -4,15 +4,18 @@
 #   _Session         the readiness pair and the session of the cart store
 #   CartsServer      the cart store: projects, not documents
 #   NavServer        where the console goes next
-#   NotifyServer     achievement events
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
+#   ShellInstall     that server as the shell drives it: pkg, the home's Delete
+#   ConsoleCalls     the moybyte role: console calls run as the calling process
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
 """The console's servers for the app ABI's rows it serves (native/moy_app/
-roles.json's "shell" rows, native/moy_app/README.md): the
+native/os_calls.json's "shell" rows, native/moy_app/README.md): the
 verbs whose state is the Python console's -- the look, the live cart list, the
-wallpaper cart, the achievements, the routes, Get Carts' transport. The files
+wallpaper cart, the routes, Get Carts' transport. The notify role's rows are
+the achievements process's (`"proc:achievements"`), served through its link
+(runtime/system/achievements.py's `NotifyRole`). The files
 role and the wallpaper's copy are C over the user-files layer
 (native/moy_store/moy_ufiles.h) the console binds (`StoreHandle.bind`), and
 none of theirs is here.
@@ -46,8 +49,21 @@ door copies back.
 
 try:
     from app_context import NO_STORE
+    from achievements import NotifyRole
+    from front import FRONT as _FRONT
+    import moybyte as _moybyte
 except ImportError:  # pragma: no cover - host package lane
     from runtime.app_context import NO_STORE
+    from runtime.achievements import NotifyRole
+    from runtime.front import FRONT as _FRONT
+    from runtime import moybyte as _moybyte
+
+try:
+    import moy_log as _L
+except ImportError:  # pragma: no cover - an image without the kernel
+    _L = None
+
+_SHELL = 1
 
 _COVER_HALF = 2       # cover_cache.HALF: a cover's 64x64 decode
 
@@ -170,6 +186,15 @@ class _Session(_Store):
 
 # -- the cart store ------------------------------------------------------------
 
+def _app_perms():
+    """The permission table's module (`app_perms`), imported at the call."""
+    try:
+        import app_perms
+    except ImportError:  # host: the runtime package
+        from runtime import app_perms
+    return app_perms
+
+
 def _catalogue():
     """The store's cart interface (`moy_catalogue`), imported at the call."""
     try:
@@ -200,8 +225,10 @@ class CartsServer(_Session):
         """A new cart in the store: `(cart, err)`. The live list is not
         changed until `rescan`."""
         root = self._ws.carts_root
-        return self._write(lambda: _catalogue().create(title, root, src=src,
-                                                       type=type))
+        got = self._write(lambda: _catalogue().create(title, root, src=src,
+                                                      type=type))
+        _app_perms().made_here(self._ws, got[0])
+        return got
 
     def journal(self, g, cart, main, src, grad=0):
         """Append `src` to `cart`'s undo journal for its file `main` (#111),
@@ -241,18 +268,30 @@ class CartsServer(_Session):
 
 class NavServer:
     """Where the console goes next. `open_app` is the app-to-app seam,
-    resolved by registered id, so an app never holds another app's class."""
+    resolved by registered id, so an app never holds another app's class.
+
+    Every verb that changes what is on screen passes the front's gate
+    (runtime/system/front.py) for its caller, the run whose grant `g` is
+    (`Procs.pid_of`; a shell app's grant is the shell's): a run in the
+    background without `front` gets a notification that goes there when
+    the user opens it, and the verb answers as though it went."""
 
     def __init__(self, ws):
         self.__ws = ws
 
+    def _go(self, g, what, then, wait=True):
+        return _FRONT.take(self.__ws.procs.pid_of(g), what, then, wait)
+
     def open_app(self, g, app_id, cart=None):
         """Spawn the registered app `app_id`. False when this build does not
         carry it or no cart carries its identity."""
-        app = self.__ws._apps_by_id.get(app_id)
+        ws = self.__ws
+        app = ws._apps_by_id.get(app_id)
         if app is None:
             return False
-        return bool(self.__ws.open_app(app, cart))
+        title = ws.app_title(app.id) or app.id
+        return self._go(g, "Wants to open " + str(title),
+                        lambda: bool(ws.open_app(app, cart)))
 
     def is_system_app(self, g, cart):
         """True when a registered app's identity claims `cart` -- what keeps
@@ -275,23 +314,30 @@ class NavServer:
         if cart is None:
             return False
         ws = self.__ws
-        ws._note_app_caller()
-        ws.open_in_editor(cart)
-        if ws.project is None or ws.project.cart is not cart:
-            return False
-        if tab:
-            ws.set_menu_view(tab)
-        return True
+
+        def then():
+            ws._note_app_caller()
+            ws.open_in_editor(cart)
+            if ws.run.project is None or ws.run.project.cart is not cart:
+                return False
+            if tab:
+                ws.set_menu_view(tab)
+            return True
+        return self._go(g, "Wants to edit " + str(cart.get("title") or "a cart"), then)
 
     def open_image(self, g, name, kind=None, cart=None):
         """Open a PICTURE in Paint: a gallery drawing, or a cart's OWN image
         (`cart` given). False when the build carries no Paint."""
-        return self.__ws.open_image(name, kind, cart)
+        ws = self.__ws
+        return self._go(g, "Wants to open " + str(name) + " in Paint",
+                        lambda: ws.open_image(name, kind, cart))
 
     def open_text(self, g, name, kind=None, mode=None):
         """Open a user-files TEXT document in the console's text app, in
         `mode`. False when the build carries no text app."""
-        return self.__ws.open_text_cart(name, kind, mode)
+        ws = self.__ws
+        return self._go(g, "Wants to open " + str(name),
+                        lambda: ws.open_text_cart(name, kind, mode))
 
     def edit_file(self, g, cart, name, mode=None):
         """Open one of `cart`'s OWN files in the editor, through that
@@ -299,8 +345,11 @@ class NavServer:
         if cart is None:
             return False
         ws = self.__ws
-        ws._note_app_caller()
-        return bool(ws.open_project_file(cart, name, mode))
+
+        def then():
+            ws._note_app_caller()
+            return bool(ws.open_project_file(cart, name, mode))
+        return self._go(g, "Wants to edit " + str(name), then)
 
     def play(self, g, cart):
         """Open `cart` as a workspace and RUN it, returning to the calling
@@ -309,12 +358,21 @@ class NavServer:
         caller = ws._apps_by_id.get(ws.app_abi.grant_id(g))
         if caller is None:
             caller = ws.launcher_layer
-        ws._open_workspace(cart)
-        ws.run(ws.project, caller)
+
+        def go():
+            ws._open_workspace(cart)
+            ws.play(caller)
+
+        def then():
+            if not ws.ask_first(cart, go):
+                go()
+        self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
     def run_script(self, g, kind, name):
         """RUN a vault SCRIPT (a bare `.py`/`.lua` file): `(ok, why)`."""
-        return self.__ws.run_script(kind, name)
+        ws = self.__ws
+        return self._go(g, "Wants to run " + str(name),
+                        lambda: ws.run_script(kind, name), (True, None))
 
     def text_mode(self, g, on):
         """Flip the keyboard between typing and game mode, for an app that
@@ -339,52 +397,6 @@ class NavServer:
         cover landed, or the cache let one go."""
         covers = getattr(self.__ws, "covers", None)
         return 0 if covers is None else covers.gen
-
-
-# -- notifications ---------------------------------------------------------------
-
-class NotifyServer:
-    """Achievement events (#21)."""
-
-    def __init__(self, ws):
-        self.__ws = ws
-
-    def achieve(self, g, kind, key=None):
-        """Note an achievement event. Silent when the build carries none."""
-        ach = getattr(self.__ws, "ach", None)
-        if ach is not None:
-            ach.note(kind, key)
-
-    def award(self, g, ach_id):
-        """Award badge `ach_id` (a hidden one's find): True when it is new."""
-        ach = getattr(self.__ws, "ach", None)
-        return False if ach is None else bool(ach.award(ach_id))
-
-    def count(self, g):
-        """How many badges are found."""
-        ach = getattr(self.__ws, "ach", None)
-        return 0 if ach is None else ach.count()
-
-    def has(self, g, ach_id):
-        """Whether badge `ach_id` is found."""
-        ach = getattr(self.__ws, "ach", None)
-        return ach is not None and ach.has(ach_id)
-
-    def found_on(self, g, ach_id):
-        """The day (YYYYMMDD) badge `ach_id` was found, 0 for a day nobody
-        knows, None while it is not found."""
-        ach = getattr(self.__ws, "ach", None)
-        return None if ach is None else ach.found_on(ach_id)
-
-    def progress(self, g, ach_id):
-        """(done, goal) of a counted badge, None for one that is not."""
-        ach = getattr(self.__ws, "ach", None)
-        return None if ach is None else ach.progress(ach_id)
-
-    def today(self, g):
-        """Today as the badges record it (YYYYMMDD off the bar's clock), 0
-        without a clock."""
-        return self.__ws._today_ymd()
 
 
 # -- the desktop backdrop ----------------------------------------------------------
@@ -431,20 +443,79 @@ class WallpaperServer(_Store):
 
 # -- the cart installer --------------------------------------------------------------
 
+class _AsShell:
+    """The http device API's requests made as the shell (pid 1, never
+    gated): the installer is the system's, whichever app drives it, and
+    closes what it opens itself."""
+
+    def __init__(self, face, log):
+        self._face = face
+        self._log = log
+        self.CAP_MAX = face.CAP_MAX
+
+    def _as_shell(self, fn, *a):
+        L = self._log
+        if L is None:
+            return fn(*a)
+        was = L.current()
+        L.current(1)
+        try:
+            return fn(*a)
+        finally:
+            L.current(was)
+
+    def get(self, url, cap):
+        return self._as_shell(self._face.get, url, cap)
+
+    def stream(self, url, window):
+        return self._as_shell(self._face.stream, url, window)
+
+
+def _http_worker():
+    """The http device API where its https verifies (the boards), else None
+    (the host's transport fetches over plain TCP)."""
+    try:
+        import devices
+    except ImportError:  # host: the runtime package
+        from runtime import devices
+    try:
+        f = devices.api("http")
+        return _AsShell(f, devices._L) if f is not None and f.tls() else None
+    except Exception:  # noqa: BLE001 -- a console that cannot say has none
+        return None
+
+
 class InstallServer:
     """Carts from outside (#124): the network a store fetches with, the radio
     lease it fetches under, the store it installs into and the engine's
-    sizing. `runtime/carts/cart_index.py` does the installing; Get Carts drives it.
+    sizing. `runtime/carts/cart_index.py` does the installing; Get Carts and the
+    shell's `pkg` (runtime/carts/pkg.py) drive it.
     Its verbs raise: the installer turns every failure into a screen of its
     own. Never a cart's (no permission maps to it)."""
 
     def __init__(self, ws):
         self.__ws = ws
         self.__store = ws.store
+        self.__net = self.__wrapped = None
 
     def net(self, g):
-        """The transport (`online()`, `open(url)`), or None."""
-        return self.__ws.cart_net
+        """The transport (`online()`, `open(url)`), or None: where the http
+        device API verifies https (the boards), its documents and downloads
+        up to the worker's cap are the worker's, off the VM's thread
+        (cart_index.Worker), for Get Carts and `pkg` alike."""
+        net = self.__ws.cart_net
+        if net is not self.__net:
+            self.__net = net
+            http = _http_worker() if net is not None else None
+            if http is None:
+                self.__wrapped = net
+            else:
+                try:
+                    from cart_index import Worker
+                except ImportError:  # host: the runtime package
+                    from runtime.cart_index import Worker
+                self.__wrapped = Worker(net, http)
+        return self.__wrapped
 
     def home(self, g):
         """Where this console's carts are got instead, when not here: "board"
@@ -487,9 +558,16 @@ class InstallServer:
         written, a file ended, the staging swapped -- never a whole install."""
         return self.__store.call(fn)
 
-    def rescan(self, g):
-        """Re-read the store, so the shelf shows what came and went."""
-        self.__ws.carts.rescan()
+    def rescan(self, g, folder=None):
+        """Re-read the cart folder `folder` (its name, or its path), so the
+        shelf shows what came or went there -- one entry's read, never a scan
+        of the store; with no folder, the whole store."""
+        ws = self.__ws
+        if folder is None:
+            ws.carts.rescan()
+        else:
+            name = folder.replace("\\", "/").rsplit("/", 1)[-1]
+            ws.carts.rescan([_catalogue().cart_path(ws.carts_root, name)])
 
     def wifi(self, g):
         """Open the Wi-Fi page: Settings' WIFI panel, on the desk its popover
@@ -509,6 +587,11 @@ class InstallServer:
         if m is not None and m.open and m.widget == "wifi":
             return True
         return bool(ws.wm.top_is("settings") and ws.settings_layer.wifi_view)
+
+    def consent(self, g):
+        """The console's consent records (`app_perms.Consent`): what the
+        install prompt asked and the user allowed, per app id."""
+        return self.__ws.consent
 
     def free(self, g):
         """`(free bytes, block size)` of the store the carts live on, or None:
@@ -571,25 +654,207 @@ class InstallServer:
             return None, None
 
 
+class ShellInstall:
+    """The install role's server as the shell drives it, its grant argument
+    bound: the object Get Carts holds as `ctx.install`, and `carts()`, the
+    shelf, which Get Carts reads through its carts role. The shell's `pkg`
+    and the home's Delete (`CartManager.delete`) step `pkg.removed` over
+    one."""
+
+    def __init__(self, ws):
+        self._s = InstallServer(ws)
+        self._ws = ws
+
+    def carts(self):
+        return self._ws.carts.all
+
+    def __getattr__(self, name):
+        fn = getattr(self._s, name)
+        return lambda *a: fn(None, *a)
+
+
+# -- the console calls --------------------------------------------------------
+
+class ConsoleCalls:
+    """The `moybyte` role's rows (native/os_calls.json's "call" server, and
+    the kernel's and Python's rows a compiled app imports): the console
+    calls a program makes on any tier, each the `moybyte` module's function
+    run as the process whose grant `g` is (`Procs.pid_of`), so the
+    permission each names (the front's gate) is that process's. Every grant holds the role; a grant no process claims
+    is answered STALE.
+
+    A compiled app's messages are its process's own event queue
+    (native/moy_kernel/moy_evq.h), opened for it at its launch
+    (moybyte._compiled_events) as a native service's is (no Python wake
+    serves it). Its `send`, `recv`, `on`, `log`, timers, alarms,
+    notifications and badges are no console call: native/moy_app's C rows
+    serve them on the caller's own task (moy_app.c, send_row, at_row,
+    note_row)."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def _as(self, g, fn, *args):
+        pid = self.__ws.procs.pid_of(g)
+        was = _L.current() if _L is not None else None
+        if _L is not None:
+            _L.current(pid if pid is not None else 0)
+        try:
+            return fn(*args)
+        finally:
+            if _L is not None:
+                _L.current(was)
+
+    def open_with(self, g, item, choose):
+        return self._as(g, _moybyte.open_with, item, bool(choose))
+
+    def share(self, g, data, mime):
+        return self._as(g, _moybyte.share, bytes(data), mime)
+
+    def pick(self, g, mime, mode=None):
+        return self._as(g, _moybyte.pick, mime, mode or "r")
+
+    def service_start(self, g):
+        return self._service(g, _moybyte.service_start)
+
+    def service_stop(self, g):
+        return self._service(g, _moybyte.service_stop)
+
+    def service_running(self, g):
+        return self._service(g, _moybyte.service_running)
+
+    def _service(self, g, fn):
+        if self.__ws.procs.pid_of(g) is None:
+            return _DOOR_STALE
+        return self._as(g, fn)
+
+    def name(self, g, cap):
+        d = str(self._as(g, _moybyte.name) or "").encode("utf-8")
+        return _DOOR_FULL if len(d) > cap else d
+
+    def clock(self, g, local):
+        t = _moybyte.clock(bool(local))
+        return _DOOR_ABSENT if t is None else t
+
+    def item_read(self, g, h, cap):
+        it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
+        if it is None:
+            return _DOOR_ABSENT
+        d = it.read()
+        if d is None:
+            return _DOOR_ABSENT
+        d = d.encode("utf-8") if isinstance(d, str) else bytes(d)
+        return _DOOR_FULL if len(d) > cap else d
+
+    def item_write(self, g, h, data):
+        it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
+        if it is None:
+            return _DOOR_ABSENT
+        return bool(it.write(bytes(data)))
+
+    # The device handles (runtime/system/dev_handles.py): each run as the
+    # process, whose permissions the lease or the device checks.
+    def _dev(self, g, fn, *args):
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None or pid <= _SHELL:
+            return _DOOR_STALE
+        return self._as(g, getattr(_dev_handles(), fn), pid, *args)
+
+    def dev_open(self, g, name, cfg=None):
+        return self._dev(g, "open", name, cfg or "")
+
+    def dev_close(self, g, h):
+        return self._dev(g, "close", h)
+
+    def dev_read(self, g, h, cap):
+        return self._dev(g, "read", h, cap)
+
+    def dev_write(self, g, h, data):
+        return self._dev(g, "write", h, data)
+
+    def dev_xfer(self, g, h, data, cap):
+        return self._dev(g, "xfer", h, data, cap)
+
+    def dev_set(self, g, h, cfg):
+        return self._dev(g, "set", h, cfg)
+
+    def dev_get(self, g, h, what):
+        return self._dev(g, "get", h, what)
+
+    # The status items (runtime/system/status_items.py): a compiled
+    # program's item is an icon in a state, a slot of the kernel's table its
+    # C rows write on its own task (native/moy_app/moy_app.c, status_row),
+    # and the panel it describes here, which the shell draws; a press reaches
+    # it as the system's message STATUS, one name of the MOY_EVQ_LISTEN it
+    # listens on, taken at its first panel.
+    def status_panel(self, g, h, rows=None):
+        pid = self.__ws.procs.pid_of(g)
+        if pid is None or pid <= _SHELL:
+            return _DOOR_STALE
+        return _moybyte.panel_of(pid, h, rows)
+
+
+def _dev_handles():
+    try:
+        import dev_handles
+    except ImportError:  # host: the runtime package
+        from runtime import dev_handles
+    return dev_handles
+
+
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
-_DOOR_ABSENT, _DOOR_BAD = -8, -7
+_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -7, -8
+# The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
+# MOY_SH_DOOR, runtime/shell/sh_door.py).
+SH_DOOR = 0x7368
 
 # The shell rows whose arguments and answers are numbers and text, by the
 # arguments each takes in the door's fields: `s` text, `o` text where empty is
-# None, `i` a number, `c` a cart named by its folder. A shell row not here (an
-# object, a callable, the cart store's and the installer's) answers BAD.
+# None, `i` a number, `c` a cart named by its folder, `b` bytes. A shell row
+# not here (an object, a callable, the cart store's and the installer's)
+# answers BAD.
+# GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit.
 DOOR_ARGS = {
-    "theme.set": "so", "theme.set_variant": "s", "theme.edit_file": "",
-    "nav.open_app": "s", "nav.is_system_app": "c", "nav.projects": "",
-    "nav.edit": "co", "nav.open_image": "so", "nav.open_text": "soo",
-    "nav.edit_file": "cso", "nav.play": "c", "nav.run_script": "ss",
+    "theme.set": "so",
+    "theme.set_variant": "s",
+    "theme.edit_file": "",
+    "nav.open_app": "s",
+    "nav.is_system_app": "c",
+    "nav.projects": "",
+    "nav.edit": "co",
+    "nav.open_image": "so",
+    "nav.open_text": "soo",
+    "nav.edit_file": "cso",
+    "nav.play": "c",
+    "nav.run_script": "ss",
     "nav.text_mode": "i",
-    "notify.achieve": "so",
-    "wallpaper.current": "", "wallpaper.carts": "",
-    "wallpaper.id_for": "c", "wallpaper.title": "s", "wallpaper.select": "o",
+    "wallpaper.current": "",
+    "wallpaper.carts": "",
+    "wallpaper.id_for": "c",
+    "wallpaper.title": "s",
+    "wallpaper.select": "o",
+    "moybyte.open_with": "si",
+    "moybyte.share": "bs",
+    "moybyte.pick": "so",
+    "moybyte.item_read": "ii",
+    "moybyte.item_write": "ib",
+    "moybyte.service_start": "",
+    "moybyte.service_stop": "",
+    "moybyte.service_running": "",
+    "moybyte.dev_open": "so",
+    "moybyte.dev_close": "i",
+    "moybyte.dev_read": "ii",
+    "moybyte.dev_write": "ib",
+    "moybyte.dev_xfer": "ibi",
+    "moybyte.dev_set": "is",
+    "moybyte.dev_get": "is",
+    "moybyte.status_panel": "io",
+    "moybyte.name": "i",
+    "moybyte.clock": "i",
 }
+# END GENERATED
 
 
 def _fields(b):
@@ -632,13 +897,14 @@ def _answer(v):
 
 class RoleDoor:
     """The ROLE upcall's Python half: `door(grant, row, args)` for table row
-    `row` (native/moy_app/roles.json's index), registered with the kernel's
+    `row` (the role table's index, native/os_calls.json), registered with the kernel's
     loop (`moy_loop.role`). C has checked the grant holds the row's role."""
 
     def __init__(self, ws, servers, table):
         self._ws = ws
         self._servers = servers
         self._table = table
+        self._sh = None
 
     def _cart(self, folder):
         for c in self._ws.carts.all:
@@ -647,6 +913,14 @@ class RoleDoor:
         return None
 
     def __call__(self, g, row, args):
+        if row == SH_DOOR:
+            if self._sh is None:
+                try:
+                    from sh_door import ShellDoor
+                except ImportError:  # host: the runtime package
+                    from runtime.sh_door import ShellDoor
+                self._sh = ShellDoor(self._ws)
+            return self._sh(args)
         name = self._table[row] if 0 <= row < len(self._table) else None
         kinds = DOOR_ARGS.get(name)
         if kinds is None:
@@ -664,6 +938,9 @@ class RoleDoor:
                     return _DOOR_BAD
                 v = f[0] | f[1] << 8 | f[2] << 16 | f[3] << 24
                 call.append(v - (1 << 32) if v & 0x80000000 else v)
+                continue
+            if k == "b":
+                call.append(f)
                 continue
             text = f.decode("utf-8")
             if k == "c":
@@ -699,9 +976,10 @@ def serve_all(ws):
     servers = {
         "theme": ThemeServer(ws),
         "carts": CartsServer(ws), "nav": NavServer(ws),
-        "notify": NotifyServer(ws), "wallpaper": WallpaperServer(ws),
+        "notify": NotifyRole(ws), "wallpaper": WallpaperServer(ws),
         "install": InstallServer(ws),
     }
     for role, server in servers.items():
         app.serve(role, server)
+    servers["moybyte"] = ConsoleCalls(ws)
     _door_open(ws, servers)

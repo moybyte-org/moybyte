@@ -1,11 +1,22 @@
+# Map (grep -n a name to jump there):
+#   SpineVerbs                the run and exit verbs, apps, the WiFi lease, as a mixin
+#   SpineVerbs.load_system    read the system settings and apply them
+#   SpineVerbs.play           show the front run's cart, recording its caller
+#   SpineVerbs.exit           the taskbar app's X: back toward the launcher
+#   SpineVerbs.register_app   a system app into the registry
+#   SpineVerbs.open_app       the one app-launch dispatch
+#   SpineVerbs.wifi_hold      take a radio hold by tag (and pid)
+#   SpineVerbs.wifi_release   let a hold go
+#   SpineVerbs.wifi_settle    the service's view let go when nothing holds
 """The kernel spine's half of the Workstation (docs/history/kernel_spine_2026-10.md):
 the run and exit verbs, app registration and resolution, the WiFi lease and
 the settings wiring, as a mixin over `self`.
 
-The state these verbs keep lives in the spine's components (native/moy_spine) --
-`self.apps` (AppRegistry), `self.wm.stack` (BackStack), `self.returns`
-(Returns), `self.leases` (Leases) and `self.prefs.rows` (Settings) -- which
-hold ids, kinds and JSON text, never a Python object. What stays here is the
+The state these verbs keep lives in C -- the spine's components
+(native/moy_spine): `self.apps` (AppRegistry), `self.wm.stack` (BackStack),
+`self.returns` (Returns) and `self.prefs.rows` (Settings), and the lease
+table's radio row (native/moy_kernel/moy_lease.h): `self.leases` (Wifi) --
+which hold ids, kinds, tags and JSON text, never a Python object. What stays here is the
 Python side of each verb: the app objects (`_apps`, `_apps_by_id`), the
 surfaces a route lands on, and the radio service the lease powers.
 """
@@ -16,6 +27,7 @@ try:
     from settings_layer import SETTINGS_TOGGLES
     from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
     from ui_draw import AppHost
+    from achievements import is_proc as _is_ach_proc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
     from runtime.chrome import DEFAULT_VARIANT, NAMES
@@ -23,7 +35,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
                                    ROUTE_WINDOW)
     from runtime.ui_draw import AppHost
+    from runtime.achievements import is_proc as _is_ach_proc
 import moy_app as _moy_app
+
+# The radio's holders: a process's tags, each held under its pid, and the
+# owner of the console's own (moy_lease.SHELL, the shell's pid).
+PROC_TAGS = ("cart", "http", "media", "native", "net")
+_SHELL = 1
 
 
 def _resolve_app_entry(entry):
@@ -84,7 +102,7 @@ class SpineVerbs:
 
         The other half of three-strikes, and without it the refusal panel's
         "EDIT it" was a dead end: nothing called `CrashGuard.forgive`, so the
-        only ways back were renaming the cart or hand-editing `system.json`.
+        only ways back were renaming the cart or hand-editing `system/settings`.
 
         Called from `Project.commit_code`, and deliberately from there ALONE.
         A code commit is the one edit that can change whether the cart hangs,
@@ -92,7 +110,7 @@ class SpineVerbs:
         of which a sprite, a map or a config tweak can fix or cause. Forgiving
         on every asset save would hand a boot-looping app a fresh set of
         strikes for repainting a tile; forgiving only on a hand-edited
-        `system.json` is what we had.
+        `system/settings` is what we had.
 
         Strikes are cleared, not decremented: the kid's next open starts from
         zero and gets the full three, exactly like a cart the guard has never
@@ -151,12 +169,14 @@ class SpineVerbs:
             from runtime.console import keep_splash
         keep_splash(self.theme_colors)
         # Every persisted ON/OFF setting, through the verb its registry entry
-        # names (#209 section 7): the key is the system.json key, the default is
+        # names (#209 section 7): the key is the system/settings key, the default is
         # declared beside it, and a board that cannot serve one gets the honest
         # answer from the setter rather than a silent flag. A new toggle is one
         # registry entry, not a line here.
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
+        # The bar's clock reads the stored time zone (UTC with none).
+        self.set_time_zone(self.system.get("tz"), persist=False)
         # A key a retired setting left behind (#217 took FRAMESKIP) would ride
         # every write forever; drop it once.
         self.system.delete("frameskip")
@@ -182,17 +202,17 @@ class SpineVerbs:
                                       persist=False)
         self._dirty = True
 
-    def run(self, project, caller):
-        """Show `project`'s running cart on the desktop, recording `caller` so the exit
+    def play(self, caller):
+        """Show the front run's cart on the desktop, recording `caller` so the exit
         gesture knows where to return (spec Section 2's run/return -- a stack discipline,
         not a blocking call, since the frame loop can't block). The cart itself is started
         by the explicit _start() at each call site (open/apply/run_code/_leave_menu);
-        run() makes the desktop layer active + records the caller. The launcher home root
+        play() makes the desktop layer active + records the caller. The launcher home root
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
         if self.cart_error is not None and self.web.parked and self._crash_to_code():
             return                     # a parked console goes home; else the stop card
-        if self.player.notice is not None:
+        if self.run.player.notice is not None:
             self.pause.stop()          # a cart this console cannot run: its card over
             return                     # the screen it was opened from
         self.crash_popup = None        # a clean launch retires any stale popup
@@ -236,7 +256,7 @@ class SpineVerbs:
         # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
         # next cart must build into a compact heap, not around this one's corpse
         # (see Player.release_world's docstring for the measured mechanism).
-        self.player.release_world()
+        self.run.player.release_world()
         self.pause.dismiss()           # a stop card goes with its run
         ran = self._script_return
         if ran is not None:
@@ -361,7 +381,8 @@ class SpineVerbs:
             ctx = self.app_context(d["id"], getattr(cls, "NEEDS", ()),
                                    prefs_ns=getattr(cls, "PREFS_NS", None))
             if getattr(cls, "UI", False):
-                ctx.ui = AppHost(d["id"])   # an app on the public UI API's verbs
+                # an app on the public UI API's verbs
+                ctx.ui = AppHost(d["id"], getattr(ctx, "surface", None))
             app = cls(ctx, NAMES)
             setattr(self, str(d["id"]) + "_app", app)
             # Paint's document model is the console's reach into Paint (the
@@ -435,6 +456,8 @@ class SpineVerbs:
         (`wm.bring_forward`); one opened on a cart opens it in that window,
         the windows above left open (`wm.activate`). Returns False
         when no cart carries the app's identity."""
+        if self.usb_drive_refuses():
+            return False
         self.close_popover()
         if cart is None:
             if self.wm.bring_forward(app.id):
@@ -450,41 +473,88 @@ class SpineVerbs:
         self.look.commit()             # an app switch is an exit: `custom` is written
         self.settings_layer.commit_name()  # ... and a Name still being typed
         self._note_app_caller()        # a jump OUT of an app comes back to it
-        self.cart = cart
+        self.app_carts[app.id] = cart
+        if not self._project_held():
+            self.cart = cart
         self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
         self.wm.activate(app.id)
         self._set_text_mode(bool(text))
-        self.ach.note("open", cart.get("path") or cart.get("title"))
+        self.ach.played(cart.get("path") or cart.get("title"))
         return True
 
+    def _project_held(self):
+        """Whether the open project is another surface's: a run plays it (in
+        a desk window, parked behind console mode, or on a handheld's
+        back-stack) or the Editor has it open or parked. An app opened then
+        leaves it as it is."""
+        wm = self.wm
+        if self.procs._front_live():
+            return True
+        pl = self.run.player
+        if (wm.is_parked("desktop") and pl.cart_error is None
+                and (pl._update is not None or pl._draw is not None)):
+            return True
+        ed = getattr(self, "editor_app", None)
+        if ed is None or ed.project is not self.run.project:
+            return False
+        wins = getattr(wm, "_wins", None)
+        return (("menu" in wins) if wins is not None else wm.stack.has("menu")) \
+            or wm.is_parked("menu")
+
     def is_system_app(self, cart):
-        """True when a registered system app's identity claims `cart` -- the
-        registry-side predicate (services use it to keep app carts out of
-        project lists)."""
+        """True when a registered system app's identity claims `cart`, or it
+        is the achievements process's -- the registry-side predicate
+        (services use it to keep the console's own carts out of project
+        lists and App permissions)."""
+        if _is_ach_proc(cart):
+            return True
         for app, _text in getattr(self, "_apps", ()):
             if app.is_app(cart):
                 return True
         return False
 
-    def wifi_hold(self, tag):
+    def wifi_hold(self, tag, pid=None):
         """Take the radio for `tag`: the WiFi is OFF unless
-        something holds it, and this is the only way to turn it on. Powers the
-        interface up at once -- every holder scans or connects next, and the
-        ESP-NOW link must find the service owning the interface it activates.
-        Idempotent per tag. The holders: "web" (wasm mode, released when its
-        socket actually closes), "update" (the online update screen), "settings"
-        (the WIFI panel), "cart" (a run with the "network" permission), "link"
-        (a match), "carts" (the Get Carts app while it fetches). A new consumer
-        of the network takes a tag here and releases it on its way out, or the
-        radio never goes off again. The tags are `moy_spine.LEASE_TAGS`, and
-        any other is refused (ValueError)."""
+        something holds it. The hold is a row of the lease table's radio book,
+        and on a board the kernel's WiFi driver powers the station from that
+        book (native/moy_net/moy_net.h's THE BOOK), as it does for a hold a
+        compiled program or a C service takes; `radio_on` then makes the
+        service's view of the interface at once -- every holder scans or
+        connects next, and the ESP-NOW link must find the service owning the
+        interface it activates.
+        Idempotent per tag and holder. The console's own holders: "web" (wasm
+        mode, released when its socket actually closes), "update" (the online
+        update screen), "settings" (the WIFI panel), "link" (a match), "carts"
+        (the Get Carts app while it fetches), "ssh" (the SSH server while it
+        serves, ssh_service.py). A process's, held with its `pid`
+        (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
+        (its `moybyte.http` requests while one runs, dev_http.py, or a
+        compiled program's http handles from its first to its last, held in
+        the kernel, native/moy_net/moy_fetch_dev.c), "media"
+        (the media service's run, under the run's pid, while a URL of its
+        list may play, dev_media.py or a compiled program's media handle,
+        native/moy_media/moy_media_dev.c), "native"
+        (a native process from its first socket to its end, elf_run.py),
+        "net" (its radio link's ports, from the first open to the last
+        close, dev_handles.py); its
+        end lets exactly its holds go (the lease table's sweep, then
+        `wifi_settle`). A new consumer of the network takes a tag here and
+        releases it on its way out, or the radio never goes off again. The
+        holders are the lease table's radio rows (`moy_lease.Wifi`), its tags
+        `moy_lease.WIFI_TAGS`, and any other is refused (ValueError), as is a
+        process's tag with no pid; a table with no row left is a radio that
+        cannot start (False)."""
+        owner = self._wifi_owner(tag, pid)
         w = self.wifi
         if w is None:
             self.leases.held(tag)          # refused even with no radio to hold
             return False
-        self.leases.hold(tag)
+        try:
+            self.leases.hold(tag, owner)
+        except OSError:
+            return False
         on = getattr(w, "radio_on", None)
         if on is None:
             return True
@@ -493,14 +563,32 @@ class SpineVerbs:
         except Exception:  # noqa: BLE001 -- a radio that will not start is offline
             return False
 
-    def wifi_release(self, tag):
-        """Let the radio go for `tag`; the last holder out powers it down.
-        Releasing a tag never held is fine (every exit path releases without
-        asking), and an empty set powers down even so: "off in general" is the
-        rule, and whatever a serial `py` brought up without a lease goes with
-        the next exit."""
-        if self.leases.release(tag):
+    def wifi_release(self, tag, pid=None):
+        """Let the radio go for `tag` (a process's tag: process `pid`'s hold,
+        or with pid 0 every process's, for a run that ended in the kernel);
+        the last holder out powers it down (the book's, on a board). Releasing
+        a tag never held is fine (every exit path releases without asking),
+        and an empty set lets the service's view go even so (`radio_off`,
+        which on the host and a port's network.WLAN powers down too)."""
+        if self.leases.release(tag, self._wifi_owner(tag, pid, True)):
             return
+        self._radio_off()
+
+    def wifi_settle(self):
+        """The service's view let go when nothing holds the radio: what a
+        process's end runs after the lease table let its holds go (the
+        book powered the station down with them, on a board)."""
+        if not self.leases.mask():
+            self._radio_off()
+
+    def _wifi_owner(self, tag, pid, release=False):
+        if tag not in PROC_TAGS:
+            return _SHELL
+        if pid is None or (pid == 0 and not release):
+            raise ValueError("the radio's %s tag is a process's: name it" % tag)
+        return pid
+
+    def _radio_off(self):
         off = getattr(self.wifi, "radio_off", None)
         if off is not None:
             try:

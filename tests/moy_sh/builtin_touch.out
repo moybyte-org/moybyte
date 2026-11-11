@@ -1,0 +1,5 @@
+$ touch a b; ls
+a  b  bin/  dev/  proc/
+$ echo keep > a; touch a; cat a
+keep
+[exit 0]

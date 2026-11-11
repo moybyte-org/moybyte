@@ -65,9 +65,9 @@ def test_the_size_cap_is_style_jsons():
 
 
 def _notes(ws):
-    """Record every achievement the shell notes, without the store."""
+    """Record every badge of its own the shell awards, without the store."""
     seen = []
-    ws.ach.note = lambda name: seen.append(name)
+    ws.ach.award = lambda name: seen.append(name)
     return seen
 
 
@@ -306,7 +306,7 @@ def test_select_wallpaper_leaves_the_open_projects_cart_fat(tmp_path):
     cart = next(c for c in ws.look.wallpaper_carts()
                 if c.get("path") and ws.look.wp_id_for(c) != ws.look.PICTURE)
     ws._open_workspace(cart)
-    assert ws._fat_cart is cart
+    assert ws.run.fat_cart is cart
     ws.look.select_wallpaper(ws.look.wp_id_for(cart), persist=False)
     assert cart.get("lazy") is not True and "src" in cart
 
@@ -330,7 +330,7 @@ def test_only_a_pick_earns_home_decorator_and_it_lands_in_the_theme(tmp_path):
     assert seen == []
     assert ws.look.select_wallpaper(None) == 0
     _settle(ws)
-    assert seen == ["wallpaper_change"]
+    assert seen == ["decorator"]
     assert ws.look.theme_name == CUSTOM and ws.look.wallpaper_id is None
     assert "wallpaper" not in _stored(ws)
     assert _package(ws)["wallpapers"] == {}
@@ -451,7 +451,7 @@ def _accent(i):
 
 
 def _writes(ws, monkeypatch):
-    """Count the store's writes: custom's package and system.json."""
+    """Count the store's writes: custom's package and system/settings."""
     n = {"package": 0, "system": 0}
     real_pkg, real_sys = moy_carts.save_package, moy_carts.save_system
 
@@ -825,7 +825,7 @@ def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     use_theme(ws, "mint", store=True)
     ed = _edit(ws)
     d = json.loads(ed.text())
-    ed.set_text(json.dumps(d, indent=32))
+    ed.set_text(json.dumps(d, indent=24))
     assert _THEME_BYTES < len(ed.text()) <= ws.look.max_chars   # Config's cap
     assert ed.save(soft=True) == (True, "")
     saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()

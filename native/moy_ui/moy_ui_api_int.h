@@ -11,9 +11,11 @@
 #if __has_include("esp_heap_caps.h")
 #include "esp_heap_caps.h"
 #define KEPT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
+#define KEPT_FREE(p) heap_caps_free(p)
 #else
 #include <stdlib.h>
 #define KEPT_ALLOC(n) malloc(n)
+#define KEPT_FREE(p) free(p)
 #endif
 
 #include "moy_ui_api.h"
@@ -93,11 +95,6 @@ typedef struct {
     moy_ui_kept_t kt[MOY_UI_KEPT_RING];
 } kept_ring_t;
 
-// The engine's state one file keeps and another reads.
-extern uint32_t mua_scope;   // moy_ui_api.c
-extern uint32_t mua_audit_on, mua_audit_fail;   // moy_ui_api.c
-extern int mua_no_foot;   // moy_ui_api.c
-
 // moy_ui_api.c
 uint32_t mua_hash(const uint8_t *p, size_t n, uint32_t salt);
 int mua_kmetric(int kind, int slot);
@@ -141,8 +138,7 @@ int mua_clip_row(moy_ui_ctx_t *c, clip_t *k, const moy_ui_sink_t *s, moy_ui_box_
 int mua_clip_next(clip_t *k);
 moy_ui_box_t mua_card_of(const moy_ui_ctx_t *c);
 void mua_band_mark(moy_ui_ctx_t *c, moy_ui_box_t b, int stacked, int marks);
-void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
-              int marks);
+void mua_band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked);
 void mua_group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 int mua_in_dialog(const moy_ui_ctx_t *c);
 void mua_sig_mix(moy_ui_ctx_t *c, const void *p, size_t n);
@@ -152,7 +148,7 @@ int mua_pic_note(moy_ui_ctx_t *c, const moy_ui_over_t *o, int pic);
 void mua_pic_redraw(moy_ui_ctx_t *c, moy_ui_box_t r);
 int mua_interact(int st);
 int mua_mark_flags(int st, const moy_ui_over_t *o);
-uint32_t mua_id_of(const moy_ui_over_t *o, moy_ui_span_t label);
+uint32_t mua_id_of(const moy_ui_ctx_t *c, const moy_ui_over_t *o, moy_ui_span_t label);
 moy_ui_span_t mua_name_of(const moy_ui_over_t *o, moy_ui_span_t label);
 void mua_vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t label);
 void mua_vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
@@ -174,7 +170,17 @@ void mua_nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int u
                    int flags, const moy_ui_over_t *o);
 void mua_edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
                     int scroll, int ci, int head, int h);
+void mua_thumb(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
+               int scroll);
 void mua_foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// Snapping pages (moy_ui_ctx_t's snap): whether a unit's piece is left out,
+// and the page just opened snapping where its `o` says so.
+int mua_snap_out(moy_ui_ctx_t *c, int y, int h, int unit);
+// The open group's card parts' `desk`: the ground, and MOY_UI_CARDED where
+// it is a desk's card.
+int mua_card_flags(const moy_ui_ctx_t *c);
+void mua_snap_open(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_over_t *o);
+const moy_ui_over_t *mua_snap_whole(const moy_ui_over_t *o, moy_ui_over_t *copy);
 int mua_nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind);
 
 // moy_ui_api_kept.c

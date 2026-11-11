@@ -214,7 +214,7 @@ def test_a_config_edit_commits_on_the_debounce(tmp_path):
     ws = _ws(tmp_path)
     path = _editable(ws)
     ws.set_menu_view("cards")
-    ws.project.config["fps"] = 12
+    ws.run.project.config["fps"] = 12
 
     _go_idle(ws)
 

@@ -19,7 +19,7 @@ import pytest
 from runtime import layout_base
 from runtime.layout_base import LayoutBase
 from ws_helpers import build_ws, build_desktop_ws, select_on_home
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -195,6 +195,7 @@ def _settle(ws, n=6):
     prev = None
     for _ in range(n):
         ws.pointer.visible = False
+        settle_badges(ws)
         ws._toast_until = 0
         ws.bar_layer._clock_text = lambda: "12:34"
         ws._dirty = True
@@ -383,9 +384,9 @@ def test_an_app_cart_reads_the_content_rect(tmp_path, edge, lua):
     for _ in range(3):
         ws.input.begin_frame()
         ws.frame(DT)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    got = (ws.player._lua.get_global("RECT") if lua
-           else ws.player.ns["RECT"])
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    got = (ws.run.player._lua.get_global("RECT") if lua
+           else ws.run.player.ns["RECT"])
     x, y, w, h = ws.app_content_rect()
     assert got == "%d,%d,%d,%d,%d" % (x, y, w, h, y)     # Lua answers four values
     assert (y == 0) == (edge == "bottom") and h == 240 - ws.bar_layer._bar_h("tool")

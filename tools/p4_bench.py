@@ -56,7 +56,7 @@ page's ACCENT row, its `right` handled once a frame for three seconds from
 the live theme (an image without the page calls `ws.look.change("accent",
 ...)` instead), so the first change makes `custom`: the key's ms and the
 painted frames per change, then the frames after release; it counts the store's
-writes (the package and system.json) and asserts none while held and exactly
+writes (the package and system/settings) and asserts none while held and exactly
 one package write once it settles. The live theme is put back after, and
 `custom` stays on the store.
 
@@ -166,13 +166,13 @@ if not hasattr(ws, '_bench_installed'):
         if ws._recording and ws._force:
             ws.mark_dirty()        # --repaint: every frame paints the surface
         a = ws._T()
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         r = _of(dt)
         # Record only frames that actually PAINTED. The redraw gate makes an
         # idle frame a ~0ms no-op, and those dominate any sample window -- a
         # median over all frames reads 0 even while every painted frame takes
         # 174ms. What the eye judges is the painted-frame cadence.
-        if ws._recording and ws._frames_drawn != n0:
+        if ws._recording and ws.frame_state.frames_drawn != n0:
             ws._ft.append(ws._D(ws._T(), a))
         return r
     ws.frame = _f
@@ -390,7 +390,7 @@ def edit_thrash(b, bench):
     bench.stop("edit thrash (after release)")
     after = pyval(b, "list(ws._th_writes)") or [None, None]
     ok = held == [0, 0] and after[0] == 1
-    print("  edit thrash: writes held=%r settled=%r (package, system.json) -> %s"
+    print("  edit thrash: writes held=%r settled=%r (package, system/settings) -> %s"
           % (held, after, "PASS" if ok else "FAIL"))
     pyexec(b, "ws.look.set_theme(ws._th_was)")
     if keys:
@@ -600,7 +600,7 @@ def bench_sprites(b, out_path):
 PAINTER_BENCH = """
 import time, ui, ui_draw, moy_ui, chrome
 def _pb(n, sheet):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(240, 120)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(240, 120)
     try:
         assert moy_ui.theme_install(%r)[0] == 0
         ui_draw.use_shape('bench-spr')
@@ -636,7 +636,7 @@ def _pb(n, sheet):
 SHAPES_BENCH = """
 import time, ui, ui_draw
 def _ps(n):
-    cv = (ws.sys_canvas or ws.canvas).new_layer(320, 200)
+    cv = (ws.sys_canvas or ws.run.canvas).new_layer(320, 200)
     th = ws.theme_colors
     try:
         ui_draw.use_shape('moy')
@@ -1241,7 +1241,7 @@ def _kb_med(f, n=15):
     return ts[len(ts) // 2]
 
 def _kb_run(scales):
-    cv = ws.sys_canvas            # the home's canvas; ws.canvas is the game's
+    cv = ws.sys_canvas            # the home's canvas; ws.run.canvas is the game's
     buf, W, H = cv._buf, cv._stride, cv.h
     lay = ws.launcher.layout
     fs = lay.fs

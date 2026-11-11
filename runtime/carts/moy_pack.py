@@ -23,14 +23,15 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, _listing, _rmtree,
-                                _sibling_path, cart_path, theme_name_ok)
+    from moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, USER_NS, _listing,
+                                _rmtree, _sibling_path, cart_path, theme_name_ok)
     from moy_fs import (_exists, _mkdir, _read, _read_bytes, _remove, _write,
                         _write_bytes)
     from moy_fs import _native as _store
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, _listing,
-                                        _rmtree, _sibling_path, cart_path, theme_name_ok)
+    from runtime.moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, USER_NS,
+                                        _listing, _rmtree, _sibling_path, cart_path,
+                                        theme_name_ok)
     from runtime.moy_fs import (_exists, _mkdir, _read, _read_bytes, _remove, _write,
                                 _write_bytes)
     from runtime.moy_fs import _native as _store
@@ -69,8 +70,8 @@ def rename_package(path, dest, files, replace=False):
 
 # --- a cart as it travels (#127, #122): the archive and adopt ---------------
 #
-# A `.moy` archive is the browser's codec (firmware/web_runner/moy_store.mjs's
-# zipStore/unzip): STORED entries under `<folder>/`, a fixed 1980-01-01 date,
+# A `.moy` archive, the browser's export and import too (its VM runs these):
+# STORED entries under `<folder>/`, a fixed 1980-01-01 date,
 # files in name order at most six folders deep, nothing the wire skips (the
 # journal too, unless `history`). The native store writes and reads it
 # wherever it is linked (native/moy_store/moy_pack.c); these are the twins.
@@ -196,10 +197,53 @@ def adopt(stage, target):
         os.rename(stage, target)
 
 
-def import_archive(archive, root=CARTS_DIR, stage=None):
+# A dropped file's name loses these, in this order, before it names a folder.
+_DROP_EXTS = (".p8.png", ".p8", ".zip", ".moy")
+
+
+def _id_part(s):
+    """`s` in a cart id's characters: lowercase a-z, 0-9 and _, each run of
+    anything else one _, none at either end."""
+    out = ""
+    for c in s.lower():
+        if "a" <= c <= "z" or "0" <= c <= "9" or c == "_":
+            out += c
+        elif not out.endswith("_"):
+            out += "_"
+    return out.strip("_")
+
+
+def import_base(name):
+    """The folder stem a dropped file or an archive's top folder named `name`
+    lands under: the cart's id, `<author>.<name>`, each part in the id's
+    characters, the local author's (USER_NS) when it names none."""
+    n = name.rsplit("/", 1)[-1]
+    for ext in _DROP_EXTS:
+        if n.lower().endswith(ext):
+            n = n[:-len(ext)]
+    dot = n.find(".")
+    who = _id_part(n[:dot]) if dot >= 0 else ""
+    return (who or USER_NS) + "." + (_id_part(n[dot + 1:]) or "cart")
+
+
+def import_target(root, base, theme=False):
+    """The free folder for `base` in the store `root`: `base.moy`, else the
+    next `base_2.moy`, `base_3.moy`... -- a theme's stem cut so its name
+    stays THEME_NAME_MAX long."""
+    target = cart_path(root, base + CART_EXT)
+    i = 2
+    while _exists(target):
+        stem = base[:THEME_NAME_MAX - len(str(i)) - 1] if theme else base
+        target = cart_path(root, stem + "_" + str(i) + CART_EXT)
+        i += 1
+    return target
+
+
+def import_archive(archive, root=CARTS_DIR, stage=None, name=None):
     """A `.moy` archive unpacked into a staging folder and adopted onto the
-    shelf under the browser's naming rule (moy_store.mjs's cartBase and
-    uniqueCartDir): the new cart's path, or None when it held no files."""
+    shelf: the new cart's path, or None when it held no files. A cart lands
+    under `import_base` of its top folder (else of `name`, else of the
+    archive's file name), a theme under its own name (`_theme_of`)."""
     if stage is None:
         stage = _sibling_path(root, "install") + "/import"
     _mkdir(_sibling_path(root, "install"))
@@ -208,31 +252,15 @@ def import_archive(archive, root=CARTS_DIR, stage=None):
     if not n:
         _rmtree(stage)
         return None
-    base = top or archive.rsplit("/", 1)[-1]
-    for ext in (".zip", ".moy"):
-        if base.lower().endswith(ext):
-            base = base[:-len(ext)]
-    out = ""
-    for c in base:
-        ok = ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c in "_-"
-        out += c if ok else ("" if out.endswith("_") else "_")
-    base = out.strip("_") or "cart"
+    base = top or name or archive.rsplit("/", 1)[-1]
     theme = _theme_of(stage, base)
+    target = import_target(root, theme[0] if theme else import_base(base),
+                           theme is not None)
     if theme is not None:
-        base = theme[0]
-    target = cart_path(root, base + CART_EXT)
-    i = 2
-    while _exists(target):
-        stem = base
-        if theme is not None:
-            stem = base[:THEME_NAME_MAX - len(str(i)) - 1]
-        target = cart_path(root, stem + "_" + str(i) + CART_EXT)
-        i += 1
-    if theme is not None:
-        name = target.rsplit("/", 1)[-1][:-len(CART_EXT)]
-        if name != theme[0] or theme[2]:
+        landed = target.rsplit("/", 1)[-1][:-len(CART_EXT)]
+        if landed != theme[0] or theme[2]:
             d = json.loads(theme[3])
-            d["name"] = name
+            d["name"] = landed
             _write(stage + "/" + theme[1], json.dumps(d))
     adopt(stage, target)
     return target
@@ -240,7 +268,7 @@ def import_archive(archive, root=CARTS_DIR, stage=None):
 
 def _theme_of(folder, stem):
     """A theme package's (name, file, renamed, text) in unpacked `folder`,
-    or None for a cart: the browser's `themeOf` (moy_store.mjs). A theme
+    or None for a cart. A theme
     lands under its theme.json's `name`, else its folder's `stem` in the
     grammar (`renamed`), since the loader takes it only from `<name>.moy`."""
     try:
@@ -258,8 +286,14 @@ def _theme_of(folder, stem):
         return None
     if theme_name_ok(name):
         return (name, file, False, text)
+    for ext in _DROP_EXTS:
+        if stem.lower().endswith(ext):
+            stem = stem[:-len(ext)]
     alt = ""
     for c in stem.lower():
-        alt += c if ("a" <= c <= "z" or "0" <= c <= "9" or c in "_-") else "_"
-    alt = alt.lstrip("_-")[:24]
+        if "a" <= c <= "z" or "0" <= c <= "9" or c in "_-":
+            alt += c
+        elif not alt.endswith("_"):
+            alt += "_"
+    alt = alt.lstrip("_-")[:THEME_NAME_MAX]
     return (alt if theme_name_ok(alt) else "theme", file, True, text)

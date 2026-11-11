@@ -476,6 +476,47 @@ int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
     return ok;
 }
 
+const char *moy_ota_admit_module(const uint8_t *file, size_t len, const char *scheme,
+                                 const char *chip, int consented, const moy_ota_key_t *keys,
+                                 int nkeys, size_t *module_len) {
+    const size_t magic = sizeof(MOY_OTA_MODULE_MAGIC) - 1;
+    *module_len = len;
+    if (len < magic + 4 || memcmp(file + len - magic, MOY_OTA_MODULE_MAGIC, magic) != 0) {
+        return consented ? NULL : MOY_OTA_MODULE_UNSIGNED;
+    }
+    const uint8_t *lp = file + len - magic - 4;
+    size_t k = lp[0] | (size_t)lp[1] << 8 | (size_t)lp[2] << 16 | (size_t)lp[3] << 24;
+    if (k < 64 || k > 1024 || k > len - magic - 4) {
+        return "malformed signature";
+    }
+    size_t n = len - magic - 4 - k;
+    *module_len = n;
+    uint8_t digest[32];
+    moy_net_sha256(file, n, digest);
+    static const char hex[] = "0123456789abcdef";
+    char text[160];
+    int tl = snprintf(text, sizeof text - 64, "%s\n%s\n%u\n", scheme, chip, (unsigned)n);
+    if (tl < 0 || (size_t)tl >= sizeof text - 64) {
+        return "bad signature";
+    }
+    for (int i = 0; i < 32; i++) {
+        text[tl++] = hex[digest[i] >> 4];
+        text[tl++] = hex[digest[i] & 15];
+    }
+    char *sig = moy_net_alloc(2 * k);
+    if (sig == NULL) {
+        return "the signature could not be checked";
+    }
+    const uint8_t *sp = lp - k;
+    for (size_t i = 0; i < k; i++) {
+        sig[2 * i] = hex[sp[i] >> 4];
+        sig[2 * i + 1] = hex[sp[i] & 15];
+    }
+    int ok = moy_ota_verify(text, (size_t)tl, sig, 2 * k, keys, nkeys);
+    moy_net_free(sig);
+    return ok ? NULL : "bad signature";
+}
+
 // -- the manifest ---------------------------------------------------------------------------
 
 // The object's `key` as Python's `m.get(key) or ""` formats under "%s": a
@@ -687,6 +728,7 @@ typedef struct {
     uint8_t open;
     void *conn;
     char *head;                     // MOY_HTTPC_HEAD_MAX: the head, then the body's first bytes
+    size_t head_n;                  // the final response's head
     size_t rest, rest_n;            // the body bytes still in `head`
 } client_t;
 
@@ -719,7 +761,7 @@ static void client_drop(client_t *c) {
 }
 
 // One GET: the connection open with its head read into c->head. 0, or -errno.
-static int get_once(client_t *c, const char *url, const char *agent,
+static int get_once(client_t *c, const char *url, const char *agent, uint32_t flags,
                     moy_http_resp_t *r) {
     char host[MOY_URL_HOST_MAX];
     int tls;
@@ -728,14 +770,19 @@ static int get_once(client_t *c, const char *url, const char *agent,
     if (moy_url_parse(url, &tls, host, sizeof(host), &port, &path) != 0) {
         return -EINVAL_;
     }
-    int rc = moy_conn_open(host, port, tls, &c->conn);
+    int mode = !tls ? MOY_CONN_PLAIN : (flags & MOY_HTTPC_SIGNED) ? MOY_CONN_TLS_SIGNED
+               : MOY_CONN_TLS;
+    if (mode == MOY_CONN_TLS && !moy_conn_verifies()) {
+        return -MOY_HTTPC_ETLS;
+    }
+    int rc = moy_conn_open(host, port, mode, &c->conn);
     if (rc != 0) {
         c->conn = NULL;
         return rc;
     }
     int k = snprintf(c->head, MOY_HTTPC_HEAD_MAX,
-                     "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: close\r\n\r\n",
-                     path, host, agent);
+                     "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\n%sConnection: close\r\n\r\n",
+                     path, host, agent, (flags & MOY_HTTPC_ICY) ? "Icy-MetaData: 1\r\n" : "");
     if (k <= 0 || k >= MOY_HTTPC_HEAD_MAX) {
         return -EINVAL_;
     }
@@ -760,24 +807,40 @@ static int get_once(client_t *c, const char *url, const char *agent,
             break;
         }
     }
+    c->head_n = r->head_end;
     c->rest = r->head_end;
     c->rest_n = n - r->head_end;
     return 0;
 }
 
-int moy_httpc_open(const char *url, const char *agent, int *status,
-                   uint32_t *clen) {
+int moy_httpc_init(void) {
     if (s_cl == NULL) {
         s_cl = moy_net_alloc(sizeof(client_t) * MOY_HTTPC_SLOTS);
         if (s_cl == NULL) {
             return -ENOMEM_;
         }
+        memset(s_cl, 0, sizeof(client_t) * MOY_HTTPC_SLOTS);
     }
-    int i = 0;
-    while (i < MOY_HTTPC_SLOTS && s_cl[i].open) {
+    return 0;
+}
+
+int moy_httpc_open(const char *url, const char *agent, int *status,
+                   uint32_t *clen) {
+    return moy_httpc_open_ex(url, agent, 0, status, clen);
+}
+
+int moy_httpc_open_ex(const char *url, const char *agent, uint32_t flags, int *status,
+                      uint32_t *clen) {
+    if (moy_httpc_init() != 0) {
+        return -ENOMEM_;
+    }
+    int i = (flags & MOY_HTTPC_MEDIA) ? MOY_HTTPC_SLOTS - 1
+            : (flags & MOY_HTTPC_WORKER) ? MOY_HTTPC_SLOTS - 2 : 0;
+    int end = i + ((flags & (MOY_HTTPC_MEDIA | MOY_HTTPC_WORKER)) ? 1 : MOY_HTTPC_SLOTS - 2);
+    while (i < end && s_cl[i].open) {
         i++;
     }
-    if (i == MOY_HTTPC_SLOTS) {
+    if (i == end) {
         return -EBADF_;
     }
     client_t *c = &s_cl[i];
@@ -794,7 +857,7 @@ int moy_httpc_open(const char *url, const char *agent, int *status,
     int rc;
     for (int hop = 0;; hop++) {
         moy_http_resp_t r;
-        rc = get_once(c, cur, agent, &r);
+        rc = get_once(c, cur, agent, flags, &r);
         if (rc != 0) {
             break;
         }
@@ -860,6 +923,51 @@ int moy_httpc_read(int h, void *buf, size_t n) {
     return moy_conn_read(c->conn, buf, n);
 }
 
+int moy_httpc_read_wait(int h, void *buf, size_t n, uint32_t ms) {
+    client_t *c = client_at(h);
+    if (c == NULL) {
+        return -EBADF_;
+    }
+    if (c->rest_n > 0 || n == 0) {
+        return moy_httpc_read(h, buf, n);
+    }
+    if (n > 0x7fffffffu) {
+        n = 0x7fffffffu;
+    }
+    return moy_conn_read_wait(c->conn, buf, n, ms);
+}
+
+int moy_httpc_header(int h, const char *name, char *out, size_t cap) {
+    client_t *c = client_at(h);
+    if (c == NULL || cap == 0) {
+        return -1;
+    }
+    size_t nl = strlen(name);
+    const char *p = c->head, *end = c->head + c->head_n;
+    while (p < end) {
+        const char *eol = memchr(p, '\n', (size_t)(end - p));
+        if (eol == NULL) {
+            eol = end;
+        }
+        const char *colon = memchr(p, ':', (size_t)(eol - p));
+        if (colon != NULL && (size_t)(colon - p) == nl && name_is(p, nl, name)) {
+            const char *v = colon + 1, *ve = eol;
+            while (v < ve && is_ws(*v)) {
+                v++;
+            }
+            while (ve > v && (is_ws(ve[-1]) || ve[-1] == '\r')) {
+                ve--;
+            }
+            size_t k = (size_t)(ve - v) < cap - 1 ? (size_t)(ve - v) : cap - 1;
+            memcpy(out, v, k);
+            out[k] = '\0';
+            return (int)k;
+        }
+        p = eol + 1;
+    }
+    return -1;
+}
+
 void moy_httpc_close(int h) {
     client_t *c = client_at(h);
     if (c != NULL) {
@@ -869,10 +977,15 @@ void moy_httpc_close(int h) {
 
 int moy_httpc_get(const char *url, const char *agent, size_t cap, int *status,
                   char **body, size_t *n) {
+    return moy_httpc_get_ex(url, agent, 0, cap, status, body, n);
+}
+
+int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t cap,
+                     int *status, char **body, size_t *n) {
     uint32_t clen = 0;
     *body = NULL;
     *n = 0;
-    int h = moy_httpc_open(url, agent, status, &clen);
+    int h = moy_httpc_open_ex(url, agent, flags, status, &clen);
     if (h < 0) {
         return h;
     }
@@ -1020,7 +1133,8 @@ int moy_ota_check(const char *url, const char *board, int require_sig,
     int status = 0;
     char *body;
     size_t got;
-    int rc = moy_httpc_get(url, AGENT, MOY_OTA_MANIFEST_MAX, &status, &body, &got);
+    int rc = moy_httpc_get_ex(url, AGENT, MOY_HTTPC_SIGNED, MOY_OTA_MANIFEST_MAX, &status,
+                              &body, &got);
     if (rc != 0) {
         fail("net error %d", -rc);
         return MOY_OTA_ERR;
@@ -1077,7 +1191,7 @@ int moy_ota_dl_begin(const char *url, uint32_t size, const char *sha_hex,
     }
     int status = 0;
     uint32_t clen = 0;
-    int h = moy_httpc_open(url, AGENT, &status, &clen);
+    int h = moy_httpc_open_ex(url, AGENT, MOY_HTTPC_SIGNED, &status, &clen);
     if (h < 0) {
         return fail("net error %d", -h);
     }
@@ -1174,6 +1288,19 @@ int moy_ota_dl_step(uint32_t max) {
     }
     if (max == 0 || max > DL_BUF) {
         max = DL_BUF;
+    }
+    // A body of known size ends at its size, never at a read past it: on the
+    // boards' lwIP a plain-HTTP socket reports its close as end of stream once,
+    // and every read after that fails ENOTCONN.
+    if (s_u.st.dl_total) {
+        uint32_t left = s_u.st.dl_done < s_u.st.dl_total
+                        ? s_u.st.dl_total - s_u.st.dl_done : 0;
+        if (left == 0) {
+            return 0;
+        }
+        if (max > left) {
+            max = left;
+        }
     }
     size_t got = 0;
     while (got < max) {
@@ -1350,7 +1477,7 @@ void moy_net_vm_stop(void) {
     if (s_up != NULL && (s_u.st.phase == MOY_OTA_FETCHING || s_u.st.phase == MOY_OTA_WRITING)) {
         moy_ota_cancel();
     }
-    for (int i = 0; s_cl != NULL && i < MOY_HTTPC_SLOTS; i++) {
+    for (int i = 0; s_cl != NULL && i < MOY_HTTPC_SLOTS - 1; i++) {
         if (s_cl[i].open) {
             client_drop(&s_cl[i]);
         }

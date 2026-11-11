@@ -28,6 +28,14 @@ try:                                    # a VM: the native module
     import moy_input as _mi
 except ImportError:
     from runtime import moy_input as _mi
+try:                                    # staged/frozen flat namespace
+    import moybyte as _moybyte
+except ImportError:                     # host: the runtime package
+    from runtime import moybyte as _moybyte
+try:                                    # staged/frozen flat namespace (web runner)
+    from scheduler import SCHED as _sched
+except ImportError:                     # host: the runtime package
+    from runtime.scheduler import SCHED as _sched
 
 # A desk keyboard's keys on a host (the simulator's and the browser page's),
 # in one place: the button each presses beside what it types. The arrows and
@@ -98,6 +106,17 @@ class FakeWifi:
         self.radio = True
         return [tuple(ap) for ap in self.FAKE_APS]
 
+    def scan_poll(self):
+        """DeviceWifi's polled scan: the fake radio's scan ends at once."""
+        return self.scan()
+
+    def join(self, ssid, password=""):
+        """DeviceWifi's join: the fake radio associates at once."""
+        return self.connect(ssid, password)
+
+    def joined(self):
+        return self._connected
+
     def _stored_password(self, ssid):
         """The password wifi.json holds for `ssid`, else None.
 
@@ -135,6 +154,7 @@ class FakeWifi:
         if not password and stored:
             password = stored
         self._connected = ok
+        self._net(ok)
         if (ok or (password and password != stored)) \
                 and self._store is not None and self._root is not None:
             try:
@@ -146,6 +166,14 @@ class FakeWifi:
     def disconnect(self):
         self._connected = False
         self._ssid = None
+        self._net(False)
+
+    def _net(self, up):
+        """The link's change as the board's driver posts it: NET up or down on
+        the input table the wakes read (moy_input.h, the radios)."""
+        t = _moybyte.WAKES.table
+        if t is not None and hasattr(t, "radio"):
+            t.radio(_mi.EV_NET, up, 0)
 
     def radio_on(self):
         self.radio = True
@@ -305,6 +333,14 @@ class ConsoleDriver:
             if not self._chord:
                 self.system_key()
 
+    def media_key(self, usage):
+        """A keyboard's media key pressed and let go: its consumer-page usage
+        (moy_media.h's MOY_MEDIA_KEY_*) as a MEDIA record down and one up on
+        this driver's source, which the media service answers; nothing a
+        surface or a cart reads."""
+        self._src.post(_mi.EV_MEDIA, usage, 0, 1)
+        self._src.post(_mi.EV_MEDIA, usage, 0, 0)
+
     def wheel(self, dx, dy, mods=0):
         """A mouse wheel's (or a trackpad's) notches, across and down,
         positive right and down, with the modifiers held as it turned."""
@@ -422,10 +458,14 @@ class ConsoleDriver:
         """Esc is the console's: a menu shows, a game plays fullscreen (its
         Esc is the console's key), Settings or a registered app is the
         fullscreen surface (its Esc is the bar's back), or the focused desk
-        window shows its back chevron."""
+        window shows its back chevron, or a running app has a view of its
+        own open (`Player.has_page`)."""
         ws = self.ws
-        return (self.menu_open() or ws.plays_fullscreen() or ws.screen == "settings"
+        return (self.menu_open() or ws.plays_fullscreen()
+                or ws.screen in ("settings", "tasks")
                 or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
+                or (not ws.windowed_chrome and ws.screen == "desktop"
+                    and ws.run.player.has_page())
                 or (ws.windowed_chrome and ws.wm.focus_has_back()))
 
     def escape(self):
@@ -449,8 +489,13 @@ class ConsoleDriver:
             ws.system_key()
         elif ws.screen == "settings":
             ws.settings_layer.back()
+        elif ws.screen == "tasks" and not ws.windowed_chrome:
+            ws.tasks_layer.back()
         elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
             ws.app_back()
+        elif (not ws.windowed_chrome and ws.screen == "desktop"
+              and ws.run.player.has_page()):
+            ws.app_back(ws.run.player)  # the running app's own view steps back
         elif ws.windowed_chrome and ws.wm.focus_back():
             pass
         elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):
@@ -505,7 +550,10 @@ class ConsoleDriver:
         # input (above) and the clock, so the frame keeps the dt it was given.
         ws = self.ws
         _loop.drive(ws.handle_input, ws.handle_pointer,
-                    lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
+                    lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
+        # The background scheduler after the frame, as a board's tail runs it:
+        # this harness does not sleep, so its budget is the guaranteed slice.
+        _sched.tick(0)
         for name in self._pending:
             if name not in self._held_ext:     # never release an explicit hold()
                 self.input.set_held(name, False)

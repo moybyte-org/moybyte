@@ -28,7 +28,7 @@ failed runs whether the console survived them or not.
 
 ## Two roles, two ledgers
 
-`Workstation` holds two guards over the one `system.json`, each under its own
+`Workstation` holds two guards over the one `system/settings`, each under its own
 key: `app_guard` (`KEY`), armed in `Player.start` for `type: "app"` carts, and
 `wallpaper_guard` (`WALLPAPER_KEY`), armed in `Wallpaper.compile` for the
 backdrop. The strikes are per ROLE because the risk is: a cart that is fine
@@ -52,7 +52,7 @@ again in Appearance is the kid saying "try again", and the pick
 
 ## What it costs, stated plainly
 
-An armed run costs two small `system.json` writes: one at `arm`, one at the
+An armed run costs two small `system/settings` writes: one at `arm`, one at the
 heal. A settings write is flash, so this is NOT free, and it is NOT armed for
 games -- a game that always crashes shows the panel and the kid moves on, which
 is not a brick. An app pays it per open, deliberately and rarely, beside a cart
@@ -80,7 +80,7 @@ frames is ~100 ms. A false strike is cleared by the next healthy run anyway.
 
 ## Storage
 
-One key per role inside the shell's existing `system.json` (`ws.system`, the
+One key per role inside the shell's existing `system/settings` (`ws.system`, the
 spine's `Settings`) -- no new store surface, no new file, and it inherits that
 store's atomic write, so an interrupted write cannot leave a half-parsed guard
 that disables everything. A guard reads its slot with `store.get(key)` and
@@ -94,7 +94,7 @@ console that cannot write cannot remember, and refusing to run apps at all
 because of it would be worse than the loop.
 """
 
-# The `system.json` keys the two roles' ledgers live under.
+# The `system/settings` keys the two roles' ledgers live under.
 KEY = "app_guard"
 WALLPAPER_KEY = "wallpaper_guard"
 
@@ -118,15 +118,42 @@ def last_crash():
     return _native.last() if _native is not None else None
 
 
+# The core dump's size, read once a boot (the check reads the whole dump);
+# empty until the first read.
+_dump = []
+
+
+def core_dump():
+    """The size in bytes of the ESP-IDF core dump the last panic wrote to the
+    board's coredump partition (tools/coredump.py reads and decodes it), or
+    None: no dump, no partition on this board's table, or no kernel."""
+    if _native is None:
+        return None
+    if not _dump:
+        _dump.append(_native.dump() or None)
+    return _dump[0]
+
+
+def clear_core_dump():
+    """Erase the core dump: True once it is gone."""
+    if _native is None or not _native.clear_dump():
+        return False
+    _dump[:] = [None]
+    return True
+
+
 def crash_available():
     """True on a board whose kernel keeps a crash record: the Settings
     diagnostics row exists exactly there."""
     return _native is not None
 
 
-def crash_lines(rec):
+def crash_lines(rec, dump=None):
     """A crash record as the Settings panel's lines (short, upper case): what
-    stopped, what was running, where, and the reason. `rec` None is no crash."""
+    stopped, what was running, where, and the reason, then the core dump's
+    size when one is in flash. `rec` None is no crash."""
+    if dump:
+        return crash_lines(rec) + ["CORE DUMP %d KB IN FLASH" % ((dump + 1023) // 1024)]
     if not rec:
         return ["NO CRASH RECORDED"]
     kind = str(rec.get("kind") or "?").upper()
@@ -186,7 +213,7 @@ class CrashGuard:
         guard works on in place. A copy: nothing here changes the store until
         `_commit` writes it back.
 
-        Tolerant of garbage: a hand-edited or half-migrated `system.json` whose
+        Tolerant of garbage: a hand-edited or half-migrated `system/settings` whose
         guard slot is not a dict is REPLACED (by the next commit), never allowed
         to raise. A corrupt guard must not be able to do what the guard exists
         to prevent."""

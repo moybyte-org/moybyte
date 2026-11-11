@@ -1,4 +1,4 @@
-"""`system.json`'s owner (#209 landing B) -- `StoreHandle` + `SystemStore`.
+"""`system/settings`' owner (#209 landing B) -- `StoreHandle` + `SystemStore`.
 
 `Workstation.prefs`. Every persisted Settings choice, the achievement badges,
 the crash guard's strikes, the pairing pin, favorites and recents all live in
@@ -75,7 +75,7 @@ class StoreHandle:
     """The (store, root, can_manage, with_sd) guard 4-tuple, as an object.
 
     Four bodies re-derived it before this landing (`_persist_system`, the
-    wallpaper's, `_save_achievements`, `rescan_carts`) -- which is why
+    wallpaper's, the badges', `rescan_carts`) -- which is why
     this is a standalone object and not private to `SystemStore`: CartManager
     and the storage roles' servers (runtime/shell/shell_servers.py) take one too.
 
@@ -140,7 +140,7 @@ class StoreHandle:
 
 
 class SystemStore:
-    """The `system.json` rows and the hook that writes them.
+    """The `system/settings` rows and the hook that writes them.
 
     Holds the `Settings` `ws.system` aliases (see the module docstring) plus the
     achievements list's two store halves. What it deliberately does NOT own is
@@ -155,11 +155,12 @@ class SystemStore:
         # nothing rebinds either name again -- `load()` replaces its rows.
         self.rows = _rows(self._write)
         self.safe = safe_mode()
+        self._landed = None           # the text save_steps just put down
 
-    # -- system.json ---------------------------------------------------------
+    # -- system/settings ---------------------------------------------------------
 
     def load(self):
-        """Read `system.json` into the rows, IN PLACE. Safe no-op if no store or
+        """Read `system/settings` into the rows, IN PLACE. Safe no-op if no store or
         root is wired (an embedded boot keeps whatever it already had).
 
         A store that raises leaves the settings EMPTY rather than half-read: a
@@ -168,7 +169,7 @@ class SystemStore:
         if not self.store.ready():
             return self.rows
         if self.safe:
-            print("Moybyte SAFE start: system.json ignored")
+            print("Moybyte SAFE start: system/settings ignored")
             return self.rows
         # A return start's rows may carry a write the stopped VM never saved:
         # it reaches the file before the file is read back.
@@ -189,7 +190,7 @@ class SystemStore:
         the next write carries it; True when it landed or when this build has
         nowhere to put one (`can_manage` is False where the carts are baked
         into the image: that is not a failure to retry)."""
-        if self.safe or not self.store.writable():
+        if self.safe or not self.store.writable() or text == self._landed:
             return True
         ws = self.ws
         try:
@@ -199,32 +200,29 @@ class SystemStore:
             return False
         return True
 
-    # -- achievements.json (#21) ---------------------------------------------
-
-    def load_achievements(self):
-        """The badges' document off the store (moy_carts.achievements_doc), or
-        None on an embedded/no-store boot or a store that holds none of this
-        format (the badges then start empty -- still awarded and shown this
-        session, remembered once a write lands)."""
-        if not self.store.ready():
-            return None
-        ws = self.ws
-        try:
-            return self.store.call(
-                lambda: ws.carts_store.load_achievements(ws.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-            print("Moybyte achievements load failed:", _err_text(exc))
-            return None
-
-    def save_achievements(self, doc):
-        """Persist the badges' document -- `Achievements`' `on_save` hook.
-
-        No try/except here on purpose: `Achievements.award` already wraps the
-        hook and prints the failure, so a second one would only decide the same
-        thing twice. A disabled write is simply not remembered (the badge still
-        shows this session)."""
-        if not self.store.writable():
+    def save_steps(self):
+        """`yield from` it: the rows a `set(..., False)` left dirty written as
+        `_write` writes them, a store op a frame (moy_docs.save_system_steps)
+        -- for a write that must not hold one frame for all three of its
+        writes (the install prompt's consent: 120 ms on the T-Deck's card).
+        A change to the rows between the two is written whole by `flush`."""
+        rows = self.rows
+        if self.safe or not self.store.writable() or not rows.dirty():
+            rows.flush()
             return
+        gen = rows.gen()
+        text = rows.dump()
         ws = self.ws
-        self.store.call(
-            lambda: ws.carts_store.save_achievements(doc, ws.carts_root))
+        steps = ws.carts_store.save_system_steps(text, ws.carts_root)
+        try:
+            self.store.call(lambda: next(steps))
+            yield
+            if rows.gen() == gen:
+                self.store.call(lambda: next(steps, None))
+                self._landed = text
+        except Exception as exc:  # noqa: BLE001 -- flush below writes it whole
+            print("Moybyte system save failed:", _err_text(exc))
+        try:
+            rows.flush()
+        finally:
+            self._landed = None

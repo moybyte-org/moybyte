@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 9,
   "title": "Paint",
   "id": "moybyte.paint",
   "runtime": "python",
@@ -20,6 +20,9 @@
       "graphics",
       "input",
       "artwork"
+    ],
+    "handles": [
+      "image/x-moyimg"
     ],
     "config": {},
     "edit": []

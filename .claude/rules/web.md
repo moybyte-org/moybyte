@@ -37,8 +37,10 @@ nor those docs will warn you about:
   -Oz over the rest is smaller still and could not be shown free of frame
   cost (2026-10-28). The C no browser reaches is not built at all, and its
   names are ABSENT from the modules, never stubs: `moy_glass`'s compositors
-  and `front` (`MOY_GLASS_PRESENT=0`) and `moy_net`'s webhost, web console,
-  DNS, GPIO route, updater and HTTP client (`MOY_NET_SERVE=0`), both set in
+  and `front` (`MOY_GLASS_PRESENT=0`), `moy_net`'s webhost, web console,
+  DNS, GPIO route, updater and HTTP client (`MOY_NET_SERVE=0`) and
+  `moy_input`'s keyboard, touch, trackball and BLE drivers
+  (`MOY_INPUT_DRIVERS=0`; its event rings stay), all set in
   `variant/mpconfigvariant.mk`; Python probes for them (`getattr`).
 - **The browser draws what its boards draw: each arrangement on its board's
   metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the
@@ -75,14 +77,30 @@ nor those docs will warn you about:
   EMPTY-batch POST — because a board running firmware older than that marker
   still ACCEPTS the batch, and reading it as "static host" would quietly strand a
   kid's edits in a browser.
+- **The page's JavaScript does I/O; the console's rules are the VM's**
+  (owner, 2026-11-08): what is seeded, skipped and named, the root registry
+  and the `.moy` archive run in the VM (`moy_sync.seed_store`,
+  `moy_sync.roots_json`, `moy_store.skip`, `moy_pack` through `web_boot`),
+  and the VM is up before the store is seeded (the worker's `bindStore`). A rule that must
+  run before it is exported from the wasm's C, never copied into JavaScript.
+  The store holds no rule: what a path, a song, an install's name or a root
+  is reaches it through `bind`. `tests/test_web_io_ratchet.py` holds its
+  exports to a list that only shrinks, every string it holds to a filed word
+  (no file, folder or suffix) and its patterns to the channel's one (the
+  audit: `docs/moycore_direction.md` §3).
 - **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
   cart folder stays a cart folder. No OPFS (private window, blocked site data,
   `file://`) runs in memory and **the page says so**; a quota failure requeues, and
   after three gives up ONCE and says that too. A returning browser's shelf is
-  OPFS's, never the bundle's -- except a SYSTEM cart the store has never had
-  (a new app, a new seed game), which is seeded into it the way a board seeds a
-  built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
-  had visited before a system cart shipped would ever see it.
+  OPFS's, never the bundle's -- except the bundle's SYSTEM carts, which reach
+  it as a board's built-ins reach its SD (#47), decided in the VM
+  (`moy_seed.seed_folders`, the worker's `seedLocal` only moving the bytes):
+  one the store has never had (a new app, a new seed game) is seeded whole,
+  and one whose bundled manifest `version` is newer replaces the store's copy,
+  its `pmem.json` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
+  before a system cart shipped would ever see it; without the second, an app
+  kept from an older console runs its old manifest on the new one (Notes'
+  `files:docs` after the folders took their names: no `files`, a NameError).
 - **A channel's site keeps its own storage.** The stable site (`/moybyte/`)
   and the dev site (`/moybyte/dev/`, both from `.github/workflows/pages.yml`)
   share the origin moybyte-org.github.io, so they share its OPFS.
@@ -111,34 +129,49 @@ nor those docs will warn you about:
   both ends without a byte of history on the wire. **The wire predicate itself
   never moves**: `_skip` refuses journal paths and a board-mode batch is
   byte-identical to what it always was.
-- **THE PIN GATES EVERYTHING** (owner call), reversing the earlier read-half-open
-  design: handing any device on the WiFi a child's whole cart store for the asking
-  was the thing being fixed. Only the boot assets and `GET /sync` are open, by
-  necessity. **A GET carries its pin the only place a GET can**, so the request
-  parser (`moy_http_parse`) keeps the query string — stripping it once spent the
-  credential before any handler saw it.
+- **THE SIGN-IN GATES EVERYTHING** (owner call), reversing the earlier
+  read-half-open design: handing any device on the WiFi a child's whole cart
+  store for the asking was the thing being fixed. Only the boot assets and `GET
+  /sync` are open, by necessity. Since 2026-11-07 the gate is a paired
+  browser's device key and a sealed session (`docs/os_2026-11/system.md` §3,
+  the protocol `native/moy_net/moy_seal.h`): a request names its session and
+  sequence number on the query, so the request parser (`moy_http_parse`) keeps
+  the query string, and its body is AES-GCM opened in place before a route
+  reads it. A route the VM answers (`/run`, `/update`, the system root's
+  batches) parks with its body opened, and the C seals what the VM answers.
+  **A page never downgrades**: one that holds a key or has signed in treats
+  `{"open": true}`, a 404/405/501 from `/auth` and a 2xx in the clear as
+  errors; only a keyless page believes a host that says it has no sign-in
+  (the dev server). `firmware/web_runner/signin_test.mjs` holds the page's end.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
-  REFUSE the batch instead of writing `drawings/…` into its carts store. A files
-  path must start with a `FILE_KINDS` kind, which is the one rule keeping
-  `.history/` and `trash/` home in both directions.
+  REFUSE the batch instead of writing `Pictures/…` into its carts store. A files
+  path must start with a shared folder (`moy_store_base.SHARED_FOLDERS`), which
+  is the one rule keeping `.history/` and `.Trash/` home in both directions.
 - **The console's own documents are a THIRD root** (`moy_sync.SYSTEM_ROOT`,
-  owner 2026-10-20): `system.json` (the theme and every Setting),
-  `achievements.json`, the edited bar icons and the shared sheet ride the
-  same sweep into a site-mode page's OPFS, so a reload comes back on the same
+  owner 2026-10-20): `system/settings` (the theme, every Setting and the
+  apps' prefs, the achievements process's badges row among them), the edited
+  bar icons and the shared sheet ride the same sweep into a site-mode page's
+  OPFS, so a reload comes back on the same
   theme, Settings and badges. Each lands old-or-new (`moy_store.commitFile`),
-  because a torn `system.json` boots the console on its defaults. **On a
+  because a torn `system/settings` boots the console on its defaults. **On a
   board the root is the VM's, never the C's**: the page seeds from `GET
   /console.json` and pushes `{"v": 2, "root": "system"}` batches, which the C
-  parks (pin checked) for `moy_webhost.ConsoleSystem`; the board is of record
+  parks (its seal checked) for `moy_webhost.ConsoleSystem`; the board is of record
   and takes a page's change KEY BY KEY (`moy_sync.SYSTEM_KEYS`: an unknown key
-  is LOCAL, the pin, the update channel and UNKNOWN SOURCES are never sent and
-  never taken, the badges are a union). Its directory is the carts folder's
+  is LOCAL, so the consent records are never taken; the update channel is
+  never sent and never taken, and the badges row crosses whole, the later
+  writer's winning). Its directory is the carts folder's
   parent and proves nothing, so the page watches it only when the pull
   answered (the worker's `seeded` list); firmware without it 404s the pull and
   400s the batch, and that page keeps them in the tab. Cart paths in
   `favorites`/`plays`/`desk_mru` cross as folder names and land under each
   side's own carts root.
+- **The apps' private folders are a FOURTH root** (`moy_sync.APPS_ROOT`), all
+  bytes, with one writer per mode (`docs/os_2026-11/between_apps.md` §2): what
+  bites is that `Root.site` is False, so the worker's `initStore` and
+  `web_boot._build_watchers` both skip it in site mode, where the keeper owns
+  OPFS `apps/`.
 - **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
   In site mode `carts_link.py` gives the console the page's fetch
   (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker
@@ -165,7 +198,8 @@ nor those docs will warn you about:
     shipping it. `store_test.mjs` interrupts an update at every change it
     makes.
   - **The shelves are the serving host's**: an `indexes.json` beside the page
-    replaces the defaults, read once at boot.
+    replaces the defaults, read once at boot and written as the console's
+    `system/sources`.
   - **A page keeps no compiled module**, so a release asset is read by RANGE
     (`ranges` on the page's transport, `cart_unpack._Ranged`): the zip's
     directory, then the runs of members it keeps -- a cart's modules are most
@@ -179,7 +213,7 @@ nor those docs will warn you about:
   web-player adapters over libmoy's import table); moycore, `WasmRun`, the
   Player and the canvas are the boards'. What bites:
   - **Nothing on a board is reimplemented here, and nothing native applies**:
-    no AOT module, key, signature or Unknown sources -- `moy_wasm.CHIP` is None,
+    no AOT module, key, signature or admission -- `moy_wasm.CHIP` is None,
     so WasmRun opens `main.wasm` and is never "slow" for it.
   - **A hook's catch rethrows anything that is not an `Error`**: the VM's own
     longjmp unwinds as a JavaScript exception through the cart's frames, and
@@ -190,6 +224,57 @@ nor those docs will warn you about:
   - **The site-mode sweep must pass a file it cannot carry by stat**
     (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
     every sweep, an installed Doom drew a frame a second.
+- **The site's Terminal runs WASI commands on the BROWSER'S engine, through
+  the boards' adapter**, compiled into the site's wasm alone; the README of
+  `native/moy_wasm_web` says how ("A WASI command here"). What bites:
+  - **A row's pointer is an offset in the module's memory, never one into
+    the VM's.** A WASI row reaches it through `moy_wasi_web_reach`; a
+    `moybyte.os` row, whose body dereferences what it is handed, gets copies
+    of its `*~` spans because the C hands the page its signature. A new WAMR
+    call in `moy_wasi.c` needs its twin in `moy_wasi_web.c`:
+    `tests/test_wasi_web.py` names it before a `--site` build fails.
+  - **Nothing waits inside a command**: the module runs inside the door's
+    crossing on the one thread, so stdin from the grid is end of file, a
+    `moybyte.os` row that hops (a console call, the door's Python half)
+    answers NOSYS, and the first-run question is asked at the prompt and
+    answered by the next line (`moy_sh_ask`), never read during the run.
+  - The worker's command engine (about 1 KB of script gzipped) rides the
+    baked bundle too; its C does not. `tests/test_web_term_e2e.py` runs
+    wasi-sdk's modules in Chrome.
+- **Music plays in the browser on the boards' decoder (#251)**: `moy_media`
+  is in the wasm with no task and no HTTP client (`moy_media.h`, THE
+  BROWSER): the frame's C job decodes, and what the VFS does not hold (a
+  URL, a song) the C arms for the face, which feeds it from `ws.media_net`
+  (`media_link.py`) in both modes, from the byte a seek asks for (`mget`'s
+  `at`). What bites:
+  - **A song never enters the VFS.** A site-mode page's songs stay in OPFS
+    (`moy_store.readAll` leaves `files/Music/*.mp3` out; a dropped MP3 is
+    written there), a board-served page's on the board, read through its
+    sealed `GET /media` 32 KiB a request; the worker lists either into
+    `web_vfs.LISTING` at boot, which is what Music's folder shows.
+  - **A stream's bytes go through spool SEGMENTS** the console removes as it
+    reads them, and the worker stops reading while four wait, so a radio
+    station costs the page a few segments however long it plays.
+  - **The page's frame pulls the mix while a stream plays** (`web_boot`'s
+    step ticks `_RunnerPump` when no Player did): a board's feeder task
+    pulls it whatever runs, and on the web nothing else would.
+  - **A station without CORS headers cannot be read**, and from the page
+    that looks like no network; a `no-cors` fetch that answers tells them
+    apart, and the face fails the entry with EACCES. A page on https asks
+    for an `http://` station over https (mixed content), and a station whose
+    https address redirects to http cannot play there. The fetch names no
+    page (`referrerPolicy: "no-referrer"`): SomaFM answers a Referer naming a
+    github.io or localhost page with an empty 403.
+  - **A station is asked for its ICY metadata as a board asks
+    (`Icy-MetaData: 1`), which makes the fetch PREFLIGHTED**, and its
+    `icy-metaint` is readable only where the station exposes it
+    (Access-Control-Expose-Headers). `media_link.py` decides: a refused
+    asking fetch, or an answer with no readable `icy-metaint` (its bytes may
+    carry metadata nothing can take out), is read again without asking, so
+    a station that played before still plays, with no now-playing text. The
+    head reaches the C through `moy_media_feed_icy`, and the feed takes the
+    metadata out with the board's own demux. The worker only sends the
+    headers it is given and reads back the ones it is named.
 - **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
   what it does depends on whether that board has glass. Headless: the strip IS
   the update screen — two taps, then a polled progress read, because the board
@@ -235,10 +320,9 @@ nor those docs will warn you about:
   the WiFi driver's link has an address (the kernel dials the network it kept)
   and parks the glass then, and a join that outlives `MOY_WC_JOIN_MS` fails
   into the row's label. Only the dev word `web` waits for the outcome. The QR encoder is ours because there is no library on a board and
-  the pin is not a constant anything could be baked with. **The pin is read at
-  `start()`, never at construction** — boards build the webhost before
-  system.json is loaded, so a pin captured then is one minted against an empty
-  store.
+  the QR's pairing token is minted each time the screen draws it. **The sign-in's
+  system folder is read at `start()`, never at construction** — boards build the
+  webhost before the store is up.
 - **Two Makefile patches are load-bearing and non-obvious.** `-Wno-unknown-pragmas`
   must be appended to the PORT's CFLAGS, not `CFLAGS_USERMOD`: py.mk folds usermod
   flags in at its include and the port adds `-Wall` afterwards, which re-enables
@@ -302,7 +386,22 @@ nor those docs will warn you about:
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.
-- Web audio ships per-frame FINISHED PCM through ONE AudioWorklet ring
-  (continuous resample, seam-free; starvation decays instead of hard-cutting),
-  with the runner topping a cushion via the page-reported queue depth.
+- **Web audio is FINISHED PCM at the page's AudioContext's rate, and the
+  samples never ride the frame slot** (page_core.html, THE SINK). The context
+  is made as the page loads, so its rate reaches the console before boot: the
+  sessions mix at 22.05 kHz as on every board and the C upsamples that mix
+  once to it (`moy_aud_render_out`), the MP3 decoder resampling to it too, so
+  the page plays the samples one for one and its JS converts nothing. The
+  worker posts each frame's samples straight to the sink -- an AudioWorklet
+  over a MessageChannel in a secure context, the page's own AudioBufferSource
+  schedule on a board-served page over plain HTTP, which has no worklet --
+  because the page keeps only the NEWEST frame: samples that rode a frame
+  were dropped with every frame a newer one superseded, and the pull, steered
+  by a depth that did not count them, drained a live stream faster than real
+  time until the decoder starved (the owner's stutter on the P4-served desk,
+  2026-11-10). The pull tops the sink's depth up by COUNT (`_RunnerPump`:
+  samples sent against the sink's `played`); a dry sink plays silence and
+  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`);
+  `tests/test_web_audio_stream_e2e.py` plays a live station a minute on both
+  sinks.
 

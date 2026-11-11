@@ -41,6 +41,12 @@
 // when a card is in it (device/card_store.py), and a big card is the common one.
 // FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
 #define MICROPY_FATFS_EXFAT                 (1)
+// FatFS takes the store's lock around every call on the card's volume, which
+// a program's own task works too (native/moy_store/moy_vol.h, THE STORE'S LOCK);
+// its long-name buffer is on the calling task's stack (tools/patch_fatfs_lfn.py).
+#define MICROPY_FATFS_REENTRANT             (1)
+#define MICROPY_FATFS_ENABLE_LFN            (2)
+#define MICROPY_FATFS_SYNC_T                uintptr_t
 
 // The Python heap may grow on demand (split heap), but never into this much
 // of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
@@ -49,6 +55,15 @@
 // dozen carts grows the launcher's heap 1.5MB at boot. 3MB keeps the biggest
 // cart loadable behind that. See tools/esp32_build_lib.sh.
 #define MOYBYTE_GC_SPLIT_RESERVE            (3072 * 1024)
+
+// One growth of the Python heap adds at most this much (tools/patch_gc_grow_step.py):
+// the stock step is the whole heap, so a 20-32 KB request a collect could not
+// place among the desk's holes added a megabyte, and one survivor in it kept
+// that megabyte for the session. A request bigger than the cap still gets an
+// area of its own size. The step is the headroom a cart's garbage collects
+// in: measured on the T-Deck 2026-11-04, Brick Siege collected once in 120 s
+// on the stock 1 MB step and on this one, three times on a 256 KB step.
+#define MOYBYTE_GC_GROW_MAX                 (512 * 1024)
 
 // Paint SAVES pictures, and since 2026-09-07 a `.moyimg` is a deflate stream --
 // ONE format, the compressed one (runtime/carts/moy_image.py). The esp32 port sits at
@@ -93,16 +108,13 @@
 
 // The kernel's recovery floor (native/moy_kernel): moy_axs's entry points, its
 // landscape 480x320 framebuffer in wire order (the module turns the bands onto
-// the portrait glass), and the AXS15231's touch on I2C0, polled from C.
+// the portrait glass). Its input is the AXS15231's touch below (MOY_INPUT_TOUCH_*),
+// brought up by the floor on the kernel's bus.
 #define MOY_KERNEL_PANEL(fn)                moy_axs_k##fn
 #define MOY_KERNEL_PANEL_W                  (480)
 #define MOY_KERNEL_PANEL_H                  (320)
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (1)
-#define MOY_KERNEL_TOUCH_AXS15231           (1)
-#define MOY_KERNEL_TOUCH_SDA                MICROPY_HW_I2C0_SDA
-#define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
-#define MOY_KERNEL_TOUCH_ADDR               (0x3B)
 
 // The VM stop (docs/history/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM
@@ -141,6 +153,10 @@
 // scroll cart's 384,000-byte world is freed at exit and allocated again.
 #define MOY_GLASS_POOL_BYTES                (160 * 1024)
 
+// THE SHARES' ROWS (native/moy_play/moy_play.h): this image's line, named by
+// its board.toml OTA id (tests/test_board_toml.py holds the two together).
+#define MOY_SHARES_BOARD                    "guition_s3"
+
 // The banded present (native/moy_glass/moy_present.h): this panel module's
 // kernel transport (kwait/kkick/kship) under the kernel's frame state machine.
 #define MOY_GLASS_BANDED                    (1)
@@ -152,6 +168,13 @@
 #define MICROPY_PY_ESPNOW                   (0)
 #define MOY_NET_LINK                        (1)
 // The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
-// starts and stops as the spine's lease asks, and Python never constructs the
+// starts and stops as the radio's lease asks, and Python never constructs the
 // port's network.WLAN on this board.
 #define MOY_NET_WIFI                        (1)
+// The mDNS name (`<name>.local`, Settings' Name) the console answers to while
+// its SSH server serves (runtime/system/ssh_service.py).
+#define MOY_NET_MDNS                        (1)
+
+// The VM abort: the scheduler stops a background Python callback that never
+// returns while the shell goes on (native/moy_kernel/modmoy_guard.c).
+#define MICROPY_ENABLE_VM_ABORT             (1)

@@ -164,6 +164,55 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.web_console import WebConsole
 
+# The OS's own names for a Python app (moybyte.py): its events read the rings
+# of the input this Workstation is built over.
+try:
+    import moybyte as _moybyte
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moybyte as _moybyte
+
+# The cooperative scheduler (scheduler.py): the services this console starts
+# at its first drawn frame.
+try:
+    import scheduler as _scheduler
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import scheduler as _scheduler
+
+# The SSH server, served at the first frame where a password is set.
+try:
+    import ssh_service as _ssh
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ssh_service as _ssh
+
+
+try:
+    import moy_log as _L
+except ImportError:  # pragma: no cover - an image without the kernel
+    _L = None
+
+
+def _log_info(pid, text):
+    if _L is not None:
+        _L.write(_L.INFO, pid, text)
+
+
+# The crontab's lines and the shell's at jobs (cron.py), read at the first frame.
+try:
+    import cron as _cron
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import cron as _cron
+
+# The hardware leases (leases.py): the `pins` verbs' local service, and the
+# grants a lease and a device API (devices.py) check; devfs.py's process rows.
+try:
+    import leases as _hwleases
+    import devfs as _devfs
+    import devices as _devices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import leases as _hwleases
+    from runtime import devfs as _devfs
+    from runtime import devices as _devices
+
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
 try:
@@ -180,7 +229,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_manager import CartManager
 
-# system.json's owner (#209 landing B, system_store.py): the settings rows
+# system/settings' owner (#209 landing B, system_store.py): the settings rows
 # `ws.system` aliases (written through one persisting setter), and the
 # achievements list's store halves -- over a StoreHandle that reads the
 # store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
@@ -203,19 +252,33 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
+    from notifications import NOTES as _NOTES
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.notifications import NOTES as _NOTES
+# The media service's face once the console has booted its services: each
+# frame starts with its check for a run a compiled program's handle started.
+_MEDIA = [None]
+try:
+    from procs import Procs, Run
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.procs import Procs, Run
+try:
     from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
-# achievement CORE (ach, load_achievements/_achievement_unlocked) is the
-# Workstation's, on the Notices mixin (console_notices.py), and the banner's
+# badges are the achievements process's (`ach`, its link); starting it and the
+# unlock's effects (load_achievements/_achievement_unlocked) are on the Notices
+# mixin (console_notices.py), and the banner's
 # DEADLINE the unlock pushes into at event time is created in _init_overlays
 # below (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
+    from achievements import Link as _AchLink
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.achievements_ui import AchievementsUI
+    from runtime.achievements import Link as _AchLink
 
 # The Layer protocol + the self-contained surface adapters (extracted from this
 # file -- see layers.py): the router builds the stack from these. layers.py is a
@@ -259,9 +322,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # imported back here.
 try:
     from settings_layer import SettingsLayer
+    from tasks_ui import TasksLayer
     from popover import component_for as _component_for
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import SettingsLayer
+    from runtime.tasks_ui import TasksLayer
     from runtime.popover import component_for as _component_for
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
@@ -276,21 +341,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH,
                                     _CODE_SYMBOLS)
 
-# Self-contained support widgets (see widgets.py): the Achievements milestone
-# tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
-# Popup, the one popover, and the Pointer cursor (moy_input.py). Leaves;
-# imported back here so
-# console.Pointer / console.Popup / console.ACHIEVEMENTS / ... resolve for
-# Workstation + host_app + tests.
+# Self-contained support widgets (see widgets.py): Pmem (cart persistent RAM)
+# and the Popup, the one popover, and the Pointer cursor (moy_input.py).
+# Leaves; imported back here so console.Pointer / console.Popup / ... resolve
+# for Workstation + host_app + tests.
 try:
-    from widgets import (Achievements, Pmem, Popup,
-                         ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W)
+    from widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
     from moy_input import Pointer, ball_coast as _ball_coast
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, Pmem,
-                                 Popup, ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X,
-                                 _POPUP_Y, _POPUP_W)
+    from runtime.widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
     from runtime.moy_input import Pointer, ball_coast as _ball_coast
     from runtime.audio_session import console_volume
 
@@ -320,8 +380,10 @@ import moy_app as _moy_app
 # in-process except cannot do this job.
 try:
     from crash_guard import CrashGuard, WALLPAPER_KEY
+    import app_perms as _app_perms
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
+    from runtime import app_perms as _app_perms
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the system font scale, the theme's wallpaper, `custom`
@@ -487,7 +549,8 @@ try:
     from console_saves import SaveVerbs
     from console_notices import Notices
     from console_spine import SpineVerbs
-    from moy_spine import AppRegistry, Leases, Returns
+    from moy_spine import AppRegistry, Returns
+    from moy_lease import Wifi, wifi_reset
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_input import InputVerbs
     from runtime.console_home import HomeVerbs
@@ -498,16 +561,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_saves import SaveVerbs
     from runtime.console_notices import Notices
     from runtime.console_spine import SpineVerbs
-    from runtime.moy_spine import AppRegistry, Leases, Returns
+    from runtime.moy_spine import AppRegistry, Returns
+    from runtime.moy_lease import Wifi, wifi_reset
 
 
 def _kernel_tables():
-    """(apps, back, returns, leases) as views of the kernel's own tables where
-    the console runs on a kernel (a board: `moy_kernel` is in the image), so a
-    VM stop leaves its routes and leases for the next VM
-    (docs/history/kernel_cartpath_2026-10.md section 5.4); None elsewhere, where each
-    console owns its own. A return start keeps them as they were; every other
-    start puts them back as they are made."""
+    """(apps, back, returns) as views of the kernel's own tables where the
+    console runs on a kernel (a board: `moy_kernel` is in the image), so a VM
+    stop leaves its routes, like the radio's holders in the lease table, for
+    the next VM (docs/history/kernel_cartpath_2026-10.md section 5.4); None
+    elsewhere, where each console owns its own. A return start keeps them and
+    the radio's holders as they were; every other start puts them back as they
+    are made."""
     try:
         import moy_kernel
         import moy_spine
@@ -519,7 +584,9 @@ def _kernel_tables():
     start = getattr(moy_kernel, "start", None)
     returning = start is not None and start() == "return"
     tables = kernel(not returning)
-    if returning:
+    if not returning:
+        wifi_reset()
+    else:
         # The route the stop recorded: a run that stopped the VM was HOME's
         # (moy_play_launch refuses any other), so its exit is the launcher.
         tables[1].goto("launcher")
@@ -531,9 +598,12 @@ def _app_abi(rows):
     """The app ABI's state (native/moy_app): the kernel's where the console
     runs on a kernel (a board), so a VM stop leaves its grants and clipboard
     for the next VM, its prefs the kernel's settings rows; elsewhere this
-    console's own, its prefs written into `rows`. A return start keeps the
-    kernel's as it was but for the stopped run's grant, which it ends; every
-    other start ends its run grants."""
+    console's own, its prefs written into `rows`. Every start ends the run
+    grants, the stopped VM's runs' and Python services', but for a return
+    start's services on tasks of their own, which ran on through the stop
+    and keep theirs (scheduler.kept_pids, taken back at the first frame); a
+    return start keeps the rest of the kernel's as it was, the clipboard
+    among it."""
     try:
         import moy_kernel
     except ImportError:
@@ -543,8 +613,9 @@ def _app_abi(rows):
     app = _moy_app.kernel(not returning)
     if returning:
         # A compiled app's run that stopped the VM held its grant across the
-        # stop (Player._stop_grant); that run is over now.
-        app.wasm_end()
+        # stop (Player._stop_grant); that run is over now, and so is every
+        # process the stopped VM ran but the services it kept running.
+        app.stop_end(_scheduler.kept_pids())
     return app
 
 
@@ -663,6 +734,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     _menu_over = False              # a menu holds the keys over the surface (`_menu_keys`)
     _text_back = None               # `_text_sets` when that menu took text mode away
     _text_sets = 0                  # `_set_text_mode` calls, counted
+    _pf_home = None                 # the home frame's split, under perf_capture (home_band)
     # A soft keyboard the board offers beside its inputs (the browser page's).
     soft_keyboard = False
     no_keyboard_text = NO_KEYBOARD_TEXT
@@ -673,6 +745,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # as a table of contents). The ORDER is load-bearing: the WM must exist
         # before anything reads/writes `screen`, Project/Player/EditorApp before
         # anything sets their forwarded fields, and the layer stack last.
+        self.shell_grants = set()      # the system apps' grants (app_context)
         self._init_canvases(comp, canvas, sys_canvas, font_scale,
                             panel_diagonal_in)
         self._init_components(input, carts)
@@ -723,11 +796,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # When sys_canvas is None (or the same size, the T-Deck default) the system
         # canvas IS the game canvas -- one object, so everything is pixel-identical
         # to today (graceful degradation), and the composite step is a no-op.
-        self.canvas = canvas
+        # The game canvas is the run's (`self.run.canvas`, procs.Run): the run
+        # the shell serves holds everything the shell keeps of it.
+        self.run = Run(canvas)
         # A distinct SYSTEM canvas, or None for the degradation case where the system
         # canvas IS the game canvas. Kept as a separate field (not a hard reference to
-        # `canvas`) so the property tracks `self.canvas` even if a backend swap
-        # reassigns it later (the web console does `ws.canvas = CommandCanvas(...)`).
+        # `canvas`) so the property tracks `self.run.canvas` even if a backend swap
+        # reassigns it later (the web console does `ws.run.canvas = CommandCanvas(...)`).
         self._sys_canvas = sys_canvas if (sys_canvas is not None
                                           and sys_canvas is not canvas) else None
         # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller raster
@@ -736,25 +811,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # backend attach point (like make_api): a factory (w, h) -> canvas, or
         # None on a tier that can't build one yet -- Player then refuses cleanly.
         self.make_game_canvas = None
-        # A compiled cart's frame that goes to the glass from the cart's own
-        # memory (device/moycore_glue.CartFrame), set by the run for its life
-        # on a system canvas that `presents_frames`; None everywhere else.
-        self.cart_frame = None
-        self._run_canvas = None            # the bound small canvas, while a run holds it
-        self._run_canvas_stock = None      # what self.canvas was before the bind
-        self._run_canvas_shared = False    # True when the bind promoted stock to system
-        # A RESPONSIVE app cart (#181) draws on the SYSTEM canvas instead of the
-        # fixed game one; a plain attribute (never a property -- the app-context
-        # perf convention) so the chrome can read it once per frame. False for
-        # every game, every fixed app cart, and every shipped system app, which
-        # is what keeps the pixel goldens where they are.
-        self.app_full_canvas = False
-        # ...and in the windowed desk its window is its surface: a canvas the
-        # desk's work area large, of which the window's content shows
-        # (`app_window_size`), so a resize moves its content rect and no
-        # pixels. No host strip is drawn on it; the window's title strip is
-        # the way out.
-        self.app_window_canvas = False
         # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
         # skin, the requested system font scale, the theme's wallpaper and the
         # top-bar icon sheet. Built FIRST of the collaborators because the two
@@ -803,13 +859,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """Injected-service attach points + the shell processes (Project/Player/
         EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
+        if input is not None:
+            _moybyte.bind(input)
         # The (store, root, can_manage, with_sd) guard 4-tuple as ONE object
         # (#209 landing B, system_store.py). FIRST, because everything that
         # touches storage takes it: both store-owning collaborators below AND
         # the storage roles' servers. It captures nothing; every field is read
         # through `self` at the moment of use, because none of them is wired yet.
         self.store = StoreHandle(self)
-        # system.json (#209 landing B): the store owns the rows and the hook
+        # system/settings (#209 landing B): the store owns the rows and the hook
         # that writes them; `self.system` is a plain ALIAS of the rows and
         # neither name is ever rebound -- prefs.load() replaces them in place,
         # which keeps the launcher's per-paint favorites read, the prefs role
@@ -837,6 +895,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # transport, never touches a host OS clipboard (parity trap).
         self.clipboard = _moy_app.Clipboard(
             self.app_abi, self.app_abi.grant("editor", ("clipboard",)))
+        # The console's Paste into an app's focused field reads it here, so
+        # the app holds no clipboard grant (ui_draw.PASTE).
+        _ui_draw.PASTE[0] = self._paste_text
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         # Paint's document model (runtime/apps/artwork.py's ArtworkService), which
         # Paint builds over its own grant: the backdrop's My Art, the image
@@ -844,7 +905,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # apps register, and in a build that carries no Paint.
         self.artwork = None
         self.audio_out = None       # injected where no feeder task plays the mix: a PcmPump
-        self.audio = None           # the open cart's AudioSession (built on a run, #16)
         # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
         # run_desktop/build_workstation injects the backend here; it's exposed
         # to a cart's namespace ONLY when the cart's manifest permissions
@@ -852,8 +912,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # LEASE (console_spine's wifi_hold/wifi_release): the tags holding it,
         # and the last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
-        kt = self._kernel_tables
-        self.leases = kt[3] if kt is not None else Leases()
+        self.leases = Wifi()        # the radio's lease row (moy_lease.h, THE RADIO)
+        if self._kernel_tables is None:
+            wifi_reset()            # a console with no kernel starts with no holders
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
@@ -866,12 +927,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Transport-neutral is the point, because there will be two backends. The
         # browser tier injects a `gpio_link.GpioLink`, which QUEUES writes and
         # answers reads from the last batch because a frame may not wait on a
-        # network round trip; a board that grows pins of its own would inject a
-        # direct driver instead. The cart verbs are the same two names either way.
+        # network round trip; a board whose [hardware] has a gpio lease row
+        # gets the lease table's direct driver (leases.LocalPins). The cart verbs
+        # are the same two names either way.
         # The CONTRACT is written at the remote backend's level (a write is
         # queued, a read may be one round trip stale), so a native backend is a
         # strict improvement and no cart has to know which it got.
-        self.gpio = None
+        self.gpio = _hwleases.local_pins()
         # #65 Phase 2: the live two-console LOCKSTEP session (players.LockstepSession,
         # a view of the kernel's moy_match), set by the link once two consoles have
         # agreed on a cart and a seed, and torn down with the run. None = solo, and
@@ -900,6 +962,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
+        # USB mass storage (runtime/system/usb_drive.py): a board whose card a
+        # computer can take over USB; None where the image has no driver.
+        self.usb_drive = None
         # The network Get Carts fetches carts through (#124, runtime/carts/cart_index.py):
         # `online()` and `open(url)`, injected by a board (device/wire_links.CartNet),
         # by the live simulator (host_app.HostCartNet) and by a browser page
@@ -955,7 +1020,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # `carts.all` is the single source both grids derive from and has no `ws`
         # mirror: a re-scan REBINDS the list, so an alias could not stay honest.
         self.carts = CartManager(self, self.store, carts)
-        self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         # Launcher search (#105): plain-text substring filter over the run-grid,
         # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
         # idiom -- _set_text_mode swaps the keyboard to clean ASCII while typing).
@@ -983,11 +1047,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._splash_until = None     # boot logo deadline (_ticks_ms); None = no splash
         # The open cart's live WORKSPACE (Stage 1, project.py): the DATA of the cart
         # currently open -- cart/config/sheet/tilemap/images/pmem. Those six are
-        # forwarding properties (below) delegating to self.project, so every surface
+        # forwarding properties (below) delegating to self.run.project, so every surface
         # file + test that reads/writes ws.cart/ws.sheet/... is unchanged. Constructed
         # idle here (all fields None -> the boot launcher state) BEFORE anything can set
         # ws.cart, and rebuilt per open() when a cart is opened.
-        self.project = Project(self)
+        self.run.project = Project(self)
         # The cart PLAYER (Stage 2, player.py): the run-loop object. Built idle here
         # (BEFORE anything can set the forwarded cart-run fields below), reused across
         # runs (start() re-inits it). The fields it owns -- ns/_update/_draw,
@@ -995,7 +1059,17 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # state -- live on it now and the cart-run ones are exposed back as forwarding
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
-        self.player = Player(self, NAMES)
+        self.run.player = Player(self, NAMES, self.run)
+        # The running set beyond the front run: the games stepped beside it
+        # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
+        self.procs = Procs(self)
+        _hwleases.LEASES.grants = self.procs.granted
+        _hwleases.LEASES.settle = self.wifi_settle
+        _devices.grants = self.procs.granted
+        _devices.cart_of = lambda pid: self.procs.who(pid)[1]
+        _moybyte.WAKES.woke = self.alarm_woke
+        _devices.console = self
+        _devfs.RUNS = self.procs.runs
         # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
         # terminal scrollback after it. One instance for the console's life
         # (its ring is preallocated, so a run costs no allocation); `run_script`
@@ -1054,9 +1128,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # stores the keystroke tick straight onto it (doc 3e -- an attribute
         # store per keypress, never a call).
         self.history = HistoryRouter(self, self.store)
-        # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
+        # (cart/config/sheet/tilemap/images/pmem live on self.run.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
-        # self.player now -- Stage 2; both exposed as forwarding properties, so
+        # self.run.player now -- Stage 2; both exposed as forwarding properties, so
         # ws.sheet/ws.cart_error/... are unchanged.)
         self.paint = None             # PaintEditor while menu_view == "paint"
         # The map (tilemap) editor's UI (#32, extracted from this class -- see
@@ -1115,6 +1189,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # stay the same object across a load. One ledger per role -- see
         # runtime/shell/crash_guard.py, "Two roles, two ledgers".
         self.app_guard = CrashGuard(self.system)
+        self.consent = _app_perms.Consent(self.system,
+                                          lambda: _app_perms.services(self),
+                                          saving=self.prefs.save_steps,
+                                          changed=lambda aid: _app_perms.regrant(self, aid))
         self.wallpaper_guard = CrashGuard(self.system, key=WALLPAPER_KEY)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
@@ -1150,7 +1228,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (Settings' focus and page scroll live in self.settings_layer's UI
         # context, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
-        # (cart_error + crash_line live on self.player now -- Stage 2; forwarding
+        # (cart_error + crash_line live on self.run.player now -- Stage 2; forwarding
         # properties below, so ws.cart_error / ws.crash_line are unchanged.)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
@@ -1179,12 +1257,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # the banner draws, which is read only while its deadline is up.
         self._toast_until = 0          # _ticks_ms the unlock banner hides at
         self._toast_at = 0             # _ticks_ms it was armed (a secret's confetti bursts from it)
-        # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
-        # rewards. Starts empty/volatile; load_achievements() adds the SD store.
-        # The unlock hook is wired from the START, not at that load: persistence
-        # waits for a store, but arming the banner is kernel behavior a build
-        # with no card still owes the kid.
-        self.ach = Achievements(on_unlock=self._achievement_unlocked, today=self._today_ymd)
+        # Achievements: the console's own badges and every game's, held by the
+        # achievements process (runtime/system/achievements.py), which
+        # load_achievements() starts.
+        self.ach = _AchLink(self)
         # The three Easter eggs (#21, achievements_ui.py): their trigger state
         # (_konami_pos/_clock_taps/_secret_taps), reset on screen changes
         # (go_home/settings/desktop tap) so a stray sequence never carries
@@ -1197,6 +1273,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # is no screen it could otherwise report to.
         self._notice = None            # (title, sub, kind) while up
         self._notice_until = 0
+        # An app's notifications (runtime/system/notifications.py): the
+        # banner over whatever is up, and what acting on one does.
+        self._init_notes()
+        self._init_status()
+        self._init_intents()
         # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is
@@ -1225,6 +1306,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # last saw it, and the one that last set the keyboard's text mode.
         self._holder = None
         self._text_by = None
+        # The cart each registered app was opened on last (`open_app`): its
+        # bar's title, whatever project the console holds open.
+        self.app_carts = {}
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -1232,20 +1316,18 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # `_last_ptr` snapshots the pointer state actually drawn so a cursor move/hide/
         # click triggers exactly one redraw. A running cart and a live wallpaper /
         # overlay effect animate every frame -> always dirty -> unchanged full-redraw
-        # behaviour for them. `_frames_drawn` counts the frames that actually painted
-        # (idle frames are skipped) -- a host-testable witness of the win.
+        # behaviour for them. `frame_state.frames_drawn` counts the frames that
+        # actually painted (idle frames are skipped) -- a host-testable witness
+        # of the win.
         self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
-        self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
-        self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
         self.ui_moving = False        # a verbs page the last painted frame drew moves on its own
         # what the last painted frame's change was, as its shift frames said:
         # "shift", "rows", None (whole, or nothing spoke); tools/input_bench.py
         self.frame_change = None
-        self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
-        self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._dirty_in = True         # a change reported before this input (handle_input)
         self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
+        self._services_due = True     # the services start at the first drawn frame
         self._press_taken = False     # ...unless a popover's change took it (popover_touch)
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
@@ -1276,6 +1358,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # rows and panels; reads ws config/system state + dispatches every
         # mutation to ws setters (it owns NO config).
         self.settings_layer = SettingsLayer(self, _ui_draw.AppHost)
+        # The task manager (runtime/system/tasks_ui.py): the running set and
+        # the services, their CPU and memory, Switch to and Close.
+        self.tasks_layer = TasksLayer(self)
+        self._tasks_return = None     # the kind a handheld's task manager goes back to
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
         # chrome, Storybook's compiling decks, Files' user-files gallery and
@@ -1293,7 +1379,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.projects_layer = HomeWindowLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is its own Layer/component -- the running-cart "desktop" is the
-        # _PlayerLayer adapter over ws.player; the only _LegacyLayer entries are the four draw-only overlays
+        # _PlayerLayer adapter over ws.run.player; the only _LegacyLayer entries are the four draw-only overlays
         # (splash / toast / notice / cursor, built by `L` above).
         # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
         # adds each one's kind to this table.
@@ -1301,9 +1387,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             "launcher": self.launcher_layer,
             "projects": self.projects_layer,
             "settings": self.settings_layer,
+            "tasks": self.tasks_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
-            "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
+            "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.run.player
 
             "code": self.code_layer,
             "blocks": _BlocksLayer(self),
@@ -1330,6 +1417,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._perf_layer = _PerfLayer(self)
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
+        self._note_layer = L("note", "system", draw=lambda dt: self._draw_note(),
+                             ptr=self._note_pointer)
+        self._rec_layer = L("rec", "system", draw=lambda dt: self._draw_rec())
         self._sysmenu_layer = _SysMenuLayer(self)
         self._pause_layer = _PauseLayer(self)
         self._confirm_layer = _ConfirmLayer(self)
@@ -1410,9 +1500,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def sys_canvas(self):
         """The SYSTEM canvas the desktop chrome + overlays render on (#39). A distinct
         SystemCanvas when one was supplied, else the GAME canvas itself (degradation:
-        one surface, pixel-identical to today). Reading through `self.canvas` keeps it
+        one surface, pixel-identical to today). Reading through `self.run.canvas` keeps it
         correct even if a backend swaps the game canvas (e.g. the web CommandCanvas)."""
-        return self._sys_canvas if self._sys_canvas is not None else self.canvas
+        return self._sys_canvas if self._sys_canvas is not None else self.run.canvas
 
     @property
     def glass_canvas(self):
@@ -1485,9 +1575,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """True iff the open cart's manifest permissions include `name` (#38).
         moy_carts.load() carries the manifest "permissions" list onto the cart;
         an embedded/legacy cart with none simply never matches, so it gets no
-        gated APIs."""
+        gated APIs. One the run holds absent (runtime/shell/app_perms.py) is
+        not held."""
         perms = self.cart.get("permissions") if self.cart else None
-        return bool(perms) and name in perms
+        return bool(perms) and name in perms and name not in self.run.player.absent
 
     def cart_editor_focus(self, handle):
         """A cart's editor handle takes (`handle`) or releases (None) the
@@ -1497,7 +1588,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         does two things no cart can: it puts the T-Deck keyboard into clean
         ASCII, and it seeds the typed-key edge with the byte already down, so
         the key that opened the note is not typed into it (`b2ff7de`)."""
-        self.player.set_editor_focus(handle)
+        self.run.player.set_editor_focus(handle)
         self._set_text_mode(handle is not None)
 
     def take_text_request(self):
@@ -1508,6 +1599,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         req = self._text_request
         self._text_request = None
         return req
+
+    def _paste_text(self):
+        """What the console's Paste brings an app's field: the clipboard's
+        text as UTF-8 bytes, None where it holds none."""
+        clip = self.clipboard
+        if clip.kind() != "text":
+            return None
+        return clip.text().encode("utf-8") or None
 
     def open_text_cart(self, name, kind=None, mode=None):
         """RUN the text app on one document -- the Files router's door for
@@ -1534,7 +1633,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if not self._open_workspace(cart):
             self._text_request = None
             return False
-        self.run(self.project, caller or self.launcher_layer)
+        self.play(caller or self.launcher_layer)
         return True
 
     def open_project_file(self, cart, name, mode=None):
@@ -1551,9 +1650,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         path = (cart or {}).get("path")
         if not path:
             return False
-        if self.project is None or self.project.cart is not cart:
+        if self.run.project is None or self.run.project.cart is not cart:
             self.open_in_editor(cart)
-            if self.project is None or self.project.cart is not cart:
+            if self.run.project is None or self.run.project.cart is not cart:
                 return False
         self.editor_app.set_tab("cards")     # the tab the return lands back on
         if not self.open_text_cart(name, self.carts_store.project_kind(path),
@@ -1572,7 +1671,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             _cp()
         self.carts.reload(cart)
         self.open_in_editor(cart)
-        if self.project is not None and self.project.cart is cart:
+        if self.run.project is not None and self.run.project.cart is cart:
             self.editor_app.set_tab("cards")
         self._dirty = True
 
@@ -1634,6 +1733,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
+        _ui_draw.tap_floor(self.look.tap_floor())   # what every frame begins with
         self._surface_write()             # what the apps' relayouts read
         w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
         cs = self.look.effective_chrome_scale()
@@ -1695,10 +1795,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # The switch itself lives in web_console.py; these keep the names its
     # callers already speak. Fixed signatures, one delegation each (#209).
 
-    def web_pin(self):
-        """`web.pin()` -- moy_webhost's start-time lambda + the tests."""
-        return self.web.pin()
-
     def web_console_url(self):
         """`web.url()` -- the dev channel's `web` and the tests."""
         return self.web.url()
@@ -1736,11 +1832,12 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """`web.toggle()` -- settings_layer, the dev channel, push_cart_wifi."""
         return self.web.toggle()
 
-    def rescan_carts(self):
-        """`carts.rescan()` -- moy_webhost captures this name in its `on_sync`
-        lambda at construction, and the Guition on-glass suite's sync test
-        depends on the shelf following a browser batch with no reboot."""
-        return self.carts.rescan()
+    def rescan_carts(self, folders=None):
+        """`carts.synced(folders)` -- moy_webhost captures this name in its
+        `on_sync` lambda at construction, and the Guition on-glass suite's
+        sync test depends on the shelf following a browser batch with no
+        reboot."""
+        return self.carts.synced(folders)
 
     # `updater` is a PROPERTY so that injecting one INVALIDATES the two cached
     # availability answers below. Four places inject an updater -- three boards
@@ -1783,6 +1880,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 self._online_ok = False
         return self._online_ok
 
+    def usb_drive_refuses(self):
+        """True, with a notice, while a computer has the card over USB: the
+        store is closed, so nothing that reads it opens."""
+        d = self.usb_drive
+        if d is None or not d.on:
+            return False
+        self.notice("USB drive is on", "Turn it off in Settings first")
+        return True
+
     def open_settings(self):
         if self.wm.bring_forward("settings"):
             return                     # the desk's Settings window, as it was
@@ -1793,6 +1899,118 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
+
+    def open_log(self, pid=None):
+        """Settings' System log page (runtime/system/log_ui.py), on one
+        process's records where `pid` names it: what a crash's "details"
+        open."""
+        self.open_settings()
+        self.settings_layer.open_page("log", pid)
+
+    def open_tasks(self):
+        """The task manager (runtime/system/tasks_ui.py): from the system
+        menu and a held console key. On a handheld it goes on top, holding
+        a front game while it shows; on the desk it is a window. Opened while
+        a notification's banner is up, it takes the banner down and opens on
+        the Notifications tab with that one current."""
+        self.close_popover()
+        if self.pause.open:
+            self.pause.close()
+        if self.confirm.open:
+            self.confirm.cancel()
+        self._dirty = True
+        layer = self.tasks_layer
+        note = _NOTES.up()
+        if note is not None:
+            _NOTES.dismiss()
+        if self.wm.top_is("tasks"):
+            if note is not None:
+                layer.open(note)
+            return
+        if self.wm.bring_forward("tasks"):
+            if note is not None:
+                layer.open(note)
+        else:
+            layer.open(note)
+            pl = self.run.player
+            layer.held = False
+            if self.procs.handheld():
+                self._tasks_return = self.wm.top_kind()
+                if self.wm.top_is_player() and not pl.paused \
+                        and self.cart_error is None:
+                    pl.pause()
+                    layer.held = True
+            self.wm.activate("tasks")
+        self._set_text_mode(False)
+
+    def close_tasks(self, home=False):
+        """The task manager goes: back where it was opened from (a held
+        game resumed), or `home`."""
+        self._dirty = True
+        layer = self.tasks_layer
+        _ck = getattr(self.wm, "close_window_kind", None)
+        if _ck is not None and self.wm.desk_open():
+            _ck("tasks")
+            if home:
+                self.home_key()
+            return
+        back = self._tasks_return
+        self._tasks_return = None
+        if layer.held:
+            layer.held = False
+            if back == "desktop" and not home:
+                self.run.player.resume()
+        if home or back is None or back == "tasks" or not self.wm.stack.has(back):
+            if self.wm.stack.has("desktop") and self.procs._detachable():
+                self.procs.detach()     # the run that played joins the running set
+            self.go_home()
+            return
+        self.wm.goto(back)
+
+    def tasks_switch(self, key):
+        """The task manager's Switch to: run `key` (a Proc's, or the front
+        run's) shown and given the keys."""
+        procs = self.procs
+        p = procs.by_key.get(key)
+        if procs.handheld():
+            layer = self.tasks_layer
+            if p is None:
+                self.close_tasks()
+                return
+            if layer.held:
+                layer.held = False
+                self.run.player.resume()
+            self._tasks_return = None
+            procs.switch(p)
+            return
+        if key == "desktop":
+            self.wm.bring_forward("desktop")
+        elif p is not None:
+            self.wm._bring_forward(key)
+        self._dirty = True
+
+    def tasks_close(self, key):
+        """The task manager's Close on run `key`, the task manager staying."""
+        procs = self.procs
+        p = procs.by_key.get(key)
+        if p is not None:
+            procs.close(p)
+            return
+        if key != "desktop":
+            return
+        if procs.handheld():
+            self.tasks_layer.held = False
+            self.run.player.release_world()
+            self.pause.dismiss()
+            if self.wm.stack.remove("desktop"):
+                self.wm._on_nav()
+            if self._tasks_return == "desktop":
+                self._tasks_return = self.wm.root_kind()
+            procs.gen += 1
+            return
+        _ck = getattr(self.wm, "close_window_kind", None)
+        if _ck is not None:
+            _ck("desktop")
 
     def _exit_settings(self):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
@@ -1872,7 +2090,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         the screen, the pause menu's, the delete confirm's or the system
         menu's (on the desk a popover frame paints it from its own layer),
         or None."""
-        if self.pause.open:
+        if self.pause.open and not self.sysmenu.open:
             return _PAUSE_LAYERS
         if self.confirm.open:
             return _CONFIRM_LAYERS
@@ -1912,7 +2130,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """A game runs fullscreen, live: what Super pauses -- in console
         mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool
+                and not self.run.player._is_tool
                 and (not self.wm.desk_open() or self.wm.game_full()))
 
     def _game_pauses(self):
@@ -1920,7 +2138,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
         gp = getattr(self.wm, "game_pauses", None)
         return (gp is not None and self.wm.top_is_player() and self.cart_error is None
-                and not self.player._is_tool and gp())
+                and not self.run.player._is_tool and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -1995,10 +2213,20 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         desk = self.metric_class == _layout_base.DESK
         h += 2 if desk else 2 * self.layout.fs   # the card's drop
         w = min(max(w, _POPUP_W * m.fs), self.sys_canvas.w)
-        h = min(h, self.sys_canvas.h)
         self._place_popover(widget, w, h)
-        m.show_component(comp, widget, (w, h))
+        m.show_component(comp, widget, (w, min(h, self.popover_room())))
         self.popover_touch()
+
+    def popover_room(self):
+        """The most height the placed popover's card takes: from its anchor to
+        the glass's far edge, the popover's gap kept off that edge. A
+        component given less than its size lays its rows out in what it
+        gets: tighter, or in a scroll region."""
+        m = self.sysmenu
+        e = 8 if self.metric_class == _layout_base.DESK else 4 * self.layout.fs
+        if m.up:
+            return m.anchor_y - e
+        return self.sys_canvas.h - m.anchor_y - e
 
     def close_popover(self):
         """Close the popover if one is open: its component's `closed` runs,
@@ -2048,6 +2276,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         (no `battery` gauge: the glyph is the widget's whole value)."""
         return None if self.battery is None else self.battery.level()
 
+    def battery_charging(self):
+        """Whether a charger feeds the battery, or None where the board's
+        gauge cannot tell (the T-Deck's has no charge-status line)."""
+        b = self.battery
+        f = getattr(b, "charging", None) if b is not None else None
+        return None if f is None else f()
+
     # -- firmware update screen (#53) -----------------------------------------
     #
     # OTA flow: Settings -> UPDATE FW finds a .bin on /sd/update, the kid confirms,
@@ -2071,11 +2306,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self.covers.diet:
             self.covers.diet_release()     # RAM-tight tier: the shelf's caches are
                                            # dead weight (and GC-pause fuel) mid-play
-        return self.player.start(self.project)
+        return self.run.player.start(self.run.project)
 
     # -- open-cart workspace forwards (Stage 1, project.py) -------------------
     #
-    # The open cart's six live-data fields live on self.project now; these forwarding
+    # The open cart's six live-data fields live on self.run.project now; these forwarding
     # properties delegate reads AND writes to it, so every surface file + test that
     # reads/writes ws.cart/ws.config/ws.sheet/ws.tilemap/ws.images/ws.pmem is byte-for-
     # byte unchanged. A getter that returns the live object covers in-place mutation
@@ -2084,59 +2319,59 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # the toolkit/deps; only its DATA moves off ws here.
     @property
     def cart(self):
-        return self.project.cart
+        return self.run.project.cart
 
     @cart.setter
     def cart(self, value):
-        self.project.cart = value
+        self.run.project.cart = value
 
     @property
     def config(self):
-        return self.project.config
+        return self.run.project.config
 
     @config.setter
     def config(self, value):
-        self.project.config = value
+        self.run.project.config = value
 
     @property
     def sheet(self):
-        return self.project.sheet
+        return self.run.project.sheet
 
     @sheet.setter
     def sheet(self, value):
-        self.project.sheet = value
+        self.run.project.sheet = value
 
     @property
     def tilemap(self):
-        return self.project.tilemap
+        return self.run.project.tilemap
 
     @tilemap.setter
     def tilemap(self, value):
-        self.project.tilemap = value
+        self.run.project.tilemap = value
 
     @property
     def images(self):
-        return self.project.images
+        return self.run.project.images
 
     @images.setter
     def images(self, value):
-        self.project.images = value
+        self.run.project.images = value
 
     @property
     def pmem(self):
-        return self.project.pmem
+        return self.run.project.pmem
 
     @pmem.setter
     def pmem(self, value):
-        self.project.pmem = value
+        self.run.project.pmem = value
 
     @property
     def scenes(self):                     # #85: the open cart's placed-actor scenes
-        return self.project.scenes
+        return self.run.project.scenes
 
     @scenes.setter
     def scenes(self, value):
-        self.project.scenes = value
+        self.run.project.scenes = value
 
     # -- cart-run forwards (Stage 2, player.py) ------------------------------
     #
@@ -2148,51 +2383,51 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # they stay private on the Player, no forward. cart_paused was retired in Stage 5.)
     @property
     def cart_error(self):
-        return self.player.cart_error
+        return self.run.player.cart_error
 
     @cart_error.setter
     def cart_error(self, value):
-        self.player.cart_error = value
+        self.run.player.cart_error = value
 
     @property
     def crash_line(self):
-        return self.player.crash_line
+        return self.run.player.crash_line
 
     @crash_line.setter
     def crash_line(self, value):
-        self.player.crash_line = value
+        self.run.player.crash_line = value
 
     @property
     def ns(self):
-        return self.player.ns
+        return self.run.player.ns
 
     @ns.setter
     def ns(self, value):
-        self.player.ns = value
+        self.run.player.ns = value
 
     @property
     def _update(self):
-        return self.player._update
+        return self.run.player._update
 
     @_update.setter
     def _update(self, value):
-        self.player._update = value
+        self.run.player._update = value
 
     @property
     def _draw(self):
-        return self.player._draw
+        return self.run.player._draw
 
     @_draw.setter
     def _draw(self, value):
-        self.player._draw = value
+        self.run.player._draw = value
 
     @property
     def _cart_key_prev(self):
-        return self.player._cart_key_prev
+        return self.run.player._cart_key_prev
 
     @_cart_key_prev.setter
     def _cart_key_prev(self, value):
-        self.player._cart_key_prev = value
+        self.run.player._cart_key_prev = value
 
     # -- active-tab forward (Stage 3, editor_app.py) --------------------------
     #
@@ -2293,7 +2528,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         card. The dead run's world is released exactly like a normal exit;
         cart_error/crash_line survive it (the editor's inline marker + the
         popover read them). A parked console (#197) goes home instead."""
-        if self.project is None or self.cart is None:
+        if self.run.project is None or self.cart is None:
             return False
         # #197: while WASM MODE is on, the glass is PARKED and the browser owns
         # authoring. A cart played by PLAY ON DEVICE that crashes must return to
@@ -2320,15 +2555,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # ...read straight off the player: the legacy ws-> player forwards are a
         # set that may only shrink (tests/test_console_facade.py), and this is a
         # new name with two readers.
-        self.code_file = self.player.crash_file or None
-        self.player.release_world()
+        self.code_file = self.run.player.crash_file or None
+        self.run.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
         # the fullscreen tiers just re-route the back-stack below.
         _cp = getattr(self.wm, "close_player", None)
         if _cp is not None and self.wm.desk_open():
             _cp()
-        self.editor_app.open(self.project)
+        self.editor_app.open(self.run.project)
         self.editor = None            # rebuild over the file that raised
         self.set_menu_view("code")
         if line is not None:
@@ -2369,8 +2604,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _draw_tool_band(self):
         """A running tool cart's compact bar, on the system canvas over the
         composited game's top rows: True where it drew."""
-        p = self.player
-        if not p._is_tool or p.cart_error is not None or self.app_window_canvas \
+        p = self.run.player
+        if not p._is_tool or p.cart_error is not None or self.run.app_window_canvas \
                 or not self.wm.top_is_player() or self.bar_layer.tool_band() is None:
             return False
         self.bar_layer._draw_status_strip("tool")
@@ -2398,7 +2633,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
         # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
         # over progress that only ever reached RAM.
-        _old = getattr(self, "project", None)
+        _old = self.run.project
         if _old is not None and _old.pmem is not None:
             try:
                 _old.pmem.flush()
@@ -2418,7 +2653,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if _editor_app is not None and _old is not None and _editor_app.project is _old:
             _editor_app.save_current()
             _editor_app.tab = None
-        self.project = Project(self)   # a fresh workspace for the cart being opened
+        self.run.project = Project(self)   # a fresh workspace for the cart being opened
         if cart is None:
             cart = self.launcher.selected()
         # INVARIANT: a workspace only ever opens a REAL cart. The "+ New" pseudo card
@@ -2427,7 +2662,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # cart instead of crashing on a non-cart (path/cfg-less) tile.
         if cart is None or cart.get("path") is None:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
-        prev = getattr(self, "_fat_cart", None)
+        prev = self.run.fat_cart
         if prev is not None and prev is not cart:
             self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
         self.carts.rehydrate(cart)
@@ -2440,14 +2675,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # enough for the source. The kid gets the panel a crashing cart gets --
         # open()/play() run() straight to it -- and the launcher stays usable.
         if cart is None or "src" not in cart:
-            self._fat_cart = None
-            self.player.release_world()    # the outgoing run's world is dead too,
+            self.run.fat_cart = None
+            self.run.player.release_world()    # the outgoing run's world is dead too,
                                            # and this is the heap that had no room
             self.cart_error = ("Couldn't open %.24s. Try again."
                                % ((cart or {}).get("title") or "that cart"))
             self.crash_line = None
             return False
-        self._fat_cart = cart
+        self.run.fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # no file list or dialog carried to the new cart
@@ -2464,8 +2699,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.tilemap = self._build_tilemap()
         # No ws.flags projection: the legacy property-forward set can only
         # shrink (tests/test_console_facade.py), so the one reader -- the
-        # Player, building the cart namespace -- goes through self.project.
-        self.project.flags = self._build_flags()
+        # Player, building the cart namespace -- goes through self.run.project.
+        self.run.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
@@ -2477,13 +2712,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.menu_view = "cards"
         self._set_text_mode(False)
         self._start()
-        # Achievements (#21): opening a cart is "First Steps"; opening _PLAY_GOAL
-        # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
-        # the SAME identity the launcher uses (distinct carts, not repeat opens).
-        self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+        # First Steps, and Cart Explorer's distinct carts: keyed by the
+        # cart's path or title, the identity the launcher uses.
+        self.ach.played(self.cart.get("path") or self.cart.get("title"))
         return True
 
-    def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None):
+    def app_context(self, app_id, needs=(), prefs_ns=None, run=False, kind=None,
+                    owner=0):
         """Build the narrowed shell interface for one system app
         (docs/app_api_v1.md, runtime/shell/app_context.py).
 
@@ -2492,8 +2727,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         raises here rather than growing an invisible dependency. That filter is
         the whole point: Phase 7's `make_system_api(ctx, cart)` is this same
         call with a cart's manifest permissions in place of a class constant,
-        its grant a RUN grant (`run`) scoped to its files `kind`."""
-        return AppContext(self, app_id, needs, prefs_ns, run, kind)
+        its grant a RUN grant (`run`) scoped to its files `kind`; a
+        service's names its pid as the grant's `owner`. A system app's grant
+        is the shell's (`shell_grants`): what it asks of the nav role is
+        never gated (runtime/system/front.py)."""
+        ctx = AppContext(self, app_id, needs, prefs_ns, run, kind, owner)
+        if not run:
+            self.shell_grants.add(ctx.grant)
+        return ctx
 
     # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
     #
@@ -2538,10 +2779,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def page_app(self, kind):
         """The app behind process `kind` whose pages its back steps through:
-        a registered app, or Settings; None for any other kind."""
+        a registered app, Settings, or the running app cart (the Player,
+        whose `has_page` and `back` are its app's views); None for any other
+        kind."""
         app = self._apps_by_id.get(kind)
         if app is None and kind == "settings":
             app = self.settings_layer
+        if app is None and kind == "desktop" and self.run.player._is_tool:
+            app = self.run.player
         return app
 
     def app_has_page(self, kind):
@@ -2569,6 +2814,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         commit = getattr(app, "commit", None)
         if commit is not None:
             commit()
+        if getattr(app, "BACK_MINIMISES", False) and self.wm.minimise_kind(app.id):
+            return
         self._exit_to_caller()
 
     def open(self, cart=None):
@@ -2579,6 +2826,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # isn't stranded (a silent stay-on-launcher would be a dead end on the
         # device). Authoring is a separate app (the Editor), reached through the
         # home's Make tab or CHANGE, not a tap-mode on the played tabs.
+        if self.usb_drive_refuses():
+            return
         selected = cart if cart is not None else self.launcher.selected()
         self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
@@ -2596,14 +2845,27 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # Editor's Config tab, which shows the break and offers the file.
             self.open_in_editor(selected)
             return
+        # A cart that arrived as files is asked for its permissions first
+        # (app_perms.asks_first): Open records them and opens it again.
+        if self.ask_first(selected, lambda: self.open(selected)):
+            return
+        # Several games at once (runtime/shell/procs.py): the front one joins
+        # the running set, a game already running comes forward, or the
+        # admission names what to close.
+        if not self.procs.launch(selected):
+            return
         # The run's route is HOME (the launcher is its caller): what lets the
         # kernel stop the VM for it (docs/history/kernel_cartpath_2026-10.md 5.1).
         self._home_launch = True
+        self.run.player.declined = False
         try:
             self._open_workspace(selected)
         finally:
             self._home_launch = False
-        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+        if self.run.player.declined:
+            self.run.player.declined = False      # the shell asked first (ask_stop_music)
+            return
+        self.play(self.launcher_layer)   # activate desktop, record caller
 
     def run_script(self, kind, name):
         """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
@@ -2659,7 +2921,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         caller = self._content_layer()
         if not self._open_workspace(cart):
             return (False, "CAN'T RUN IT")
-        player = self.player
+        player = self.run.player
         if player.cart_error is not None:
             # The body did not survive its own exec. The console IS this run's
             # error surface, so the traceback goes there and the run continues
@@ -2672,7 +2934,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         player._update = con.driver(player._update)
         self._set_text_mode(True)      # a script TYPES; this is the surface taking
         con.seed_key(getattr(self.input, "last_key", 0) or 0)
-        self.run(self.project, caller)
+        self.play(caller)
         return (True, "")
 
     def ask_run(self, handle):
@@ -2690,14 +2952,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         open) goes straight back. Nothing runs when the asking run is over."""
         ed = self._editor_run
         self._editor_run = None
-        if ed is None or ed not in self.player._editors:
+        if ed is None or ed not in self.run.player._editors:
             return
         back = (self.cart, ed.kind, ed.name(), ed.mode(), ed._where(),
                 self.returns.caller())
         ok, why = self.run_script(ed.kind, ed.name())
         if ok:
             self._script_return = back
-        elif ed in self.player._editors:
+        elif ed in self.run.player._editors:
             ed._refuse(why)
         else:
             self._return_to_runner(back)
@@ -2716,8 +2978,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._text_request = None
             self._go_home_or_back()
             return
-        self.run(self.project, caller)
-        for ed in self.player._editors:
+        self.play(caller)
+        for ed in self.run.player._editors:
             if ed.kind == kind and ed.name() == name:
                 ed._put(where)
 
@@ -2740,7 +3002,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             if not path:
                 return False
             kind = self.carts_store.project_kind(path)
-            if self.project is not None and self.project.cart is cart:
+            if self.run.project is not None and self.run.project.cart is cart:
                 into_project = cart      # opened FROM this project's Editor
         self.artwork.open_named(name, kind)
         if not self.open_app(app):
@@ -2769,9 +3031,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
-            self.run(self.project, self.launcher_layer)
+            self.play(self.launcher_layer)
             return
-        self.editor_app.open(self.project)
+        self.editor_app.open(self.run.project)
         if back is not None:
             self._editor_from = back + (frozenset(wm.window_kinds()),)
 
@@ -2799,24 +3061,24 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
     # runner calls ws._build_sheet(cart), _start calls _build_audio, and open()
-    # calls all four -- all through self.project now).
+    # calls all four -- all through self.run.project now).
     def _build_sheet(self, cart=None):
-        return self.project._build_sheet(cart)
+        return self.run.project._build_sheet(cart)
 
     def _build_pmem(self):
-        return self.project._build_pmem()
+        return self.run.project._build_pmem()
 
     def _build_tilemap(self, cart=None):
-        return self.project._build_tilemap(cart)
+        return self.run.project._build_tilemap(cart)
 
     def _build_flags(self, cart=None):
-        return self.project._build_flags(cart)
+        return self.run.project._build_flags(cart)
 
     def _build_scenes(self, cart=None):
-        return self.project._build_scenes(cart)
+        return self.run.project._build_scenes(cart)
 
     def _build_audio(self):
-        return self.project._build_audio()
+        return self.run.project._build_audio()
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -2827,7 +3089,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # auto-batch (#63), so cart sprites land before the console overlays draw.
         # The probe is cached by canvas identity: a `getattr` that finds a
         # method allocates a bound method, and this runs every cart frame.
-        cv = self.canvas
+        cv = self.run.canvas
         if cv is not self._rs_cv:
             self._rs_cv = cv
             self._rs_fn = getattr(cv, "reset_state", None)
@@ -2888,7 +3150,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (the 320x240 device case; #75: no per-frame tuple, no duplicate probe).
         # Both probes cached by canvas identity (a found method is a bound-method
         # allocation per probe, and this runs every painted frame).
-        cv = self.canvas
+        cv = self.run.canvas
         if cv is not self._fb_cv:
             self._fb_cv = cv
             self._fb_cv_fn = getattr(cv, "flush_batch", None)
@@ -2923,12 +3185,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         128x128 cart canvas (SPEC.md 3.1) concedes 8 rows via view(128, 120)
         and fills a 4:3 screen's height (2x on the handheld, 5x on the P4)
         instead of letterboxing the square -- and game_xy maps taps back
-        through it. Lives on the shared InputState (the cart_quit pattern) so
-        the verb needs no console handle; Player.start clears it per run."""
-        v = getattr(self.input, "game_view", None)
+        through it. The declaration is the run's (`Run.view`), which the
+        verb sets and Player.start clears."""
+        run = self.run
+        v = run.view
         if not v:
             return None
-        gc = self.canvas
+        gc = run.canvas
         w = min(int(v[0]), gc.w)
         h = min(int(v[1]), gc.h)
         if w <= 0 or h <= 0 or (w == gc.w and h == gc.h):
@@ -2942,13 +3205,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # A compiled cart's frame still in its own memory is shown from there
         # when the WM can; otherwise it lands in the game canvas and the
         # composite reads it as ever.
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None:
             view = cf.take()
             if view is not None:
                 if self.wm.present_frame(cf, view):
                     return None
-                cf.settle(self.canvas)
+                cf.settle(self.run.canvas)
             cf.nrects = 0
         return self.wm.composite_game()
 
@@ -2957,15 +3220,15 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         cart's frame -- the FPS chip, the perf HUD line: the flush takes that
         rect from the canvas and the rest from the frame, so the frame need
         not be written first. A rect the frame cannot take settles it."""
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None and not cf.patch(x, y, w, h):
-            cf.settle(self.canvas)
+            cf.settle(self.run.canvas)
 
     def settle_cart_frame(self):
         """Before anything draws on the game canvas over a compiled cart's
         frame: put the frame there first, the bytes its blit would have
         written."""
-        cf = self.cart_frame
+        cf = self.run.cart_frame
         if cf is not None:
             cf.settle()
 
@@ -3025,10 +3288,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # drawn on a change, over the frozen frame; a hidden window, the desk
         # Editor's paused Run slot). An app on the verbs, drawn on change,
         # changes its own content alone, as a verbs page does (`pages`).
-        player = self.player
+        player = self.run.player
         # (The Player's own fields: ws._update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
-        if kind == "desktop" and self.cart_error is None and not self.pause.open \
+        if kind == "desktop" and player.cart_error is None and not self.pause.open \
                 and not player.paused and (
                     player._update is not None or player._draw is not None) \
                 and (pages or not player._on_change) and player.animates():
@@ -3053,6 +3316,16 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # asynchronously. A static wallpaper would otherwise close the redraw
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
+            return True
+        # The System log page follows the ring: a new record draws it again.
+        if kind == "settings" and self.settings_layer.log_moved():
+            return True
+        # The USB drive page follows the drive: a computer took the card or
+        # let it go.
+        if kind == "settings" and self.settings_layer.usb_moved():
+            return True
+        # The task manager's rows moved: a sample, a state, a run.
+        if kind == "tasks" and self.tasks_layer.moved():
             return True
         # A verbs page the last painted frame drew coasts on a fling or eases
         # on a glide (`api_moving`): its next frame is due with nothing dirty.
@@ -3080,7 +3353,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return True
         if self.notice_active():
             return True
-        return False
+        return _NOTES.banner is not None and _NOTES.up(now) is not None
 
     def _needs_redraw(self, dt):
         """Decide whether frame() must repaint+flush this frame. True when something
@@ -3092,7 +3365,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         k = _glass.kernel_epoch()
         if k != self._kepoch:
             self._kepoch = k
-            self._kframes = max(1, getattr(self._sys_canvas or self.canvas,
+            self._kframes = max(1, getattr(self._sys_canvas or self.run.canvas,
                                            "RETAINED_FRAMES", 1))
         if self._kframes:
             self._kframes -= 1
@@ -3139,6 +3412,43 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     # system-domain now and always fully covered the backdrop anyway, so the tabs
     # just reset the game canvas's draw state and paint their own opaque body.)
 
+    def alarm_woke(self, pid):
+        """An alarm that wakes went off (moybyte.at): the idle ladder's
+        sleep ends, the light back on, where the board has a ladder, and the
+        log says so under the alarm's process where it was asleep."""
+        lad = getattr(self, "idle_ladder", None)
+        if lad is not None and lad.wake():
+            _log_info(pid, "an alarm woke the screen")
+
+    def boot_services(self):
+        """The services that start with the console: every service cart
+        holding `autostart`, those a VM stop paused (scheduler.boot), and the
+        SSH server where a password is set (ssh_service.boot), the
+        crontab's lines (cron.boot), and Music's card in the bar for every run
+        of the media service, the one a VM stop left playing first
+        (dev_media.listen, music_app.follow), and every frame after for one a
+        compiled program's handle starts (dev_media.frame)."""
+        try:
+            _scheduler.boot(self)
+        except Exception as exc:  # noqa: BLE001 -- a service never stops the desk
+            print("Moybyte services: %s" % (exc,))
+        _ssh.boot(self)
+        _cron.boot(self)
+        media = _devices.api("media")
+        if media is not None:
+            media.listen(self._music_follows)
+            media.attach()
+            _MEDIA[0] = media
+
+    def _music_follows(self):
+        """A run of the media service found, whoever played it: Music's card
+        and its status item follow it (music_app.follow)."""
+        try:
+            import music_app
+        except ImportError:  # host: the runtime package
+            from runtime import music_app
+        music_app.follow(self)
+
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
         # EMA tail) run ONLY under perf_capture -- the measurement-session mode,
@@ -3149,11 +3459,27 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # row's count; `carts.begin`, the handle's) ends here, at the next
         # frame: it holds no gate, so this is bookkeeping, never a flush held
         # off (native/moy_app/README.md).
+        fs = self.frame_state
+        if self._services_due and fs.frames_drawn:
+            self._services_due = False
+            self.boot_services()
+        sched = _scheduler.SCHED
+        _NOTES.drain()                # what compiled programs posted on their own tasks
+        media = _MEDIA[0]
+        if media is not None:
+            media.frame()             # a stream a compiled program's handle started
+        if sched.mail_owed():
+            sched.mail()              # messages the input sent: served before the draw
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:
                 self._dirty = True        # the press handle_input left owed
-        self._press_taken = False
+        # A store on the Workstation looks through all its classes for a
+        # property (about 57 us on a T-Deck), so the frame path stores a
+        # per-frame flag only when it changes, and what changes every frame
+        # lives on `fs`, a plain object.
+        if self._press_taken:
+            self._press_taken = False
         st = self.store
         if st.open:
             st.end_all()
@@ -3163,13 +3489,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if lk is not None and getattr(lk, "_m", None) is not None:
             lk.sync(self)             # the session the link formed, the cart it asked for
         if dt > 0:
-            self._since_draw += dt
+            fs.since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
-            self._frame_dt_ms = min(dt * 1000.0, 100.0)
+            ms = min(dt * 1000.0, 100.0)
+            fs.frame_dt_ms = ms
             # ... and the verbs engine's clock, the scrolling pages' motion
-            _ui_draw.frame_dt(self._frame_dt_ms)
+            _ui_draw.frame_dt(ms)
         # The cover collaborator's two per-frame touches: this budget reset and
         # the deferred drain at the tail. Bound once, here, so both cost a call
         # and no second lookup (#209 landing C -- nothing else in the loop
@@ -3178,7 +3505,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         covers = self.covers
         covers.begin_frame()          # the per-frame cover-build budget, which is
                                       # a TIME slice, not a count
-        self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
+        if self._pf_home is not None:
+            self._pf_home = None      # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
         # redraw gate below, so it fires even on a static (redraw-skipped) editor
         # frame. The router is called DIRECTLY here (#209 landing E, doc 3b: the
@@ -3197,7 +3525,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             now = _ticks_ms()
             cv.covered = bool((self._toast_until and _ticks_diff(self._toast_until, now) > 0
                                and self.ach.toast is not None)
-                              or (self._notice is not None and self.notice_active(now)))
+                              or (self._notice is not None and self.notice_active(now))
+                              or (_NOTES.banner is not None and _NOTES.up(now) is not None))
         # Input focus moved (a window clicked, a screen left): Settings stores
         # a Name still being typed and hands back the keyboard's text mode.
         h = self.wm.input_holder()
@@ -3220,12 +3549,20 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # lockstep match (#65) owns its clock in there: the world moves only on
         # the shared tick, so a frame that tick is not due for holds the last
         # agreed frame instead of repainting it.
-        if self.wm.top_is_player() and self.cart_error is None and not self.pause.open:
-            if not self.player.frame_plan(dt):
-                self.player.tick(dt, render=False)
+        procs = self.procs
+        procs.frame(dt)               # the running set's games, by their states
+        # The front run, taken once for the frame's head: the running set
+        # promoted any Proc the focus reached above. A layer's draw can open
+        # another run, so the draw loop reads `self.run` again.
+        run = self.run
+        player = run.player
+        if (self.wm.top_is_player() and player.cart_error is None and not self.pause.open
+                and not procs.front_minimised()):
+            if not player.frame_plan(dt):
+                player.tick(dt, render=False)
                 return
-        elif self.player.tick_ms:
-            self.player.park()
+        elif player.tick_ms:
+            player.park()
         # The kernel's idle ladder is on its SAVER rung (idle_ladder.Saver): the
         # saver owns the glass until the ladder wakes, which moves the kernel
         # epoch so the gate below repaints what it covered.
@@ -3236,7 +3573,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 if self._half is not None:
                     self._present_half()
                 self.comp.flush()
-                self._frames_drawn += 1
+                fs.frames_drawn += 1
             return
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
@@ -3297,13 +3634,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                         self._idle_warned = True
                         print("Moybyte idle work failed:", _err_text(exc))
             return
-        self._quiet_frames = 0
+        if self._quiet_frames:
+            self._quiet_frames = 0
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.
-        if self._since_draw > 0:
-            self._fps = _ema(self._fps, 1.0 / self._since_draw)
-            self._since_draw = 0.0
+        if fs.since_draw > 0:
+            fs.fps = _ema(fs.fps, 1.0 / fs.since_draw)
+            fs.since_draw = 0.0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
@@ -3315,7 +3653,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # once at the EMA (_frame_perf_end).
         _frame_t0 = _ticks_us() if _perf else 0
         if _deep:
-            _bc = getattr(self.canvas, "batch_reset", None)
+            _bc = getattr(run.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
             # The DRAWBRK scratch (Player.tick fills it on the cart path, in
@@ -3330,13 +3668,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._pf_cart = 0   # cart _draw() (RENDERING)
             self._pf_audio = 0  # audio.tick(dt) (mixer feed)
             self._pf_bg = 0     # the backdrop restore's share of _pf_cart
-        elif getattr(self.canvas, "_prof", False):
+        elif getattr(run.canvas, "_prof", False):
             # Perf capture just went off: clear the device canvas's DRAW2 timing
             # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
             # fill, and chrome issues them by the hundred -- see _fill's note in
             # device_canvas.py). One attribute read per frame here; the host
             # canvas has no _prof, so getattr returns False and this never fires.
-            self.canvas._prof = False
+            run.canvas._prof = False
         # Compositor / router (docs/history/shell_layers_refactor_v1.md §3): draw the z-ordered
         # visible stack bottom -> top. The active content draws first (game-domain
         # content on the fixed 320x240 game canvas); at the game->system domain boundary
@@ -3365,7 +3703,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # is byte-identical, and a raster game canvas keeps the composite).
         _view = None
         if self._sys_canvas is not None:
-            _gc = self.canvas
+            _gc = run.canvas
             if _gc is not self._probe_gc:
                 self._probe_gc = _gc
                 self._probe_buf = getattr(_gc, "buf", None)
@@ -3427,7 +3765,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # but for the FPS chip, which names where it drew (`overdrew`).
         _ring = self.wm.CONTENT_RING
         _alone = _ring and self.wm.content_alone()
-        _ui_draw.paint_frame(self._frames_drawn, _alone, self,
+        _ui_draw.paint_frame(fs.frames_drawn, _alone, self,
                              not _alone and _ring and self.show_fps
                              and self.wm.content_alone(_SIG_FPS))
         for layer in _stack:
@@ -3439,7 +3777,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                     _game_open = False
                 self._composite_game()
                 _fold_live = True
-                if self.player._is_tool and self.bar_layer.tool_band() is not None:
+                if self.run.player._is_tool and self.bar_layer.tool_band() is not None:
                     _dsf = self._disarm_fn()        # #190: the band paints the root
                     if _dsf is not None:
                         _dsf()
@@ -3460,7 +3798,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 # behind the game (owner, 2026-07-31). Painting it here, before
                 # the bracket opens, is the same pixels in the right order.
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
-                _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
+                _gc = self.run.canvas       # a draw above may have opened a run
+                _view(_ox, _oy, _sc, _gc.w, _gc.h)
                 _game_open = True
             if _lb is not None and layer.domain == "game" and not _lb_done:
                 _lb()
@@ -3505,12 +3844,17 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
-        self._dirty = False
+        if self._dirty:
+            self._dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
-        self.ui_moving = _ui_draw.moving_take()
+        mv = _ui_draw.moving_take()
+        if mv != self.ui_moving:
+            self.ui_moving = mv
         if _ui_draw.again_take():
             self._dirty = True        # a pass owes the frame after it (`AppHost.again`)
-        self.frame_change = _ui_draw.change_take()
+        ch = _ui_draw.change_take()
+        if ch != self.frame_change:
+            self.frame_change = ch
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the
@@ -3523,7 +3867,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._dirty = True
         if self._ptr_changed():          # rebuilt only when it moved: no tuple
             self._last_ptr = self._ptr_state()   # on a static-pointer frame
-        self._frames_drawn += 1
+        fs.frames_drawn += 1
         if self._deferred:
             # #184: the flush above PRESENTED this frame's LOADING
             # acknowledgment -- now run the queued transition(s) behind it.
@@ -3550,7 +3894,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _mini_btn(self, label, rect, fill, cv=None, label_rect=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
         # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
-        _ui_draw.mini_btn(cv if cv is not None else self.canvas, rect, label, fill,
+        _ui_draw.mini_btn(cv if cv is not None else self.run.canvas, rect, label, fill,
                         label_rect)
 
     def _btn(self, label, rect, fill, cv=None):
@@ -3558,14 +3902,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
         # implementation (incl. the frozen scale-2 baseline quirk) moved to
         # ui.game_btn; this stays the tested ws entry point.
-        _ui_draw.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
+        _ui_draw.game_btn(cv if cv is not None else self.run.canvas, rect, label, fill)
 
     def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
         label and a kid who can't read still gets the picture. Implementation:
         ui.game_icon_btn."""
-        _ui_draw.game_icon_btn(cv if cv is not None else self.canvas, rect,
+        _ui_draw.game_icon_btn(cv if cv is not None else self.run.canvas, rect,
                              kind, label, fill, _ui_draw.glyph_draw)
 
     def _draw_cursor(self):
@@ -3592,7 +3936,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
         # slot (#203). The raster is native/moy_ui's, through `ui.glyph`, which
         # Launcher (canvas-only) is handed too.
-        _ui_draw.glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
+        _ui_draw.glyph(cv if cv is not None else self.run.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
@@ -3747,7 +4091,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     `before_slim(ws)`. can_manage defaults to "the store root is known"; the
     host passes True. `first_variant` ("dark" or "light") is the theme variant
     a console with no saved `theme_variant` row boots in -- a page's colour
-    scheme; None keeps `DEFAULT_VARIANT`, and a saved row always wins. Ends with the three boot loads (system.json settings /
+    scheme; None keeps `DEFAULT_VARIANT`, and a saved row always wins. Ends with the three boot loads (system/settings settings /
     icon theme / achievements) -- install a WindowedWM AFTER this returns, so
     the persisted font scale is applied before the root layout context is
     captured (#73/#58)."""
@@ -3779,7 +4123,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.sync_keyboard_mode()
     if first_variant in THEME_VARIANTS:
         ws.look.theme_variant = first_variant   # load_system's absent-row default
-    ws.load_system()            # #28: system.json, the theme and its wallpaper
+    ws.load_system()            # #28: system/settings, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))
     except (TypeError, ValueError):

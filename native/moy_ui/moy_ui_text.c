@@ -6,6 +6,8 @@
 #include "moy_canvas.h"
 #include "moy_gfx_kernels.h"
 #include "moy_shape.h"
+#include "moy_ui_tables.h"
+#include "moy_ui_api.h"
 #include "moy_ui_text.h"
 
 #if __has_include("esp_heap_caps.h")
@@ -27,12 +29,20 @@
 #define WORD_MAX 160
 #define WORD_SLOTS 256
 
-// What the views share -- the rows one draw lays out, a wrapped line's
-// breaks and the word table -- in one block taken at first use (PSRAM where
-// the board has it): a static would hold it in internal SRAM from boot.
-typedef struct {
+// An instance's views (moy_ui_api.h's moy_ui_inst_t): the rows one draw
+// lays out, a wrapped line's breaks and the views' records, in one block
+// taken at the instance's first view (PSRAM where the board has it): a
+// static would hold it in internal SRAM from boot.
+struct moy_ui_text_mem {
     moy_ui_trow_t rows[MOY_UI_TEXT_ROWS];
     uint32_t starts[MOY_UI_TEXT_BREAKS];
+    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
+    uint32_t used;
+};
+typedef struct moy_ui_text_mem text_mem_t;
+
+// The word table, the console's: one block taken at its first word.
+typedef struct {
     char pool[WORD_POOL];
     struct {
         uint16_t off;
@@ -41,34 +51,46 @@ typedef struct {
     } word[WORD_MAX];
     uint8_t slot[WORD_SLOTS];   // word index + 1, 0 empty
     uint16_t pool_n, words;
-    moy_ui_tview_t views[MOY_UI_TEXT_VIEWS];
-    uint32_t used;
-} text_mem_t;
+} words_t;
 
-static text_mem_t *s_mem;
+static words_t *s_words;
 
-static text_mem_t *mem(void) {
-    if (s_mem == NULL) {
-        s_mem = (text_mem_t *)TEXT_ALLOC(sizeof(text_mem_t));
-        if (s_mem != NULL) {
-            memset(s_mem, 0, sizeof(*s_mem));
+static words_t *words_mem(void) {
+    if (s_words == NULL) {
+        s_words = (words_t *)TEXT_ALLOC(sizeof(words_t));
+        if (s_words != NULL) {
+            memset(s_words, 0, sizeof(*s_words));
         }
     }
-    return s_mem;
+    return s_words;
 }
 
-moy_ui_trow_t *moy_ui_text_scratch(void) {
-    text_mem_t *m = mem();
+static text_mem_t *mem(moy_ui_inst_t *I) {
+    if (I->text == NULL) {
+        I->text = (text_mem_t *)TEXT_ALLOC(sizeof(text_mem_t));
+        if (I->text != NULL) {
+            memset(I->text, 0, sizeof(text_mem_t));
+        }
+    }
+    return I->text;
+}
+
+moy_ui_trow_t *moy_ui_text_scratch(moy_ui_inst_t *I) {
+    text_mem_t *m = mem(I != NULL ? I : moy_ui_inst_main());
     return m != NULL ? m->rows : NULL;
 }
 
-uint32_t *moy_ui_text_breaks(void) {
-    text_mem_t *m = mem();
+uint32_t *moy_ui_text_breaks(moy_ui_inst_t *I) {
+    text_mem_t *m = mem(I != NULL ? I : moy_ui_inst_main());
     return m != NULL ? m->starts : NULL;
 }
 
-moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
-    text_mem_t *m = make ? mem() : s_mem;
+moy_ui_tview_t *moy_ui_text_view_of(moy_ui_inst_t *I, const void *owner, uint32_t id,
+                                    int make) {
+    if (I == NULL) {
+        I = moy_ui_inst_main();
+    }
+    text_mem_t *m = make ? mem(I) : I->text;
     if (m == NULL || owner == NULL) {
         return NULL;
     }
@@ -97,8 +119,8 @@ moy_ui_tview_t *moy_ui_text_view_of(const void *owner, uint32_t id, int make) {
     return old;
 }
 
-void moy_ui_text_views_drop(const void *owner) {
-    text_mem_t *m = s_mem;
+void moy_ui_text_views_drop(moy_ui_inst_t *I, const void *owner) {
+    text_mem_t *m = (I != NULL ? I : moy_ui_inst_main())->text;
     if (m == NULL) {
         return;
     }
@@ -118,7 +140,7 @@ static uint32_t word_hash(const uint8_t *p, size_t n) {
 }
 
 static int word_find(const uint8_t *p, size_t n) {
-    text_mem_t *m = s_mem;
+    words_t *m = s_words;
     if (m == NULL || n == 0 || n > 255) {
         return -1;
     }
@@ -136,8 +158,8 @@ static int word_find(const uint8_t *p, size_t n) {
     return -1;
 }
 
-void moy_ui_text_words_reset(void) {
-    text_mem_t *m = s_mem;
+static void moy_ui_text_words_reset_w(void) {
+    words_t *m = s_words;
     if (m != NULL) {
         m->pool_n = 0;
         m->words = 0;
@@ -145,12 +167,18 @@ void moy_ui_text_words_reset(void) {
     }
 }
 
-int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
+void moy_ui_text_words_reset(void) {
+    moy_ui_theme_write(1);
+    moy_ui_text_words_reset_w();
+    moy_ui_theme_write(0);
+}
+
+static int moy_ui_text_words_w(int syntax, const uint8_t *words, size_t n, int tone) {
     if ((syntax != MOY_UI_SYN_PYTHON && syntax != MOY_UI_SYN_LUA) || tone < 0
         || tone >= MOY_UI_TT_N) {
         return MOY_UI_BAD;
     }
-    text_mem_t *m = mem();
+    words_t *m = words_mem();
     if (m == NULL) {
         return MOY_UI_NOMEM;
     }
@@ -190,12 +218,19 @@ int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
     return MOY_UI_OK;
 }
 
+int moy_ui_text_words(int syntax, const uint8_t *words, size_t n, int tone) {
+    moy_ui_theme_write(1);
+    int rc = moy_ui_text_words_w(syntax, words, n, tone);
+    moy_ui_theme_write(0);
+    return rc;
+}
+
 static int word_tone(const uint8_t *p, size_t n, int lua) {
     int w = word_find(p, n);
     if (w < 0) {
         return MOY_UI_TT_TEXT;
     }
-    int t = (s_mem->word[w].tone >> (lua ? 4 : 0)) & 0xF;
+    int t = (s_words->word[w].tone >> (lua ? 4 : 0)) & 0xF;
     return t == 0xF ? MOY_UI_TT_TEXT : t;
 }
 
@@ -479,8 +514,26 @@ static void runs_markdown(runs_t *r, const uint8_t *p, uint32_t n) {
     }
 }
 
+// The base colour nearest 0xRRGGBB: its MOY64 index, 0-15.
+static int nearest_base(uint32_t rgb) {
+    int best = 0;
+    uint32_t bd = UINT32_MAX;
+    for (int i = 0; i < 16; i++) {
+        uint32_t c = moy_theme_moy64[i];
+        int dr = (int)((rgb >> 16) & 0xFF) - (int)((c >> 16) & 0xFF);
+        int dg = (int)((rgb >> 8) & 0xFF) - (int)((c >> 8) & 0xFF);
+        int db = (int)(rgb & 0xFF) - (int)(c & 0xFF);
+        uint32_t d = (uint32_t)(dr * dr + dg * dg + db * db);
+        if (d < bd) {
+            bd = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
 // An SGR escape at p[i] (`ESC [ params final`): where it ends; 0 where
-// none starts there.
+// none starts there. *tone is the run's tone after it (MOY_UI_TONE_*).
 static uint32_t sgr_at(const uint8_t *p, uint32_t n, uint32_t i, int *tone) {
     if (p[i] != 0x1B || i + 1 >= n || p[i + 1] != '[') {
         return 0;
@@ -493,27 +546,17 @@ static uint32_t sgr_at(const uint8_t *p, uint32_t n, uint32_t i, int *tone) {
         return n;
     }
     if (p[j] == 'm') {
-        // the last parameter that names a colour wins
-        uint32_t k = i + 2;
-        int v = 0, any = 0;
-        for (;; k++) {
+        // the parameters, in order: the last that names an ink wins, and a
+        // ground holds until 49 or a reset
+        int par[16], np = 0, v = 0, any = 0;
+        for (uint32_t k = i + 2;; k++) {
             if (k < j && is_digit(p[k])) {
                 v = v * 10 + (p[k] - '0');
                 any = 1;
                 continue;
             }
-            int c = any ? v : 0;
-            if (c == 0 || c == 39 || c == 22) {
-                *tone = MOY_UI_TT_TEXT;
-            } else if (c == 2) {
-                *tone = MOY_UI_TT_DIM;
-            } else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) {
-                static const uint8_t ansi[8] = {
-                    MOY_UI_TT_TEXT, MOY_UI_TT_DANGER, MOY_UI_TT_STRING,
-                    MOY_UI_TT_NUMBER, MOY_UI_TT_KEYWORD, MOY_UI_TT_BUILTIN,
-                    MOY_UI_TT_VALUE, MOY_UI_TT_TEXT,
-                };
-                *tone = c == 90 ? MOY_UI_TT_COMMENT : ansi[c % 10];
+            if (np < 16) {
+                par[np++] = any ? v : 0;
             }
             v = 0;
             any = 0;
@@ -521,6 +564,48 @@ static uint32_t sgr_at(const uint8_t *p, uint32_t n, uint32_t i, int *tone) {
                 break;
             }
         }
+        int theme = MOY_UI_TONE_OF(*tone), ink = MOY_UI_TONE_INK(*tone);
+        int ground = MOY_UI_TONE_GROUND(*tone);
+        for (int q = 0; q < np; q++) {
+            int c = par[q];
+            if (c == 0 || c == 39 || c == 22) {
+                theme = MOY_UI_TT_TEXT;
+                ink = 0;
+                ground = c == 0 ? 0 : ground;
+            } else if (c == 2) {
+                theme = MOY_UI_TT_DIM;
+                ink = 0;
+            } else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) {
+                static const uint8_t ansi[8] = {
+                    MOY_UI_TT_TEXT, MOY_UI_TT_DANGER, MOY_UI_TT_STRING,
+                    MOY_UI_TT_NUMBER, MOY_UI_TT_KEYWORD, MOY_UI_TT_BUILTIN,
+                    MOY_UI_TT_VALUE, MOY_UI_TT_TEXT,
+                };
+                theme = c == 90 ? MOY_UI_TT_COMMENT : ansi[c % 10];
+                ink = 0;
+            } else if (c == 49) {
+                ground = 0;
+            } else if ((c == 38 || c == 48) && q + 1 < np) {
+                int at = -1;
+                if (par[q + 1] == 2 && q + 4 < np) {
+                    at = nearest_base(((uint32_t)(par[q + 2] & 0xFF) << 16)
+                                      | ((uint32_t)(par[q + 3] & 0xFF) << 8)
+                                      | (uint32_t)(par[q + 4] & 0xFF));
+                    q += 4;
+                } else if (par[q + 1] == 5 && q + 2 < np) {
+                    at = par[q + 2] < 16 ? par[q + 2] : -1;
+                    q += 2;
+                } else {
+                    q += 1;
+                }
+                if (at >= 0 && c == 48) {
+                    ground = at + 1;
+                } else if (at >= 0) {
+                    ink = at + 1;
+                }
+            }
+        }
+        *tone = theme | (ink << 8) | (ground << 16);
     }
     return j + 1;
 }
@@ -951,10 +1036,11 @@ typedef struct {
     const uint8_t *p;
     int left, cols, tx0, y;
     uint32_t a0, b0;            // the row's bytes
+    int c0;                     // ...and its first column
 } dr_t;
 
 static uint16_t c565(const dr_t *d, int ci) {
-    return d->row->pal[moy_ui_pidx(ci)];
+    return d->row->pal[moy_ui_pidx(d->s->cart, ci)];
 }
 
 static void target(dr_t *d) {
@@ -1043,8 +1129,8 @@ static void print_run(void *ctx, int tone, uint32_t a, uint32_t b, int col) {
         cb = cb - cols_in(p, d->b0, b);
         b = d->b0;
     }
-    // columns relative to the row's first
-    int rc0 = cols_in(p, d->a0, a), rc1 = rc0 + (cb - ca);
+    // columns relative to the row's first (an SGR escape before the run takes none)
+    int rc0 = ca - d->c0, rc1 = rc0 + (cb - ca);
     int left = d->left, right = d->left + d->cols;
     if (rc1 <= left) {
         return;
@@ -1064,8 +1150,45 @@ static void print_run(void *ctx, int tone, uint32_t a, uint32_t b, int col) {
     if (pb <= pa) {
         return;
     }
-    print(d, p + pa, pb - pa, d->tx0 + (at - left) * d->v[MOY_UI_TV_CELL], d->y,
-          d->v[MOY_UI_TV_TONE0 + tone]);
+    const int32_t *v = d->v;
+    int cell = v[MOY_UI_TV_CELL], lh = v[MOY_UI_TV_LH];
+    int x = d->tx0 + (at - left) * cell;
+    int ink = MOY_UI_TONE_INK(tone), ground = MOY_UI_TONE_GROUND(tone);
+    int ci = ink ? ink - 1 : v[MOY_UI_TV_TONE0 + MOY_UI_TONE_OF(tone)];
+    if (ground) {
+        rect(d, x, d->y, cols_in(p, pa, pb) * cell, lh, ground - 1);
+    }
+    // the half and whole blocks (U+2580, U+2584, U+2588) are the run's own
+    // fills, whole cells and seamless row to row, as pixel art draws them;
+    // the rest is text
+    uint32_t s = pa;
+    int sx = x;
+    for (uint32_t i = pa; i < pb;) {
+        int blk = i + 2 < pb && p[i] == 0xE2 && p[i + 1] == 0x96
+                  && (p[i + 2] == 0x80 || p[i + 2] == 0x84 || p[i + 2] == 0x88) ? p[i + 2] : 0;
+        if (!blk) {
+            i++;
+            continue;
+        }
+        if (i > s) {
+            print(d, p + s, i - s, sx, d->y, ci);
+            sx += cols_in(p, s, i) * cell;
+        }
+        int top = lh / 2;
+        if (blk == 0x88) {
+            rect(d, sx, d->y, cell, lh, ci);
+        } else if (blk == 0x80) {
+            rect(d, sx, d->y, cell, top, ci);
+        } else {
+            rect(d, sx, d->y + top, cell, lh - top, ci);
+        }
+        sx += cell;
+        i += 3;
+        s = i;
+    }
+    if (pb > s) {
+        print(d, p + s, pb - s, sx, d->y, ci);
+    }
 }
 
 // The current line's mark over columns [x0, x1) of it (code_layer.
@@ -1085,7 +1208,7 @@ static void current(dr_t *d, const int32_t in[4], int y, int x0, int x1) {
     }
     int ink;
     moy_ui_box_t b = {(int16_t)left, (int16_t)y, (int16_t)(right - left), (int16_t)lh};
-    moy_ui_current(d->s, b, 0, MOY_UI_MARK_SIDE | MOY_UI_MARK_KEEP, d->s->fs, &ink);
+    moy_ui_current(d->s, b, MOY_UI_ITEM_ROW, 0, MOY_UI_MARK_KEEP, d->s->fs, &ink);
     if (!whole) {
         clip_back(d, in);
     }
@@ -1183,6 +1306,7 @@ static void draw_row(dr_t *d, const int32_t in[4], const moy_ui_trow_t *r,
     d->p = r->p;
     d->a0 = r->a;
     d->b0 = r->b;
+    d->c0 = r->ca;
     d->left = left;
     d->cols = cols;
     d->tx0 = tx0;
@@ -1304,3 +1428,7 @@ void moy_ui_text_note(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, i
     t->want = 0;
 }
 
+int moy_ui_recs_text(moy_ui_rec_t *r) {
+    r[0] = (moy_ui_rec_t){NULL, (void **)&s_words, sizeof(words_t)};
+    return 1;
+}

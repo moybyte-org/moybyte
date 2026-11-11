@@ -8,6 +8,9 @@
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
 #   _lua_cart_where       which of a Lua cart's scripts raised, and its line
+#   board_share           the PROCS row admission counts (THE SHARES' rows)
+#   app_need              what one app of the running set holds
+#   admit                 whether a cart fits beside the running set, else what to close
 """What the Player decides about a cart before and after it runs, as
 functions of the cart and its runtime: whether it fits and whether it was
 built for a newer console (the notices it is refused with), whether it is
@@ -19,6 +22,8 @@ did when they lived there. A leaf over chrome_ops (the panels' words),
 widgets' `_err_text`, moy_carts' `cart_sources` and moy_play's census.
 MicroPython-safe.
 """
+
+import sys
 
 try:
     import chrome_ops as _ch
@@ -111,13 +116,14 @@ def _exc_cart_line(exc, fname="<cart>"):
 # The cart runtimes a manifest may name besides the console's own Python, and
 # how the runtime-missing panel says each. A build carries a runtime when
 # `ws.runtimes` maps its name to a factory; an absent key is the panel.
-RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm"}
+RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm", "elf": "native"}
 
 
 def _compiled(cart):
-    """True for a compiled ("runtime": "wasm") cart: no source to show, no
-    line to mark, no EDIT action on its error panel."""
-    return (cart or {}).get("runtime") == "wasm"
+    """True for a compiled ("runtime": "wasm") or native cart: no source to
+    show, no line to mark, no EDIT action on its error panel."""
+    cart = cart or {}
+    return cart.get("runtime") == "wasm" or bool(cart.get("native"))
 
 
 # A compiled cart bigger than this console can hold (native/moy_wasm/README.md:
@@ -141,8 +147,8 @@ def _compiled(cart):
 _OUT_OF_MEMORY = "out of memory"
 
 # A compiled cart whose module does not run natively on this console -- none
-# for this chip and compiled-code format, one with no signature while the
-# owner has Unknown sources off, or one whose content is corrupt -- is never
+# for this chip and compiled-code format, one with no signature whose cart's
+# consent does not grant `full_access`, or one whose content is corrupt -- is never
 # refused for it (native/moy_wasm/README.md, "A cart survives its
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
@@ -152,13 +158,13 @@ _OUT_OF_MEMORY = "out of memory"
 # expires on its own rather than needing a dismissal). A module whose
 # SIGNATURE is present and does not verify keeps the ordinary error panel --
 # that module was changed after it was signed, which is tamper evidence, not
-# staleness, and no switch and no interpreter runs it.
+# staleness, and no consent and no interpreter runs it.
 #
 # The sub-line says what to do, by cause (`WasmRun.interp_cause`): a cart
 # with no module by this console's own name -- none built yet, or one left
 # over from a format this console has moved past -- needs a fresh build;
-# one whose module matched but carried no signature while Unknown sources is
-# off is simply not signed; one whose module calls a helper this firmware's
+# one whose module matched but carried no signature, its cart not granted
+# `full_access`, is simply not signed; one whose module calls a helper this firmware's
 # runtime does not register is waiting on the CONSOLE, not the cart. Any
 # other non-tamper refusal (a corrupt or foreign-chip key despite a matching
 # file name) reads the same as "missing": this console's copy is not one it
@@ -306,3 +312,94 @@ def _lua_cart_where(text, cart):
         if pos is not None and (at is None or pos < at):
             at, where = pos, (name, line)
     return where
+
+
+# -- admission over the running set (docs/os_2026-11/processes.md §6) --------
+#
+# Admission counts THE SHARES' PROCS row (native/moy_play/moy_play.h): the
+# PSRAM the running set's apps hold together, from the image's own line
+# (`moy_play.shares()`), or a named board's when a host stands in for one. A
+# build with no line (the host, the browser, the Zero) has no share to count
+# against: None, never 0.
+# A Python run's world on the heap -- its namespace, its objects, the
+# closures of its _update and _draw (Player.release_world's figure).
+PY_WORLD = 384 << 10
+RUN_MAX = 4         # the owner tags a run's loans and audio session take
+
+
+def board_share(board=None):
+    """The PROCS row of this image's line (`board`: that board's), or None
+    where there is none."""
+    fn = getattr(_moy_play, "shares", None)
+    rows = fn(board) if fn is not None else None
+    return rows[0] if rows else None
+
+
+def app_need(cart, make=None):
+    """The bytes an app of the running set holds: a compiled cart's load
+    footprint where its runtime can say, else its canvas (RGB565) and, for
+    every tier, a Python world beside it."""
+    cart = cart or {}
+    need = None
+    if make is not None and cart.get("runtime", "python") == "wasm":
+        fp = getattr(make, "footprint", None)
+        if fp is not None:
+            try:
+                got = fp(cart)
+                need = got[0] if got is not None else None
+            except Exception:  # noqa: BLE001 -- a report is advisory
+                need = None
+    if need is None:
+        cv = cart.get("canvas")
+        w, h = (cv[0], cv[1]) if isinstance(cv, (tuple, list)) and len(cv) == 2 \
+            else (320, 240)
+        need = int(w) * int(h) * 2
+    return need + PY_WORLD
+
+
+# The browser's engine holds one compiled session (native/moy_wasm_web); a
+# board's and the host's hold one per run.
+SHARED_RUNTIMES = ("python", "lua") if sys.platform == "webassembly" \
+    else ("python", "lua", "wasm")
+
+
+def shares_runtime(cart):
+    """Whether `cart`'s runtime runs beside others: Python in the shell's
+    VM, Lua in a row of its own (native/moycore/moycore_lua.h), a compiled
+    cart in a session of its own where the engine holds several
+    (native/moy_wasm/moy_wasm_session.h). Whether two FIT is the share's
+    to say (`admit`)."""
+    return (cart or {}).get("runtime", "python") in SHARED_RUNTIMES
+
+
+def admit(new, running, share, rows, held=()):
+    """Whether a run of `new` -- (need, shares) -- fits beside `running`,
+    the running set oldest first as (key, need, shares), and the services'
+    `held` PSRAM as (key, bytes): None when it does, else the keys whose
+    closing makes room, fewest first. The rules, in order: the share
+    (`share` None: none to count), the audio table's `rows` free for a
+    run's session (a fifth source is refused), and the tiers -- a run
+    `shares` when its runtime holds several runs at once
+    (`shares_runtime`); one that does not runs alone. A service counts in
+    the share alone."""
+    need, py = new
+    if share is not None and need <= share:
+        total = need
+        for r in running:
+            total += r[1]
+        for r in held:
+            total += r[1]
+        if total > share:
+            out = []
+            for r in sorted(list(running) + list(held), key=lambda r: -r[1]):
+                out.append(r[0])
+                total -= r[1]
+                if total <= share:
+                    break
+            return out
+    if running and (len(running) >= rows or len(running) >= RUN_MAX):
+        return [running[0][0]]
+    if running and not py:
+        return [r[0] for r in running]
+    out = [r[0] for r in running if not r[2]]
+    return out or None

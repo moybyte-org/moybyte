@@ -199,6 +199,7 @@ def test_the_scenarios_cover_the_clauses_the_header_calls_races():
                  "frame_busy_clears_before_the_give",
                  "stop_failure_keeps_the_bounce",
                  "failure_counters_are_positional",
-                 "slot_pacing_two_slots", "isr_without_a_feeder"):
+                 "slot_pacing_two_slots", "isr_without_a_feeder",
+                 "gate_runs_in_a_band_gap", "gate_opened_mid_frame_waits_it_out"):
         assert name in ENGINE_SCENARIOS, name
     assert len(ENGINE_SCENARIOS) >= 30

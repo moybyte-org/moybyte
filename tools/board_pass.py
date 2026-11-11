@@ -17,8 +17,8 @@ lines.
 
 One row a board: the commit its image was built from (`+` when the tree had
 tracked changes on top), the OTA-slot headroom the build printed, the suite's
-passed/skipped/failed counts, where its time went (the wait for the P4
-build slot, build, flash, boot to the desk, suite, the board's total) and the
+passed/skipped/failed counts, where its time went (the build's wait for the
+configure lock, build, flash, boot to the desk, suite, the board's total) and the
 failing tests by name. Under the table, the pass's wall time; every time is
 also appended to the machine's timing log (tools/timings.py, tool `pass`).
 Every step's full output goes to a log file under one directory, whose path
@@ -32,15 +32,17 @@ THE MAIN CHECKOUT IS REFUSED FOR A BUILD (`--main` overrides): a build writes
 `dist/` and each board's `.build/`, and those are the images every other
 session flashes from. Build in a worktree (`tools/worktree.py new NAME`).
 
-THE P4s BUILD ONE AT A TIME, the S3s beside them. Every ESP32 build checks
-out the same git component from the component manager's one cache while it
-configures, so two builds configuring at the same moment race on its
-index.lock (`.claude/rules/boards.md`). Each esp32p4 build takes an flock
-under ~/.cache/moybyte first, which serialises the P4s across two passes in
-two worktrees too, and a build that lost the race is run again (twice at
-most, after a pause). Each board's whole run (build, flash, suite) goes in
-its own thread; the ports are resolved once, up front, and passed to every
-step, because four boards share one usb id.
+EVERY BOARD BUILDS AT ONCE, their configure steps one at a time. Every ESP32
+build checks out the same git component from the component manager's one
+cache while it configures, so two builds configuring at the same moment race
+on its index.lock (`.claude/rules/boards.md`). The build itself holds an
+flock under ~/.cache/moybyte while it configures and lets go at its first
+compiled step (tools/esp32_build_lib.sh `moybyte_configure_lock`), across
+every pass and worktree on the machine; the wait is the row's `wait` column.
+A build that lost the race anyway is run again (twice at most, after a
+pause). Each board's whole run (build, flash, suite) goes in its own thread;
+the ports are resolved once, up front, and passed to every step, because
+four boards share one usb id.
 
 THE BOARD IS LEFT AT ITS LAUNCHER (`board.py desk` after the suite), the
 T-Deck at volume 0 (the dev channel's `vol 0`, before and after the suite).
@@ -49,7 +51,6 @@ another process holds skips its board, naming the holder.
 """
 
 import argparse
-import contextlib
 import json
 import os
 import random
@@ -74,8 +75,6 @@ BOARD_PY = os.path.join(HERE, "board.py")
 WEB_BUILD = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
 # Boards whose speaker stays silent on this desk.
 QUIET = ("tdeck",)
-# Chips whose builds race each other on a shared cache: one build at a time.
-ONE_AT_A_TIME = ("esp32p4",)
 # What a build that lost the component cache's index.lock prints, CMake's
 # wrap between the two halves included; such a build runs again after a pause
 # drawn from RETRY_PAUSE_S.
@@ -83,6 +82,8 @@ LOST_RACE = "index.lock':\n  File exists"
 LOST_RACE_RE = re.compile(r"index\.lock':\s+File exists")
 RETRIES = 2
 RETRY_PAUSE_S = (5.0, 20.0)
+# The build's wait for the configure lock, as its phase table prints it.
+LOCK_RE = re.compile(r"^== time: lock (?:(\d+)m)?([\d.]+)s$", re.M)
 FLASH_RE = re.compile(r"board flash: written in ([\d.]+)s")
 HEADROOM_RE = re.compile(r"App image: \d+ bytes of a \d+-byte \S+ slot -- "
                          r"(-?\d+) bytes headroom")
@@ -202,27 +203,15 @@ def run_logged(cmd, log, env=None):
                                cwd=ROOT, env=env)
 
 
-def lock_path(key):
-    base = os.environ.get("MOYBYTE_LOCK_DIR") or os.path.join(
-        os.path.expanduser("~"), ".cache", "moybyte")
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "%s-build.lock" % key)
-
-
-@contextlib.contextmanager
-def build_slot(chip):
-    """Held across one build: exclusive per chip in ONE_AT_A_TIME, free
-    otherwise. An flock, so a pass in another worktree waits too."""
-    if chip not in ONE_AT_A_TIME:
-        yield
-        return
-    import fcntl
-    with open(lock_path(chip), "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+def lock_wait(log):
+    """Seconds the build in `log` waited for the configure lock, summed over
+    its attempts; 0.0 when it printed none."""
+    try:
+        with open(log, errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return 0.0
+    return sum(int(m or 0) * 60 + float(s) for m, s in LOCK_RE.findall(text))
 
 
 def build(run, board_dir, log):
@@ -245,6 +234,17 @@ def build(run, board_dir, log):
 def image_path(board_dir):
     return os.path.join(ROOT, board.board_file(board_dir).get("flash", {})
                         .get("image", ""))
+
+
+def image_built_since(board_dir, since):
+    """Whether the image in dist/ was written at or after `since` (wall
+    seconds, a second's slack for the filesystem's coarse clock): a build
+    that answered 0 without linking leaves the last one, which is not this
+    tree's."""
+    try:
+        return os.path.getmtime(image_path(board_dir)) >= since - 1.0
+    except OSError:
+        return False
 
 
 def image_stamp(board_dir):
@@ -333,15 +333,15 @@ def _run_board(row, a, ctx):
 
     if not a.no_flash and not a.skip_build:
         path = log("build")
-        t = time.monotonic()
-        with build_slot(board.board_file(d).get("board", {}).get("chip")):
-            row.times["wait"] = time.monotonic() - t
-            t = time.monotonic()
-            rc = build(run, d, path)
-            row.times["build"] = time.monotonic() - t
+        t, began = time.monotonic(), time.time()
+        rc = build(run, d, path)
+        row.times["wait"] = lock_wait(path)
+        row.times["build"] = max(0.0, time.monotonic() - t - row.times["wait"])
         row.headroom = headroom_of(path)
         if rc != 0:
             return stop("build failed", path)
+        if not image_built_since(d, began):
+            return stop("no image built (the one in dist/ predates this build)", path)
         if a.build_only:
             row.image = image_stamp(d)
             return row

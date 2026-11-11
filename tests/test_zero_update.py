@@ -3,7 +3,7 @@
 Every other board triggers and reports an update on its own glass: Settings ->
 UPDATE ONLINE draws a CHECKING screen, a progress bar, and the verdict of the
 last install. This board has none, so the SAME `OtaUpdater` is driven by
-`zero_host.ZeroUpdate` and reported as JSON on two pin-gated endpoints. What is
+`zero_host.ZeroUpdate` and reported as JSON on two sealed endpoints. What is
 worth pinning is therefore not the OTA machinery -- `tests/test_moy_ota.py` and
 `tests/test_ota_health.py` own that -- but the three things the headless shape
 introduces:
@@ -160,7 +160,7 @@ def test_a_boot_check_runs_once_and_installs_nothing_by_default():
     A boot check that installed would mean the board holding a kid's only copy
     of their carts replaces its own firmware unattended, with nobody watching
     and no screen to say so. So the boot check LOOKS and reports; installing is
-    a request carrying the pin -- the same act of consent that gates every other
+    a paired browser's request -- the same act of consent that gates every other
     write to this board.
     """
     ota = _FakeOta(MANIFEST)
@@ -233,6 +233,30 @@ def test_up_to_date_is_reported_as_up_to_date_and_not_as_an_offer():
     assert task.state == "none"
     assert task.offered is False
     assert task.status()["available"]["label"] == "0.9"
+
+
+def test_a_check_whose_link_is_still_dialling_is_asked_again():
+    """The updater's link is polled: `pending` while it dials. The check is
+    asked again next iteration rather than read as a failure."""
+    ota = _FakeOta(MANIFEST)
+    real = ota.check_online
+    dials = [2]
+
+    def _check(channel=None):
+        if dials[0]:
+            dials[0] -= 1
+            ota.pending = True
+            ota.calls.append("check")
+            return None
+        ota.pending = False
+        return real(channel)
+    ota.check_online = _check
+    task = zero_host.ZeroUpdate(ota)
+    task.request("download")
+    assert task.step() and task.state == "checking"
+    assert task.step() and task.state == "checking"
+    _drive(task)
+    assert ota.calls.count("check") == 3 and "begin_download" in ota.calls
 
 
 def test_the_requested_channel_reaches_the_check():
@@ -438,13 +462,19 @@ def test_the_status_carries_the_previous_installs_verdict():
 
 @pytest.fixture
 def host(tmp_path):
+    """The Zero's host as zero_host.serve builds it: its sign-in on, and a
+    page paired with it (`host.page`)."""
+    import seal_client
+    from runtime import net_binding as nb
     carts = tmp_path / "carts"
     carts.mkdir()
-    web = tmp_path / "web"
-    web.mkdir()
+    (tmp_path / "system").mkdir()
     from moy_webhost import WebHost
-    h = WebHost(str(carts), pin="1234")
+    h = WebHost(str(carts), auth=str(tmp_path / "system"))
     h.update = zero_host.ZeroUpdate(_FakeOta(MANIFEST))
+    h.handle_http("GET", "/sync", b"")
+    h.page = seal_client.Browser(h.handle_http)
+    h.page.pair_token(nb.web_token())
     return h
 
 
@@ -454,30 +484,35 @@ def _status(resp):
     return int(head.split()[1]), payload
 
 
-def test_both_methods_need_the_pin(host):
-    """No read-half exemption, and this is the deliberate part.
+def _call(host, method, path, body=None):
+    """(status, payload text) of a paired page's sealed request."""
+    import seal_client
+    try:
+        code, plain = host.page.call(method, path, (body or "").encode())
+    except seal_client.Refused as e:
+        return e.status, e.doc.decode() if isinstance(e.doc, bytes) else json.dumps(e.doc)
+    return code, plain.decode()
 
-    `/gpio`'s GET was open until 2026-08-25 on the reasoning that it changes
-    nothing; what it hands over is a fact about somebody's house. The same
-    argument lands harder here -- a GET says which firmware version a specific
-    board on a home network is running, which is a shopping list for whoever
-    wants to hand it an image.
-    """
+
+def test_both_methods_need_a_paired_page(host):
+    """No read-half exemption, and this is the deliberate part: a GET says
+    which firmware version a specific board on a home network is running,
+    which is a shopping list for whoever wants to hand it an image."""
     for method, body in (("GET", None), ("POST", '{"action":"check"}')):
         code, payload = _status(host.handle_http(method, "/update", body))
-        assert code == 403, method
-        assert json.loads(payload) == {"error": "pin"}
+        assert code == 401, method
+        assert json.loads(payload) == {"error": "session"}
+    assert host.update.ota.calls == []
 
 
-def test_a_get_with_the_pin_answers_the_status(host):
-    code, payload = _status(host.handle_http("GET", "/update?pin=1234", None))
+def test_a_paired_get_answers_the_status(host):
+    code, payload = _call(host, "GET", "/update")
     assert code == 200
     assert json.loads(payload)["running"]["board"] is not None
 
 
 def test_a_post_queues_and_answers_immediately(host):
-    code, payload = _status(
-        host.handle_http("POST", "/update?pin=1234", '{"action":"check"}'))
+    code, payload = _call(host, "POST", "/update", '{"action":"check"}')
     assert code == 200
     doc = json.loads(payload)
     assert doc["ok"] is True
@@ -488,15 +523,15 @@ def test_a_post_queues_and_answers_immediately(host):
 
 
 def test_a_post_with_no_action_defaults_to_looking_not_installing(host):
-    _status(host.handle_http("POST", "/update?pin=1234", "{}"))
+    _call(host, "POST", "/update", "{}")
     host.update.step()
     assert host.update.ota.calls == ["check"]
 
 
 def test_junk_and_the_wrong_verb_are_refused_distinctly(host):
-    code, _ = _status(host.handle_http("POST", "/update?pin=1234", "not json"))
+    code, _ = _call(host, "POST", "/update", "not json")
     assert code == 400
-    code, _ = _status(host.handle_http("PUT", "/update?pin=1234", "{}"))
+    code, _ = _status(host.handle_http("PUT", "/update", "{}"))
     assert code == 405
 
 
@@ -505,21 +540,21 @@ def test_a_board_whose_updater_would_not_build_still_serves_its_carts(host):
     NOTHING ELSE -- the kid's carts are the product, the firmware endpoint is
     not."""
     host.update = None
-    code, payload = _status(host.handle_http("GET", "/update?pin=1234", None))
+    code, payload = _call(host, "GET", "/update")
     assert code == 503
     assert json.loads(payload) == {"error": "no updater"}
     # ...and the store endpoints are untouched by the absence.
-    assert host.handle_http("GET", "/sync", None) is not None
+    assert _call(host, "GET", "/carts.json")[0] == 200
 
 
 def test_the_update_route_does_not_shadow_the_store(host):
-    """`/update` is a fourth arm on a subclass, and the three it sits beside
-    have to keep working: an override that swallowed everything would be a
-    board that serves no carts and passes every test in this file."""
-    assert host.handle_http("GET", "/updates?pin=1234", None).startswith(
-        b"HTTP/1.1 404")
+    """`/update` sits beside the store's routes, and they have to keep
+    working: an override that swallowed everything would be a board that
+    serves no carts and passes every test in this file."""
+    assert _call(host, "GET", "/updates")[0] == 404
     code, _ = _status(host.handle_http("GET", "/carts.json", None))
-    assert code == 403, "the store's own gate still applies"
+    assert code == 401, "the store's own gate still applies"
+    assert _call(host, "GET", "/carts.json")[0] == 200
 
 
 def test_an_image_already_in_the_slot_installs_without_a_second_pass():

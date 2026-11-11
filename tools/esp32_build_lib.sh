@@ -62,6 +62,30 @@ moybyte_ccache_counts() {
     END { if (NR) print h + 0, m + 0 }'
 }
 
+# ONE ESP32 BUILD CONFIGURES AT A TIME on this machine. Every build's CMake
+# configure runs the component manager over its one git cache
+# (~/.cache/Espressif/ComponentManager), and two configuring at once race on
+# its index.lock ("Unable to create index.lock: File exists": two P4s
+# 2026-09-22, the T-Deck and a P4 2026-10-03). So the configure -- `make
+# submodules` and the port build up to its first finished step -- holds an
+# flock under ~/.cache/moybyte (MOYBYTE_LOCK_DIR overrides) that every
+# checkout's builds share, and the compile and link run beside other builds.
+# The wait prints as the `lock` phase. No flock(1), no lock.
+moybyte_configure_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  local dir="${MOYBYTE_LOCK_DIR:-${HOME}/.cache/moybyte}"
+  mkdir -p "${dir}"
+  exec {MOYBYTE_LOCK_FD}>"${dir}/esp-configure.lock"
+  flock "${MOYBYTE_LOCK_FD}"
+}
+
+# Release it. Safe twice, and from the phase watcher's subshell: an flock
+# belongs to the open file, which the subshell shares.
+moybyte_configure_unlock() {
+  [ -n "${MOYBYTE_LOCK_FD:-}" ] || return 0
+  flock -u "${MOYBYTE_LOCK_FD}" 2>/dev/null || true
+}
+
 # The port build's stdout, passed through, with the moment each phase starts
 # written to $1 as "NAME START_US" lines (this runs in a pipeline's subshell,
 # so the marks come back through the file). Off a terminal ninja prints a
@@ -86,6 +110,7 @@ moybyte_phase_watch() {
         if [ -z "${compiling}" ]; then
           echo "compile ${now}" >> "$1"
           compiling=1
+          moybyte_configure_unlock
         fi
         last="${now}" ;;
     esac
@@ -115,6 +140,21 @@ moybyte_build_times() {         # the EXIT trap of a timed build: $1 its status
   "${BUILD_PYTHON:-python3}" "${REPO_ROOT}/tools/timings.py" add --tool build \
     --status "${status}" ${hits:+--ccache "${hits},${misses}"} \
     "${lane}=$(( total / 1000 )).$(( total % 1000 / 100 ))" "${args[@]}" || true
+}
+
+# Write stdin to $1 unless $1 already holds exactly it. Every generated file a
+# build compiles is judged by its mtime (ninja, makemanifest), so rewriting the
+# same text recompiles and relinks an image nothing changed in.
+moybyte_write_if_changed() {
+  local path="$1" tmp
+  tmp="$(mktemp "${path}.XXXXXX")"
+  cat > "${tmp}"
+  chmod a+r "${tmp}"
+  if cmp -s "${tmp}" "${path}"; then
+    rm -f "${tmp}"
+  else
+    mv -f "${tmp}" "${path}"
+  fi
 }
 
 # Sets BUILD_PYTHON: the venv python when there is one (same interpreter the
@@ -315,6 +355,15 @@ moybyte_patch_gc_meters() {
 # pass over the rest of the buffer per store -- ~2.2 ms a row into a 153 KB
 # PSRAM bytearray on the P4. tools/patch_slice_store.py is the patch and the
 # measurement: all-or-nothing, idempotent, and every other store unchanged.
+# FatFS's long-name buffer a board's choice: the port's MICROPY_FATFS_ENABLE_LFN
+# a default, so a re-entrant oofatfs (the store's lock, native/moy_store/
+# moy_vol.h) can put it on the calling task's stack. tools/patch_fatfs_lfn.py
+# is the patch; all-or-nothing, idempotent.
+moybyte_patch_fatfs_lfn() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_fatfs_lfn.py" "${MPY_DIR}" || exit 1
+}
+
 moybyte_patch_slice_store() {
   [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1
@@ -366,6 +415,40 @@ moybyte_patch_usj_rx_init() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_usj_rx_init.py" "${MPY_DIR}" || exit 1
 }
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book
+# (native/moy_kernel/moy_ledc.h), which a compiled program's PWM handles and a
+# panel's backlight take theirs from too, so none drives another's, and
+# channels at one frequency share a timer whoever holds them.
+# tools/patch_pwm_ledc_book.py is the patch; all-or-nothing, idempotent. Every
+# board that links moy_kernel takes it: the book is the kernel's.
+moybyte_patch_pwm_ledc_book() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_pwm_ledc_book.py" "${MPY_DIR}" || exit 1
+}
+
+# The mDNS responder's four function-static scratch buffers (about 1.8 KB of
+# internal .bss in every image that links espressif/mdns) become one PSRAM
+# block mdns_init allocates and mdns_free frees, so a console whose responder
+# runs only while its SSH server serves holds none of it otherwise.
+# tools/patch_mdns_psram.py is the patch and why ESP-IDF's external-.bss
+# option was declined; all-or-nothing, idempotent. The patch goes to the
+# component manager's copy, which exists only once the build has fetched it,
+# so this records the opt-in and moybyte_submodules applies it after the fetch.
+moybyte_patch_mdns_psram() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  MOYBYTE_MDNS_PSRAM=1
+}
+
+# TinyUSB's MSC endpoint buffer (native/moy_usbdisk) in PSRAM, taken at the
+# drive's first start, not internal .bss for the whole power-on.
+# tools/patch_tinyusb_msc_psram.py is the patch and why; all-or-nothing,
+# idempotent. Applied, like the mDNS one, by moybyte_submodules after the
+# component manager's fetch.
+moybyte_patch_tinyusb_msc_psram() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  MOYBYTE_TUSB_MSC_PSRAM=1
+}
+
 # LittleFS's default program size and lookahead, 32 -> 256 each, so a P4's
 # flash store programs 1 KB of a file at a time instead of 128 bytes and walks
 # the filesystem for free blocks an eighth as often. tools/patch_lfs_sizes.py is
@@ -383,6 +466,17 @@ moybyte_patch_lfs_sizes() {
 moybyte_patch_sdcard_runs() {
   [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_sdcard_runs.py" "${MPY_DIR}" || exit 1
+}
+
+# Split-heap growth step. A growth adds an area as large as the whole heap,
+# so a small request a collect cannot place doubles it, and an area one
+# survivor holds is never given back: on an 8 MB board the step, not the need,
+# sets what the heap keeps. tools/patch_gc_grow_step.py caps one growth at the
+# board's MOYBYTE_GC_GROW_MAX (a bigger request still gets its own size); a
+# board that defines nothing keeps the stock doubling.
+moybyte_patch_gc_grow_step() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_grow_step.py" "${MPY_DIR}" || exit 1
 }
 
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
@@ -537,7 +631,7 @@ moybyte_ota_identity() {
     ota_name="$(grep -oE '^FIRMWARE_NAME = "[^"]*"' "${ota_py}" | head -1 | cut -d'"' -f2)"
     OTA_LABEL="${ota_name:-v${OTA_VERSION}}"
   fi
-  cat > "${MODULES_DIR}/_ota_build.py" <<EOF
+  moybyte_write_if_changed "${MODULES_DIR}/_ota_build.py" <<EOF
 # AUTO-GENERATED by build.sh -- moy_ota imports this for the build's OTA identity.
 # Gitignored; do not edit or commit.
 CHANNEL = "${OTA_CHANNEL}"
@@ -560,19 +654,48 @@ EOF
   echo "OTA build identity: board=${board_id} channel=${OTA_CHANNEL} version=${OTA_VERSION} label='${OTA_LABEL}'"
 }
 
-# Write the frozen manifest ($1) for MODULES_DIR: the port's default frozen
-# stdlib + this board's modules. The md5 fingerprint makes the manifest CONTENT
-# change whenever any frozen source changes -- ninja rests custom commands on
-# identical manifest text, so without it a changed .py silently ships as stale
-# .mpy.
+# Write the frozen manifest ($1) for MODULES_DIR: MicroPython's own frozen
+# modules ($2, a manifest; the port's default set when absent) + this board's
+# modules. The md5 fingerprint makes the manifest CONTENT change whenever any
+# frozen source changes -- ninja rests custom commands on identical manifest
+# text, so without it a changed .py silently ships as stale .mpy.
 moybyte_frozen_manifest() {
-  local manifest="$1"
+  local manifest="$1" port_manifest="${2:-\$(PORT_DIR)/boards/manifest.py}"
   rm -rf "${MODULES_DIR}/__pycache__" "${MODULES_DIR}/moybyte/__pycache__"
-  cat > "${manifest}" <<EOF
-include("\$(PORT_DIR)/boards/manifest.py")
+  {
+    cat <<EOF
+include("${port_manifest}")
 freeze("${MODULES_DIR}", opt=3)
 EOF
-  echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)" >> "${manifest}"
+    echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)"
+  } | moybyte_write_if_changed "${manifest}"
+}
+
+# MicroPython's makemanifest rebuilds a module's .mpy when the .py is newer and
+# frozen_content.c when any input is, so on its own it misses three changes:
+# a module DELETED from the tree (nothing is newer), a new freeze option, and
+# a new mpy-cross, nor a board config that changes the C build's qstrs
+# (frozen_content.c names the ones the C provides, so a module turned off
+# leaves it citing a qstr that no longer exists). $1 is the port's build dir;
+# the manifest ($MANIFEST, whose fingerprint names every frozen file and its
+# bytes), the board's mpconfigboard.* (BOARD_DIR) and the mpy-cross binary are
+# the keys. A changed set or board config drops frozen_content.c; a changed
+# option or compiler drops every .mpy too. Recorded before the build, like
+# genhdr's.
+moybyte_frozen_guard() {
+  local bout="$1" set tool
+  set="$( { cat "${MANIFEST}"; cat "${BOARD_DIR:-/nonexistent}"/mpconfigboard.* 2>/dev/null; } \
+          | md5sum | cut -d' ' -f1)"
+  tool="$( { grep -v '^# frozen-source fingerprint' "${MANIFEST}"
+             md5sum < "${MPY_DIR}/mpy-cross/build/mpy-cross"; } | md5sum | cut -d' ' -f1)"
+  mkdir -p "${bout}"
+  if [ "$(cat "${bout}/.moybyte-frozen-tool" 2>/dev/null)" != "${tool}" ]; then
+    rm -rf "${bout}/frozen_mpy" "${bout}/frozen_content.c"
+  elif [ "$(cat "${bout}/.moybyte-frozen-set" 2>/dev/null)" != "${set}" ]; then
+    rm -f "${bout}/frozen_content.c"
+  fi
+  printf '%s\n' "${tool}" > "${bout}/.moybyte-frozen-tool"
+  printf '%s\n' "${set}" > "${bout}/.moybyte-frozen-set"
 }
 
 # Apply the board's sdkconfig fragment: stage the partition table it names,
@@ -619,7 +742,7 @@ moybyte_sdkconfig_guard() {
     echo "!! sdkconfig.board names ${csv_name}, which is not in ${board_dir}" >&2
     exit 1; }
   # CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32.
-  cp "${BOARD_PARTITION_CSV}" "${MPY_DIR}/ports/esp32/${csv_name}"
+  moybyte_write_if_changed "${MPY_DIR}/ports/esp32/${csv_name}" < "${BOARD_PARTITION_CSV}"
 
   local build_dir stamp want
   build_dir="$(dirname "${gen}")"
@@ -735,12 +858,15 @@ moybyte_app_size_guard() {
 # service is mp_task copied, so the pinned tag's mp_task must be the one the
 # copy was reviewed against (tools/mp_task_calls.py, before anything compiles),
 # and its recovery floor names this build's OTA label, board and channel (its
-# `update` word fetches that release). Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
+# `update` word fetches that release). The kernel reads the core dump a panic
+# wrote (esp_core_dump.h), so the port's component list takes espcoredump.
+# Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
 moybyte_kernel_entry() {
   local dest staged label
   dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
   staged="${SCRIPT_DIR}/${dest}/moy_kernel"
   [ -d "${staged}" ] || return 0
+  moybyte_idf_component espcoredump
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/mp_task_calls.py" check \
     "${MPY_DIR}" "${REPO_ROOT}/native/moy_kernel/mp_task_calls.txt" || exit 1
   local board channel
@@ -748,7 +874,8 @@ moybyte_kernel_entry() {
   board="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
   channel="$(sed -n 's/^CHANNEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
   printf '#define MOY_FW_LABEL "%s"\n#define MOY_FW_BOARD "%s"\n#define MOY_FW_CHANNEL "%s"\n' \
-    "${label:-unlabelled}" "${board:-unknown}" "${channel:-stable}" > "${staged}/moy_fw_label.gen.h"
+    "${label:-unlabelled}" "${board:-unknown}" "${channel:-stable}" \
+    | moybyte_write_if_changed "${staged}/moy_fw_label.gen.h"
 }
 
 # The build's native configuration, as one line: the native modules this board
@@ -787,29 +914,68 @@ moybyte_native_config_guard() {
   printf '%s\n' "${want}" > "${bout}/moy_native_config"
 }
 
+# `make submodules` configures the whole IDF project in a scratch build dir to
+# learn which submodules the board needs (~4 s), every build. What it answers
+# is fixed by the MicroPython tree's commit, the board def and the submodules'
+# state, so it runs when one of those moved since it last ran here. $1 is the
+# port's build dir. Reads MPY_DIR BOARD_DIR.
+moybyte_submodules_key() {
+  { git -C "${MPY_DIR}" rev-parse HEAD
+    git -C "${MPY_DIR}" submodule status
+    echo "${BOARD_DIR}"
+    find "${BOARD_DIR}" -type f -exec md5sum {} + | sort
+  } 2>&1 | md5sum | cut -d' ' -f1
+}
+
+moybyte_submodules() {
+  local bout="$1"
+  local mdns="managed_components/espressif__mdns/mdns.c"
+  local msc="managed_components/espressif__tinyusb/src/class/msc/msc_device.c"
+  if [ "$(cat "${bout}/.moybyte-submodules" 2>/dev/null)" != "$(moybyte_submodules_key)" ] \
+     || { [ -n "${MOYBYTE_MDNS_PSRAM:-}" ] && [ ! -f "${mdns}" ]; } \
+     || { [ -n "${MOYBYTE_TUSB_MSC_PSRAM:-}" ] && [ ! -f "${msc}" ]; }; then
+    make submodules BOARD_DIR="${BOARD_DIR}"
+    mkdir -p "${bout}"
+    moybyte_submodules_key > "${bout}/.moybyte-submodules"
+  fi
+  # The submodules step's configure is the component manager's fetch, so the
+  # managed components are there to patch before the build compiles them.
+  if [ -n "${MOYBYTE_MDNS_PSRAM:-}" ]; then
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_mdns_psram.py" "${MPY_DIR}" || exit 1
+  fi
+  if [ -n "${MOYBYTE_TUSB_MSC_PSRAM:-}" ]; then
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_tinyusb_msc_psram.py" "${MPY_DIR}" || exit 1
+  fi
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
   moybyte_phase mpy-cross
   moybyte_kernel_entry
   make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
   cd "${MPY_DIR}/ports/esp32"
-  make submodules BOARD_DIR="${BOARD_DIR}"
   local bout="build-${BOARD}"
   moybyte_native_config_guard "${bout}"
+  moybyte_frozen_guard "${bout}"
   local port_make=(make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}"
     USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake"
     FROZEN_MANIFEST="${MANIFEST}")
+  moybyte_phase lock
+  moybyte_configure_lock
   if [ -n "${MOYBYTE_T0}" ] && [ ! -t 1 ]; then
     local marks n at
     marks="$(mktemp)"
     moybyte_phase configure
+    moybyte_submodules "${bout}"
     "${port_make[@]}" | moybyte_phase_watch "${marks}"
     while read -r n at; do moybyte_phase "${n}" "${at}"; done < "${marks}"
     rm -f "${marks}"
   else
     moybyte_phase port
+    moybyte_submodules "${bout}"
     "${port_make[@]}"
   fi
+  moybyte_configure_unlock
   moybyte_phase collect
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
@@ -820,6 +986,9 @@ moybyte_build_and_collect() {
   floor="${floor%% *}"
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
     "${floor}" "${board_id}"
+  # A core dump must carry the loaded modules' table (tools/coredump.py).
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
+    || exit 1
   echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

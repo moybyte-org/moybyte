@@ -43,8 +43,8 @@ from runtime import host_app            # noqa: E402
 from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import gfx_binding         # noqa: E402  (MOY64 -> the exact GIF palette)
+from runtime import achievements as ACH  # noqa: E402  (the console's own badges)
 from runtime import ui_draw as UI       # noqa: E402  (labeled tab-row geometry)
-from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 OUT_DIR = os.path.join(ROOT, "docs", "media")
@@ -82,7 +82,7 @@ class Recorder:
         # same id the Appearance app persists, so `--wallpaper open_machine` records
         # exactly what a kid who picked it would see. None keeps the boot default
         # (the first wallpaper cart in the store). persist=False: a recording must
-        # not depend on -- or leave -- a system.json, and the store is a temp dir.
+        # not depend on -- or leave -- a system/settings, and the store is a temp dir.
         if wallpaper:
             self.ws.look.select_wallpaper(wallpaper, persist=False)
             if self.ws.look.wallpaper_id != wallpaper:
@@ -95,8 +95,7 @@ class Recorder:
         # Pre-unlock every achievement. The celebration banner is real UI, but a
         # fresh store unlocks "First Steps" on the very first open and the toast
         # would then sit across the top of every recording's opening seconds.
-        for entry in WID.ACHIEVEMENTS:
-            self.ws.ach.unlocked[entry[0]] = 0
+        self.ws.ach.seed({a["id"]: 0 for a in ACH.SHELL})
         self.ws.pointer.idle_ms = 10 ** 9        # never auto-hide the cursor
         self.ws.pointer.visible = True
         self.ws.show_fps = False                 # no dev chip over the payoff shot

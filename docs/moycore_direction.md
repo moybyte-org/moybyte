@@ -16,7 +16,8 @@ and `_draw` back to back with no return to Python, and the kernel's Player
 engine nor the cart's loop: a VM-free Lua run (`native/moy_play/moy_play.h`)
 is the kernel loop's foreground on the boards — its input, ticks, chrome and
 present in C, no upcall from launch to exit — and the VM stays up only
-for the shell around it. There is exactly **one** Lua runtime on every tier —
+for the shell around it. A compiled cart's run is too, on a board whose
+compositor shows its frames from the cart's memory (`moy_glass.front`). There is exactly **one** Lua runtime on every tier —
 boards, browser, host — and `import moy_lua` is meant to fail.
 
 The ladder that got there, one line each, because none of it is direction any
@@ -134,6 +135,60 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   indexed-vs-565 A/B was settled on P4 glass 2026-08-05 and moycore does not
   reopen it. The `lua_Alloc` internal-SRAM-first policy and the `-O2` pins on
   the VM carry.
+
+- **The browser's JavaScript does I/O; the decisions are the VM's** (owner,
+  2026-11-08). A rule copied into JavaScript drifts from its Python or C twin:
+  Notes' NameError came from the page's own re-seed rule. The VM is loaded
+  before the store is seeded (only the web MODE is decided first, by the
+  `GET /sync` probe), so a rule that seems to run "before the console" runs in
+  the VM anyway, and one that truly cannot is exported from the wasm's C,
+  never copied. `moy_store.mjs` holds no rule of its own: the worker's
+  `bind` hands it every one, and `tests/test_web_io_ratchet.py` holds its
+  exports to a list that only shrinks and its strings to a filed vocabulary.
+  The audit (2026-11-09, 2026-11-10):
+
+  | JavaScript rule | twin | divergence | now |
+  |---|---|---|---|
+  | `systemSeeds`, `cartVersion`, `RESEED_PRESERVE` | `moy_seed.seed_builtins` (`moy_seed.c`) | a torn local copy was diffed as version 0, where a board rewrites it whole | the VM's: `moy_seed.seed_folders` over the board's `_make_room` (the host's seed too); the worker's `seedLocal` moves bytes |
+  | `zipStore`, `crc32`, `walkVfs` | `moy_pack.pack` (`moy_pack.c`) | none | the VM's: export runs `web_boot.export_cart` |
+  | `unzip`, `inflateRaw`, `zipTopDir` | `moy_pack.unpack` (`moy_pack.c`) | the C refused a member over `MOY_SEED_MAX`, the page had no cap; the C streams each member now | the VM's: `web_boot.import_archive_json` |
+  | `cartBase`, `uniqueCartDir`, `p8Base` | `moy_pack.import_archive` | Python named an import `Hop.moy`, the page `local.hop.moy` | the VM's: `moy_pack.import_base`/`import_target`, the page's rule kept |
+  | `themeOf`, `uniqueThemeDir`, `landedTheme`, `renamedTheme` | `moy_pack._theme_of` | a fallback name's runs of other characters | the VM's: `import_archive` |
+  | `SKIP_*`, `skipName`; `SITE_SKIP_*`, `skipLocal` | `moy_sync._skip` and its site list, C `moy_store_skip` | none | the VM's: the worker hands the store the wasm's `moy_store.skip` |
+  | `BINARY_*`, `isBinary` | `moy_sync.BINARY_*` | none | gone: `readAll` hands text or bytes, and the ops are the VM's own sweep |
+  | `ROOTS`, `rootById` | `moy_sync.SYNC_ROOTS` | the delete arity lived only in the page and the C | the VM's: `moy_sync.roots_json`, `Root.dc` held to the C |
+  | `safeSegments`, `localParts` | `moy_sync_apply.c`'s path rule | the page counted a path's length in UTF-16 units, and took an app's key the skip rule keeps home | the VM's: `moy_sync.local_segs` over the C's `moy_sync_path` |
+  | `plainName`, `writtenName` | `cart_index.plain_name`; the apps root's shape in `moy_sync_apply.c` | none | the VM's: `plain_name`, `local_segs("apps", ..)` |
+  | `isSong`, `MUSIC_DIR` | `moy_webhost.c`'s song rule and music folder | none | the C's: `moy_sync_song` and `MOY_SYNC_MUSIC` (the webhost's too), by `moy_sync.local_song` and `MUSIC` |
+  | `RECORD_NAME`, `STAGE_DIR`, `WRITTEN_ROOT` | `cart_index.RECORD_NAME`/`STAGE_DIR`, the apps root | none | the VM's: `bind`'s `record`/`stage` from `cart_index`, the registry's apps root |
+  | `walk`'s depth (`depth > 6`) and "a top-level file is no cart file" | `StoreWatcher._walk_dir`'s depth; `local_segs`' shape | the page read files 7 segments deep at most where the sweep ships them 8 deep, so a deepest file went out and never came back | the VM's: `rules.folder` (`moy_sync.local_folder`, `WALK_DEPTH`, the sweep's own) and `rules.path` |
+  | `isEmpty` (roots other than carts) | `seed_folders`' `first` | none | the VM's: `moy_sync.seed_store` (`moy_seed.adopt_bundle`) |
+  | `probeMode` | the boards' `GET /sync` | none | JavaScript's: it decides what the VFS is seeded from |
+
+  And in `worker.js`:
+
+  | JavaScript rule | twin | divergence | now |
+  |---|---|---|---|
+  | a site batch's root (`doc.v === 2 && doc.root`) | the watcher that took it; `moy_sync_batch` | none | the VM's: `web_boot.sync_root` |
+  | `isP8Drop`, the `.mp3` test | `p8_writer.looks_like_png`, `moy_sync_song` | the page read 4 bytes of the PNG signature's 8 | the VM's: `web_boot.drop_kind` |
+  | the pulls' and the reload's endpoints, written out | `Root.endpoint` | none | the registry's: `roots_json`'s `endpoint` |
+  | which roots a boot seeds | none | -- | the VM's: `moy_sync.seeds` |
+  | `system/sources` from `indexes.json` | `cart_index.save_sources` | the page wrote it in place, the console through its atomic write | the VM's: `web_boot.site_sources` |
+  | the export picker's cart folders | `moy_sync._skip`, the store walk | none | the VM's: `moy_sync.folders_json` |
+  | tier select, the one-cart default, the kiosk, `?edit=` | none | -- | the VM's: `web_boot.page_boot`, `page_start` |
+  | the spool's names (a fetch's, a pick's, Music's segments and listing) | `carts_link.SPOOL`, `media_link`'s | none | the VM's: each job names its file (`path`, `spool`), the listing is `web_vfs.LISTING` |
+  | the carts folder, the seed's staging, a drop's and an export's file | `web_boot.boot`'s default carts folder | the VM named a drop folder of its own, which nothing used | `web_vfs` |
+  | the roots a reload pulls again | none | -- | the VM's: `moy_sync.reload_json` |
+
+  What stays JavaScript decides nothing a console has a rule for: the mode
+  probe and the sync link's reading of a board's answers (requeue, off,
+  refused, closing; the heartbeat), the sign-in (its crypto is
+  `moy_seal_web.c`), the OPFS keeper's crash-safety (`~part`/`~done` and the
+  install's `.commit` marker: OPFS has no rename, and the keeper is its one
+  reader), the install's room check (twice the bytes, the keeper's own
+  staging cost), a station's fetch (the https upgrade, the CORS probe), the
+  channel's word and the page's own sentences. `web_boot.py` holds no copy:
+  it reads `moy_sync`'s registry and rules.
 
 ## 4. Open rows
 

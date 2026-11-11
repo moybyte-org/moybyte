@@ -38,6 +38,7 @@ reader splits the replies and both sides fail ("multiple access on port" on one,
 ```bash
 tools/board.py tdeck state                    # stack, cart, error, diag, wifi (--json: all)
 tools/board.py tdeck push path/to/cart.moy    # copy to the store, rescan the shelf
+tools/board.py tdeck remove cart.moy          # take a folder back off, as the console removes a cart
 tools/board.py tdeck run "Brick Siege"        # by title; checks it came up without an error
 tools/board.py tdeck shot /tmp/tdeck.png      # then Read the PNG to see it
 tools/board.py tdeck leave                    # end the cart, reopen the desk it had
@@ -45,14 +46,28 @@ tools/board.py tdeck py "ws.screen" "len(ws.carts.all)"   # eval on the live con
 tools/board.py tdeck py --exec "ws._x = 1"    # statements, in the shared ws._g namespace
 tools/board.py tdeck pmem [--text]            # the running cart's 256 cells (--text: a string)
 tools/board.py tdeck mem                      # python heap, internal SRAM, PSRAM
+tools/board.py p4 sh "cd /proc" "ls" "pkg update"   # lines in the C shell's serial session
 tools/board.py tdeck tail 3 --send heapcaps --grep HEAPCAPS  # every heap's total/free/largest/low-water, one line
 tools/board.py tdeck tap 160 120              # swipe X0 Y0 X1 Y1 [FRAMES] / open settings
 tools/board.py tdeck tail 10 --send "diag 1" --grep PERF
 tools/board.py tdeck perf "Brick Siege"       # see the perf skill
 ```
 
+**`sh`** sends each line as the kernel's `sh` word (`native/moy_sh/moy_sh_board.h`,
+THE SERIAL FACE) and prints its `SH` lines as they come, the status of the
+last line its exit code (`SH end N`). It is the board's one serial session:
+`cd` and variables carry from one line, and one call, to the next. A line
+that waits (`sleep`, `http get`, `pkg update`) parks while the console's
+frames go on; Ctrl-C sends the channel's 0x03, which stops it. `--timeout`
+(60 s) bounds each line; `--also REGEX` prints the board's other lines that
+match as they come (`--also HITCH` with `diag 1`: a line's worst frames). It works with the VM stopped too (an S3 running a
+cart without one), where a console command answers "needs the console".
+Never set or remove a board's SSH password with it (`passwd`): the console's
+is the owner's.
+
 `perf` ends its cart and puts diag and uncap back, `push` changes only the
-store, `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board
+store and `remove` undoes it (`pkg.removed`: the record, the folder, the files
+the cart wrote, its consent), `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board
 to where it boots (no cart, launcher on top, the desk
 open on a windowed tier). **Leave a board the way you found it** — a leftover
 menu or cart is what the next suite trips on.
@@ -92,7 +107,7 @@ It is one job, however many boards: run it in the background and take its
 one notice; the table and the pass's wall time are its last lines. One row a
 board: the commit its image was built from (`+`: tracked changes on top), the
 headroom the build printed, passed/skipped/failed, the time each step took
-(`wait` is for the P4s' one-at-a-time build slot) and the failing tests by
+(`wait` is the build's wait for the machine's configure lock) and the failing tests by
 name; every step's log is a file under the directory it prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
@@ -124,10 +139,10 @@ tools/board.py tdeck reboot --soft  # Ctrl-C, then Ctrl-D: for a board sitting a
 tools/board.py guition_s3 wait      # until `state` answers (default 120 s)
 ```
 
-By hand, never start two builds at the same moment: every ESP32 build races
-on the component manager's cache while it configures
-(`.claude/rules/boards.md`); `pass` builds the P4s one at a time and reruns a
-build that lost. A board takes most of a minute to reach the desk after a
+Two builds may run at once, by hand or in a pass: every ESP32 build races on
+the component manager's cache while it configures, so each holds one
+machine-wide lock for its configure (`.claude/rules/boards.md`), and `pass`
+reruns a build that lost anyway. A board takes most of a minute to reach the desk after a
 reset — the Guition S3 from its card the longest — and `wait` is what knows
 when it has; a suite started earlier errors every test with "did not answer
 `state`".
@@ -147,7 +162,7 @@ when it has; a suite started earlier errors every test with "did not answer
 5. It prints `KERNEL recovery reason=...` lines and answers nothing else: the
    board is on the kernel's recovery floor (`native/moy_kernel/`) -- the VM
    failed to start or crashed into a boot loop. Read the crash it shows, then
-   send `retry`, `safe` (boots on default settings, `system.json` neither
+   send `retry`, `safe` (boots on default settings, `system/settings` neither
    read nor written, no wallpaper cart) or `repl` (skips `main.py`) as a line; each is a restart. A console that cannot start
    its VM can still take a release there: `update` says what this build's
    channel offers, `update install` installs it and restarts, over the
@@ -170,5 +185,8 @@ MOYBYTE_GUITION_P4_PORT=$(tools/board.py guition_p4 port) .venv/bin/python -m py
 ```
 
 The Waveshare's suite resets its board at the start; the attach-only boards
-are attached to as they are, so their desk must be clean. `.claude/rules/testing.md`
+are attached to as they are, so their desk must be clean. Every suite gives the
+store back when its session closes: each folder that was not there when it
+opened goes, the way `remove` takes one, and a push marks the folder it makes
+(`.on_glass`) so the next session removes what a killed one left. `.claude/rules/testing.md`
 has the rules that bite when you write one.

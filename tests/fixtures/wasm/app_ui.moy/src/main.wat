@@ -14,7 +14,8 @@
 ;; (from 0), 11 the first pane's size, 12 where a tap activated the second
 ;; pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on it
 ;; last was while pressed (the same; the part's nav is off, so a held press
-;; stays its own).
+;; stays its own), 14 the row of parts' current row, 15 the page's top (an
+;; app's ui frame is its content_rect(), below the host's bar).
 (module
   (import "moy" "rect" (func $rect (param i32 i32 i32 i32 i32)))
   (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
@@ -82,6 +83,10 @@
   (import "moybyte.app" "ui_held_all" (func $ui_held_all (result i32)))
   (import "moybyte.app" "ui_split" (func $ui_split
     (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_empty" (func $ui_empty (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_note" (func $ui_note (param i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_bubble" (func $ui_bubble
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
@@ -169,7 +174,7 @@
   (func (export "_draw")
     (local $x i32) (local $y i32) (local $w i32) (local $h i32) (local $f i32) (local $i i32)
     (local $d i32)
-    (call $ok (call $ui_page (i32.const 1024) (i32.const 7) (i32.const 0) (i32.const 0)
+    (call $ok (call $ui_page (i32.const 1024) (i32.const 0) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
     (call $ok (call $ui_label (i32.const 1040) (i32.const 5) (i32.const 0) (i32.const 0)))
     (global.set $sound (call $ui_toggle (i32.const 1056) (i32.const 5) (global.get $sound)
@@ -262,4 +267,5 @@
     (drop (call $pmem (i32.const 11) (i32.load (i32.const 2300)) (i32.const 1)))
     (drop (call $pmem (i32.const 12) (global.get $tap) (i32.const 1)))
     (drop (call $pmem (i32.const 13) (global.get $held) (i32.const 1)))
-    (drop (call $pmem (i32.const 14) (global.get $xcur) (i32.const 1)))))
+    (drop (call $pmem (i32.const 14) (global.get $xcur) (i32.const 1)))
+    (drop (call $pmem (i32.const 15) (i32.load (i32.const 2052)) (i32.const 1)))))

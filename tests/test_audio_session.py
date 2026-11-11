@@ -185,10 +185,10 @@ def test_a_run_holds_the_focused_cart_session(tmp_path):
     from ws_helpers import build_ws, open_cart
     ws = build_ws(tmp_path)
     open_cart(ws, "Coin Quest")
-    assert ws.audio.h and na.focused() == ws.audio.h
-    first = ws.audio.h
+    assert ws.run.audio.h and na.focused() == ws.run.audio.h
+    first = ws.run.audio.h
     open_cart(ws, "Brick Siege")
-    assert ws.audio.h != first
+    assert ws.run.audio.h != first
     with pytest.raises(ValueError):
         na.sfx(first, 0)
 

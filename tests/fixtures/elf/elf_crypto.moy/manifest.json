@@ -1,0 +1,10 @@
+{
+  "title": "Crypto Calls",
+  "id": "elf.crypto",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

@@ -70,6 +70,10 @@
 #define MICROPY_PY_ESPNOW                   (0)
 #define MICROPY_PY_MACHINE_I2S              (0)
 
+// NO framebuf: nothing on this board draws (no panel, and the console it
+// serves rasterizes in the browser).
+#define MICROPY_PY_FRAMEBUF                 (0)
+
 // UART0 REPL stays ON (the generic S3 board's default): D6/D7 are GPIO43/44,
 // they are broken out on this board's header, and MOY_NET_GPIO_PINS holds them
 // back from the GPIO allowlist precisely BECAUSE they are the recovery console
@@ -113,8 +117,11 @@
 // The WiFi driver is the kernel's (native/moy_net/moy_wifi.c): the station
 // that serves, the first-run setup access point beside it, and the mDNS name
 // (`<name>.local`) a headless board is found by. Python never constructs the
-// port's network.WLAN on this board.
+// port's network.WLAN on this board. The station is the board's own
+// (MOY_NET_WIFI_OWN): the lease table's book (moy_net.h) starts it for a
+// holder and never puts it down.
 #define MOY_NET_WIFI                        (1)
+#define MOY_NET_WIFI_OWN                    (1)
 #define MOY_NET_MDNS                        (1)
 
 // THE /gpio ALLOWLIST (native/moy_net/moy_gpio.c): the pins a browser's cart may
@@ -122,15 +129,17 @@
 // is refused and never touched -- because the failure modes are not
 // survivable the way a 400 is.
 //     D0=1   D1=2   D2=3*  D3=4   D4=5(SDA)  D5=6(SCL)
-//     D6=43* D7=44* D8=7(SCK)  D9=8(MISO)  D10=9(MOSI)      * excluded, below
+//     D6=43* D7=44* D8=7*  D9=8*  D10=9*                  * excluded, below
 // 21 is not on a pad: it is the board's user LED (active LOW), the one
 // hello-world that needs no wiring. EXCLUDED, each a pin some other list would
 // hand out:
 //   3 (D2)         strapping (the JTAG source at reset): the strict call, the
 //                  one exposed pad held back;
+//   7, 8, 9        (D8-D10) the SPI bus of the Wio-SX1262 on the board-to-board
+//                  connector, the `lora` row of board.toml, with 38-42;
 //   43, 44 (D6/D7) UART0 TX/RX, the REPL that recovers a wedged USB image;
 //   19, 20         the native USB pair this board is reached through;
 //   0, 45, 46      boot-mode and VDD_SPI strapping (0 low at reset is the ROM
 //                  loader);
 //   26..37         SPI flash and the octal PSRAM: driving one stops the machine.
-#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 7, 8, 9, 21}
+#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 21}

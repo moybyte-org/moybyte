@@ -13,6 +13,8 @@
 
 #include "moy_json.h"
 #include "moy_net.h"
+#include "moy_webauth.h"
+#include "moy_seal.h"
 #include "moy_ota.h"
 
 // The board's network halves: the HTTP server's parser and its responses, the
@@ -150,39 +152,29 @@ static void json_of(vstr_t *v, mp_obj_t o) {
     #endif
 }
 
-static mp_obj_t mod_encode_batch(size_t n_args, const mp_obj_t *args) {
-    vstr_t jv, jr, jo, jp;
-    json_of(&jv, args[0]);
-    int has_root = args[1] != mp_const_none;
-    int has_pin = n_args > 3 && mp_obj_is_true(args[3]);
+static mp_obj_t mod_encode_batch(mp_obj_t v, mp_obj_t root, mp_obj_t ops) {
+    vstr_t jv, jr, jo;
+    json_of(&jv, v);
+    int has_root = root != mp_const_none;
     if (has_root) {
-        json_of(&jr, args[1]);
+        json_of(&jr, root);
     }
-    json_of(&jo, args[2]);
-    if (has_pin) {
-        json_of(&jp, args[3]);
-    }
+    json_of(&jo, ops);
     size_t need = moy_sync_encode(NULL, 0, jv.buf, jv.len,
                                   has_root ? jr.buf : NULL, has_root ? jr.len : 0,
-                                  jo.buf, jo.len, has_pin ? jp.buf : NULL,
-                                  has_pin ? jp.len : 0);
+                                  jo.buf, jo.len);
     vstr_t out;
     vstr_init_len(&out, need);
     moy_sync_encode(out.buf, need, jv.buf, jv.len, has_root ? jr.buf : NULL,
-                    has_root ? jr.len : 0, jo.buf, jo.len,
-                    has_pin ? jp.buf : NULL, has_pin ? jp.len : 0);
+                    has_root ? jr.len : 0, jo.buf, jo.len);
     vstr_clear(&jv);
     vstr_clear(&jo);
     if (has_root) {
         vstr_clear(&jr);
     }
-    if (has_pin) {
-        vstr_clear(&jp);
-    }
     return mp_obj_new_str_from_vstr(&out);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_encode_batch_obj, 3, 4,
-                                           mod_encode_batch);
+static MP_DEFINE_CONST_FUN_OBJ_3(mod_encode_batch_obj, mod_encode_batch);
 
 // The builtin json, straight from the module table: an import of an
 // extensible built-in searches every sys.path entry first, a filesystem
@@ -207,9 +199,9 @@ static mp_obj_t mod_decode_batch(mp_obj_t body) {
     }
     mp_obj_t json = json_module();
     mp_obj_t fn = mp_load_attr(json, MP_QSTR_loads);
-    mp_obj_t t[4] = {loads(fn, e.v, e.v_end), loads(fn, e.root, e.root_end),
-                     loads(fn, e.ops, e.ops_end), loads(fn, e.pin, e.pin_end)};
-    return mp_obj_new_tuple(4, t);
+    mp_obj_t t[3] = {loads(fn, e.v, e.v_end), loads(fn, e.root, e.root_end),
+                     loads(fn, e.ops, e.ops_end)};
+    return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_decode_batch_obj, mod_decode_batch);
 
@@ -412,7 +404,8 @@ MP_DEFINE_CONST_OBJ_TYPE(moy_net_link_type, MP_QSTR_Link, MP_TYPE_FLAG_NONE,
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
 // The WiFi driver's face (moy_wifi.c): device/device_wifi.py's service and
-// the link call these; the spine's lease is what calls wifi_on and wifi_off.
+// the link call these. wifi_on starts only a station that is down
+// (moy_net.h's THE BOOK: the book's start is the one).
 
 static void wcheck(int err) {
     if (err != 0) {
@@ -421,7 +414,11 @@ static void wcheck(int err) {
 }
 
 static mp_obj_t mod_wifi_on(void) {
-    wcheck(moy_wifi_on());
+    moy_wifi_state_t st;
+    moy_wifi_state(&st);
+    if (!st.on) {
+        wcheck(moy_wifi_on());
+    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_on_obj, mod_wifi_on);
@@ -496,10 +493,18 @@ static mp_obj_t mod_wifi_status(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_status_obj, mod_wifi_status);
 
-// [(ssid bytes, rssi, auth)], [] while the radio is down.
-static mp_obj_t mod_wifi_scan(void) {
+// wifi_scan(wait=True): [(ssid bytes, rssi, auth)], [] while the radio is
+// down. wifi_scan(False) never waits: None while the scan it started (or the
+// one running) has not ended, then its list.
+static mp_obj_t mod_wifi_scan(size_t n_args, const mp_obj_t *args) {
+    bool wait = n_args == 0 || mp_obj_is_true(args[0]);
     moy_wifi_ap_t *aps = m_new(moy_wifi_ap_t, MOY_WIFI_SCAN_MAX);
-    int n = moy_wifi_scan(aps, MOY_WIFI_SCAN_MAX);
+    int n = wait ? moy_wifi_scan(aps, MOY_WIFI_SCAN_MAX)
+                 : moy_wifi_scan_poll(aps, MOY_WIFI_SCAN_MAX);
+    if (n == MOY_WIFI_SCANNING) {
+        m_del(moy_wifi_ap_t, aps, MOY_WIFI_SCAN_MAX);
+        return mp_const_none;
+    }
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (int i = 0; i < n; i++) {
         mp_obj_t t[3] = {mp_obj_new_bytes((const byte *)aps[i].ssid, strlen(aps[i].ssid)),
@@ -509,7 +514,7 @@ static mp_obj_t mod_wifi_scan(void) {
     m_del(moy_wifi_ap_t, aps, MOY_WIFI_SCAN_MAX);
     return out;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_scan_obj, mod_wifi_scan);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_scan_obj, 0, 1, mod_wifi_scan);
 
 static mp_obj_t mod_wifi_mac(void) {
     uint8_t mac[6];
@@ -525,6 +530,35 @@ static mp_obj_t mod_wifi_ps(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wifi_ps_obj, 0, 1, mod_wifi_ps);
 
 #endif
+
+// -- the wall clock (moy_net.h) ---------------------------------------------------
+
+// clock_state() -> MOY_CLOCK_UNSYNCED, _SYNCED or _ASKING; allocates nothing.
+// The browser's build (no platform half) reads the page's clock: synced.
+static mp_obj_t mod_clock_state(void) {
+    #if MOY_NET_SERVE
+    return MP_OBJ_NEW_SMALL_INT(moy_clock_state(NULL));
+    #else
+    return MP_OBJ_NEW_SMALL_INT(MOY_CLOCK_SYNCED);
+    #endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_clock_state_obj, mod_clock_state);
+
+// clock_server(name or None): the server the next sync asks; ValueError past
+// MOY_CLOCK_SERVER_MAX bytes.
+static mp_obj_t mod_clock_server(mp_obj_t name) {
+    const char *n = name == mp_const_none ? NULL : mp_obj_str_get_str(name);
+    #if MOY_NET_SERVE
+    int bad = moy_clock_server(n) != 0;
+    #else
+    int bad = n != NULL && strlen(n) > MOY_CLOCK_SERVER_MAX;
+    #endif
+    if (bad) {
+        mp_raise_ValueError(MP_ERROR_TEXT("server name"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_clock_server_obj, mod_clock_server);
 
 // -- the sync apply and the webhost -------------------------------------------------
 
@@ -570,13 +604,7 @@ static const char *str_or_null(mp_obj_t o) {
     return o == mp_const_none ? NULL : mp_obj_str_get_str(o);
 }
 
-#if MICROPY_EPOCH_IS_2000
-#define VM_EPOCH 946684800
-#else
-#define VM_EPOCH 0
-#endif
-
-// sync_batch(body) -> (root id, pin or None, ops JSON text), or None.
+// sync_batch(body) -> (root id, ops JSON text), or None.
 static mp_obj_t mod_sync_batch(mp_obj_t body) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
@@ -584,18 +612,34 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     if (moy_sync_batch(b.buf, b.len, &bt) != MOY_SYNC_OK) {
         return mp_const_none;
     }
-    mp_obj_t fn = mp_load_attr(json_module(), MP_QSTR_loads);
-    mp_obj_t t[3] = {
+    mp_obj_t t[2] = {
         MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files
-                        : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system : MP_QSTR_carts),
-        loads(fn, bt.pin, bt.pin_end),
+                        : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system
+                        : bt.root == MOY_SYNC_APPS ? MP_QSTR_apps : MP_QSTR_carts),
         mp_obj_new_str(bt.ops, (size_t)(bt.ops_end - bt.ops)),
     };
-    return mp_obj_new_tuple(3, t);
+    return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
 
-// sync_apply(carts, files, kinds, root id, ops JSON, journal)
+// sync_path(rel, history) -> the segments of a store path the receiver
+// takes, 0 for one it refuses (moy_net.h's moy_sync_path).
+static mp_obj_t mod_sync_path(mp_obj_t rel, mp_obj_t history) {
+    size_t n;
+    const char *p = mp_obj_str_get_data(rel, &n);
+    return MP_OBJ_NEW_SMALL_INT(moy_sync_path(p, n, mp_obj_is_true(history)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_sync_path_obj, mod_sync_path);
+
+// sync_song(name) -> whether `name` is a song of the music folder.
+static mp_obj_t mod_sync_song(mp_obj_t name) {
+    size_t n;
+    const char *p = mp_obj_str_get_data(name, &n);
+    return mp_obj_new_bool(moy_sync_song(p, n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_song_obj, mod_sync_song);
+
+// sync_apply(carts, files, kinds, root id, ops JSON, journal[, apps])
 //   -> (applied, [(index, reason)], shelf, refused)
 static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
     char kinds[96];
@@ -604,11 +648,13 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
         .files = str_or_null(args[1]),
         .kinds = names_of(args[2], kinds, sizeof(kinds)),
         .journal = mp_obj_is_true(args[5]),
-        .ts = (int64_t)(mp_hal_time_ns() / 1000000000ull) - VM_EPOCH,
+        .ts = moy_net_time(),
+        .apps = n_args > 6 ? str_or_null(args[6]) : NULL,
     };
     const char *rid = mp_obj_str_get_str(args[3]);
     int root = strcmp(rid, "files") == 0 ? MOY_SYNC_FILES
-               : strcmp(rid, "carts") == 0 ? MOY_SYNC_CARTS : MOY_SYNC_SYSTEM;
+               : strcmp(rid, "carts") == 0 ? MOY_SYNC_CARTS
+               : strcmp(rid, "apps") == 0 ? MOY_SYNC_APPS : MOY_SYNC_SYSTEM;
     size_t on;
     const char *ops = mp_obj_str_get_data(args[4], &on);
     if (moy_json_valid(ops, on) != MOY_JSON_OK) {
@@ -629,11 +675,12 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
                      mp_obj_new_bool(r.shelf), mp_obj_new_int_from_uint(r.refused)};
     return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 6, mod_sync_apply);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 7, mod_sync_apply);
 
 #if MOY_NET_SERVE
 
-// web_start(port, carts, files, kinds, pin, defer): raises OSError on a bind.
+// web_start(port, carts, files, kinds, system, defer[, apps]): raises OSError
+// on a bind.
 static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
     moy_web_cfg_t cfg = {
@@ -641,9 +688,9 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
         .carts = mp_obj_str_get_str(args[1]),
         .files = str_or_null(args[2]),
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
-        .pin = str_or_null(args[4]),
+        .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
-        .epoch = VM_EPOCH,
+        .apps = n_args > 6 ? str_or_null(args[6]) : NULL,
     };
     int rc = moy_web_start(&cfg);
     if (rc != 0) {
@@ -651,12 +698,12 @@ static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 6, mod_web_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_start_obj, 6, 7, mod_web_start);
 
 // -- the web-console switch -----------------------------------------------------
 
-// wc_on(port, carts, files, kinds, pin, defer, ip): never waits; OSError when
-// the configuration itself is refused.
+// wc_on(port, carts, files, kinds, system, defer, ip[, apps]): never waits;
+// OSError when the configuration itself is refused.
 static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
     char kinds[96], defer[96];
     moy_web_cfg_t cfg = {
@@ -664,9 +711,9 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
         .carts = mp_obj_str_get_str(args[1]),
         .files = str_or_null(args[2]),
         .kinds = names_of(args[3], kinds, sizeof(kinds)),
-        .pin = str_or_null(args[4]),
+        .system = str_or_null(args[4]),
         .defer = names_of(args[5], defer, sizeof(defer)),
-        .epoch = VM_EPOCH,
+        .apps = n_args > 7 ? str_or_null(args[7]) : NULL,
     };
     int rc = moy_wc_on(&cfg, ip_of(args[6]));
     if (rc != 0) {
@@ -674,7 +721,7 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 7, mod_wc_on);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 8, mod_wc_on);
 
 static mp_obj_t mod_wc_off(size_t n_args, const mp_obj_t *args) {
     moy_wc_off(n_args ? str_or_null(args[0]) : NULL);
@@ -740,12 +787,6 @@ static mp_obj_t mod_wc_phase(mp_obj_t port) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_phase_obj, mod_wc_phase);
 
-static mp_obj_t mod_wc_set_pin(mp_obj_t pin) {
-    moy_wc_set_pin(str_or_null(pin));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_set_pin_obj, mod_wc_set_pin);
-
 static mp_obj_t mod_wc_park(mp_obj_t on) {
     moy_wc_park(mp_obj_is_true(on));
     return mp_const_none;
@@ -753,7 +794,7 @@ static mp_obj_t mod_wc_park(mp_obj_t on) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_park_obj, mod_wc_park);
 
 static mp_obj_t mod_wc_url(mp_obj_t paired) {
-    char b[96];
+    char b[160];
     size_t n = moy_wc_url(b, sizeof(b), mp_obj_is_true(paired));
     return mp_obj_new_str(b, n < sizeof(b) ? n : sizeof(b) - 1);
 }
@@ -765,11 +806,56 @@ static mp_obj_t mod_web_stop(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_stop_obj, 0, 1, mod_web_stop);
 
-static mp_obj_t mod_web_set_pin(mp_obj_t pin) {
-    moy_web_set_pin(str_or_null(pin));
-    return mp_const_none;
+// web_auth(system) -> the board's id ("" with no folder): the sign-in set up
+// over the system folder, serving or not.
+static mp_obj_t mod_web_auth(mp_obj_t system) {
+    if (moy_web_auth(str_or_null(system)) != 0) {
+        mp_raise_OSError(MP_ENOMEM);
+    }
+    char id[33];
+    moy_web_board_id(id);
+    return mp_obj_new_str(id, strlen(id));
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_set_pin_obj, mod_web_set_pin);
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_auth_obj, mod_web_auth);
+
+// web_keys() -> [(kid, created, seen, name)], the paired browsers.
+static mp_obj_t mod_web_keys(void) {
+    char *b = m_new(char, 2048);
+    size_t n = moy_web_keys(b, 2048);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (size_t at = 0; at < n;) {
+        char *e = memchr(b + at, '\n', n - at);
+        if (e == NULL) {
+            break;
+        }
+        *e = '\0';
+        char kid[24];
+        long long cr = 0, se = 0;
+        int k = 0;
+        const char *name = "";
+        if (sscanf(b + at, "%20s%n", kid, &k) == 1 && k > 0
+            && moy_wa_scan_times(b + at + k, &cr, &se, &name)) {
+            mp_obj_t t[4] = {mp_obj_new_str(kid, strlen(kid)), mp_obj_new_int_from_ll(cr),
+                             mp_obj_new_int_from_ll(se), mp_obj_new_str(name, strlen(name))};
+            mp_obj_list_append(out, mp_obj_new_tuple(4, t));
+        }
+        at = (size_t)(e - b) + 1;
+    }
+    m_del(char, b, 2048);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_keys_obj, mod_web_keys);
+
+static mp_obj_t mod_web_key_drop(mp_obj_t kid) {
+    return MP_OBJ_NEW_SMALL_INT(moy_web_key_drop(mp_obj_str_get_str(kid)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_key_drop_obj, mod_web_key_drop);
+
+// web_signout() -> the sessions ended: a password changed or removed.
+static mp_obj_t mod_web_signout(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_web_signout());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_signout_obj, mod_web_signout);
 
 static mp_obj_t mod_web_poll(void) {
     int did = 0;
@@ -796,6 +882,25 @@ static mp_obj_t mod_web_events(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_events_obj, mod_web_events);
 
+// web_shelf() -> the cart folders the batches since the last call changed on
+// the shelf (a tuple of names), or None for every folder; cleared.
+static mp_obj_t mod_web_shelf(void) {
+    char names[MOY_WEB_SHELF_BYTES];
+    size_t n = moy_web_shelf(names, sizeof(names));
+    if (n == MOY_WEB_SHELF_ALL) {
+        return mp_const_none;
+    }
+    mp_obj_t t = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; i += strlen(names + i) + 1u) {
+        mp_obj_list_append(t, mp_obj_new_str(names + i, strlen(names + i)));
+    }
+    size_t len;
+    mp_obj_t *items;
+    mp_obj_list_get(t, &len, &items);
+    return mp_obj_new_tuple(len, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_shelf_obj, mod_web_shelf);
+
 // web_take() -> (method, target, body bytes) for the parked request, or None.
 static mp_obj_t mod_web_take(void) {
     const char *m, *t, *b;
@@ -816,43 +921,18 @@ static mp_obj_t mod_web_answer(mp_obj_t resp) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_answer_obj, mod_web_answer);
 
-static mp_obj_t out_bytes(char *p, size_t n) {
-    mp_obj_t o = mp_obj_new_bytes((const byte *)(p ? p : ""), n);
-    moy_net_free(p);
-    return o;
-}
-
-// web_handle(method, target, body) -> the whole response, or None when the
-// VM answers this request.
-static mp_obj_t mod_web_handle(mp_obj_t method, mp_obj_t target, mp_obj_t body) {
-    size_t mn, tn;
-    const char *m = mp_obj_str_get_data(method, &mn);
-    const char *t = mp_obj_str_get_data(target, &tn);
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(body, &b, MP_BUFFER_READ);
-    char *out = NULL;
-    size_t n = 0;
-    int done = 0;
-    WEB_GUARD_BEGIN
-    done = moy_web_handle(m, mn, t, tn, b.buf, b.len, &out, &n);
-    WEB_GUARD_END
-    if (!done) {
-        moy_net_free(out);
-        return mp_const_none;
-    }
-    return out_bytes(out, n);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(mod_web_handle_obj, mod_web_handle);
-
-// web_pack(root, kinds) -> the store under `root` as the pull's JSON text.
-static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
+// web_pack(root, kinds[, bytes]) -> the store under `root` as the pull's JSON
+// text, every file as bytes where `bytes` is true.
+static mp_obj_t mod_web_pack(size_t n_args, const mp_obj_t *args) {
     char kinds[96];
-    const char *k = names_of(kinds_o, kinds, sizeof(kinds));
+    mp_obj_t root = args[0];
+    const char *k = names_of(args[1], kinds, sizeof(kinds));
+    int bytes = n_args > 2 && mp_obj_is_true(args[2]);
     char *out = NULL;
     size_t n = 0;
     int rc = 0;
     WEB_GUARD_BEGIN
-    rc = moy_web_pack(mp_obj_str_get_str(root), k, &out, &n);
+    rc = moy_web_pack(mp_obj_str_get_str(root), k, bytes, &out, &n);
     WEB_GUARD_END
     if (rc != 0) {
         moy_net_free(out);
@@ -862,7 +942,7 @@ static mp_obj_t mod_web_pack(mp_obj_t root, mp_obj_t kinds_o) {
     moy_net_free(out);
     return s;
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_web_pack_obj, mod_web_pack);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_pack_obj, 2, 3, mod_web_pack);
 
 static mp_obj_t mod_web_stamp(void) {
     const char *s = moy_web_stamp_text();
@@ -1127,12 +1207,31 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_http_close_obj, mod_http_close);
 
 #endif // MOY_NET_SERVE
 
+// pw_hash(password, salt) -> the console password's record, "$moy2$ITER$SALT$
+// W0$L" (moy_seal.h's THE PASSWORD; runtime/system/ssh_service.py), on every
+// port: the shell's passwd, the Zero's setup and provision.sh make it here.
+static mp_obj_t mod_pw_hash(mp_obj_t pw, mp_obj_t salt) {
+    size_t pn, sn;
+    const char *p = mp_obj_str_get_data(pw, &pn);
+    const char *s = mp_obj_str_get_data(salt, &sn);
+    char out[MOY_SEAL_PW_RECORD];
+    int n = moy_seal_pw_record(p, pn, s, sn, MOY_SEAL_PW_ITER, out, sizeof out);
+    if (n < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("salt"));
+    }
+    return mp_obj_new_str(out, (size_t)n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_pw_hash_obj, mod_pw_hash);
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
     {MP_ROM_QSTR(MP_QSTR_encode_batch), MP_ROM_PTR(&mod_encode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_path), MP_ROM_PTR(&mod_sync_path_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_song), MP_ROM_PTR(&mod_sync_song_obj)},
+    {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     #if MOY_NET_SERVE
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
     {MP_ROM_QSTR(MP_QSTR_query_param), MP_ROM_PTR(&mod_query_param_obj)},
@@ -1141,13 +1240,16 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&mod_web_stop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_set_pin), MP_ROM_PTR(&mod_web_set_pin_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_auth), MP_ROM_PTR(&mod_web_auth_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&mod_web_key_drop_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&mod_web_signout_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},
+    {MP_ROM_QSTR(MP_QSTR_web_shelf), MP_ROM_PTR(&mod_web_shelf_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&mod_web_answer_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_handle), MP_ROM_PTR(&mod_web_handle_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_on), MP_ROM_PTR(&mod_wc_on_obj)},
@@ -1160,7 +1262,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_dns_reply), MP_ROM_PTR(&mod_dns_reply_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_poll), MP_ROM_PTR(&mod_dns_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_stop), MP_ROM_PTR(&mod_dns_stop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wc_set_pin), MP_ROM_PTR(&mod_wc_set_pin_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&mod_wc_park_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_url), MP_ROM_PTR(&mod_wc_url_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_keys), MP_ROM_PTR(&mod_ota_keys_obj)},
@@ -1185,6 +1286,8 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&mod_http_close_obj)},
     #endif
+    {MP_ROM_QSTR(MP_QSTR_clock_state), MP_ROM_PTR(&mod_clock_state_obj)},
+    {MP_ROM_QSTR(MP_QSTR_clock_server), MP_ROM_PTR(&mod_clock_server_obj)},
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},

@@ -1,5 +1,9 @@
 // moy_loop: the console's frame. moy_loop.h has the contract and the order.
 
+#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,7 +11,9 @@
 
 #include "moy_devch.h"
 #include "moy_loop.h"
+#include "moy_log.h"
 #include "moy_perf.h"
+#include "moy_sync.h"
 
 // The stage budgets in per-mille of the pacing slot; -1 is no deadline (the
 // tail: a browser pulling the console bundle owns the frame it lands in, the
@@ -96,6 +102,12 @@ static struct {
     uint32_t up_frame[MOY_UPC_CLASSES], up_last[MOY_UPC_CLASSES], up_total[MOY_UPC_CLASSES];
     moy_idle_t idle;
     heavy_t *heavy;
+    struct {
+        moy_loop_job_fn fn;
+        void *arg;
+        bool again;             // asked for while it ran: a false answer keeps it
+    } jobs[MOY_LOOP_JOBS];
+    int njobs;
 } L = {.vm = true, .frame_ms = 16, .slot = 16, .light_top = MOY_IDLE_LIGHT_FULL};
 
 // -- the tier's helpers ---------------------------------------------------------
@@ -126,6 +138,91 @@ void moy_loop_say_line(const char *line) {
     } else {
         printf("%s\n", line);
     }
+}
+
+// -- the jobs ----------------------------------------------------------------------
+
+// The table is any task's to add to (a program's own task arms the kernel's
+// timers and notifications, moy_evq.c and moy_notes.c), so it is held under
+// its own lock, never across a job's run. A job asked for again while it
+// runs is kept by its false answer: the ask made after the job looked and
+// before it went is not lost.
+static MOY_SYNC_LOCK_T s_jobs_lock = MOY_SYNC_LOCK_INIT;
+
+static int job_at(moy_loop_job_fn fn, void *arg) {
+    for (int i = 0; i < L.njobs; i++) {
+        if (L.jobs[i].fn == fn && L.jobs[i].arg == arg) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void job_cut(int i) {
+    memmove(&L.jobs[i], &L.jobs[i + 1], (size_t)(L.njobs - i - 1) * sizeof L.jobs[0]);
+    L.njobs--;
+}
+
+bool moy_loop_job(moy_loop_job_fn fn, void *arg) {
+    bool ok = true;
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int i = job_at(fn, arg);
+    if (i >= 0) {
+        L.jobs[i].again = true;
+    } else if (L.njobs == MOY_LOOP_JOBS) {
+        ok = false;
+    } else {
+        L.jobs[L.njobs].fn = fn;
+        L.jobs[L.njobs].arg = arg;
+        L.jobs[L.njobs].again = false;
+        L.njobs++;
+    }
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+    return ok;
+}
+
+void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) {
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int i = job_at(fn, arg);
+    if (i >= 0) {
+        job_cut(i);
+    }
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+}
+
+// A job may drop itself or another, or add one, while they run: each is run
+// at most once a call, by its identity.
+int moy_loop_jobs(void) {
+    moy_loop_job_fn fns[MOY_LOOP_JOBS];
+    void *args[MOY_LOOP_JOBS];
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    int n = L.njobs;
+    for (int i = 0; i < n; i++) {
+        fns[i] = L.jobs[i].fn;
+        args[i] = L.jobs[i].arg;
+    }
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+    for (int i = 0; i < n; i++) {
+        MOY_SYNC_LOCK(&s_jobs_lock);
+        int at = job_at(fns[i], args[i]);
+        if (at >= 0) {
+            L.jobs[at].again = false;
+        }
+        MOY_SYNC_UNLOCK(&s_jobs_lock);
+        if (at < 0 || fns[i](args[i])) {
+            continue;
+        }
+        MOY_SYNC_LOCK(&s_jobs_lock);
+        at = job_at(fns[i], args[i]);
+        if (at >= 0 && !L.jobs[at].again) {
+            job_cut(at);
+        }
+        MOY_SYNC_UNLOCK(&s_jobs_lock);
+    }
+    MOY_SYNC_LOCK(&s_jobs_lock);
+    n = L.njobs;
+    MOY_SYNC_UNLOCK(&s_jobs_lock);
+    return n;
 }
 
 static uint32_t now_ms(void) {
@@ -294,6 +391,15 @@ uint32_t moy_loop_pace(uint32_t elapsed) {
         L.debt = 2u * fms;
     }
     return 0;
+}
+
+uint32_t moy_loop_slack_us(void) {
+    if (L.tick_ms) {
+        return 0;
+    }
+    uint32_t used = now_ms() - L.last + L.debt;
+    uint32_t fms = slot_ms();
+    return used < fms ? (fms - used) * 1000u : 0u;
 }
 
 void moy_loop_pump(moy_loop_pump_t *out) {
@@ -549,6 +655,8 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 // PERF period by stage. Both cover the stages inside the frame's work (inputs to
 // tail); the pacing sleep is LOOP's `sleep`, and `other` is the work no stage
 // holds. A stage with no op on this tier was never metered and prints `-`.
+// Both go to the OS log under the kernel (moy_log.h): HITCH at warning, LOOP
+// and the PERF line at debug.
 
 static size_t put_ms(char *out, size_t cap, const char *name, bool have, uint32_t us) {
     if (!have) {
@@ -585,6 +693,7 @@ static void diag_frame(uint32_t elapsed, uint32_t sleep) {
     }
     h->pending |= DIAG_HITCH;
     moy_loop_say("%s", h->hitch);
+    moy_log_write(MOY_LOG_WARNING, MOY_LOG_KERNEL, h->hitch, strlen(h->hitch));
 }
 
 static void diag_window(bool emit) {
@@ -609,6 +718,7 @@ static void diag_window(bool emit) {
         }
         h->pending |= DIAG_LOOP;
         moy_loop_say("%s", h->loop);
+        moy_log_write(MOY_LOG_DEBUG, MOY_LOG_KERNEL, h->loop, strlen(h->loop));
     }
     memset(w, 0, sizeof(*w));
 }
@@ -638,6 +748,11 @@ bool moy_loop_perf_due(void) {
     return L.capture && L.heavy != NULL && (int32_t)(now_ms() - L.heavy->perf.at) >= 0;
 }
 
+// A kernel run in front plays the kernel's match with no console frame to
+// push its PERF fields: weak, so an image without the link has none.
+bool moy_play_front_live(void) __attribute__((weak));
+void moy_match_kernel_perf(void *v, uint32_t now) __attribute__((weak));
+
 static void account(uint32_t elapsed) {
     if (L.heavy == NULL) {
         return;
@@ -658,12 +773,17 @@ static void account(uint32_t elapsed) {
         if (L.ops->gc_pauses != NULL && L.ops->gc_pauses(gc)) {
             gcp = gc;
         }
+        if (moy_match_kernel_perf != NULL && moy_play_front_live != NULL
+                && moy_play_front_live()) {
+            moy_match_kernel_perf(&p->console, now);
+        }
         moy_perf_sample(p, L.drawn, ovp, gcp, L.heavy->line, sizeof(L.heavy->line));
         if (L.ops->perf_line != NULL) {
             L.ops->perf_line(L.heavy->line);
         } else {
             moy_loop_say("%s", L.heavy->line);
         }
+        moy_log_write(MOY_LOG_DEBUG, MOY_LOG_KERNEL, L.heavy->line, strlen(L.heavy->line));
         diag_window(true);
     } else {
         moy_perf_skip(p, L.drawn);
@@ -803,9 +923,15 @@ int moy_loop_step(void) {
     }
     uint32_t svc = !L.vm ? 0u
                    : L.services | L.once | (ops->services != NULL ? ops->services() : 0u);
-    if (ops->tail != NULL || svc) {
+    if (ops->tail != NULL || svc || L.njobs) {
         if (ops->tail != NULL) {
             ops->tail(now, drew);
+        }
+        if (L.njobs) {
+            moy_loop_jobs();
+            if (L.end) {
+                return take_end();
+            }
         }
         if (svc) {
             L.once = 0;

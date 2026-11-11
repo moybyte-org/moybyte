@@ -233,10 +233,10 @@ class Pair:
                 if force:
                     ws._dirty = True
                 ws.pointer.visible = False
-                k = ws._frames_drawn
+                k = ws.frame_state.frames_drawn
                 ws.code_layer._host.shifting = ws.theme_config_layer._host.shifting = False
                 drv.frame(1 / 30)
-                ws.painted = ws._frames_drawn != k
+                ws.painted = ws.frame_state.frames_drawn != k
             a, b = self.a, self.b
             assert a.painted == b.painted, "the two consoles' gates parted"
             if not a.painted:
@@ -649,7 +649,7 @@ def test_a_line_added_below_the_view_draws_no_history(th):
 
 
 def _cart_pixels(ws):
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     cv = ns["screen"]()
     x, y, w, h = ns["content_rect"]()
     buf = cv._buf
@@ -660,7 +660,7 @@ def _cart_pixels(ws):
 
 
 def _cart_pmem(ws):
-    lua = getattr(ws.player, "_lua", None)
+    lua = getattr(ws.run.player, "_lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:3]
     if lua is not None:
@@ -669,7 +669,7 @@ def _cart_pmem(ws):
         img = array("i", bytearray(4 * 256))
         sys.modules[type(lua).__module__]._moycore.pmem_image(img)
         return list(img)[:3]
-    pm = ws.player.ns["pmem"]
+    pm = ws.run.player.ns["pmem"]
     return [pm(i) for i in range(3)]
 
 
@@ -704,7 +704,7 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
             quiesce(ws)
             ws._dirty = True
             drv.frame(1 / 30)
-            assert ws.player.cart_error is None, (name, ws.player.cart_error)
+            assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
             shots.append((_cart_pixels(ws), _cart_pmem(ws)))
         runs[name] = shots
         ws.exit()
@@ -783,3 +783,24 @@ def test_a_caret_revealed_moves_the_view_only_as_far_as_its_row(th, bufs):
     assert r.reveal(2, 0)               # a caret above: its row at the top
     r.frame()
     assert r.ends()[0][0] == 2 and r.ends()[0][1] < 40
+
+
+def test_an_sgr_escape_mid_line_moves_no_glyph(th):
+    """A run after an escape draws at its own column, the escape's bytes
+    taking none: the line's ink lies where the plain line's does."""
+    from runtime.host_canvas import make_system_canvas
+
+    def ink(line):
+        cv = make_system_canvas(320, 240)
+        host = ui_draw.AppHost()
+        host.begin(cv, th, (0, 0, 320, 240))
+        ui.page("Ink")
+        ui.at(0, 40, 320, 40)
+        ui.text_view("ink", [line], {"rows": 1})
+        ui.end()
+        b = bytes(cv._buf)
+        ground = b[2 * (60 * 320 + 300):2 * (60 * 320 + 300) + 2]
+        return [x for x in range(320) if any(
+            b[2 * (y * 320 + x):2 * (y * 320 + x) + 2] != ground for y in range(44, 76))]
+
+    assert ink("\x1b[2m$ \x1b[0;36mls -l\x1b[0m /") == ink("$ ls -l /")

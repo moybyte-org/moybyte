@@ -37,7 +37,7 @@ from types import SimpleNamespace
 from runtime import host_app
 from runtime.console import Workstation
 from runtime.wm_windowed import WindowedWM
-from ws_helpers import select_first_game  # noqa: E402
+from ws_helpers import select_first_game, settle_badges  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -84,10 +84,12 @@ def _playing(tmp_path, **kw):
     select_first_game(ws)
     ws.open()
     ws._splash_until = None
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     for _ in range(3):
         drv.frame(DT)
+    settle_badges(ws)
     ws._toast_until = 0
     return ws, drv
 
@@ -98,7 +100,7 @@ def _spy(ws, took=True):
     sc = ws.sys_canvas
 
     def present(cf, view, gc, ox, oy, scale, src):
-        assert gc is ws.canvas
+        assert gc is ws.run.canvas
         calls.append(("present", gc.w, gc.h, ox, oy, scale, src, len(view),
                       cf.nrects))
         if took:
@@ -125,7 +127,7 @@ def _frame(ws, drv, cf):
 
 def test_a_frame_the_system_canvas_takes_is_not_composited(tmp_path):
     ws, drv = _playing(tmp_path)
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     _frame(ws, drv, cf)
     assert calls == [("present", 320, 240, 0, 0, 1, None, 320 * 240, 0)]
@@ -134,8 +136,8 @@ def test_a_frame_the_system_canvas_takes_is_not_composited(tmp_path):
 
 def test_a_separate_system_canvas_gets_the_composites_geometry(tmp_path):
     ws, drv = _playing(tmp_path, sys_size=(480, 320))
-    assert ws.sys_canvas is not ws.canvas
-    cf = ws.cart_frame = FakeCartFrame()
+    assert ws.sys_canvas is not ws.run.canvas
+    cf = ws.run.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     _frame(ws, drv, cf)
     ox, oy, scale = ws.wm.viewport()
@@ -145,7 +147,7 @@ def test_a_separate_system_canvas_gets_the_composites_geometry(tmp_path):
 
 def test_a_frame_it_declines_is_settled_then_composited(tmp_path):
     ws, drv = _playing(tmp_path, sys_size=(480, 320))
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     calls = _spy(ws, took=False)
     _frame(ws, drv, cf)
     assert [c[0] for c in calls] == ["present", "composite"]
@@ -154,7 +156,7 @@ def test_a_frame_it_declines_is_settled_then_composited(tmp_path):
 
 def test_nothing_owed_composites_as_ever(tmp_path):
     ws, drv = _playing(tmp_path, sys_size=(480, 320))
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     cf.log.clear()
     drv.frame(DT)                       # no blit this frame
@@ -167,7 +169,7 @@ def test_the_fps_chip_rides_the_frame_as_a_patch(tmp_path):
     ws.show_fps = True
     ws.perf_hud = True
     drv.frame(DT)
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     _frame(ws, drv, cf)
     # The chip and the breakdown card over it are one opaque rect over the
@@ -185,7 +187,7 @@ def test_a_frame_settled_after_the_chip_keeps_it(tmp_path):
     ws, drv = _playing(tmp_path)
     ws.show_fps = True
     drv.frame(DT)
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     _spy(ws, took=False)
     _frame(ws, drv, cf)
     assert ("settle", True) in cf.log     # the canvas is handed over to keep
@@ -195,7 +197,7 @@ def test_a_stopped_run_settles_the_frame_before_its_card(tmp_path):
     """The frame a run stopped on is settled before the stop card opens over
     it (the card draws on the system canvas, over the kept frame)."""
     ws, drv = _playing(tmp_path)
-    cf = ws.cart_frame = FakeCartFrame()
+    cf = ws.run.cart_frame = FakeCartFrame()
     _spy(ws)
     seen = []
     real = ws.pause.stop
@@ -205,10 +207,10 @@ def test_a_stopped_run_settles_the_frame_before_its_card(tmp_path):
         return real(*a, **k)
 
     ws.pause.stop = stop
-    ws.player.cart_error = "boom"           # the run crashed
+    ws.run.player.cart_error = "boom"           # the run crashed
     cf.owed = True
     cf.log.clear()
-    ws.player.tick(DT)
+    ws.run.player.tick(DT)
     assert seen and seen[0][-1] == "settle"
 
 
@@ -217,8 +219,8 @@ def test_desktop_mode_leaves_the_frame_to_the_player_window():
     assert WindowedWM.present_frame(wm, FakeCartFrame(), memoryview(b"")) is False
 
 
-def test_no_cart_frame_is_one_attribute_read():
-    ws = SimpleNamespace(cart_frame=None,
+def test_no_cart_frame_is_one_read_of_the_run():
+    ws = SimpleNamespace(run=SimpleNamespace(cart_frame=None),
                          wm=SimpleNamespace(composite_game=lambda: "composited"))
     assert Workstation._composite_game(ws) == "composited"
     Workstation.settle_cart_frame(ws)
@@ -266,7 +268,9 @@ class ScratchFrame(FakeCartFrame):
 
 def _canvas(comp):
     from device.device_canvas import DeviceCanvas
-    return DeviceCanvas, SimpleNamespace(_comp=comp, _snap_live=False)
+    cv = SimpleNamespace(_comp=comp, _snap_live=False)
+    cv.frame_scratch = lambda cf, gw, gh, n=0: DeviceCanvas.frame_scratch(cv, cf, gw, gh, n)
+    return DeviceCanvas, cv
 
 
 GC = SimpleNamespace(w=320, h=240, _buf=bytearray(320 * 240 * 2))
@@ -362,6 +366,7 @@ def _desk_playing(tmp_path):
     drv.frame(DT)
     ws.open_desk()
     open_cart(ws, "Star Catcher")
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     ws.pointer.visible = False
@@ -376,7 +381,7 @@ def _window_spy(ws, took=True):
     sc = ws.sys_canvas
 
     def present(cf, view, gc, ox, oy, scale, src, defer):
-        assert gc is ws.canvas
+        assert gc is ws.run.canvas
         calls.append(("present", ox, oy, scale, src, defer, len(view),
                       cf.nrects))
         if took:
@@ -397,7 +402,7 @@ def _window_spy(ws, took=True):
 
 def test_the_player_window_shows_the_frame_where_the_cart_made_it(tmp_path):
     ws, drv = _desk_playing(tmp_path)
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = _window_spy(ws)
     _frame(ws, drv, cf)
     _frame(ws, drv, cf)
@@ -409,7 +414,7 @@ def test_the_player_window_shows_the_frame_where_the_cart_made_it(tmp_path):
 
 def test_a_window_frame_it_declines_is_settled_then_composited(tmp_path):
     ws, drv = _desk_playing(tmp_path)
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = _window_spy(ws, took=False)
     _frame(ws, drv, cf)
     assert [c[0] for c in calls] == ["present", "blit_game"]
@@ -420,7 +425,7 @@ def test_the_fps_chip_rides_the_window_frame_as_a_patch(tmp_path):
     ws, drv = _desk_playing(tmp_path)
     ws.show_fps = True
     drv.frame(DT)
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = _window_spy(ws)
     _frame(ws, drv, cf)
     assert any(isinstance(e, tuple) and e[0] == "patch" for e in cf.log)
@@ -433,7 +438,7 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_in_the_window(tmp_path)
     window shows the copy of the last frame shown rather than a canvas
     nothing wrote."""
     ws, drv = _desk_playing(tmp_path)
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = _window_spy(ws)
     _frame(ws, drv, cf)
     del calls[:]
@@ -445,7 +450,7 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_in_the_window(tmp_path)
 
 def test_a_window_with_nothing_shown_composites_the_canvas(tmp_path):
     ws, drv = _desk_playing(tmp_path)
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = _window_spy(ws)
     drv.frame(DT)
     assert calls == [("blit_game",)] and cf.log == ["take"]
@@ -461,12 +466,13 @@ def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
     drv.frame(DT)
     ws.open_library()
     open_cart(ws, "Star Catcher")
+    settle_badges(ws)
     ws._toast_until = 0
     ws.show_fps = False
     for _ in range(3):
         drv.frame(DT)
     assert not ws.wm._order
-    cf = ws.cart_frame = KeptCartFrame()
+    cf = ws.run.cart_frame = KeptCartFrame()
     calls = []
     sc = ws.sys_canvas
 

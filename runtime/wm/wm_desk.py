@@ -13,18 +13,21 @@ try:
     import ui_draw as _ui_draw        # the desk's tiles and labels
     import layout_base as _layout_base
     import iconsets as _iconsets
+    from status_items import ITEMS as _ITEMS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.widgets import _in, _ticks_ms
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _layout_base
     from runtime import iconsets as _iconsets
+    from runtime.status_items import ITEMS as _ITEMS
 
 # A desk label over a wallpaper (a picture or a cart, pixels the theme does
 # not know): white over a black shadow (chrome.FIXED's), 80% and one pixel
 # down and right.
 _WALL_SHADOW_A = 204
 _NONE = -2147483648
+_TILE_MIN = 12              # the smallest a desk tile shrinks to (`_look_rects`)
 
 
 def _set(v):
@@ -71,6 +74,8 @@ class _BackdropLayer(Layer):
     def __init__(self, wm):
         self.wm = wm
         self.ws = wm.ws
+        self._cat_at = None           # what `_cat_sig` was made at (`_column_sig`)
+        self._cat_sig = None
 
     def draw(self, dt):
         wm = self.wm
@@ -170,6 +175,12 @@ class _BackdropLayer(Layer):
                 # cursors across the desk (measured on the host: from the third
                 # consecutive moving frame on). Finger gestures keep the #155
                 # skip -- the cursor is hidden there, nothing to erase.
+                tile = self.ws.bar_layer.tile_on()
+                if tile != wm._tile_shown:
+                    # a popover opened or closed over a bar item it selects:
+                    # every buffer takes the item as it now stands
+                    wm._tile_shown = tile
+                    wm._desk_streak = 0
                 ptr = self.ws._ptr_state()
                 last = self.ws._last_ptr
                 cursor_live = ((ptr is not None and ptr[2])
@@ -194,7 +205,7 @@ class _BackdropLayer(Layer):
             bar = self.ws.bar_layer
             wm._desk_clock()
             if bar.tile_on() != wm._desk_tile:
-                wm._outside_f = self.ws._frames_drawn
+                wm._outside_f = self.ws.frame_state.frames_drawn
                 bar.redraw_tile("desk")        # the cache holds the button's other state
             return
         wm._desk_streak = 0
@@ -210,17 +221,33 @@ class _BackdropLayer(Layer):
         """Everything the desk's wallpaper + icon column depends on, the
         layout's content rect among it (the bars a mode switch moves).
 
+        The apps' status items are in its bar (their `gen`).
+
         Deliberately NOT the clock (repainted over the cache instead) and NOT
         ws.covers.gen: a cover landing in the picker would otherwise invalidate
         the desk on the very frames a scroll is trying to stay cheap. Cheap to
-        compute -- no per-frame scan of the cart list."""
+        compute -- no per-frame scan of the cart list (`_column_sig`)."""
         ws = self.ws
         cv = ws.sys_canvas
         lay = ws.layout
         return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
-                ws.look.wallpaper_id,
-                len(getattr(ws, "_apps", ())), len(ws.carts.all),
-                lay.cx, lay.cy, lay.cw, lay.ch)
+                ws.look.wallpaper_id, self._column_sig(),
+                lay.cx, lay.cy, lay.cw, lay.ch, _ITEMS.gen)
+
+    def _column_sig(self):
+        """What the icon column takes from the apps and the roster: each
+        tile's key, label and cart folder (`_icon_catalog`). Made again only
+        when the roster or a title moves (`CartManager.gen`, `titled`) or
+        the apps do, so a cart installed or removed that is no tile of the
+        column leaves the desk's cache whole: a live desk is a full repaint."""
+        ws = self.ws
+        carts = ws.carts
+        at = (carts.gen, carts.titled, len(getattr(ws, "_apps", ())))
+        if at != self._cat_at:
+            self._cat_at = at
+            self._cat_sig = tuple((key, label, c.get("path") if c else None)
+                                  for key, label, c in self._icon_catalog())
+        return self._cat_sig
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt, quiet=self.quiet())
@@ -273,10 +300,10 @@ class _BackdropLayer(Layer):
         `notes`) and no registered app has that id, else its whole id."""
         ws = self.ws
         out = [("play", "Play", None), ("projects", "Projects", None)]
-        carts = ws.carts.all
+        carts = ws.runs_here(ws.carts.all)
         apps = getattr(ws, "_apps", ())
         for app, _text in apps:
-            if app.id in self.HIDDEN_APPS:
+            if app.id in self.HIDDEN_APPS or not getattr(app, "DESK_TILE", True):
                 continue
             cart = None
             for c in carts:
@@ -303,36 +330,55 @@ class _BackdropLayer(Layer):
 
     def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
         """The column under a look (docs/history/look_2026-10.md step 25): `box`
-        tiles on the class's pitch, their centres 54 of the tile's 44 in from
-        the desk's edge or further where a label needs it, each label under
-        its tile, 2 of the 44 below it, as wide as the column: nearer its own
-        tile than the next one down. A label longer than the columns leave
-        room for is cut to its band, so every column stays on the desk."""
-        k = box / 44
-        cell_h = _layout_base.metric("tile_cell", fs)
+        tiles on the class's pitch, or further apart where the tile, its
+        label's line at the font scale and 6 of the 44 under it need more,
+        their centres 54 of the tile's 44 in from the desk's edge or further
+        where a label needs it, each label under its tile, 2 of the 44 below
+        it, as wide as the column: nearer its own tile than the next one
+        down. A label longer than the columns leave
+        room for is cut to its band. Where the columns would still run past
+        the desk's right edge (more apps than the class's tiles hold at this
+        font scale), the tiles shrink, an eighth at a time, the cell and
+        margins with them and the labels kept a line, until they fit: every
+        app keeps a tile on the desk, however many there are."""
+        b = box
+        while True:
+            out, right = self._look_grid(catalog, b, box, fs, dx, dy, dh, dw)
+            if right <= dx + dw or b <= _TILE_MIN:
+                return out
+            b -= max(1, b // 8)
+
+    def _look_grid(self, catalog, b, box, fs, dx, dy, dh, dw):
+        """`_look_rects`' columns of tiles `b` across (`box` the class's),
+        and the rightmost pixel they reach."""
+        k = b / 44
+        gap = int(2 * k)
+        line = _ui_draw.font("ui")[2] * fs
+        cell_h = max(_layout_base.metric("tile_cell", fs) * b // box,
+                     b + gap + line + int(6 * k))
         y0 = dy + _layout_base.metric("tile_top", fs)
         bottom = dy + dh - int(6 * k)
-        line = _ui_draw.font("ui")[2] * fs
         maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
                    default=0)
-        rows = max(1, (bottom - y0 - box - int(2 * k) - line) // cell_h + 1)
+        rows = max(1, (bottom - y0 - b - gap - line) // cell_h + 1)
         cols = max(1, (len(catalog) + rows - 1) // rows)
         maxw = min(maxw, (dw - int(54 * k)) * 2 // (2 * cols - 1) - int(20 * k))
-        pitch = max(box + int(20 * k), maxw + int(20 * k))
+        pitch = max(b + int(20 * k), maxw + int(20 * k))
         cx = dx + max(int(54 * k), (maxw + 1) // 2 + int(10 * k))
-        gap = int(2 * k)
         y = y0
         out = []
+        right = dx
         for key, label, cart in catalog:
-            if y + box + gap + line > bottom and y > y0:
+            if y + b + gap + line > bottom and y > y0:
                 y = y0
                 cx += pitch
             out.append((key,
-                        (cx - box // 2, y, box, box),
-                        (cx - pitch // 2, y + box + gap, pitch, line),
+                        (cx - b // 2, y, b, b),
+                        (cx - pitch // 2, y + b + gap, pitch, line),
                         label, cart))
+            right = max(right, cx - b // 2 + b, cx - pitch // 2 + pitch)
             y += cell_h
-        return out
+        return out, right
 
     def _draw_look_icons(self, ws, cv, th):
         """Each tile as the look's part (`ui.bar_part`'s BAR_TILE) in its

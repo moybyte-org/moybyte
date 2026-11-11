@@ -7,11 +7,13 @@
 // Immediate mode over a CONTEXT the caller owns (moy_ui_ctx_t, plain bytes:
 // the Python face's bytearray per app, the run's one static): the focused id,
 // the stops the previous frame drew, each id's kept state (a page's scroll, a
-// list's row) and the layout cursor. A frame begins with moy_ui_api_begin,
-// which resolves the frame's input once over the previous frame's stops --
-// focus moves, activation, the pointer's press and drag, the page scroll that
-// keeps focus in view -- and every verb after it draws through a sink
-// (moy_ui.h) with the theme's marks: a stop's `focus=` and `on`.
+// list's row) and the layout cursor. A context is of an INSTANCE
+// (moy_ui_inst_t, below), what its frames share with its sibling contexts'.
+// A frame begins with moy_ui_api_begin, which resolves the frame's input
+// once over the previous frame's stops -- focus moves, activation, the
+// pointer's press and drag, the page scroll that keeps focus in view -- and
+// every verb after it draws through a sink (moy_ui.h) with the theme's
+// marks: a stop's `focus=` and `on`.
 //
 // An id is its label's FNV-1a hash, or the override's `id`; a page's is its
 // title's under a page salt. A verb's answer is its value: true the frame a
@@ -37,6 +39,7 @@
 #define MOY_UI_API_DIVS 8           // the dividers one frame's splits record (moy_ui_api_split_at)
 #define MOY_UI_API_PANES 16         // the panes one pass's splits record (moy_ui_api_split_frame)
 #define MOY_UI_API_TROWS 48         // the rows of a carried table a frame keeps the record of
+#define MOY_UI_API_PASTE 240        // the bytes the console's paste brings a field at most
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
@@ -105,8 +108,8 @@ typedef struct {
 // slots they are kept under, the uses counted, the warm order's next step,
 // the parts it named this round (wn) and the table's rows it runs over
 // (r0 .. r1 showed, of rows, np parts each);
-// each slot's part key and last use (0: empty). The engine's one record,
-// taken at the first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
+// each slot's part key and last use (0: empty). An instance's one record,
+// taken at its first moy_ui_api_slots (moy_ui_api_kept.c's kept memory).
 #define MOY_UI_FACE_SLOTS 128       // the slots it keeps at most
 typedef struct {
     uint32_t tick;
@@ -167,7 +170,9 @@ typedef struct {
     int8_t current, disabled, nav, mark;    // -1 absent
     int8_t steps;                   // a slider: a segment per step, no number
     moy_ui_span_t hint;             // a field's placeholder (p NULL: none)
-    int8_t wash;                    // a popover: wash what it covers (-1 absent)
+    int8_t wash;                    // a popover: wash what it covers (-1 absent), or
+                                    // 2 ("view") its anchor's view alone, less the
+                                    // anchor and its ring
     int8_t lead;                    // a table: its first row is a verb (-1 absent)
     int8_t has_gen;                 // `gen` given: 1, else 0
     int32_t gen;                    // what the app draws in the stop is a function of it
@@ -205,6 +210,30 @@ typedef struct {
     // the current row's part its gen and marks belong to.
     int8_t has_across;
     int16_t across_first, across_pitch, at;
+    // An info or a link row: the signal glyph (moy_ui.h's moy_ui_signal)
+    // before its value, its lit bars + 1 (0: no glyph).
+    int8_t signal;
+    // A list: each row's secondary text, NUL-separated, at its right in the
+    // dim ink (p NULL: none); `check` (0 or 1) the check icon at the
+    // current row's right, its column kept on every row.
+    moy_ui_span_t values;
+    int8_t check;
+    // A list's two-line rows (moy_ui.h's moy_ui_row2), each a text a row,
+    // NUL-separated (p NULL: none): `subs` (its second line; given, the rows
+    // are two-line), `icons` (its lead: an icon's name, or "@" and a
+    // person's name for their initials), `counts` (its badge; "" or "0"
+    // none), `tags` (a pill after its title) and `marks` (an icon there).
+    moy_ui_span_t subs, icons, counts, tags, marks;
+    // A group with no caption (ui.group("", {card = true})): 1 opens its card.
+    int8_t card;
+    // An info's or a link's tag: a pill at its value's right (p NULL: none).
+    moy_ui_span_t tag;
+    // A dialog's button focus opens on, by its label (p NULL: its body's
+    // first stop, else its first button).
+    moy_ui_span_t focus;
+    // The block's second word of flags (MOY_UI_O_MORE; 0 none), which the
+    // keys past the first word's read.
+    int32_t flags2;
 } moy_ui_over_t;
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
@@ -223,9 +252,34 @@ typedef struct {
 #define MOY_UI_O_AT 262144          // and `at`, its word after the across's
 #define MOY_UI_O_SHIFT 524288       // and `shift`
 #define MOY_UI_O_FADE 1048576       // and `fade`, its word after the at's
+#define MOY_UI_O_SIGNAL 2097152     // and `signal` (0..4 bars lit), its word after the fade's
+#define MOY_UI_O_VALUES 4194304     // and `values`, its length's word and its text after the signal's
+#define MOY_UI_O_CHECK 8388608      // and `check`
+#define MOY_UI_O_WASH_VIEW 16777216 // and `wash` "view" (with MOY_UI_O_WASH)
+#define MOY_UI_O_ROWS 33554432      // and a list's two-line rows: a word of MOY_UI_OR_* after
+                                    // the values', then each list it names, its length's word
+                                    // and its text, in the bits' order
+#define MOY_UI_O_CARD 67108864      // and `card`
+#define MOY_UI_O_FOCUS 268435456    // and `focus`, its length's word and its text after the tag's
+#define MOY_UI_O_TAG 134217728      // and `tag`, its length's word and its text after the rows'
+// and a second word of flags (MOY_UI_O2_*) after the focus's text, each key
+// it names its words after it in its bits' order: the door every key past
+// the first word's takes. Bit 30 is the first word's last free one; bit 31
+// is its sign (a word below 0 is no flags).
+#define MOY_UI_O_MORE 536870912
+// The second word's bits: `follow` (a page or scroll region rests on its
+// foot: it opens there, and stays there as its rows grow while it rests).
+#define MOY_UI_O2_FOLLOW 1
+#define MOY_UI_OR_SUBS 1
+#define MOY_UI_OR_ICONS 2
+#define MOY_UI_OR_COUNTS 4
+#define MOY_UI_OR_TAGS 8
+#define MOY_UI_OR_MARKS 16
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
+// sizeof(moy_ui_over_t): what a binding's mirror of it is held to.
+size_t moy_ui_over_size(void);
 // The block of `n` bytes at `w` (NULL or 0: every key absent) into *o, its id
 // pointing into the block. MOY_UI_BAD where it is short or its id overruns.
 int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);
@@ -252,6 +306,10 @@ typedef struct {
     int8_t keep;
     uint8_t stop, kind;             // kind: 1 a scroll region, 2 a dialog, 3 a popover
     int16_t used;                   // a dialog or popover: the body height it was laid out for
+    int8_t snap, snap_more;         // the outer page's snap state (moy_ui_ctx_t's)
+    int16_t snap_cut, snap_cap, snap_cue_h;
+    int8_t snap_at, snap_older;
+    int16_t snap_top;
 } moy_ui_nest_t;
 #define MOY_UI_API_NEST 2
 // What a verb that opens a nest (ui.scroll, ui.text_view, ui.dialog,
@@ -274,12 +332,88 @@ typedef struct {
     int32_t drawn, gen;
     uint8_t kd, s0, sn;
     int16_t rh;                     // a placed table: its row height as it drew
+    uint8_t rest;                   // a page under `follow`: it rests on its foot
 } moy_ui_keep_t;
+
+// A snapping page's units as its last pass placed them (moy_ui_ctx_t's
+// tops): the page's id (0: the slot is free) and its units' tops, in its
+// rows' pixels (0 its first row's top), ascending, MOY_UI_API_TOPS at most,
+// from two views above its scroll on. A drag let go and a focus step settle
+// its scroll onto one of them.
+#define MOY_UI_API_SNAPS 3          // the snapping pages whose units a frame keeps
+#define MOY_UI_API_TOPS 32          // the units kept a page
+typedef struct {
+    uint32_t id;
+    uint8_t n;
+    int16_t cue;                    // the band its foot keeps where its rows run on
+    int16_t top[MOY_UI_API_TOPS];
+} moy_ui_tops_t;
 
 typedef struct {
     int16_t y, h;
     uint8_t page;
 } moy_ui_cap_t;
+
+// An INSTANCE of the toolkit: what its frames write outside their contexts --
+// the kept rings and the faces (moy_ui_api_kept.c), the text views' rows,
+// breaks and records (moy_ui_text.c), the blocks of fields
+// (moy_ui_api_table.c) and the engine's counts. Each block is taken at its
+// first use (PSRAM where the board has it) and moy_ui_inst_free gives them
+// back. A context belongs to one instance (moy_ui_api_ctx_in): the shell,
+// its Python apps and the console's run share the main one
+// (moy_ui_inst_main), and a program that runs the toolkit on a task of its
+// own makes its own, so no two tasks' frames write the same bytes.
+//
+// An instance holds none of the theme (moy_ui.h's theme block): the looks,
+// the shape, the depth, the fonts and icons, the text view's word table and
+// tones and the keycaps' input are the console's, written on its task
+// between its frames. An instance in the console's image reads the live
+// ones, so a theme change shows from the next frame it begins. A copy of
+// the toolkit linked into a program holds the theme it installed: its
+// instance's `pull` (the theme row, moy_ui_theme_pull across the OS's door)
+// is asked at each begin with the generation installed last and answers a
+// newer block into `theme_buf` (moy_ui_theme_size() bytes, the program's),
+// which begin installs before the pass (moy_ui_theme_put; theme_puts counts
+// them), so a change reaches the copy's frames at its next begin. The
+// cart-text boundary is the sink's (moy_ui.h).
+struct moy_ui_inst {               // moy_ui_inst_t (moy_ui_text.h)
+    struct mua_kept_mem *kept;      // the kept rings and the faces' record
+    uint32_t fc_owner, fc_ids;      // the context holding the faces' ticket, the last given
+    struct moy_ui_text_mem *text;   // the text views' rows, breaks and records
+    struct mua_block *blocks;       // MOY_UI_BLOCKS blocks of fields
+    uint32_t block_tick, block_gen;
+    uint32_t fades;                 // moy_ui_api_fades's count
+    uint32_t audit_on, audit_fail;  // moy_ui_api_audit's switch and failures
+    uint32_t (*pull)(uint32_t have, void *buf, size_t cap);    // NULL: the live theme
+    void *theme_buf;
+    size_t theme_cap;
+    uint32_t theme_gen, theme_puts;
+    // The fonts an install names, fetched (the font row, moy_ui_theme_font
+    // across the OS's door: NULL keeps the console's ids, which an instance in
+    // the console's image reads) and loaded as the copy's own, the ids they
+    // replaced in `font_from` and the copy's in `font_local` (0: none), freed
+    // at the next install.
+    uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap);
+    uint32_t font_from[MOY_UI_THEME_FONTS], font_local[MOY_UI_THEME_FONTS];
+};
+
+// The main instance; an instance's size, for a face that owns it as bytes; a
+// fresh one over `I` (no blocks taken); and its blocks given back, every
+// context of it then to be reset before its next frame. A function here
+// that takes an instance takes NULL as the main one.
+moy_ui_inst_t *moy_ui_inst_main(void);
+size_t moy_ui_inst_size(void);
+// An instance's theme taken from `pull` into `buf` (cap bytes) from its next
+// begin, its fonts from `font_pull`, nothing installed yet (NULL: the live
+// theme).
+void moy_ui_inst_pull(moy_ui_inst_t *I, uint32_t (*pull)(uint32_t have, void *buf, size_t cap),
+                      void *buf, size_t cap,
+                      uint32_t (*font_pull)(uint32_t gen, uint32_t font, void *buf, size_t cap));
+// The theme pulled where it moved and installed, its fonts with it: what
+// every begin over `I` does first.
+void moy_ui_inst_sync(moy_ui_inst_t *I);
+void moy_ui_inst_init(moy_ui_inst_t *I);
+void moy_ui_inst_free(moy_ui_inst_t *I);
 
 typedef struct {
     uint32_t magic;
@@ -312,8 +446,9 @@ typedef struct {
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
     uint8_t keys, reveal, cls, fs;
-    uint8_t win;                    // the page lies in a window's body
+    uint8_t win;                    // the page lies in a window's body (1), on a panel (2)
     uint8_t elsewhere;              // the keys are another surface's: no focus
+    uint8_t tap;                    // the board's tap floor (moy_ui.h's MOY_UI_TAP)
     uint8_t app;                    // its buttons' row of app_buttons + 1, 0 none
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a scroll, 3 sideways
     moy_ui_stop_t prev[MOY_UI_API_STOPS], cur[MOY_UI_API_STOPS];
@@ -325,6 +460,7 @@ typedef struct {
     moy_ui_box_t surface;           // what a page fills where ui.at does not place it
     moy_ui_box_t page;              // the content rect rows stack in
     moy_ui_box_t at;
+    moy_ui_box_t at_view;           // the view ui.at's rect lay in: a scroll's, else the page
     int16_t y;                      // the row cursor, in content coordinates
     int16_t scroll;                 // the page's scroll
     int8_t page_keep;               // the page's kept state, or -1
@@ -339,8 +475,9 @@ typedef struct {
     // rows stacked on it, its last row's box and that row's marks, and the
     // marks of the row before it.
     int16_t grp_top;
-    uint16_t grp_flags, grp_prev;
+    uint16_t grp_flags;
     uint8_t grp_open, grp_n, grp_any, grp_first;
+    uint8_t grp_card;               // the open group is a desk's card (ui.group's `card`)
     moy_ui_box_t grp_last;
     // ui.icon's: the next row's icon, then the row's being drawn (an icon
     // set's slot and the glyph table's glyph, -1 none).
@@ -367,19 +504,32 @@ typedef struct {
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
     int32_t typed_n;                // ...and how many times (a held key's repeats)
+    // Q (-1) or E (1) pressed this frame outside a field: the tab row drawn
+    // first steps back or on by it (ui.tabs), 0 none or taken.
+    int8_t tab_step;
     // ui.popover's: the card drawn this frame and last (w 0: none), the
     // rect it hangs from, and whether this frame's input dismissed it (a
     // press outside the card drawn last, or Esc).
     moy_ui_box_t pop_card, pop_prev, pop_at;
+    moy_ui_box_t pop_view;          // the view its anchor lies in (`wash` "view")
     uint8_t pop_gone;
+    uint8_t pop_back;               // the host's back took the popover: gone next frame
     uint8_t tip_shown;              // ui.end drew a tooltip this frame
     uint8_t pop_mid;                // it opened with nothing to hang from: centred
+    uint8_t pop_placed;             // it hangs from ui.at's rect
     uint32_t pop_id;                // the popover drawn this frame (0: none)
     // Its body's cut while its rows lay out (content coordinates, 0: not
     // cut): the deepest row middle at or above it, and whether it already
     // falls well inside a row (a cut body peeks a row under its fade).
     int16_t pop_cut, pop_peek;
     uint8_t pop_inside;
+    // A popover's button row (its ui.buttons side by side, right-aligned
+    // inside the card's padding): open while the buttons follow one
+    // another, the row's top (content coordinates), the next button's x
+    // from the row's left, and the row's width as this frame and the last
+    // drew it, which places this frame's.
+    uint8_t brow;
+    int16_t brow_y, brow_x, brow_w, brow_was;
     // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
     // first column's left edge and the columns' pitch, the pictures' size,
     // the top of the card row being laid out (content coordinates; a placed
@@ -445,6 +595,7 @@ typedef struct {
     // screen. dw_*: the last frame's, and the frames it has stood as it is
     // (dw_n, a dialog's rows frame: moy_ui_api_shift_plan).
     uint32_t dlg_id;
+    uint32_t dlg_open;              // the button a dialog opens on (its `focus`; 0: its first stop)
     moy_ui_box_t dlg_card;
     uint8_t dlg_held;
     int32_t dlg_gen;
@@ -468,6 +619,7 @@ typedef struct {
     // that lent them (bar_seen), and the tool the host's bar activated for
     // the next ui.bar to answer (-1 none).
     char bar_title[MOY_UI_API_TIP];
+    char page_title[MOY_UI_API_TIP];    // the top page's title this frame ("" none)
     int16_t bar_slot[MOY_UI_API_BAR];
     uint8_t bar_n, bar_off, bar_seen, bar_back;
     int8_t bar_act;
@@ -556,14 +708,45 @@ typedef struct {
     // The ticket of the engine's faces this context holds (moy_ui_api_slots;
     // 0: none), tp_np the parts a row of the table drawn last holds.
     uint32_t fc_id;
+    // The instance it belongs to; the scope a table part's ids hash under
+    // (0 outside a part); and whether the region closing draws no fade at
+    // its foot.
+    moy_ui_inst_t *inst;
+    uint32_t scope;
+    uint8_t no_foot;
+    // A page or scroll region under `snap` shows whole units only (a stacked
+    // row; a group's caption with its first row; a list's row): snap_out the
+    // row placed last is left out, snap_rows the next placement is a list
+    // whose rows are its units, snap_more its rows ran on past its foot last
+    // frame (so the foot keeps snap_cue_h for the "More below" cue);
+    // snap_cut the screen row the left-out units at its foot start at, and
+    // snap_cap a caption's top waiting for its first row (INT16_MIN none).
+    int8_t snap, snap_out, snap_rows, snap_more;
+    int16_t snap_cut, snap_cap, snap_cue_h;
+    // snap_at the tops slot the page open now records its units in (-1
+    // none); under `follow`, snap_top the screen row a unit must start at
+    // to show (the "Older messages" cue's band above it; INT16_MIN none)
+    // and snap_older whether that cue draws there.
+    int8_t snap_at, snap_older;
+    int16_t snap_top;
+    moy_ui_tops_t tops[MOY_UI_API_SNAPS];
+    // The console's paste this frame (moy_ui_api_paste): the focused field
+    // takes it; 0 none, and none once a frame begins.
+    uint16_t paste_n;
+    uint8_t paste[MOY_UI_API_PASTE];
 } moy_ui_ctx_t;
 
-// A context's size, for a face that owns it as bytes; and a fresh one.
+// A context's size, for a face that owns it as bytes; and a fresh one, of
+// instance I (moy_ui_api_reset: the instance it was of, the main one for
+// bytes that held no context).
 size_t moy_ui_api_size(void);
 void moy_ui_api_reset(moy_ui_ctx_t *c);
-// A context the bytes at `p` hold (resetting them the first time), or NULL
-// where `n` is short or `p` misaligned.
+void moy_ui_api_reset_in(moy_ui_ctx_t *c, moy_ui_inst_t *I);
+// A context the bytes at `p` hold (resetting them the first time, into
+// instance I; moy_ui_api_ctx: the main one), or NULL where `n` is short or
+// `p` misaligned.
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
+moy_ui_ctx_t *moy_ui_api_ctx_in(moy_ui_inst_t *I, void *p, size_t n);
 
 // A frame begins: `in` (MOY_UI_IN_LEN words, NULL none), the surface a page
 // fills, its flags (moy_ui.h's MOY_UI_DESK: the desk's rows, else the
@@ -616,8 +799,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
 // shown. Its content scrolls at most 32767 pixels: past that, the rows at
 // the end are cut.
 //
-// A view keeps a record by its id (moy_ui_text.h's MOY_UI_TEXT_VIEWS, every
-// context's views together, the least recently drawn given up first): the
+// A view keeps a record by its id (moy_ui_text.h's MOY_UI_TEXT_VIEWS, the
+// views of every context of an instance together, the least recently drawn
+// given up first): the
 // rows it drew, which it plans the next frame against, and where they lay,
 // which moy_ui_api_text_at reads. Its scroll is its region's, kept by the
 // context like every page's.
@@ -797,8 +981,27 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // An empty page's head (ui.empty) at `at`'s rect, else the page's next row:
 // the icon on its disc, the title and the lines (NUL-separated), centred.
 // Its foot's y, where the page's verbs go.
+// ui.note(icon, lines): a note on the page (moy_ui.h's moy_ui_note), a
+// stacked row (else at `at`'s rect's top) and no stop; `icon` "warn" in the
+// danger label tone. The y under it.
+int moy_ui_api_note(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                    const uint8_t *lines, size_t n);
 int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                      moy_ui_span_t title, const uint8_t *lines, size_t n);
+// A chat's bubble (ui.bubble, moy_ui.h's moy_ui_bubble) at `at`'s rect's
+// top, across its width, else stacked on the page inside its gutters, a
+// stop: `opt` its options as words in MOY_UI_BBO_* order (`n` of them, the
+// rest their defaults: side 0 "in", signal -1 none, tone 0, max 75
+// hundredths, lines 4, anchor 0). out: the bubble's x, y and w, the
+// block's h (the bubble and its status line: a popover hung from it clears
+// the line) and the state bits, MOY_UI_ST_CUT where its text was cut. Stacked bubbles stand
+// 4 pixels apart at the scale, 6 on the desk.
+enum { MOY_UI_BBO_SIDE, MOY_UI_BBO_SIGNAL, MOY_UI_BBO_TONE, MOY_UI_BBO_MAX, MOY_UI_BBO_LINES,
+       MOY_UI_BBO_ANCHOR, MOY_UI_BBO_WORDS };
+#define MOY_UI_ST_CUT 16
+void moy_ui_api_bubble(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
+                       moy_ui_span_t head, moy_ui_span_t status, const int32_t *opt, int n,
+                       const moy_ui_over_t *o, int32_t out[5]);
 // A month (ui.month) at `at`'s rect, else stacked on the page: `title`,
 // the weekdays' initials `days`, `n` days from column `first` (0 Monday),
 // `today` marked (0 none); on the desk and under touch its head carries the
@@ -935,10 +1138,14 @@ int32_t moy_ui_api_slot_next(moy_ui_ctx_t *c);
 // ago, whose fields are then set past any generation a part kept.
 #define MOY_UI_BLOCKS 16
 #define MOY_UI_BLOCK_FIELDS 32
-int moy_ui_api_block_set(moy_ui_span_t id, int field, uint32_t value);  // 1 where it changed
-int32_t moy_ui_api_block_gen(moy_ui_span_t id);                  // its generation (0: not held)
-uint32_t moy_ui_api_block_since(moy_ui_span_t id, int32_t gen);  // the fields set after `gen`
-int32_t moy_ui_api_block_key(moy_ui_span_t id);                  // what its fields show, hashed (30 bits)
+// An instance's blocks (NULL: the main instance's).
+int moy_ui_api_block_set(moy_ui_inst_t *I, moy_ui_span_t id, int field,
+                         uint32_t value);                          // 1 where it changed
+int32_t moy_ui_api_block_gen(moy_ui_inst_t *I, moy_ui_span_t id);  // its generation (0: not held)
+uint32_t moy_ui_api_block_since(moy_ui_inst_t *I, moy_ui_span_t id,
+                                int32_t gen);                      // the fields set after `gen`
+int32_t moy_ui_api_block_key(moy_ui_inst_t *I,
+                             moy_ui_span_t id);  // what its fields show, hashed (30 bits)
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one; and over everything, the tooltip of a tool a resting
@@ -969,8 +1176,9 @@ int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t ti
 // across ui.at's rect (down it where the rect is taller than wide), else a
 // row of the page's with the line across its middle.
 void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
-// The host's side of ui.bar: whether the frame drawn last lent a bar, its
-// title then, its tools' slots into `slots` (room for MOY_UI_API_BAR) and
+// The host's side of ui.bar: whether the frame drawn last lent a bar (or a
+// top page with a title, which lends that title alone), its title then (the
+// page's where ui.bar named none), its tools' slots into `slots` (room for MOY_UI_API_BAR) and
 // their count into *n, the half-strength bits and MOY_UI_BAR_BACK into *off.
 int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
                         uint32_t *off);
@@ -980,6 +1188,12 @@ const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 // The host's bar activated tool `i` of the bar lent last (MOY_UI_BAR_UP its
 // way back); the next ui.bar answers it.
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
+// The host's back (the bar's chevron, a window's, Esc, B and the T-Deck's
+// K) over the frame drawn last: 1 where the app takes it -- a popover it
+// drew is dismissed next frame (ui.popover answers false), else the bar it
+// lent with MOY_UI_BAR_BACK answers MOY_UI_BAR_UP -- and 0 where it has no
+// view to step out of, so the host leaves the app. `take` 0 only asks.
+int moy_ui_api_back(moy_ui_ctx_t *c, int take);
 // Whether the frame drawn last owes the next though no input comes: a
 // dialog or a popover laid out from a stale measure, or a reveal its pass
 // set (a list's or a table's row stepped where begin could not reveal it, a
@@ -997,10 +1211,10 @@ int moy_ui_api_moving(const moy_ui_ctx_t *c);
 // no page lies there. A measuring tool's probe (tools/input_bench.py).
 int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y);
 // The fades drawn at the edges lists run on past (a page's foot, a scroll
-// region's, a cut popover body's, a table's), in every context since the
-// count was last reset; `reset` zeroes it after reading. The review kit's
-// net that a list with hidden rows says so.
-uint32_t moy_ui_api_fades(int reset);
+// region's, a cut popover body's, a table's), in every context of instance
+// I (NULL: the main one) since the count was last reset; `reset` zeroes it
+// after reading. The review kit's net that a list with hidden rows says so.
+uint32_t moy_ui_api_fades(moy_ui_inst_t *I, int reset);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);
@@ -1090,6 +1304,13 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 // let them go in its update): from here a stop takes the focus as on a frame
 // begun with them, so the first frame after shows its mark.
 void moy_ui_api_keys_back(moy_ui_ctx_t *c);
+// The console's Paste fired (the desk's Ctrl+V): the field focused in this
+// frame, begun already, takes `n` bytes of UTF-8 `text` at its caret, as many
+// as its room holds, cut at a character boundary. A line break or a tab is a
+// space and any other control byte is dropped. The console reads the text
+// from its clipboard, so the app holds no clipboard grant; MOY_UI_API_PASTE
+// bytes at most are kept.
+void moy_ui_api_paste(moy_ui_ctx_t *c, const uint8_t *text, size_t n);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.
 int moy_ui_api_edge(const moy_ui_ctx_t *c);
@@ -1278,7 +1499,8 @@ int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, i
 // is kept, and a shift frame whose stops differ from the last frame's
 // outside the floor, or that draws a stop outside R reaching into it with
 // the part of R it reaches not the floor's, counts a failure; answers the failures since the last
-// call and zeroes them (`on` -1 reads, leaving the switch as it is).
-uint32_t moy_ui_api_audit(int on);
+// call and zeroes them (`on` -1 reads, leaving the switch as it is); per
+// instance (NULL: the main one).
+uint32_t moy_ui_api_audit(moy_ui_inst_t *I, int on);
 
 #endif // MOY_UI_API_H

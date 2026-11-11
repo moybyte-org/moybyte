@@ -65,15 +65,15 @@ class SettingsPage:
         return [f for f in (ws.cart.get("edit") or []) if not valid(f)]
 
     def _get(self, f):
-        return self.ws.project.config.get(f["key"], f.get("default"))
+        return self.ws.run.project.config.get(f["key"], f.get("default"))
 
     def _set(self, f, v):
         ws = self.ws
         old = self._get(f)
         if v == old:
             return
-        ws.project.config[f["key"]] = v
-        ws.project.record_config(f["key"], old, v)
+        ws.run.project.config[f["key"]] = v
+        ws.run.project.record_config(f["key"], old, v)
         ws._dirty = True
 
     # -- drawing -----------------------------------------------------------------

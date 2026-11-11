@@ -15,10 +15,13 @@
 // and a generation (native/moy_kernel/moy_kernel.h), and the VM's
 // stop closes what it left open (moy_net_vm_stop).
 //
-// TLS verifies no certificate. What decides an install is the manifest's
-// signature under a key baked into the image (OTA_PUBLIC_KEYS, tools/ota_sign.py)
-// and the image's sha256, which that signature covers; what Get Carts installs
-// is checked against its index's sha256.
+// TLS verifies the server's certificate against the image's CA bundle
+// (esp_crt_bundle), on every request but the updater's, which asks for none
+// (MOY_HTTPC_SIGNED): what decides an install is the manifest's signature
+// under a key baked into the image (OTA_PUBLIC_KEYS, tools/ota_sign.py) and the
+// image's sha256, which that signature covers. A build without the bundle
+// refuses every other https request (moy_conn_verifies). What Get Carts
+// installs is checked against its index's sha256 besides.
 
 #ifndef MOY_OTA_H
 #define MOY_OTA_H
@@ -81,6 +84,25 @@ int moy_ota_key_hex(const char *hex, size_t n, moy_ota_key_t *out);
 int moy_ota_verify(const void *payload, size_t n, const char *sig_hex,
                    size_t sig_n, const moy_ota_key_t *keys, int nkeys);
 
+// A compiled module's ADMISSION, every tier's: an AOT module
+// (native/moy_wasm/moy_wasm_key.h) and a native one (native/moy_elf/moy_elf.h)
+// alike. The FILE is the module, its signature, the signature's length in 4
+// little-endian bytes, then MOY_OTA_MODULE_MAGIC; the signature covers
+// "<scheme>\n<chip>\n<module length>\n<sha256 hex>" under `keys` (`nkeys`
+// of them; NULL: the baked ones). A signature that is present must verify,
+// whatever the consent. A file with no trailer is admitted only when
+// `consented`: the cart's install consent grants `full_access`, the prompt's
+// "Full access to the console" (runtime/shell/app_perms.py's
+// admits_unsigned), since an unsigned module runs at the kernel's trust.
+// NULL when the module may load, else the refusal: MOY_OTA_MODULE_UNSIGNED,
+// "malformed signature", "bad signature", or that it could not be checked.
+// *module_len is the module's length without any trailer.
+#define MOY_OTA_MODULE_MAGIC "moybyte-sig1"
+#define MOY_OTA_MODULE_UNSIGNED "unsigned module"
+const char *moy_ota_admit_module(const uint8_t *file, size_t len, const char *scheme,
+                                 const char *chip, int consented, const moy_ota_key_t *keys,
+                                 int nkeys, size_t *module_len);
+
 // The bytes a manifest's signature covers ("moybyte-ota-v2\n<board>\n
 // <channel>\n<version>\n<size>\n<sha256 lowercased>") and the c6 block's
 // ("moybyte-c6-v1\n<board>\n<version>\n<size>\n<sha256>"), from the manifest's
@@ -114,7 +136,18 @@ int moy_ota_judge_c6(const char *text, size_t n, int require_sig,
 #define MOY_HTTPC_HOPS 4            // redirects followed
 #define MOY_HTTPC_HEAD_MAX 16384    // GitHub's redirect head measured 5147 bytes
 #define MOY_HTTPC_IO_MS 15000       // a connect, or a read that has no byte this long
-#define MOY_HTTPC_SLOTS 2
+// The VM's two clients, one the http device API's worker holds
+// (MOY_HTTPC_WORKER, native/moy_net/moy_fetch.h) and one the media service's
+// task holds (MOY_HTTPC_MEDIA, native/moy_media/moy_media.h), which the VM's
+// stop leaves.
+#define MOY_HTTPC_SLOTS 4
+#define MOY_HTTPC_SIGNED 0x01       // the payload is signed: TLS checks no certificate
+#define MOY_HTTPC_WORKER 0x02       // the worker's slot
+#define MOY_HTTPC_MEDIA 0x04        // the media service's slot
+#define MOY_HTTPC_ICY 0x08          // ask for ICY metadata (Icy-MetaData: 1)
+#define MOY_HTTPC_ETLS 93           // https this build cannot verify: EPROTONOSUPPORT
+#define MOY_HTTPC_ECERT 129         // a certificate that does not verify: EKEYREJECTED
+#define MOY_HTTPC_EAGAIN 11         // moy_httpc_read_wait: nothing came in time
 
 // GET `url` with redirects followed: a handle (> 0), or -errno (EINVAL for a
 // URL that does not parse, EIO for a head that never ends). `*status` and
@@ -124,18 +157,42 @@ int moy_httpc_open(const char *url, const char *agent, int *status,
 // Up to `n` body bytes: their count, 0 at the end, -errno on a failure or a
 // handle that is not open.
 int moy_httpc_read(int h, void *buf, size_t n);
+// The same, waiting at most `ms` for a first byte: -MOY_HTTPC_EAGAIN when
+// none came, so a task that reads a stream can be told to stop between waits.
+int moy_httpc_read_wait(int h, void *buf, size_t n, uint32_t ms);
+// The final response's header `name` (lower case; the head's in any case)
+// into `out`, trimmed and NUL-ended: its length (cut to cap - 1), or -1 when
+// the head has none.
+int moy_httpc_header(int h, const char *name, char *out, size_t cap);
 void moy_httpc_close(int h);
+// The same with MOY_HTTPC_* `flags`; the client table made by moy_httpc_init
+// (0, or -ENOMEM), which a thread other than the VM's calls before its first
+// open.
+int moy_httpc_open_ex(const char *url, const char *agent, uint32_t flags, int *status,
+                      uint32_t *clen);
+int moy_httpc_init(void);
 // The body whole, up to `cap` bytes, into a kernel buffer the caller frees
 // with moy_net_free: 0, or -errno; `*status` the final response's.
 int moy_httpc_get(const char *url, const char *agent, size_t cap, int *status,
                   char **body, size_t *n);
+int moy_httpc_get_ex(const char *url, const char *agent, uint32_t flags, size_t cap,
+                     int *status, char **body, size_t *n);
 
 // The platform's connection (moy_net_port.c): 0 and a connection, or -errno.
-// A board speaks TLS; the host, the unix port and the browser refuse it with
-// EPROTONOSUPPORT.
+// `tls` is MOY_CONN_PLAIN, MOY_CONN_TLS (the certificate verified: its chain
+// to a root of the bundle, the host's name, its dates; -MOY_HTTPC_ECERT when
+// it does not) or MOY_CONN_TLS_SIGNED (no certificate checked). A board speaks
+// TLS; the host, the unix port and the browser refuse it with EPROTONOSUPPORT.
+#define MOY_CONN_PLAIN 0
+#define MOY_CONN_TLS 1
+#define MOY_CONN_TLS_SIGNED 2
 int moy_conn_open(const char *host, uint16_t port, int tls, void **conn);
+// 1 where MOY_CONN_TLS verifies (the build carries a CA bundle), else 0.
+int moy_conn_verifies(void);
 // >0 bytes, 0 at the end, -errno (ETIMEDOUT after MOY_HTTPC_IO_MS of nothing).
 int moy_conn_read(void *conn, void *p, size_t n);
+// The same, waiting at most `ms` for a first byte: -MOY_HTTPC_EAGAIN when none came.
+int moy_conn_read_wait(void *conn, void *p, size_t n, uint32_t ms);
 int moy_conn_write(void *conn, const void *p, size_t n);
 void moy_conn_close(void *conn);
 

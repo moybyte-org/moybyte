@@ -268,8 +268,17 @@ class _Input:
         return self._c.pointer()
 
 
-class FakeWs:
-    def __init__(self, console, tilemap=None):
+class _Run:
+    """The run the glue plays in (runtime/shell/procs.py's Run): no start
+    stamp, so the time slot stays where the parity drew it."""
+
+    def __init__(self, tilemap):
         self.canvas = _Canvas()
         self.project = _Project(tilemap)
+        self.audio = self.cart_frame = self.view = self.cart_start_ms = None
+
+
+class FakeWs:
+    def __init__(self, console, tilemap=None):
+        self.run = _Run(tilemap)
         self.input = _Input(console)

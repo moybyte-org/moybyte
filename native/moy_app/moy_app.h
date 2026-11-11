@@ -1,6 +1,6 @@
 // The app ABI's kernel half (docs/history/kernel_appabi_2026-10.md): the grants, the
-// grant policy, and the roles served in C. roles.json beside this file is the
-// role table; a C row there is a function here, and tests/test_moy_app.py holds
+// grant policy, and the roles served in C. native/os_calls.json is the role
+// table; a C row there is a function here, and tests/test_moy_app.py holds
 // the two equal.
 //
 // A moy_appabi_t is the state the C rows read: the grant table (kind GRANT, rows
@@ -10,7 +10,7 @@
 // once, never freed, so a VM stop leaves it and a return start reads it, its
 // rows moy_spine_kernel's); elsewhere each console owns one.
 //
-// A grant is a row: the app's id, its class, its role mask, its files kind,
+// A grant is a row: the app's id, its class, its role mask, its files folder,
 // its prefs namespace and an OWNER handle it names. A SHIPPED grant is the
 // console's own app's and is idempotent by id: a start registering the app
 // again gets the row it had, so a stop leaves the count where it was. A RUN
@@ -24,7 +24,7 @@
 // at every switch of the look) and the pointer (moy_app_pointer_bind, the
 // console's moy_input_ptr_t, read live).
 //
-// The policy is C's: the permission each role is granted by, the files kinds,
+// The policy is C's: the permission each role is granted by, the files folders,
 // the manifest refusal and the key a cart's grant is made under.
 //
 // Every byte comes from the moy_htab_mem_t the state is made with.
@@ -32,9 +32,11 @@
 #ifndef MOY_APP_H
 #define MOY_APP_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_app_run.h"
 #include "moy_htab.h"
 #include "moy_input.h"
 #include "moy_settings.h"
@@ -51,65 +53,27 @@ enum {
     MOY_APP_BAD = 7,        // a refused argument: an unknown kind or token, a name too long
     MOY_APP_ABSENT = 8,     // no such cart, app, key or document, or a build without it
     MOY_APP_NEEDS_VM = 9,   // a shell-served verb while no VM runs
+    MOY_APP_FORGED = 10,    // sealed bytes that do not open (moy_crypto.h's aes_gcm_open)
+    MOY_APP_BUSY = 11,      // a lease or a device another process holds
 };
 
-// The roles, in roles.json's order: a grant's mask is 1 << role.
-enum {
-    MOY_ROLE_DAMAGE = 0, MOY_ROLE_SURFACE, MOY_ROLE_THEME, MOY_ROLE_FILES,
-    MOY_ROLE_CARTS, MOY_ROLE_NAV, MOY_ROLE_PREFS, MOY_ROLE_NOTIFY,
-    MOY_ROLE_WALLPAPER, MOY_ROLE_ARTWORK, MOY_ROLE_CLIPBOARD, MOY_ROLE_INSTALL,
-    MOY_ROLE_UI,
-    MOY_ROLE_N
-};
-
-// The C rows, in roles.json's order: what moy_app_count counts.
-enum {
-    MOY_ROW_DAMAGE_ALL = 0, MOY_ROW_DAMAGE_AGAIN,
-    MOY_ROW_SURFACE_CANVAS, MOY_ROW_SURFACE_SIZE, MOY_ROW_SURFACE_FONT_SCALE,
-    MOY_ROW_SURFACE_CHROME_SCALE, MOY_ROW_SURFACE_WINDOWED, MOY_ROW_SURFACE_BAR_H,
-    MOY_ROW_SURFACE_CONTENT_RECT, MOY_ROW_SURFACE_POINTER,
-    MOY_ROW_THEME_COLORS, MOY_ROW_THEME_TOKEN, MOY_ROW_THEME_GEN,
-    MOY_ROW_THEME_LIGHT, MOY_ROW_THEME_NAME, MOY_ROW_THEME_VARIANT,
-    MOY_ROW_FILES_READABLE, MOY_ROW_FILES_READY, MOY_ROW_FILES_BEGIN,
-    MOY_ROW_FILES_END, MOY_ROW_FILES_LIST, MOY_ROW_FILES_COUNT, MOY_ROW_FILES_LOAD,
-    MOY_ROW_FILES_SAVE, MOY_ROW_FILES_DELETE, MOY_ROW_FILES_DUPLICATE,
-    MOY_ROW_FILES_RENAME, MOY_ROW_FILES_NEW_NAME, MOY_ROW_FILES_TRASH_LIST,
-    MOY_ROW_FILES_RESTORE, MOY_ROW_FILES_EMPTY_TRASH, MOY_ROW_FILES_HISTORY,
-    MOY_ROW_FILES_HISTORY_OPS, MOY_ROW_FILES_HISTORY_COMMIT,
-    MOY_ROW_FILES_ENCODE_IMAGE, MOY_ROW_FILES_DECODE_IMAGE,
-    MOY_ROW_FILES_DECODE_COVER, MOY_ROW_FILES_ENCODE_COVER, MOY_ROW_FILES_SIG,
-    MOY_ROW_FILES_STAMP, MOY_ROW_FILES_ENCODE_TEXT, MOY_ROW_FILES_DECODE_TEXT,
-    MOY_ROW_FILES_PROVENANCE,
-    MOY_ROW_PREFS_GET, MOY_ROW_PREFS_SET, MOY_ROW_PREFS_CLEAR,
-    MOY_ROW_WALLPAPER_LOAD_COPY, MOY_ROW_WALLPAPER_SAVE_COPY,
-    MOY_ROW_ARTWORK_CURRENT, MOY_ROW_ARTWORK_FOLLOW,
-    MOY_ROW_CLIPBOARD_PUT_TEXT, MOY_ROW_CLIPBOARD_TEXT, MOY_ROW_CLIPBOARD_KIND,
-    MOY_ROW_CLIPBOARD_SEQ,
-    MOY_ROW_UI_PAGE, MOY_ROW_UI_LABEL, MOY_ROW_UI_BUTTON, MOY_ROW_UI_TOGGLE,
-    MOY_ROW_UI_SLIDER, MOY_ROW_UI_LIST, MOY_ROW_UI_PART, MOY_ROW_UI_FOCUS,
-    MOY_ROW_UI_KEYS_TAKEN, MOY_ROW_UI_AT, MOY_ROW_UI_GROUP, MOY_ROW_UI_INFO, MOY_ROW_UI_LINK,
-    MOY_ROW_UI_CYCLE, MOY_ROW_UI_SEG, MOY_ROW_UI_SWATCHES, MOY_ROW_UI_HINTS,
-    MOY_ROW_UI_ICON, MOY_ROW_UI_PROGRESS, MOY_ROW_UI_TABLE, MOY_ROW_UI_SCROLL, MOY_ROW_UI_FIELD,
-    MOY_ROW_UI_DIALOG, MOY_ROW_UI_TABS, MOY_ROW_UI_GRID, MOY_ROW_UI_CARD, MOY_ROW_UI_POPOVER,
-    MOY_ROW_UI_MENU, MOY_ROW_UI_TOOL, MOY_ROW_UI_BAR,
-    MOY_ROW_UI_RULE, MOY_ROW_UI_TEXT_VIEW, MOY_ROW_UI_TABLE_PART, MOY_ROW_UI_PART_AT,
-    MOY_ROW_UI_SPLIT, MOY_ROW_UI_TABLE_DIST, MOY_ROW_UI_TABLE_FLOOR, MOY_ROW_UI_HELD,
-    MOY_ROW_UI_SLOTS, MOY_ROW_UI_SLOT, MOY_ROW_UI_SLOT_NEXT, MOY_ROW_UI_HELD_LAST,
-    MOY_ROW_UI_HELD_ALL,
-    MOY_ROW_N
-};
+// The roles (MOY_ROLE_*, a grant's mask 1 << role), the rows served in C
+// (MOY_ROW_*), the role table (MOY_T_*, MOY_APP_TABLE_N) and the permission
+// each role is granted by, generated from native/os_calls.json.
+#include "moy_app_rows.h"
 
 #define MOY_GRANT_SLOTS 32u       // grants a table holds
 #define MOY_APP_ID_MAX 63u      // an id's, and a prefs namespace's, bytes
 #define MOY_APP_KEY_MAX 127u    // a namespaced prefs key's bytes
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
-#define MOY_APP_KINDS 4u        // the files kinds a permission may name
+#define MOY_APP_KINDS 4u        // the shared folders a files permission may name
 #define MOY_APP_NAME_MAX 31u    // a theme's and a variant's name bytes
 #define MOY_APP_TOKENS 38u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
 #define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in
 #define MOY_APP_ROOT_MAX 191u   // the carts folder's path, in bytes
+#define MOY_APP_FOLDER_MAX 255u // a run's cart folder's path, in bytes
 
 enum { MOY_GRANT_SHIPPED = 0, MOY_GRANT_RUN = 1 };
 enum { MOY_DAMAGE_ALL = 1u, MOY_DAMAGE_AGAIN = 2u };
@@ -131,12 +95,14 @@ typedef struct {
 
 typedef struct {
     uint8_t id_len, ns_len, cls;
-    int8_t kind;                // a files kind, 0 .. MOY_APP_KINDS - 1, or -1
+    int8_t kind;                // a files folder, 0 .. MOY_APP_KINDS - 1, or -1
     uint32_t roles;
-    uint32_t owner;             // an OWNER handle the grant names, or 0
+    uint32_t owner;             // an OWNER handle or a service's pid the grant names, or 0
     char id[MOY_APP_ID_MAX + 1];
     char ns[MOY_APP_ID_MAX + 1];
     moy_app_surface_t surf;     // written by the shell, zero until then
+    uint32_t devs;              // the device permissions it holds (moy_dev.h's MOY_DEV_P_*)
+    char folder[MOY_APP_FOLDER_MAX + 1];    // its cart's folder, absolute, "" none
 } moy_grant_t;
 
 // A console's own state over `prefs` (NULL: prefs answer ABSENT), or NULL.
@@ -155,16 +121,55 @@ void moy_app_vm_stop(void);
 // -- the grants -----------------------------------------------------------------
 
 // Grant `roles` to `id` as `cls`: OK and the handle, BAD (an empty or long id
-// or namespace, a kind out of range), FULL or NOMEM. A row of the same id and
-// class is reused, its fields replaced: the same handle back.
+// or namespace, a kind out of range), FULL or NOMEM. A row of the same id,
+// class and owner is reused, its fields replaced: the same handle back. The
+// owner keeps two runs of one app apart: a run's grant is made with its pid
+// as the owner (a foreground run's and a service's alike), so each run of an
+// app holds a row of its own and ending one leaves the others'.
 int moy_app_grant(moy_appabi_t *a, const char *id, size_t n, uint8_t cls,
                   uint32_t roles, int kind, const char *ns, size_t ns_n,
                   uint32_t owner, uint32_t *h);
+
+// The roles a foreground run holds beside its permissions' (the Player's
+// needs, runtime/shell/system_api.py): a run row holding the surface is a
+// foreground run's, and a service's holds neither.
+#define MOY_APP_RUN_BASE ((1u << MOY_ROLE_SURFACE) | (1u << MOY_ROLE_THEME))
+
+// The app `id`'s permissions changed: every live RUN row of it, whatever its
+// owner, recomputed from what its kind of run is now entitled to. A
+// foreground run's row (one holding the surface) gets `roles`, what its
+// permissions name for the app's tier, and MOY_APP_RUN_BASE; a service's
+// gets `svc`, what they name for its service's tier. Both take `kind`, the
+// files kind (moy_app_policy_roles). A run's next call answers from its
+// row, so a permission turned off is absent at it. The rows it recomputed,
+// or -BAD for an empty or long id, a mask past the roles or a kind out of
+// range.
+int moy_app_regrant(moy_appabi_t *a, const char *id, size_t n, uint32_t roles, uint32_t svc,
+                    int kind);
 int moy_app_end(moy_appabi_t *a, uint32_t h);      // OK or STALE
 int moy_app_grant_get(const moy_appabi_t *a, uint32_t h, const moy_grant_t **g);
 uint32_t moy_app_grants(const moy_appabi_t *a);    // live grants
 // The kernel's live grants, 0 before it is made (the KSTOP line's).
 uint32_t moy_app_kernel_grants(void);
+
+// -- a run's grant (moy_app_run.h) ----------------------------------------------------
+
+// The run of grant `g` under `a`, its permissions naming `roles`: g 0 (or `a`
+// NULL) is no app run, `a` NULL.
+void moy_app_run_make(moy_appabi_t *a, uint32_t g, uint32_t roles, moy_app_run_t *r);
+// Whether `r` names a state still made: 0 for no run, and for one whose state
+// was freed (its pointer then never read). Its grant may still have ended.
+int moy_app_run_live(const moy_app_run_t *r);
+// The run a VM stop carries: a compiled app the kernel opens with no VM
+// (native/moy_play/moy_play_stop.c). The Player holds it in the state before
+// the stop, the kernel's open reads it (the kernel's state's, or NULL), and
+// the start after the stop (moy_app_stop_end) ends its grant and lets it go,
+// with every other RUN grant but those owned by one of the `n` pids of `keep`:
+// the services on tasks of their own the stop left running, which the next
+// console takes back (docs/os_2026-11/processes.md section 5).
+void moy_app_stop_hold(moy_appabi_t *a, const moy_app_run_t *r);
+const moy_app_run_t *moy_app_stopped(void);
+void moy_app_stop_end(moy_appabi_t *a, const uint32_t *keep, size_t n);
 
 // -- the policy -------------------------------------------------------------------
 
@@ -173,15 +178,30 @@ uint32_t moy_app_kernel_grants(void);
 // clipboard. Every other role is never granted.
 const char *moy_app_perm_of(int role);
 int moy_app_role_of(const char *perm, size_t n);
-// The files kinds, by index: docs, drawings, sprites, music. -1 for another.
+// The shared folders a files grant is made for, by index: documents,
+// pictures, music, recordings (docs/os_2026-11/between_apps.md section 2).
+// Each has its own kind, the user-files kind its own files are (docs,
+// drawings, music, recordings): what a grant names it by, what a Python app's
+// `files` and a Lua run's io reach. A grant reaches every kind in its folder
+// (pictures: drawings and Pictures/Sprites' sprites; documents: docs and
+// Documents/Stories' stories). moy_app_kind_name and moy_app_kind_of name a
+// folder by its own kind, -1 for a kind that is no folder's own;
+// moy_app_folder_name and moy_app_folder_of by its name; moy_app_kind_folder
+// is the folder any kind lies in, -1 for none.
 const char *moy_app_kind_name(int kind);
 int moy_app_kind_of(const char *name, size_t n);
-#define MOY_APP_DEFAULT_KIND 0  // "files" with no kind: docs
+const char *moy_app_folder_name(int folder);
+int moy_app_folder_of(const char *name, size_t n);
+int moy_app_kind_folder(const char *kind, size_t n);
+#define MOY_APP_DEFAULT_KIND 0  // "files" with no folder: documents
 
 // A manifest's permissions, read one by one (moy_app_policy_add) into what
-// they grant. `files` with no kind is the default kind, `files:<kind>` a
-// known kind; an unknown kind grants nothing. Two kinds or more are a manifest
-// error, and then no files grant is made.
+// they grant: the one policy of every tier, an app's grant and a compiled
+// command's preopened folder alike (runtime/shell/sh_door.py's wasi_roots).
+// `files` with no folder is the default folder, `files:<folder>` a known
+// folder; an unknown folder grants nothing, Downloads included (it has no
+// kind of the layer's). Two folders or more are a manifest error, and then no
+// files grant is made.
 typedef struct {
     uint32_t roles;
     uint8_t nkinds;
@@ -335,7 +355,7 @@ uint32_t moy_app_copy_gen(const moy_appabi_t *a);
 // -- files ---------------------------------------------------------------------------
 
 // The user-files layer over the bound store (moy_ufiles.h has each verb's
-// rules). A grant made with a files kind reaches that kind alone: another
+// rules). A grant made for a folder reaches the kinds in it alone: another
 // answers DENIED. A read answers NOSTORE with no store to read, a write with
 // none to write; a store that failed answers IO (moy_app_why), nothing there
 // ABSENT, a refused argument BAD. Names come back NUL-terminated in `name_out`
@@ -433,8 +453,7 @@ int32_t moy_app_clip_seq(moy_appabi_t *a, uint32_t g);
 
 // -- the ROLE door -----------------------------------------------------------------
 
-// The role table's rows (roles.json), C and shell alike: what the door names.
-#define MOY_APP_TABLE_N 164u
+// The role table's rows, C and shell alike (MOY_T_*): what the door names.
 // Table row `row`'s role (MOY_ROLE_*), its C row (MOY_ROW_*, or MOY_APP_SHELL
 // for a row the Python console serves), -1 past the table; its "role.verb",
 // NULL past it.
@@ -470,6 +489,30 @@ const char *moy_app_table_name(uint32_t row);
 // session thread reaches it through the hop (moy_wasm_on_vm).
 int32_t moy_app_role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
                      size_t n, uint8_t *ans, size_t cap);
+// The same row run where it is called, on the caller's own task (a row of
+// how "here", native/os_calls.json): a row that only the VM's task can serve
+// answers NEEDS_VM, and the caller hops it (moy_app_role on the VM's task).
+int32_t moy_app_role_here(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *arg,
+                          size_t n, uint8_t *ans, size_t cap);
+// Grant `h`'s device permissions (moy_dev.h's MOY_DEV_P_* bits, which
+// moy_app_dev_bit gives a permission's): what its device handles answer
+// under. A grant is made holding none. OK, STALE.
+int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask);
+uint32_t moy_app_dev_bit(const char *perm, size_t n);
+// Grant `h`'s cart folder (n bytes, an absolute path): where its device
+// handles reach the cart's own files (the media handle's, moy_dev.h). A grant
+// is made holding none. OK, STALE, BAD for a path that is not absolute, holds
+// a NUL or is over MOY_APP_FOLDER_MAX bytes.
+int moy_app_grant_folder(moy_appabi_t *a, uint32_t h, const char *path, size_t n);
+// The carts folder moy_app_store_bind bound, "" for none.
+const char *moy_app_root(const moy_appabi_t *a);
+// Where process `pid`'s device handles reach files, from the run grant it
+// owns in any state: the grant's cart folder, the state's carts root and the
+// grant's files kind (-1 none; moy_app_kind_name names it), each string
+// NUL-ended into its buffer ("" for none, or for one that does not fit).
+// False where no state holds a run grant `pid` owns.
+bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap,
+                        int *kind);
 typedef int32_t (*moy_app_door_fn)(uint32_t g, uint32_t row, const uint8_t *arg,
                                    size_t n, uint8_t *ans, size_t cap);
 // The door the shell rows cross: one a process, NULL for none.

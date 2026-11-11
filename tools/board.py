@@ -4,10 +4,11 @@
 #   -- the boards and their declarations  boards, board_file, is_console
 #   -- which port: facts that need no open  learn, holders, port_table, claim, resolve
 #   -- opening a board                refuse_if_held, attach, stable
-#   -- verbs                          cmd_state, cmd_py, cmd_run, cmd_desk, cmd_perf, cmd_pmem, cmd_tail
+#   -- verbs                          cmd_state, cmd_py, cmd_sh, cmd_run, cmd_desk, cmd_perf, cmd_pmem, cmd_tail
 #   -- the picture on the glass       grab, cmd_shot
 #   -- the ports                      cmd_ports
 #   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
+#   -- the C6 radio's firmware        c6_image, c6_stream, cmd_c6
 #   -- the command line               parser, main (`pass` goes to tools/board_pass.py)
 """Drive an attached board by name: the on-glass loop, one command per step.
 
@@ -21,7 +22,11 @@
     tools/board.py tdeck perf "Brick Siege"     median drawn fps; --diag adds phase ms
     tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
                                                 a compiled cart gets its chip's module
+    tools/board.py tdeck remove x.moy           take it off the store as the console
+                                                removes a cart (push's counterpart)
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
+    tools/board.py p4 sh "ls /proc" "pkg update"  lines in the C shell's serial
+                                                session: its output, its status
     tools/board.py tdeck pmem [--text]          the running cart's 256 pmem cells
     tools/board.py tdeck mem                    python heap, internal SRAM, PSRAM
     tools/board.py tdeck tap X Y | swipe X0 Y0 X1 Y1 [FRAMES] | open settings
@@ -29,6 +34,8 @@
     tools/board.py tdeck flash [--build]        cable-flash its image, wait for the desk
     tools/board.py tdeck reboot [--soft]        reset it the way it allows, wait for the desk
     tools/board.py tdeck wait                   until the desk answers
+    tools/board.py guition_p4 c6 URL            flash the C6 radio's slave image
+                                                over ESP-Hosted, reboot onto it
     tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, one table
                                                 (tools/board_pass.py; --all,
                                                 --skip-build, --no-flash, --shot)
@@ -54,15 +61,16 @@ tty split its bytes, and a second open steals replies from whatever suite or
 agent opened it first.
 
 LEAVING THE DESK. `perf` ends its cart and restores diag and uncap; `push`
-changes the store and rescans it; `shot`, `pmem`, `state` and `mem` change
-nothing. `run`, `tap`, `swipe` and `open` change the console on purpose, and
-`desk` undoes them.
+changes the store and rescans it, `remove` takes a folder back off it;
+`shot`, `pmem`, `state` and `mem` change nothing. `run`, `tap`, `swipe` and
+`open` change the console on purpose, and `desk` undoes them.
 """
 
 import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -72,6 +80,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
+
+# Run bare (`tools/board.py ...`), the shebang finds the system python, which
+# has no esptool or pyserial; every flash and suite this tool starts runs in
+# sys.executable, so it re-runs itself under the checkout's venv.
+_VENV = os.path.join(ROOT, ".venv")
+if (__name__ == "__main__" and os.path.exists(os.path.join(_VENV, "bin", "python"))
+        and os.path.realpath(sys.prefix) != os.path.realpath(_VENV)):
+    os.execv(os.path.join(_VENV, "bin", "python"),
+             [os.path.join(_VENV, "bin", "python"), os.path.abspath(__file__)]
+             + sys.argv[1:])
 
 import p4_autotest as pa                                           # noqa: E402
 from p4_autotest import P4Board                                    # noqa: E402
@@ -336,6 +354,66 @@ def cmd_py(b, a):
     return status
 
 
+def cmd_remove(b, a):
+    """Each folder off the store as the console removes a cart
+    (push_cart.remove_folders); exit 1 when one is still there."""
+    need_console(b, a.board)
+    import push_cart
+    had = push_cart.store_folders(b)
+    if had is None:
+        raise BoardError("%s did not list its store" % a.board)
+    had = {f for f, _m in had}
+    left = push_cart.remove_folders(b, [f for f in a.folders if f in had])
+    if left is None:
+        raise BoardError("%s did not list its store after the removal" % a.board)
+    for f in a.folders:
+        print("%s %s" % (f, "not in the store" if f not in had
+                         else "still there" if f in left else "removed"))
+    return 1 if left else 0
+
+
+SH_ENDS = ("SH end ", "SH exit ", "SH more", "SH app ", "SH busy", "SH error")
+
+
+def cmd_sh(b, a):
+    """Each line in the C shell's serial session (the kernel's `sh` word,
+    native/moy_sh/moy_sh_board.h): its output as it comes, then its end.
+    The session is the board's one serial session, so `cd` and variables
+    carry from one line to the next. Ctrl-C here sends the channel's `sh ^C`
+    line, which interrupts the command; a raw 0x03 would reach the board's
+    REPL on the boards whose stdin the REPL owns. Exit status: the last line's."""
+    status = 0
+    also = re.compile(a.also) if a.also else None
+    for line in a.lines:
+        n0 = len(b.lines)
+        b._write_line("sh " + line)
+        end, t_end = None, time.time() + a.timeout
+        try:
+            while end is None and time.time() < t_end:
+                b._pump()
+                while n0 < len(b.lines) and end is None:
+                    got = b.lines[n0]
+                    n0 += 1
+                    if got.startswith(SH_ENDS):
+                        end = got
+                    elif got.startswith("SH "):
+                        print(got[3:])
+                    elif also is not None and also.search(got):
+                        print(got)
+        except KeyboardInterrupt:
+            b._write_line("sh ^C")
+            end = b.wait_line("SH end ", 10.0) or end
+        if end is None:
+            print("no end of %r in %.0f s" % (line, a.timeout), file=sys.stderr)
+            return 2
+        if a.verbose or not end.startswith("SH end "):
+            print(end, file=sys.stderr)
+        word, _, rest = end[3:].partition(" ")
+        status = int(rest) if word in ("end", "exit") and rest.strip().isdigit() else \
+            0 if word in ("more", "app") else 2 if word == "error" else 1
+    return status
+
+
 def cmd_run(b, a):
     need_desk(b, a.board)
     line = b.cmd("run %s" % a.title, wait_for="REMOTE run", timeout=20.0)
@@ -429,7 +507,7 @@ def cmd_perf(b, a):
 
 PMEM = ("(lambda p: (getattr(getattr(p, '_lua', None), 'flush_pmem', "
         "lambda: 0)(), list(ws.pmem.cells) if getattr(ws, 'pmem', None) "
-        "is not None else None)[1])(getattr(ws, 'player', None))")
+        "is not None else None)[1])(getattr(ws.run, 'player', None))")
 
 
 def pmem_text(cells):
@@ -536,7 +614,7 @@ def _shot_open(comp, src, z, band):
     ox = 0
     oy = 0
     if src == 'game':
-        c = ws.canvas
+        c = ws.run.canvas
         buf = c._buf
         stride = getattr(c, '_stride', None) or c.w
         ox = getattr(c, '_ox', 0)
@@ -869,11 +947,102 @@ def cmd_flash(name, dirs, a):
 # -- the command line ---------------------------------------------------------
 
 
+# -- the C6 radio's firmware --------------------------------------------------
+
+C6_LINK_S = 60.0
+# What `ws.c6_updater.activate()` reports from a slave older than ESP-Hosted
+# 2.6: it has no activate RPC, and its own ota_end already pointed its
+# bootloader at the image and restarts it (Guition's factory 2.3.2 does this).
+C6_NO_ACTIVATE = "c6 activate refused"
+
+
+def c6_image(url):
+    """(size, sha256) of the image at `url`, read on this machine: the board
+    checks the bytes it streams against both before the radio may boot them."""
+    import hashlib
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=60) as r:
+        data = r.read()
+    return len(data), hashlib.sha256(data).hexdigest()
+
+
+def c6_stream(b, url, size, sha):
+    """Stream the image into the C6's inactive slot over ESP-Hosted (the path
+    Settings' UPGRADE C6 RADIO takes, with no manifest) and hand it over.
+    "activated", or "swapped" from a slave with no activate RPC; BoardError
+    with the reason otherwise. The radio lease is held for the stream only."""
+    if not b.pyval("getattr(ws, 'c6_updater', None) is not None", timeout=10):
+        raise BoardError("this board has no C6 updater")
+    cu = "ws.c6_updater"
+    b.pyexec("ws.wifi_hold('update')\n"
+             "__import__('device_wifi').autoconnect_wifi(ws.wifi)", timeout=30)
+    try:
+        end = time.time() + C6_LINK_S
+        while not b.pyval("ws.wifi.status()[0]", timeout=10):
+            if time.time() > end:
+                raise BoardError("the WiFi did not join a saved network "
+                                 "in %.0f s" % C6_LINK_S)
+            time.sleep(1.0)
+        if not b.pyexec("%s.updater.begin_download({'url': %r, 'size': %d, "
+                        "'sha256': %r}, sink=__import__('moy_ota').SINK_C6)"
+                        % (cu, url, size, sha), timeout=60):
+            raise BoardError("the download did not start: %s"
+                             % b.pyval("%s.updater.error" % cu, timeout=10))
+        # Never a step past the size: an image without the dl_step bound
+        # fails the read after a plain-HTTP close.
+        step = ("(lambda c: [c.download_step() for _ in range(4) "
+                "if c.dl_done < %d])(%s)" % (size, cu))
+        while True:
+            b.pyval(step, timeout=60)
+            done = b.pyval("%s.dl_done" % cu, timeout=10)
+            err = b.pyval("%s.updater.error" % cu, timeout=10)
+            if err:
+                raise BoardError("the download failed: %s" % err)
+            print("  %d / %d" % (done, size), end="\r", flush=True)
+            if done >= size:
+                break
+        print()
+        if b.pyval("%s.download_finish()" % cu, timeout=30) is None:
+            raise BoardError("the image did not verify: %s"
+                             % b.pyval("%s.error" % cu, timeout=10))
+        if b.pyval("%s.activate()" % cu, timeout=60):
+            return "activated"
+        err = b.pyval("%s.error" % cu, timeout=10)
+        if err == C6_NO_ACTIVATE:
+            return "swapped"
+        raise BoardError("the radio did not take it: %s" % err)
+    finally:
+        b.pyexec("ws.wifi_release('update')", timeout=30)
+
+
+def cmd_c6(name, dirs, a):
+    size, sha = c6_image(a.url)
+    print("%s: %d bytes, sha256 %s" % (a.url, size, sha))
+    b = attach(name, dirs, a.port, a.force,
+               log=(lambda s: print("  | " + s)) if a.verbose else None)
+    try:
+        need_console(b, name)
+        how = c6_stream(b, a.url, size, sha)
+    finally:
+        b.close()
+    print("handed over (%s); rebooting the console onto the new radio" % how)
+    a.soft = False
+    cmd_reboot(name, dirs, a)
+    b = attach(name, dirs, a.port, a.force)
+    try:
+        ver = b.pyval("__import__('moy_c6').fwversion()", timeout=10)
+        shim = b.pyval("__import__('moy_c6').shim_version()", timeout=10)
+    finally:
+        b.close()
+    print("the C6 runs ESP-Hosted %s, ESP-NOW shim %s" % (ver, shim))
+    return 0
+
+
 ON_THE_CONSOLE = {"state": cmd_state, "py": cmd_py, "run": cmd_run,
                   "leave": cmd_leave, "desk": cmd_desk, "perf": cmd_perf,
                   "pmem": cmd_pmem, "mem": cmd_mem, "tap": cmd_tap,
                   "swipe": cmd_swipe, "open": cmd_open, "tail": cmd_tail,
-                  "shot": cmd_shot}
+                  "shot": cmd_shot, "sh": cmd_sh, "remove": cmd_remove}
 
 
 def _common(ap, default):
@@ -920,6 +1089,12 @@ def parser(dirs):
                    help="run each as statements (the shared ws._g namespace)")
     p.add_argument("--file", help="a snippet to run first, as statements")
     p.add_argument("--timeout", type=float, default=30.0)
+    p = verb("sh", help="run lines in the C shell's serial session (`sh` word)")
+    p.add_argument("lines", nargs="+", metavar="LINE")
+    p.add_argument("--timeout", type=float, default=60.0,
+                   help="seconds to wait for each line's end")
+    p.add_argument("--also", metavar="REGEX",
+                   help="print the board's other lines that match too (HITCH, PERF)")
     p = verb("run", help="start a cart by title; it stays running")
     p.add_argument("title")
     p.add_argument("--settle", type=float, default=2.5,
@@ -943,6 +1118,12 @@ def parser(dirs):
                         "(scenes/x.moyscene); repeatable")
     p.add_argument("--dest")
     p.add_argument("--no-rescan", action="store_true")
+    p = verb("remove", help="take folders of the carts folder off the store "
+                            "the way the console removes a cart (pkg.removed: "
+                            "the record, the folder, the files it wrote, its "
+                            "consent and keys); push's counterpart")
+    p.add_argument("folders", nargs="+", metavar="FOLDER",
+                   help="a name in the carts folder (elf_hello.moy)")
     p = verb("refresh-wasm", help="rebuild the stale compiled-cart modules "
                                   "this BOARD'S STORE actually has "
                                   "(tools/refresh_wasm.py) -- what a "
@@ -969,7 +1150,7 @@ def parser(dirs):
     for k in ("x0", "y0", "x1", "y1"):
         p.add_argument(k, type=int)
     p.add_argument("frames", type=int, nargs="?", default=20)
-    p = verb("open", help="open settings|projects|appearance|wifi")
+    p = verb("open", help="open settings|projects|appearance|wifi|log")
     p.add_argument("what")
     p = verb("tail", help="print what the board says")
     p.add_argument("secs", type=float)
@@ -983,6 +1164,11 @@ def parser(dirs):
                    help="Ctrl-C then Ctrl-D: for a board sitting at >>>")
     p.add_argument("--timeout", type=float, default=WAIT_S)
     p = verb("wait", help="until the desk answers")
+    p.add_argument("--timeout", type=float, default=WAIT_S)
+    p = verb("c6", help="flash the C6 radio's slave image from a URL over "
+                        "ESP-Hosted, then reboot (a P4)")
+    p.add_argument("url", help="the slave's APP image, served where the "
+                               "board's WiFi reaches it")
     p.add_argument("--timeout", type=float, default=WAIT_S)
     return ap
 
@@ -1039,6 +1225,8 @@ def main(argv=None):
         if not is_console(dirs[a.board]):
             raise BoardError("%s has no dev channel: `ports`, `flash` and "
                              "`reboot` are what apply" % a.board)
+        if a.verb == "c6":
+            return cmd_c6(a.board, dirs, a)
         b = attach(a.board, dirs, a.port, a.force,
                    log=(lambda s: print("  | " + s)) if a.verbose else None)
         try:

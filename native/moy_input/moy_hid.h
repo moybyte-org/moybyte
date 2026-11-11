@@ -10,11 +10,24 @@
 // drives the same machine over a fake stack (runtime/host/moy_input.py, the tests).
 //
 // THE PROFILE (HOGP). A Boot Keyboard Input characteristic is preferred: the
-// host writes Protocol Mode = 0 and consumes only the fixed eight-byte boot
-// report. A Report-only keyboard is subscribed and its eight-byte reports
-// decoded the same way; other layouts are ignored. Security is Just Works
+// host writes Protocol Mode = 0 and takes its keys from the fixed eight-byte
+// boot report alone. A Report-only keyboard is subscribed and its eight-byte reports
+// decoded the same way; other layouts are ignored. MEDIA KEYS come in a
+// Consumer Control report: a two-byte report holding one consumer-page usage
+// (little-endian, 0 when nothing is down), the shape most keyboards give
+// their media keys, read from any Report characteristic a keyboard report
+// does not decode from. Beside a Boot Keyboard Input every notifying Report
+// characteristic is subscribed for such reports alone, and a CCCD write it
+// refuses is skipped rather than ending the link. A usage going down or up is
+// a MEDIA record on the source's ring (moy_event.h: `a` the usage, `b` 1 down
+// and 0 up), which the media service answers (native/moy_media/moy_media.h,
+// MEDIA KEYS); a bitmap-shaped consumer report needs the report map, which is
+// not read, so its keys are not heard. Security is Just Works
 // with bonding; a CCCD write the keyboard rejects before encryption is
-// retried once, when the link is encrypted.
+// retried once, when the link is encrypted. A report is input only once the
+// link is encrypted, and a link whose encryption fails is dropped with the
+// error saying so (a keyboard that lost its bond is forgotten and picked
+// again).
 //
 // THE KEYMAP is the arrow-key hosts' (owner call, 2026-08-14): arrows are the
 // d-pad, W A S D too, Z and SPACE are A, X is B, ENTER is `run`, ESC `stop`,
@@ -24,8 +37,11 @@
 // owns the keys; a text surface gets the key and no alias but the arrows.
 // A key event carries the report's modifiers (moy_input.h).
 //
-// RECONNECT. Once a keyboard is picked only that address is reconnected; with
-// none picked, the first HOGP keyboard seen is. Background scans are passive
+// RECONNECT. A keyboard is picked in Settings (the picker's scan, then a
+// pick), and only that address is ever connected: its address and name are
+// saved, so it reconnects after a reboot. With none picked the machine waits
+// in `choose` and scans for nothing: a keyboard nobody picked is never
+// connected. Background scans look only for the picked keyboard, passive
 // and 10% duty (the radio is shared with WiFi and ESP-NOW, #7); the picker's
 // scan is active and continuous, and it waits for an explicit pick.
 
@@ -41,7 +57,8 @@
 #define MOY_HID_DEVICES 8
 #define MOY_HID_CHRS 16
 #define MOY_HID_DSCS 24
-#define MOY_HID_INPUTS 4
+#define MOY_HID_INPUTS 6
+#define MOY_HID_MEDIA_Q 8          // media key changes held for the next frame
 #define MOY_HID_NAME 24
 #define MOY_HID_ERROR 48
 
@@ -117,6 +134,8 @@ typedef struct {
     uint8_t keys[6];
     uint8_t nkeys;
     bool mouse;                 // a Boot Mouse Input: buttons and deltas
+    bool media;                 // a Report beside a boot keyboard: consumer reports alone
+    uint16_t usage;             // the consumer usage it holds down, 0 none
 } moy_hid_report_t;
 
 struct moy_hid {
@@ -156,6 +175,7 @@ struct moy_hid {
     uint8_t protocol;           // 0 none, 1 boot, 2 report
     uint16_t subs[MOY_HID_INPUTS];      // the CCCDs to write
     uint8_t nsubs;
+    uint8_t nsubs_core;         // the first this many are the keyboard's and mouse's
     uint8_t sub_next;
     int32_t write_pending;
     uint8_t sub_retries;
@@ -167,6 +187,9 @@ struct moy_hid {
     uint8_t nreports;
     uint8_t pend_usage[32];     // makes seen since the last frame, a bitmap
     uint8_t pend_mods;
+    uint16_t pend_media[MOY_HID_MEDIA_Q];  // consumer usages that went down or up
+    uint8_t pend_down;          // bit i: pend_media[i] went down
+    uint8_t npend_media;
     bool caps;
     bool level_idle;
     uint32_t notify_count;
@@ -184,17 +207,26 @@ size_t moy_hid_adv_name(const uint8_t *adv, size_t n, char *out, size_t cap);
 // A boot-shaped report (eight bytes, or nine with a leading report id) ->
 // modifiers and up to six usages; false for any other layout.
 bool moy_hid_decode(const uint8_t *r, size_t n, uint8_t *mods, uint8_t keys[6], uint8_t *nkeys);
+// A Consumer Control report of one 16-bit usage (two bytes) -> its usage,
+// 0 when nothing is down; false for any other length.
+bool moy_hid_consumer(const uint8_t *r, size_t n, uint16_t *usage);
 // A usage typed with the report's modifiers -> its key event (moy_input.h),
 // 0 for a usage that is no key; moy_hid_keycode is the byte that event types.
 int32_t moy_hid_event(uint8_t usage, uint8_t mods, bool caps);
 int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps);
+// A key event (moy_input.h) -> the HID usage that types it on a US layout in
+// the low byte and the modifiers in the high byte (moy_event.h's KEY field):
+// moy_hid_event's inverse, the Shift a character needs added. A key no usage
+// types answers usage 0 with its modifiers.
+uint16_t moy_hid_usage(int32_t ev);
 // The buttons a typed byte presses: Enter and Esc on every surface, the
 // letters and Space only while a game owns the keys (`cart`).
 uint32_t moy_hid_buttons_for_key(int32_t key, bool cart);
 
 // -- the machine --
 void moy_hid_init(moy_hid_t *h, const moy_hid_ops_t *ops, moy_input_t *table, uint32_t src);
-// The radio came up (available) or could not.
+// The radio came up (available) or could not; it went down. Each is the
+// table's BLE up or down (moy_input_radio).
 void moy_hid_started(moy_hid_t *h, bool ok, const char *why);
 void moy_hid_stopped(moy_hid_t *h);
 void moy_hid_tick(moy_hid_t *h);                    // timeouts and retries, ~2 Hz
@@ -202,7 +234,7 @@ void moy_hid_set_enabled(moy_hid_t *h, bool on);
 void moy_hid_discover(moy_hid_t *h);                // the picker's scan
 bool moy_hid_pick(moy_hid_t *h, const moy_hid_addr_t *addr);
 void moy_hid_forget(moy_hid_t *h);
-bool moy_hid_scan(moy_hid_t *h);                    // a background scan now
+bool moy_hid_scan(moy_hid_t *h);                    // a background scan now, for the picked keyboard
 
 void moy_hid_on_scan_result(moy_hid_t *h, const moy_hid_addr_t *addr, int8_t rssi,
                             const uint8_t *adv, size_t n);

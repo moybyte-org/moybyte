@@ -84,6 +84,18 @@
 # `_forget_bak` is the same drop, done by the writer rather than the next reader:
 # a foreign writer that calls it leaves nothing stale behind at all.
 #
+# A SAVE THAT GIVES A FRAME BACK between store ops (`_write_atomic_steps`: an
+# install's record, the install prompt's consent) makes the same three writes
+# in two ops: the backup first, then the marker and the publish together. Until
+# the marker names `path` its previous save is what reads (mid-backup, the
+# backup is not consulted at all); after it the backup is whole, so a torn
+# publish is the prefix case above. Keeping the marker beside the publish is
+# what lets another file's save land between the two ops: that save takes the
+# one marker, and this one takes it back in the op that publishes. The second
+# op checks the backup's stamp first: when it is not this save's (a save of
+# the SAME file came between, or, outside every root, a read dropped it as
+# stale) it makes the whole save instead.
+#
 # THE BACKUP IS SPENT ONCE STEP 3 RETURNS, and `_claim_bak` is what that buys. The
 # marker's stamp then fits the published file, so no read reaches the backup again
 # before the next save overwrites it -- which means a second writer that wants those
@@ -353,8 +365,13 @@ def _write_atomic(path, data):
     `_read_recover`. Three writes, no stat/remove/rename -- see the module
     docstring for the crash-safety argument and the invariant it asks of other
     writers."""
-    bak = path + ".bak"
     n, crc = _stamp_of(data)
+    _mark_publish(path, n, crc)
+    _publish_bak(path, data)
+    _write(path, data)                # publish in place
+
+
+def _mark_publish(path, n, crc):
     root = _root_for(path)
     if root is not None:
         try:
@@ -364,6 +381,13 @@ def _write_atomic(path, data):
             _marks[root] = None       # this save publishes without detection
         else:
             _marks[root] = (path, n, crc)
+
+
+def _publish_bak(path, data):
+    """The stamped backup of `data` beside `path`: `_write_atomic`'s second
+    write, and the first of `_write_atomic_steps`."""
+    bak = path + ".bak"
+    n, crc = _stamp_of(data)
     try:
         with open(bak, "w") as f:     # the redo log, stamped
             f.write("%s%d %d\n" % (_STAMP, n, crc))
@@ -371,7 +395,35 @@ def _write_atomic(path, data):
     except Exception:                 # noqa: BLE001 -- ENOSPC etc.
         _remove(bak)                  # free the half-written backup; `path` is untouched
         raise
-    _write(path, data)                # publish in place
+
+
+def _publish_mark(path, data):
+    """The marker and the publish together: `_write_atomic_steps`' second
+    store op. The whole save instead when the backup beside `path` is not
+    this save's -- another save of the same file came between the two, or a
+    reader outside every root dropped it as a foreign write's stale one --
+    so a cut in the publish always finds its own backup."""
+    n, crc = _stamp_of(data)
+    st = _bak_stamp(path)
+    if st is None or tuple(st) != (n, crc):
+        _write_atomic(path, data)
+        return
+    _mark_publish(path, n, crc)
+    _write(path, data)
+
+
+def _write_atomic_steps(path, data):
+    """`_write_atomic`'s save as two store ops, a resume each, for a caller
+    that gives a frame back between them: the stamped backup, then the marker
+    and the publish together. Every cut lands in a case the module docstring
+    covers -- before the marker names `path` its previous save is what reads,
+    after it the backup is whole -- and a save of ANOTHER file between the two
+    (which takes the one marker) cannot leave this publish unmarked. A backup
+    that is no longer this save's makes the second op the whole save
+    (`_publish_mark`)."""
+    _publish_bak(path, data)
+    yield
+    _publish_mark(path, data)
 
 
 def _forget_bak(path):
@@ -478,6 +530,8 @@ if _native is not None:
     _read_stamped = _native.read_stamped
     _unmark = _native.unmark
     _write_atomic = _native.publish
+    _publish_bak = _native.publish_bak
+    _publish_mark = _native.publish_mark
     _forget_bak = _native.forget_bak
     _claim_bak = _native.claim
     _read_recover = _native.read_recover

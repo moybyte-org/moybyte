@@ -16,7 +16,8 @@ sprint 2's harness (tools/moy_index_spike.py --component spine) CI runs.
   * the API-sequence fuzz (native/moy_spine/fuzz_spine.c) under AddressSanitizer
     and UndefinedBehaviorSanitizer: #224's containment;
   * the placement rule of native/moy_kernel/moy_kernel.h, asserted
-    in the sources: kernel data is PSRAM.
+    in the sources: kernel data is PSRAM, and a ring a task writes is a take
+    from THE SHARES' RINGS row (native/moy_play/moy_play.h).
 
 The spine trace over the native module is tests/test_semantic_traces.py's.
 """
@@ -41,11 +42,18 @@ NATIVE = moy_spine_binding.host_bindings()
 SPINE_DIR = os.path.join(ROOT, "native", "moy_spine")
 
 # Tests that need the host (a tmp store, the workstation), not a VM.
-HOST_ONLY = ("test_system_json_on_the_card_is_byte_identical",
-             "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call")
+HOST_ONLY = ("test_the_settings_file_on_the_card_is_byte_identical",
+             "test_a_legacy_system_json_reads_as_absent",
+             "test_a_line_the_settings_reader_cannot_read_is_passed_over",
+             "test_a_write_through_the_setter_reaches_the_card_with_no_persist_call",
+             "test_the_settings_file_functions_are_the_c_rows")
 # MicroPython's dict has no order, so the Python twin there reads a file's
 # rows in the VM's order; the native twin keeps the file's.
-VM_NATIVE_ONLY = ("test_the_file_is_the_bytes_json_dumps_writes",)
+# The settings file's reader and writer are C's alone: the twin has neither.
+VM_NATIVE_ONLY = ("test_the_file_is_the_bytes_json_dumps_writes",
+                  "test_the_settings_file_is_its_rows_sorted_one_a_line",
+                  "test_the_settings_files_reader_passes_over_what_it_cannot_read",
+                  "test_the_settings_file_keeps_only_keys_and_lines_it_can_read_back")
 
 
 def _vm_suite(exe, tmp_path, native):
@@ -120,7 +128,6 @@ def round_():
         t.new(i)
     st = sp.BackStack()
     st.goto("menu")
-    sp.Leases().hold("web")
 
 
 for _ in range(300):
@@ -199,7 +206,6 @@ def _outcome(fn, *a):
 KINDS = ["launcher", "menu", "desk", "desktop", "settings", "files", "artwork",
          "calc"] + ["k%d" % i for i in range(40)] + ["", "x" * 16, "éé",
                                                        "x" * 15, None, 3]
-TAGS = list(moy_spine.LEASE_TAGS) + ["", "wasm", "we", None, 4]
 KEYS = ["a", "b", "theme", "fs", "app_guard", 'q"q', "b\\s", "n\nl", "é",
         "\U0001f600", "k\x7f", "x y", "", None, 5]
 VALUES = ["1", "-0", "0.5e+3", "true", "null", "NaN", '"s"', '"\\u00e9\\n"',
@@ -238,7 +244,6 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
     apps = pair(lambda m: m.AppRegistry())
     back = pair(lambda m: m.BackStack())
     returns = (ref.Returns(apps[0]), nat.Returns(apps[1]))
-    leases = pair(lambda m: m.Leases())
     saved = ([], [])                # what each save hook was handed, in order
     landing = [True]                # whether a write lands: the hooks' answer
 
@@ -339,11 +344,6 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 agree(both(returns, op), step)
             agree(both(returns, "caller"), (step, "caller"))
             agree(both(returns, "back"), (step, "back"))
-        elif k < 0.68:                                   # the leases
-            op = rnd.choice(("hold", "release", "held"))
-            agree(both(leases, op, rnd.choice(TAGS)), step)
-            assert leases[0].mask() == leases[1].mask()
-            assert leases[0].holders() == leases[1].holders()
         else:                                            # the settings rows
             op = rnd.choice(("set", "set", "set_text", "set_text", "get", "text",
                              "delete", "load", "adopt", "flush", "land"))
@@ -579,6 +579,30 @@ def test_kernel_data_is_allocated_from_psram():
     outside = ALLOC_CALLS.findall(binding.replace(alloc, " "))
     # spine_alloc / spine_release off the board (calloc, free), the rows array
     assert sorted(outside) == ["calloc", "free", "m_new0"], outside
+
+
+def test_the_shares_rows_hold_what_the_kernel_places_in_psram():
+    """THE SHARES' ROWS (native/moy_play/moy_play.h): the ledger allocates
+    nothing of its own, and a ring a task writes -- PSRAM by the rule above
+    (native/moy_input/moy_input.c) -- is a take from the RINGS row before it
+    is allocated and a give when it is freed, while an ISR's internal ring
+    stays under the kernel's internal cap and takes nothing."""
+    play = os.path.join(ROOT, "native", "moy_play")
+    shares = _code(os.path.join(play, "moy_shares.c"))
+    assert not ALLOC_CALLS.findall(shares), "the ledger allocates"
+    header = open(os.path.join(play, "moy_play.h")).read()
+    rings = int(re.search(r"MOY_SHARE_RINGS = (\d+)", header).group(1))
+    raw = open(os.path.join(ROOT, "native", "moy_input", "moy_input.c")).read()
+    assert "#define RINGS_ROW %du" % rings in raw
+    code = _code(os.path.join(ROOT, "native", "moy_input", "moy_input.c"))
+    new = re.search(r"static moy_input_ring_t \*ring_new\(.*?\n\}", code, re.S).group(0)
+    assert new.index("moy_share_take(RINGS_ROW") < new.index("ring_alloc(")
+    assert "!internal && moy_share_take" in new
+    drop = re.search(r"static void ring_drop\(.*?\n\}", code, re.S).group(0)
+    assert "!g->internal && moy_share_give" in drop
+    # every ring the input table frees goes through the give
+    outside = code.replace(new, " ").replace(drop, " ")
+    assert re.findall(r"\bring_free\(", outside) == ["ring_free("] * 2   # the two definitions
 
 
 def test_the_cpython_host_runs_the_c_spine():

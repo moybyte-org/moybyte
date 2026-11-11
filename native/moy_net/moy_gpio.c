@@ -1,9 +1,9 @@
 // The Zero's pins as the webhost's /gpio route (moy_net.h): a batch of digital
 // writes and reads, refused pin by pin against the board's allowlist table.
 //
-//   GET  /gpio?pin=NNNN  -> {"v": 1, "pins": [...]}
+//   GET  /gpio           -> {"v": 1, "pins": [...]}
 //   POST /gpio           {"v": 1, "ops": [{"p": 2, "mode": "out", "v": 1},
-//                                         {"p": 2, "mode": "read"}], "pin": "NNNN"}
+//                                         {"p": 2, "mode": "read"}]}
 //                        -> {"ok": n, "reads": {"2": 1}, "err": [[i, why], ...]}
 //
 // THE ALLOWLIST IS THE SECURITY MODEL: the pins a kid may drive are the board's
@@ -11,8 +11,17 @@
 // excluded pin would break), and a pin outside it is refused and never
 // touched. A bad op is skipped and reported; it never aborts the batch, whose
 // neighbours may be the write that turns a motor off. An empty batch is the
-// page's probe and answers with the allowlist, behind the pin like every write.
-// Both methods are pin-gated: the GET by `?pin=`, the POST in its body.
+// page's probe and answers with the allowlist. Both methods are sealed routes
+// of the webhost (moy_webhost.c's header): what reaches here is a signed-in
+// page's.
+//
+// THE PINS ARE LEASED (moy_lease.h, where the image has the table): a write
+// takes the pin's lease for the page, a process named "web" (MOY_LEASE_PINS,
+// the `pins` permission's digital subset; the page's sign-in is its grant), and keeps it, so the level it drove stays driven and `pins`
+// and `ps` show who holds it; the webhost's stop drops them all
+// (moy_gpio_release). A pin another process holds -- a cart's lease -- is
+// refused "pin N: busy", a read as a write, and never touched. A board that
+// offers no lease of a pin has no other holder to meet, and drives it as it is.
 //
 // The pins themselves are the board's (moy_gpio_pins, moy_gpio_drive,
 // moy_gpio_sense in moy_net_port.c): a pin's first touch decides what it is,
@@ -28,6 +37,75 @@
 
 #define GPIO_V 1
 #define ERR_MAX 8
+
+// The lease table's calls (moy_lease.h), weak: an image without the kernel
+// leases nothing.
+int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
+                   uint8_t flags, uint32_t *h) __attribute__((weak));
+uint32_t moy_lease_of_pin(int pin) __attribute__((weak));
+uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
+uint32_t moy_log_spawn(const char *name) __attribute__((weak));
+#define LEASE_OK 0
+#define LEASE_BAD 4
+#define LEASE_GPIO 1
+#define LEASE_PINS 0x02u
+#define LEASE_PIN_MAX 64
+
+// Kernel memory at the first lease, so a board that never serves /gpio spends
+// no internal RAM on it.
+static uint32_t s_web;                  // the page's process, 0 until its first lease
+static uint32_t *s_lease;               // LEASE_PIN_MAX: the page's lease of each pin, 0 none
+
+// 1 when another process holds `pin`.
+static int held_elsewhere(int pin) {
+    if (moy_lease_of_pin == NULL || pin < 0 || pin >= LEASE_PIN_MAX) {
+        return 0;
+    }
+    uint32_t h = moy_lease_of_pin(pin);
+    return h != 0 && (s_lease == NULL || h != s_lease[pin]);
+}
+
+// The page's lease of `pin` before a write: 0, or -1 when it cannot be had.
+static int claim(int pin) {
+    if (moy_lease_take == NULL || moy_lease_of_pin == NULL || pin < 0
+        || pin >= LEASE_PIN_MAX) {
+        return 0;
+    }
+    if (s_lease == NULL) {
+        s_lease = moy_net_alloc(LEASE_PIN_MAX * sizeof(uint32_t));
+        if (s_lease == NULL) {
+            return -1;
+        }
+        memset(s_lease, 0, LEASE_PIN_MAX * sizeof(uint32_t));
+    }
+    uint32_t h = moy_lease_of_pin(pin);
+    if (h != 0) {
+        return h == s_lease[pin] ? 0 : -1;
+    }
+    s_lease[pin] = 0;
+    if (s_web == 0) {
+        s_web = moy_log_spawn != NULL ? moy_log_spawn("web") : 0;
+    }
+    uint32_t nh;
+    int r = moy_lease_take(s_web, LEASE_GPIO, 0, 1ull << pin, LEASE_PINS, &nh);
+    if (r == LEASE_OK) {
+        s_lease[pin] = nh;
+        if (moy_gpio_reset != NULL) {
+            moy_gpio_reset(pin);        // a lease since may have left it safe
+        }
+        return 0;
+    }
+    return r == LEASE_BAD ? 0 : -1;
+}
+
+void moy_gpio_release(void) {
+    if (s_web != 0 && moy_lease_sweep != NULL) {
+        moy_lease_sweep(s_web);
+    }
+    if (s_lease != NULL) {
+        memset(s_lease, 0, LEASE_PIN_MAX * sizeof(uint32_t));
+    }
+}
 
 typedef struct {
     char *p;
@@ -105,20 +183,14 @@ static const char *check(const char *o, const char *oe, const uint8_t *pins,
 }
 
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
-                     size_t bn, const char *pin, char *out, size_t cap) {
+                     size_t bn, char *out, size_t cap) {
     const uint8_t *pins = NULL;
     int count = moy_gpio_pins != NULL ? moy_gpio_pins(&pins) : 0;
     buf_t b = {out, 0, cap};
     out[0] = '\0';
-    int gated = pin != NULL && pin[0] != '\0';
+    (void)target;
+    (void)tn;
     if (!post) {
-        const char *q;
-        size_t qn;
-        moy_http_query(target, tn, "pin", 3, &q, &qn);
-        if (gated && (qn != strlen(pin) || memcmp(q, pin, qn) != 0)) {
-            put(&b, "{\"error\":\"pin\"}");
-            return 403;
-        }
         put(&b, "{\"v\": %d, \"pins\": ", GPIO_V);
         pin_list(&b, pins, count);
         put(&b, "}");
@@ -135,11 +207,6 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
         || !moy_json_get(o, oe, "ops", &ops, &ops_e) || moy_json_kind(ops, ops_e) != MOY_JSON_ARR) {
         put(&b, "{\"error\":\"bad batch\"}");
         return 400;
-    }
-    if (gated && !(moy_json_get(o, oe, "pin", &v, &ve) && moy_json_kind(v, ve) == MOY_JSON_STR
-                   && moy_json_str_is(v, ve, pin, strlen(pin)))) {
-        put(&b, "{\"error\":\"pin\"}");
-        return 403;
     }
     moy_json_iter_t it;
     const char *k, *ke, *e, *ee;
@@ -159,6 +226,10 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
         int p = 0, isout = 0, val = 0;
         char why[64];
         const char *bad = check(e, ee, pins, count, &p, &isout, &val, why, sizeof(why));
+        if (bad == NULL && (held_elsewhere(p) || (isout && claim(p) != 0))) {
+            snprintf(why, sizeof(why), "pin %d: busy", p);
+            bad = why;
+        }
         if (bad == NULL) {
             if (isout) {
                 if (moy_gpio_drive(p, val) != 0) {

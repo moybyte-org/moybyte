@@ -67,6 +67,9 @@ moybyte_patch_gc_meters
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# FatFS's long-name buffer on the calling task's stack, which the re-entrant
+# oofatfs needs (mpconfigboard.h, tools/patch_fatfs_lfn.py).
+moybyte_patch_fatfs_lfn
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
@@ -75,6 +78,7 @@ moybyte_patch_import_cache
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
 # and a board takes it when a profile here shows the same path.
 moybyte_patch_gc_split_reserve
+moybyte_patch_gc_grow_step
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
@@ -84,9 +88,22 @@ moybyte_patch_native_code_free
 # whole boot (tools/patch_usj_rx_init.py).
 moybyte_patch_usj_rx_init
 
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).
 moybyte_patch_psram_retune
+
+# The mDNS responder's scratch is PSRAM while it runs (the SSH server's
+# `<name>.local`), not internal .bss for the whole power-on
+# (tools/patch_mdns_psram.py).
+moybyte_patch_mdns_psram
+
+# DECLINED moybyte_patch_tinyusb_msc_psram -- this board denies
+# native/moy_usbdisk, so TinyUSB's MSC class is not built.
 
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.

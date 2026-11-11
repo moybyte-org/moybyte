@@ -19,6 +19,45 @@ file. On a VM tier a run's frame is the kernel's Player's
 (`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
 plays the queue.
 
+**Several runs are open at once, each a row** (`moycore_lua.h`, THE RUNS ARE
+ROWS): its VM, console, layers, paint images and scenes, p8 machine and
+OWNER. `run_begin` answers the run's handle and makes its row current;
+`use(h)` makes it current again, and every other verb acts on the current
+row, so the glue (`device/moycore_glue.py`) calls `use` before each call into
+its run. A row is held only while its run is, internal SRAM first on a
+board (the verbs read its console every call), and the current row while no
+run is open is an idle one in PSRAM, so the S3s' idle desk holds the
+pointers alone. What a row keeps against the gc -- its registered
+callables, its layer restore state, its last `view()`, its p8 buffers -- is
+one rooted list, a stretch per row. `runs()` counts the open runs and
+`heap(h)` reads a run's Lua heap, Lua's own count. The pool's chunks are
+every state's, given back at the last VM's close. The kernel's Player holds a
+row per run too (`native/moy_play/moy_play.h`) and makes its run's row
+current before each frame, so Lua games run side by side in the shell's
+running set (`docs/os_2026-11/processes.md` §6). A compiled run's state
+hangs off its row too (`moycore_wasm.c`'s `wr`, with its engine session), so
+compiled games run side by side the same way; the speaker's `snd` stream and
+the timed lanes, which a board holds one of, are the newest compiled run's.
+
+**A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
+verbs): no console, no row of the runs, its timers, message wakes and
+`moybyte` names, its own counting allocator in PSRAM. Its start runs the
+scripts it is handed in order, each its own chunk (`moycore_svc_chunk_t`),
+sharing through globals as a window's scripts do. On a board each runs on
+its own task (pinned to the P4s' core 0, or to the S3s' core 1 with its stack
+in PSRAM); the host and the desktop MicroPython step them at the
+scheduler's poll (`runtime/system/scheduler.py`).
+It is the Lua face of the one service model
+(`docs/os_2026-11/processes.md` §1): its messages are its process's event
+queue (`native/moy_kernel/moy_evq.h`), its task blocks in that queue's wait,
+its rungs are the one supervisor's (`moy_super.h`), and its console calls
+(`moybyte.notify`, `award`, `progress`, the functions the console hands it) go through
+the VM's queue (`moy_vmq.h`) for the VM's task to answer; their JSON is the
+prefs names' (`native/moy_app/moy_app_lua.h`). Its state opens its app's role
+names over the run its start was handed (`moy_app_lua_open_hop`), a row the
+table answers here (the store's and the settings') run on its own task, and
+each other row on a P4 a hop on the VM's queue.
+
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
@@ -37,7 +76,8 @@ console -- canvas, snapshot, audio queue, pmem, flags, `tick`, `view`,
 argument says which: False builds the console alone, and `wasm_open(module,
 wasm_head, pages, wasm_sha, cart_dir, wire_swapped, gate, allow_unsigned)`
 hands it to the ENGINE, `native/moy_wasm`, which owns the runtime, the
-signature (`allow_unsigned` is the console's Unknown sources setting), the
+admission (`allow_unsigned` is the cart's consent to `full_access`,
+`app_perms.run_admits_unsigned`), the
 load, the provenance key and the thread everything WAMR does runs on. This half binds
 and nothing else: it registers the table, checks the module's shape against
 the manifest's pages before its memory exists, binds the instance to the
@@ -64,7 +104,8 @@ says where they run). An item reaches no console state -- an import from one
 traps -- so nothing here is touched from another core.
 
 **A compiled cart's samples go to the speaker's mixer.** `snd` (22,050 Hz
-mono, a queue of 2,048 frames; moy-spec SPEC.md §16.9) is libmoy's
+mono, a queue of 2,048 frames unless the manifest's `"moybyte":
+{"audio_ring": n}` asks otherwise; moy-spec SPEC.md §16.9) is libmoy's
 `moy_stream`, and where the image carries `moy_audio` (its cmake defines
 `MOY_AUDIO_SND`) and the core-1 feeder runs, moycore points the binding's
 `snd` at it (`native/moy_audio/moy_audio_snd.h`): the feeder adds the queue
@@ -428,6 +469,24 @@ hands over from the `__layer_new` trampoline), and `__layer_verb`, which wraps
 a screen verb into a layer method that points `con->canvas` at that canvas for
 one protected call. The host's Lua shim (`runtime/host/moyhost_lua.c`) includes the
 same header, so both Lua hosts draw into a layer through one body.
+
+## A Lua app's role names
+
+A Lua app or script's state opens with its role names: `moycore_lua_open`
+calls `native/moy_app/moy_app_lua.h`'s opener (weak, so an image without
+`native/moy_app` opens none) with the app's run the open was handed
+(`run_begin`'s `app`, the Player's `moy_app.run`), which the state copies,
+and installs `files`, `prefs`, `set_theme`,
+`open_app`, `clipboard`, `io` and `os` as its permissions grant, and the
+theme's reads (`theme.token`, `gen`, `light`, `name`, `variant`) where its
+grant holds the theme, which every app's does, before the prelude and the
+cart. The register loop never makes a trampoline over them
+(`lua_ext.ROLE_NAMES`); `themes()` and `files.badge` answer from the Python
+face's tables through two gated trampolines (`lua_ext.PRELUDE_APP`). A game
+has no run and opens none of them. A compiled app's run holds its app run
+the same way (`wasm_open`'s `app`, `moycore_open_c_t.app` for a run opened
+with no VM), and the adapter's natives find it by the instance their call
+comes from (`moy_app_wasm_run_of`).
 
 ## Testing
 

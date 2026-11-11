@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 from ws_helpers import build_ws as _build_ws, select_on_home, use_theme
 from tools.board_config import runtime_file
+from ws_helpers import settle_badges  # noqa: E402
 
 
 def _ws(tmp_path, **kw):
@@ -37,7 +38,7 @@ def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
     assert kinds == ["artwork", "myart", "appearance", "storybook",
-                     "files", "calc", "getcarts"]
+                     "files", "calc", "getcarts", "jukebox", "terminal"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
     assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
@@ -211,9 +212,9 @@ def test_calc_arrows_move_focus_and_enter_presses(tmp_path):
     # A tap owes its release and rest frames, and then Calc paints nothing.
     _quiesce_frame(ws)
     _tap(ws, calc, "4")
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     _settle_calc(ws, calc, 8)
-    assert ws._frames_drawn == before
+    assert ws.frame_state.frames_drawn == before
 
 
 def test_calc_keeps_a_tape(tmp_path):
@@ -369,7 +370,7 @@ import hashlib
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6
 _SHIPPED_APPS = ("artwork", "myart", "appearance", "storybook",
-                 "files", "calc", "getcarts")
+                 "files", "calc", "getcarts", "jukebox")
 
 
 class _NakedApp:
@@ -410,6 +411,7 @@ def _quiesce_frame(ws):
     recipe): two renders taken a moment apart must differ only by the bar."""
     if ws.pointer is not None:
         ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0

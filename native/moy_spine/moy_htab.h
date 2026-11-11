@@ -49,6 +49,8 @@ enum {
     MOY_KIND_IMAGE = 10,    // a run's decoded pictures (native/moy_play)
     MOY_KIND_ACTOR = 11,    // reserved: a Lua run's actors are its own tables (moycore_scene.h)
     MOY_KIND_GRANT = 12,    // the app ABI's grants (native/moy_app)
+    MOY_KIND_LEASE = 13,    // the lease table (native/moy_kernel/moy_lease.h)
+    MOY_KIND_PROC = 14,     // the process table (native/moy_kernel/moy_proc.h)
 };
 
 enum {

@@ -9,7 +9,6 @@ the canvas backend, the cart store's filesystem, and the input source differ.
 
 import json
 import os
-import shutil
 import sys
 
 # The shell imports `audio`, `blocks` and the editor cores by their frozen device
@@ -83,6 +82,7 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
+from . import moy_store_base as _store_base  # noqa: E402
 from . import moy_catalogue  # noqa: E402  (the store's carts-by-handle interface)
 sys.modules.setdefault("moy_catalogue", moy_catalogue)   # ONE index per process
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
@@ -111,7 +111,7 @@ class SdlPump(PcmPump):
     device (headless, CI) it pulls and discards, so the sequencers still
     advance exactly as they do with one."""
 
-    def __init__(self, rate=11025):
+    def __init__(self, rate=22050):
         PcmPump.__init__(self, rate)
         self._ok = False
         self._pygame = None
@@ -206,14 +206,21 @@ class HostCartNet:
     """The network Get Carts fetches through on the host (#124):
     `runtime/carts/cart_index.py`'s transport over urllib, which follows redirects
     and checks certificates.
-    The board's twin is device/wire_links.CartNet; both answer `online()` and
-    `open(url)` -> status / length / readinto / close. The PC is already on a
-    network, so `online()` has nothing to dial."""
+    The board's twin is device/wire_links.CartNet; both answer `dial()`,
+    `ready()` and `open(url)` -> status / length / readinto / close (and this
+    one `online()`, the shape a transport with no `ready()` keeps).
+    The PC is already on a network, so there is nothing to dial."""
 
     def __init__(self, timeout=30):
         self.timeout = timeout
 
     def online(self):
+        return True
+
+    def dial(self):
+        pass
+
+    def ready(self):
         return True
 
     def open(self, url):
@@ -235,20 +242,6 @@ def make_host_cart_net():
     return HostCartNet()
 
 
-_SEED_PRESERVE = ("config.json", "pmem.json")   # the kid's tuning + saves, kept across a re-seed
-
-
-def _manifest_version(cart_dir):
-    """The integer "version" in a cart folder's manifest.json (0 if missing/unreadable),
-    so a newer shipped version supersedes a stale seeded copy -- mirrors the device's
-    _cart_version (#47)."""
-    try:
-        with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
-            return int(json.load(f).get("version", 0))
-    except (OSError, ValueError, TypeError):
-        return 0
-
-
 def _manifest_title(cart_dir):
     with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
         return json.load(f)["title"]
@@ -256,37 +249,33 @@ def _manifest_title(cart_dir):
 
 def _seed_system_carts(carts_dir):
     """Copy the read-only system .moy folders into the user store so the launcher shows
-    them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
-    shipped manifest "version" is newer than the seeded copy is RE-SEEDED -- code + art
-    refreshed, while the kid's tuning + saves (config.json, pmem.json) are preserved --
-    matching the device's seed_builtins, so a bumped cart actually propagates on the host
-    (it used to seed once and ignore version bumps)."""
+    them (and the child duplicates/edits copies), by the rules a board seeds its
+    built-ins by (#47, moy_seed.seed_folders over the store as a cache): a built-in
+    whose shipped manifest "version" is newer than the seeded copy is RE-SEEDED, its
+    tuning and saves (config.json, pmem.json) kept."""
     os.makedirs(carts_dir, exist_ok=True)
     names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
              if os.path.isdir(SYSTEM_CARTS) else [])
     moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
         os.path.join(SYSTEM_CARTS, n))} for n in names])
-    for name in names:
-        src = os.path.join(SYSTEM_CARTS, name)
-        dst = moy_carts.cart_path(carts_dir, name)
-        if not os.path.exists(dst):
-            shutil.copytree(src, dst)
-        elif _manifest_version(src) > _manifest_version(dst):
-            kept = {}
-            for f in _SEED_PRESERVE:                 # snapshot the kid's data
-                p = os.path.join(dst, f)
-                if os.path.isfile(p):
-                    with open(p, "rb") as fh:
-                        kept[f] = fh.read()
-            shutil.rmtree(dst)
-            shutil.copytree(src, dst)                # refresh code + art
-            for f, data in kept.items():             # restore the kid's data
-                with open(os.path.join(dst, f), "wb") as fh:
-                    fh.write(data)
+    _store_base.seeded(carts_dir, names)
+    if names:
+        moy_carts.seed_folders(SYSTEM_CARTS, carts_dir, record=False)
+
+
+def _bind_media_keys(table):
+    """The media service answers the MEDIA records on `table`: none where the
+    host has no C compiler for it."""
+    try:
+        from . import moy_media
+        moy_media.keys_on(table)
+    except (ImportError, OSError):  # pragma: no cover - no host build of the C
+        pass
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
-                      windowed=False, panel_diagonal_in=None, first_variant=None):
+                      windowed=False, panel_diagonal_in=None, first_variant=None,
+                      kernel_input=False):
     """Build the shared console.Workstation wired to host backends.
     `first_variant` ("dark"/"light") is the theme variant of a first run, as
     `console.wire_workstation_core` takes it.
@@ -296,7 +285,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     fixed 320x240 the carts + cart API draw on. When `sys_size` is None or 320x240
     (the T-Deck default) the system canvas IS the game canvas (one object), so the
     desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
-    system-UI font size (the persisted system.json value overrides it on load).
+    system-UI font size (the persisted system/settings value overrides it on load).
 
     `windowed=True` installs the Picotron-style windowed WM (wm_windowed.py --
     the big-screen / P4 presentation, #73/#58): the launcher is the desktop and
@@ -306,7 +295,14 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     `panel_diagonal_in` is the board fact a BOARD declares in its board.toml
     (#203): the glass's diagonal in inches, from which the chrome tap-target
     floor is derived. None -- every simulated tier by default -- keeps chrome on
-    the font scale."""
+    the font scale.
+
+    `kernel_input=True` makes the console's input the kernel's table
+    (moy_input_kernel), as a board's console binds it (device/wire_input.py),
+    so the device APIs' records (the radio's, the microphone's), which their
+    drivers post there, wake a Python program's `on(fn)`. One console a
+    process may hold it (the simulator's); by default a console's table is
+    its own, so two consoles in one process never share input."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_catalogue.catalogue(carts_dir)
@@ -332,17 +328,25 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         canvas = host_canvas.make_system_canvas(WIDTH, HEIGHT)
     else:
         canvas = host_canvas.make_canvas(WIDTH, HEIGHT)   # the fixed 320x240 GAME canvas
-        sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
+        sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale,
+                                                    desk=windowed)
     for cv in (canvas, sys_canvas):
         if cv is not None:
             cv._owners = owners
-    inp = InputState()
+    if kernel_input:
+        from . import moy_input as _mi
+        inp = InputState(_mi._lib().moy_input_kernel())
+    else:
+        inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale,
                              panel_diagonal_in=panel_diagonal_in)
     # The host's inputs: its keyboard, on the table's own source. Its mouse is
     # a mouse, not a finger, so a click leaves the keys showing.
     ws.use_inputs(HOST_INPUTS)
+    # Its media keys are MEDIA records on this table, which the media service
+    # answers (a board's console and the service share the kernel's).
+    _bind_media_keys(inp)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = lambda w, h, owner=None: host_canvas.make_canvas(
@@ -367,6 +371,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         runtimes["lua"] = lua
     if wasm_host.available():
         runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
+    from runtime import elf_binding
+    if elf_binding.available():
+        from runtime.elf_run import ElfRuntime
+        runtimes["elf"] = ElfRuntime(ws, elf_binding)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the

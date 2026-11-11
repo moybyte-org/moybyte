@@ -6,7 +6,8 @@
 # focused pane (from 0), 11 the first pane's size, 12 where a tap activated the
 # second pane's part (x * 256 + y + 1; 0 none), 13 where the pointer held on
 # it last was while pressed (the same; a part with nav off keeps a held
-# press), 14 the row of parts' current row. A table at the right draws its
+# press), 14 the row of parts' current row, 15 the page's top (an app's ui
+# frame is its content_rect(), below the host's bar). A table at the right draws its
 # rows as parts (ui.table_part); a row of parts above the Save button lies
 # side by side (o.axis "x"), its view resting on a part's centre (o.snap),
 # each part shorter by its distance from the centre (ui.table_dist); two
@@ -31,7 +32,7 @@ _XO = {"id": "row", "part": (30, 26), "axis": "x", "snap": True}
 
 def _draw():
     global sound, vol, cur, saves, frames, _pane, _tap, _held, _xcur
-    ui.page("UI page")
+    top = ui.page("")[1]
     ui.label("Hello")
     sound = ui.toggle("Sound", sound)
     vol = ui.slider("Volume", vol, 0, 10)
@@ -82,3 +83,4 @@ def _draw():
     pmem(12, _tap)
     pmem(13, _held)
     pmem(14, _xcur)
+    pmem(15, top)

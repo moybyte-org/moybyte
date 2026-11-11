@@ -44,7 +44,9 @@ _FILES = ((_LIBMOY, "moy_audio.c", True), (_LIBMOY, "moy_audio.h", True),
           (_AUDIO, "moy_aud.c", True), (_AUDIO, "moy_aud.h", True),
           (_AUDIO, "moy_aud_out.c", False), (_AUDIO, "moy_audio_snd.h", False),
           (_SPINE, "moy_htab.c", False), (_SPINE, "moy_htab.h", False))
-_CFLAGS = ["-std=gnu99", "-O2", "-ffp-contract=off", "-fPIC", "-shared"]
+# MOY_AUDIO_STEREO builds the P4s' stereo output (moy_aud_render_st and its
+# upsampler) for the tests to play; the host's own mix stays mono.
+_CFLAGS = ["-std=gnu99", "-O2", "-ffp-contract=off", "-fPIC", "-shared", "-DMOY_AUDIO_STEREO=1"]
 
 OK, STALE, FULL, NOMEM, BANK, BAD = range(6)
 OUT_NONE, OUT_RUNNING, OUT_FAILED, OUT_ABSENT = range(4)
@@ -145,6 +147,8 @@ def _load(path):
         ("moy_aud_set_rate", [i], None),
         ("moy_aud_rate", [], i),
         ("moy_aud_render", [p, i], None),
+        ("moy_aud_out_rate_set", [i], None),
+        ("moy_aud_render_out", [p, i], None),
         ("moy_aud_stats", [C.POINTER(u32 * 13)], None),
         ("moy_aud_dump", [u32, p, i], i),
         ("moy_aud_stats_reset_max", [], None),
@@ -153,6 +157,14 @@ def _load(path):
         ("moy_aud_out_start", [], i),
         ("moy_aud_out_state", [C.POINTER(C.c_char_p)], i),
         ("moy_aud_snd_counts", [pu32, C.POINTER(i)], i),
+        ("moy_audio_snd_open", [u32], i),
+        ("moy_audio_snd", [p, u32], u32),
+        ("moy_audio_snd_close", [], None),
+        ("moy_aud_bg", [p], None),
+        ("moy_aud_render_st", [p, i], None),
+        ("moy_aud_up2", [p, p, i, p], None),
+        ("moy_aud_out_rate", [], i),
+        ("moy_aud_out_channels", [], i),
     )
     for name, args, res in sigs:
         fn = getattr(d, name)
@@ -265,6 +277,17 @@ class Module:
         self._d.moy_aud_render(cbuf, n)
         return n
 
+    def set_out_rate(self, rate):
+        self._d.moy_aud_out_rate_set(int(rate))
+
+    def render_out(self, buf, n):
+        n = min(int(n), len(buf) // 2)
+        if n <= 0:
+            return 0
+        cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
+        self._d.moy_aud_render_out(cbuf, n)
+        return n
+
     def dump(self, h, buf, n):
         n = min(int(n), len(buf) // 2)
         cbuf = (self._C.c_char * (2 * n)).from_buffer(buf)
@@ -301,12 +324,36 @@ class Module:
     def codec(self):
         return None
 
+    def bg(self, fn):
+        """The background stream's pull (a C function's address, None for
+        none): the media service's (runtime/host/moy_media.py's attach)."""
+        self._d.moy_aud_bg(fn)
+
+    SND_DEPTH, SND_MIN, SND_MAX = 2048, 64, 65536
+
     def snd_counts(self):
-        c = (self._C.c_uint32 * 4)()
+        c = (self._C.c_uint32 * 5)()
         o = self._C.c_int()
         if not self._d.moy_aud_snd_counts(c, self._C.byref(o)):
             return None
-        return (c[0], c[1], c[2], c[3], bool(o.value))
+        return (c[0], c[1], c[2], c[3], bool(o.value), c[4])
+
+    def snd_open(self, depth=0):
+        return self._d.moy_audio_snd_open(max(0, int(depth))) if int(depth) >= 0 else 0
+
+    def snd(self, buf=None):
+        if buf is None:
+            return self._d.moy_audio_snd(None, 0)
+        mv = memoryview(buf).cast("B")
+        n = len(mv) // 2
+        if n == 0:
+            return 0
+        raw = (self._C.c_char * len(mv)).from_buffer_copy(mv) if mv.readonly else \
+            (self._C.c_char * len(mv)).from_buffer(mv)
+        return self._d.moy_audio_snd(raw, n)
+
+    def snd_close(self):
+        self._d.moy_audio_snd_close()
 
 
 def get():

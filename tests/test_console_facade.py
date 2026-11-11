@@ -45,7 +45,6 @@ COLLABORATORS = ("web", "prefs", "covers", "carts", "look", "history")
 # answer rather than a guess.
 FORWARDS = {
     "web": {
-        "web_pin": "pin",                    # moy_webhost's start-time lambda
         "web_console_url": "url",            # dev_channel's `web`
         "park_web_console": "park",          # layers.py's contract comment
         "stop_web_console": "stop",          # the Guition on-glass suite (serial)
@@ -69,13 +68,13 @@ FORWARDS = {
     # the direct suites.
     "covers": {},
     # Landing C, commit 2. ONE forward, and it is the one #209's own 3d blind
-    # spot names: `moy_webhost` captures `lambda: ws.rescan_carts()` when the
+    # spot names: `moy_webhost` captures `lambda folders: ws.rescan_carts(folders)` when the
     # webhost is CONSTRUCTED, and the Guition on-glass suite's sync test drives
     # it end to end from a browser batch. Everything else migrated in-commit --
     # the roster attribute (`carts.all`) has no `ws` mirror at all, because a
     # re-scan REBINDS the list and an alias would go stale on the first sync.
     "carts": {
-        "rescan_carts": "rescan",            # device/moy_webhost's on_sync lambda
+        "rescan_carts": "synced",            # device/moy_webhost's on_sync lambda
     },
     # Landing D. ZERO forwards, like the cover cache, and for the same reason:
     # the look's callers are all IN this tree and all moved with it. The three
@@ -292,7 +291,7 @@ def test_no_property_forwards_to_a_collaborator():
 
 
 # The pre-carve property forwards, over the objects the 2026-07 shell split off
-# (project/player/editor_app/wm) rather than the six carve collaborators. They
+# (the run's project and player, editor_app, wm) rather than the six carve collaborators. They
 # are exempt from the rule above BY MEASUREMENT, not by oversight: `ns` alone is
 # read at 257 sites and `cart` at 168, so retiring the set is a ~920-site
 # mechanical rename -- the big-bang the architecture doc's Section 9 rules out.
@@ -321,10 +320,13 @@ def test_the_legacy_property_forwards_are_exactly_the_pinned_set():
                    for d in fn.decorator_list):
             continue
         for node in ast.walk(fn):
-            if (isinstance(node, ast.Attribute)
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id == "self"
-                    and node.attr in found):
+            if not (isinstance(node, ast.Attribute) and node.attr in found):
+                continue
+            base = node.value
+            if (isinstance(base, ast.Attribute) and base.attr == "run"
+                    and node.attr in ("project", "player")):
+                base = base.value       # the run's Player and Project: self.run.<x>
+            if isinstance(base, ast.Name) and base.id == "self":
                 found[node.attr].add(fn.name)
     assert found == LEGACY_PROPERTY_FORWARDS
 

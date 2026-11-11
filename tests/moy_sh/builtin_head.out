@@ -1,0 +1,9 @@
+$ printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n' > n
+$ head n | wc -l
+10
+$ head -n 2 n
+1
+2
+$ echo x | head -n 5
+x
+[exit 0]

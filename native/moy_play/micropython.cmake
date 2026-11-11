@@ -15,6 +15,7 @@ target_sources(usermod_moy_play INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_rt.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_play_rule.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_play.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_shares.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_match.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_match_kernel.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_chrome.c

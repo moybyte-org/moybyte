@@ -1,0 +1,10 @@
+{
+  "title": "Math Native",
+  "id": "elf.math",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "full_access"
+    ]
+  }
+}

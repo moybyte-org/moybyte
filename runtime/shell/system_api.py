@@ -11,7 +11,7 @@ whoever owns the console -- that asks for shell capabilities in its
 `manifest.json`, in its `"moybyte"` object (Moybyte's own fields):
 
     "moybyte": {"type": "app",
-                "permissions": ["graphics", "input", "files:docs", "prefs"]}
+                "permissions": ["graphics", "input", "files:documents", "prefs"]}
 
 `make_system_api` is the FILTER between the two. It is not a second interface:
 it maps each declared permission to a role on the SAME `AppContext`, builds one
@@ -31,9 +31,9 @@ mentions a capability provably cannot use it.
 A cart runs `exec` in a plain namespace with the real builtins: it can
 `import`, walk `gc.get_objects()`, or reach an attribute on anything it was
 handed. The role objects are native/moy_app's, which hold a grant and the
-console's app ABI state, and a grant made with a files kind reaches that kind
-alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
-from an app granted `files:docs` is refused wherever the role object is
+console's app ABI state, and a grant made for a shared folder reaches the
+kinds in it alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
+from an app granted `files:documents` is refused wherever the role object is
 reached from. That is the files role, not containment: a cart that goes
 looking through `gc` or its imports will find the console's own objects.
 
@@ -48,15 +48,15 @@ here changes that, and no amount of wrapper would.
 ## The map
 
 The policy is C's (native/moy_app, `moy_app.policy`): the permission each
-role is granted by, the files kinds, the manifest refusal
+role is granted by, the files folders, the manifest refusal
 (`moy_app.manifest_error`) and the key a cart's grant is made under
 (`moy_app.id_for`: the cart's `id`, #162, else its title's slug).
 
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
     "files"           files.*  + open_editor()        ctx.files
-    "files:<kind>"    the same, that kind only        ctx.files
-    "clipboard"       (the editor handle's cut/copy)  ctx.clipboard
+    "files:<folder>"  the same, that folder only      ctx.files
+    "clipboard"       clipboard.*                     ctx.clipboard
     "prefs"           prefs.get / prefs.set           ctx.prefs (namespaced)
     "appearance"      set_theme() / themes()          ctx.theme
     "launch"          open_app(id)                    ctx.nav
@@ -99,10 +99,7 @@ lost feature rather than a granted capability.)
     A cart's context holds `surface` for the ungated `content_rect()` and
     `bar_h()` alone, and no other surface verb has a name in its namespace.
   * `notify` -- not refused on principle, just not mapped yet. A grant with no
-    consumer is a capability granted for nothing. `clipboard` sat here for the
-    same reason until the editor handle became its consumer; it is mapped now,
-    and a cart still never touches the buffer -- the handle's `cut`/`copy`/
-    `paste` are the only things that read it.
+    consumer is a capability granted for nothing.
   * Firmware update and reboot are not roles at all -- they live on
     `ws.updater` / `machine`, and no role hands out the console.
 
@@ -157,15 +154,19 @@ import moy_app as _moy_app
 # The marker permission the console's TEXT APP claims its cart with -- the
 # `.md`/`.json`/`.txt` door the Files router opens (docs/theme_and_shell_2026-11.md §10).
 # Not a permission the grant policy maps, so it grants nothing; it only says
-# which cart this is, the way a shipped app claims its cart by title +
-# `APP_PERM`.
+# which built-in this is, the way a shipped app claims its cart by title +
+# `APP_PERM`, and counts only on a built-in (`_builtin_name`).
 TEXT_APP_PERM = "editor"
 
 
 def is_text_app(cart):
-    """True when `cart` is the console's text app."""
+    """True when `cart` is the console's text app: a built-in (or an
+    embedded one, with no path) that claims the marker."""
     perms = (cart.get("permissions") or ()) if cart else ()
-    return TEXT_APP_PERM in perms
+    if TEXT_APP_PERM not in perms:
+        return False
+    path = cart.get("path")
+    return not path or _builtin_name(path) is not None
 
 
 def draws_in_look(cart):
@@ -182,14 +183,15 @@ def draws_in_look(cart):
 # -- the kind-scoped user-files handle ---------------------------------------
 
 class ScopedFiles:
-    """`ctx.files` narrowed to ONE user-files kind (#108).
+    """`ctx.files` narrowed to ONE user-files kind (#108): the granted
+    folder's own (`files:pictures` is drawings).
 
     The role itself takes `(kind, name)` on every verb, which would let an app
-    granted `"files:docs"` read the kid's drawings by passing another kind.
+    granted `"files:documents"` read the kid's drawings by passing another kind.
     This binds the kind at construction and never takes it as an argument, so
     every published verb spells one kind, the granted one; the grant itself
-    reaches no other (native/moy_app checks the kind on every row), so the
-    role it holds refuses another kind however it is reached.
+    reaches no kind outside its folder (native/moy_app checks the kind on
+    every row), so the role it holds refuses one however it is reached.
 
     Same `(value, err)` contract as the role -- nothing here raises."""
 
@@ -246,7 +248,7 @@ class ScopedFiles:
 
     # -- text documents ------------------------------------------------------
     #
-    # A document on disk is plain Markdown (`files/docs/<name>.md`), so these
+    # A document on disk is plain Markdown (`files/Documents/<name>.md`), so these
     # two are thin -- but they stay the verbs a cart calls, because they are
     # what says a document is TEXT and not a blob. `save`/`load` above stay raw
     # for the kinds that are not text.
@@ -278,7 +280,7 @@ _DOC_GRANT = "moybyte.document"
 
 
 def make_system_api(ctx_factory, cart, canvas=None,
-                    editor=None, request=None, keep=None):
+                    editor=None, request=None, keep=None, perms=None, owner=0):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -298,9 +300,13 @@ def make_system_api(ctx_factory, cart, canvas=None,
     shell, not a role. Without them `open_editor` simply has no name.
 
     The context is a RUN grant (native/moy_app), keyed by the cart's id and
-    made from its permissions by the C policy (`moy_app.policy`); `keep` is
-    handed the context so the run can end its grant when it ends."""
-    perms = cart.get("permissions") if cart else None
+    made from its permissions by the C policy (`moy_app.policy`): `perms`,
+    the run's granted ones (`app_perms.check`), else the manifest's; `keep`
+    is handed the context so the run can end its grant when it ends;
+    `owner` is the run's pid, whose timers a compiled app's are (native/
+    moy_app/moy_app.c, timer_row)."""
+    if perms is None:
+        perms = cart.get("permissions") if cart else None
     roles, kind = _moy_app.policy(perms)
     # `theme` and `surface` are always held: `theme()`, `content_rect()` and
     # `bar_h()` are ungated reads of their rows. Requesting one twice is
@@ -309,7 +315,8 @@ def make_system_api(ctx_factory, cart, canvas=None,
     needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
     app_id = _moy_app.id_for(cart.get("id") if cart else None,
                              cart.get("title") if cart else None)
-    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind)
+    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind, owner=owner or 0)
+    grant_devices(ctx, perms, cart)
     if keep is not None:
         keep(ctx)
 
@@ -335,8 +342,8 @@ def make_system_api(ctx_factory, cart, canvas=None,
     ns["bar_h"] = ctx.surface.bar_h     # content_rect()[1]
 
     # -- GATED ----------------------------------------------------------------
+    ns.update(granted_names(ctx, roles, kind))
     if "files" in roles:
-        ns["files"] = ScopedFiles(ctx.files, kind)
         if editor is not None:
             # The editor handle (docs/history/text_editing_2026-09.md step 3). The cart
             # passes a NAME and never a kind: with one it edits an item of the
@@ -366,14 +373,27 @@ def make_system_api(ctx_factory, cart, canvas=None,
                 return editor(files, kind, str(name), mode, canvas, clip)
 
             ns["open_editor"] = _open_editor
+    return ns
+
+
+def granted_names(ctx, roles, kind):
+    """The names `roles` (the grant's, `moy_app.policy`'s) publish over
+    context `ctx`: `files` (its one `kind`), `prefs`, `clipboard`,
+    `set_theme` and `themes`, `open_app`. A user app's namespace holds them beside its
+    drawing riders (`make_system_api`), a service's alone (`service_api`)."""
+    ns = {}
+    if "files" in roles:
+        ns["files"] = ScopedFiles(ctx.files, kind)
     if "prefs" in roles:
         ns["prefs"] = ctx.prefs
+    if "clipboard" in roles:
+        ns["clipboard"] = ctx.clipboard
     if "theme" in roles:
         # The theme ROLE also carries read verbs, but only the write half is a
         # privilege -- reading is already ungated above. So publish two bound
         # functions, not the role: an app with "appearance" can restyle the
         # console, and cannot reach anything else through the same object.
-        ns["set_theme"] = theme.set
+        ns["set_theme"] = ctx.theme.set
 
         def _themes():
             """The installed panel-theme names, so a picker has valid choices.
@@ -402,10 +422,56 @@ def make_system_api(ctx_factory, cart, canvas=None,
     return ns
 
 
+def service_api(ctx_factory, cart, perms, owner, rows=False):
+    """`(ctx, roles, names)` for service `cart` started as process `owner`
+    under its granted permissions `perms`: its app's roles, as a foreground
+    run of the same app is handed them (the same policy, the same app id,
+    files kind and prefs namespace), on a run grant of its own whose owner
+    is its pid; the names its Python namespace holds (`granted_names`).
+    `(None, (), {})` where the permissions grant no role and no device (a
+    device handle's row answers under the grant's, `grant_devices`), unless
+    the service calls the table's rows itself (`rows`: a Lua service, whose
+    floor rows, the status items, answer as the grant's process). A
+    service has no canvas, so it holds no drawing rider and no
+    `open_editor`."""
+    roles, kind = _moy_app.policy(perms)
+    if not rows and not roles and not any(
+            str(p).split(":")[0] in DEVICE_PERMS for p in perms or ()):
+        return None, (), {}
+    app_id = _moy_app.id_for(cart.get("id") if cart else None,
+                             cart.get("title") if cart else None)
+    ctx = ctx_factory(app_id, roles, app_id, run=True, kind=kind, owner=owner)
+    grant_devices(ctx, perms, cart)
+    return ctx, roles, granted_names(ctx, roles, kind)
+
+
+# The permissions a device handle answers under (native/os_calls.json's
+# moybyte.dev_* rows' perm, `lease` and `media` also as lease:<row> and
+# media:url).
+DEVICE_PERMS = ("lease", "http", "lora", "mic", "ble", "usb", "midi", "camera", "media",
+                "pins", "multiplayer")
+
+
+def grant_devices(ctx, perms, cart=None):
+    """The device permissions among `perms` held on run grant `ctx`'s
+    (moy_app_grant_devs): what the kernel's device handles of its compiled
+    process answer under (native/moy_kernel/moy_dev.h), with `cart`'s folder,
+    where they reach its own files (moy_app_grant_folder)."""
+    fn = getattr(getattr(ctx, "_app", None), "grant_devs", None)
+    if fn is not None and perms:
+        try:
+            import devices
+        except ImportError:  # host: the runtime package
+            from runtime import devices
+        fn(ctx.grant, tuple(perms), devices.folder(cart))
+
+
 # -- the responsive opt-in ---------------------------------------------------
 
 def wants_layout(src):
-    """True when `src` defines a top-level `_layout` -- the RESPONSIVE opt-in.
+    """True when `src` defines a top-level `_layout` -- a Python cart's
+    RESPONSIVE opt-in (every other tier's runtime answers its own
+    `wants_layout(cart)`: Player._wants_layout).
 
     A source probe and not a manifest field, deliberately. The canvas a cart
     draws on has to be chosen BEFORE `make_api` closes over it, which is before

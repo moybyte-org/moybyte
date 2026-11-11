@@ -1,0 +1,11 @@
+{
+  "title": "Wild Native",
+  "id": "elf.wild",
+  "moybyte": {
+    "type": "command",
+    "permissions": [
+      "full_access",
+      "files"
+    ]
+  }
+}

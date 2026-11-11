@@ -51,6 +51,7 @@ typedef struct {
     row_t r;
     uint8_t *buf;
     uint32_t gen;
+    uint32_t n;                 // the file's length
 } font_slot_t;
 
 static font_slot_t s_fonts[MOY_FONT_SLOTS];
@@ -256,6 +257,7 @@ int moy_font_load(const uint8_t *src, size_t n, uint32_t *id) {
     }
     memcpy(buf, src, n);
     sl->buf = buf;
+    sl->n = (uint32_t)n;
     read_row(&sl->r, buf);
     sl->gen = (sl->gen + 1) & 0xffffffu;
     if (sl->gen == 0) {
@@ -263,6 +265,14 @@ int moy_font_load(const uint8_t *src, size_t n, uint32_t *id) {
     }
     *id = (sl->gen << 8) | (uint32_t)(k + 1);
     return MOY_FONT_OK;
+}
+
+const uint8_t *moy_font_bytes(uint32_t font, size_t *n) {
+    const font_slot_t *sl = slot_of(font);
+    if (n != NULL) {
+        *n = sl != NULL ? sl->n : 0;
+    }
+    return sl != NULL ? sl->buf : NULL;
 }
 
 int moy_font_free(uint32_t font) {

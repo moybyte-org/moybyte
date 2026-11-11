@@ -1,0 +1,29 @@
+> sh pwd
+SH /moy/files
+SH end 0
+> sh echo $HOME
+SH /moy/files
+SH end 0
+> sh mkdir -p /etc; printf 'theme = "dusk"\n' > /etc/settings
+SH end 0
+> sh cat /moy/system/settings
+SH theme = "dusk"
+SH end 0
+> sh settings get theme
+SH "dusk"
+SH end 0
+> sh settings set volume 3
+SH end 0
+> sh cat /etc/settings
+SH theme = "dusk"
+SH volume = 3
+SH end 0
+> sh mkdir -p .ssh; echo key > .ssh/authorized_keys; cat /moy/system/authorized_keys
+SH key
+SH end 0
+> sh ls /sd
+SH ls: /sd: No such file or directory
+SH end 1
+> sh pkg list
+SH end 0
+[exit 0]

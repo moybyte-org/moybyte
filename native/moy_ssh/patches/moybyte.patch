@@ -1,0 +1,725 @@
+Moybyte's changes to Dropbear, all under DROPBEAR_MOY (port/localoptions.h):
+the server runs inside the kernel's process, one session at a time.
+
+- sysoptions.h: the tracking allocator is on, so a session's allocations
+  are freed with its epoch when it ends (moy_ssh.c).
+- dbmalloc.c: the allocator's calloc/realloc/free are DB_CALLOC/DB_REALLOC/
+  DB_FREE, PSRAM and counted on a board (port/moy_ssh_port.h).
+- svr-session.c: an exit jumps back to the accept loop instead of exit();
+  the log is moy_ssh_log; no unauthenticated close delay (one task).
+- common-session.c: no signal pipe; the command's end is polled every loop.
+- svr-chansession.c: no fork, no pty, no SIGCHLD: a session's command is
+  moy_ssh_command (the shell's face over a socket pair), its end
+  moy_ssh_reap, its signal moy_ssh_signal; a pty request keeps the size.
+  A command's end does not flush its output: the output ends at the face's
+  close, which follows its status, so the bytes still crossing the board's
+  loopback when the status is reaped are read, not dropped.
+- chansession.h: the size a pty request asked for.
+- dbrandom.c: the seed is the SoC's hardware generator (moy_ssh_entropy).
+- gensignkey.c: the host key is renamed into place (FAT has no link()).
+- svr-kex.c: the made-key log's fingerprint only where the build has it
+  (DROPBEAR_SIGNKEY_VERIFY): a server without public-key sign-in does not.
+- libtomcrypt's crypt_cipher_descriptor.c and crypt_hash_descriptor.c: the
+  tables are PSRAM, taken at setup (port/moy_ssh_port.h), not .bss.
+- common-algo.c and algo.h: the algorithm lists, which a session writes
+  (`usable`), are const tables copied at setup into PSRAM (moy_ssh_algos),
+  each list's name a pointer to its copy, not .data.
+- svr-authpubkey.c: the authorized keys are the store's, read by the server
+  at the connection's start (moy_ssh_keys), not a file under a home folder.
+
+diff --git a/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c b/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c
+index ccc9890..1458331 100644
+--- a/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c
++++ b/libtomcrypt/src/misc/crypt/crypt_cipher_descriptor.c
+@@ -13,9 +13,14 @@
+   Stores the cipher descriptor table, Tom St Denis
+ */
+ 
++#if DROPBEAR_MOY
++/* the table is PSRAM, taken at the server's setup (port/moy_ssh_port.h) */
++struct ltc_cipher_descriptor cipher_descriptor[TAB_SIZE];
++#else
+ struct ltc_cipher_descriptor cipher_descriptor[TAB_SIZE] = {
+ { NULL, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
+  };
++#endif
+ 
+ LTC_MUTEX_GLOBAL(ltc_cipher_mutex)
+ 
+diff --git a/libtomcrypt/src/misc/crypt/crypt_hash_descriptor.c b/libtomcrypt/src/misc/crypt/crypt_hash_descriptor.c
+index 6e1103f..6b36014 100644
+--- a/libtomcrypt/src/misc/crypt/crypt_hash_descriptor.c
++++ b/libtomcrypt/src/misc/crypt/crypt_hash_descriptor.c
+@@ -13,9 +13,14 @@
+   Stores the hash descriptor table, Tom St Denis
+ */
+ 
++#if DROPBEAR_MOY
++/* the table is PSRAM, taken at the server's setup (port/moy_ssh_port.h) */
++struct ltc_hash_descriptor hash_descriptor[TAB_SIZE];
++#else
+ struct ltc_hash_descriptor hash_descriptor[TAB_SIZE] = {
+ { NULL, 0, 0, 0, { 0 }, 0, NULL, NULL, NULL, NULL, NULL }
+ };
++#endif
+ 
+ LTC_MUTEX_GLOBAL(ltc_hash_mutex)
+ 
+diff --git a/src/chansession.h b/src/chansession.h
+index 306af94..a283174 100644
+--- a/src/chansession.h
++++ b/src/chansession.h
+@@ -50,6 +50,9 @@ struct ChanSess {
+ 	int slave;
+ 	char * tty;
+ 	char * term;
++#if DROPBEAR_MOY
++	int moy_cols, moy_rows; /* the client's terminal, when it asked for one */
++#endif
+ 
+ 	/* exit details */
+ 	struct exitinfo exit;
+diff --git a/src/common-session.c b/src/common-session.c
+index 6108aba..8db08d1 100644
+--- a/src/common-session.c
++++ b/src/common-session.c
+@@ -92,13 +92,21 @@ void common_session_init(int sock_in, int sock_out) {
+ 	if (!fuzz.fuzzing)
+ #endif
+ 	{
++#if DROPBEAR_MOY
++	/* no signals: the command's end is polled every loop (moy_ssh_reap) */
++	ses.signal_pipe[0] = ses.signal_pipe[1] = -1;
++	if (0) {
++#else
+ 	if (pipe(ses.signal_pipe) < 0) {
++#endif
+ 		dropbear_exit("Signal pipe failed");
+ 	}
++#if !DROPBEAR_MOY
+ 	setnonblocking(ses.signal_pipe[0]);
+ 	setnonblocking(ses.signal_pipe[1]);
+ 	ses.maxfd = MAX(ses.maxfd, ses.signal_pipe[0]);
+ 	ses.maxfd = MAX(ses.maxfd, ses.signal_pipe[1]);
++#endif
+ 	}
+ 	
+ 	ses.writepayload = buf_new(TRANS_MAX_PAYLOAD_LEN);
+@@ -180,7 +188,7 @@ void session_loop(void(*loophandler)(void)) {
+ #if DROPBEAR_FUZZ
+ 		if (!fuzz.fuzzing) 
+ #endif
+-		{
++		if (ses.signal_pipe[0] >= 0) {
+ 		dropbear_fd_set(ses.signal_pipe[0], &readfd);
+ 		}
+ 
+@@ -230,8 +238,8 @@ void session_loop(void(*loophandler)(void)) {
+ 		/* We'll just empty out the pipe if required. We don't do
+ 		any thing with the data, since the pipe's purpose is purely to
+ 		wake up the select() above. */
+-		ses.channel_signal_pending = 0;
+-		if (FD_ISSET(ses.signal_pipe[0], &readfd)) {
++		ses.channel_signal_pending = DROPBEAR_MOY;
++		if (ses.signal_pipe[0] >= 0 && FD_ISSET(ses.signal_pipe[0], &readfd)) {
+ 			char x;
+ 			TRACE(("signal pipe set"))
+ 			while (read(ses.signal_pipe[0], &x, 1) > 0) {}
+diff --git a/src/dbmalloc.c b/src/dbmalloc.c
+index e2cdc8f..2193651 100644
+--- a/src/dbmalloc.c
++++ b/src/dbmalloc.c
+@@ -1,6 +1,12 @@
+ #include "dbmalloc.h"
+ #include "dbutil.h"
+ 
++#ifndef DB_CALLOC
++#define DB_CALLOC calloc
++#define DB_REALLOC realloc
++#define DB_FREE free
++#endif
++
+ 
+ void * m_calloc(size_t nmemb, size_t size) {
+     if (SIZE_T_MAX / nmemb < size) {
+@@ -32,7 +38,7 @@ void * m_malloc(size_t size) {
+ 	if (size == 0) {
+ 		dropbear_exit("m_malloc failed");
+ 	}
+-	ret = calloc(1, size);
++	ret = DB_CALLOC(1, size);
+ 	if (ret == NULL) {
+ 		dropbear_exit("m_malloc failed");
+ 	}
+@@ -47,7 +53,7 @@ void * m_realloc(void* ptr, size_t size) {
+ 	if (size == 0) {
+ 		dropbear_exit("m_realloc failed");
+ 	}
+-	ret = realloc(ptr, size);
++	ret = DB_REALLOC(ptr, size);
+ 	if (ret == NULL) {
+ 		dropbear_exit("m_realloc failed");
+ 	}
+@@ -89,7 +95,7 @@ void m_malloc_free_epoch(unsigned int epoch, int dofree) {
+         nextheader = header->next;
+         if (header->epoch == epoch) {
+             if (dofree) {
+-                free(header);
++                DB_FREE(header);
+             }
+         } else {
+             header->prev = NULL;
+@@ -138,7 +144,7 @@ void * m_malloc(size_t size) {
+ 
+     size = size + sizeof(struct dbmalloc_header);
+ 
+-    mem = calloc(1, size);
++    mem = DB_CALLOC(1, size);
+     if (mem == NULL) {
+         dropbear_exit("m_malloc failed");
+     }
+@@ -159,7 +165,7 @@ void * m_realloc(void* ptr, size_t size) {
+     remove_alloc(header);
+ 
+     size = size + sizeof(struct dbmalloc_header);
+-    mem = realloc(header, size);
++    mem = DB_REALLOC(header, size);
+     if (mem == NULL) {
+         dropbear_exit("m_realloc failed");
+     }
+@@ -176,7 +182,7 @@ void m_free_direct(void* ptr) {
+     }
+     header = get_header(ptr);
+     remove_alloc(header);
+-    free(header);
++    DB_FREE(header);
+ }
+ 
+ #endif /* DROPBEAR_TRACKING_MALLOC */
+diff --git a/src/dbrandom.c b/src/dbrandom.c
+index aa72203..ab0175e 100644
+--- a/src/dbrandom.c
++++ b/src/dbrandom.c
+@@ -136,7 +136,7 @@ static void write_urandom(void)
+ 		return;
+ 	}
+ #endif
+-#if !DROPBEAR_USE_PRNGD
++#if !DROPBEAR_USE_PRNGD && !DROPBEAR_MOY
+ 	/* This is opportunistic, don't worry about failure */
+ 	unsigned char buf[INIT_SEED_SIZE];
+ 	FILE *f = fopen(DROPBEAR_URANDOM_DEV, "w");
+@@ -240,8 +240,18 @@ void seedrandom() {
+ 	/* existing state */
+ 	sha256_process(&hs, (void*)hashpool, sizeof(hashpool));
+ 
++#if DROPBEAR_MOY
++	{
++		/* the SoC's hardware generator */
++		unsigned char seed[INIT_SEED_SIZE];
++		moy_ssh_entropy(seed, sizeof(seed));
++		sha256_process(&hs, seed, sizeof(seed));
++		m_burn(seed, sizeof(seed));
++		urandom_seeded = 1;
++	}
++#endif
+ #ifdef HAVE_GETRANDOM
+-	if (process_getrandom(&hs) == DROPBEAR_SUCCESS) {
++	if (!urandom_seeded && process_getrandom(&hs) == DROPBEAR_SUCCESS) {
+ 		urandom_seeded = 1;
+ 	}
+ #endif
+diff --git a/src/gensignkey.c b/src/gensignkey.c
+index ad62b90..746b950 100644
+--- a/src/gensignkey.c
++++ b/src/gensignkey.c
+@@ -111,7 +111,12 @@ int signkey_generate(enum signkey_type keytype, int bits, const char* filename,
+ 		goto out;
+ 	}
+ 
++#if DROPBEAR_MOY
++	/* FAT has no hard links: the store's volume renames */
++	if (rename(fn_temp, filename) < 0) {
++#else
+ 	if (link(fn_temp, filename) < 0) {
++#endif
+ 		/* If generating keys on connection (skipexist) it's OK to get EEXIST 
+ 		- we probably just lost a race with another connection to generate the key */
+ 		if (!(skip_exist && errno == EEXIST)) {
+diff --git a/src/svr-chansession.c b/src/svr-chansession.c
+index a2ea1fc..df20df4 100644
+--- a/src/svr-chansession.c
++++ b/src/svr-chansession.c
+@@ -78,9 +78,16 @@ static int sesscheckclose(struct Channel *channel) {
+ 	struct ChanSess *chansess = (struct ChanSess*)channel->typedata;
+ 	TRACE(("sesscheckclose, pid %d, exitpid %d", chansess->pid, chansess->exit.exitpid))
+ 
++#if DROPBEAR_MOY
++	/* no flushing: the face closes its end after its exit status, so its
++	   output ends at that EOF. A loopback's bytes reach this end after the
++	   send that wrote them, and a flush closes at the first moment none are
++	   readable, dropping what is still crossing. */
++#else
+ 	if (chansess->exit.exitpid != -1) {
+ 		channel->flushing = 1;
+ 	}
++#endif
+ 	return chansess->pid == 0 || chansess->exit.exitpid != -1;
+ }
+ 
+@@ -100,7 +107,24 @@ void svr_chansess_checksignal(void) {
+ 		return;
+ 	}
+ 
++#if DROPBEAR_MOY
++	while (moy_ssh_reap(&pid, &status)) {
++		unsigned int i;
++		for (i = 0; i < svr_ses.childpidsize; i++) {
++			if (svr_ses.childpids[i].pid == pid) {
++				struct exitinfo *ex = &svr_ses.childpids[i].chansess->exit;
++				ex->exitpid = pid;
++				ex->exitstatus = status;
++				ex->exitsignal = -1;
++				ex->exitcore = 0;
++				break;
++			}
++		}
++	}
++	if (0) {
++#else
+ 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
++#endif
+ 		unsigned int i;
+ 		struct exitinfo *ex = NULL;
+ 		TRACE(("svr_chansess_checksignal : pid %d", pid))
+@@ -278,6 +302,7 @@ static int newchansess(struct Channel *channel) {
+ 
+ }
+ 
++#if !DROPBEAR_MOY
+ static struct logininfo* 
+ chansess_login_alloc(const struct ChanSess *chansess) {
+ 	struct logininfo * li;
+@@ -285,6 +310,7 @@ chansess_login_alloc(const struct ChanSess *chansess) {
+ 			svr_ses.remotehost, chansess->tty);
+ 	return li;
+ }
++#endif
+ 
+ /* send exit status message before the channel is closed */
+ static void closechansess(const struct Channel *channel) {
+@@ -323,6 +349,7 @@ static void cleanupchansess(const struct Channel *channel) {
+ 	m_free(chansess->term);
+ 	m_free(chansess->original_command);
+ 
++#if !DROPBEAR_MOY
+ 	if (chansess->tty) {
+ 		/* write the utmp/wtmp login record */
+ 		li = chansess_login_alloc(chansess);
+@@ -336,6 +363,7 @@ static void cleanupchansess(const struct Channel *channel) {
+ 		pty_release(chansess->tty);
+ 		m_free(chansess->tty);
+ 	}
++#endif
+ 
+ #if DROPBEAR_X11FWD
+ 	x11cleanup(chansess);
+@@ -465,7 +493,11 @@ static int sessionsignal(const struct ChanSess *chansess) {
+ 		return DROPBEAR_FAILURE;
+ 	}
+ 			
++#if DROPBEAR_MOY
++	if (moy_ssh_signal(chansess->pid, sig) < 0) {
++#else
+ 	if (kill(chansess->pid, sig) < 0) {
++#endif
+ 		TRACE(("sessionsignal: kill() errored"))
+ 		return DROPBEAR_FAILURE;
+ 	} 
+@@ -479,6 +511,20 @@ static int sessionwinchange(const struct ChanSess *chansess) {
+ 
+ 	int termc, termr, termw, termh;
+ 
++#if DROPBEAR_MOY
++	if (chansess->term == NULL) {
++		return DROPBEAR_FAILURE;
++	}
++	termc = buf_getint(ses.payload);
++	termr = buf_getint(ses.payload);
++	(void)termw; (void)termh;
++	((struct ChanSess *)chansess)->moy_cols = termc;
++	((struct ChanSess *)chansess)->moy_rows = termr;
++	if (chansess->pid > 0) {
++		moy_ssh_winch(chansess->pid, termc, termr);
++	}
++	return DROPBEAR_SUCCESS;
++#endif
+ 	if (chansess->master < 0) {
+ 		/* haven't got a pty yet */
+ 		return DROPBEAR_FAILURE;
+@@ -608,6 +654,22 @@ static int sessionpty(struct ChanSess * chansess) {
+ 		return DROPBEAR_FAILURE;
+ 	}
+ 
++#if DROPBEAR_MOY
++	/* no pty: the shell's face is the terminal; the size is kept for it */
++	(void)namebuf; (void)pw;
++	if (chansess->moy_cols) {
++		dropbear_exit("Multiple pty requests");
++	}
++	chansess->moy_cols = buf_getint(ses.payload);
++	chansess->moy_rows = buf_getint(ses.payload);
++	if (chansess->moy_cols <= 0) {
++		chansess->moy_cols = 80;
++	}
++	if (chansess->moy_rows <= 0) {
++		chansess->moy_rows = 24;
++	}
++	return DROPBEAR_SUCCESS;
++#endif
+ 	/* allocate the pty */
+ 	if (chansess->master != -1) {
+ 		dropbear_exit("Multiple pty requests");
+@@ -741,6 +803,22 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+ 	make_connection_string(chansess);
+ #endif
+ 
++#if DROPBEAR_MOY
++	{
++		int fd;
++		if (moy_ssh_command(chansess->cmd, chansess->term != NULL,
++				chansess->moy_cols, chansess->moy_rows, &fd, &chansess->pid) < 0) {
++			ret = DROPBEAR_FAILURE;
++		} else {
++			channel->readfd = channel->writefd = fd;
++			channel->bidir_fd = 1;
++			ses.maxfd = MAX(ses.maxfd, fd);
++			setnonblocking(fd);
++			addchildpid(chansess, chansess->pid);
++			ret = DROPBEAR_SUCCESS;
++		}
++	}
++#else
+ 	if (chansess->term == NULL) {
+ 		/* no pty */
+ 		ret = noptycommand(channel, chansess);
+@@ -752,6 +830,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+ 		/* want pty */
+ 		ret = ptycommand(channel, chansess);
+ 	}
++#endif
+ 
+ #if !DROPBEAR_VFORK
+ 	m_free(chansess->connection_string);
+@@ -765,6 +844,7 @@ static int sessioncommand(struct Channel *channel, struct ChanSess *chansess,
+ 	return ret;
+ }
+ 
++#if !DROPBEAR_MOY
+ /* Execute a command and set up redirection of stdin/stdout/stderr without a
+  * pty.
+  * Returns DROPBEAR_SUCCESS or DROPBEAR_FAILURE */
+@@ -937,6 +1017,8 @@ static int ptycommand(struct Channel *channel, struct ChanSess *chansess) {
+ 	return DROPBEAR_SUCCESS;
+ }
+ 
++#endif /* !DROPBEAR_MOY */
++
+ /* Add the pid of a child to the list for exit-handling */
+ static void addchildpid(struct ChanSess *chansess, pid_t pid) {
+ 
+@@ -960,6 +1042,7 @@ static void addchildpid(struct ChanSess *chansess, pid_t pid) {
+ 
+ }
+ 
++#if !DROPBEAR_MOY
+ /* Clean up, drop to user privileges, set up the environment and execute
+  * the command/shell. This function does not return. */
+ static void execchild(const void *user_data) {
+@@ -1067,6 +1150,7 @@ static void execchild(const void *user_data) {
+ 	/* only reached on error */
+ 	dropbear_exit("Child failed");
+ }
++#endif /* !DROPBEAR_MOY */
+ 
+ /* Set up the general chansession environment, in particular child-exit
+  * handling */
+@@ -1080,12 +1164,16 @@ void svr_chansessinitialise() {
+ 	svr_ses.childpids[0].chansess = NULL;
+ 	svr_ses.childpidsize = 1;
+ 	svr_ses.lastexit.exitpid = -1; /* Nothing has exited yet */
++#if DROPBEAR_MOY
++	(void)sa_chld; (void)sesssigchild_handler;
++#else
+ 	sa_chld.sa_handler = sesssigchild_handler;
+ 	sa_chld.sa_flags = SA_NOCLDSTOP;
+ 	sigemptyset(&sa_chld.sa_mask);
+ 	if (sigaction(SIGCHLD, &sa_chld, NULL) < 0) {
+ 		dropbear_exit("signal() error");
+ 	}
++#endif
+ 	
+ }
+ 
+diff --git a/src/svr-kex.c b/src/svr-kex.c
+index 44939e0..b634c74 100644
+--- a/src/svr-kex.c
++++ b/src/svr-kex.c
+@@ -168,6 +168,7 @@ static void svr_ensure_hostkey(void) {
+ 	/* Read what we just generated (or another process raced us) */
+ 	ret = readhostkey(expand_fn, svr_opts.hostkey, &type);
+ 
++#if DROPBEAR_SIGNKEY_VERIFY
+ 	if (ret == DROPBEAR_SUCCESS) {
+ 		char *fp = NULL;
+ 		unsigned int len;
+@@ -181,6 +182,7 @@ static void svr_ensure_hostkey(void) {
+ 		m_free(fp);
+ 		buf_free(key_buf);
+ 	}
++#endif /* the fingerprint is built only where keys are verified */
+ 
+ out:
+ 	if (ret == DROPBEAR_FAILURE) {
+diff --git a/src/svr-session.c b/src/svr-session.c
+index f3ac8fc..fa8c4ea 100644
+--- a/src/svr-session.c
++++ b/src/svr-session.c
+@@ -278,7 +278,7 @@ void svr_dropbear_exit(int exitcode, const char* format, va_list param) {
+ 	 * With the delay, this rate becomes:
+ 	 *     "MAX_UNAUTH_PER_IP / UNAUTH_CLOSE_DELAY".
+ 	 */
+-	if ((add_delay != 0) && (UNAUTH_CLOSE_DELAY > 0)) {
++	if ((add_delay != 0) && (UNAUTH_CLOSE_DELAY > 0) && !DROPBEAR_MOY) {
+ 		TRACE(("svr_dropbear_exit: start delay of %d seconds", UNAUTH_CLOSE_DELAY));
+ 		sleep(UNAUTH_CLOSE_DELAY);
+ 		TRACE(("svr_dropbear_exit: end delay of %d seconds", UNAUTH_CLOSE_DELAY));
+@@ -300,6 +300,10 @@ void svr_dropbear_exit(int exitcode, const char* format, va_list param) {
+         longjmp(fuzz.jmp, 1);
+     }
+ #endif
++#if DROPBEAR_MOY
++	/* the server lives on: back to its accept loop, svr_opts kept */
++	moy_ssh_exit_jump(exitcode);
++#endif
+ 
+ 	if (svr_opts.hostkey) {
+ 		sign_key_free(svr_opts.hostkey);
+@@ -325,6 +329,12 @@ void svr_dropbear_log(int priority, const char* format, va_list param) {
+ 
+ 	vsnprintf(printbuf, sizeof(printbuf), format, param);
+ 
++#if DROPBEAR_MOY
++	moy_ssh_log(priority, printbuf);
++	(void)datestr; (void)timesec; (void)havetrace;
++	return;
++#endif
++
+ #ifndef DISABLE_SYSLOG
+ 	if (opts.usingsyslog) {
+ 		syslog(priority, "%s", printbuf);
+diff --git a/src/sysoptions.h b/src/sysoptions.h
+index 6e50f8f..7a25990 100644
+--- a/src/sysoptions.h
++++ b/src/sysoptions.h
+@@ -439,7 +439,10 @@
+ #define DROPBEAR_CLIENT_TCP_FAST_OPEN 0
+ #endif
+ 
+-#define DROPBEAR_TRACKING_MALLOC (DROPBEAR_FUZZ)
++#ifndef DROPBEAR_MOY
++#define DROPBEAR_MOY 0
++#endif
++#define DROPBEAR_TRACKING_MALLOC (DROPBEAR_FUZZ || DROPBEAR_MOY)
+ 
+ /* Used to work around Memory Sanitizer false positives */
+ #if defined(__has_feature)
+diff --git a/src/algo.h b/src/algo.h
+--- a/src/algo.h
++++ b/src/algo.h
+@@ -46,6 +46,20 @@
+ typedef struct Algo_Type algo_type;
+ 
+ /* lists mapping ssh types of algorithms to internal values */
++#if DROPBEAR_MOY
++/* PSRAM copies of the lists (common-algo.c's moy_ssh_algos) */
++extern algo_type *moy_ssh_g_sshkex, *moy_ssh_g_sigalgs, *moy_ssh_g_sshciphers,
++	*moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress, *moy_ssh_g_ssh_delaycompress,
++	*moy_ssh_g_ssh_nocompress;
++#define sshkex moy_ssh_g_sshkex
++#define sigalgs moy_ssh_g_sigalgs
++#define sshciphers moy_ssh_g_sshciphers
++#define sshhashes moy_ssh_g_sshhashes
++#define ssh_compress moy_ssh_g_ssh_compress
++#define ssh_delaycompress moy_ssh_g_ssh_delaycompress
++#define ssh_nocompress moy_ssh_g_ssh_nocompress
++int moy_ssh_algos(void);
++#else
+ extern algo_type sshkex[];
+ extern algo_type sigalgs[];
+ extern algo_type sshciphers[];
+@@ -53,6 +67,7 @@
+ extern algo_type ssh_compress[];
+ extern algo_type ssh_delaycompress[];
+ extern algo_type ssh_nocompress[];
++#endif
+ 
+ extern const struct dropbear_cipher dropbear_nocipher;
+ extern const struct dropbear_cipher_mode dropbear_mode_none;
+diff --git a/src/common-algo.c b/src/common-algo.c
+--- a/src/common-algo.c
++++ b/src/common-algo.c
+@@ -125,7 +125,11 @@
+  * The ordering here is important for the client - the first mode
+  * that is also supported by the server will get used. */
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sshciphers[] = {
++#else
+ algo_type sshciphers[] = {
++#endif
+ #if DROPBEAR_CHACHA20POLY1305
+ 	{"chacha20-poly1305@openssh.com", 0, &dropbear_chachapoly, 1, &dropbear_mode_chachapoly},
+ #endif
+@@ -171,7 +175,11 @@
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sshhashes[] = {
++#else
+ algo_type sshhashes[] = {
++#endif
+ #if DROPBEAR_SHA1_96_HMAC
+ 	{"hmac-sha1-96", 0, &dropbear_sha1_96, 1, NULL},
+ #endif
+@@ -188,26 +196,42 @@
+ };
+ 
+ #ifndef DISABLE_ZLIB
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_compress[] = {
++#else
+ algo_type ssh_compress[] = {
++#endif
+ 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
+ 	{"zlib", DROPBEAR_COMP_ZLIB, NULL, 1, NULL},
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_delaycompress[] = {
++#else
+ algo_type ssh_delaycompress[] = {
++#endif
+ 	{"zlib@openssh.com", DROPBEAR_COMP_ZLIB_DELAY, NULL, 1, NULL},
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ #endif
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_ssh_nocompress[] = {
++#else
+ algo_type ssh_nocompress[] = {
++#endif
+ 	{"none", DROPBEAR_COMP_NONE, NULL, 1, NULL},
+ 	{NULL, 0, NULL, 0, NULL}
+ };
+ 
++#if DROPBEAR_MOY
++static const algo_type moy_sigalgs[] = {
++#else
+ algo_type sigalgs[] = {
++#endif
+ #if DROPBEAR_ED25519
+ 	{"ssh-ed25519", DROPBEAR_SIGNATURE_ED25519, NULL, 1, NULL},
+ #if DROPBEAR_SK_ED25519
+@@ -304,7 +328,11 @@
+ 
+ 
+ /* data == NULL for non-kex algorithm identifiers */
++#if DROPBEAR_MOY
++static const algo_type moy_sshkex[] = {
++#else
+ algo_type sshkex[] = {
++#endif
+ #if DROPBEAR_SNTRUP761
+ 	{"sntrup761x25519-sha512", 0, &kex_sntrup761, 1, NULL},
+ 	{"sntrup761x25519-sha512@openssh.com", 0, &kex_sntrup761, 1, NULL},
+@@ -623,3 +651,36 @@
+ 	return n;
+ }
+ #endif /* DROPBEAR_USER_ALGO_LIST */
++
++#if DROPBEAR_MOY
++/* The lists are written while a session runs (`usable`), so each is a copy
++ * taken at the server's setup: PSRAM on a board (moy_ssh_calloc), the
++ * initial tables const. */
++algo_type *moy_ssh_g_sshciphers, *moy_ssh_g_sshhashes, *moy_ssh_g_ssh_compress,
++	*moy_ssh_g_ssh_delaycompress, *moy_ssh_g_ssh_nocompress, *moy_ssh_g_sigalgs,
++	*moy_ssh_g_sshkex;
++
++static int moy_algos_copy(algo_type **to, const algo_type *from, size_t size) {
++	if (*to == NULL) {
++		*to = moy_ssh_calloc(1, size);
++		if (*to == NULL) {
++			return -1;
++		}
++		memcpy(*to, from, size);
++	}
++	return 0;
++}
++
++int moy_ssh_algos(void) {
++	return moy_algos_copy(&moy_ssh_g_sshciphers, moy_sshciphers, sizeof moy_sshciphers)
++		| moy_algos_copy(&moy_ssh_g_sshhashes, moy_sshhashes, sizeof moy_sshhashes)
++#ifndef DISABLE_ZLIB
++		| moy_algos_copy(&moy_ssh_g_ssh_compress, moy_ssh_compress, sizeof moy_ssh_compress)
++		| moy_algos_copy(&moy_ssh_g_ssh_delaycompress, moy_ssh_delaycompress,
++			sizeof moy_ssh_delaycompress)
++#endif
++		| moy_algos_copy(&moy_ssh_g_ssh_nocompress, moy_ssh_nocompress, sizeof moy_ssh_nocompress)
++		| moy_algos_copy(&moy_ssh_g_sigalgs, moy_sigalgs, sizeof moy_sigalgs)
++		| moy_algos_copy(&moy_ssh_g_sshkex, moy_sshkex, sizeof moy_sshkex);
++}
++#endif
+diff --git a/src/svr-authpubkey.c b/src/svr-authpubkey.c
+--- a/src/svr-authpubkey.c
++++ b/src/svr-authpubkey.c
+@@ -503,6 +503,34 @@
+ 		dropbear_exit("Failed to set euid");
+ 	}
+ #endif
++#if DROPBEAR_MOY
++	/* the keys are the store's system/authorized_keys, read by the server
++	 * at the connection's start (moy_ssh_keys) */
++	{
++		size_t keys_n = 0;
++		const char *keys = moy_ssh_keys(&keys_n), *end = keys + keys_n;
++		line = buf_new(MAX_AUTHKEYS_LINE);
++		for (line_num = 1; keys != NULL && keys < end
++				&& line_num <= MAX_AUTHKEYS_LINE_COUNT; line_num++) {
++			const char *nl = memchr(keys, '\n', end - keys);
++			size_t n = (nl != NULL ? nl : end) - keys;
++			buf_setpos(line, 0);
++			buf_setlen(line, 0);
++			if (n > 0 && n <= MAX_AUTHKEYS_LINE) {
++				buf_putbytes(line, (const unsigned char *)keys, n);
++				buf_setpos(line, 0);
++				ret = checkpubkey_line(line, line_num, "authorized_keys", keyalgo,
++					keyalgolen, keyblob, keybloblen, ret_options);
++				if (ret == DROPBEAR_SUCCESS) {
++					break;
++				}
++			}
++			keys += n + (nl != NULL);
++		}
++		buf_free(line);
++		return ret;
++	}
++#endif
+ 	/* check file permissions, also whether file exists */
+ 	if (checkpubkeyperms() == DROPBEAR_FAILURE) {
+ 		TRACE(("bad authorized_keys permissions, or file doesn't exist"))

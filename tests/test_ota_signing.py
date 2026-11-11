@@ -276,7 +276,7 @@ def _online(m, u, manifest, from_card=False):
     try:
         with Server({"/latest.json": (200, {}, json.dumps(manifest).encode())}) as srv:
             u._manifest_source = lambda channel=None: (srv.url("/latest.json"), from_card)
-            u.ensure_online = lambda: True
+            u.poll_online = lambda: True
             return u.check_online()
     finally:
         nb()._trust(None)

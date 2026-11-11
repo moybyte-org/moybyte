@@ -5,16 +5,29 @@
 #include <string.h>
 
 #include "moy_net.h"
+#include "moy_lease.h"
+#include "moy_link.h"
 
 #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
+#include <sys/time.h>
+#include <time.h>
+
+#include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#define WIFI_EVENTS 1
+#endif
 #if __has_include("mdns.h") && defined(MOY_NET_MDNS) && MOY_NET_MDNS
 #include "mdns.h"
 #define HAVE_MDNS 1
@@ -32,7 +45,16 @@ static esp_netif_t *s_netif;
 static volatile int s_want;             // a connect is asked for: retry on loss
 static esp_timer_handle_t s_retry;      // the next attempt after a loss
 static volatile uint8_t s_backoff;      // retries since the last address
+static volatile uint8_t s_stall;        // the timer is an attempt's deadline, not a backoff
 static volatile uint8_t s_keep;         // an address came: keep the network
+static volatile uint8_t s_scan;         // SCAN_IDLE, _ASKING, _RUNNING or _DONE
+static uint32_t s_scan_ms;              // since when it is asked for, or runs
+static uint32_t s_ask_ms;               // the last ask of the driver
+
+// A scan the driver refused (a station still starting or associating) is
+// asked again every SCAN_ASK_MS until MOY_WIFI_SCAN_MS has passed.
+enum { SCAN_IDLE, SCAN_ASKING, SCAN_RUNNING, SCAN_DONE };
+#define SCAN_ASK_MS 250u
 
 // A lost or failed association is retried after a backoff (0.5 s doubling to
 // 8 s), never from the event itself: an immediate esp_wifi_connect() lands on
@@ -42,12 +64,16 @@ static volatile uint8_t s_keep;         // an address came: keep the network
 // the leave a connect's own disconnect causes can also end the attempt that
 // follows it, so a leave is retried like any loss; an attempt that has
 // already got its address is left alone.
-static void retry(void *arg) {
-    (void)arg;
-    if (s_want && !s_st.connected) {
-        esp_wifi_connect();
-    }
-}
+//
+// Each attempt also has a deadline, STALL_MS: an attempt that reached neither
+// an address nor a disconnect by then is the station associating with
+// nothing, which no event would ever end -- every later stream and request
+// failed until a reboot. It is ended with a disconnect, whose event retries
+// it after the backoff; the backoff is armed here too, in case that event
+// never comes either.
+#define STALL_MS 15000u
+
+static void connect_now(void);
 
 static void schedule_retry(void) {
     if (s_retry == NULL) {
@@ -55,8 +81,150 @@ static void schedule_retry(void) {
     }
     uint8_t k = s_backoff < 4 ? s_backoff : 4;
     s_backoff++;
+    s_stall = 0;
     esp_timer_stop(s_retry);
     esp_timer_start_once(s_retry, (uint64_t)500000u << k);
+}
+
+static void retry(void *arg) {
+    (void)arg;
+    if (!s_want || s_st.connected) {
+        return;
+    }
+    if (s_stall) {
+        esp_wifi_disconnect();
+        schedule_retry();
+        return;
+    }
+    connect_now();
+}
+
+// One attempt, its deadline armed; a refused ask is retried after the backoff.
+static void connect_now(void) {
+    if (esp_wifi_connect() != ESP_OK) {
+        schedule_retry();
+        return;
+    }
+    if (s_retry != NULL) {
+        s_stall = 1;
+        esp_timer_stop(s_retry);
+        esp_timer_start_once(s_retry, (uint64_t)STALL_MS * 1000u);
+    }
+}
+
+// The wall clock (moy_net.h): NTP asked from the first address a raise of
+// the station gets to the radio going down, for whichever holder raised it.
+// The answer's mark lives in RTC memory beside the time the chip's RTC keeps,
+// so it holds across the VM's soft reset and the chip's software reset, and a
+// power-on finds the time behind the mark (or the mark gone) and reads
+// unsynced.
+//
+// The board's system clock counts from 2000, MicroPython's epoch on the esp32
+// port: its `time` module reads it so, and the TLS clock the VM installs
+// (mbedtls_time) adds CLOCK_EPOCH back. NTP answers in Unix time, so the
+// answer is set CLOCK_EPOCH seconds back (sntp_sync_time below).
+#define CLOCK_MARK 0x4d4f5943u              // "MOYC"
+#define CLOCK_EPOCH MOY_NET_CLOCK_EPOCH     // 1970-01-01 to 2000-01-01 (moy_net.h)
+#define CLOCK_ASK_MS 15000u                 // a first answer is still awaited
+
+typedef struct {
+    uint32_t mark;
+    int64_t at;                             // Unix time of the last answer
+} clock_rtc_t;
+
+RTC_NOINIT_ATTR static clock_rtc_t s_clk;
+static volatile uint8_t s_ntp;              // the SNTP client is running
+static uint32_t s_ntp_ms;                   // since when, esp_timer's ms
+static char *s_server;                      // a set server's name, or NULL
+
+static int clock_synced(void) {
+    return s_clk.mark == CLOCK_MARK && (int64_t)time(NULL) + CLOCK_EPOCH >= s_clk.at;
+}
+
+int moy_clock_state(int64_t *at) {
+    int ok = clock_synced();
+    if (at != NULL) {
+        *at = ok ? s_clk.at : 0;
+    }
+    if (ok) {
+        return MOY_CLOCK_SYNCED;
+    }
+    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    return s_ntp && s_st.connected && ms - s_ntp_ms < CLOCK_ASK_MS ? MOY_CLOCK_ASKING
+                                                                  : MOY_CLOCK_UNSYNCED;
+}
+
+int moy_clock_server(const char *name) {
+    size_t n = name != NULL ? strlen(name) : 0;
+    if (n > MOY_CLOCK_SERVER_MAX) {
+        return -1;
+    }
+    if (n == 0) {
+        if (s_server != NULL) {
+            s_server[0] = '\0';
+        }
+        return 0;
+    }
+    if (s_server == NULL) {
+        s_server = heap_caps_malloc(MOY_CLOCK_SERVER_MAX + 1, MALLOC_CAP_SPIRAM);
+        if (s_server == NULL) {
+            return -1;
+        }
+    }
+    memcpy(s_server, name, n + 1u);
+    return 0;
+}
+
+// The kernel's alarms keep their wall time across a step (moy_evq.h, TIMERS),
+// where the image takes moy_kernel.
+void moy_evq_clock(int64_t step_ms) __attribute__((weak));
+
+// lwIP's SNTP client sets the clock through this (ESP-IDF's is weak): the
+// answer, Unix time, on the board's epoch, and the mark; the step told to the
+// kernel's alarms.
+void sntp_sync_time(struct timeval *tv) {
+    struct timeval t = {tv->tv_sec - CLOCK_EPOCH, tv->tv_usec};
+    struct timeval was;
+    gettimeofday(&was, NULL);
+    settimeofday(&t, NULL);
+    if (moy_evq_clock != NULL) {
+        moy_evq_clock(((int64_t)t.tv_sec - was.tv_sec) * 1000
+                      + ((int64_t)t.tv_usec - was.tv_usec) / 1000);
+    }
+    sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
+    s_clk.at = (int64_t)tv->tv_sec;
+    s_clk.mark = CLOCK_MARK;
+}
+
+static void ntp_start(void) {
+    if (s_ntp) {
+        return;
+    }
+    esp_sntp_config_t c = ESP_NETIF_SNTP_DEFAULT_CONFIG(
+        s_server != NULL && s_server[0] ? s_server : MOY_CLOCK_SERVER);
+    c.wait_for_sync = false;
+    if (esp_netif_sntp_init(&c) == ESP_OK) {
+        s_ntp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        s_ntp = 1;
+    }
+}
+
+static void ntp_stop(void) {
+    if (s_ntp) {
+        s_ntp = 0;
+        esp_netif_sntp_deinit();
+    }
+}
+
+// The station's address coming and going, as the kernel table's NET up and
+// down (moy_input_radio), where the image takes moy_input.
+static void radio(bool up, uint32_t why) {
+    #ifdef WIFI_EVENTS
+    moy_input_radio(moy_input_kernel(), MOY_EV_NET, up, why, NULL);
+    #else
+    (void)up;
+    (void)why;
+    #endif
 }
 
 static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -65,6 +233,12 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_STOP) {
         s_st.on = 0;
         s_st.connected = 0;
+        s_scan = SCAN_IDLE;
+        radio(false, 0);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        if (s_scan == SCAN_RUNNING) {
+            s_scan = SCAN_DONE;
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *d = data;
         portENTER_CRITICAL(&s_latch);
@@ -72,6 +246,7 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         s_st.ip = 0;
         s_st.reason = d ? d->reason : 0;
         portEXIT_CRITICAL(&s_latch);
+        radio(false, d ? d->reason : 0);
         if (s_want) {
             schedule_retry();
         }
@@ -84,6 +259,12 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
         portEXIT_CRITICAL(&s_latch);
         s_backoff = 0;
         s_keep = 1;
+        if (s_stall && s_retry != NULL) {
+            s_stall = 0;
+            esp_timer_stop(s_retry);
+        }
+        ntp_start();
+        radio(true, 0);
     }
 }
 
@@ -137,6 +318,8 @@ void moy_wifi_off(void) {
     if (s_retry != NULL) {
         esp_timer_stop(s_retry);
     }
+    ntp_stop();
+    s_scan = SCAN_IDLE;
     esp_wifi_disconnect();
     esp_wifi_stop();
     portENTER_CRITICAL(&s_latch);
@@ -145,10 +328,14 @@ void moy_wifi_off(void) {
     s_st.ip = 0;
     s_st.ssid[0] = '\0';
     portEXIT_CRITICAL(&s_latch);
+    radio(false, 0);
 }
 
+// Each driver call is a round trip to the C6 on a P4, so a connect asks only
+// for what the station's state needs: a start when it is down, a disconnect
+// when it is associating or associated.
 int moy_wifi_connect(const char *ssid, const char *password) {
-    int e = moy_wifi_on();
+    int e = s_st.on ? ESP_OK : moy_wifi_on();
     if (e != ESP_OK) {
         return e;
     }
@@ -160,12 +347,15 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     }
     memcpy(c.sta.ssid, ssid, n);
     memcpy(c.sta.password, password, p);
+    int busy = s_want || s_st.connected;
     s_want = 0;
     s_backoff = 0;
     if (s_retry != NULL) {
         esp_timer_stop(s_retry);
     }
-    esp_wifi_disconnect();
+    if (busy) {
+        esp_wifi_disconnect();
+    }
     e = esp_wifi_set_config(WIFI_IF_STA, &c);
     if (e != ESP_OK) {
         return e;
@@ -173,14 +363,13 @@ int moy_wifi_connect(const char *ssid, const char *password) {
     portENTER_CRITICAL(&s_latch);
     memcpy(s_st.ssid, ssid, n);
     s_st.ssid[n] = '\0';
+    s_st.reason = 0;                    // a refusal from here on is this attempt's
     portEXIT_CRITICAL(&s_latch);
     s_want = 1;
     // A connect asked while the radio is still starting (through the C6 on a
     // P4, right after the lease brought it up) is refused; the backoff asks
     // again, as it does after a loss.
-    if (esp_wifi_connect() != ESP_OK) {
-        schedule_retry();
-    }
+    connect_now();
     return ESP_OK;
 }
 
@@ -276,11 +465,20 @@ int moy_wifi_ap_mac(uint8_t mac[6]) {
 
 // The name the board answers to on the network (`<host>.local`), with its
 // web console as an http service, where the board takes the responder
-// (MOY_NET_MDNS: the headless Zero, found by name). 0, an ESP error, or
+// (MOY_NET_MDNS: the headless Zero, found by name, and every console while
+// its SSH server serves). An empty name ends the responder: its task's
+// stack and records are internal SRAM. 0, an ESP error, or
 // ESP_ERR_NOT_SUPPORTED in an image without it.
 int moy_wifi_mdns(const char *host) {
     #if HAVE_MDNS
     static uint8_t up;
+    if (host[0] == '\0') {
+        if (up) {
+            mdns_free();
+            up = 0;
+        }
+        return 0;
+    }
     if (!up) {
         esp_err_t e = mdns_init();
         if (e != ESP_OK) {
@@ -296,12 +494,66 @@ int moy_wifi_mdns(const char *host) {
     #endif
 }
 
+int moy_net_dialing(void) {
+    return s_st.on && s_want && !s_st.connected;
+}
+
 int moy_net_link(uint32_t *ip) {
     portENTER_CRITICAL(&s_latch);
     int up = s_st.connected && s_st.ip != 0;
     *ip = s_st.ip;
     portEXIT_CRITICAL(&s_latch);
     return up;
+}
+
+// THE NETWORK'S GATE (moy_net.h): the station's link holds an address, so
+// esp_netif_init (the driver's first step) brought lwIP's tcpip task up.
+int moy_net_online(void) {
+    uint32_t ip;
+    return moy_net_link(&ip);
+}
+
+// THE BOOK (moy_net.h): the mask it last followed.
+static uint32_t s_book;
+
+// What keeps a station up with no row: the board's own station (the Zero's,
+// MOY_NET_WIFI_OWN), the ESP-NOW link riding it, or the webhost serving on
+// it until the next VM takes its "web" row back.
+static int kept_up(void) {
+    #if defined(MOY_NET_WIFI_OWN) && MOY_NET_WIFI_OWN
+    return 1;
+    #else
+    #if defined(MOY_NET_LINK) && MOY_NET_LINK
+    moy_link_stats_t l;
+    moy_link_stats(&l);
+    if (l.up) {
+        return 1;
+    }
+    #endif
+    moy_web_state_t w;
+    moy_web_state(&w);
+    return w.listening;
+    #endif
+}
+
+void moy_wifi_book(uint32_t mask) {
+    mask &= ~moy_lease_wifi_bit("kstop", 5);   // the kernel's kstop mark powers nothing
+    uint32_t was = s_book;
+    s_book = mask;
+    if (mask != 0u && was == 0u) {
+        if (!s_st.on) {
+            moy_wifi_on();
+        }
+    } else if (mask == 0u) {
+        if (s_st.on && !kept_up()) {
+            moy_wifi_off();
+        }
+        return;
+    }
+    uint32_t dial = moy_lease_wifi_bit("http", 4) | moy_lease_wifi_bit("media", 5);
+    if ((mask & dial) && !(was & dial) && s_st.on && !s_want && !s_st.connected) {
+        moy_wifi_connect_kept();
+    }
 }
 
 int moy_wifi_connect_kept(void) {
@@ -348,13 +600,43 @@ void moy_wifi_state(moy_wifi_state_t *out) {
     portEXIT_CRITICAL(&s_latch);
 }
 
-int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
+// A scan is started without blocking (through the C6 on a P4 a blocking one
+// holds its caller for seconds) and its records are read once the driver's
+// SCAN_DONE came.
+int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max) {
     if (!s_st.on) {
+        s_scan = SCAN_IDLE;
         return -1;
     }
-    if (esp_wifi_scan_start(NULL, true) != ESP_OK) {
-        return -1;
+    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_scan == SCAN_IDLE) {
+        s_scan = SCAN_ASKING;
+        s_scan_ms = ms;
+        s_ask_ms = ms - SCAN_ASK_MS;
     }
+    if (s_scan == SCAN_ASKING) {
+        if (ms - s_scan_ms >= MOY_WIFI_SCAN_MS) {
+            s_scan = SCAN_IDLE;
+            return -1;
+        }
+        if (ms - s_ask_ms >= SCAN_ASK_MS) {
+            s_ask_ms = ms;
+            s_scan = SCAN_RUNNING;      // first: its SCAN_DONE may come before the return
+            if (esp_wifi_scan_start(NULL, false) == ESP_OK) {
+                s_scan_ms = ms;
+            } else {
+                s_scan = SCAN_ASKING;
+            }
+        }
+        return MOY_WIFI_SCANNING;
+    }
+    if (s_scan == SCAN_RUNNING) {
+        if (ms - s_scan_ms < MOY_WIFI_SCAN_MS) {
+            return MOY_WIFI_SCANNING;
+        }
+        esp_wifi_scan_stop();
+    }
+    s_scan = SCAN_IDLE;
     uint16_t n = (uint16_t)max;
     wifi_ap_record_t *recs = heap_caps_malloc(sizeof(*recs) * (size_t)max,
                                               MALLOC_CAP_SPIRAM);
@@ -373,6 +655,14 @@ int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
         out[i].auth = (uint8_t)recs[i].authmode;
     }
     heap_caps_free(recs);
+    return n;
+}
+
+int moy_wifi_scan(moy_wifi_ap_t *out, int max) {
+    int n;
+    while ((n = moy_wifi_scan_poll(out, max)) == MOY_WIFI_SCANNING) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     return n;
 }
 

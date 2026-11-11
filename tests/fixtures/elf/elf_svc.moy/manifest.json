@@ -1,0 +1,13 @@
+{
+  "title": "Service Native",
+  "id": "elf.svc",
+  "moybyte": {
+    "type": "service",
+    "permissions": [
+      "files",
+      "full_access",
+      "notifications",
+      "prefs"
+    ]
+  }
+}

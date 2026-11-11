@@ -16,9 +16,9 @@ through the injected store (`ws.carts_store`) inside the SD session
 (`ws._with_sd`) and journal what landed (the durable undo journal,
 `moy_journal`). It keeps a `ws` back-reference for the Workstation-owned deps
 the builders and commits need: the SD-session wrapper `ws._with_sd`, the cart
-store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.audio`,
+store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.run.audio`,
 the save-failure UI field `ws.cart_error` and
-the achievements tracker `ws.ach`.
+the achievements link `ws.ach`.
 
 `Project` (runtime/editors/project.py) is this class plus the Editor's half -- the
 per-tab op-history registry (`history_for`) and the CONFIG tab's undo codec --
@@ -263,9 +263,9 @@ class ProjectStore:
         ws = self.ws
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
-        if ws.audio is not None:
-            ws.audio.close()
-        ws.audio = AudioSession(bank, "cart")
+        if ws.run.audio is not None:
+            ws.run.audio.close()
+        ws.run.audio = AudioSession(bank, ws.run.player.owner)
 
     # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #
@@ -510,7 +510,7 @@ class ProjectStore:
                       % (_total, _t_write, _t_burst, _t_ops,
                          _total - _t_write - _t_burst - _t_ops, len(src)))
             if not quiet:
-                ws.ach.note("code_save")      # "Code Wizard": manual SAVE/PLAY only (#21)
+                ws.ach.award("first_code")    # Code Wizard: a manual commit only
             # A successful save means the source now compiles and persisted: clear
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
@@ -534,7 +534,7 @@ class ProjectStore:
             print("Moybyte save code failed:", txt)
             return False
 
-    def _commit_asset(self, what, rel, payload, save, hist, clean=None, note=None):
+    def _commit_asset(self, what, rel, payload, save, hist, clean=None, award=None):
         """ONE body for the asset commits (sprites / map / scene / sounds):
         the store write under the SD wrapper, the editor marked clean, then
         the durable undo line -- this
@@ -555,8 +555,8 @@ class ProjectStore:
             self._journal(rel, payload, ops=ops)
             if hist is not None:
                 hist.clear()
-            if note:
-                ws.ach.note(note)
+            if award:
+                ws.ach.award(award)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
@@ -574,7 +574,7 @@ class ProjectStore:
         self._commit_asset("sprites", "sprites.moygfx", hexs,
                            lambda: ws.carts_store.save_sprites(self.cart, hexs),
                            self._paint_history(), clean=self.sheet,
-                           note="paint_save")          # "Little Artist" (#21)
+                           award="first_paint")       # Little Artist
         if self.flags_dirty and self.flags is not None:
             # A sprite's flags (the Sprite pane's toggles) ride the sheet's
             # commit: they are the sprites' own data.
@@ -593,7 +593,7 @@ class ProjectStore:
         self._commit_asset("map", "map.moymap", hexs,
                            lambda: ws.carts_store.save_map(self.cart, hexs),
                            self._map_history(), clean=self.tilemap,
-                           note="map_save")            # "Map Maker" (#21)
+                           award="first_map")         # Map Maker
 
     def commit_scene(self, name, text):
         """Persist one scene to scenes/<name>.moyscene (#85). `text` is the
@@ -612,7 +612,7 @@ class ProjectStore:
 
     def commit_sounds(self):
         """Persist the cart's AudioBank to sounds.json (#50). The MusicEditor
-        edits the LIVE bank (ws.audio.bank), so a save just serializes
+        edits the LIVE bank (ws.run.audio.bank), so a save just serializes
         what the cart already plays through."""
         ws = self.ws
         me = ws.music_ui.musicedit
@@ -621,5 +621,4 @@ class ProjectStore:
         bank_dict = me.bank.to_dict()
         self._commit_asset("sounds", "sounds.json", json.dumps(bank_dict),
                            lambda: ws.carts_store.save_sounds(self.cart, bank_dict),
-                           self._music_history(), clean=me,
-                           note="sound_save")          # "Sound Designer" (#21)
+                           self._music_history(), clean=me)

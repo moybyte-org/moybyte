@@ -106,9 +106,9 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     stats = {"frames": 0, "band": 0}
 
     def frame():
-        n0 = ws._frames_drawn
+        n0 = ws.frame_state.frames_drawn
         drv.frame(1 / 30)
-        if ws._frames_drawn == n0:
+        if ws.frame_state.frames_drawn == n0:
             return None
         stats["frames"] += 1
         held.append(bytes(root._buf))
@@ -489,17 +489,17 @@ def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
     layer = ws.launcher_layer
     ws.launcher_layer.handle_input(_Key("down"))
     ws.mark_dirty()
-    n = ws._frames_drawn
+    n = ws.frame_state.frames_drawn
     drv.frame(1 / 30)
-    assert ws._frames_drawn == n + 1
-    assert layer._debt_owed + 1 == ws._frames_drawn
+    assert ws.frame_state.frames_drawn == n + 1
+    assert layer._debt_owed + 1 == ws.frame_state.frames_drawn
     assert not ws._frame_requested
     drew = list(ws.launcher.floor)
     assert drew and not ws.launcher.copied
     for _ in range(6):
         drv.frame(1 / 30)
     assert layer._debt_owed is None
-    assert ws._frames_drawn == n + 2       # the owed frame, then quiet
+    assert ws.frame_state.frames_drawn == n + 2       # the owed frame, then quiet
     assert ws.launcher.floor == [] and sorted(ws.launcher.copied) == sorted(drew)
 
 

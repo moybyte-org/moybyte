@@ -30,24 +30,29 @@
 // tools/mp_task_calls.py fails it when the tag's call list moves (v1.29.0
 // drops machine_timer_deinit_all, so the stop stops timers itself). The ORDER
 // of a stop: the app's close(); the cooperative stops (threads joined,
-// moycore's close() -- which ends a wasm session and frees the Lua state --
-// the flush feeder drained and the fold disarmed, async copies waited:
-// moy_glass_vm_stop); the port's deinit list, with the pin sweep replaced by
-// one that removes only the pins a Python handler holds, so the kernel's GPIO
-// ISRs survive; gc_sweep_all, whose finalisers close files, sockets, I2S and
-// SD and return the glass rows Python held (moy_glass_vm_swept; the theme
-// fonts, moy_text_vm_stop); the native-code arena freed; mp_deinit; the root
-// section ZEROED (a stale root would mark whatever sits at its address in the
-// next first area); the first heap area freed; the console's stdin ring and
-// the interrupt character taken by the kernel, which drains the ring and
-// re-polls the USB FIFO while no VM runs (a host writing through a stop
-// otherwise stalls the console's input for good). The VM's task is NOT
-// deleted: it drives the kernel's frame with no VM until the stop's run ends,
-// then starts the next VM (a RETURN start). What C owns survives: the input
-// task, the BLE central, the ESP-NOW link and its ring, the WiFi station and
-// its lease table, the card's FATFS and the internal flash volume, the driver
-// buffers and native tasks (the audio task silences the cart's sound). A stop
-// is refused while a Python owner holds a WiFi lease or an OTA write runs.
+// moycore's close() -- which ends a wasm session and frees the Lua state, the
+// Lua services on their tasks kept (moycore_svc_vm_stop) -- the flush feeder drained and
+// the fold disarmed, async copies waited: moy_glass_vm_stop); the port's
+// deinit list, with the pin sweep replaced by one that removes only the pins
+// a Python handler holds, so the kernel's GPIO ISRs survive; gc_sweep_all,
+// whose finalisers close files, sockets, I2S and SD and return the glass rows
+// Python held (moy_glass_vm_swept; the theme fonts, moy_text_vm_stop); the
+// VM's processes' event queues closed (moy_evq_vm_stop) and the input
+// table's readers freed (moy_input_vm_stop); the native-code arena freed;
+// mp_deinit; the VM's leases dropped (moy_lease_vm_stop, a soft reset's
+// too), which closes the drivers a VM process held (the microphone, the LoRa
+// radio, the BLE central's scan and connection); the root section ZEROED (a stale root would mark whatever sits
+// at its address in the next first area); the first heap area freed; the
+// console's stdin ring and the interrupt character taken by the kernel, which
+// drains the ring and re-polls the USB FIFO while no VM runs (a host writing
+// through a stop otherwise stalls the console's input for good). The VM's task
+// is NOT deleted: it drives the kernel's frame with no VM until the stop's run
+// ends, then starts the next VM (a RETURN start). What C owns survives: the
+// input task, the BLE central, the ESP-NOW link and its ring, the WiFi station
+// and its rows of the lease table, the card's FATFS and the internal flash volume, the
+// driver buffers and native tasks (the audio task silences the cart's sound). A
+// stop is refused while a Python owner holds a WiFi lease or a hardware lease
+// (moy_lease.h's MOY_LEASE_VM) or an OTA write runs.
 // An app that is stopped comes back from persisted state: close() is the
 // leaving hook, commit() the forced save, open() re-enters.
 
@@ -72,11 +77,22 @@ void moy_kernel_boot_failed(const char *what);
 
 // The ledger's OPEN id for a role, mirrored into RTC memory.
 void moy_kernel_arm(int role, const char *id);
+// The process the armed GAME runs as: a record of the game names it.
+void moy_kernel_arm_pid(uint32_t pid);
+// The crash count's limit (moy_crash.h's THE CRASH COUNT): `n` 0..32 sets it
+// (0: never), -1 reads it; the limit, and the count so far at *count.
+int moy_kernel_crash_limit(int n, int *count);
 
 // The last crash this board recorded (NVS), or NULL. `fresh`: the record this
 // boot's intake took, once.
 const moy_crash_rec_t *moy_kernel_last_crash(void);
 const moy_crash_rec_t *moy_kernel_take_crash(void);
+
+// The core dump the last panic wrote to flash: its size, 0 for none (no
+// partition on this board's table, or a dump whose checksum fails). Clearing
+// erases it: true once it is gone.
+uint32_t moy_kernel_dump(void);
+bool moy_kernel_dump_clear(void);
 
 const char *moy_kernel_reset_name(int reason);
 
@@ -98,7 +114,7 @@ void moy_kernel_test_crash(bool abort_not_fault);
 // alive, with moy_loop_task presenting across each window. `kstop N stop` runs
 // N real VM stops instead, each printing a third line, `KSTOP i/n down`, with
 // the heaps read while no VM runs and the route and lease set before the stop
-// read back (`route=kstop lease=dev`); the start after it is a RETURN start.
+// read back (`route=kstop lease=kstop`); the start after it is a RETURN start.
 // When the kernel lit the glass with the logo, ms after power-on; 0: it did not.
 uint32_t moy_kernel_lit_ms(void);
 void moy_kernel_kstop(int n);
@@ -120,8 +136,9 @@ int moy_kernel_start(void);
 // a lease set on the kernel's tables before it and read back after.
 void moy_kernel_kstop_stop(int n);
 // The resume record: what the launcher writes before a stop and reads at the
-// return start (its place on the shelf), PSRAM, never flash.
-#define MOY_KERNEL_RESUME_MAX 256
+// return start (its place on the shelf, the Python services to start again and
+// the services the stop kept running), PSRAM, never flash.
+#define MOY_KERNEL_RESUME_MAX 512
 void moy_kernel_resume_set(const char *text, size_t n);
 size_t moy_kernel_resume(const char **text);
 // A line out through the kernel's serial path, with no VM's stream.

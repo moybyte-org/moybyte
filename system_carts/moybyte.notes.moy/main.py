@@ -11,7 +11,7 @@
 #                                      `carts` in this file is a NameError, not
 #                                      a locked door. That is the whole sandbox.
 #
-# The one that matters here is `files:docs`, which brings BOTH the storage verbs
+# The one that matters here is `files:documents`, which brings BOTH the storage verbs
 # (`files.list()`, `files.new_name()`, `files.rename()`, `files.duplicate()`,
 # `files.delete()`, `files.badge()`) and `open_editor(name)` -- a handle onto
 # one note, over the console's own editor. The editor is not in this file: the
@@ -288,7 +288,6 @@ def _hand_keys():
 def _list_page(x, y, w, h):
     global cur
     ui.bar("Notes")
-    ui.at(x, y, w, h)
     ui.page("")
     if names is None:
         _blank(x, y, w, h, "No storage", NO_STORE)
@@ -406,7 +405,6 @@ def _note_page(x, y, w, h):
     elif t == -2:
         _close()
         return
-    ui.at(x, y, w, h)
     ui.page("", _page_o(False))
     foot = 34
     _sheet(x + 6, y + 3, w - 12, h - foot - 5, 8 * FS)
@@ -501,7 +499,6 @@ def _desk(x, y, w, h):
     over it, a foot under both: its rule, the note's state, the clipboard's
     keys."""
     ui.bar(_title(ed.name()) if ed is not None else "")
-    ui.at(x, y, w, h)
     ui.page("", _page_o(True) if ed is not None and names is not None else None)
     if names is None:
         _blank(x, y, w, h, "No storage", NO_STORE)

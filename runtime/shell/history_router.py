@@ -185,7 +185,7 @@ class HistoryRouter:
         doc = self._theme()
         if doc is not None:
             return doc.history(ws.menu_view, self)
-        return ws.project.history_for(ws.menu_view)
+        return ws.run.project.history_for(ws.menu_view)
 
     # -- code editor op-history + typing burst (#111 phase 4) ----------------
 
@@ -507,7 +507,7 @@ class HistoryRouter:
             return
         ws.cart = fresh
         ws.config = dict(fresh.get("cfg", {}))
-        ws.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
+        ws.run.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
         ws.sheet = ws._build_sheet()
         ws.tilemap = ws._build_tilemap()
         ws.images = fresh.get("images") or {}
@@ -568,7 +568,7 @@ class HistoryRouter:
         # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
         # the "Code Wizard" achievement toast. A failed store write still
         # surfaces via cart_error, as it must.
-        ws.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
+        ws.run.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
 
     def _autosave_tab(self):
         """The idle commit for a tab that is not code: hand it to the Editor's own

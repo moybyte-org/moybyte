@@ -5,8 +5,8 @@ GET /console.json and sends its changes back as system batches; the board's C
 parks them for the VM (native/moy_net/moy_webhost.c), which merges them key by
 key (runtime/carts/moy_sync.py's SYSTEM_KEYS, merge_system, SystemReceiver). The
 board is of record, so most of what is pinned here is what a page can NOT do:
-change a key the board keeps for itself, turn on unsigned code, read the pin,
-or take a badge away. The real-browser round trip is
+change a key the board keeps for itself, turn on unsigned code, read or write
+anything without a paired session, or take a badge away. The real-browser round trip is
 tests/test_web_board_system_e2e.py.
 """
 
@@ -28,7 +28,9 @@ sys.path.insert(0, str(ROOT / "device"))
 import moy_webhost as wh                                       # noqa: E402
 from runtime import moy_sync, net_binding as nb               # noqa: E402
 from runtime.moy_spine import Settings                        # noqa: E402
-from runtime.widgets import Achievements                      # noqa: E402
+from runtime.moy_carts import parse_settings as _doc, settings_text as _text  # noqa: E402
+
+SETTINGS = moy_sync.SYSTEM_SETTINGS
 
 PORTABLE, LOCAL, BOARD = moy_sync.PORTABLE, moy_sync.LOCAL, moy_sync.BOARD
 
@@ -54,8 +56,8 @@ class _Rows(Settings):
 
 BOARD_DOC = {
     "theme": "dusk", "theme_variant": "dark", "name": "Mia", "author": "mia",
-    "show_fps": True, "volume": 2, "font_scale": 2, "web_pin": "4821",
-    "ota_channel": "stable", "unknown_sources": False,
+    "show_fps": True, "volume": 2, "font_scale": 2,
+    "ota_channel": "stable", "consent": {"a.b": {"perms": [], "off": []}},
     "app_guard": {"local.calc": [3, 0]},
     "favorites": ["/sd/moybyte/carts/moybyte.star_catcher.moy"],
     "paint_doc": "sunset.moyimg", "retired_thing": 7,
@@ -77,7 +79,7 @@ BOARD_DOC = {
     ("chrome_scale", LOCAL), ("crisp_pixels", LOCAL), ("two_player", LOCAL),
     ("diag_live", LOCAL), ("diag_sd", LOCAL), ("app_guard", LOCAL),
     ("wallpaper_guard", LOCAL),
-    ("web_pin", BOARD), ("ota_channel", BOARD), ("unknown_sources", BOARD),
+    ("ota_channel", BOARD), ("ntp_server", BOARD), ("consent", LOCAL),
     ("frameskip", LOCAL), ("never_heard_of_it", LOCAL), ("paint_", LOCAL),
 ])
 def test_every_key_has_its_class_and_an_unknown_one_is_local(key, cls):
@@ -113,42 +115,48 @@ def test_every_system_app_that_keeps_prefs_has_its_namespace_listed():
 
 # -- the pull ------------------------------------------------------------------
 
-_NONE = {"found": {}, "count": {}}
-
-
-def _badges(**found):
-    return json.dumps({"v": 2, "found": found, "count": {}})
-
+BADGES_KEY = "moybyte.achievements_badges"     # the achievements process's prefs row
 
 
 def test_the_pull_carries_the_portable_rows_and_never_the_boards_own():
-    rows = _Rows(BOARD_DOC)
-    pull = moy_sync.system_pull(rows, {"found": {"first_open": 20261012, "first_run": 0},
-                                       "count": {"play_five": ["a"]}})
-    assert set(pull) == {"system.json", "achievements.json"}
-    sent = json.loads(pull["system.json"])
+    rows = _Rows(dict(BOARD_DOC, milestones={"played": ["a"]}))
+    pull = moy_sync.system_pull(rows)
+    assert set(pull) == {SETTINGS}
+    sent = _doc(pull[SETTINGS])
     assert sent == {
         "theme": "dusk", "theme_variant": "dark", "name": "Mia",
         "author": "mia", "show_fps": True, "paint_doc": "sunset.moyimg",
         "favorites": ["moybyte.star_catcher.moy"]}
-    for key in ("web_pin", "ota_channel", "unknown_sources", "volume",
+    for key in ("ota_channel", "consent", "volume",
                 "app_guard", "retired_thing"):
         assert key not in sent
-    assert json.loads(pull["achievements.json"]) == {
-        "v": 2, "found": {"first_open": 20261012, "first_run": 0},
-        "count": {"play_five": ["a"]}}
+    assert "milestones" not in sent           # the shell's own count stays each console's
+
+
+def test_the_badges_cross_as_the_achievements_processs_prefs_row():
+    """The badges are a row of the settings file (an app's prefs, its
+    namespace a cart id), so they cross with the portable rows: the board's
+    in its pull, the page's in its batch."""
+    row = {"system": {"name": "Moybyte", "found": {"first_open": [20261012, "First Steps",
+                                                                  "app", "Open a cart"]}}}
+    assert moy_sync.key_class(BADGES_KEY) == moy_sync.PORTABLE
+    pull = moy_sync.system_pull(_Rows(dict(BOARD_DOC, **{BADGES_KEY: row})))
+    assert _doc(pull[SETTINGS])[BADGES_KEY] == row
+    rows = _Rows(BOARD_DOC)
+    page = dict(_doc(moy_sync.system_pull(rows)[SETTINGS]), **{BADGES_KEY: row})
+    assert BADGES_KEY in moy_sync.merge_system(rows, _text(page), "/c")
+    assert rows.get(BADGES_KEY) == row
 
 
 def test_a_pulled_document_lands_under_the_pages_carts_root():
-    text = json.dumps({"favorites": ["a.moy", "/x/carts/b.moy", "", ".."],
+    text = _text({"favorites": ["a.moy", "/x/carts/b.moy", "", ".."],
                        "plays": {"a.moy": [3, 20261020]},
                        "desk_mru": ["b.moy"], "theme": "dusk"})
-    doc = json.loads(moy_sync.rebase_system(text, "/moy/carts"))
+    doc = _doc(moy_sync.rebase_system(text, "/moy/carts"))
     assert doc == {"favorites": ["/moy/carts/a.moy", "/moy/carts/b.moy"],
                    "plays": {"/moy/carts/a.moy": [3, 20261020]},
                    "desk_mru": ["/moy/carts/b.moy"], "theme": "dusk"}
-    assert moy_sync.rebase_system("[1]", "/moy/carts") is None
-    assert moy_sync.rebase_system("{", "/moy/carts") is None
+    assert moy_sync.rebase_system("not a row\n", "/moy/carts") == ""
 
 
 # -- the merge -------------------------------------------------------------------
@@ -156,12 +164,12 @@ def test_a_pulled_document_lands_under_the_pages_carts_root():
 
 def _merge(doc, board=None, root="/sd/moybyte/carts"):
     rows = _Rows(BOARD_DOC if board is None else board)
-    changed = moy_sync.merge_system(rows, json.dumps(doc), root)
+    changed = moy_sync.merge_system(rows, _text(doc), root)
     return rows, changed
 
 
 def test_a_portable_change_lands_and_reports_its_key():
-    page = json.loads(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)["system.json"])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     page["theme"] = "night"
     rows, changed = _merge(page)
     assert changed == ["theme"]
@@ -170,7 +178,7 @@ def test_a_portable_change_lands_and_reports_its_key():
 
 
 def test_an_unchanged_document_changes_nothing_and_writes_nothing():
-    page = json.loads(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)["system.json"])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     rows, changed = _merge(page)
     assert changed == [] and rows.saves == []
     assert json.loads(rows.dump()) == BOARD_DOC
@@ -187,20 +195,20 @@ def test_a_page_cannot_change_a_key_the_board_keeps():
         assert rows.get(key) is None
 
 
-def test_a_page_can_never_turn_on_unsigned_code_or_move_the_pin():
-    """The board-only keys: a page that sends UNKNOWN SOURCES on, a pin of
-    its own and the unstable channel changes none of them."""
-    page = dict(BOARD_DOC, unknown_sources=True, web_pin="0000",
-                ota_channel="unstable")
+NATIVE = {"a.b": {"perms": ["full_access"], "off": []}}
+
+
+def test_a_page_can_never_consent_to_unsigned_code_or_move_the_channel():
+    """A page that sends a consent record granting "full_access" (what admits
+    unsigned code) and the unstable channel changes neither."""
+    page = dict(BOARD_DOC, consent=NATIVE, ota_channel="unstable")
     rows, changed = _merge(page)
-    assert rows.get("unknown_sources") is False
-    assert rows.get("web_pin") == "4821"
+    assert rows.get("consent") == BOARD_DOC["consent"]
     assert rows.get("ota_channel") == "stable"
-    assert "unknown_sources" not in changed
+    assert "consent" not in changed
     # ...and a board that never had the row does not gain it either.
-    rows, _ = _merge({"unknown_sources": True, "theme": "dusk"},
-                     board={"theme": "dusk"})
-    assert rows.get("unknown_sources") is None
+    rows, _ = _merge({"consent": NATIVE, "theme": "dusk"}, board={"theme": "dusk"})
+    assert rows.get("consent") is None
 
 
 def test_a_value_of_the_wrong_shape_is_passed_over():
@@ -211,11 +219,11 @@ def test_a_value_of_the_wrong_shape_is_passed_over():
 
 
 def test_a_portable_key_the_page_dropped_is_dropped_here():
-    page = json.loads(moy_sync.system_pull(_Rows(BOARD_DOC), _NONE)["system.json"])
+    page = _doc(moy_sync.system_pull(_Rows(BOARD_DOC))[SETTINGS])
     del page["paint_doc"]
     rows, changed = _merge(page)
     assert changed == ["paint_doc"] and rows.get("paint_doc") is None
-    assert rows.get("web_pin") == "4821", "a key the page never had stays"
+    assert rows.get("volume") == 2, "a key the page never had stays"
 
 
 def test_an_empty_document_says_nothing():
@@ -235,77 +243,55 @@ def test_cart_paths_land_under_the_boards_own_root():
     assert rows.get("plays") == {"/sd/moybyte/carts/local.hop.moy": [2, 20261020]}
 
 
-def test_a_document_that_is_not_an_object_is_refused():
+def test_a_document_that_is_not_text_is_refused_and_its_bad_lines_say_nothing():
     rows = _Rows(BOARD_DOC)
-    for text in ("[]", "3", "{"):
-        with pytest.raises(ValueError):
-            moy_sync.merge_system(rows, text, "/c")
-
-
-# -- the badges ---------------------------------------------------------------------
-
-
-def test_badges_are_a_union_never_the_last_writers_list():
-    saved = []
-    ach = Achievements({"found": {"first_run": 0}}, on_save=saved.append)
-    n = moy_sync.merge_achievements(
-        _badges(first_open=20261003, no_such_badge=1),
-        lambda i, day: ach.award(i, quiet=True, day=day))
-    assert n == 1
-    assert sorted(ach.unlocked) == ["first_open", "first_run"]
-    assert ach.found_on("first_open") == 20261003, "the day it was found there"
-    assert saved == [{"found": {"first_run": 0, "first_open": 20261003}, "count": {}}]
-    assert ach.toast is None, "a badge earned in the page is not celebrated twice"
-    # A page whose list lacks a badge the board has takes nothing away.
-    assert moy_sync.merge_achievements(_badges(), ach.award) == 0
-    assert sorted(ach.unlocked) == ["first_open", "first_run"]
-    for bad in ("[]", '{"unlocked": ["first_open"]}'):
-        with pytest.raises(ValueError):
-            moy_sync.merge_achievements(bad, ach.award)
+    for doc in (None, 3, ["x"]):
+        with pytest.raises(TypeError):
+            moy_sync.merge_system(rows, doc, "/c")
+    assert moy_sync.merge_system(rows, "[]\n{\ntheme dusk\n", "/c") == []
+    assert json.loads(rows.dump()) == BOARD_DOC
 
 
 # -- the receiver -------------------------------------------------------------------
 
 
-def _rx_apply(ops, rows=None, ach=None, rx=None):
+def _rx_apply(ops, rows=None, rx=None):
     rows = rows if rows is not None else _Rows(BOARD_DOC)
-    ach = ach if ach is not None else Achievements()
     rx = rx or moy_sync.SystemReceiver()
-    return rx.apply(ops, rows, lambda i, day: ach.award(i, quiet=True, day=day),
-                    "/sd/moybyte/carts"), rows, ach
+    return rx.apply(ops, rows, "/sd/moybyte/carts"), rows, None
 
 
-def test_the_receiver_takes_the_two_documents_and_refuses_the_rest():
-    (applied, errors, changed), rows, ach = _rx_apply([
-        {"p": "system.json", "t": json.dumps({"theme": "night"})},
-        {"p": "achievements.json", "t": _badges(first_open=0)},
-        {"p": "system.json", "d": 1},
+def test_the_receiver_takes_the_settings_and_refuses_the_rest():
+    (applied, errors, changed), rows, _ = _rx_apply([
+        {"p": SETTINGS, "t": _text({"theme": "night"})},
+        {"p": SETTINGS, "d": 1},
         {"p": "shared.moygfx", "b": "AAAA"},
         {"p": "wifi.json", "t": "[]"},
-        {"p": "achievements.json", "t": "nope"},
+        {"p": "achievements.json", "t": "{}"},
+        {"p": SETTINGS, "t": 3},
         "junk"], rows=_Rows({"theme": "dusk", "volume": 3}))
-    assert applied == 2 and changed == ["theme"]
-    assert errors == [(2, "kept on the console"), (3, "stays on the console"),
-                      (4, "stays on the console"), (5, "bad document"),
-                      (6, "bad op")]
-    assert rows.get("theme") == "night" and ach.has("first_open")
+    assert applied == 1 and changed == ["theme"]
+    assert errors == [(1, "kept on the console"), (2, "stays on the console"),
+                      (3, "stays on the console"), (4, "stays on the console"),
+                      (5, "not a document"), (6, "bad op")]
+    assert rows.get("theme") == "night"
 
 
 def test_a_document_in_parts_lands_at_its_publish_across_batches():
-    text = json.dumps(dict(BOARD_DOC, name="Leo"))
+    text = _text(dict(BOARD_DOC, name="Leo"))
     rx = moy_sync.SystemReceiver()
     rows = _Rows(BOARD_DOC)
-    (a1, e1, c1), _, _ = _rx_apply([{"p": "system.json", "t": text[:20],
+    (a1, e1, c1), _, _ = _rx_apply([{"p": SETTINGS, "t": text[:20],
                                      "part": 0}], rows=rows, rx=rx)
     assert (a1, e1, c1) == (1, [], []) and rows.get("name") == "Mia"
-    (a2, e2, c2), _, _ = _rx_apply([{"p": "system.json", "t": text[20:],
+    (a2, e2, c2), _, _ = _rx_apply([{"p": SETTINGS, "t": text[20:],
                                      "part": 1},
-                                    {"p": "system.json", "pub": 1}],
+                                    {"p": SETTINGS, "pub": 1}],
                                    rows=rows, rx=rx)
     assert (a2, e2, c2) == (2, [], ["name"]) and rows.get("name") == "Leo"
-    (_a, e3, _c), _, _ = _rx_apply([{"p": "system.json", "pub": 1}], rx=rx)
+    (_a, e3, _c), _, _ = _rx_apply([{"p": SETTINGS, "pub": 1}], rx=rx)
     assert e3 == [(0, "nothing to publish")]
-    (_a, e4, _c), _, _ = _rx_apply([{"p": "system.json", "t": "x",
+    (_a, e4, _c), _, _ = _rx_apply([{"p": SETTINGS, "t": "x",
                                      "part": 1}], rx=moy_sync.SystemReceiver())
     assert e4 == [(0, "part out of order")]
 
@@ -314,12 +300,11 @@ def test_a_document_in_parts_lands_at_its_publish_across_batches():
 
 
 class _Ws:
-    """What ConsoleSystem reads of a console: its rows, its badges, its carts
-    root and the re-apply verb."""
+    """What ConsoleSystem reads of a console: its rows, its carts root and
+    the re-apply verb."""
 
-    def __init__(self, doc=None, ids=()):
+    def __init__(self, doc=None):
         self.system = _Rows(BOARD_DOC if doc is None else doc)
-        self.ach = Achievements({"found": {i: 0 for i in ids}})
         self.carts_root = "/sd/moybyte/carts"
         self.applied = []
 
@@ -334,17 +319,27 @@ def _store(tmp_path):
     return root
 
 
-def _host(tmp_path, ws=None, pin="4821", **kw):
+def _host(tmp_path, ws=None, **kw):
+    """A host with its sign-in on over `tmp_path`/system, and a page paired
+    with it (`.page`, tests/seal_client.py)."""
     kw.setdefault("port", 0)
     system = None if ws is False else wh.ConsoleSystem(ws or _Ws())
-    return wh.WebHost(str(_store(tmp_path)), pin=pin, system=system, **kw)
+    folder = tmp_path / "system"
+    folder.mkdir(exist_ok=True)
+    h = wh.WebHost(str(_store(tmp_path)), auth=str(folder), system=system, **kw)
+    h.handle_http("GET", "/sync", b"")
+    return h
 
 
-def _batch(ops, pin="4821", v=2, root="system"):
-    doc = {"v": v, "root": root, "ops": ops}
-    if pin is not None:
-        doc["pin"] = pin
-    return json.dumps(doc).encode()
+def _paired(h, send=None):
+    import seal_client
+    page = seal_client.Browser(send or h.handle_http)
+    page.pair_token(nb.web_token())
+    return page
+
+
+def _batch(ops, v=2, root="system"):
+    return json.dumps({"v": v, "root": root, "ops": ops}).encode()
 
 
 def _status(resp):
@@ -355,41 +350,31 @@ def _json(resp):
     return json.loads(resp.split(b"\r\n\r\n", 1)[1])
 
 
-def test_the_pull_needs_the_pin(tmp_path):
-    h = _host(tmp_path)
-    assert _status(h.handle_http("GET", "/console.json", b"")) == 403
-    assert _status(h.handle_http("GET", "/console.json?pin=0000", b"")) == 403
-    r = h.handle_http("GET", "/console.json?pin=4821", b"")
-    assert _status(r) == 200
-    doc = _json(r)
-    assert json.loads(doc["system.json"])["theme"] == "dusk"
-    assert "4821" not in doc["system.json"], "the pull carried the pin"
-
-
-def test_a_system_batch_needs_the_pin(tmp_path):
+def test_the_pull_and_a_system_batch_need_a_paired_page(tmp_path):
     ws = _Ws()
     h = _host(tmp_path, ws)
-    ops = [{"p": "system.json", "t": json.dumps({"theme": "night"})}]
-    for pin in (None, "0000"):
-        assert _status(h.handle_http("POST", "/sync", _batch(ops, pin))) == 403
+    assert _status(h.handle_http("GET", "/console.json", b"")) == 401
+    assert _status(h.handle_http("GET", "/console.json?pin=4821", b"")) == 401
+    ops = [{"p": SETTINGS, "t": _text({"theme": "night"})}]
+    assert _status(h.handle_http("POST", "/sync", _batch(ops))) == 401
     assert ws.system.get("theme") == "dusk" and ws.applied == []
+    st, doc = _paired(h).json("GET", "/console.json")
+    assert st == 200 and _doc(doc[SETTINGS])["theme"] == "dusk"
 
 
 def test_a_system_batch_is_merged_and_its_keys_re_applied(tmp_path):
-    ws = _Ws(ids=["first_run"])
+    ws = _Ws()
     h = _host(tmp_path, ws)
-    page = json.loads(moy_sync.system_pull(ws.system, _NONE)["system.json"])
-    page.update(theme="night", show_fps=False, unknown_sources=True)
-    r = h.handle_http("POST", "/sync", _batch([
-        {"p": "system.json", "t": json.dumps(page)},
-        {"p": "achievements.json", "t": _badges(first_open=0)}]))
-    assert _status(r) == 200 and _json(r) == {"ok": 2, "err": []}
+    page = _doc(moy_sync.system_pull(ws.system)[SETTINGS])
+    page.update(theme="night", show_fps=False, consent=NATIVE)
+    st, doc = _paired(h).json("POST", "/sync", json.loads(_batch([
+        {"p": SETTINGS, "t": _text(page)}])))
+    assert st == 200 and doc == {"ok": 1, "err": []}
     assert ws.system.get("theme") == "night"
     assert ws.system.get("show_fps") is False
-    assert ws.system.get("unknown_sources") is False
+    assert ws.system.get("consent") == BOARD_DOC["consent"]
     assert ws.system.get("favorites") == BOARD_DOC["favorites"]
-    assert ws.applied == [["theme", "show_fps"]]
-    assert sorted(ws.ach.unlocked) == ["first_open", "first_run"]
+    assert [sorted(k) for k in ws.applied] == [["show_fps", "theme"]]
 
 
 def test_a_host_without_the_system_root_refuses_its_batch(tmp_path):
@@ -397,19 +382,21 @@ def test_a_host_without_the_system_root_refuses_its_batch(tmp_path):
     its Settings in the tab) refuses the batch, never misfiles it; firmware
     from before the root refuses it too, as a batch it cannot parse."""
     h = _host(tmp_path, ws=False)
-    ops = [{"p": "system.json", "t": "{}"}]
-    r = h.handle_http("POST", "/sync", _batch(ops))
-    assert _status(r) == 400 and _json(r) == {"error": "no such store"}
-    assert _status(h.handle_http("GET", "/console.json?pin=4821", b"")) == 404
-    assert not (tmp_path / "carts" / "system.json").exists()
-    assert not (tmp_path / "system.json").exists()
+    page = _paired(h)
+    ops = [{"p": SETTINGS, "t": ""}]
+    assert page.json("POST", "/sync", json.loads(_batch(ops))) == (
+        400, {"error": "no such store"})
+    target, _b, _seq = page.seal("GET", "/console.json")
+    assert _status(h.handle_http("GET", target, b"")) == 404
+    assert not (tmp_path / "carts" / SETTINGS).exists()
+    assert not (tmp_path / SETTINGS).exists()
 
 
 def test_a_carts_batch_still_applies_in_c_beside_the_system_root(tmp_path):
     h = _host(tmp_path)
-    r = h.handle_http("POST", "/sync", _batch(
-        [{"p": "hop.moy/main.py", "t": "x = 2\n"}], v=1, root=None))
-    assert _json(r)["ok"] == 1
+    st, doc = _paired(h).json("POST", "/sync", {"v": 1, "ops": [
+        {"p": "hop.moy/main.py", "t": "x = 2\n"}]})
+    assert doc["ok"] == 1
     assert (tmp_path / "carts" / "hop.moy" / "main.py").read_text() == "x = 2\n"
 
 
@@ -441,23 +428,25 @@ def _exchange(host, raw, polls=400):
 
 
 def test_over_a_socket_the_c_parks_the_batch_for_the_vm(tmp_path):
-    """The board's own path: the kernel's poll parks the pinned system batch,
-    the VM's poll takes it, merges it and answers on the same connection."""
+    """The board's own path: the kernel's poll opens the sealed system batch
+    and parks it, the VM's poll takes it, merges it and answers, and the C
+    seals that answer on the same connection."""
     ws = _Ws()
     h = _host(tmp_path, ws, port=free_port())
     h.start(ip="127.0.0.1")
     try:
-        body = _batch([{"p": "system.json", "t": json.dumps(
-            dict(json.loads(moy_sync.system_pull(ws.system, _NONE)["system.json"]),
-                 theme="night"))}])
-        raw = (b"POST /sync HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
-               % len(body)) + body
-        r = _exchange(h, raw)
-        assert _status(r) == 200 and _json(r) == {"ok": 1, "err": []}
+        def send(method, target, body):
+            return _exchange(h, ("%s %s HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
+                                 % (method, target, len(body))).encode() + body)
+        page = _paired(h, send)
+        st, doc = page.json("POST", "/sync", json.loads(_batch([{"p": SETTINGS, "t": _text(
+            dict(_doc(moy_sync.system_pull(ws.system)[SETTINGS]),
+                 theme="night"))}])))
+        assert st == 200 and doc == {"ok": 1, "err": []}
         assert ws.system.get("theme") == "night"
         assert ws.applied == [["theme"]]
-        r = _exchange(h, b"GET /console.json?pin=4821 HTTP/1.1\r\nHost: x\r\n\r\n")
-        assert json.loads(_json(r)["system.json"])["theme"] == "night"
+        st, doc = page.json("GET", "/console.json")
+        assert _doc(doc[SETTINGS])["theme"] == "night"
     finally:
         h.stop()
 
@@ -474,10 +463,10 @@ def test_a_theme_merged_from_the_page_is_the_consoles_at_once(tmp_path):
     ws = build_ws(tmp_path)
     other = next(n for n in THEME_NAMES if n != ws.look.theme_name)
     host = wh.ConsoleSystem(ws)
-    page = json.loads(host.pull()["system.json"])
+    page = _doc(host.pull()[SETTINGS])
     page["theme"] = other
     page["theme_variant"] = "dark"
-    applied, errors = host.apply([{"p": "system.json", "t": json.dumps(page)}])
+    applied, errors = host.apply([{"p": SETTINGS, "t": _text(page)}])
     assert (applied, errors) == (1, [])
     assert ws.look.theme_name == other and ws.look.theme_variant == "dark"
     assert ws.system.get("theme") == other

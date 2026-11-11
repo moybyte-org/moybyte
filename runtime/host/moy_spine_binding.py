@@ -6,7 +6,7 @@ tests/spine_twin.py (tests/test_moy_spine.py's BINDINGS, the random walk of
 tests/test_moy_spine_twins.py).
 
 `binding()` returns a module-like object with the Python twin's names -- Table,
-AppRegistry, BackStack, Returns, Leases, Settings, StaleHandle and the
+AppRegistry, BackStack, Returns, Settings, StaleHandle and the
 constants -- or None where there is no C compiler. Each call into C is the ABI
 of moy_htab.h, moy_route.h and moy_settings.h and nothing more; what a binding
 adds is what C cannot hold (a Table's row objects) and the mapping of the ABI's
@@ -86,18 +86,10 @@ _SIGS = (
     ("moy_returns_note", [_P, _PCHAR, _SIZE, _PINT], c.c_int),
     ("moy_returns_back", [_P], c.POINTER(_Kind)),
     ("moy_returns_take_back", [_P, c.POINTER(_Kind)], c.c_int),
-    ("moy_leases_new", [_P], _P),
-    ("moy_leases_free", [_P], None),
-    ("moy_lease_tag", [_U32], _PCHAR),
-    ("moy_lease_bit", [_PCHAR, _SIZE], _U32),
-    ("moy_leases_hold", [_P, _PCHAR, _SIZE, _PU32], c.c_int),
-    ("moy_leases_release", [_P, _PCHAR, _SIZE, _PU32], c.c_int),
-    ("moy_leases_mask", [_P], _U32),
     ("moy_apps_clear", [_P], None),
     ("moy_back_reset", [_P], None),
     ("moy_returns_reset", [_P], None),
-    ("moy_leases_reset", [_P], None),
-    ("moy_spine_kernel", [_P], c.POINTER(_P * 5)),
+    ("moy_spine_kernel", [_P], c.POINTER(_P * 4)),
     ("moy_settings_new", [_P], _P),
     ("moy_settings_free", [_P], None),
     ("moy_settings_validate", [_PCHAR, _SIZE], c.c_int),
@@ -112,6 +104,10 @@ _SIGS = (
     ("moy_settings_at", [_P, _U32, _PP, c.POINTER(_SIZE), _PP,
                          c.POINTER(_SIZE)], c.c_int),
     ("moy_settings_dump", [_P, c.c_char_p, _SIZE], _SIZE),
+    ("moy_settings_lock", [], None),
+    ("moy_settings_unlock", [], None),
+    ("moy_settings_load_file", [_P, _PCHAR, _SIZE, _PU32, _PU32], c.c_int),
+    ("moy_settings_file", [_P, c.c_char_p, _SIZE], _SIZE),
     ("moy_settings_saver", [_P, _P, _P], None),
     ("moy_settings_flush", [_P], c.c_int),
     ("moy_settings_saver_ctx", [_P], _P),
@@ -119,8 +115,6 @@ _SIGS = (
 
 # moy_settings_save_fn: (ctx, text, len) -> nonzero when it landed.
 SAVE_FN = c.CFUNCTYPE(c.c_int, _P, _P, _SIZE)
-
-LEASE_TAGS = ("web", "update", "settings", "cart", "link", "carts", "dev")
 
 
 def binding(sanitize=False):
@@ -139,10 +133,10 @@ def binding(sanitize=False):
         SLOT_BITS=8, KIND_SHIFT=8, GEN_SHIFT=12, GEN_MAX=(1 << 18) - 1,
         SLOTS=256, ID_MAX=15, KIND_APP=1, KIND_BUF=2, KIND_CANVAS=3,
         KIND_SURF=4, KIND_OWNER=5, KIND_SRC=6, KIND_PEER=7, KIND_AUDIO=8, KIND_CLIP=9,
-        KIND_IMAGE=10, KIND_ACTOR=11, KIND_GRANT=12,
+        KIND_IMAGE=10, KIND_ACTOR=11, KIND_GRANT=12, KIND_LEASE=13, KIND_PROC=14,
         STAYED=0, PUSHED=1, RETURNED=2,
         ROOT="launcher", EDITOR="menu", ROUTE_HOME=0, ROUTE_EDITOR=1,
-        ROUTE_APP=2, ROUTE_WINDOW=3, LEASE_TAGS=LEASE_TAGS, IMPL="c")
+        ROUTE_APP=2, ROUTE_WINDOW=3, IMPL="c")
 
     class StaleHandle(ValueError):
         """A handle that names no live row of the table it was given to."""
@@ -412,42 +406,6 @@ def binding(sanitize=False):
             return kind_str(k) if lib.moy_returns_take_back(
                 self._p, c.byref(k)) else None
 
-    class Leases:
-        def __init__(self):
-            self._p = lib.moy_leases_new(mem)
-            if not self._p:
-                nomem("leases")
-
-        __del__ = free_with("moy_leases_free")
-
-        def _tag(self, tag):
-            b = raw(tag, "a lease tag is a str")
-            if not lib.moy_lease_bit(b, len(b)):
-                raise ValueError("unknown lease tag %r" % tag)
-            return b
-
-        def hold(self, tag):
-            b, mask = self._tag(tag), c.c_uint32()
-            lib.moy_leases_hold(self._p, b, len(b), c.byref(mask))
-            return mask.value
-
-        def release(self, tag):
-            b, mask = self._tag(tag), c.c_uint32()
-            lib.moy_leases_release(self._p, b, len(b), c.byref(mask))
-            return mask.value
-
-        def mask(self):
-            return lib.moy_leases_mask(self._p)
-
-        def held(self, tag):
-            b = self._tag(tag)
-            return bool(self.mask() & lib.moy_lease_bit(b, len(b)))
-
-        def holders(self):
-            mask = self.mask()
-            return [LEASE_TAGS[i] for i in range(len(LEASE_TAGS))
-                    if mask & (1 << i)]
-
     def settings_key(k):
         b = raw(k, "a settings key is a str")
         if not b:
@@ -492,7 +450,7 @@ def binding(sanitize=False):
                 self._p = None
 
         def load(self, text):
-            b = raw(text, "system.json is a str")
+            b = raw(text, "the settings text is a str")
             rows = c.c_uint32()
             rc = lib.moy_settings_load(self._p, b, len(b), c.byref(rows))
             if rc != OK:
@@ -507,10 +465,17 @@ def binding(sanitize=False):
         def _text(self, key):
             kb = settings_key(key)
             j, n = c.c_void_p(), c.c_size_t()
-            if not lib.moy_settings_get(self._p, kb, len(kb), c.byref(j),
-                                        c.byref(n)):
-                return None
-            return c.string_at(j.value, n.value).decode()
+            # The settings lock (moy_settings.h): a program's task writes the
+            # kernel's rows too, so a row is copied while the lock holds it.
+            lib.moy_settings_lock()
+            try:
+                if not lib.moy_settings_get(self._p, kb, len(kb), c.byref(j),
+                                            c.byref(n)):
+                    return None
+                t = c.string_at(j.value, n.value)
+            finally:
+                lib.moy_settings_unlock()
+            return t.decode()
 
         def get(self, key, default=None):
             t = self._text(key)
@@ -556,19 +521,42 @@ def binding(sanitize=False):
 
         def keys(self):
             out = []
-            for i in range(lib.moy_settings_count(self._p)):
-                k, kn, j, jn = c.c_void_p(), c.c_size_t(), c.c_void_p(), \
-                    c.c_size_t()
-                lib.moy_settings_at(self._p, i, c.byref(k), c.byref(kn),
-                                    c.byref(j), c.byref(jn))
-                out.append(c.string_at(k.value, kn.value).decode())
-            return out
+            lib.moy_settings_lock()
+            try:
+                for i in range(lib.moy_settings_count(self._p)):
+                    k, kn, j, jn = c.c_void_p(), c.c_size_t(), c.c_void_p(), \
+                        c.c_size_t()
+                    lib.moy_settings_at(self._p, i, c.byref(k), c.byref(kn),
+                                        c.byref(j), c.byref(jn))
+                    out.append(c.string_at(k.value, kn.value))
+            finally:
+                lib.moy_settings_unlock()
+            return [k.decode() for k in out]
+
+        def _sized(self, fn):
+            lib.moy_settings_lock()
+            try:
+                n = fn(self._p, None, 0)
+                buf = c.create_string_buffer(n + 1)
+                fn(self._p, buf, n)
+            finally:
+                lib.moy_settings_unlock()
+            return buf.raw[:n].decode()
 
         def dump(self):
-            n = lib.moy_settings_dump(self._p, None, 0)
-            buf = c.create_string_buffer(n + 1)
-            lib.moy_settings_dump(self._p, buf, n)
-            return buf.raw[:n].decode()
+            return self._sized(lib.moy_settings_dump)
+
+        def load_file(self, text):
+            b = raw(text, "the settings text is a str")
+            rows, passed = c.c_uint32(), c.c_uint32()
+            rc = lib.moy_settings_load_file(self._p, b, len(b), c.byref(rows),
+                                            c.byref(passed))
+            if rc != OK:
+                settings_error(rc)
+            return passed.value
+
+        def file(self):
+            return self._sized(lib.moy_settings_file)
 
     def view(cls, p, **extra):
         # A view of a kernel table: its finaliser frees nothing.
@@ -585,24 +573,22 @@ def binding(sanitize=False):
         k = lib.moy_spine_kernel(mem)
         if not k:
             nomem("kernel tables")
-        apps_p, back_p, returns_p, leases_p, _rows = k.contents
+        apps_p, back_p, returns_p, _rows = k.contents
         lib.moy_apps_clear(apps_p)
         if fresh:
             lib.moy_back_reset(back_p)
             lib.moy_returns_reset(returns_p)
-            lib.moy_leases_reset(leases_p)
         apps = type("AppRegistry", (_View, AppRegistry), {})
         back = type("BackStack", (_View, BackStack), {})
         rets = type("Returns", (_View, Returns), {})
-        leas = type("Leases", (_View, Leases), {})
         a = view(apps, apps_p)
-        return (a, view(back, back_p), view(rets, returns_p, _apps=a), view(leas, leases_p))
+        return (a, view(back, back_p), view(rets, returns_p, _apps=a))
 
     def kernel_settings(save, fresh):
         k = lib.moy_spine_kernel(mem)
         if not k:
             nomem("kernel tables")
-        rows = k.contents[4]
+        rows = k.contents[3]
         if fresh:
             lib.moy_settings_load(rows, b"{}", 2, c.byref(c.c_uint32()))
         o = Settings.__new__(Settings)
@@ -610,7 +596,7 @@ def binding(sanitize=False):
         o._saver()
         return o
 
-    for cls in (Table, AppRegistry, BackStack, Returns, Leases, Settings):
+    for cls in (Table, AppRegistry, BackStack, Returns, Settings):
         m.__dict__[cls.__name__] = cls
     m.kernel = kernel
     m.kernel_settings = kernel_settings

@@ -686,18 +686,21 @@ int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, i
         moy_ui_stop_t *q = &c->cur[c->n_cur - 1];
         q->flags |= c->prev[i].flags & (STOP_PIC | STOP_GEN | STOP_GRID);
         q->gen = c->prev[i].gen;
-        if (mua_audit_on) {
+        if (c->inst->audit_on) {
             q->sig = c->prev[i].sig;
         }
     }
     return st;
 }
 
-uint32_t moy_ui_api_audit(int on) {
-    uint32_t n = mua_audit_fail;
-    mua_audit_fail = 0;
+uint32_t moy_ui_api_audit(moy_ui_inst_t *I, int on) {
+    if (I == NULL) {
+        I = moy_ui_inst_main();
+    }
+    uint32_t n = I->audit_fail;
+    I->audit_fail = 0;
     if (on >= 0) {
-        mua_audit_on = (uint32_t)(on != 0);
+        I->audit_on = (uint32_t)(on != 0);
     }
     return n;
 }

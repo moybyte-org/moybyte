@@ -33,87 +33,52 @@ The hugging ring is the orchestrator's (2026-10-15, under the owner's
 ## The marks: focus, current, primary
 
 Three marks, each with one meaning, in every theme and on both sizes. Focus
-and current are theme properties (`THEMES.md`); the engine draws them, so no
-button kind styles them, and a theme changes its marks by changing two
-fields (owner, 2026-10-15: "make it a property, easy to change later").
+and current are theme properties: a theme DECLARES them per item kind and
+state (`marks`, `docs/theme_and_shell_2026-11.md` §3.3), the engine draws
+them, so no button kind styles them, and the loader holds them legible
+(`docs/media/focus_2026-11/README.md`, the checks).
 
 | mark | means | drawn by | colour |
 |---|---|---|---|
-| **focus** | where the keys act; exactly one per screen, never in a window behind | `focus.style` per size class | `accent` |
-| **current** | the chosen tab, row, Places entry, file, tool, window chip | `current.style` | `value` |
+| **focus** | where the keys act; exactly one per screen, never in a window behind | `marks.<kind>.focus` | `accent` |
+| **current** (selected, on) | the chosen tab, row, Places entry, file, tool, window chip | `marks.<kind>.on` | `value` |
 | **primary** | Play, Run, "=" | the `primary` kind; on a bar, a bare glyph in `value` | `value` |
 
 **One accent.** `value` is `accent` unless a theme sets its own: Moy sets
-only `accent`, so its focus, current plates and primary fills are one
+only `accent`, so its focus, current tints and primary fills are one
 colour, the Accent setting's (owner, 2026-10-15). Blocks and Contrast keep
 a `value` of their own, and picking an accent sets both roles. Contrast
 offers no accent picks (`accents`, owner 2026-10-19): its one yellow focus
 is the promise it keeps.
 
-**Focus** is `focus = {style, card, small, color, ink, ring, plate, lift,
-edge, underline}`. The engine picks the style by the part's size class: a
-`card` (a carousel card, a desk tile: 48 px and up), a `small` part (under
-28 px: bar icons, title buttons, tool cells) or any other part (rows,
-buttons, fields), which takes `style`; `card` and `small` absent mean
-`style`. The six styles:
+**The item kinds** are a `row` (value rows, list, table and menu rows, a
+field's row), a `cell` (buttons, chips, tabs, segments, tools, swatches)
+and a `card` (a grid's cards, the home's tiles). Each declares a mark for
+`focus`, `on` and `both` from one vocabulary -- `fill`, `tint`, `bar`,
+`ring`, `inset`, `outline`, `underline`, `none` -- with an optional
+keyline. Focus and current on one part stack, and the shapes tell them
+apart, not the colours: in Moy they are one colour. Two rules hold in every
+theme (2026-10-21, GAPS 38 and 41): a mark that would land on a fill it does
+not hold 3:1 against (Moy's primary button, its `value` its `accent`)
+becomes a 2 px ring 2 px clear; and a grid of colour swatches takes the
+canvas cursor's ring for focus.
 
-| style | draws | parameters |
+| theme | row: focus / on | cell and card: focus / on |
 |---|---|---|
-| `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`; `outline` |
-| `plate` | the part tinted in `accent` | `plate.alpha` (light, dark) |
-| `lift` | the part grown and raised over a neutral offset shadow, with a 1 px rim; on a card, its chrome grown and its picture raised at its own clean side, on the card's plate (owner call 2026-10-17: never a non-clean scale) | `lift.grow`, `lift.rise`, `lift.rim` (a colour or role, and its alpha) |
-| `edge` | a bar the full height of a row on its leading edge, over a light `accent` plate across the part; under a part not three times wider than tall | `edge.w`, `plate.alpha` |
-| `underline` | a bar under the glyph, inside the part's box | `underline.w` |
-| `invert` | the part filled in `accent`, its ink flipped | — |
-
-`ink` (`keep` or `accent`) is what a focused glyph or label does; `invert`
-always flips it. `outline` (a width and a colour) rings a ring from outside
-and an inverted part from inside, for an accent that alone would not hold
-3:1 on its ground. Every style but `lift` on a card is drawn after the part's
-fill and before its content. Two rules hold in every theme (2026-10-21,
-GAPS 38 and 41): a mark that would land on a fill it does not hold 3:1
-against (Moy's primary button, its `value` its `accent`) becomes a 2 px
-`accent` ring at a 2 px gap of `surface`; and a grid of colour swatches
-takes the canvas cursor's ring for focus, never the small-part mark.
-
-**Current** is `current = {style, color, alpha, row, ink}`: a `plate`
-(`color`, by default `value`, at `alpha` for light and dark, 0.6 of it in a
-window behind; a solid plate, alpha 1, is its outline behind), a `fill`
-(`sel` and `sel_ink`, `sel_back` behind) or a `bar` (the 3 px `value` bar
-under a tab or beside a row). `row` says how a row wears it: the style's
-own, the row's outline, or an underline under its label. On an inverted
-part a current bar takes the flipped ink. Focus and current on one part
-stack, and the shapes tell them apart, not the colours: in Moy they are
-one colour.
-
-**Blocks' rule** (owner, 2026-10-19): a ring is the chosen value in a set
-of swatches, an underline is the current label (a tab, a tool, a theme
-card's name, a Places entry, a file), and a fill is focus.
-
-| theme | focus: card / part / small | current |
-|---|---|---|
-| Moy Day | `lift`, an `accent` rim at 0.6 / `edge` 4 px on a 0.12 plate / `underline` 3 px | `plate`, `value` at 0.14 |
-| Moy Night | `lift`, an `accent` rim at 0.6 / `edge` 4 px on a 0.14 plate / `underline` 3 px | `plate`, `value` at 0.24 |
-| Blocks | `ring` 3 px / `invert` / `invert` | `bar`, a row's label underlined |
-| Contrast | `ring` 3 px, gap 2 / `invert` / `invert`; the light mode's 2 px black `outline` | `plate`, solid `value` (the ink) with `value_ink` text |
-| Luna | `ring` 3 px, gap 0 / `invert` / `invert` | `fill` (XP's blue) |
-| Coast | `ring` 3.5 px at 0.6 / `invert` / `ring` | `fill` (macOS's selection) |
-| Pico | `invert` / `invert` / `invert` | `bar` |
-| Bench | `invert` / `invert` / `invert` | `fill` (Workbench's complement) |
-| Adw | `ring` 2 px at 0.5, gap 0 / `plate` / `ring` | `fill` |
+| Moy Day | `bar` 4 px / `tint` of `value` at 0.18 | `ring` 2 px, gap 2 / `tint` at 0.18 |
+| Moy Night | `bar` 4 px / `tint` of `value` at 0.24 | `ring` 2 px, gap 2 / `tint` at 0.24 |
+| Blocks | `bar` 4 px / `fill` of `selection`; both: a white bar | `ring` 3 px / `underline` 3 px of `value` |
+| Contrast | `fill` of yellow, Day's with a 2 px black keyline / `inset` 3 px frame | `ring` 3 px, gap 2 / `fill` of `value`, `value_ink` text |
 
 **Visibility.** WCAG 2.2's Focus Appearance (2.4.13) asks for a change of
-3:1 over at least a 2 px perimeter's area. Moy's edge bar, underline and
-lift are quieter marks than a ring, found at a glance by their shape and
-colour (`accent` against the surface is 7.2:1 in Day and 8.2:1 in Night,
-`focus_marks.png`); the lift's rim carries it over a dark wallpaper, its
-shadow over a light ground. `invert` passes on every part: Contrast, the
-accessible choice, keeps it, with a ring on cards, and in light mode a
-black outline round both, as its yellow alone is 1.3:1 on white.
+3:1 over at least a 2 px perimeter's area; the loader's L1 holds a focus
+mark to it, by its colour or by a keyline (Contrast Day's yellow is 1.3:1
+on white). Moy's bar is a quieter mark than a ring, found at a glance by
+its shape and colour (`accent` against the surface is 7.2:1 in Day and 8.2:1
+in Night, `focus_marks.png`).
 
 **The Moy button is not in the focus order;** Super reaches it. Open, it
-shows the current mark as a plate (`sel`, or `value` mixed into its tile),
-never a focus mark.
+shows the current mark (the cell's `on`), never a focus mark.
 
 ## Colour
 
@@ -135,17 +100,16 @@ primary), a **value** (current and primary; `accent` where unset) with its
 
 **Contrast:** text 12:1, `dim` 5.1:1, every mark 6.3:1 or better
 (`draw.py` prints every pair); syntax colours are theme roles at 4.5:1.
-Bright colour lives in content. Contrast's light focus has a black outline.
+Bright colour lives in content. Contrast's light focus has a black keyline.
 **The structure ramp** (owner, 2026-10-19): a text field's outline holds
 3:1 or better on its ground (`field.border`), and the rest of the
 structure -- hairlines, an Off toggle's track, a slider's rest, a key's
 plate and its border, a hint's keycap -- about 1.5:1, a part on a focused
-row's plate held to it there too; an empty field shows its placeholder in
+row's fill held to it there too; an empty field shows its placeholder in
 the `disabled` ink. Contrast's hierarchy is weight and size, not a dimmer
 ink: its `dim` is its `text`. A toggle's knob is one colour in a mode (white,
 the ink in a dark one), the state on the track.
-`accent` against the current plate is 3:1 or better wherever a theme's
-current is a `plate` (Day 5.9, Night 5.2).
+A focus mark drawn over a selected tint or fill holds 3:1 against it (L4).
 
 ## Type
 
@@ -287,8 +251,8 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
   transparency is a grey checker (#6e6e78 / #9a9aa4); the cursor is the
   theme's ring around a black keyline. Playtest is its own window at an
   integer scale.
-- **Motion:** the carousel slides in 6 frames, focus in 3 (a lift grows
-  over them), with no colour tweens.
+- **Motion:** the carousel slides in 6 frames, focus in 3, with no colour
+  tweens.
 
 ## The themes
 

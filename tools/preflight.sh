@@ -7,6 +7,16 @@
 #   tools/preflight.sh --full   # the host job even when only docs changed
 #   tools/preflight.sh --firmware     # ...plus every board's image, built here
 #   tools/preflight.sh --no-firmware  # ...without them even where the change reaches them
+#   tools/preflight.sh --native # the host suite on this machine's OS, not CI's
+#
+# The host suite -- the desktop MicroPython it drives, the main suite and the
+# redraw suite -- runs in CI's OS: an ubuntu 26.04 container with Python 3.11
+# (tools/ci_image/run.sh, which says how). This machine's older glibc and
+# OpenSSH passed what the runner's failed: C23's const-preserving bsearch and
+# strchr (9546bd7bd) and the current ssh-copy-id (2f6278bb7). With no Docker
+# the default FAILS rather than falling back; `--native` is the quick run on
+# this OS, chosen. Everything else -- the browser builds and suites, the docs
+# check, the toolchain fetches, the tour, the board images -- runs here.
 #
 # The browser suites run on their own when the change touches what CI's
 # web-e2e.yml path filter covers (`web_touched`, below, mirrors that list);
@@ -63,6 +73,7 @@ NOWEB=0
 FULL=0
 FIRMWARE=0
 NOFIRMWARE=0
+NATIVE=0
 for arg in "$@"; do
   case "${arg}" in
     --web) WEB=1 ;;
@@ -70,6 +81,7 @@ for arg in "$@"; do
     --full) FULL=1 ;;
     --firmware) FIRMWARE=1 ;;
     --no-firmware) NOFIRMWARE=1 ;;
+    --native) NATIVE=1 ;;
   esac
 done
 TOUR_DIR="$(mktemp -d)"
@@ -124,7 +136,14 @@ lane_times() {                # lane_times STATUS: the table, then the shared lo
   TOTAL_DUR="$(dur "${total}")"
 }
 
-PYTEST=(env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
+# The host suite's prefix: CI's OS, or this one under --native. The container
+# mounts its own venv at the same path, so "${PY}" names the right one in both.
+IN=()
+if [ "${NATIVE}" = "0" ]; then
+  tools/ci_image/run.sh --check || exit 2
+  IN=(tools/ci_image/run.sh)
+fi
+PYTEST=("${IN[@]}" env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
 
 changed() {                     # every path changed against origin/dev (or $PREFLIGHT_BASE)
   { git diff --name-only "${PREFLIGHT_BASE:-origin/dev}"...HEAD 2>/dev/null
@@ -151,13 +170,41 @@ web_touched() {
     case "${f}" in
       firmware/web_runner/*|runtime/*|device/*|system_carts/*|native/*|ports/jet/*) return 0 ;;
       tests/test_web_*|tests/web_e2e.py|tests/cart_store_fixtures.py) return 0 ;;
-      tests/fixtures/*|tests/tier_frame.py) return 0 ;;
+      tests/fixtures/*|tests/test_moy_tty.py|tests/tier_frame.py|tests/crypto_vectors.py) return 0 ;;
       tools/jet_cart.py|tools/zopfli_gz.py|tools/wasm_cart.py) return 0 ;;
       tools/p8_import.py|tools/p8_lua_port.py|tools/p8_writer.py) return 0 ;;
       .github/workflows/web-e2e.yml) return 0 ;;
     esac
   done <<< "$(changed)"
   return 1
+}
+
+# The browser suites CI drives: the test files web-e2e.yml's drive step names,
+# read from it, so this lane cannot run fewer than CI does
+# (tests/test_preflight_web_filter.py).
+web_suites() {
+  sed -n '/- name: Drive the hosted console in real Chrome/,/- name:/p' \
+    .github/workflows/web-e2e.yml | grep -o 'tests/[A-Za-z0-9_]*\.py'
+}
+
+# Those suites as CI runs them: a missing prerequisite fails rather than skips
+# (MOYBYTE_REQUIRE_WEB_E2E), and a run that skipped anything fails as CI's
+# "A skipped browser suite proves nothing" step does.
+browser_suites() {
+  local xml="${TOUR_DIR}/web-e2e.xml" suites
+  mapfile -t suites < <(web_suites)
+  [ "${#suites[@]}" -gt 0 ] || { echo "no suites in web-e2e.yml's drive step"; return 1; }
+  env MOYBYTE_WEB_E2E=1 MOYBYTE_REQUIRE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
+    --junitxml="${xml}" "${suites[@]}" || return 1
+  "${PY}" - "${xml}" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+tests = sum(int(s.get("tests", 0)) for s in suites)
+skipped = sum(int(s.get("skipped", 0)) for s in suites)
+if skipped or not tests:
+    sys.exit("the browser suites did not run: %d collected, %d skipped" % (tests, skipped))
+PY
 }
 
 # Whether the change touches what firmware-build.yml's `paths:` covers: keep
@@ -191,6 +238,8 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && [ "${FIRMWARE}" = "0" ] && docs_
   done <<< "$(changed)"
   mapfile -t named < <(printf '%s\n' tests/test_look_shots.py tests/test_editor_look.py "${named[@]}" | sort -u)
   step "docs agree with the tree"  "${PY}" tools/check_docs.py
+  [ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
+  step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropython
   step "tests that name a changed document" \
     "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
   if [ "${fails}" -ne 0 ]; then
@@ -215,31 +264,27 @@ fi
 # Not cached-and-skipped: a stale binary is the failure this is here to catch,
 # and a warm build is under a minute.
 step "browser console builds"                       firmware/web_runner/build.sh
-step "desktop MicroPython with the native usermods" make unix-micropython
+[ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
+step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
 # CI's cached step: the toolchain the showcase cart's goldens build with,
 # fetched by its pinned sha256 when absent (a no-op when it is here).
-step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --toolchain
+step "wasi-sdk for the compiled showcase cart and the WASI commands" "${PY}" tools/jet_cart.py --toolchain
 # CI's cached step too: the pinned wamrc the AOT checks compile with, fetched
 # and hash-checked when absent.
 step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
 step "suite (redraw excluded)" \
   "${PYTEST[@]}" -p xdist -n auto -q --ignore=tests/test_redraw_on_change.py
-step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py
+step "redraw suite, alone"     "${IN[@]}" "${PY}" -m pytest -q tests/test_redraw_on_change.py
 step "headless tour (fresh save dir)" \
   "${PY}" tools/simulate_desktop.py --demo --strict \
     --gif "${TOUR_DIR}/demo.gif" --save-dir "${TOUR_DIR}/projects"
 
 if [ "${WEB}" = "1" ]; then
   # Path-filtered in CI (`web_touched` above). The suites drive the `dist/`
-  # built at the top.
-  step "browser suites in real Chrome" \
-    env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
-      tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-      tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
-      tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
-      tests/test_web_fonts.py tests/test_web_look_parity.py \
-      tests/test_editor_ladder_icons.py
+  # built at the top and the site's `dist_site/`, built here as CI builds it.
+  step "the site's browser console builds"       firmware/web_runner/build.sh --site
+  step "browser suites in real Chrome, none skipped" browser_suites
 fi
 
 if [ "${FIRMWARE}" = "0" ] && [ "${NOFIRMWARE}" = "0" ] && firmware_touched; then

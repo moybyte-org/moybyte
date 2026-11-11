@@ -1,37 +1,36 @@
-// moy_recovery: the kernel's own screens (docs/history/look_2026-10.md step 33,
-// GAPS 55).
+// moy_recovery: what the kernel says when the console cannot come up, and its
+// own screen while no VM runs and the web console serves.
 //
 // THE FLOOR comes up when the VM fails to start (its first heap area is not
-// there, or the console's boot ends before boot_ok) or the boot-loop guard
-// trips (moy_crash.h), and only on a boot no VM ran in (moy_kernel.c). It
-// offers Try again (RETRY: the VM as usual), Safe start (SAFE: system.json
-// neither read nor written, the defaults, a fill for the wallpaper) and
-// Developer console (REPL: main.py skipped); the serial words and the `sel=`
-// names stay RETRY, SAFE and REPL whatever the rows say. The minimum on every
-// console is the panel brought up, presented and lit from C, one font, and
-// serial: while the VM is down the kernel drains the console's RX ring, reads
-// `retry`, `safe` and `repl`, answers `state` with "screen": "recovery", and
-// prints `KERNEL recovery reason=<r> sel=<choice> crc=<framebuffer crc32>`
-// with the lines it drew every five seconds, which is how the gate drives a
-// board with no input on the floor. A one-button board moves the highlight on
-// a press and picks on a one-second hold; a board with no input on the floor
-// (the Guition P4, whose touch needs a firmware upload) picks SAFE, never
-// RETRY, after 30 s.
+// there, or the console's boot ends before boot_ok), the boot-loop guard
+// trips or the console crashed its crash count's limit of boots in a row
+// (moy_crash.h), and only on a boot no VM ran in (moy_kernel.c). Its screen
+// is the recovery console (native/moy_sh/moy_sh_floor.h): the Terminal's face
+// under the lines moy_recovery_view makes here and the choices Try again
+// (RETRY: the VM as usual), Safe start (SAFE: system/settings neither read
+// nor written, the defaults, a fill for the wallpaper) and Reboot (a restart
+// with the counts started over); `repl` (REPL: main.py skipped) is a typed
+// word only. Serial drives every floor, the headless one included: while the
+// VM is down the kernel drains the console's RX ring and reads `retry`,
+// `safe`, `reboot` and `repl`, runs `sh LINE` in the C shell (the card is
+// brought up from C as the floor starts, moy_store_card_up), answers `state`
+// with "screen": "recovery", takes `type TEXT`, `key N` and `tap X Y` into the
+// screen's input and answers `screen` with what the face shows, and prints
+// `KERNEL recovery reason=<r> sel=<choice> crc=<the screen's crc32>` with its
+// lines, its input, its buttons' boxes and its hint every five seconds, which
+// is how tools/kernel_gate.py drives a board. `sel` is the choice the floor
+// takes on its own: SAFE where no input came up and the board names an idle
+// time (MOY_KERNEL_IDLE_SAFE_MS: the headless Zero, a Guition P4 whose touch
+// failed its upload), after that long with nothing typed; RETRY elsewhere,
+// where it takes none. `sel=` names stay RETRY, SAFE and REPL.
 //
-// What the kernel draws when the console cannot come up -- the recovery
-// floor -- and while no VM runs and the web console serves: in the 2026-10
-// look, through moy_scr (native/moy_gfx/moy_scr.h) and the outline faces
-// compiled into C, straight into a panel module's framebuffer 0. No canvas
-// state, no compositor, no PPA, no allocation: a turned panel draws through
-// the band the caller lends, and the faces through its scratch. Portable C:
-// the host builds it for tests/test_moy_kernel.py, which renders every
-// console's geometry and pins the hashes the boards print.
-//
-// Recovery is in Moy Night whatever the stored theme (the store may be what
-// failed): Moy, "Moybyte didn't start" and why, the three choices as rows
-// of a card, what the kernel knows in the code face, and the keys at the
-// foot. The web-console screen is the shell's page without its QR, on the
-// ground the boot splash draws on.
+// The web-console screen is drawn here in the 2026-10 look, through moy_scr
+// (native/moy_gfx/moy_scr.h) and the outline faces compiled into C, straight
+// into a panel module's framebuffer 0: the shell's page without its QR, on the
+// ground the boot splash draws on. No canvas state, no compositor, no PPA, no
+// allocation: a turned panel draws through the band the caller lends, and the
+// faces through its scratch. Portable C: the host builds it for
+// tests/test_moy_kernel.py, which renders every console's geometry.
 //
 // The screen is LOGICAL landscape (w x h); `rot` turns it onto the panel's
 // framebuffer counter-clockwise, the PPA's convention (device/dsi_panel.py's
@@ -63,7 +62,7 @@ typedef struct {
     int fb_w, fb_h;                  // the framebuffer, panel-native
     int rot;                         // 0, 90, 180 or 270
     int swap;                        // the framebuffer holds RGB565 high byte first
-    int touch;                       // a finger picks a row: rows at the tap floor
+    int touch;                       // a touch-only board: the handheld screen's touch sizes
     uint16_t *band;                  // a turned panel's band, w * band_rows pixels
     int band_rows;
     void *scratch;                   // lent to the outline faces (moy_path_lend)
@@ -78,7 +77,6 @@ typedef struct {
     char line[MOY_RV_LINES][MOY_RV_COLS];
     int nlines;
     char hint[MOY_RV_COLS];
-    int sel;                         // the highlighted choice, 0..2
 } moy_rview_t;
 
 // The geometry, with no band and no scratch.
@@ -89,19 +87,14 @@ void moy_rgeom_init(moy_rgeom_t *g, int w, int h, int rot, int swap);
 void moy_recovery_view(moy_rview_t *v, int why, const moy_crash_rec_t *rec,
                        const char *label, const char *hint, int serial);
 
-// The draws that failed (0: none).
-int moy_recovery_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *v);
-
-// What the plain web-console screen says, from the web console's paired URL
-// ("http://a.b.c.d[:port]/?pin=..."): the sentence, the address and the pin;
-// with no address, that the console is restarting.
+// What the plain web-console screen says, from the web console's URL
+// ("http://a.b.c.d[:port]/"): the sentence and the address; with no address,
+// that the console is restarting. It has no QR, so it mints no pairing token:
+// a paired browser signs in, a new one pairs by the console's password.
 void moy_web_screen_view(moy_rview_t *v, const char *url);
 // The screen on `pal`'s ground (moy_scr.h's splash palette; NULL: Moy Day).
 int moy_web_screen_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t *v,
                           const uint16_t *pal);
-
-// The choice under a logical point, or -1.
-int moy_recovery_hit(const moy_rgeom_t *g, int x, int y);
 
 // The serial protocol's name for a choice: RETRY, SAFE or REPL
 // (tools/kernel_gate.py parses it), whatever the screen says.

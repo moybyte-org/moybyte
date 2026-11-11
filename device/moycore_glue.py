@@ -4,8 +4,10 @@
 #   -- the compiled cart  aot_path, wasm_head, missing_imports, CartFrame, WasmRun
 #   aot_path              where a cart's compiled module for a chip lives
 #   missing_imports       what a module imports that this console's table lacks
+#   wasm_exports          the names a module exports
 #   CartFrame             a compiled cart's frame on its way to the glass
 #   WasmRun               one compiled cart run
+#   LuaRuntime            ws.runtimes["lua"]
 #   make_moycore_runtime  the Lua runtime factory
 #   WasmRuntime           ws.runtimes["wasm"]
 #   make_wasm_runtime     the compiled-cart runtime, or None
@@ -62,16 +64,18 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
-                         install_handles, put_scenes, layer_restore, layer_restore_end,
-                         snap_slots, audio_ops, snap_shared, sync_view,
-                         drain_audio, cfg_blob)
+                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
+                         install_handles, end_handles, put_scenes, layer_restore,
+                         layer_restore_end,
+                         snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
+                         drain_audio, cfg_blob, wants_layout)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
-                                 install_handles, put_scenes, layer_restore,
-                                 layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, sync_view, drain_audio, cfg_blob)
+                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
+                                 install_handles, end_handles, put_scenes,
+                                 layer_restore, layer_restore_end, snap_slots, audio_ops,
+                                 snap_shared, run_room, run_face, sync_view, drain_audio, cfg_blob,
+                                 wants_layout)
 
 try:
     from moy_input import pointer_state
@@ -111,6 +115,11 @@ try:
     from ticks import _since_ms
 except ImportError:                      # host tests importing the device module
     from runtime.ticks import _since_ms
+
+try:
+    from app_perms import run_admits_unsigned
+except ImportError:                      # host tests importing the device module
+    from runtime.app_perms import run_admits_unsigned
 
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
@@ -152,6 +161,25 @@ def _p8_buffers():
     return _P8_BUFFERS
 
 
+_P8_HOLDER = [None]     # the run the reserved pair is lent to
+
+
+def _p8_for(run):
+    """The machine's buffers for `run`: the reserved pair while no open run
+    holds it, else a pair of its own (two p8 runs at once must not share a
+    machine), or [] when the heap cannot give one."""
+    held = _P8_HOLDER[0]
+    if held is None or not held._h:
+        bufs = _p8_buffers()
+        if bufs:
+            _P8_HOLDER[0] = run
+        return bufs
+    try:
+        return [bytearray(65536), bytearray(0x4300)]
+    except MemoryError:
+        return []
+
+
 def reserve_p8_memory():
     """Take the PICO-8 machine's buffers NOW, while the heap is still whole.
 
@@ -185,14 +213,16 @@ class MoycoreRun:
     # size rather than merely big.
     AUDIO_MAX = 32
 
+    _h = 0             # the run's row (run_begin's handle), 0 once closed
+
     def __init__(self, ws, ns, src):
         if _moycore is None:
             raise RuntimeError("moycore is not in this build")
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
-        canvas = ws.canvas
-        project = getattr(ws, "project", None)
+        canvas = ws.run.canvas
+        project = ws.run.project
         sheet = getattr(project, "sheet", None) if project is not None else None
         # the run's own map (`ProjectStore.play_world`); a harness's bare
         # project carries only `tilemap`
@@ -256,18 +286,19 @@ class MoycoreRun:
         # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
         # once; moycore reseeds it per run.
         if hasattr(_moycore, "p8_memory"):
-            bufs = _p8_buffers()
+            bufs = _p8_for(self)
             if bufs:
                 _moycore.p8_memory(*bufs)
             else:
                 _moycore.p8_memory(None, None)      # no machine this run
 
-        _moycore.run_begin(
+        self._h = _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags, True)
+            self.snap, self.aq, self.pmem_img, cfg, flags, True,
+            ns.get("_moy_app") if hasattr(ns, "get") else None)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -275,20 +306,22 @@ class MoycoreRun:
         try:
             for name in ns:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
-                        and name not in NATIVE_NAMES and callable(ns[name])):
+                        and name not in NATIVE_NAMES and name not in ROLE_NAMES
+                        and callable(ns[name])):
                     _moycore.register(name, ns[name])
             # The object-valued verbs are the prelude's Lua over the run's C:
             # the layers, paint images and scenes are the run's own
             # (moycore_lua.c, moycore_scene.h), their texts handed over once,
             # here, so nothing of them crosses after. Only the editor handle
-            # stays a Python registry (lua_ext.install_handles).
+            # stays a Python registry, beside the app names that read the
+            # Python face's tables (lua_ext.install_handles).
             imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
             for name in (imgs or ()):
                 blob = imgs[name]
                 if isinstance(blob, (str, bytes)):
                     _moycore.image_put(name, blob)
             put_scenes(ns, _moycore.scene_put)
-            self._pins = install_handles(ns, _moycore.register)
+            self._pins = install_handles(ns, _moycore.register, self.exec)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
@@ -311,9 +344,11 @@ class MoycoreRun:
         # -- what player_fit._lua_cart_line parses for the crash-to-code panel
         # (#24) -- and load() is where the verb profiler arms, ahead of the
         # first chunk rather than after a shim that already captured its verbs.
-        err = _moycore.load(cart_chunks(ns, src))
+        lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+        err = _moycore.load(cart_chunks(ns, src), lay)
         if err:
             try:
+                end_handles(self._pins)
                 _moycore.close()
                 layer_restore_end(canvas, self)
             finally:
@@ -322,9 +357,11 @@ class MoycoreRun:
         self.snap[_moycore.SNAP_PLAYERS] = 1   # refreshed every frame by _refresh
         self._view = None
         self._sync_view()          # a view declared in _init must land now
-        # init already ran inside run_begin (libmoy's moy_lua_init), so the
-        # Player's `lua.init()` step has nothing left to do.
+        # init already ran inside load (libmoy's moy_lua_init), after
+        # `_layout` where the Player gave its arguments, so the Player's
+        # `lua.init()` step has nothing left to do.
         self.init = None
+        self.layout = self._relayout if lay is not None else None
         self.update = self._update
         # Present but empty: tick() already drew. A None draw would change the
         # shape every other runtime presents, which the Player and its tests
@@ -378,8 +415,10 @@ class MoycoreRun:
             held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
-                    getattr(self.ws, "windowed_chrome", False))
+        snap_shared(s, inp, self.ws.run.cart_start_ms, self._I_SNAP, pointer_state,
+                    self._touch_out, _since_ms,
+                    run_face(self.ws),
+                    run_room(self.ws.run))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
@@ -397,9 +436,18 @@ class MoycoreRun:
     def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
-        drain_audio(getattr(self.ws, "audio", None), self._aq_ops,
+        drain_audio(self.ws.run.audio, self._aq_ops,
                     ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
                      for i in range(n)))
+
+    def _relayout(self, w, h, fs):
+        """A responsive app's surface changed: its `_layout(w, h, fs)`, a Lua
+        cart's global or a compiled cart's export, where it defines one
+        (docs/app_api_v1.md §3)."""
+        _moycore.use(self._h)
+        err = _moycore.layout(w, h, fs)
+        if isinstance(err, str):
+            raise RuntimeError(err)
 
     def _draw_noop(self):
         return None
@@ -437,10 +485,11 @@ class MoycoreRun:
         """The whole cart frame. `draw` is None because this already drew: the
         C loop runs _update and _draw back to back, which is the point."""
         self._refresh()
+        _moycore.use(self._h)
         # A tier that swaps framebuffers per frame (the P4's ping-pong, the
         # T-Deck's bounce) must re-point the canvas, exactly as
         # DeviceCanvas.sync_back does for the Python lanes.
-        buf = self.ws.canvas._buf
+        buf = self.ws.run.canvas._buf
         if buf is not self._last_buf():
             _moycore.retarget(buf)
             self._buf = buf
@@ -470,7 +519,7 @@ class MoycoreRun:
         """An Editor flag edit into the run's own table
         (`ProjectStore.flag_edits`); a module built without it drops it."""
         fx = getattr(_moycore, "flag_xor", None)
-        if fx is not None:
+        if fx is not None and _moycore.use(self._h):
             fx(n, mask)
 
     def _last_buf(self):
@@ -494,7 +543,7 @@ class MoycoreRun:
             return None
         self._run = run
         try:
-            au = getattr(self.ws, "audio", None)
+            au = self.ws.run.audio
             _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0), tick)
             _moy_play.open(run)
         except (RuntimeError, TypeError) as exc:
@@ -511,7 +560,8 @@ class MoycoreRun:
         composites from."""
         ws = self.ws
         inp = ws.input
-        buf = ws.canvas._buf
+        buf = ws.run.canvas._buf
+        _moycore.use(self._h)
         if buf is not self._buf:
             _moycore.retarget(buf)
             self._buf = buf
@@ -522,19 +572,29 @@ class MoycoreRun:
         except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
             x = y = st = 0
         bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
-                               getattr(ws, "windowed_chrome", False))
+                               run_face(ws),
+                               run_room(ws.run))
         if bits:
             if bits & _moy_play.QUIT:
                 inp.cart_quit = True
             if bits & _moy_play.VIEW:
                 self._sync_view()
 
+    def mute(self, on):
+        """A run held aside (runtime/shell/procs.py) reads no input while
+        `on`: its frames' snapshot has no buttons, key or pointer."""
+        if self._run and _moy_play is not None:
+            try:
+                _moy_play.mute(self._run, on)
+            except (RuntimeError, AttributeError):
+                pass
+
     # -- exit ---------------------------------------------------------------
 
     def flush_pmem(self):
         """Write the C-side pmem image back into the console's Pmem, if it
         moved. Called at the same boundaries the deferred save already uses."""
-        if _moycore is None or not _moycore.active():
+        if _moycore is None or not _moycore.use(self._h) or not _moycore.active():
             return False
         if not _moycore.pmem_image(self.pmem_img):
             return False
@@ -555,16 +615,26 @@ class MoycoreRun:
 
     def get_global(self, name):
         """A cart global as a number or a string, or None."""
-        return _moycore.get_global(name) if _moycore is not None else None
+        if _moycore is None or not _moycore.use(self._h):
+            return None
+        return _moycore.get_global(name)
 
     def get_global_len(self, name):
         """The length of a table global, or None (a module that cannot say)."""
         f = getattr(_moycore, "get_global_len", None)
-        return f(name) if f is not None else None
+        return f(name) if f is not None and _moycore.use(self._h) else None
 
     def exec(self, src, name="probe"):
         """Run a chunk in the cart's state: None, or the error text."""
+        if not _moycore.use(self._h):
+            return "the run has closed"
         return _moycore.exec(src, name)
+
+    def heap(self):
+        """The run's Lua heap in bytes, Lua's own count, or None: a run with
+        no VM, or one that has closed."""
+        f = getattr(_moycore, "heap", None)
+        return f(self._h) if f is not None and self._h else None
 
     def close(self):
         # The hooks go with the state: the Player and its tests read
@@ -575,11 +645,14 @@ class MoycoreRun:
             self.flush_pmem()
         finally:
             # Drop the handle registries: they are what PIN the run's layers
-            # and images, and a layer is a full-canvas allocation.
+            # and images, and a layer is a full-canvas allocation; its wakes
+            # end with it.
+            end_handles(self._pins)
             self._pins = None
-            if _moycore is not None:
+            if _moycore is not None and _moycore.use(self._h):
                 _moycore.close()
-            layer_restore_end(self.ws.canvas, self)
+            self._h = 0
+            layer_restore_end(self.ws.run.canvas, self)
             # After the runtime's close: the run's end returns whatever of its
             # loans the close left (native/moy_play).
             if self._run:
@@ -592,8 +665,8 @@ class MoycoreRun:
 # The only two AOT refusals that are TAMPER EVIDENCE -- a module whose
 # signature bytes are present but do not verify -- and so stay a hard
 # refusal to the ordinary error panel. Every other reason an AOT open can
-# fail (no file by this console's name, unsigned while Unknown sources is
-# off, a corrupted key) means only that THIS console's copy of the module is
+# fail (no file by this console's name, unsigned without the cart's consent
+# to `full_access`, a corrupted key) means only that THIS console's copy of the module is
 # unusable, not that the cart is; WasmRun retries those on the interpreter
 # instead ("A cart survives its firmware", 2026-09-30).
 _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature")
@@ -732,6 +805,63 @@ def missing_imports(head, table):
     except (IndexError, ValueError):
         pass
     return out
+
+
+# The sections that follow the export section (7) in a module's order:
+# start, element, data count, code and data.
+_PAST_EXPORTS = (8, 9, 10, 11, 12)
+
+
+def wasm_exports(path):
+    """The names the module at `path` exports, read from its export
+    section and nothing after it (the code is never read). [] for a file
+    that is no module or does not parse."""
+    out = []
+    with open(path, "rb") as f:
+        if f.read(8)[:4] != b"\0asm":
+            return out
+        try:
+            while True:
+                sid = f.read(1)
+                if not sid or sid[0] in _PAST_EXPORTS:
+                    return out
+                n = shift = 0
+                while True:
+                    b = f.read(1)
+                    if not b:
+                        return out
+                    n |= (b[0] & 0x7F) << shift
+                    shift += 7
+                    if not b[0] & 0x80:
+                        break
+                if sid[0] != 7:
+                    f.seek(n, 1)
+                    continue
+                body = f.read(n)
+                count, i = _uleb(body, 0)
+                for _ in range(count):
+                    k, i = _uleb(body, i)
+                    out.append(body[i:i + k].decode("utf-8"))
+                    _, i = _uleb(body, i + k + 1)
+                return out
+        except (IndexError, ValueError):
+            return out
+
+
+def wasm_wants_layout(cart, gate=None):
+    """True when the compiled cart's main.wasm exports `_layout` -- a
+    compiled or WASI app's responsive opt-in, Python's
+    `system_api.wants_layout` for its tier, answered before the canvas is
+    chosen. `gate` runs the read under the board's bus gate."""
+    path = cart.get("path")
+    if not path:
+        return False
+    p = path + "/" + cart.get("main", "main.wasm")
+    try:
+        names = gate(lambda: wasm_exports(p)) if gate is not None else wasm_exports(p)
+    except OSError:
+        return False
+    return "_layout" in names
 
 
 def _sha256_file(path):
@@ -915,7 +1045,7 @@ class WasmRun(MoycoreRun):
         if (_moycore is None or not getattr(_moycore, "WASM", 0)
                 or _moy_wasm is None):
             raise RuntimeError("moycore has no wasm engine in this build")
-        project = getattr(ws, "project", None)
+        project = ws.run.project
         cart = getattr(project, "cart", None) or ws.cart or {}
         path = cart["path"]
         main = cart.get("main", "main.wasm")
@@ -960,7 +1090,7 @@ class WasmRun(MoycoreRun):
         self.ws = ws
         self.ns = ns
         self._dt = 0.0
-        canvas = ws.canvas
+        canvas = ws.run.canvas
         sheet = getattr(project, "sheet", None) if project is not None else None
         # the run's own map (`ProjectStore.play_world`); a harness's bare
         # project carries only `tilemap`
@@ -994,40 +1124,50 @@ class WasmRun(MoycoreRun):
         swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
         cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
         self._pins = None
-        _moycore.run_begin(
+        self._h = _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, flags, False)
+            self.snap, self.aq, self.pmem_img, cfg, flags, False, None)
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
         # moycore's C over the kernel's volume, inside the board's bus gate
-        # (native/moy_store/moy_files.h). The owner's Unknown sources
-        # setting, as it stands at this load, decides whether an AOT module
-        # with no signature may load; the engine checks everything else
-        # either way. The engine raises MemoryError when it cannot hold the
-        # module file, and a run left open here would refuse every later
-        # cart's run_begin.
-        unknown_sources = bool(getattr(ws, "unknown_sources", False))
+        # (native/moy_store/moy_files.h). The cart's consent, as it stands at
+        # this load, decides whether an AOT module with no signature may load
+        # (app_perms.run_admits_unsigned, the engine's moy_ota_admit_module);
+        # the engine checks everything else either way. The engine raises
+        # MemoryError when it cannot hold the module file, and a run left
+        # open here would refuse every later cart's run_begin.
+        unsigned_ok = run_admits_unsigned(ws, cart)
         writable = cart.get("writable") or ()
         joined = "\0".join(writable) if writable else None
+        ring = cart.get("audio_ring") or 0
+        # The app's run (the Player's, moy_app's `run()`): its imports from
+        # the app extension serve its grant, and its load is checked against it.
+        app = ns.get("_moy_app")
+
+        lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, unknown_sources, interp, joined)
+                                      swapped, unsigned_ok, interp, joined, ring,
+                                      app, lay)
 
         try:
             if has_module:
                 err = _open(module, sha, False)
-                if err and not err.startswith(_AOT_TAMPER_EVIDENCE):
+                if (err and not err.startswith(_AOT_TAMPER_EVIDENCE)
+                        and not _moycore.wasm_ran()):
                     # Not tamper evidence -- a mismatched or unsigned module,
                     # despite carrying this console's own file name (rare: a
                     # push tool built it unsigned, or the file is corrupt),
                     # or one calling a helper this firmware lacks. The cart
                     # itself is fine; only this console cannot use its
                     # module, so it plays on the interpreter, exactly as it
-                    # would have with no module at all.
+                    # would have with no module at all. A module that loaded
+                    # and ran its _init (`wasm_ran`) is past that: its error
+                    # is a trap in the cart's own code, the cart's to show.
                     self.interp = True
                     self.interp_cause = (
                         "unsigned" if err.startswith(_AOT_UNSIGNED)
@@ -1046,7 +1186,8 @@ class WasmRun(MoycoreRun):
                 raise RuntimeError(err)
         self._view = None
         self._sync_view()
-        self.init = None                 # _init ran inside wasm_open
+        self.init = None                 # _init ran inside wasm_open, after _layout
+        self.layout = self._relayout if lay is not None else None
         self.update = self._update
         self.draw = self._draw_noop
         # Frames go to the glass from the cart's memory where the system
@@ -1055,30 +1196,55 @@ class WasmRun(MoycoreRun):
         # blit writes the canvas as it always has.
         self.frame = None
         sc = getattr(ws, "sys_canvas", None)
+        self._palette = bool(getattr(sc, "presents_palette_frames", True))
         if getattr(sc, "presents_frames", False):
             self.frame = CartFrame(canvas.w, canvas.h)
-            ws.cart_frame = self.frame
-            _moycore.take_frames(
-                True, bool(getattr(sc, "presents_palette_frames", True)))
+            ws.run.cart_frame = self.frame
+            _moycore.take_frames(True, self._palette)
+
+    def mute(self, on):
+        """Held aside, the run's frames go to its canvas, which its window
+        shows: its blits stop leaving them in its memory and the one it
+        owes is written; given back, they go to the glass from there again.
+        The CartFrame travels with the run's world (runtime/shell/procs.py)."""
+        MoycoreRun.mute(self, on)
+        if self.frame is not None and self._h:
+            _moycore.use(self._h)
+            if on:
+                _moycore.take_frames(False)
+                _moycore.frame_settle()
+            else:
+                _moycore.take_frames(True, self._palette)
 
     def close(self):
         f = self.frame
         if f is not None:
             self.frame = None
-            if getattr(self.ws, "cart_frame", None) is f:
-                self.ws.cart_frame = None
+            if self.ws.run.cart_frame is f:
+                self.ws.run.cart_frame = None
             f.close(getattr(self.ws, "comp", None))
         MoycoreRun.close(self)
+
+
+class LuaRuntime:
+    """`ws.runtimes["lua"]`: called with `(ns, src)` it starts a
+    MoycoreRun; before it does, the Player asks whether the cart opts into
+    the responsive surface (`wants_layout`, lua_ext's probe)."""
+
+    wants_layout = staticmethod(wants_layout)
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def __call__(self, ns, src):
+        return MoycoreRun(self.ws, ns, src)
 
 
 def make_moycore_runtime(ws):
     """The Lua runtime factory, or None when unavailable."""
     if _moycore is None:
         return None
-
-    def _make(ns, src):
-        return MoycoreRun(ws, ns, src)
-    return _make
+    return LuaRuntime(ws)
 
 
 # The most linear memory a footprint is asked about: 1 GiB, past any board's
@@ -1097,6 +1263,13 @@ class WasmRuntime:
         self.ws = ws
 
     def __call__(self, ns, src):
+        cart = getattr(self.ws, "cart", None) or {}
+        if cart.get("wasi"):
+            try:
+                from wasi_run import WasiApp
+            except ImportError:                      # the host: the runtime package
+                from runtime.wasi_run import WasiApp
+            return WasiApp(self, self.ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
         return WasmRun(self.ws, ns, src)
 
     def footprint(self, cart):
@@ -1161,6 +1334,10 @@ class WasmRuntime:
             return []
         return missing_imports(head, table())
 
+    def wants_layout(self, cart):
+        """Whether the cart's module exports `_layout` (`wasm_wants_layout`)."""
+        return wasm_wants_layout(cart, getattr(self.ws, "_with_sd", None))
+
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and
         a module file of `module_len` bytes, interpreted or not. What Get
@@ -1177,6 +1354,109 @@ class WasmRuntime:
         m = _moy_wasm.mem()
         return m[3], m[4]
 
+    RUNNING = -100                       # moy_wasi.h's MOY_WASI_RUNNING
+
+    def command(self, cart, argv, roots=(), bg_pid=0, budget_ms=0, run=None):
+        """A WASI command cart run as `argv` in the shell session the door's
+        crossing runs in (runtime/shell/sh_door.py, native/moy_wasm/moy_wasi.h),
+        its app rows answered for `run` (compiled_run's), to its end, the
+        task's watchdog fed while it runs: (exit status, None), or -1 (a
+        trap) or -3 (it did not run) and the reason."""
+        got = self._start(cart, argv, roots, bg_pid, budget_ms, run)
+        if got[1] is not None:
+            return got
+        got = (self.RUNNING, None)
+        while got[0] == self.RUNNING:
+            got = _moy_wasm.command_step(1000)
+        return got
+
+    def start(self, cart, argv, roots=(), pid=0, budget_ms=0, run=None):
+        """`command`'s run started in the foreground and left running, as the
+        shell door's job (moy_wasi.h's "IN STEPS"): (0, None), or (-3, why).
+        `step` serves it and `cancel` ends it; one runs at a time."""
+        del pid
+        return self._start(cart, argv, roots, 0, budget_ms, run)
+
+    def step(self, pid, max_ms):
+        """The run's calls served for `max_ms` at most: (RUNNING, None), or
+        `command`'s answer once it has ended."""
+        del pid
+        return _moy_wasm.command_step(max_ms)
+
+    def cancel(self, pid):
+        """The run ended as Ctrl-C ends it: (130, None) unless it had exited."""
+        del pid
+        return _moy_wasm.command_stop()
+
+    def _start(self, cart, argv, roots, bg_pid, budget_ms, run):
+        """The run started: (0, None), or (-3, why)."""
+        start = getattr(_moy_wasm, "command_start", None)
+        if start is None:
+            return -3, "this firmware runs no commands"
+        joined = "".join(r + "\0" for r in roots) or None
+        argv = tuple(argv)
+        return self._launch(cart, lambda path, sha, interp, unsigned_ok: start(
+            path, sha, interp, unsigned_ok, argv, joined, bg_pid, budget_ms, run))
+
+    def _launch(self, cart, start):
+        """`start(path, want_sha, interp, allow_unsigned)` on the cart's
+        module for this console where it carries one, as a cart's is, and
+        on main.wasm on the interpreter where it carries none or that one is
+        refused for anything but tamper evidence. start's answer, (code,
+        why) with -3 for a refusal."""
+        path = cart["path"]
+        main = cart.get("main", "main.wasm")
+        unsigned_ok = run_admits_unsigned(self.ws, cart)
+        if _moy_wasm.CHIP is not None:
+            module = aot_path(path, main, _moy_wasm.CHIP, _moy_wasm.FORMAT)
+            try:
+                open(module, "rb").close()
+            except OSError:
+                module = None
+            if module is not None:
+                sha = _sha256_file(path + "/" + main)
+                code, err = start(module, sha, False, unsigned_ok)
+                if code != -3 or err.startswith(_AOT_TAMPER_EVIDENCE):
+                    return code, err
+        return start(path + "/" + main, None, True, unsigned_ok)
+
+    def service(self, cart, pid, run=None):
+        """The cart started as service `pid` (native/moy_wasm/moy_wasi.h, A
+        SERVICE): its `_start` on a task of its own, its argv the cart's id;
+        its module chosen as `command`'s is, its app rows answered for
+        `run`, the app grant compiled_run made. None, or why it did not
+        start."""
+        app_id = cart.get("id") or ""
+
+        def start(path, sha, interp, unsigned_ok):
+            why = _moy_wasm.service_start(path, sha, interp, unsigned_ok, pid, app_id, run)
+            return (0, None) if why is None else (-3, why)
+        return self._launch(cart, start)[1]
+
+    def stop(self, pid):
+        """Service `pid` stopped: its descriptor hung up, killed (137) past
+        its time. Its exit status, or -1 for no such service."""
+        return _moy_wasm.service_stop(pid)
+
+    def reap(self):
+        """[(pid, exit status)] of the services that ended: by themselves, a
+        trap (134), or killed by the watchdog (137)."""
+        return _moy_wasm.service_reap()
+
+    def figures(self, pid):
+        """(linear memory bytes, its wakes' cost in us) of live service
+        `pid`, or None once it has ended."""
+        return _moy_wasm.service_info(pid)
+
+    def keep(self, pid):
+        """Service `pid` made a Player app's run (runtime/run/wasi_run.py):
+        the reap leaves its end to its stop. Whether there is one."""
+        return _moy_wasm.service_keep(pid)
+
+    def done(self, pid):
+        """Whether service `pid`'s `_start` has returned."""
+        return _moy_wasm.service_done(pid)
+
 
 def make_wasm_runtime(ws):
     """The compiled-cart runtime, or None when this build has no engine
@@ -1192,7 +1472,12 @@ def make_runtimes(ws):
     manifest name a cart gives it. An absent key is a runtime this build lacks,
     and the Player's runtime-missing panel is what a cart naming it gets."""
     out = {}
-    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime)):
+    try:
+        from elf_run import make_elf_runtime
+    except ImportError:
+        from runtime.elf_run import make_elf_runtime
+    for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime),
+                       ("elf", make_elf_runtime)):
         rt = make(ws)
         if rt is not None:
             out[name] = rt

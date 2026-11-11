@@ -19,7 +19,7 @@ docs/theme_and_shell_2026-11.md §3.9) or into a project as ``images/bg.moyimg``
 runtime/apps/picture_copies.py's, which Files and My Art use too. The app is
 runtime/apps/paint_app.py; the drawings' page is runtime/apps/myart_app.py.
 
-Drawings are USER FILES (#108): named ``files/drawings/*.moyimg`` items in the
+Drawings are USER FILES (#108): named ``files/Pictures/*.moyimg`` items in the
 store, auto-named (naming is never a gate), browsed by My Art and Files, and
 autosaved. Publishing is copy-on-use everywhere: Use as wallpaper and Put in a
 game copy the named file's pixels at that moment (editing the drawing
@@ -720,7 +720,7 @@ class ArtworkService:
     is how the console reaches it; the copy-on-use verbs are Paint's
     `PictureCopies` (runtime/apps/picture_copies.py), over the same roles. The open
     picture lives in Paint's prefs, whose namespace is "paint" (`paint_doc` has
-    been the key in real cards' system.json since #108), which the `artwork`
+    been the key in real cards' system/settings since #108), which the `artwork`
     role's C rows read for every other app."""
 
     # The largest document Paint holds -- and it is Paint's OWN largest, the
@@ -965,7 +965,7 @@ class ArtworkService:
             return False
         self._set_doc_name(got, kind)
         self.last_error = ""
-        self._notify.achieve("paint_save")
+        self._notify.award("first_paint")
         return True
 
     def new_doc(self, width, height):

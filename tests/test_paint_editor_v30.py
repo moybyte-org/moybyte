@@ -570,6 +570,7 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
     page = ws.map_ui.page()
     _tap(drv, *_stop(ws, drv, "Resize"))
     assert page.pop == "resize"
+    drv.frame(1 / 30)                # the card's first frame measures its row
 
     _tap(drv, *_stop(ws, drv, "Wider"))            # +1 column
     _tap(drv, *_stop(ws, drv, "Taller"))           # +1 row

@@ -24,10 +24,19 @@
 //   bind(run, input, audio, tick) its input table, audio session, Tick
 //   open(run)                    the row's check that its runtime is open
 //   frame(run, ticks, dt, render, x, y, touch) -> QUIT | VIEW
-//   end(run[, why]), info([run]), current(), stack()
+//   end(run[, why]), info([run]), current(), runs(), mute(run, on), stack()
 //   watch(ms)                    the runaway watch's budget for the next
 //                                launch, 0 its slots' rule (a test's lever)
 //   QUIT, VIEW (a frame's bits); END_QUIT, END_CRASH (an end's why)
+//
+// THE SHARES' ROWS (moy_play.h), every image:
+//
+//   shares([board]) -> (procs, media, rings, elf, lanes) in bytes, None for
+//                     an absent row; None for no line (a build that names
+//                     none, or a board no line has). No board: the image's.
+//   share_held(row)   the bytes a row's takers hold
+//   kill_below(held)  the kill threshold with the running set holding `held`
+//                     of PROCS, None with no line
 //
 // The radio link and its lockstep session (modmoy_match.c has the list):
 //
@@ -44,6 +53,7 @@
 
 #include "moy_cat.h"
 #include "moy_play.h"
+#include "moy_proc.h"
 #include "moy_rt.h"
 #include "moy_tick.h"
 #include "moy_input.h"
@@ -72,12 +82,15 @@ void moy_play_vm_stop(void) {
     if (moycore_vm_stop != NULL) {
         moycore_vm_stop();
     }
-    uint32_t run = moy_play_current();
-    if (run != 0u && moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2) {
-        return;                         // MOY_STOP_RUN
-    }
-    if (run != 0u) {
-        moy_play_end(run, MOY_PLAY_END_SERIAL);
+    // Every run ends with the VM, but the one a stop is for (MOY_STOP_RUN):
+    // the kernel's from here.
+    uint32_t keep = moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2
+                    ? moy_play_current() : 0u;
+    for (uint32_t i = 0; i < MOY_PLAY_RUNS; i++) {
+        uint32_t run = moy_play_run_at(i);
+        if (run != 0u && run != keep) {
+            moy_play_end(run, MOY_PLAY_END_SERIAL);
+        }
     }
 }
 
@@ -330,9 +343,10 @@ static mp_obj_t mod_open(mp_obj_t run_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_open_obj, mod_open);
 
-// frame(run, ticks, dt, render, x, y, touch[, window]) -> QUIT | VIEW bits.
-// The pointer is the console's, in the cart's coordinates; `window`, whether
-// the run's surface is a window's body. A cart that raised
+// frame(run, ticks, dt, render, x, y, touch[, face[, room]]) -> QUIT | VIEW bits.
+// The pointer is the console's, in the cart's coordinates; `face`, how the
+// run's ui frame draws (moy_play_in_t's); `room`, an app's ui frame (x, y, w,
+// h: its content_rect()), None for a game's whole canvas. A cart that raised
 // raises RuntimeError with its own text, which is how the Player has always
 // captured a Lua cart's crash.
 static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
@@ -340,8 +354,15 @@ static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
     uint32_t run = run_arg(a[0]);
     moy_play_in_t in = {
         (int32_t)mp_obj_get_int(a[4]), (int32_t)mp_obj_get_int(a[5]),
-        (int32_t)mp_obj_get_int(a[6]), n_args > 7 && mp_obj_is_true(a[7]) ? 1 : 0,
+        (int32_t)mp_obj_get_int(a[6]), n_args > 7 ? (int32_t)mp_obj_get_int(a[7]) : 0, {0},
     };
+    if (n_args > 8 && a[8] != mp_const_none) {
+        mp_obj_t *v;
+        mp_obj_get_array_fixed_n(a[8], 4, &v);
+        for (int i = 0; i < 4; i++) {
+            in.room[i] = (int32_t)mp_obj_get_int(v[i]);
+        }
+    }
     moy_play_input(run, &in);
     uint32_t out = 0;
     mp_int_t n = mp_obj_get_int(a[1]);
@@ -357,7 +378,7 @@ static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
     }
     return MP_OBJ_NEW_SMALL_INT(out);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 7, 8, mod_frame);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_frame_obj, 7, 9, mod_frame);
 
 // end(run[, why]) -- the run's books closed; a stale handle is a no-op.
 static mp_obj_t mod_end(size_t n_args, const mp_obj_t *a) {
@@ -384,7 +405,7 @@ static mp_obj_t stack_obj(uint32_t v) {
 // or the last one's (`stop`: the launch's stop verdict, "stops" or the clause
 // that kept the VM; `vm_down`: it ran with the VM stopped; `fit`: the
 // verdict's fit check with the VM up -- (need, need_block, free, largest,
-// vm_heap) bytes -- or None when it did not reach one; `stuck`: the runaway
+// freed) bytes, `freed` what the stop would give back -- or None when it did not reach one; `stuck`: the runaway
 // watch ended a tick); None when
 // there is none. `upcalls` is a tuple by class: CONSOLE, APP, DRIVER,
 // SERVICE, REFUSED; the two stack readings are moy_play.stack()'s, taken
@@ -470,6 +491,67 @@ static mp_obj_t mod_current(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_current_obj, mod_current);
 
+// mute(run, on) -- a run held aside reads no input.
+static mp_obj_t mod_mute(mp_obj_t run_obj, mp_obj_t on) {
+    int rc = moy_play_mute(run_arg(run_obj), mp_obj_is_true(on));
+    if (rc != MOY_PLAY_OK) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_mute_obj, mod_mute);
+
+// proc_row(run) -- the run's process row (moy_proc.h): (pid, tier, kind,
+// state, bound, grant), or None for a VM run or a stale handle. Not `proc`:
+// the frozen console uses that name, and a qstr both pools carry collides
+// (native/moy_web/modmoy_web.c's `assets()` has the story).
+static mp_obj_t mod_proc(mp_obj_t run_obj) {
+    moy_proc_row_t *p;
+    if (moy_proc_get(moy_play_proc(run_arg(run_obj)), &p) != MOY_PROC_OK) {
+        return mp_const_none;
+    }
+    mp_obj_t t[6] = {
+        mp_obj_new_int_from_uint(p->pid), MP_OBJ_NEW_SMALL_INT(p->tier),
+        MP_OBJ_NEW_SMALL_INT(p->kind), MP_OBJ_NEW_SMALL_INT(p->state),
+        mp_obj_new_bool(p->engine != NULL), mp_obj_new_int_from_uint(moy_proc_grant(p)),
+    };
+    return mp_obj_new_tuple(6, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_proc_obj, mod_proc);
+
+static mp_obj_t mod_runs(void) {
+    return MP_OBJ_NEW_SMALL_INT(moy_play_runs());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_runs_obj, mod_runs);
+
+// THE SHARES' ROWS (moy_play.h).
+static mp_obj_t share_obj(uint32_t v) {
+    return v >= MOY_SHARE_NONE ? mp_const_none : mp_obj_new_int_from_uint(v);
+}
+
+static mp_obj_t mod_shares(size_t n_args, const mp_obj_t *args) {
+    const char *board = n_args > 0 && args[0] != mp_const_none ? mp_obj_str_get_str(args[0]) : NULL;
+    if (moy_share_row(board, MOY_SHARE_PROCS) == MOY_SHARE_NONE) {
+        return mp_const_none;
+    }
+    mp_obj_t rows[MOY_SHARE_ROWS];
+    for (uint8_t r = 0; r < MOY_SHARE_ROWS; r++) {
+        rows[r] = share_obj(moy_share_row(board, r));
+    }
+    return mp_obj_new_tuple(MOY_SHARE_ROWS, rows);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_shares_obj, 0, 1, mod_shares);
+
+static mp_obj_t mod_share_held(mp_obj_t row) {
+    return mp_obj_new_int_from_uint(moy_share_held((uint8_t)mp_obj_get_int(row)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_share_held_obj, mod_share_held);
+
+static mp_obj_t mod_kill_below(mp_obj_t procs_held) {
+    return share_obj(moy_share_kill_below((uint32_t)mp_obj_get_int(procs_held)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_kill_below_obj, mod_kill_below);
+
 // The radio link and its lockstep session (modmoy_match.c).
 extern const mp_obj_type_t moy_play_match_type;
 extern const mp_obj_fun_builtin_fixed_t moy_play_seed_of_obj;
@@ -478,7 +560,7 @@ extern const mp_obj_fun_builtin_fixed_t moy_chrome_inks_obj,
     moy_chrome_band_obj,
     moy_chrome_say_title_obj, moy_chrome_crash_title_obj, moy_chrome_newer_text_obj;
 extern const mp_obj_fun_builtin_var_t moy_chrome_panel_obj,
-    moy_chrome_cell_obj, moy_chrome_toast_arm_obj,
+    moy_chrome_cell_obj, moy_chrome_toast_arm_obj, moy_chrome_note_obj,
     moy_chrome_notice_obj, moy_chrome_fit_text_obj;
 
 static const mp_rom_map_elem_t moy_play_globals_table[] = {
@@ -493,9 +575,15 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hold), MP_ROM_PTR(&mod_hold_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&mod_current_obj) },
+    { MP_ROM_QSTR(MP_QSTR_runs), MP_ROM_PTR(&mod_runs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mute), MP_ROM_PTR(&mod_mute_obj) },
+    { MP_ROM_QSTR(MP_QSTR_proc_row), MP_ROM_PTR(&mod_proc_obj) },
     { MP_ROM_QSTR(MP_QSTR_lockstep), MP_ROM_PTR(&mod_lockstep_obj) },
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&mod_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_live), MP_ROM_PTR(&mod_front_live_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shares), MP_ROM_PTR(&mod_shares_obj) },
+    { MP_ROM_QSTR(MP_QSTR_share_held), MP_ROM_PTR(&mod_share_held_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kill_below), MP_ROM_PTR(&mod_kill_below_obj) },
     { MP_ROM_QSTR(MP_QSTR_END_MENU), MP_ROM_INT(MOY_PLAY_END_MENU) },
     { MP_ROM_QSTR(MP_QSTR_END_LINK), MP_ROM_INT(MOY_PLAY_END_LINK) },
     { MP_ROM_QSTR(MP_QSTR_END_SERIAL), MP_ROM_INT(MOY_PLAY_END_SERIAL) },
@@ -521,6 +609,7 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_chrome_strip_cell), MP_ROM_PTR(&moy_chrome_cell_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_notice), MP_ROM_PTR(&moy_chrome_notice_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_toast_arm), MP_ROM_PTR(&moy_chrome_toast_arm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_chrome_note), MP_ROM_PTR(&moy_chrome_note_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_play_globals, moy_play_globals_table);
 

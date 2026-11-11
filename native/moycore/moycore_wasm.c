@@ -3,6 +3,7 @@
 // `files_keep`, `frame`, ...).
 
 #include "modmoycore_int.h"
+#include "moy_proc.h"
 
 // -- the compiled cart (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------
 //
@@ -33,31 +34,43 @@
 // below is unconditional so qstr scanning, which does not see those defines,
 // finds every name.
 
-enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW };
+enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW, WCALL_LAYOUT };
 
 #if MOYCORE_WASM
 
-// A compiled cart's run state. Allocated per session, from PSRAM where there
-// is any: libmoy's per-run struct alone is about 4 KB (eight layer canvases),
-// and as static data it would sit in internal SRAM for the whole boot -- the
-// resource the S3 boards gate the tier on. Only the pointer is static.
-typedef struct {
+// A compiled cart's run state, its run's row's (`wr`): several compiled runs
+// are several rows, each with its engine session, and every call here reads
+// the CURRENT row's. Allocated per run, from PSRAM where there is any:
+// libmoy's per-run struct alone is about 4 KB (eight layer canvases), and as
+// static data it would sit in internal SRAM for the whole boot -- the
+// resource the S3 boards gate the tier on.
+typedef struct moycore_wrun {
     moy_wasm w;                  // libmoy's per-run state for the table
+    void *sess;                  // its engine session (moy_wasm_session_current)
+    int take;                    // take_frames' TAKE_* for this run
+    int tl;                      // the board's timed lanes are this run's
     int dead;                    // trapped: never called again
     char dir[192];               // the cart's folder: `read`'s only root
     char keep_dir[320];          // where its written files are kept
     moy_files_t *files;          // its files' session (moy_files.h)
     char *writable;              // the manifest's "writable", libmoy's form
+    int32_t layout[3];           // the (w, h, fs) WCALL_LAYOUT passes `_layout`
+    int has_layout;              // the last WCALL_LAYOUT found the export
+#if MOYCORE_APP
+    moy_app_run_t app;           // the app's run its imports from the extension serve
+#endif
 #if MOY_WASM
     // The import table's registration storage: WAMR sorts it in place and
     // points at it until the runtime is destroyed, so it lives as long as
     // this struct does -- freed by moycore_wasm_end, after the session's teardown.
     NativeSymbol *natives;
-    NativeSymbol *app_natives;   // the same, for the app extension's rows
+    // The app extension's rows, registered where they are: const, generated
+    // in WAMR's lookup order (moy_wasm_register_rows).
+    const NativeSymbol *app_natives;
 #endif
 } wrun_t;
 
-static wrun_t *WR;
+#define WR (moycore_RUN.wr)
 
 // The app ABI's import adapter (native/moy_app/moy_app_wasm.h): the rows a
 // compiled app imports from module "moybyte.app", WAMR's NativeSymbol field
@@ -66,18 +79,39 @@ static wrun_t *WR;
 // any import outside "moy" is.
 #define APP_EXT "moybyte.app"
 const NativeSymbol *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
-uint32_t moy_app_wasm_grant(void) __attribute__((weak));
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen)
-    __attribute__((weak));
+int moy_app_wasm_admit(const struct moy_app_run *r, const uint8_t *head, size_t n, char *err,
+                       size_t errlen) __attribute__((weak));
 
-// The extension's table for libmoy's check: only while a run's app grant is
-// bound (the Player binds it for a compiled user app that declares the
+// The run a native's call is for (moy_app_wasm.h): the engine's handle on the
+// call -- the instance's exec env, its custom data libmoy's binding, or in
+// the browser the binding itself -- to the process row that binding is the
+// engine of (moy_proc.h), or, for a run no Player launched, to the session's.
+#if MOYCORE_APP
+const struct moy_app_run *moy_app_wasm_run_of(void *e)
+{
+    if (!e) return NULL;
+#if MOY_WASM
+    wasm_module_inst_t inst = wasm_runtime_get_module_inst((wasm_exec_env_t)e);
+    e = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    if (!e) return NULL;
+#endif
+    if (((const moy_wasm *)e)->items) return NULL;   // a par item calls no import
+    if (moy_proc_of_engine(e)) return moy_proc_app_of(e);
+    return WR && e == (void *)&WR->w && WR->app.g ? &WR->app : NULL;
+}
+#endif
+
+// The extension's table for libmoy's check: only for a run that holds an app
+// grant (the Player makes one for a compiled user app that declares the
 // extension), so a cart that declares none imports only from "moy".
 static uint32_t app_ext(moy_wasm_ext *x)
 {
     uint32_t n = 0;
-    if (moy_app_wasm_natives == NULL || moy_app_wasm_grant == NULL
-        || moy_app_wasm_grant() == 0) return 0;
+#if MOYCORE_APP
+    if (moy_app_wasm_natives == NULL || !WR || WR->app.g == 0) return 0;
+#else
+    return 0;
+#endif
     x->module = APP_EXT;
     x->rows = moy_app_wasm_natives(&n);
     x->count = n;
@@ -113,10 +147,22 @@ static void wrun_free(wrun_t *r)
     if (r == WR) files_close();
 #if MOY_WASM
     wmem_free(r->natives);
-    wmem_free(r->app_natives);
 #endif
     wmem_free(r->writable);
     wmem_free(r);
+}
+
+// What the board holds one of -- the speaker's `snd` stream (1) and the
+// timed lanes (2) -- is the newest compiled run's: the run taking it takes
+// it from every other row's.
+static __attribute__((unused)) void others_lose(int what)
+{
+    for (int i = 0; i < MOYCORE_RUNS; i++) {
+        moycore_run *r = moycore_run_at(i);
+        if (r == NULL || r == moycore_run_row || r->wr == NULL) continue;
+        if (what == 1) r->wr->w.snd = NULL;
+        else r->wr->tl = 0;
+    }
 }
 
 // -- the cart's files: its own folder and its written ones (SPEC.md 16.12) --
@@ -341,16 +387,11 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
     if (moy_app_wasm_natives != NULL) {
         uint32_t an = 0;
         const NativeSymbol *rows = moy_app_wasm_natives(&an);
-        WR->app_natives = (NativeSymbol *)wmem_calloc(an, sizeof(NativeSymbol));
-        if (!WR->app_natives) {
-            snprintf(err, errlen, "out of memory: no PSRAM for the import table");
-            return 1;
-        }
-        memcpy(WR->app_natives, rows, an * sizeof(NativeSymbol));
-        if (!wasm_runtime_register_natives(APP_EXT, WR->app_natives, an)) {
+        if (!moy_wasm_register_rows(APP_EXT, rows, an)) {
             snprintf(err, errlen, "the app extension's table did not register");
             return 1;
         }
+        WR->app_natives = rows;
     }
 #else
     // The page's adapters read the table where it is (moy_web_natives).
@@ -377,8 +418,15 @@ static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errle
 #endif
     // Each import from the extension against the run's grant, named when its
     // role is not one the cart's permissions name.
-    return nx && moy_app_wasm_admit != NULL ? moy_app_wasm_admit(head, head_len, err, errlen)
-                                            : 0;
+#if MOYCORE_APP
+    return nx && moy_app_wasm_admit != NULL
+               ? moy_app_wasm_admit(&WR->app, head, head_len, err, errlen) : 0;
+#else
+    (void)nx;
+    (void)head;
+    (void)head_len;
+    return 0;
+#endif
 }
 
 static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
@@ -399,14 +447,73 @@ static int wo_bound(void *user, moy_wasm_env env, char *err, size_t errlen)
     return 0;
 }
 
+#if MOY_WASM
+static uint32_t no_ring(const uint8_t *pcm, uint32_t n)
+{
+    (void)pcm;
+    (void)n;
+    return 0;
+}
+
+// The cart's timed lanes, once _init has returned (moy_wasm_session.h): the
+// audio lane fills `snd`'s ring, which a struck lane mutes.
+static int lanes_start(char *err, size_t errlen)
+{
+    moy_wasm_tlane_sink_t sink = {no_ring, NULL};
+#if MOY_AUDIO_SND
+    if (WR->w.snd) {
+        sink.write = moy_audio_snd;
+        sink.mute = moy_audio_snd_mute;
+    }
+#endif
+    others_lose(2);
+    WR->tl = 1;
+    return moy_wasm_tlanes_start(WR->w.env, &sink, err, errlen) < 0;
+}
+#endif
+
+#if MOY_WASM
+// A responsive app's exported `_layout(w, h, fs)` (docs/app_api_v1.md §3)
+// with WR->layout: WR->has_layout says whether the module exports one, of
+// three i32 parameters and no result. Called outside libmoy's hook brackets,
+// as `_layout` draws nothing: the target between hooks is the screen.
+static int call_layout(char *err, size_t errlen)
+{
+    wasm_module_inst_t inst = WR->w.inst;
+    wasm_function_inst_t fn = wasm_runtime_lookup_function(inst, "_layout");
+    WR->has_layout = fn && wasm_func_get_param_count(fn, inst) == 3
+                     && wasm_func_get_result_count(fn, inst) == 0;
+    if (!WR->has_layout) return 0;
+    uint32_t argv[3];
+    memcpy(argv, WR->layout, sizeof argv);
+    if (wasm_runtime_call_wasm(WR->w.env, fn, 3, argv)) return 0;
+    if (WR->w.quitting) {                   // quit() is an ending, not a failure
+        wasm_runtime_clear_exception(inst);
+        return 0;
+    }
+    const char *msg = wasm_runtime_get_exception(inst);
+    snprintf(err, errlen, "%s", msg ? msg : "the cart trapped");
+    return 1;
+}
+#endif
+
 static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 {
     (void)user;
 #if MOY_WASM
-    if (what == WCALL_INIT) return moy_wasm_init(&WR->w, err, errlen);
+    if (what == WCALL_LAYOUT) return call_layout(err, errlen);
+    if (what == WCALL_INIT) {
+        if (moy_wasm_init(&WR->w, err, errlen) != 0) return 1;
+        return lanes_start(err, errlen);
+    }
     if (what == WCALL_UPDATE) return moy_wasm_update(&WR->w, dt, err, errlen);
     return moy_wasm_draw(&WR->w, err, errlen);
 #else
+    // The page's engine calls the cart's three hooks alone: no `_layout`.
+    if (what == WCALL_LAYOUT) {
+        WR->has_layout = 0;
+        return 0;
+    }
     // The page calls the export; the binding brackets the call. A trap the
     // binding raised names itself; anything else the cart threw (an
     // unreachable, an access outside its memory) is the engine's message.
@@ -426,6 +533,13 @@ static int wo_call(void *user, int what, float dt, char *err, size_t errlen)
 static void wo_unbound(void *user)
 {
     (void)user;
+#if MOY_WASM
+    if (WR->tl) moy_wasm_tlanes_stop();
+    // The runtime outlives this session where another is open: the import
+    // table's registration from this run's storage goes now.
+    if (WR->natives) wasm_runtime_unregister_natives(MOY_WASM_MODULE, WR->natives);
+    if (WR->app_natives) wasm_runtime_unregister_natives(APP_EXT, WR->app_natives);
+#endif
     moy_wasm_close(&WR->w);
 }
 
@@ -462,15 +576,14 @@ static void wo_lane_wait(void *user, int lane)
 // when something needs it -- a verb over it, a settle, or the cart's next
 // hook. On the engine's thread, so it only answers. TAKE_565 and TAKE_PALETTE
 // are the two layouts: blit565's words, and blit's indices with their colours.
-#define TAKE_565 1
-#define TAKE_PALETTE 2
-static volatile int g_take_frames;
+#define TAKE_565 MOYCORE_TAKE_565
+#define TAKE_PALETTE MOYCORE_TAKE_PALETTE
 
 static int wo_frame(void *user, const uint8_t *pixels, const moy_pixel *lut)
 {
     (void)user;
     (void)pixels;
-    return g_take_frames & (lut ? TAKE_PALETTE : TAKE_565);
+    return WR->take & (lut ? TAKE_PALETTE : TAKE_565);
 }
 #endif // MOY_WASM
 
@@ -487,19 +600,25 @@ static void wasm_trapped(void)
 
 int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
-                       int swapped, int allow_unsigned, int interp, char *err,
-                       size_t errlen)
+                       int swapped, int allow_unsigned, int interp, uint32_t ring,
+                       const struct moy_app_run *app, const int32_t *layout,
+                       char *err, size_t errlen)
 {
     if (WR) {
         wrun_free(WR);
         WR = NULL;
     }
+    moy_wasm_session_use(NULL);         // another run's session is not this one's
     if ((WR = (wrun_t *)wmem_calloc(1, sizeof(wrun_t))) == NULL) {
         snprintf(err, errlen, "out of memory: no PSRAM for the cart's run state");
         return 1;
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+#if MOYCORE_APP
+    if (app) WR->app = *app;
+#endif
+    moy_proc_bind(moycore_RUN.proc, &WR->w, app);
     // The manifest's "writable" entries, NUL-separated as Python joined them,
     // and two NULs to end libmoy's list.
     if (writable_len) {
@@ -523,7 +642,16 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     WR->w.lane_stack = MOY_WASM_EXEC_STACK;
 #endif
 #if MOY_AUDIO_SND
-    if (moy_audio_snd_open()) WR->w.snd = wo_snd;
+    // The queue is as deep as the manifest's "audio_ring" asks (moy_audio_snd.h),
+    // a depth outside the range being the default; a deep one the RINGS row
+    // refuses leaves `snd` to the binding's clock, silent.
+    if (ring < MOY_AUDIO_SND_MIN || ring > MOY_AUDIO_SND_MAX) ring = 0;
+    if (moy_audio_snd_open(ring) > 0) {
+        others_lose(1);
+        WR->w.snd = wo_snd;
+    }
+#else
+    (void)ring;
 #endif
     snprintf(WR->dir, sizeof(WR->dir), "%s", dir);
     files_open(WR->dir);
@@ -539,13 +667,38 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
         files_close();
         return 1;
     }
+    WR->sess = moy_wasm_session_current();
     RUN.wasm = 1;
     moycore_run_tick_begin();
+    if (layout) {
+        memcpy(WR->layout, layout, sizeof WR->layout);
+        if (moy_wasm_session_call(WCALL_LAYOUT, 0.0f, err, errlen) != 0) {
+            wasm_trapped();
+            return 1;
+        }
+    }
     if (moy_wasm_session_call(WCALL_INIT, 0.0f, err, errlen) != 0) {
         wasm_trapped();
         return 1;
     }
     return 0;
+}
+
+int moycore_wasm_layout(int32_t w, int32_t h, int32_t fs, char *err, size_t errlen)
+{
+    if (!WR || WR->dead) {
+        snprintf(err, errlen, "the cart is not running");
+        return -1;
+    }
+    WR->layout[0] = w;
+    WR->layout[1] = h;
+    WR->layout[2] = fs;
+    moy_wasm_session_use(WR->sess);
+    if (moy_wasm_session_call(WCALL_LAYOUT, 0.0f, err, errlen) != 0) {
+        wasm_trapped();
+        return -1;
+    }
+    return WR->has_layout;
 }
 
 int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
@@ -555,6 +708,7 @@ int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
         snprintf(err, errlen, "the cart is not running");
         return 1;
     }
+    moy_wasm_session_use(WR->sess);
     if (moy_wasm_session_call(WCALL_UPDATE, dt, err, errlen) != 0) {
         wasm_trapped();
         return 1;
@@ -572,13 +726,13 @@ int moycore_wasm_tick_c(float dt, int draw, char *err, size_t errlen)
 
 void moycore_wasm_end(void)
 {
-    if (RUN.wasm) moy_wasm_session_close();
+    if (RUN.wasm && WR) {
+        moy_wasm_session_use(WR->sess);
+        moy_wasm_session_close();
+    }
     RUN.wasm = 0;
 #if MOY_AUDIO_SND
-    moy_audio_snd_close();
-#endif
-#if MOY_WASM
-    g_take_frames = 0;
+    if (WR && WR->w.snd) moy_audio_snd_close();    // the stream is this run's
 #endif
     if (WR) {
         wrun_free(WR);
@@ -588,7 +742,8 @@ void moycore_wasm_end(void)
 #endif // MOYCORE_WASM
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
-//           allow_unsigned=False, interp=False, writable=None)
+//           allow_unsigned=False, interp=False, writable=None, ring=0, app=None,
+//           layout=None)
 //           -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
@@ -597,15 +752,19 @@ void moycore_wasm_end(void)
 // before its memory exists, refuse it unless its key names `wasm_sha`, bind it
 // to this console and run _init. `cart_dir` is the only folder `read` sees;
 // `wire_swapped` says the canvas stores its words byte-swapped, which a
-// palette blit must match. `allow_unsigned` is the owner's Unknown sources
-// setting: true lets an AOT module with no signature load
+// palette blit must match. `allow_unsigned` is the cart's consent
+// (app_perms.run_admits_unsigned): true lets an AOT module with no signature load
 // (moy_wasm_session.h). `interp` is true when `module_path` IS the cart's own
 // main.wasm, run on the interpreter tier (native/moy_wasm/README.md, "A
-// cart survives its firmware", 2026-09-30): no key, no signature, no Unknown
-// sources check, and `wasm_sha` is ignored. `writable` is the manifest's
+// cart survives its firmware", 2026-09-30): no key, no signature, no
+// admission, and `wasm_sha` is ignored. `writable` is the manifest's
 // "writable" entries joined by NUL characters (moy-spec SPEC.md 16.12; the
-// cart's files are moy_files', above). A refusal or a trap closes nothing --
-// close() does.
+// cart's files are moy_files', above). `ring` is the manifest's "audio_ring",
+// the depth of `snd`'s queue in frames (0: moy-spec's 2,048). `app` is the
+// app's run (moycore_app_run), which the run holds for its imports from the
+// app extension and its load's grant check, or None for none. `layout`, a
+// responsive app's (w, h, fs), is what its exported `_layout` hears before
+// _init. A refusal or a trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -616,14 +775,29 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
     size_t hlen = 0, wlen = 0;
     const char *writable = NULL;
     if (n_args > 8 && a[8] != mp_const_none) writable = mp_obj_str_get_data(a[8], &wlen);
+    mp_int_t ring = n_args > 9 && a[9] != mp_const_none ? mp_obj_get_int(a[9]) : 0;
     moycore_whead = (const uint8_t *)moycore_buf_r(a[1], &hlen);
     moycore_whead_len = hlen;
     moycore_wpages = (uint32_t)mp_obj_get_int(a[2]);
     const char *sha = a[3] == mp_const_none ? NULL : mp_obj_str_get_str(a[3]);
+    int32_t lay[3];
+    const int32_t *layout = NULL;
+    if (n_args > 11 && a[11] != mp_const_none) {
+        size_t nl = 0;
+        mp_obj_t *l = NULL;
+        mp_obj_get_array(a[11], &nl, &l);
+        if (nl != 3)
+            mp_raise_ValueError(MP_ERROR_TEXT("moycore: wasm_open's layout is (w, h, fs)"));
+        for (int i = 0; i < 3; i++) lay[i] = (int32_t)mp_obj_get_int(l[i]);
+        layout = lay;
+    }
     int rc = moycore_wasm_begin(mp_obj_str_get_str(a[0]), sha, mp_obj_str_get_str(a[4]),
                                 writable, wlen,
                                 mp_obj_is_true(a[5]), n_args > 6 && mp_obj_is_true(a[6]),
-                                n_args > 7 && mp_obj_is_true(a[7]), err, sizeof(err));
+                                n_args > 7 && mp_obj_is_true(a[7]),
+                                ring > 0 ? (uint32_t)ring : 0u,
+                                moycore_app_run(n_args > 10 ? a[10] : mp_const_none),
+                                layout, err, sizeof(err));
     moycore_whead = NULL;
     moycore_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -635,7 +809,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 9, mod_wasm_open);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 12, mod_wasm_open);
 
 // files_keep(on): the page's keeper is listening, or not (the browser's,
 // firmware/web_runner/carts_link.py); turning it off drops the log.
@@ -708,6 +882,22 @@ static mp_obj_t mod_wasm_quit(void)
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_quit_obj, mod_wasm_quit);
 
+// Whether the run's module is open: it loaded, and its _init was called. A
+// refusal before that point leaves the run free for another open (a module
+// this console cannot use, retried on the interpreter); an error after it is
+// the cart's own, a trap in its code, and nothing retries it.
+int moycore_wasm_ran(void)
+{
+    return RUN.wasm;
+}
+
+// wasm_ran() -> moycore_wasm_ran(), for the binding's open.
+static mp_obj_t mod_wasm_ran(void)
+{
+    return mp_obj_new_bool(moycore_wasm_ran());
+}
+MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_ran_obj, mod_wasm_ran);
+
 // wasm_table() -> the names in this console's import table (libmoy's
 // moy_wasm_natives), every function a compiled cart may import from "moy":
 // what the Player holds a module's imports to before it loads one
@@ -727,11 +917,11 @@ static mp_obj_t mod_wasm_table(void)
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_wasm_table_obj, mod_wasm_table);
 
-// take_frames(on, palette=True) -- whether a compiled cart's blits leave
-// their frames in its memory for the board to show (frame/frame_presented)
-// instead of writing the canvas: blit565's when `on`, and blit's too unless
-// `palette` is false, for a board that cannot show a palette frame. Off at
-// every run's end.
+// take_frames(on, palette=True) -- whether the current compiled run's blits
+// leave their frames in its memory for the board to show
+// (frame/frame_presented) instead of writing the canvas: blit565's when
+// `on`, and blit's too unless `palette` is false, for a board that cannot
+// show a palette frame. Each run's own, off until it is asked.
 static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
 {
 #if MOY_WASM
@@ -740,7 +930,7 @@ static mp_obj_t mod_take_frames(size_t n_args, const mp_obj_t *a)
         take = TAKE_565;
         if (n_args < 2 || mp_obj_is_true(a[1])) take |= TAKE_PALETTE;
     }
-    g_take_frames = take;
+    if (WR) WR->take = take;
 #else
     (void)n_args;
     (void)a;
@@ -812,15 +1002,7 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_kept_obj, mod_frame_kept);
 // and with the colours of the blit that made it.
 static mp_obj_t mod_frame_settle(void)
 {
-#if MOY_WASM
-    if (RUN.wasm && WR) {
-        if (!WR->w.owed && WR->w.kept) {
-            WR->w.owed = WR->w.kept;
-            WR->w.kept = NULL;
-        }
-        moy_wasm_settle(&WR->w);
-    }
-#endif
+    moycore_wasm_settle();
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_settle_obj, mod_frame_settle);
@@ -829,11 +1011,15 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_settle_obj, mod_frame_settle);
 // the run's draw target, an owed or kept frame on the screen written in
 // first, as libmoy's own verbs settle it before they draw. NULL with no
 // compiled run, or inside one of par's items, which reach no import.
+int moy_wasm_tlane_here(void) __attribute__((weak));
 void *moycore_ui_target(void);
 void *moycore_ui_target(void)
 {
 #if MOYCORE_WASM
     if (!RUN.wasm || !WR || WR->w.items) return NULL;
+#if MOY_WASM
+    if (moy_wasm_tlane_here != NULL && moy_wasm_tlane_here()) return NULL;
+#endif
     moy_wasm *w = &WR->w;
 #if MOY_WASM
     if (w->target == w->screen && (w->owed || w->kept)) {
@@ -877,3 +1063,51 @@ static mp_obj_t mod_frame_presented(size_t n_args, const mp_obj_t *a)
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_frame_presented_obj, 0, 2,
                                     mod_frame_presented);
+
+// The same hand-off for the kernel's front (moycore_lua.h).
+void moycore_wasm_take(int take)
+{
+#if MOY_WASM
+    if (WR) WR->take = take & (TAKE_565 | TAKE_PALETTE);
+#else
+    (void)take;
+#endif
+}
+
+const uint8_t *moycore_wasm_owed(const uint16_t **lut, bool *kept)
+{
+    *lut = NULL;
+    *kept = false;
+#if MOY_WASM
+    if (!RUN.wasm || !WR) return NULL;
+    *kept = WR->w.kept != NULL;
+    const moy_pixel *l = NULL;
+    const uint8_t *px = moy_wasm_frame(&WR->w, &l);
+    *lut = (const uint16_t *)l;
+    return px;
+#else
+    return NULL;
+#endif
+}
+
+void moycore_wasm_presented(const uint8_t *kept)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) moy_wasm_presented(&WR->w, kept);
+#else
+    (void)kept;
+#endif
+}
+
+void moycore_wasm_settle(void)
+{
+#if MOY_WASM
+    if (RUN.wasm && WR) {
+        if (!WR->w.owed && WR->w.kept) {
+            WR->w.owed = WR->w.kept;
+            WR->w.kept = NULL;
+        }
+        moy_wasm_settle(&WR->w);
+    }
+#endif
+}

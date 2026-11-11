@@ -18,11 +18,18 @@
 #define MICROPY_PY_ESPNOW                (0)
 #define MOY_NET_LINK                     (1)
 // The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
-// starts and stops as the spine's lease asks, and Python never constructs the
+// starts and stops as the radio's lease asks, and Python never constructs the
 // port's network.WLAN on this board.
 #define MOY_NET_WIFI                     (1)
+// The mDNS name (`<name>.local`, Settings' Name) the console answers to while
+// its SSH server serves (runtime/system/ssh_service.py).
+#define MOY_NET_MDNS                     (1)
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
+
+// The TF card's power (native/moy_sd/moy_sd.h; its SDMMC slot 0 pins are
+// board.toml's `sdmmc0` row): LDO channel 4, which PMU_EXT_LDO_P1_0P2A owns.
+#define MOY_SD_MMC_LDO_REG                  (0x501151D8u)
 
 // exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
 // leave it off). A card over 32 GB ships exFAT, and without it a read-only
@@ -30,6 +37,12 @@
 // when a card is in it (device/card_store.py), and a big card is the common one.
 // FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
 #define MICROPY_FATFS_EXFAT                 (1)
+// FatFS takes the store's lock around every call on the card's volume, which
+// a program's own task works too (native/moy_store/moy_vol.h, THE STORE'S LOCK);
+// its long-name buffer is on the calling task's stack (tools/patch_fatfs_lfn.py).
+#define MICROPY_FATFS_REENTRANT             (1)
+#define MICROPY_FATFS_ENABLE_LFN            (2)
+#define MICROPY_FATFS_SYNC_T                uintptr_t
 
 #ifndef USB_SERIAL_JTAG_PACKET_SZ_BYTES
 #define USB_SERIAL_JTAG_PACKET_SZ_BYTES (64)
@@ -37,6 +50,11 @@
 
 // Enable UART REPL for modules that have an external USB-UART and don't use native USB.
 #define MICROPY_HW_ENABLE_UART_REPL     (1)
+
+// The high-speed OTG port is the `usb` device API's host (native/p4/moy_usb):
+// MicroPython's TinyUSB device, which mainline brings up there by default,
+// stays out of the image. The REPL is the CH343's UART either way.
+#define MICROPY_HW_ENABLE_USBDEV        (0)
 
 #define MICROPY_PY_MACHINE_I2S          (1)
 
@@ -80,6 +98,10 @@
 #define MOY_WASM_STACK_BYTES                (16 * 1024)
 #define MOY_WASM_STACK_PSRAM                (1)
 
+// A compiled cart's timed lanes (native/moy_wasm/moy_wasm_session.h): the
+// P4-only set of docs/os_2026-11.md section 5.
+#define MOY_WASM_TIMED_LANES                (1)
+
 // The engine's runtime pool, its fixed part (moy_wasm_footprint.h). A RISC-V
 // load holds more than the S3's for the same cart -- its text relocations --
 // and the peak follows the data segments and relocations, not the text:
@@ -90,15 +112,12 @@
 #define MOY_WASM_POOL_BYTES                 (320 * 1024)
 
 // The kernel's recovery floor (native/moy_kernel): moy_dsi's entry points, the
-// 1024x600 DPI framebuffer, and the BOOT button (GPIO35, active low) as its one
-// button.
+// 1024x600 DPI framebuffer. Its input is the GT911 touch below (MOY_INPUT_TOUCH_*).
 #define MOY_KERNEL_PANEL(fn)                moy_dsi_k##fn
 #define MOY_KERNEL_PANEL_W                  (1024)
 #define MOY_KERNEL_PANEL_H                  (600)
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (0)
-#define MOY_KERNEL_BUTTON_GPIO              (35)
-#define MOY_KERNEL_BUTTON_NAME              "BOOT"
 
 // The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GT911 touch
 // and the ES8311/ES7210 codecs.
@@ -115,6 +134,16 @@
 #define MOY_AUDIO_I2S_WS                    (10)
 #define MOY_AUDIO_I2S_DOUT                  (9)
 #define MOY_AUDIO_PA_GPIO                   (53)
+// 44.1 kHz stereo out (docs/os_2026-11/hardware.md section 3): the mix,
+// 22,050 Hz mono as on every board, upsampled 2x by the feeder, the streams
+// added after it. The ES8311 is a mono DAC that reads one slot, so the two
+// channels reach it as their mean.
+#define MOY_AUDIO_RATE                      (44100)
+#define MOY_AUDIO_STEREO                    (1)
+#define MOY_AUDIO_DAC_MONO                  (1)
+// The feeder on core 0, off the VM's: its stereo stage on core 1 cost a heavy
+// cart frames whether anything sounded or not (A/B'd 2026-11-05).
+#define MOY_AUDIO_CORE                      (0)
 
 // Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
 // central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
@@ -135,3 +164,11 @@
 // released layer buffers it keeps for the next run. A window's buffer is
 // never pooled (the desk re-mints at every size); a cart's worlds are.
 #define MOY_GLASS_POOL_BYTES                (2 * 1024 * 1024)
+
+// THE SHARES' ROWS (native/moy_play/moy_play.h): this image's line, named by
+// its board.toml OTA id (tests/test_board_toml.py holds the two together).
+#define MOY_SHARES_BOARD                    "p4"
+
+// The VM abort: the scheduler stops a background Python callback that never
+// returns while the shell goes on (native/moy_kernel/modmoy_guard.c).
+#define MICROPY_ENABLE_VM_ABORT             (1)

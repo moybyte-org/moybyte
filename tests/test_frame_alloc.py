@@ -26,13 +26,20 @@ collections free what the other thread holds: a segfault or a lost attribute
 mid-boot, with the driver reporting nothing. `tests/unix_mp.py` refuses a
 board-model binary that is not under a GIL.
 
-WHAT IT PINS. The frames allocate nothing -- with nothing held, and with a
-button held down -- over windows long enough to take in two PERF periods and a
+WHAT IT PINS. The frames allocate nothing -- with nothing held, with a
+button held down, with a background service due every frame (the
+kernel's service upcall, runtime/system/scheduler.py's tick and the wake),
+beside an asyncio service asleep in the shell's loop (runtime/system/aio.py),
+and with a notification's banner over the game (runtime/system/notifications.py) --
+over windows long enough to take in two PERF periods and a
 T-Deck diag tick (net of a thread's straddling block, see SLACK). The console boots in kid mode (PERF DIAG off,
 the default), where nothing periodic is formatted, printed or ringed (owner
 call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
 skill lists the idioms that allocate on a board while reading as free; a dozen
-of them were on this path at once.
+of them were on this path at once. The work the console runs on the wall
+clock (the battery's read, the task manager's accounting) is made due and
+measured on its own as well: how many of its periods a window spans depends
+on how fast the machine runs the window's frames.
 
 It then runs Notes, the app cart on the public UI API, with a note open: idle
 it paints nothing and allocates nothing, and typed into, one key every fourth
@@ -209,6 +216,18 @@ class Pin:
         return self._v
 
 
+class ADC:
+    """The battery's gauge (device/battery.py): a cell resting at 3.8 V
+    behind the T-Deck's 100k/100k divider."""
+    ATTN_11DB = 3
+
+    def __init__(self, pin, atten=None):
+        pass
+
+    def read_uv(self):
+        return 1900000
+
+
 class I2C:
     def __init__(self, *a, **k):
         pass
@@ -285,13 +304,13 @@ _real = [None]
 
 
 def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
-              vm):
+              vm, app):
     return _real[0].run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq,
-                              pmem, cfg, flags, True)
+                              pmem, cfg, flags, True, app)
 
 
 def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
-              interp=False, writable=None):
+              interp=False, writable=None, ring=0, app=None, layout=None):
     return None
 
 
@@ -371,7 +390,7 @@ def measure(loop):
     for _ in range(60):
         loop.step()
     info = {"title": title, "error": str(ws.cart_error),
-            "frame": getattr(ws, "cart_frame", None) is not None,
+            "frame": ws.run.cart_frame is not None,
             "top": ws.wm.top_kind()}
     # A first run unlocks an achievement, and its toast paints over the game
     # for a few seconds: an event, not the steady frame. Let it end.
@@ -394,6 +413,11 @@ def measure(loop):
     _frames(loop, 100, True)             # the press edge itself may allocate
     info["held"] = _frames(loop, @WINDOW_MS@, True, @MIN_FRAMES@)
     gc.enable()
+    background(loop, info)
+    asleep(loop, info)
+    music(loop, info)
+    banner(loop, info)
+    periodic(loop, info)
     notes(loop, info)
     code(loop, info)
     apps(loop, info)
@@ -402,7 +426,180 @@ def measure(loop):
     editor(loop, info)
     panes(loop, info)
     row_of_parts(loop, info)
+    status_panel(loop, info)
     print("RESULT " + json.dumps(info))
+
+
+BG = """
+import moybyte
+n = [0]
+def tick():
+    n[0] += 1
+moybyte.every(1, tick)
+"""
+
+
+def background(loop, info):
+    """The play frame again with a background service due every frame: the
+    kernel's service upcall, the scheduler's tick, the guard and the wake."""
+    import scheduler
+    pid = scheduler.SCHED.start({"id": "t.bg", "title": "bg", "src": BG,
+                                 "permissions": []})
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    info["bg"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    p = scheduler.SCHED.procs[pid]
+    info["bg_ran"] = p.ns["n"][0] if p.ns else -1
+    scheduler.SCHED.stop(pid)
+
+
+AIO = """
+import asyncio
+n = [0]
+async def main():
+    while True:
+        n[0] += 1
+        await asyncio.sleep(60)
+asyncio.run(main())
+"""
+
+
+def asleep(loop, info):
+    """The play frame again beside an asyncio service asleep in the shell's
+    loop (runtime/system/aio.py): the loop's wake looks at it every POLL_MS.
+    A pass that steps a task is the task's work and allocates the loop's own
+    (MicroPython's run_until_complete makes two tuples a pass)."""
+    import scheduler
+    pid = scheduler.SCHED.start({"id": "t.aio", "title": "aio", "src": AIO,
+                                 "permissions": []})
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    info["aio"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    p = scheduler.SCHED.procs[pid]
+    info["aio_ran"] = p.state
+    scheduler.SCHED.stop(pid)
+
+
+class _Face:
+    """The media face as a station playing on: this binary has no
+    moy_media, so the stamp is still and counts its reads."""
+
+    def __init__(self):
+        self.reads = [0]
+        self.n = {"state": "playing", "paused": False, "src": "http://x/s.mp3",
+                  "station": "", "title": "Dayvan Cowboy", "entry": 0,
+                  "entries": 1, "volume": 60, "at": 0, "len": 0}
+
+    def now(self):
+        return dict(self.n)
+
+    def stamp(self):
+        self.reads[0] += 1
+        return 12345
+
+    def play(self, src, label=None):
+        pass
+
+    def stop(self):
+        pass
+
+    def volume(self, v=None):
+        return 60
+
+
+def music(loop, info):
+    """The play frame again with Music's station playing on behind it: its
+    poll every POLL_MS finds the stamp still."""
+    import music_app
+    s = music_app.STREAM
+    f = _Face()
+    s.face = f
+    s.play("radio", "Groove Salad", "http://x/s.mp3")
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    r0 = f.reads[0]
+    info["music"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    info["music_polls"] = f.reads[0] - r0
+    gc.enable()
+    info["music_item"] = s.item is not None
+    s.stop()
+    s.face = None
+
+
+POSTER = """
+import moybyte
+def post():
+    moybyte.notify("Ana: are you coming?", "by the lake", "heart", (), 2)
+moybyte.after(0, post)
+moybyte.every(60000, lambda: None)
+"""
+
+
+def banner(loop, info):
+    """The play frame again under a notification's banner: a service posts
+    (outside the window), and the frames measured are the game's with the
+    banner over them."""
+    import scheduler
+    import notifications
+    pid = scheduler.SCHED.start({"id": "t.mesh", "title": "Mesh", "src": POSTER,
+                                 "permissions": ["notifications"]})
+    for _ in range(30):
+        loop.step()
+    info["banner_posted"] = notifications.NOTES.up() is not None
+    # Up for the whole window, however slowly a loaded machine paces its
+    # frames: a critical banner's ten seconds ran out under xdist.
+    notifications.NOTES.until = time.ticks_add(time.ticks_ms(), 600000)
+    gc.collect()
+    gc.disable()
+    info["banner"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    gc.enable()
+    info["banner_up"] = notifications.NOTES.up() is not None
+    info["banner_top"] = loop.ws.wm.top_kind()
+    scheduler.SCHED.stop(pid)
+    notifications.NOTES.reset()
+
+
+def periodic(loop, info):
+    """The console's work that runs on the wall clock, each made due and run
+    alone: the battery's read (device/battery.py, every REFRESH_MS) and the
+    task manager's accounting (Procs.account, every METER_MS) over a table
+    that holds the services stopped above. A window holds one of them or
+    none depending on how fast the machine runs its frames."""
+    from gc import mem_alloc
+    import scheduler
+    ws = loop.ws
+    b = ws.battery
+    pr = ws.procs
+    b._at = None
+    b.level()
+    gc.collect()
+    gc.disable()
+    out = []
+    for _ in range(3):
+        b._at = None
+        a = mem_alloc()
+        b.level()
+        out.append(mem_alloc() - a)
+    info["battery"] = out
+    out = []
+    for _ in range(3):
+        now = time.ticks_ms()
+        pr._acct_t = time.ticks_add(now, -60000)
+        a = mem_alloc()
+        pr.account(now)
+        out.append(mem_alloc() - a)
+    info["account"] = out
+    gc.enable()
+    info["battery_level"] = b.level()
+    info["account_rows"] = len(scheduler.SCHED.procs)
 
 
 def _typing(loop, ms, least=0):
@@ -412,7 +609,7 @@ def _typing(loop, ms, least=0):
     over `ms` and at least `least` frames."""
     from gc import mem_alloc
     keys = b"the quick brown fox jumps over the lazy dog "
-    fed = loop.ws.player._focus_editor
+    fed = loop.ws.run.player._focus_editor
     out = []
     n = 0
     t0 = time.ticks_ms()
@@ -436,17 +633,17 @@ def notes(loop, info):
     info["notes_title"] = ws.launch_named("Notes")
     for _ in range(30):
         loop.step()
-    ns = ws.player.ns
+    ns = ws.run.player.ns
     got, err = ns["files"].new_name("probe")
     ns["_open"](got)
     for _ in range(60):
         loop.step()
     info["notes_error"] = str(ws.cart_error)
-    info["notes_focused"] = ws.player._focus_editor is not None
+    info["notes_focused"] = ws.run.player._focus_editor is not None
     _typing(loop, 1500)                  # the first keys' edges, settled
     # ...and the idle save they owe (EditorHandle.AUTOSAVE_MS), an event of
     # its own: idle is what comes after it.
-    fed = ws.player._focus_editor
+    fed = ws.run.player._focus_editor
     t0 = time.ticks_ms()
     while fed.dirty() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
         loop.step()
@@ -455,14 +652,14 @@ def notes(loop, info):
         loop.step()
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
-    d1 = ws._frames_drawn
-    info["notes_text0"] = len(ws.player._focus_editor.text())
+    d1 = ws.frame_state.frames_drawn
+    info["notes_text0"] = len(ws.run.player._focus_editor.text())
     info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
-    info["notes_typing_drawn"] = ws._frames_drawn - d1
-    info["notes_text"] = len(ws.player._focus_editor.text())
+    info["notes_typing_drawn"] = ws.frame_state.frames_drawn - d1
+    info["notes_text"] = len(ws.run.player._focus_editor.text())
     gc.enable()
     notes_swiped(loop, info)
 
@@ -474,13 +671,13 @@ def notes_swiped(loop, info):
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
-    fed = ws.player._focus_editor
+    fed = ws.run.player._focus_editor
     fed.set_text("\n".join("Line %d of a long note, with words enough to wrap past the "
                            "edge of the paper" % i for i in range(120)))
     fed.save()
     for _ in range(60):
         loop.step()
-    x, y, w, h = ws.player.ns["sheet"]
+    x, y, w, h = ws.run.player.ns["sheet"]
     out = []
     for rep in range(4):
         y0, y1 = (y + h * 3 // 4, y + h // 4) if rep % 2 == 0 else (y + h // 4, y + h * 3 // 4)
@@ -488,11 +685,11 @@ def notes_swiped(loop, info):
         gc.collect()
         gc.disable()
         for _ in range(40):
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
             if rep:
-                out.append((mem_alloc() - m, ws._frames_drawn - d0,
+                out.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0,
                             ws.frame_change == "shift"))
         gc.enable()
     info["notes_swipe"] = out
@@ -711,10 +908,10 @@ def apps(loop, info):
             gc.disable()
             for _ in range(30):
                 cards[0] = 0
-                d0 = ws._frames_drawn
+                d0 = ws.frame_state.frames_drawn
                 m = mem_alloc()
                 loop.step()
-                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0],
+                drag.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0, cards[0],
                              ws.frame_change == "shift"))
             gc.enable()
         info[app + "_drag"] = drag
@@ -765,10 +962,10 @@ def editor(loop, info):
         for d in (1,) * 24 + (-1,) * 24:
             move(d)
             ws.mark_dirty()
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
-            walk.append((mem_alloc() - m, ws._frames_drawn - d0))
+            walk.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0))
         gc.enable()
         info[tab + "_walk"] = walk
         info[tab + "_page"] = drew[0]
@@ -779,10 +976,10 @@ def editor(loop, info):
             gc.collect()
             gc.disable()
             for _ in range(30):
-                d0 = ws._frames_drawn
+                d0 = ws.frame_state.frames_drawn
                 p0 = drew[0]
                 loop.step()
-                drag.append((drew[0] - p0, ws._frames_drawn - d0,
+                drag.append((drew[0] - p0, ws.frame_state.frames_drawn - d0,
                              ws.frame_change == "shift"))
             gc.enable()
         page.draw = draw
@@ -837,6 +1034,43 @@ def panes(loop, info):
     info["split_sizes"] = list(sizes)
     info["split_focus"] = o["focus"]
     info["part_at"] = at
+    ws.mark_dirty()
+    for _ in range(10):
+        loop.step()
+
+
+def status_panel(loop, info):
+    """A compiled program's status item's panel (status_items.Panel: a
+    text row, a button, a toggle and a slider), drawn on an app host of its
+    own as the handheld's control center and the desk's menu draw it, as
+    its process: what the draw allocates each frame, idle."""
+    from gc import mem_alloc
+    import ui
+    import ui_draw
+    from status_items import ITEMS, parse
+    ws = loop.ws
+    cv = ws.sys_canvas
+    th = ws.theme_colors
+    W = cv.w
+    host = ui_draw.AppHost()
+    h = ITEMS.show_compiled(77, "music", 0, 0)
+    it = ITEMS.slots[h - 1]
+    it.section.set(parse("text Now playing\tGroove Salad\nbutton skip Skip\n"
+                         "toggle shuffle Shuffle 1\nslider vol Volume 0 10 6"))
+    drawn = []
+    gc.collect()
+    gc.disable()
+    for k in range(16):
+        desk = k >= 8
+        host.begin(cv, th, (0, 0, W, 200), desk, "panel")
+        ui.at(0, 0, W, 200)
+        m = mem_alloc()
+        ITEMS.draw(it, desk)
+        drawn.append(mem_alloc() - m)
+        ui.end()
+    gc.enable()
+    it.remove()
+    info["status_panel"] = drawn
     ws.mark_dirty()
     for _ in range(10):
         loop.step()
@@ -899,8 +1133,8 @@ def achievements(loop, info):
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
-    earned = ws.ach.unlocked
-    ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
+    earned = ws.system.get(ws.ach.key, None)
+    ws.ach.seed({"first_open": 20261012, "first_run": 0, "konami": 0})
     ws.open_settings()
     # the rows page swiped, its pictures met once: what each frame of a drag
     # and its coast allocates, and which shifted
@@ -914,11 +1148,11 @@ def achievements(loop, info):
         gc.collect()
         gc.disable()
         for _ in range(30):
-            d0 = ws._frames_drawn
+            d0 = ws.frame_state.frames_drawn
             m = mem_alloc()
             loop.step()
             if rep:
-                drag.append((mem_alloc() - m, ws._frames_drawn - d0,
+                drag.append((mem_alloc() - m, ws.frame_state.frames_drawn - d0,
                              ws.frame_change == "shift"))
         gc.enable()
     info["settings_drag"] = drag
@@ -944,7 +1178,7 @@ def achievements(loop, info):
         gc.enable()
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
     ws._exit_settings()
-    ws.ach.unlocked = earned
+    ws.system.set(ws.ach.key, earned if earned is not None else {})
     for _ in range(30):
         loop.step()
 
@@ -957,9 +1191,9 @@ def home(loop, info):
     info["home_top"] = ws.wm.top_kind()
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     info["home_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
-    info["home_idle_drawn"] = ws._frames_drawn - d0
+    info["home_idle_drawn"] = ws.frame_state.frames_drawn - d0
     gc.enable()
     # A card right, then back, BAND_STEPS frames each (the move the home's
     # left and right keys make, `nav2d`): the carousel glides, its moving
@@ -968,21 +1202,21 @@ def home(loop, info):
     g = ws.launcher
     gc.collect()
     gc.disable()
-    d0 = ws._frames_drawn
+    d0 = ws.frame_state.frames_drawn
     band = []
     drew = []
     for k in range(@BAND_MOVES@):
         g.nav2d(1 if k % 2 == 0 else -1, 0)
         ws.mark_dirty()
         for _ in range(@BAND_STEPS@):
-            n = ws._frames_drawn
+            n = ws.frame_state.frames_drawn
             a = gc.mem_alloc()
             loop.step()
             band.append(gc.mem_alloc() - a)
-            drew.append(ws._frames_drawn != n)
+            drew.append(ws.frame_state.frames_drawn != n)
     info["home_band"] = band
     info["home_band_drew"] = drew
-    info["home_band_drawn"] = ws._frames_drawn - d0
+    info["home_band_drawn"] = ws.frame_state.frames_drawn - d0
     gc.enable()
     for _ in range(60):
         loop.step()
@@ -1005,7 +1239,7 @@ class _HeldClock:
     def __init__(self):
         self.lt = time.localtime()
 
-    def localtime(self):
+    def localtime(self, t=None):
         return self.lt
 
 
@@ -1024,7 +1258,7 @@ class _Loop:
         def _frame(dt):
             frame(FRAME_S)
         ws.frame = _frame
-        bar_layer.time = _HeldClock()
+        bar_layer._wc = _HeldClock()
         ws.bar_layer._clock_at = -1      # read the held clock from the next frame
 
 
@@ -1045,6 +1279,13 @@ def main():
         def _load(self, boot, store):
             carts, root = boot.load_carts(store, [], root=ROOT + "/carts",
                                           media="SD")
+            # The card's built-ins were staged by hand, not written by a
+            # seed: record them as the seed's roster, which is how a board's
+            # store knows its built-ins (moy_store_base.seeded).
+            import os
+            import moy_store_base
+            moy_store_base.seeded(root, [n for n in os.listdir(root)
+                                         if moy_store_base.builtin_ns(n)])
             self.on_sd = True                # the T-Deck's store is its card
             return carts, root, None
 
@@ -1266,6 +1507,31 @@ def test_a_play_frame_with_a_button_held_allocates_nothing(result):
     _assert_quiet(info["held"], "'up' held", text)
 
 
+def test_a_play_frame_with_a_background_service_allocates_nothing(result):
+    info, text = result
+    assert info["bg_ran"] > len(info["bg"]) // 2, text[-3000:]
+    _assert_quiet(info["bg"], "a background service", text)
+
+
+def test_a_play_frame_beside_an_asleep_asyncio_service_allocates_nothing(result):
+    info, text = result
+    assert info["aio_ran"] == "background", text[-3000:]
+    _assert_quiet(info["aio"], "an asyncio service asleep", text)
+
+
+def test_a_play_frame_with_music_playing_allocates_nothing(result):
+    info, text = result
+    assert info["music_item"] and info["music_polls"] > 2, text[-3000:]
+    _assert_quiet(info["music"], "music playing on", text)
+
+
+def test_a_play_frame_under_a_notification_banner_allocates_nothing(result):
+    info, text = result
+    assert info["banner_posted"] and info["banner_up"], text[-3000:]
+    assert info["banner_top"] == "desktop", text[-3000:]
+    _assert_quiet(info["banner"], "a notification's banner", text)
+
+
 def test_notes_is_the_run_being_measured(result):
     info, text = result
     assert info["notes_title"] == "Notes", text[-3000:]
@@ -1288,6 +1554,18 @@ def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
     keys = (len(info["notes_typing"]) + 3) // 4
     assert keys - 1 <= info["notes_typing_drawn"] <= keys + 1, (
         info["notes_typing_drawn"], keys)
+
+
+def test_the_console_s_clocked_work_allocates_nothing(result):
+    """The battery's read and the task manager's accounting run on the wall
+    clock, so whether a window takes one in depends on the machine's speed:
+    under xdist's load a window of MIN_FRAMES spans several. Each is pinned
+    here on its own, made due."""
+    info, text = result
+    assert info["battery_level"] == 55, info["battery_level"]   # 3.8 V resting
+    assert info["account_rows"] > 0, "no service row to account"
+    assert info["battery"] == [0, 0, 0], info["battery"]
+    assert info["account"] == [0, 0, 0], info["account"]
 
 
 def test_notes_idle_allocates_nothing(result):
@@ -1366,7 +1644,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
     try:
         drv.touch(400, 420)
         drv.frame(dt)
-        painted = ws._frames_drawn
+        painted = ws.frame_state.frames_drawn
         for i in range(12):
             drv.touch_drag(400, 400 - 20 * i)
             drv.frame(dt)
@@ -1374,7 +1652,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
         drv.frame(dt)
     finally:
         ui_draw.input_kind(was)
-    assert ws._frames_drawn - painted >= 10, "the drag painted too few frames to say"
+    assert ws.frame_state.frames_drawn - painted >= 10, "the drag painted too few frames to say"
     assert len(rebuilt) <= 1, "the Code layout was rebuilt %d times in a drag" % len(rebuilt)
 
 
@@ -1499,8 +1777,13 @@ from editors_code import CodeEditor
 from history_router import HistoryRouter
 
 
+class _Run:
+    project = None
+
+
 class _Ws:
     menu_view = "code"
+    run = _Run()
 
 
 class _Project:
@@ -1511,7 +1794,7 @@ class _Project:
 ws = _Ws()
 ws.editor = CodeEditor("\n".join("x = %d  # a line of a long cart" % i
                                  for i in range(1500)))
-ws.project = _Project()
+ws.run.project = _Project()
 router = HistoryRouter(ws, None)
 idle = router.bar_undo_bits()
 router.code_burst_open()
@@ -1585,6 +1868,17 @@ def test_a_row_of_parts_allocates_nothing(result):
     assert all(b <= ANSWER for b, moved in row if moved), info["row_of_parts"]
 
 
+def test_a_compiled_status_panel_draws_allocating_nothing(result):
+    """A compiled program's status item's panel (runtime/system/
+    status_items.py's Panel), the shell's drawer of the rows the program
+    described: past the first frame of each mode, a frame's draw on a
+    handheld card and in a desk menu allocates nothing."""
+    info, text = result
+    drawn = info.get("status_panel")
+    assert drawn and len(drawn) == 16, text[-3000:]
+    assert drawn[1:8] == [0] * 7 and drawn[9:] == [0] * 7, drawn
+
+
 def test_a_splits_divider_drag_allocates_nothing(result):
     """ui.split (docs/ui_api_2026-10.md section 5a): no frame of a
     divider's press, drag and let-go allocates, the drag lands in `sizes`,
@@ -1598,3 +1892,79 @@ def test_a_splits_divider_drag_allocates_nothing(result):
     assert any(act and got for _b, act, got in at), at
     assert all(b == 0 for b, _act, got in at if not got), at
     assert all(b <= ANSWER for b, _act, got in at if got), at
+
+
+MATCH_DRIVER = r'''
+import sys
+sys.path.insert(0, @RUNTIME@)
+import gc
+import players
+
+NAMES = ("left", "right", "up", "down", "a", "b", "x", "y")
+MASKS = ((5, 3), (5, 0), (0, 3), (17, 130))
+
+
+class M:
+    """The C session's face as LockstepSession reads it, values held in
+    advance: what is measured is the console's Python around the C."""
+    index = 0
+    seed = 1
+    session = 0
+    config = None
+    frame_seed = 12345
+    waiting = False
+    frame = 7
+
+    def __init__(self):
+        self.held = MASKS[0]
+
+    def world_due(self):
+        return False
+
+    def advance(self, mask, now):
+        return 1
+
+
+class Inp:
+    def held(self, name, player=None):
+        return name == "left" or name == "a"
+
+
+inp = Inp()
+m = M()
+s = players.LockstepSession(0, 1, None, NAMES, players.PlayerRouter(inp), _m=m)
+
+
+def tick(k):
+    m.held = MASKS[k & 3]
+    s.advance(players.mask_of(inp, NAMES, None), k)
+    s.waiting
+    s.frame
+
+
+for k in range(8):
+    tick(k)
+gc.collect()
+m0 = gc.mem_alloc()
+for k in range(200):
+    tick(k)
+spent = gc.mem_alloc() - m0
+r = s.local
+print("RESULT", spent, int(r.held("a")), int(r.pressed("left")))
+'''
+
+
+def test_a_match_tick_allocates_nothing_around_the_c(tmp_path):
+    """A lockstep tick's Python on a board (2026-11-07): the buttons' mask,
+    both player slots' held and press edge, the forwarded reads of the
+    session. On glass a Python Brick Siege match collected every 13 s on
+    the T-Deck and the Guition S3 (~200 ms each, a tick lost for every 33)
+    against once in 40-115 s solo: the tick allocated ~600 bytes, enumerate's
+    tuples, two new sets a slot and a copy of the instance's __dict__ at
+    every forwarded read."""
+    spent, held, pressed = _mp_result(
+        tmp_path, MATCH_DRIVER,
+        "A match tick's Python runs 30 times a second on both consoles; only "
+        "the board-model MicroPython measures what it allocates.")
+    assert (held, pressed) == (1, 1), "the slots read the last tick's masks"
+    assert spent == 0, "200 match ticks allocated %d bytes" % spent

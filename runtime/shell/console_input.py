@@ -29,7 +29,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
 
 
+# How long the console's key is held to open the task manager, ms.
+START_HOLD_MS = 500
+
+
 class InputVerbs:
+
+    _start_down = 0               # when the console's key went down; 0: not armed
 
     def handle_input(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
@@ -39,8 +45,12 @@ class InputVerbs:
         # content layer is at the bottom and always consumes.
         i = self.input
         # Whether a change was reported since the last painted frame, before
-        # this input's own (`Hold.opened`).
-        self._dirty_in = self._dirty or self._press_owed
+        # this input's own (`Hold.opened`). Stored only on a change: a store
+        # on the Workstation looks through all its classes for a property,
+        # about 60 us on a T-Deck.
+        d = self._dirty or self._press_owed
+        if d != self._dirty_in:
+            self._dirty_in = d
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
         # ran. A no-op (empty loop) with no extra controllers registered, so the
@@ -56,20 +66,38 @@ class InputVerbs:
         # A desk keyboard's letters are a GAME's buttons only while it owns
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
-        ck = self.wm.keys_to_cart() and not self.player._is_tool
+        kc = self.wm.keys_to_cart()
+        ck = kc and not self.run.player._is_tool
         if ck != self._cart_keys:
             self._cart_keys = ck
             i.cart_keys = ck
-        self._menu_keys()
+        if self._menu_over or self.pause.open or self.confirm.open or self.sysmenu.open:
+            self._menu_keys()
         # Super (the `start` button) is the console's from every surface, before
-        # any layer: the system menu, or the pause menu over a fullscreen game.
+        # any layer, and acts when it comes up: a tap is the system menu, or
+        # the pause menu over a fullscreen game (a T-Deck text field's Cancel);
+        # held START_HOLD_MS it opens the task manager, and its release is
+        # spent. Another key going down while it is held spends it too (a
+        # chord), as the host's Super does.
         if i.pressed("start"):
             desk = self._editor_desk
             if desk is not None and i.held("select") and desk.select_start():
                 return                  # the desk Editor's Select+Start: Play
-            if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
-                self.system_key()
+            self._start_down = _ticks_ms() or 1
             return
+        if self._start_down:
+            if i.held("start"):
+                if i.last_key or i.any_pressed():
+                    self._start_down = 0        # a chord: the key does nothing
+                elif _ticks_diff(_ticks_ms(), self._start_down) >= START_HOLD_MS:
+                    self._start_down = 0
+                    self.open_tasks()
+                    return
+            else:
+                self._start_down = 0
+                if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
+                    self.system_key()
+                return
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every
@@ -100,7 +128,7 @@ class InputVerbs:
             return
         if (pressed or i.last_key or getattr(i, "wheel_y", 0) or getattr(i, "wheel_x", 0)
                 or getattr(i, "pointer_buttons", 0)):
-            if not self.wm.keys_to_cart() and not self.wm.popover_takes_keys():
+            if not kc and not self.wm.popover_takes_keys():
                 if pressed or i.last_key or getattr(i, "wheel_y", 0) \
                         or getattr(i, "wheel_x", 0):
                     self._dirty = True
@@ -121,20 +149,31 @@ class InputVerbs:
                 and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
                 and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
-        if self._bar_keys(i, pressed):
+        bl = self.bar_layer
+        edge = _ui_draw.edge_take()
+        if ((bl.focus is not None or edge or (pressed and i.steps("up")))
+                and self._bar_keys(i, pressed, edge)):
             return
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
         # B and Esc on a registered app's fullscreen surface are the bar's
-        # back chevron (`app_back`): a page of the app, else out of it.
+        # back chevron (`app_back`): a page of the app, else out of it; on a
+        # running app's, while it has a view of its own open (`has_page`).
         _apps = (self._apps_by_id if pressed and not self.windowed_chrome
                  and (i.pressed("b") or i.pressed("stop")) else None)
         for layer in self.wm.visible_stack_rev():
             if _apps is not None and layer.id in _apps:
                 self.app_back(layer)
                 return
+            if (_apps is not None and layer.id == "desktop"
+                    and self.run.player.has_page()):
+                self.app_back(self.run.player)
+                return
             if layer.handle_input(i):
+                if getattr(layer, "leave_asked", False):
+                    layer.leave_asked = False         # the app's own way out (a page's button)
+                    self.app_back(layer)
                 return
 
     # (The "desktop" content layer routes the running cart's frame to
@@ -194,12 +233,13 @@ class InputVerbs:
             # WM's game_xy consumes; its memo checks the same key, but through
             # two calls and a property (~0.2 ms a loop on the S3).
             k = self._gp_key
-            gc = self.canvas
+            run = self.run
+            gc = run.canvas
             sc = self._sys_canvas
             if sc is None:
                 sc = gc
             if (gc is k[1] and sc is k[2]
-                    and getattr(self.input, "game_view", None) is k[0]
+                    and run.view is k[0]
                     and gc.w == k[3] and gc.h == k[4]
                     and sc.w == k[5] and sc.h == k[6]):
                 if self.wm.top_is_player():
@@ -217,11 +257,12 @@ class InputVerbs:
             else:
                 self._gp_idle = gp
                 k = self._gp_key
-                gc = self.canvas
+                run = self.run
+                gc = run.canvas
                 sc = self._sys_canvas
                 if sc is None:
                     sc = gc
-                k[0] = getattr(self.input, "game_view", None)
+                k[0] = run.view
                 k[1] = gc
                 k[2] = sc
                 k[3] = gc.w
@@ -310,7 +351,7 @@ class InputVerbs:
 
         On a backend that samples every frame (the host's mouse, the scripted
         remote gestures) every frame is fresh, so this is exactly
-        `self._frame_dt_ms`. Every touch driver holds + flags
+        `self.frame_state.frame_dt_ms`. Every touch driver holds + flags
         (native/moy_input/moy_touch.c).
 
         (A "third rule" -- charge stale stretches past a threshold as real dt
@@ -325,13 +366,14 @@ class InputVerbs:
         the AXS driver's per-controller bound. The rule meanwhile killed
         real flicks dead: a lift's 400ms silence crossed the threshold and
         decayed the velocity to zero before the release ever fired.)"""
-        dt = self._frame_dt_ms
+        fs = self.frame_state
+        dt = fs.frame_dt_ms
         if getattr(p, "fresh", True):
-            self._pointer_dt_ms = min(dt + self._stale_ptr_ms, 100.0)
-            self._stale_ptr_ms = 0.0
+            fs.pointer_dt_ms = min(dt + fs.stale_ptr_ms, 100.0)
+            fs.stale_ptr_ms = 0.0
         else:
-            self._pointer_dt_ms = None
-            self._stale_ptr_ms = min(self._stale_ptr_ms + dt, 100.0)
+            fs.pointer_dt_ms = None
+            fs.stale_ptr_ms = min(fs.stale_ptr_ms + dt, 100.0)
 
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
@@ -450,7 +492,7 @@ class InputVerbs:
         if not on:
             r.stop()
             return
-        r.tick(0.0 if self._coast_fed else self._frame_dt_ms)
+        r.tick(0.0 if self._coast_fed else self.frame_state.frame_dt_ms)
         self._coast_fed = False
         k = r.offset // self.COAST_UNIT - self._coast_got
         if k > 0:
@@ -527,6 +569,8 @@ class InputVerbs:
         a running cart, a surface with no bar."""
         if self.windowed_chrome:
             return None
+        if self.pause.open and self.pause.shows_bar():
+            return "pause"
         kind = self.wm.top_kind()
         if kind == "launcher":
             return "home"
@@ -536,21 +580,20 @@ class InputVerbs:
             return "app"
         return None
 
-    def _bar_keys(self, i, pressed):
+    def _bar_keys(self, i, pressed, edge):
         """The keys on the bar (`BarLayer.focus_keys`), and the ways onto
         it: up from a surface at its top (its `at_top`: a home's tab row
         below the bar, a list's first row; the handheld home's tabs walk on
         to it sideways, `BarLayer.focus_beside_tabs`) or an up that went past the top of a page drawn
-        last frame (`ui_draw.edge_take`). Neither under a menu, a popover or
-        a dialog, which hold the keys. True where the bar took them."""
+        last frame (`edge`, this frame's `ui_draw.edge_take`). Neither under a menu, a popover or
+        a dialog, which hold the keys. True where the bar took them.
+        `handle_input` calls it only while the bar holds the keys or one of
+        those ways is taken."""
         bl = self.bar_layer
-        edge = _ui_draw.edge_take()
-        if bl.focus is None and not edge and not (pressed and i.steps("up")):
-            return False
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
             return False
-        held = self._modal_layer() is not None or self._about
+        held = (self._modal_layer() is not None and not self._pause_bar()) or self._about
         if bl.focus is not None:
             took = False
             if pressed and not held:
@@ -567,8 +610,8 @@ class InputVerbs:
         where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
-        layer = self._content_layer()
-        if edge:
+        layer = self.pause if where == "pause" else self._content_layer()
+        if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
             steps = getattr(layer, "ball_steps", True)
             if not (steps() if callable(steps) else steps):
@@ -583,6 +626,12 @@ class InputVerbs:
         if where == "home":
             self.ach_ui.konami_watch(i)
         return True
+
+    def _pause_bar(self):
+        """The pause menu holds the keys and the bar shows over it, nothing
+        else over them: the bar's keys are the pause menu's to share."""
+        return (self.pause.open and self.pause.shows_bar() and not self.sysmenu.open
+                and not self.confirm.open)
 
     def bar_open_x(self, where):
         """Where on `where`'s bar the keys land (an x in its bar's
@@ -619,7 +668,9 @@ class InputVerbs:
         handheld, the keyboard is out of text mode, so the T-Deck's W A S D
         step its rows (moy_kbd.c, THE MOVE KEYS) and K is its back. The
         surface's text mode comes back as the menu closes, unless what the
-        menu did set a mode of its own (a row that opened another surface)."""
+        menu did set a mode of its own (a row that opened another surface).
+        `handle_input` calls it only while one of the three shows or
+        `_menu_over` says one did."""
         over = not self.windowed_chrome and self._modal_layer() is not None
         if over == self._menu_over:
             return
@@ -653,4 +704,4 @@ class InputVerbs:
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""
-        return self.player.focused_editor()
+        return self.run.player.focused_editor()

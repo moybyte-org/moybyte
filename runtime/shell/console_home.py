@@ -26,6 +26,9 @@ try:
     from project import Project
     from cart_manager import today_ymd as _today_ymd
     from chrome import NAMES
+    import scheduler as _scheduler
+    import cron as _cron
+    from achievements import is_proc as _is_ach_proc
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.home_icons import IconHome
     from runtime.home_carousel import Carousel
@@ -34,6 +37,33 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.project import Project
     from runtime.cart_manager import today_ymd as _today_ymd
     from runtime.chrome import NAMES
+    from runtime import scheduler as _scheduler
+    from runtime import cron as _cron
+    from runtime.achievements import is_proc as _is_ach_proc
+
+RESUME_MAX = 512        # the kernel's resume record's bytes (MOY_KERNEL_RESUME_MAX)
+
+
+def _with_cron(rec, json):
+    """Record `rec`'s text with what cron carries through the stop
+    (cron.held), as many at jobs as fit RESUME_MAX, soonest first; one
+    that does not fit is logged and left behind."""
+    held = _cron.CRON.held()
+    jobs = held["at"]
+    if held["due"] is None and not jobs:
+        return json.dumps(rec)
+    rec["cron"] = c = {"due": held["due"], "at": []}
+    text = json.dumps(rec)
+    for i, job in enumerate(jobs):
+        c["at"].append(job)
+        more = json.dumps(rec)
+        if len(more.encode()) > RESUME_MAX:
+            c["at"].pop()
+            print("Moybyte resume: %d at jobs do not fit the record" % (len(jobs) - i))
+            break
+        text = more
+    return text
+
 
 # The home's arrangements by the layout's `home` value
 # (docs/theme_and_shell_2026-11.md §8.10); an unknown one is the carousel.
@@ -124,12 +154,19 @@ class HomeVerbs:
     def resume_record(self):
         """The launcher's place as the resume record's text: the selection,
         the shelf's scroll, the search and the selected cart's folder (the
-        selection is found by it again, in case the shelf moved)."""
+        selection is found by it again, in case the shelf moved), the paths
+        of the Python services running, which the console after the stop
+        starts again (scheduler.pause), and the services on tasks of their
+        own, which run on through it and that console takes back
+        (`kept_rows`, scheduler.take_back)."""
         import json
         lw = self.launcher
         sel = lw.selected() or {}
-        return json.dumps({"tab": lw.tab, "sel": int(lw.sel),
-                           "search": self.search_query, "path": sel.get("path")})
+        rec = {"tab": lw.tab, "sel": int(lw.sel),
+               "search": self.search_query, "path": sel.get("path"),
+               "svc": _scheduler.SCHED.running_paths(),
+               "keep": _scheduler.SCHED.kept_rows()}
+        return _with_cron(rec, json)
 
     def resume_launcher(self, text):
         """Land the launcher where the resume record left it. A record that
@@ -153,6 +190,11 @@ class HomeVerbs:
                         break
             self.launcher.sel = max(0, min(sel, len(items) - 1))
             self._dirty = True
+            svc = rec.get("svc")
+            if isinstance(svc, list):
+                _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
+            _scheduler.SCHED.kept = _scheduler.kept_of(rec)
+            _cron.CRON.carry(rec.get("cron"))
         except (ValueError, TypeError, AttributeError) as exc:
             print("Moybyte resume: %s" % exc)
 
@@ -275,7 +317,7 @@ class HomeVerbs:
         self._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
-        # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
+        # torn down (self.editor/self.run.project etc.) -- a HOME-key tap reaches
         # here directly, bypassing any per-app CLOSE affordance, and must never
         # drop an edit still sitting in its idle-debounce window.
         #
@@ -292,7 +334,7 @@ class HomeVerbs:
             if _close is not None:
                 _close()
         _editor_app = getattr(self, "editor_app", None)
-        if _editor_app is not None and _editor_app.project is self.project:
+        if _editor_app is not None and _editor_app.project is self.run.project:
             _editor_app.save_current()
         if self._editing_icons:
             self.look.save_icons()     # the theme mode's tabs
@@ -304,7 +346,7 @@ class HomeVerbs:
         # to it, so neither it nor the run state it holds is torn down.
         keep = self.wm.is_parked("menu") and (
             self._editing_icons or (_editor_app is not None
-                                    and _editor_app.project is self.project))
+                                    and _editor_app.project is self.run.project))
         if not keep:
             self.editor = None
             self.paint = None
@@ -319,21 +361,21 @@ class HomeVerbs:
             self.cart = None
             # #66 fragmentation fix: ns = None alone kept the world alive through
             # player._update's closure; release clears the dict in place + collects.
-            self.player.release_world()
+            self.run.player.release_world()
             # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
             # the whole workspace. The fat cart re-slims NOW (not at the next open --
             # reopening the SAME cart otherwise stays fat forever, and its rehydrated
             # src/sprites strings are mid-heap pins that fragment every later run's
             # churn arena; reopen costs one SD read) and a FRESH empty Project
-            # replaces the old one's sheet/tilemap/images/pmem (ws.project is
+            # replaces the old one's sheet/tilemap/images/pmem (ws.run.project is
             # never-None by design, so surfaces keep their invariant). The EDITOR
             # return path (\_exit_to_caller -> menu) keeps both -- that's live
             # editing state, not a corpse.
-            _fat = getattr(self, "_fat_cart", None)
+            _fat = self.run.fat_cart
             if _fat is not None:
                 self.carts.reslim(_fat)
-                self._fat_cart = None
-            self.project = Project(self)
+                self.run.fat_cart = None
+            self.run.project = Project(self)
         self.cart_error = None
         self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         self.ach_ui._clock_taps = 0
@@ -360,6 +402,9 @@ class HomeVerbs:
                  then the installed app- and tool-typed carts no app claims;
           make   "+ New" first, then every editable cart (`_make_items`).
 
+        The first three hold only what runs here (`runs_here`): a cart
+        requiring a device this console lacks is no run tile.
+
         WALLPAPERS play in none of the first three: they are a backdrop chosen
         in Settings (Make lists them). THEMES are in none of the four: a theme
         is data the Appearance app picks (docs/history/theming_2026-09.md §9 phase 6
@@ -372,6 +417,7 @@ class HomeVerbs:
         if tab == "make":
             items = self._make_items(carts)
             return items if manage else items[1:]
+        carts = self.runs_here(carts)
         own = self.carts.is_own
         if tab == "apps":
             hidden = getattr(self.wm, "HIDDEN_APPS", ())
@@ -387,7 +433,7 @@ class HomeVerbs:
             return out
         out = []
         for c in carts:
-            if c.get("type") in ("wallpaper", "theme") or self.is_system_app(c):
+            if c.get("type") in ("wallpaper", "theme", "service") or self.is_system_app(c):
                 continue
             if tab == "mine":
                 if own(c):
@@ -397,6 +443,14 @@ class HomeVerbs:
         if tab == "mine" and not out and manage:
             out.append(new_tile())
         return out
+
+    def runs_here(self, carts):
+        """`carts` less those whose manifest requires a device this console
+        lacks, the launch's refusal (`app_perms.lacking`): the run tiles
+        (Games, Mine, Apps, the desk column) leave them out, and Files and
+        Make still list them."""
+        consent = getattr(self, "consent", None)
+        return consent.runnable(carts) if consent is not None else list(carts)
 
     def unclaimed_apps(self, carts):
         """The installed app- and tool-typed carts of `carts` that no
@@ -587,8 +641,9 @@ class HomeVerbs:
         (the same is_app() check the desk icons and launcher dispatch use), so a
         kid-made cart of type "app" -- which no shell app claims -- still shows.
         Note this departs from shell_ux_v1's "everything is editable"; the spec
-        line is right again once #181 lands."""
-        carts = [c for c in carts if c.get("type") != "theme"]
+        line is right again once #181 lands. The achievements process's cart
+        is the console's own as well (docs/os_2026-11/processes.md §8)."""
+        carts = [c for c in carts if c.get("type") != "theme" and not _is_ach_proc(c)]
         apps = getattr(self, "_apps", ())
         if apps:
             keep = []

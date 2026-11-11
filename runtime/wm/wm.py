@@ -37,10 +37,14 @@ try:
     from widgets import _Blit, _ticks_ms, _ticks_diff
     from moy_spine import BackStack, STAYED
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from notifications import NOTES as _NOTES
+    from devices import MIC as _MIC
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.devices import MIC as _MIC
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
     from runtime.moy_spine import BackStack, STAYED
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
+    from runtime.notifications import NOTES as _NOTES
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -284,9 +288,9 @@ class FullscreenStackWM:
         and the chrome around it is unchanged by cart-bound keys). On this
         fullscreen tier a running cart on top owns ALL input; the crash panel
         (cart_error) hands keys back to the system chrome."""
-        ws = self.ws
-        return (self.stack.top() == "desktop" and ws.cart_error is None
-                and (ws._update is not None or ws._draw is not None))
+        pl = self.ws.run.player
+        return (self.stack.top() == "desktop" and pl.cart_error is None
+                and (pl._update is not None or pl._draw is not None))
 
     def goto(self, kind):
         """Navigate the back-stack so `kind` is on top -- the mechanism behind the
@@ -297,6 +301,12 @@ class FullscreenStackWM:
         stack an honest launcher-root -> ... -> top shape."""
         if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
             self._on_nav()
+
+    def minimise_kind(self, kind):
+        """Hide process `kind`'s window to its chip, the focus leaving it:
+        True when this WM did (a desk's window), False where it has none
+        (every fullscreen tier)."""
+        return False
 
     def bring_forward(self, kind):
         """Show the window process `kind` already has, in front, with no
@@ -340,19 +350,14 @@ class FullscreenStackWM:
         transient overlays are gated ON this frame. Together with the content-layer
         identity + content_gen it is the memo key: while it is unchanged the cached
         stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
-        alloc), so computing it every access is free on the hot path."""
+        alloc). It runs twice a frame on a game's cold caches, so a frame
+        with no banner armed reads flags only: no clock, no call."""
         ws = self.ws
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
         if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
-        # The unlock banner is a flat kernel deadline the unlock pushes at
-        # event time (#209 landing B) -- a plain int read, no call into ach
-        # from the hot path.
-        now = _ticks_ms()
-        if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
-            sig |= 32
         if ws.sysmenu.open:
             sig |= 64
         if ws.pause.open:
@@ -361,8 +366,20 @@ class FullscreenStackWM:
             sig |= 1024
         if ws._about:
             sig |= 128
-        if ws.notice_active():
-            sig |= 256
+        if _MIC[0]:
+            sig |= 4096                 # the recording indicator, while the mic is held
+        # The banners up for a span of the clock: the unlock's is a flat
+        # kernel deadline the unlock pushes at event time (#209 landing B) --
+        # a plain int read, no call into ach from the hot path.
+        tu = ws._toast_until
+        if tu or ws._notice is not None or _NOTES.banner is not None:
+            now = _ticks_ms()
+            if tu and _ticks_diff(tu, now) > 0:
+                sig |= 32
+            if ws.notice_active(now):
+                sig |= 256
+            if _NOTES.banner is not None and _NOTES.up(now) is not None:
+                sig |= 2048
         return sig
 
     def _ensure_stack(self):
@@ -387,7 +404,7 @@ class FullscreenStackWM:
         self._rebuild(self.ws._content_layer(), sig)
 
     def _overlay_layers(self, sig):
-        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..1024,
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..4096,
         cursor appended last so it sits above everything). One copy: a new
         overlay layer (like #53's notice banner) registers here ONCE and
         reaches the windowed WM's stack too -- the two _rebuild bodies used to
@@ -407,6 +424,10 @@ class FullscreenStackWM:
             overlays.append(ws._confirm_layer)
         if sig & 256:
             overlays.append(ws._notice_layer)
+        if sig & 2048:
+            overlays.append(ws._note_layer)
+        if sig & 4096:
+            overlays.append(ws._rec_layer)
         overlays.append(ws._cursor_layer)
         return overlays
 
@@ -465,7 +486,7 @@ class FullscreenStackWM:
         """The composited game viewport as (ox, oy, scale) -- the top-left of the
         320x240 game canvas inside the system canvas, and its integer scale. (0, 0,
         1) when the two canvases are the same object (degradation)."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         if sc is gc:
             return _VIEWPORT_IDENTITY
@@ -490,6 +511,14 @@ class FullscreenStackWM:
         d[3] = sc.h
         self._vp_val = (ox, oy, scale)
         return self._vp_val
+
+    def play_viewport(self):
+        """Console mode's fullscreen game rect, (ox, oy, scale): what a run
+        the kernel drives in front composes (native/moy_play's front). None
+        for a cart-declared view, which the console composes."""
+        if self._view_src() is not None:
+            return None
+        return FullscreenStackWM.viewport(self)
 
     def game_xy(self, px, py):
         """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
@@ -528,12 +557,12 @@ class FullscreenStackWM:
         Memoized on the declared view's identity + both canvases + their dims
         (see __init__): the SAME tuple comes back until one of those moves."""
         ws = self.ws
-        return self._view_src_for(ws.canvas, ws.sys_canvas)
+        return self._view_src_for(ws.run.canvas, ws.sys_canvas)
 
     def _view_src_for(self, gc, sc):
         """_view_src for canvases the caller already holds (one attribute walk
         per frame instead of one per asker)."""
-        gv = getattr(self.ws.input, "game_view", None)
+        gv = self.ws.run.view
         if not gv:
             return None                 # no declared view: nothing to crop, ever
         d = self._vs_dims
@@ -600,7 +629,7 @@ class FullscreenStackWM:
         the Player resets both after every cart frame."""
         ws = self.ws
         sc = ws.sys_canvas
-        gc = ws.canvas
+        gc = ws.run.canvas
         if sc is not gc:
             return                      # the composite will fill it, as it always has
         view = self._view_src_for(gc, sc)
@@ -622,7 +651,7 @@ class FullscreenStackWM:
         canvas: the system canvas snapshots it for its flush, black bezels and
         integer scale included, and the canvas is never written. True when it
         took the frame; False leaves the caller to settle it and composite."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         if sc is not self._pf_for:
             self._pf_for = sc
@@ -644,7 +673,7 @@ class FullscreenStackWM:
         degradation case: 320x240 system canvas == game canvas, pixel-identical to
         today). Index-only (host == device): reads game indices, writes them scaled
         into the system buffer, so no palette resolve is needed."""
-        gc = self.ws.canvas
+        gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         # #63: complete any sprites still queued in the game canvas's auto-batch before
         # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-

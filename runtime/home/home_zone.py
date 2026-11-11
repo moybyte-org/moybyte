@@ -75,10 +75,21 @@ class HomeZone:
         h = min(rect[3] + 2 * cs, h)
         y = rect[1] + (rect[3] - h) // 2
         x = rect[0] + 2 * cs
+        end = rect[0] + rect[2]
+        n = len(HOME_TABS)
+        if n > 1:
+            # the gaps shrink, evenly, before a tab is dropped: down to the
+            # labels' pads overlapping by all but a unit, whose plates never
+            # show together (only the open tab's does)
+            need = x + 2 * pad * n + (n - 1) * gap
+            for _tid, label in HOME_TABS:
+                need += _ui_draw.print_width(label, sc)
+            if need > end:
+                gap = max(gap - (need - end + n - 2) // (n - 1), 2 * cs - 2 * pad)
         out = []
         for tid, label in HOME_TABS:
             w = _ui_draw.print_width(label, sc) + 2 * pad
-            if x + w > rect[0] + rect[2]:
+            if x + w > end:
                 break
             out.append((tid, label, (x, y, w, h)))
             x += w + gap
@@ -101,10 +112,9 @@ class HomeZone:
     def _draw_zone_tabs(self, cv, rect):
         """The tabs in the bar (step 17): the active one under the current
         mark, the rest in the dim
-        chrome ink; while the keys are the tab row's, the focus pill on the
-        one they are on (`focused_tab`), its plate under the label and its
-        ring round the plate, so the focused tab and the open one read
-        apart."""
+        chrome ink; while the keys are the tab row's, the focus ring round
+        the one they are on (`focused_tab`), so the focused tab and the open
+        one read apart."""
         ws = self.ws
         th = ws.theme_colors
         fs = ws.layout.fs
@@ -117,10 +127,8 @@ class HomeZone:
             if on:
                 got = _ui_draw.current(cv, th, r, r=5 * fs, fs=fs)
                 ink = th["chrome_ink"] if got is None else got
-            if tid == at:
-                _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, pill=True)
-                if not on:
-                    ink = th["chrome_ink"]
+            if tid == at and not on:
+                ink = th["chrome_ink"]
             if sc == fs:
                 # the line centred on the plate, as the bar's clock is on the bar,
                 # so the two share a baseline
@@ -129,7 +137,11 @@ class HomeZone:
                 lh = _ui_draw.font()[2] * sc
                 cv.print_scaled(label, r[0] + pad, r[1] + (r[3] - lh) // 2, ink, sc)
             if tid == at:
-                _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, after=True, pill=True)
+                # focused: the ring, two units out from the tab (selected is
+                # the current mark's fill)
+                g = 2 * u
+                _ui_draw.focus(cv, th, (r[0] - 2 * g, r[1] - 2 * g, r[2] + 4 * g, r[3] + 4 * g),
+                               r=5 * fs + 2 * g, fs=u, after=True, pill=True)
 
     def _zone_action_rects(self, rect):
         """{verb: rect} of the hint strip's pairs, where the verbs are

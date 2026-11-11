@@ -138,10 +138,12 @@ def test_the_native_shelf_is_the_twins_over_every_cart(tmp_path):
 
 _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
-         "icon", "edit", "permissions", "input", "canvas", "assets", "id",
-         "config", "sources", "description", "genre", "tags", "glass", "pictures")
-_VENDOR = ("type", "graduated", "edit", "permissions", "assets", "config", "glass",
-           "pictures")
+         "icon", "edit", "permissions", "required", "input", "canvas", "assets", "id",
+         "config", "sources", "description", "genre", "tags", "glass", "pictures",
+         "audio_ring", "handles")
+_VENDOR = ("type", "graduated", "edit", "permissions", "required", "handles", "assets", "config",
+           "glass",
+           "pictures", "audio_ring")
 
 
 _LISTING = json.load(open(os.path.join(ROOT, "tests", "listing_vectors",
@@ -285,8 +287,40 @@ def _folders(root, rng, n):
         elif rng.random() < 0.1:
             with open(os.path.join(d, "scenes"), "w") as f:
                 f.write("a file, not a folder")
+    for name in ("moybyte.x.moy", "moybyte.y.moy", "mine.moy"):
+        os.makedirs(os.path.join(root, name))      # a built-in's id names only its folder
+        with open(os.path.join(root, name, "manifest.json"), "w") as f:
+            f.write(json.dumps({"title": "X", "id": "moybyte.x"}))
+    # any id names a cart in another folder only where no folder is named for
+    # it: "ann.pong" is its folder's, "ann.solo" has no folder of its own
+    for name, cid in (("ann.pong.moy", "ann.pong"), ("copy.moy", "ann.pong"),
+                      ("pong2.moy", "ann.pong"), ("solo.moy", "ann.solo"),
+                      ("ann.file.moy", "ann.loose")):
+        os.makedirs(os.path.join(root, name))
+        with open(os.path.join(root, name, "manifest.json"), "w") as f:
+            f.write(json.dumps({"title": name, "id": cid}))
+        with open(os.path.join(root, name, "main.py"), "w") as f:
+            f.write("def _draw():\n    pass\n")
+    with open(os.path.join(root, "ann.loose.moy"), "w") as f:
+        f.write("a file, not a folder: it owns no id")
     with open(os.path.join(root, "loose.moy"), "w") as f:
         f.write("an archive")
+
+
+def test_an_id_names_a_cart_only_where_no_folder_is_named_for_it(tmp_path):
+    """The folder `<id>.moy` owns its id: a cart copied into another folder
+    claiming it takes its own folder's name, while an id no folder is named
+    for (a file of that name is no folder) stays the manifest's. The native
+    shelf reads the same ids, scanned and read alone (the twin test below)."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    _folders(root, random.Random(1), 4)
+    want = {"ann.pong.moy": "ann.pong", "copy.moy": "copy", "pong2.moy": "pong2",
+            "solo.moy": "ann.solo", "ann.file.moy": "ann.loose"}
+    shelf = dict((c["path"].rsplit("/", 1)[1], c["id"]) for c in moy_carts.scan(root))
+    assert dict((k, shelf[k]) for k in want) == want
+    one = dict((k, moy_carts.load(os.path.join(root, k))["id"]) for k in want)
+    assert one == want
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
@@ -575,6 +609,48 @@ def test_the_native_seed_carries_a_picture_carts_pictures(tmp_path):
     assert man["moybyte"]["pictures"] == pictures
 
 
+def test_the_native_seed_carries_an_apps_service_entry(tmp_path):
+    """An app with its own service (docs/app_api_v1.md section 7): the
+    manifest keeps `entries` and the entry's file is written beside main,
+    by the C and the twin alike, and the seeded cart's service reads."""
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_device_carts
+    from runtime import moy_carts, scheduler
+    src = tmp_path / "src" / "moybyte.both.moy"
+    src.mkdir(parents=True)
+    (src / "manifest.json").write_text(json.dumps({
+        "format": "moybyte-cart-v1", "title": "Both", "id": "moybyte.both",
+        "runtime": "python", "main": "main.py", "version": 1,
+        "moybyte": {"type": "app", "system": True, "order": 1, "edit": [],
+                    "permissions": ["prefs"], "entries": {"service": "service.lua"}}}))
+    (src / "main.py").write_text("def _draw():\n    cls(1)\n")
+    (src / "service.lua").write_text("function moy_start() end\n")
+    packed = gen_device_carts.build_packed(str(tmp_path / "src"))
+    with open(str(tmp_path / "roster.json"), "w") as f:
+        json.dump([[t, v] for t, v, _ in packed], f)
+    for i, (_t, _v, blob) in enumerate(packed):
+        with open(str(tmp_path / ("blob%d" % i)), "wb") as f:
+            f.write(blob)
+    vm_root, cp_root = str(tmp_path / "vm" / "carts"), str(tmp_path / "cp" / "carts")
+    assert _seed_step([_vm()], tmp_path, vm_root, "cold")[1:] \
+        == _seed_step([sys.executable], tmp_path, cp_root, "cold")[1:]
+    a, b = _tree(vm_root), _tree(cp_root)
+    assert a == b
+    man = json.loads(a[os.path.join("moybyte.both.moy", "manifest.json")])
+    assert man["moybyte"]["entries"] == {"service": "service.lua"}
+    assert a[os.path.join("moybyte.both.moy", "service.lua")] == b"function moy_start() end\n"
+    cart = moy_carts.load(os.path.join(cp_root, "moybyte.both.moy"))
+    run = scheduler.as_service(cart)
+    assert run["runtime"] == "lua" and run["src"] == "function moy_start() end\n"
+
+
+def test_a_seed_entry_that_is_a_module_is_refused(tmp_path):
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_device_carts
+    with pytest.raises(ValueError):
+        gen_device_carts._entry_src(str(tmp_path), {"service": "service.wasm"})
+
+
 # -- the journal (slice 6) -------------------------------------------------------------------
 
 JOURNAL_DRIVER = r'''
@@ -677,21 +753,6 @@ print("import", moy_carts.import_archive(D + "/browser.zip", D + "/shelf/carts")
 print("import", moy_carts.import_archive(D + "/browser.zip", D + "/shelf/carts")[len(D):])
 '''
 
-NODE_DRIVER = r'''
-import * as store from "@MJS@";
-import fs from "fs";
-const mode = process.argv[2];
-if (mode === "zip") {
-    const files = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).map(
-        (f) => ({ name: f[0], data: Buffer.from(f[1], "base64") }));
-    fs.writeFileSync(process.argv[4], store.zipStore(files));
-} else {
-    const entries = await store.unzip(new Uint8Array(fs.readFileSync(process.argv[3])));
-    console.log(JSON.stringify(entries.map((e) => [e.name, Buffer.from(e.data).toString("base64")])));
-}
-'''
-
-
 def _cart_tree(d):
     files = {
         "manifest.json": b'{"title": "Hop", "main": "main.py"}',
@@ -709,16 +770,14 @@ def _cart_tree(d):
 
 
 def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
-    """moy_pack against firmware/web_runner/moy_store.mjs: the C archive is the
-    twin's byte for byte and unzips in the browser's reader to the cart less
-    what the wire skips; the browser's zipStore, a deflated zip and one with no
+    """moy_pack, which the browser's export and import run in its VM: the C
+    archive is the twin's byte for byte and a zip reader reads it as the cart
+    less what the wire skips; a stored zip, a deflated one and one with no
     top folder unpack in the C to the same files; adopt and the import put a
-    cart on the shelf under the browser's naming rule."""
-    import base64
+    cart on the shelf under the store's import rule (moy_pack.import_base)."""
     import shutil
     import zipfile
-    if shutil.which("node") is None:
-        pytest.skip("node not installed")
+    from runtime import moy_carts
     exe = _vm()
     src = str(tmp_path / "src" / "hop.moy")
     files = _cart_tree(src)
@@ -726,14 +785,7 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
             if not (k.endswith((".bak", ".tmp")) or k.startswith(("journal", "thumbs")))}
     with_history = dict(kept, **{"hop.moy/" + k: v for k, v in files.items()
                                  if k.startswith("journal")})
-    lst = str(tmp_path / "files.json")
-    with open(lst, "w") as f:
-        json.dump([[k, base64.b64encode(v).decode()] for k, v in sorted(kept.items())], f)
-    mjs = str(tmp_path / "drv.mjs")
-    with open(mjs, "w") as f:
-        f.write(NODE_DRIVER.replace("@MJS@", os.path.join(
-            ROOT, "firmware", "web_runner", "moy_store.mjs")))
-    subprocess.run(["node", mjs, "zip", lst, str(tmp_path / "browser.zip")], check=True)
+    moy_carts.pack(src, str(tmp_path / "browser.zip"))
     with zipfile.ZipFile(str(tmp_path / "deflated.zip"), "w", zipfile.ZIP_DEFLATED) as z:
         for k, v in kept.items():
             z.writestr(k, v)
@@ -758,12 +810,67 @@ def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
             a = f.read()
         with open(str(tmp_path / (t.replace("vm", "cp") + ".moy")), "rb") as f:
             assert a == f.read()
-        got = json.loads(subprocess.run(["node", mjs, "unzip", str(tmp_path / (t + ".moy"))],
-                                        capture_output=True, text=True, check=True).stdout)
-        assert {k: base64.b64decode(v) for k, v in got} == want
+        with zipfile.ZipFile(str(tmp_path / (t + ".moy"))) as z:
+            assert {i.filename: z.read(i) for i in z.infolist()} == want
     for name in ("browser", "deflated", "flat"):
         for t in ("vm", "cp"):
             assert _tree(str(tmp_path / ("%s-%s" % (t, name)))) == {
                 k[len("hop.moy/"):]: v for k, v in kept.items()}
-    assert "import /shelf/carts/hop.moy" in outs["vm"]
-    assert "import /shelf/carts/hop_2.moy" in outs["vm"]
+    assert "import /shelf/carts/local.hop.moy" in outs["vm"]
+    assert "import /shelf/carts/local.hop_2.moy" in outs["vm"]
+
+
+BIG_DRIVER = r'''
+import sys
+sys.path.insert(0, @RUNTIME@)
+import moy_carts
+D = @DIR@
+print("packed", moy_carts.pack(D + "/src/doom.moy", D + "/@TAG@.moy"))
+for name in ("@TAG@.moy", "deflated.zip"):
+    n, top = moy_carts.unpack(D + "/" + name, D + "/@TAG@-" + name.replace(".", "-"))
+    print("unpacked", name, n, repr(top))
+try:
+    import moy_store
+    print("peak", moy_store.mem()[1])
+except ImportError:
+    pass
+'''
+
+
+def test_an_archive_member_past_the_seed_cap_travels_streamed(tmp_path):
+    """A compiled cart's module or game data is megabytes: the archive a
+    browser exports it in and imports it back from carries a member over
+    4 MiB (MOY_SEED_MAX, what a SEED may inflate to), stored and deflated,
+    and the C reads and writes each a chunk at a time -- its peak store
+    memory a fraction of the member."""
+    import random
+    import zipfile
+    exe = _vm()
+    rng = random.Random(7)
+    big = bytes(rng.getrandbits(8) for _ in range(1 << 16)) * 96     # 6 MiB
+    src = tmp_path / "src" / "doom.moy"
+    src.mkdir(parents=True)
+    (src / "manifest.json").write_bytes(b'{"title": "Doom"}')
+    (src / "doom1.wad").write_bytes(big)
+    with zipfile.ZipFile(str(tmp_path / "deflated.zip"), "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("doom.moy/manifest.json", b'{"title": "Doom"}')
+        z.writestr("doom.moy/doom1.wad", big)
+    outs = {}
+    for tag, cmd in (("vm", [exe, "-X", "heapsize=4M"]), ("cp", [sys.executable])):
+        script = (BIG_DRIVER.replace("@RUNTIME@", repr(runtime_tree()))
+                  .replace("@DIR@", repr(str(tmp_path))).replace("@TAG@", tag))
+        out = subprocess.run(cmd + ["-c", script], capture_output=True, text=True,
+                             timeout=300)
+        assert out.returncode == 0, out.stdout + out.stderr
+        outs[tag] = out.stdout.splitlines()
+    peak = [ln for ln in outs["vm"] if ln.startswith("peak ")]
+    for tag in ("vm", "cp"):
+        assert outs[tag][:3] == ["packed 2", "unpacked %s.moy 2 'doom.moy'" % tag,
+                                 "unpacked deflated.zip 2 'doom.moy'"], outs[tag]
+    assert (tmp_path / "vm.moy").read_bytes() == (tmp_path / "cp.moy").read_bytes()
+    for tag in ("vm", "cp"):
+        for name in (tag + "-moy", "deflated-zip"):
+            d = tmp_path / ("%s-%s" % (tag, name))
+            assert (d / "doom1.wad").read_bytes() == big, (tag, name)
+            assert (d / "manifest.json").read_bytes() == b'{"title": "Doom"}'
+    assert peak and int(peak[0].split()[1]) < (256 << 10), peak

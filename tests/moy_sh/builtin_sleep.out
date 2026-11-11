@@ -1,0 +1,6 @@
+$ sleep 0.05; echo slept=$?
+slept=0
+$ sleep x; echo bad=$?
+sleep: x: not a number
+bad=1
+[exit 0]

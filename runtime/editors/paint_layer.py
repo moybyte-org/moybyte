@@ -6,7 +6,7 @@
 """The sprite PAINT editor (#4/#30), extracted from Workstation
 (runtime/shell/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
-It edits the cart's SpriteSheet (ws.project.sheet) through `ws.paint` (a PaintEditor).
+It edits the cart's SpriteSheet (ws.run.project.sheet) through `ws.paint` (a PaintEditor).
 SAVE is GONE (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the
 editor -- CLOSE hard-commits the sheet on its way out (ws._leave_menu, which is
 EditorApp.leave -- PLAY, a hard-commit trigger now), and the idle-typing autosave-commit +
@@ -15,7 +15,7 @@ swap, going home) commit it too. A theme's icons are the Editor's theme mode's
 (runtime/editors/theme_editor.py).
 
 Boundary (the anti-spaghetti line, per the doc): the SHEET + the current-editor handle
-+ the persistence verbs stay on Workstation -- `ws.project.sheet` (single source of the
++ the persistence verbs stay on Workstation -- `ws.run.project.sheet` (single source of the
 pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like ws.editor),
 `ws.paint_status` (status), and `ws.save_sprites` / `ws.share_tile_get` /
 `ws.share_tile_put` (cart state the device + tests pin). PaintLayer READS those and
@@ -347,7 +347,7 @@ class PaintLayer:
     gone -- the panel always covered every pixel of it anyway). draw = the paint UI
     at the PaintLayout geometry; handle_pointer routes taps to the grid/palette/
     buttons in SYSTEM coords; keyboard is no-op (paint is pointer-driven). Reads
-    ws.paint / ws.project.sheet and dispatches SAVE/GET/PUT/
+    ws.paint / ws.run.project.sheet and dispatches SAVE/GET/PUT/
     CLOSE to Workstation."""
 
     id = "paint"
@@ -704,7 +704,7 @@ class PaintLayer:
             ws.share_tile_put()              # save the tile to the shared sheet
         elif (getattr(lay, "files_btn", None) is not None
               and _in(px, py, lay.files_btn)):
-            ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
+            ws.send_sprites_to_files()       # export the sheet to files/Pictures/Sprites/ (#108)
 
     # -- tool row (#90) ------------------------------------------------------
 
@@ -825,7 +825,7 @@ class PaintLayer:
         self._sync_layout()
         pe = ws.paint
         # Edit the editor's OWN sheet (the cart's sprites).
-        sheet = pe.sheet if pe is not None else ws.project.sheet
+        sheet = pe.sheet if pe is not None else ws.run.project.sheet
         hold = self._hold
         if self._pop == "pickers" and pe is not None:
             # the page under the pickers left or put back as it was held,
@@ -970,10 +970,10 @@ class PaintLayer:
             x, y = self._cursor_xy(pe, gx0, gy0, cell)
             box = (x - 1, y - 1, cell + 1, cell + 1)
             cv.rectb(box[0], box[1], box[2], box[3], keyline)
-            for o in range(1, _ui_draw.mark_reach("part") + 2):
+            for o in range(1, _ui_draw.mark_reach("cell") + 2):
                 cv.rectb(box[0] - o, box[1] - o, box[2] + 2 * o, box[3] + 2 * o,
                          th["surface"])
-            _ui_draw.focus(cv, th, box, "part", ring=True)
+            _ui_draw.focus(cv, th, box, "cell", ring=True)
         # The palette: colour 0 the checker under a white stroke, the
         # colour in use two-toned at its edge -- a line of `ink`, then one of
         # `surface` within -- never a palette colour, so one tone reads
@@ -1036,7 +1036,7 @@ class PaintLayer:
     def _draw_flags(self, cv, lay, pe, th):
         """The sprite's eight flags as toggles (Q-03): a disc in its colour
         where it is set, a ring where it is clear, then the word."""
-        flags = self.ws.project.flags
+        flags = self.ws.run.project.flags
         v = flags[pe.n] if flags is not None and pe.n < len(flags) else 0
         for k, (x, y, w, h) in enumerate(lay.flag_cells):
             d = max(8, min(w, h) - (14 if h >= 36 else 8))
@@ -1061,12 +1061,12 @@ class PaintLayer:
         game at its next frame (`ProjectStore.flag_edits`); it is saved with
         the sheet (`Project.commit_sprites`)."""
         ws = self.ws
-        flags = ws.project.flags
+        flags = ws.run.project.flags
         pe = ws.paint
         if flags is None or pe is None or pe.n >= len(flags):
             return
         flags[pe.n] ^= 1 << k
-        ws.project.flags_dirty = True
+        ws.run.project.flags_dirty = True
         if ws.sheet is not None:
             ws.sheet.dirty = True
         ws.mark_dirty()

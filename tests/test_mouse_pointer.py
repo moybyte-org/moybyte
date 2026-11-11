@@ -275,7 +275,7 @@ def test_the_code_tab_autoscrolls_until_a_key(tmp_path):
 
 def _handle(ws, name):
     ctx = ws.app_context("probe", ("files", "clipboard"))
-    return ws.player._open_cart_editor(ctx.files, "docs", name, None, ws.canvas, ctx.clipboard)
+    return ws.run.player._open_cart_editor(ctx.files, "docs", name, None, ws.run.canvas, ctx.clipboard)
 
 
 def _cell(h, col, row=0):
@@ -372,7 +372,7 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
 # -- the desk: a held press is its window's, a window-bound app its window's size --
 
 def _desk_files(tmp_path, n=60):
-    """Files on the desk over `n` drawings, its Art place open: (ws, driver,
+    """Files on the desk over `n` drawings, its Pictures place open: (ws, driver,
     a point on the list, the window's content rect)."""
     from ws_helpers import build_desktop_ws
     from test_files_app import _files, _frames, _press, _seed_drawing
@@ -438,7 +438,7 @@ def test_a_window_bound_app_lays_out_in_its_window_and_scrolls_to_its_end(tmp_pa
     for _ in range(4):
         d.frame(DT)
     cx, cy, cw, ch = ws.wm._wins["desktop"].content_rect()
-    assert tuple(ws.player.ns["content_rect"]()[2:]) == (cw, ch)
+    assert tuple(ws.run.player.ns["content_rect"]()[2:]) == (cw, ch)
     x, y = cx + 60, cy + ch // 2
     d.hover(x, y)
     d.frame(DT)
@@ -446,5 +446,5 @@ def test_a_window_bound_app_lays_out_in_its_window_and_scrolls_to_its_end(tmp_pa
         d.wheel(0, 1)
         d.frame(DT)
         d.frame(DT)
-    bx, by, bw, bh = ui_draw._C.api_box(ws.player._ui[0], "vault")
+    bx, by, bw, bh = ui_draw._C.api_box(ws.run.player._ui[0], "vault")
     assert by + bh <= ch, "the list runs on under the window's bottom"

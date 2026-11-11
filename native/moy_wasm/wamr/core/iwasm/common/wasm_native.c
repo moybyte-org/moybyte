@@ -181,10 +181,11 @@ native_symbol_cmp(const void *native_symbol1, const void *native_symbol2)
 }
 
 static void *
-lookup_symbol(NativeSymbol *native_symbols, uint32 n_native_symbols,
+lookup_symbol(const NativeSymbol *native_symbols, uint32 n_native_symbols,
               const char *symbol, const char **p_signature, void **p_attachment)
 {
-    NativeSymbol *native_symbol, key = { 0 };
+    const NativeSymbol *native_symbol;
+    NativeSymbol key = { 0 };
 
     key.symbol = symbol;
 
@@ -259,9 +260,24 @@ wasm_native_resolve_symbol(const char *module_name, const char *field_name,
     return func_ptr;
 }
 
+/* Whether the rows are in strictly ascending strcmp order of their symbols:
+   the order lookup_symbol's bsearch needs, with no name twice. */
 static bool
-register_natives(const char *module_name, NativeSymbol *native_symbols,
-                 uint32 n_native_symbols, bool call_conv_raw)
+natives_sorted(const NativeSymbol *native_symbols, uint32 n_native_symbols)
+{
+    uint32 i;
+
+    for (i = 1; i < n_native_symbols; i++) {
+        if (strcmp(native_symbols[i - 1].symbol, native_symbols[i].symbol)
+            >= 0)
+            return false;
+    }
+    return true;
+}
+
+static bool
+add_natives(const char *module_name, const NativeSymbol *native_symbols,
+            uint32 n_native_symbols, bool call_conv_raw)
 {
     NativeSymbolsNode *node;
 
@@ -280,10 +296,18 @@ register_natives(const char *module_name, NativeSymbol *native_symbols,
     node->next = g_native_symbols_list;
     g_native_symbols_list = node;
 
+    return true;
+}
+
+static bool
+register_natives(const char *module_name, NativeSymbol *native_symbols,
+                 uint32 n_native_symbols, bool call_conv_raw)
+{
     qsort(native_symbols, n_native_symbols, sizeof(NativeSymbol),
           native_symbol_cmp);
 
-    return true;
+    return add_natives(module_name, native_symbols, n_native_symbols,
+                       call_conv_raw);
 }
 
 bool
@@ -305,8 +329,19 @@ wasm_native_register_natives_raw(const char *module_name,
 }
 
 bool
+wasm_native_register_natives_sorted(const char *module_name,
+                                    const NativeSymbol *native_symbols,
+                                    uint32 n_native_symbols)
+{
+    if (!natives_sorted(native_symbols, n_native_symbols))
+        return false;
+
+    return add_natives(module_name, native_symbols, n_native_symbols, false);
+}
+
+bool
 wasm_native_unregister_natives(const char *module_name,
-                               NativeSymbol *native_symbols)
+                               const NativeSymbol *native_symbols)
 {
     NativeSymbolsNode **prevp;
     NativeSymbolsNode *node;

@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   cart_chunks                       a cart's Lua scripts as chunks
+#   wants_layout                      a Lua cart's responsive opt-in
 #   -- the frame seam, once for both Lua tiers  snap_shared, sync_view, drain_audio
 #   snap_shared                       player two, the pointer and the clock into the cart
 #   sync_view                         apply the cart's view() to the console
@@ -7,6 +8,9 @@
 #   -- what NOT to register on top of libmoy's table  put_scenes, install_handles
 #   put_scenes                        hand the cart's scene texts to the run
 #   install_handles                   register the int-handle half of the prelude
+#   _install_moybyte                  a run's `moybyte` table: the calls, the wakes, the log
+#   lua_lit                           a Python value as a Lua literal
+#   end_handles                       a closed run's wakes ended
 """What both Lua tiers share -- the object-verb glue, and the frame seam.
 
 Several families of the moybyte cart API return objects: `make_layer` (a
@@ -57,6 +61,29 @@ def cart_chunks(ns, src):
     return out
 
 
+_LAYOUT_DEFS = ("function _layout(", "_layout = function", "_layout=function")
+
+
+def wants_layout(cart):
+    """True when one of a Lua cart's scripts (`src_before`, main, then
+    `src_after`) defines a global `_layout` at column 0 -- the responsive
+    opt-in, Python's `system_api.wants_layout` for Lua: `function
+    _layout(` or `_layout = function`. A probe of the source because the
+    canvas is chosen before the VM opens; the run then calls `_layout` only
+    where the global is a function, as it finds `_init` (moycore's
+    `load`)."""
+    texts = [t for _n, t in cart.get("src_before") or ()]
+    texts.append(cart.get("src") or "")
+    texts += [t for _n, t in cart.get("src_after") or ()]
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for d in _LAYOUT_DEFS:
+            if text.startswith(d) or ("\n" + d) in text:
+                return True
+    return False
+
+
 # libmoy's `moy_button` order (moy.h, SPEC.md 7.3). This is an ABI, not a
 # preference: the snapshot hands moycore ONE integer per player and its h_btn
 # does `(mask >> b) & 1` with `b` the enum value, so bit i means button i of
@@ -98,7 +125,8 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
 SNAP_SLOTS = ("SNAP_BTN_P1", "SNAP_BTNP_P1", "SNAP_PLAYERS",
               "SNAP_TOUCH_X", "SNAP_TOUCH_Y", "SNAP_TOUCH_DOWN",
-              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_WINDOW")
+              "SNAP_TOUCH_MS", "SNAP_TIME_MS", "SNAP_FACE",
+              "SNAP_ROOM_X", "SNAP_ROOM_Y", "SNAP_ROOM_W", "SNAP_ROOM_H")
 
 AQ_OPS = ("AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP",
           "AQ_VOLUME")
@@ -114,9 +142,10 @@ def audio_ops(mod):
     return tuple(getattr(mod, name) for name in AQ_OPS)
 
 
-def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
-    """PLAYER TWO, THE POINTER, THE CLOCK and THE WINDOW, into the snapshot the
-    tick will read.
+def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, face=0,
+                room=None):
+    """PLAYER TWO, THE POINTER, THE CLOCK, THE FACE and THE ROOM, into the
+    snapshot the tick will read.
 
     PLAYER TWO (#65). These slots exist in the C ABI and nothing filled them, so
     libmoy's `players()` answered 1 forever and a Lua cart could not have a
@@ -134,14 +163,21 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
     answer "is there one", "is it down" and "did it go down this frame" out of
     it. 0 is no pointer, which is what SPEC.md 7.3 means by nil.
 
-    THE CLOCK: milliseconds since the Player stamped `cart_start_ms`
-    (`ticks._since_ms`), the base libmoy's time() adds the milliseconds inside
-    the tick to -- the same clock a Python cart's time() reads. An input with
-    no stamp leaves the slot as it was.
+    THE CLOCK: milliseconds since `start`, the run's `cart_start_ms` the
+    Player stamped (`ticks._since_ms`), the base libmoy's time() adds the
+    milliseconds inside the tick to -- the same clock a Python cart's time()
+    reads. A None `start` leaves the slot as it was.
 
-    THE WINDOW: whether the run's surface is a window's body (the desk's
-    `windowed_chrome`), which the public UI API's page lies on: its ground is
-    then the window's (native/moy_ui/moy_ui_wasm.c), as a Python app's is.
+    THE FACE: how the run's `ui` frame draws, the Player's `ui_face()`
+    (`run_face`): whether its surface is a window's body (the page's ground is
+    then the window's), the desk's rows, the shell's look for a responsive
+    app, and the font scale -- what native/moy_ui/moy_ui_wasm.c's RUN face
+    reads to draw the page a Python app's frame draws.
+
+    THE ROOM: the rect (x, y, w, h) the run's `ui` frame lies in, the
+    Player's `ui_room()`: an app's content_rect(), below the host's bars; None,
+    a game's, is a W of 0, the whole canvas. moy_play.frame writes the same
+    slots where the kernel's Player takes the run.
     """
     n = 1
     pr = getattr(inp, "players", None)
@@ -160,10 +196,30 @@ def snap_shared(s, inp, idx, pointer_state, out, since_ms, window=False):
         s[idx[6]] = int(ms)
     except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
         s[idx[5]] = 0
-    start = getattr(inp, "cart_start_ms", None)
     if start is not None:
         s[idx[7]] = since_ms(start)
-    s[idx[8]] = 1 if window else 0
+    s[idx[8]] = int(face)
+    x, y, w, h = room if room else (0, 0, 0, 0)
+    s[idx[9]] = int(x)
+    s[idx[10]] = int(y)
+    s[idx[11]] = int(w)
+    s[idx[12]] = int(h)
+
+
+def run_face(ws):
+    """`snap_shared`'s face for the run in front: its Player's `ui_face()`,
+    the window bit alone where the run has no Player."""
+    player = getattr(ws.run, "player", None)
+    if player is not None:
+        return player.ui_face()
+    return 1 if getattr(ws, "windowed_chrome", False) else 0
+
+
+def run_room(run):
+    """`snap_shared`'s room for `run` (procs.Run): its Player's `ui_room()`,
+    None where the run has no Player."""
+    player = getattr(run, "player", None)
+    return player.ui_room() if player is not None else None
 
 
 def cfg_blob(cfg):
@@ -191,7 +247,7 @@ def sync_view(ws, view, last):
     """Apply the cart's view() to the console; returns the view now in force.
 
     libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
-    console still has to ACT on it -- ws.input.game_view is what the WM
+    console still has to ACT on it -- the run's `view` is what the WM
     composites from. So this reads the recording instead of the cart crossing
     into Python to set it, which is the whole point of the verb moving into
     core. Checked per frame because the spec allows a cart to change its region
@@ -201,7 +257,7 @@ def sync_view(ws, view, last):
     if view == last:
         return last
     try:
-        ws.input.game_view = view
+        ws.run.view = view
     except Exception:  # noqa: BLE001 -- a console without the field is fine
         pass
     return view
@@ -317,12 +373,32 @@ NOT_REGISTRABLE = frozenset((
     "scene", "load_scene", "actors",       # rows of actors: prelude + C
     "touching", "move_actor", "move_actor_to", "remove_actor", "draw_scene",
     "open_editor",                         # an editor handle: prelude + handles
+    "_minimise", "_restore", "moy_action", "moy_open",   # the state's own (LUA_EVENTS)
 ))
 
 # The superset names a Lua run answers in C (native/moycore/moycore_superset.h),
 # so a frame that calls them makes no crossing: registering the namespace's
 # Python over them would shadow the C with a trampoline.
 NATIVE_NAMES = frozenset(("col", "mouse"))
+
+# The app ABI's names a Lua run's state holds in C (native/moy_app/moy_app_lua.h):
+# a Lua app's role binding over the role table, opened with the state for the
+# run the Player bound, so the namespace's Python faces of them are never
+# registered. `themes` and `files.badge` are the Python face's own tables,
+# which cross as text (`install_handles`, PRELUDE_APP). A run's `moybyte`
+# table (PRELUDE_MOYBYTE) holds the names a Lua service's does: LUA_RUN_CALLS,
+# the console calls, each the moybyte module's verb run as the run's process
+# and gated where it is served, as a Python app's; and LUA_OWN, the messages,
+# the wakes and the log, which a service holds in C (native/moycore/
+# moycore_svc.c). An app run's `send` is the moybyte module's, its run being
+# on the VM (RUN_VERBS).
+# GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit.
+LUA_ROLE_NAMES = ("theme", "set_theme", "files", "open_app", "prefs", "clipboard")
+LUA_RUN_CALLS = ("notify", "open_with", "share", "award", "progress", "pick", "service_start", "service_stop", "service_running", "status_panel", "name", "key_make", "key_public", "key_shared", "clock")
+LUA_OWN = ("send", "on", "every", "after", "cancel", "log", "at")
+# END GENERATED
+ROLE_NAMES = frozenset(LUA_ROLE_NAMES + ("themes",))
+RUN_VERBS = LUA_RUN_CALLS + ("send",)
 
 
 def layer_restore(bind, canvas, run):
@@ -626,6 +702,133 @@ do
 end
 """
 
+PRELUDE_APP = """
+do
+  -- The app names whose answers are the console's Python tables: `themes()`
+  -- (the installed panel themes, crossing as lines) and `files.badge(name)`,
+  -- each only where the run's permissions name its role.
+  local themes_text, badge = __themes, __files_badge
+  __themes, __files_badge = nil, nil
+  if themes_text then
+    local gmatch = string.gmatch
+    function themes()
+      local t = {}
+      for n in gmatch(themes_text(), "[^\\n]+") do t[#t + 1] = n end
+      return t
+    end
+  end
+  if files and badge then files.badge = badge end
+end
+"""
+
+PRELUDE_MOYBYTE = """
+do
+  -- A run's `moybyte` table, a Lua service's names (LUA_RUN_CALLS, LUA_OWN):
+  -- each console call's arguments cross as one JSON array to the moybyte
+  -- module's own verb, run as the run's process; a wake's callback is
+  -- this state's, which the console fires by its id (`__moybyte_fire`) at
+  -- the frame's start, as it serves a Python app's.
+  local call, wake, unwake, log = __moybyte_call, __moybyte_wake, __moybyte_cancel, __moybyte_log
+  local gread, gwrite = __grant_read, __grant_write
+  __moybyte_call, __moybyte_wake, __moybyte_cancel, __moybyte_log = nil, nil, nil, nil
+  __grant_read, __grant_write = nil, nil
+  if call then
+    local fmt, byte, gsub, mtype, huge = string.format, string.byte, string.gsub, math.type, math.huge
+    local sort, concat, tostring, type, pairs, select = table.sort, table.concat, tostring, type, pairs, select
+    local function esc(c) return fmt("\\\\u%04x", byte(c)) end
+    local function enc(v, d)
+      local t = type(v)
+      if t == "string" then return '"' .. gsub(v, '[%c"\\\\]', esc) .. '"' end
+      if t == "number" then
+        if mtype(v) == "integer" then return tostring(v) end
+        if v ~= v then return "NaN" end
+        if v == huge then return "Infinity" end
+        if v == -huge then return "-Infinity" end
+        return tostring(v)
+      end
+      if t == "boolean" then return tostring(v) end
+      if t ~= "table" then return "null" end
+      if d > 16 then error("a value nested too deep", 0) end
+      local n, keys, seq = #v, {}, true
+      for k in pairs(v) do
+        keys[#keys + 1] = k
+        if mtype(k) ~= "integer" or k < 1 or k > n then seq = false end
+      end
+      local out = {}
+      if seq then
+        for i = 1, n do out[i] = enc(v[i], d + 1) end
+        return "[" .. concat(out, ", ") .. "]"
+      end
+      for i, k in ipairs(keys) do
+        local kt = type(k)
+        if kt ~= "string" and kt ~= "number" then error("a key that is not a string or a number", 0) end
+        keys[i] = tostring(k)
+        out[keys[i]] = v[k]
+      end
+      sort(keys)
+      local parts = {}
+      for i, k in ipairs(keys) do parts[i] = enc(k, d) .. ": " .. enc(out[k], d + 1) end
+      return "{" .. concat(parts, ", ") .. "}"
+    end
+    local function args(...)
+      local n = select("#", ...)
+      while n > 0 and select(n, ...) == nil do n = n - 1 end
+      local out = {}
+      for i = 1, n do out[i] = enc((select(i, ...)), 0) end
+      return "[" .. concat(out, ", ") .. "]"
+    end
+    -- the table the run's role binding opened its C rows into (random,
+    -- sha256, ...: native/moy_app/moy_app_lua.c), kept
+    local m = type(moybyte) == "table" and moybyte or {}
+    m.ERR, m.WARNING, m.INFO = 3, 4, 6
+    for _, v in ipairs({@RUN_CALLS@}) do
+      m[v] = function(...) return call(v, args(...)) end
+    end
+    local fns, once = {}, {}
+    local function add(how, x, fn, one)
+      if type(fn) ~= "function" then error("moybyte." .. how .. " needs a function", 3) end
+      local w = wake(how, x)
+      if type(w) ~= "number" then error(w or ("no " .. how), 3) end
+      fns[w], once[w] = fn, one
+      return w
+    end
+    function m.on(name, fn) return add("on", name, fn) end
+    function m.every(ms, fn) return add("every", ms, fn) end
+    function m.after(ms, fn) return add("after", ms, fn, true) end
+    function m.at(t, fn) return add("at", t, fn, true) end
+    function m.cancel(id)
+      fns[id], once[id] = nil, nil
+      return unwake(id)
+    end
+    function m.log(level, text) log(level, tostring(text)) end
+    function __moybyte_fire(w, ...)
+      local fn = fns[w]
+      if once[w] then fns[w], once[w] = nil, nil end
+      if fn then fn(...) end
+    end
+    -- What the console tells the app (Player.window_event): its own
+    -- global, where it defines one; a granted item crosses as a table
+    -- whose read and write reach the grant.
+    function __moybyte_event(name, ...)
+      local fn = _G[name]
+      if type(fn) == "function" then fn(...) end
+    end
+    function __moybyte_grant(t)
+      if t == nil then return nil end
+      local h = t.h
+      t.h = nil
+      function t.read() return gread(h) end
+      function t.write(_, data)
+        if data == nil then data = _ end
+        return gwrite(h, data)
+      end
+      return t
+    end
+    moybyte = m
+  end
+end
+"""
+
 PRELUDE_FASTMATH = """
 do
   -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
@@ -646,7 +849,9 @@ end
 # second name would be a second thing to remember to send.
 PRELUDE_HANDLES = (PRELUDE_HANDLES.replace(
     "@LAYER_VERBS@", ", ".join('"%s"' % v for v in LAYER_VERBS))
-    + PRELUDE_EDITOR)
+    + PRELUDE_EDITOR + PRELUDE_APP
+    + PRELUDE_MOYBYTE.replace(
+        "@RUN_CALLS@", ", ".join('"%s"' % v for v in RUN_VERBS)))
 
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
@@ -666,18 +871,209 @@ def put_scenes(ns, put):
             put(name, text)
 
 
-def install_handles(ns, reg):
+def install_handles(ns, reg, call=None):
     """Register the int-handle half of PRELUDE_HANDLES that is Python's: the
-    editor handle (#112), for a cart that earned `open_editor`. Return the
-    list that PINS the run's editors for its lifetime; drop it at close.
+    editor handle (#112), for a cart that earned `open_editor`, the app names
+    over the Python face's tables and the run's `moybyte` table. Return the
+    list that PINS the run's editors and its wakes for its lifetime; hand it
+    to `end_handles` at close.
 
-    `reg` is the runtime's own register verb (`moycore.register`). The
+    `reg` is the runtime's own register verb (`moycore.register`), `call`
+    the run's `exec` (a chunk run in its state: None or the error's text),
+    through which a wake fires; a run with none holds no wakes. The
     layers, paint images and scenes are the run's C on every tier
     (native/moycore/moycore_lua.c, moycore_scene.h): nothing of them is
     registered."""
     pins = []
     _install_editor(ns, reg, pins)
+    _install_app(ns, reg)
+    _install_moybyte(ns, reg, call, pins)
     return pins
+
+
+def end_handles(pins):
+    """A run's close: the wakes it made end with it."""
+    for p in pins or ():
+        if isinstance(p, _RunWakes):
+            p.end()
+
+
+def _moybyte_mod():
+    try:
+        import moybyte as mod
+    except ImportError:  # host: the runtime package
+        from runtime import moybyte as mod
+    return mod
+
+
+def lua_lit(v, depth=0):
+    """A JSON value as a Lua literal: None nil, a list a sequence, a dict a
+    table of its keys."""
+    if v is None:
+        return "nil"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, int):
+        return "%d" % v
+    if isinstance(v, float):
+        if v != v:
+            return "(0/0)"
+        if v in (float("inf"), float("-inf")):
+            return "(1/0)" if v > 0 else "(-1/0)"
+        return repr(v)
+    if depth > 16:
+        raise ValueError("a value nested too deep")
+    if isinstance(v, (list, tuple)):
+        return "{" + ", ".join(lua_lit(x, depth + 1) for x in v) + "}"
+    if isinstance(v, dict):
+        return "{" + ", ".join("[%s] = %s" % (lua_lit(k, depth + 1), lua_lit(x, depth + 1))
+                               for k, x in v.items()) + "}"
+    if isinstance(v, (bytes, bytearray)):
+        v = bytes(v).decode("utf-8", "replace")
+    out = ['"']
+    for ch in str(v):
+        o = ord(ch)
+        if ch == '"' or ch == "\\" or o < 32 or o == 127:
+            out.append("\\%03d" % o)
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+class _RunWakes:
+    """The wakes one Lua run made (moybyte.on/every/after/at), each a wake
+    of the moybyte module's under the run's process whose function fires
+    the state's callback by its id through `call`."""
+
+    def __init__(self, mod, call):
+        self.mod = mod
+        self.call = call
+        self.mine = set()
+        self.grants = {}
+
+    def fire(self, wid, once, args):
+        if once:
+            self.mine.discard(wid)
+        src = "__moybyte_fire(%d%s)" % (wid, "".join(", " + lua_lit(a) for a in args))
+        err = self.call(src)
+        if err == "the run has closed":
+            self.end()
+        elif err:
+            raise RuntimeError(err)
+
+    def wake(self, how, x):
+        mod = self.mod
+        cell = [0]
+        try:
+            if how == "on":
+                cell[0] = mod.on(str(x), lambda *a: self.fire(cell[0], False, a))
+            elif how == "every":
+                cell[0] = mod.every(int(x), lambda: self.fire(cell[0], False, ()))
+            elif how == "after":
+                cell[0] = mod.after(int(x), lambda: self.fire(cell[0], True, ()))
+            elif how == "at":
+                cell[0] = mod.at(x, lambda: self.fire(cell[0], True, ()))
+            else:
+                return "no wake " + str(how)
+        except (OSError, ValueError, TypeError) as exc:
+            return str(exc.args[-1] if exc.args else exc)
+        self.mine.add(cell[0])
+        return cell[0]
+
+    def cancel(self, wid):
+        if wid not in self.mine:
+            return False
+        self.mine.discard(wid)
+        return bool(self.mod.cancel(wid))
+
+    def event(self, name, args):
+        """Window event `name` to the state's own global of that name."""
+        src = "__moybyte_event(%s%s)" % (lua_lit(name), "".join(
+            ", " + (self.grant(a) if hasattr(a, "read") and hasattr(a, "mime") else lua_lit(a))
+            for a in args))
+        err = self.call(src)
+        if err and err != "the run has closed":
+            raise RuntimeError(err)
+
+    def grant(self, g):
+        """A granted item (runtime/system/intents.py's Grant) as the table
+        the state's `moy_open` takes."""
+        h = len(self.grants) + 1
+        self.grants[h] = g
+        return "__moybyte_grant({h = %d, mime = %s, mode = %s, name = %s, url = %s})" % (
+            h, lua_lit(g.mime), lua_lit(g.mode), lua_lit(g.name), lua_lit(g.url))
+
+    def end(self):
+        mine, self.mine = self.mine, set()
+        for wid in mine:
+            self.mod.cancel(wid)
+        self.grants.clear()
+
+
+# The window events a Lua app hears in its own state (Player.window_event).
+LUA_EVENTS = ("_minimise", "_restore", "moy_action", "moy_open")
+
+
+def _install_moybyte(ns, reg, call, pins):
+    """A run's `moybyte` table (PRELUDE_MOYBYTE): the console calls through
+    one dispatch, the moybyte module's own verbs, which act as the calling
+    process; the wakes and the window events where the run has `call`."""
+    mod = _moybyte_mod()
+    try:
+        import json as _json
+    except ImportError:  # pragma: no cover - every VM has it
+        _json = None
+    calls = {v: getattr(mod, v) for v in RUN_VERBS}
+
+    def _call(verb, text):
+        fn = calls.get(verb)
+        if fn is None:
+            return None
+        try:
+            r = fn(*_json.loads(text))
+        except Exception as exc:  # noqa: BLE001 -- refused: the OS log says why
+            mod.log(mod.ERR, "moybyte.%s: %s: %s" % (verb, type(exc).__name__, exc))
+            return None
+        return r if r is None or isinstance(r, (bool, int, str)) else None
+
+    reg("__moybyte_call", _call)
+    reg("__moybyte_log", lambda level, text: mod.log(level, text))
+    if call is None:
+        return
+    rw = _RunWakes(mod, call)
+    pins.append(rw)
+    reg("__moybyte_wake", rw.wake)
+    reg("__moybyte_cancel", rw.cancel)
+
+    def _read(h):
+        g = rw.grants.get(h)
+        d = g.read() if g is not None else None
+        return d.decode("utf-8", "replace") if isinstance(d, (bytes, bytearray)) else d
+
+    def _write(h, data):
+        g = rw.grants.get(h)
+        return bool(g.write(data)) if g is not None and data is not None else False
+
+    reg("__grant_read", _read)
+    reg("__grant_write", _write)
+    if hasattr(ns, "__setitem__"):
+        for name in LUA_EVENTS:
+            ns[name] = (lambda n: lambda *a: rw.event(n, a))(name)
+
+
+def _install_app(ns, reg):
+    """The two app names a Lua run answers from the Python face's tables
+    (PRELUDE_APP): registered only where the namespace holds them, so a run
+    without the role has neither."""
+    themes = ns.get("themes")
+    if callable(themes):
+        reg("__themes", lambda: "\n".join(themes()))
+    files = ns.get("files")
+    if files is not None:
+        reg("__files_badge", lambda name: files.badge(str(name)))
 
 
 # The verbs the prelude reaches through ONE `__ed_do` trampoline: no arguments,

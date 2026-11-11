@@ -82,12 +82,16 @@ def _run(tmp_path, base, name, steps):
 
 
 def test_the_sprite_tabs_keys_in_chrome(tmp_path, base):
-    """S selects nothing and shifts nothing; Ctrl+Z / Ctrl+Y walk the
-    history; Ctrl+C then Del then Ctrl+V puts the sprite back."""
+    """S and X select nothing and shift nothing; W and Q step to the sprite
+    after and back (PICO-8's sprite keys, the pane's "Q W" hint); Ctrl+Z /
+    Ctrl+Y walk the history; Ctrl+C then Del then Ctrl+V puts the sprite
+    back."""
     steps = _edit("paint") + [
         _probe("START"),
         {"key": "f"}, {"wait": 300}, _probe("FLIPPED"),
-        {"key": "s"}, {"key": "w"}, {"wait": 300}, _probe("LETTERS"),
+        {"key": "s"}, {"key": "x"}, {"wait": 300}, _probe("LETTERS"),
+        {"key": "w"}, {"wait": 300}, _probe("NEXT"),
+        {"key": "q"}, {"wait": 300}, _probe("BACK"),
         {"key": "z", "mods": ["ctrl"]}, {"wait": 300}, _probe("UNDONE"),
         {"key": "y", "mods": ["ctrl"]}, {"wait": 300}, _probe("REDONE"),
         {"key": "c", "mods": ["ctrl"]}, {"key": "Delete"}, {"wait": 300}, _probe("CLEARED"),
@@ -98,6 +102,8 @@ def test_the_sprite_tabs_keys_in_chrome(tmp_path, base):
     assert got["START"]["edit"]["tab"] == "paint", out[-3000:]
     assert sprite["FLIPPED"] != sprite["START"], "F did not flip"
     assert sprite["LETTERS"] == sprite["FLIPPED"], "a letter moved the sprite"
+    assert sprite["NEXT"] != sprite["FLIPPED"], "W did not step to the next sprite"
+    assert sprite["BACK"] == sprite["FLIPPED"], "Q did not step back"
     assert sprite["UNDONE"] == sprite["START"], "Ctrl+Z did not undo"
     assert sprite["REDONE"] == sprite["FLIPPED"], "Ctrl+Y did not redo"
     assert set(sprite["CLEARED"]) == {"0"}, "Del did not clear"
@@ -132,29 +138,41 @@ def test_shift_tab_super_and_f11_in_chrome(tmp_path, base):
 
 # -- the mouse ------------------------------------------------------------------
 
-_HASH = ("(function(){var c=document.getElementById('cv');var d=c.getContext('2d')"
-         ".getImageData(0,0,c.width,c.height).data;var h=0;for(var i=0;i<d.length;i+=4)"
-         "{h=(h*31+d[i]+d[i+1]*7+d[i+2]*13)|0;}return '%s '+JSON.stringify(h);})()")
+# A hash of Files' list rows (canvas pixels x 500..880, y 125..505): the
+# bar's clock and everything outside the list stay out of it.
+_LIST_HASH = ("(function(){var d=document.getElementById('cv').getContext('2d')"
+              ".getImageData(500,125,380,380).data;var h=0;for(var i=0;i<d.length;i+=4)"
+              "{h=(h*31+d[i]+d[i+1]*7+d[i+2]*13)|0;}return h;})()")
+
+
+def _list_settled():
+    """Waits until the list's rows hold still for five samples running (the
+    list loaded, a notch's glide landed), however slow the frames are."""
+    return {"js": "window.__wh = null; window.__wn = 0; 'reset'"}, {
+        "waitFor": "(function(){var h=%s;window.__wn=(h===window.__wh)?window.__wn+1:0;"
+                   "window.__wh=h;return window.__wn>=5;})()" % _LIST_HASH,
+        "timeout": 15000}
 
 
 def test_the_wheel_scrolls_files_list_in_chrome(tmp_path, base):
     """Over Files' list a notch scrolls it and the notch back returns it,
     the pointer resting where it was."""
     at = [700, 330]
+
+    def probe(tag):
+        return [*_list_settled(), {"js": "'%s ' + JSON.stringify(%s)" % (tag, _LIST_HASH)}]
+
     steps = [
         {"note": "Files up", "wait": 6000},
-        {"move": at}, {"wait": 800},
-        {"js": _HASH % "BEFORE"}, {"shot": "files_before"},
-        {"wheel": at + [0, 300]}, {"wait": 800},
-        {"js": _HASH % "DOWN"}, {"shot": "files_down"},
-        {"wheel": at + [0, -300]}, {"wait": 800},
-        {"js": _HASH % "BACK"},
+        {"move": at}, *probe("BEFORE"), {"shot": "files_before"},
+        {"wheel": at + [0, 300]}, *probe("DOWN"), {"shot": "files_down"},
+        {"wheel": at + [0, -300]}, *probe("BACK"),
     ]
     out, js = web_e2e.run(tmp_path, "wheel_files", "?desktop=1&cart=moybyte.files.moy&dev=1",
                           steps, base, tmp_path / "chrome_wheel", boot_ms=30000)
     got = _tagged(js)
     assert got["DOWN"] != got["BEFORE"], "the wheel moved nothing:\n" + out[-2000:]
-    assert got["BACK"] == got["BEFORE"], "the notch back did not return it"
+    assert got["BACK"] == got["BEFORE"], "the notch back did not return it:\n" + out[-2000:]
 
 
 def _grid(tmp_path, base):
@@ -177,7 +195,7 @@ def test_the_mouse_selects_and_autoscrolls_the_code_in_chrome(tmp_path, base):
         _probe("START"),
         {"move": at(0, 0)},
         {"drag": at(0, 0) + at(0, 4) + [4]}, {"wait": 300}, _probe("DRAGGED"),
-        {"click": at(1, 2), "settle": 60}, {"click": at(1, 2)}, _probe("WORD"),
+        {"dblclick": at(1, 2)}, _probe("WORD"),
         {"click": at(0, 0)}, {"click": at(0, 3), "mods": ["shift"]}, _probe("SHIFTED"),
         {"move": at(4, 10)},
         {"middle": at(4, 10) + at(4, 10)}, {"move": at(4, 10)},

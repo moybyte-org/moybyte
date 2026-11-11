@@ -1,0 +1,12 @@
+$ # the console's service commands go to the host's role table
+$ perm list
+role perm: list
+$ notify "a b"
+role notify: a b
+$ printf 'print(1)\n' | python
+role python:
+print(1)
+$ service list; echo service=$?
+service: needs the console
+service=1
+[exit 0]

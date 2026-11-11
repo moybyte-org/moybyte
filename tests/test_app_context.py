@@ -43,6 +43,7 @@ from runtime import chrome as _chrome
 from runtime import moy_carts as _store
 from runtime import system_api as _api
 from runtime.app_decls import APPS
+from ws_helpers import settle_badges  # noqa: E402
 
 
 # Every (module, class) on the app side of the seam: the registered apps, from
@@ -162,6 +163,21 @@ def test_the_context_carries_only_the_declared_roles(tmp_path):
                     "%s can reach undeclared role %s" % (cls, role)
 
 
+def test_an_app_on_the_verbs_gets_a_host_that_reads_its_pointer(tmp_path):
+    """`ctx.ui` reads the held pointer off the app's surface, so an app's
+    `handle_pointer` that names no `down` still drags its pages and tables
+    (the Music lists once took every drag as a tap)."""
+    ws = _ws(tmp_path)
+    apps = [a for a, _t in ws._apps if getattr(type(a), "UI", False)]
+    assert len(apps) >= 9
+    for app in apps:
+        host = app.ctx.ui
+        assert host.surface is app.ctx.surface, type(app).__name__
+        ws.pointer.down = True
+        assert host.surface.pointer().down
+        ws.pointer.down = False
+
+
 def test_an_unknown_need_is_refused_at_construction(tmp_path):
     """A typo in a NEEDS tuple must fail loudly at boot, not silently grant
     nothing and AttributeError on some rare code path."""
@@ -220,6 +236,7 @@ def _quiesce_frame(ws):
     and every redraw-gate assertion reads as a failure of whatever changed last."""
     if ws.pointer is not None:
         ws.pointer.visible = False
+    settle_badges(ws)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
@@ -327,11 +344,11 @@ def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
 
     for _ in range(3):                    # the entry paint + any settling
         quiet_loop()
-    before = ws._frames_drawn
-    assert before >= 1, "the app never painted -- is _frames_drawn still wired?"
+    before = ws.frame_state.frames_drawn
+    assert before >= 1, "the app never painted -- is frame_state.frames_drawn still wired?"
     for _ in range(12):
         quiet_loop()
-    painted = ws._frames_drawn - before
+    painted = ws.frame_state.frames_drawn - before
     assert painted <= 1, \
         "%s painted %d of 12 quiet frames: something calls damage.all() per frame" \
         % (kind, painted)
@@ -421,7 +438,7 @@ def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
 
 def test_paints_document_pointer_keeps_its_on_disk_key(tmp_path):
     """The namespace is a constructor argument and not a hard-wired app id for
-    exactly one reason: `paint_doc` has been the key in real cards' system.json
+    exactly one reason: `paint_doc` has been the key in real cards' system/settings
     since #108. Renaming it would lose every kid's open drawing on the next
     boot, silently."""
     ws = _ws(tmp_path)
@@ -459,11 +476,11 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
 
 
 def _system_json(ws):
-    """`system.json` as it is ON DISK -- `ws.system` is the live dict every
+    """`system/settings` as it is ON DISK -- `ws.system` is the live dict every
     persist verb also mutates, so reading it back proves nothing about the
     write."""
     with open(_store.system_store_path(ws.carts_root)) as fh:
-        return json.load(fh)
+        return _store.parse_settings(fh.read())
 
 
 def _trash_dir(ws, kind):
@@ -588,7 +605,7 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
     ws.frame(1 / 30.0)
     assert ws.app_abi.files_end_all() == 0, "a frame left the sessions open"
     files.begin()
-    ws.player._end_grant()
+    ws.run.player._end_grant()
     assert ws.app_abi.files_end_all() == 0, "a run's end left a session open"
 
 
@@ -625,11 +642,11 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     carts.begin()                                  # never ended
     files.save("docs", "leak", _store.encode_text("x"))
     assert carts.images({"path": str(tmp_path / "nope.moy")}) == ({}, None)
-    before = ws._frames_drawn
+    before = ws.frame_state.frames_drawn
     for _ in range(4):
         ws._dirty = True
         ws.frame(1 / 30.0)
-    assert ws._frames_drawn - before == 4, "the panel stopped presenting"
+    assert ws.frame_state.frames_drawn - before == 4, "the panel stopped presenting"
     assert held_at_present and set(held_at_present) == {0}, held_at_present
     assert ws.app_abi.files_end_all() == 0 and ws.store.open == 0
 
@@ -709,7 +726,7 @@ def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     """The DARK/LIGHT half of the theme (docs/history/visual_identity_v1.md §4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
     reads -- follows; the app's colour dict is a new one, rebuilt at the
-    table's new generation; and the choice reaches system.json or it is gone
+    table's new generation; and the choice reaches system/settings or it is gone
     at the next boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
@@ -739,7 +756,7 @@ def test_the_shells_unpersisted_variant_leaves_the_stored_choice_alone(tmp_path)
 def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
     """It must land on the DEFAULT, not keep the current one: the tokens are
     looked up by this string on every theme swap, and an unknown value stored
-    in system.json would be re-applied at every boot."""
+    in system/settings would be re-applied at every boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
     theme.set_variant("light")
@@ -751,22 +768,20 @@ def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
 # -- ctx.nav -------------------------------------------------------------------
 
 def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
-    """The badge rows answer the console's tracker as it is NOW: a store load
-    replaces `ws.ach`, and a role that had captured the old one would count
+    """The badge rows answer the achievements process as it is NOW: a store
+    load restarts it, and a role that had captured the old one would list
     badges nobody can see."""
     ws = _ws(tmp_path)
     notify = ws.app_context("probe_badges", ("notify",)).notify
-    assert notify.count() == ws.ach.count()
+    assert notify.groups() is ws.ach.groups()
     assert notify.award("konami") is True
+    settle_badges(ws)                                  # the achievements process takes it
     assert notify.award("konami") is False             # a repeat is no find
-    assert notify.has("konami") and notify.count() == ws.ach.count()
-    assert notify.found_on("konami") == ws.ach.found_on("konami")
-    assert notify.found_on("decorator") is None
-    assert notify.progress("play_five") == ws.ach.progress("play_five")
+    shell = {b[0]: b for b in notify.groups()[0][2]}
+    assert shell["konami"][6] == ws._today_ymd() and shell["decorator"][6] is None
     assert notify.today() == ws._today_ymd()
     ws.load_achievements()
-    assert notify.count() == ws.ach.count()
-    assert notify.has("konami") == ws.ach.has("konami")
+    assert notify.groups() is ws.ach.groups()
 
 
 def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
@@ -903,7 +918,12 @@ def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
     assert "set_theme" not in ns and "files" not in ns and "prefs" not in ns
     assert ns["open_app"]("no_such_app") is False
     assert ws.screen == "launcher"
+    # A grant no run holds is no app on screen: the front's gate
+    # (runtime/system/front.py) asks by a notification, whose act opens it.
+    from runtime.notifications import NOTES
     assert ns["open_app"]("calc") is True
+    assert ws.screen == "launcher"
+    assert NOTES.act(NOTES.list[0].id)
     assert ws.screen == "calc"
 
 

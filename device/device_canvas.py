@@ -706,11 +706,11 @@ class DeviceCanvas:
         # normal case allocates nothing and costs one attribute load.
         #
         # It is per-instance because SPEC.md 3.1 lets a cart ship its own 64-entry
-        # RGB table, and runtime/run/player.py duly assigns `ws.canvas.palette = table`
+        # RGB table, and runtime/run/player.py duly assigns `ws.run.canvas.palette = table`
         # on start and restores it on exit -- except player.py is STAGED TO BOTH
         # BOARDS and DeviceCanvas had no `palette` at all, so on device that
         # assignment set an attribute nobody read. Verified on P4 glass
-        # 2026-08-15: hasattr(ws.canvas, "palette") was False, the assignment was
+        # 2026-08-15: hasattr(ws.run.canvas, "palette") was False, the assignment was
         # accepted, and PAL565[8] stayed 0xf809. Cart palettes worked on the host
         # and were inert on every other tier.
         self._wire = _PAL565_WIRE_BUF
@@ -1405,6 +1405,46 @@ class DeviceCanvas:
     # the windowed WM anyway.)
     letterbox_composite = True
 
+    def front_scratch(self, gw, gh):
+        """The fold's snapshot scratch for a run in the kernel's front on this
+        panel (moy_glass.front): blit_game's own, sized for the whole `gw` x
+        `gh` game canvas, after the fence that frees it. The console's next
+        sync_back fences the front's last snapshot."""
+        self._comp.fold_fence()
+        scr = self._snap_scratch
+        if scr is None or scr._w != gw or scr._h != gh:
+            if scr is not None:
+                scr.release()
+            scr = self._snap_scratch = _LayerComp(gw, gh, self._gfx, 0, _ROLE_SCRATCH)
+        self._snap_live = True
+        return scr.framebuffer()
+
+    def release_fold(self):
+        """A run's end (Player.release_world): give back the fold's snapshot
+        and the view crop's scratch, which only a game frame uses -- a
+        320x240 game's snapshot is 150 KB of PSRAM the desk would otherwise
+        keep until the next run. Waits out whatever still reads them first,
+        as the compiled cart's frame scratch does at its close. The next
+        blit_game makes them again. The fold's snapshot engine goes with
+        them, its copy waited out (`fold_release`, moy_fold.h): the next
+        snapshot installs it again."""
+        comp = self._comp
+        fr = getattr(comp, "fold_release", None)
+        if fr is not None:
+            fr()
+        if self._snap_scratch is None and self._view_scratch is None:
+            return
+        for name in ("fold_fence", "snap_fence", "disarm_scale_fold"):
+            fn = getattr(comp, name, None)
+            if fn is not None:
+                fn()
+        self._snap_live = False
+        for name in ("_snap_scratch", "_view_scratch"):
+            scr = getattr(self, name)
+            if scr is not None:
+                setattr(self, name, None)
+                scr.release()
+
     def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
         """FullscreenStackWM's device composite for a cart-declared small canvas
         (SPEC.md 1/3.1): THIS canvas is the promoted system surface (the glass),
@@ -1523,6 +1563,15 @@ class DeviceCanvas:
         frames."""
         return self.presents_frames
 
+    def frame_scratch(self, cf, gw, gh, n=0):
+        """The scratch `cf`'s frames are folded from -- an `n`-byte frame's
+        span (a direct-colour one's where `n` is 0), a palette frame's colours
+        and the patches' pixels -- for present_frame and for a run the
+        kernel's front shows from the cart's memory (moy_glass.front): the
+        run's one scratch, which a smaller request keeps as it is. None when
+        there is none to be had."""
+        return cf.scratch((n or 2 * gw * gh) + 128 + 512 + cf.PATCH_BYTES)
+
     def present_frame(self, cf, view, gc, ox, oy, scale, src=None):
         """Hand the flush a compiled cart's frame straight from its memory in
         place of blit_game: `view` is the frame the CartFrame `cf` owes (the
@@ -1550,7 +1599,7 @@ class DeviceCanvas:
         fmt = 2 if n == gw * gh else 1
         nr = cf.nrects
         comp.fold_fence()
-        scr = cf.scratch(n + 128 + 512 + cf.PATCH_BYTES)
+        scr = self.frame_scratch(cf, gw, gh, n)
         if scr is None:
             return False
         try:

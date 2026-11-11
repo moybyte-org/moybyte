@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "moy_net.h"
+#include "moy_seal.h"
 
 extern int moy_net_link(uint32_t *ip) __attribute__((weak));
 extern int moy_wifi_connect_kept(void) __attribute__((weak));
@@ -23,7 +24,6 @@ typedef struct {
     moy_wc_state_t st;
     uint32_t since;                 // the join's start, moy_net_ms
     uint32_t given_ip;              // the caller's address, where there is no driver
-    char pin[16];
 } wc_t;
 
 static wc_t *s_wc;
@@ -48,7 +48,6 @@ int moy_wc_on(const moy_web_cfg_t *cfg, uint32_t ip) {
     if (!ready()) {
         return 12;                  // ENOMEM
     }
-    snprintf(s_wc->pin, sizeof(s_wc->pin), "%s", cfg->pin != NULL ? cfg->pin : "");
     moy_web_state_t ws;
     moy_web_state(&ws);
     if (s_wc->st.state == MOY_WC_SERVING && ws.listening) {
@@ -153,17 +152,29 @@ void moy_wc_state(moy_wc_state_t *out) {
     *out = s_wc->st;
 }
 
-void moy_wc_set_pin(const char *pin) {
-    if (ready()) {
-        snprintf(s_wc->pin, sizeof(s_wc->pin), "%s", pin != NULL ? pin : "");
-    }
-    moy_web_set_pin(pin);
-}
-
 void moy_wc_park(int on) {
     if (ready() && s_wc->st.parked != (on != 0)) {
         s_wc->st.parked = on != 0;
     }
+}
+
+// base64url, no padding, NUL-terminated.
+static void b64url(const uint8_t *p, size_t n, char *out) {
+    static const char A[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    size_t k = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        uint32_t v = (uint32_t)p[i] << 16 | (i + 1 < n ? (uint32_t)p[i + 1] << 8 : 0)
+                     | (i + 2 < n ? p[i + 2] : 0);
+        out[k++] = A[v >> 18 & 63];
+        out[k++] = A[v >> 12 & 63];
+        if (i + 1 < n) {
+            out[k++] = A[v >> 6 & 63];
+        }
+        if (i + 2 < n) {
+            out[k++] = A[v & 63];
+        }
+    }
+    out[k] = '\0';
 }
 
 size_t moy_wc_url(char *out, size_t cap, int paired) {
@@ -178,9 +189,26 @@ size_t moy_wc_url(char *out, size_t cap, int paired) {
     if (s_wc->st.port != 80) {
         snprintf(port, sizeof(port), ":%u", (unsigned)s_wc->st.port);
     }
-    int n = snprintf(out, cap, "http://%u.%u.%u.%u%s/%s%s", (unsigned)(ip & 0xff),
+    // The QR's link (moy_net.h): base64url keeps it inside the code's
+    // version 4 (78 bytes), the token whole and the board's id's first 8
+    // bytes, which the page holds against the hello's.
+    char hex[33] = "", tok[24] = "", id[12] = "";
+    if (paired) {
+        uint8_t raw[MOY_SEAL_RAND];
+        moy_web_token(hex);
+        if (moy_seal_unhex(hex, strlen(hex), raw, MOY_SEAL_RAND)) {
+            b64url(raw, MOY_SEAL_RAND, tok);
+            moy_web_board_id(hex);
+            moy_seal_unhex(hex, strlen(hex), raw, MOY_SEAL_RAND);
+            b64url(raw, 8, id);
+        }
+        moy_seal_wipe(raw, sizeof raw);
+        moy_seal_wipe(hex, sizeof hex);
+    }
+    int n = snprintf(out, cap, "http://%u.%u.%u.%u%s/%s%s%s%s", (unsigned)(ip & 0xff),
                      (unsigned)((ip >> 8) & 0xff), (unsigned)((ip >> 16) & 0xff),
-                     (unsigned)(ip >> 24), port,
-                     paired && s_wc->pin[0] ? "?pin=" : "", paired ? s_wc->pin : "");
+                     (unsigned)(ip >> 24), port, tok[0] ? "#t=" : "", tok,
+                     tok[0] ? "&b=" : "", tok[0] ? id : "");
+    moy_seal_wipe(tok, sizeof tok);
     return n < 0 ? 0 : (size_t)n;
 }

@@ -18,6 +18,8 @@ int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look) {
     s->fs = (uint8_t)(row->st[MOY_ST_FONT_SCALE] > 0 ? row->st[MOY_ST_FONT_SCALE] : 1);
     s->look = (uint8_t)look;
     s->dst = row;
+    s->cart = (uint8_t)moy_ui_cart_ui();
+    s->shown = (uint8_t)moy_ui_marks_shown();
     return MOY_UI_OK;
 }
 
@@ -29,7 +31,7 @@ int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int
         row->px, row->cap, (int)st[MOY_ST_W], (int)st[MOY_ST_CAM_X], (int)st[MOY_ST_CAM_Y],
         (int)st[MOY_ST_CX0], (int)st[MOY_ST_CY0], (int)st[MOY_ST_CX1], (int)st[MOY_ST_CY1],
     };
-    int w = moy_text_glyph(&t, font, code, x, y, row->pal[moy_ui_pidx(ci)], 1);
+    int w = moy_text_glyph(&t, font, code, x, y, row->pal[moy_ui_pidx(s->cart, ci)], 1);
     row->st[MOY_ST_N_TEXT]++;
     return w < 0 ? MOY_UI_BAD : MOY_UI_OK;
 }

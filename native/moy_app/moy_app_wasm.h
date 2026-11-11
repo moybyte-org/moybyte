@@ -1,7 +1,8 @@
 // The app ABI's wasm import adapter (docs/history/kernel_appabi_2026-10.md section
 // 4): the role rows a compiled app imports, from module "moybyte.app" (the
 // vendor extension its manifest declares, moy-spec SPEC.md 16.2), one native
-// per row of roles.json with a wasm type, named "<role>_<verb>" at that type.
+// per row of native/os_calls.json a compiled app imports, named
+// "<role>_<verb>" at its type (moy_app_wasm_rows.h, generated).
 //
 // A native runs on the thread that calls the cart's import: a board's session
 // thread, whose stack is PSRAM (native/moy_wasm/moy_wasm_session.h), the
@@ -15,12 +16,12 @@
 // too: the settings rows and the store are the VM task's. Where there is no
 // session thread (the host, the browser) the hop is a call.
 //
-// The run a native serves is the one bound here (moy_app_wasm_bind): the
-// state, the grant the Player made from the cart's permissions at its launch,
-// and the roles those permissions name. A module importing a row of a role its
-// permissions do not name is refused at its load, the import named
-// (moy_app_wasm_admit); the theme's reads need none, as a cart's theme() is
-// ungated.
+// A native serves the run its call is made for (moy_app_wasm_run_of): the
+// run's grant, which the Player made from the cart's permissions at its
+// launch, and the roles those permissions name, held by the engine's per-run
+// state for its instance. A module importing a row of a role its permissions
+// do not name is refused at its load, the import named (moy_app_wasm_admit);
+// the theme's reads need none, as a cart's theme() is ungated.
 
 #ifndef MOY_APP_WASM_H
 #define MOY_APP_WASM_H
@@ -41,28 +42,34 @@ typedef struct {
     void *attachment;
 } moy_app_native_t;
 
-// The natives, in roles.json's order of the rows with a wasm type, and the
+// The natives, in the role table's order of the rows with an import, and the
 // table row each serves.
 const moy_app_native_t *moy_app_wasm_natives(uint32_t *count);
 int moy_app_wasm_row(uint32_t i);
 // The table row an import name serves, or -1.
 int moy_app_wasm_row_named(const char *name, size_t n);
 
-// The run the natives serve: `a`, grant `g` and the role mask (1 << MOY_ROLE_*)
-// its permissions name (g 0: none). While none is bound every native
-// answers -MOY_APP_STALE. `a` stays the state the theme is read from with no
-// run bound, as a Lua cart's `ui` reads it. end: the bound run is over, its grant ended and
-// unbound (the Player's, at a run's end and at the start after a stopped one).
-void moy_app_wasm_bind(moy_appabi_t *a, uint32_t g, uint32_t roles);
-void moy_app_wasm_end(void);
-// `a` is going: unbound if it is the bound run's.
-void moy_app_wasm_forget(const moy_appabi_t *a);
-uint32_t moy_app_wasm_grant(void);
+// The run a native's call is for (moy_app_run.h): the engine's handle on the
+// call -- a WAMR exec env, or the browser's binding -- to the run its glue
+// holds for that instance, which the engine's glue defines
+// (native/moycore/moycore_wasm.c on a board and in the browser,
+// runtime/host/moyhost_wasm.c on the host). Weak here: with none, or a run
+// whose state is gone, every native but the toolkit's answers -MOY_APP_STALE.
+// No call reads another run's grant: two instances are two runs.
+const moy_app_run_t *moy_app_wasm_run_of(void *e);
 
-// The module's imports from MOY_APP_EXT against the bound grant: 0, or
+// The console's state, the one the theme is read from (moy_app_wasm_theme),
+// as a Lua game's `ui` reads it: named at every launch on a tier binding,
+// let go by forget when it is freed.
+void moy_app_wasm_live(moy_appabi_t *a);
+void moy_app_wasm_forget(const moy_appabi_t *a);
+
+// The module's imports from MOY_APP_EXT against run `r`'s grant: 0, or
 // non-zero with the first one whose role the grant does not hold named in
-// `err`. `head` is the module through its import section at least.
-int moy_app_wasm_admit(const uint8_t *head, size_t n, char *err, size_t errlen);
+// `err` (every one, with no run). `head` is the module through its import
+// section at least.
+int moy_app_wasm_admit(const moy_app_run_t *r, const uint8_t *head, size_t n, char *err,
+                       size_t errlen);
 
 // Every import of a module, (module, name) in order, from its head: what the
 // load check and the VM-free verdict read. Stops at the first section past
@@ -81,7 +88,8 @@ uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *na
 
 // The hops made, the microseconds they took end to end, and the rows' own
 // share of those on the VM's task: the hop's price per call is the difference
-// over the count (the suites read it).
-void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us);
+// over the count (the suites read it). And the rows of how "here" answered on
+// the caller's own task, with no hop.
+void moy_app_wasm_hops(uint32_t *count, uint32_t *us, uint32_t *work_us, uint32_t *here);
 
 #endif // MOY_APP_WASM_H

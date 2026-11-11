@@ -1,28 +1,27 @@
 # Map (grep -n a name to jump there):
-#   pin_ok             may a request with this pin proceed
 #   pack_store         the whole store as the page's bundle (the C pull)
 #   update_status      the one /update document
 #   ConsoleUpdate      the /update backend on a board with glass
 #   ConsoleSystem      the console's Settings and badges for the page it serves
 #   WebHost            the Settings contract over the kernel's webhost
 #   WebHost.poll       the C poll, its events, the parked request, the update
-#   WebHost.handle_http  the routes the VM answers: /run, /update, the system root
-#   ensure_online      connect, wait for the link, report (a port's station)
+#   WebHost.answer_vm  the routes the VM answers: /run, /update, the system root
+#   WebHost.browsers   the paired browsers (and WebHost.forget, one or all)
 #   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
 
 The server is the kernel's (native/moy_net/moy_webhost.c, whose header is the
-authority on the routes and the pin): its listener, the baked bundle, the
-capability marker, the store's two pulls and the sync apply are C, polled once
+authority on the routes and the sign-in): its listener, the baked bundle, the
+capability marker, the store's pulls and the sync apply are C, polled once
 a frame and calling no Python, and it outlives a soft reset -- a Ctrl-D leaves
 it serving and the next VM adopts it. What stays here is what needs the
 console behind it:
 
-    POST /run       play a cart on the BOARD's own glass (#197)         [pin]
-    GET  /update    this board's FIRMWARE state (#41/#53)               [pin]
-    POST /update    ask it to update                                    [pin]
-    GET  /console.json  the console's portable Settings and its badges  [pin]
-    POST /sync      a batch for the system root, merged into them       [pin]
+    POST /run       play a cart on the BOARD's own glass (#197)         [sealed]
+    GET  /update    this board's FIRMWARE state (#41/#53)               [sealed]
+    POST /update    ask it to update                                    [sealed]
+    GET  /console.json  the console's portable Settings and its badges  [sealed]
+    POST /sync      a batch for the system root, merged into them       [sealed]
 
 The last two are a host built with `system` (`ConsoleSystem`; the Zero has
 none, so its page keeps its Settings in the tab): the board is of record, and
@@ -31,17 +30,17 @@ which keys a page may change is `moy_sync.SYSTEM_KEYS`.
 The C parks such a request until `poll()` takes it, answers it here, and hands
 the response back; one nobody answers within the kernel's window (a VM gone
 mid-request) is a 503. A batch that changed the SHELF is an event the poll
-turns into `on_sync` (the launcher re-scans), and the listener closing after
+turns into `on_sync(folders)` -- the cart folders the batches changed, None
+when they did not all fit the kernel's list (the launcher re-reads those, or
+every one), and the listener closing after
 its goodbye window is the event that releases the radio lease (`on_stop`).
 
-THE PIN is read at START, never at construction: a board builds this before
-system.json is loaded, and a pin minted then would not be the one the
-connection screen's QR carries. A host built with `pin=None` (a test, the dev
-server) is open end to end.
-
-/update and /run read their pins where the C's routes do: /update off
-`?pin=` (a GET has nowhere else, and one endpoint spending its credential in
-two places is a rule nobody holds), /run off its body like /sync.
+THE SIGN-IN is the C's (moy_webauth.c): it opens a parked request's seal
+before the VM sees it and seals the VM's answer, so these handlers read plain
+bodies and check nothing. Its folder (`auth`, the store's system folder: the
+keys file and the console's password) is read at START, never at
+construction: a board builds this before its store is up. A host built with
+no folder (a test, the dev server) is open end to end.
 
 FIRMWARE UPDATES ARE TWO BACKENDS behind one route. A board WITH GLASS
 (`ConsoleUpdate`) hands the glass back: the request turns the web console off
@@ -68,36 +67,28 @@ except ImportError:                      # host / CPython: the runtime package
 
 DEFAULT_PORT = 80
 
-# The one refusal body every gated endpoint answers with: the page tests for
-# it and prompts for a pin.
-PIN_REFUSED = '{"error":"pin"}'
-# ...and the one a board with no updatable firmware answers /update with: 503
+# The answer a board with no updatable firmware answers /update with: 503
 # means "a board, but nothing to update", where a 404 means "not a board".
 NO_UPDATER = '{"error":"no updater"}'
 
 # The kernel's events (moy_net.h's MOY_WEB_EV_*).
 EV_SHELF = 1
 EV_STOPPED = 2
-
-
-def pin_ok(pin, sent):
-    """May a request carrying `sent` proceed against a host holding `pin`?
-    No pin configured = open. ONE body, so the device host and the dev twin
-    cannot drift about what the gate means -- serve.py imports it."""
-    return (not pin) or (sent == pin)
+EV_PAIRED = 4
 
 
 def _kinds():
-    kinds = moy_sync.file_kinds()
+    kinds = moy_sync.file_folders()
     return None if kinds is None else tuple(kinds)
 
 
-def pack_store(carts_root, tops=None):
+def pack_store(carts_root, tops=None, binary=False):
     """The store under `carts_root` as the page's bundle: {"<top>/<rel>":
-    text}, and {"<top>/<rel>": {"b": base64}} for a cover -- the kernel's pull,
-    parsed. `tops` restricts the top-level folders walked (the files root's
-    kinds); the dev server (firmware/web_runner/serve.py) serves this."""
-    return _json.loads(moy_net.web_pack(carts_root, tops))
+    text}, and {"<top>/<rel>": {"b": base64}} for a cover, or for every file
+    where `binary` (the apps root) -- the kernel's pull, parsed. `tops`
+    restricts the top-level folders walked (the files root's kinds); the dev
+    server (firmware/web_runner/serve.py) serves this."""
+    return _json.loads(moy_net.web_pack(carts_root, tops, binary))
 
 
 def baked_stamp():
@@ -261,8 +252,9 @@ class ConsoleSystem:
     """The system root's board half: the pull a page seeds its console from,
     and the merge of what it sends back, over the live console. A changed
     Setting is re-applied through the verbs boot uses (`apply_system_keys`),
-    so a theme picked in the page is the board's when its glass comes back;
-    a badge earned there is kept here without a second celebration."""
+    so a theme picked in the page is the board's when its glass comes back,
+    and a badge earned there (the achievements process's prefs row) is the
+    board's too."""
 
     def __init__(self, ws):
         self.ws = ws
@@ -270,14 +262,12 @@ class ConsoleSystem:
 
     def pull(self):
         ws = self.ws
-        return moy_sync.system_pull(ws.system, ws.ach.doc())
+        return moy_sync.system_pull(ws.system)
 
     def apply(self, ops):
         """(applied, [(index, reason)]) of one batch's ops."""
         ws = self.ws
-        applied, errors, changed = self._rx.apply(
-            ops, ws.system, lambda i, day: ws.ach.award(i, quiet=True, day=day),
-            ws.carts_root)
+        applied, errors, changed = self._rx.apply(ops, ws.system, ws.carts_root)
         if changed:
             ws.apply_system_keys(changed)
         return applied, errors
@@ -305,17 +295,20 @@ class WebHost:
     OFF, JOINING, SERVING, CLOSING, FAILED = range(5)
 
     def __init__(self, carts_root, port=None, with_sd=None,
-                 ensure_online=None, pin=None, on_sync=None, pin_source=None,
+                 auth=None, on_sync=None, auth_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
                  kinds=None, dial=None, on_serving=None, on_failed=None,
-                 system=None):
+                 system=None, on_paired=None, apps_root=None):
         self.port = DEFAULT_PORT if port is None else port
         self.carts_root = carts_root
         self.files_root = (moy_sync.files_root(carts_root)
                            if files_root is None else files_root)
         self.kinds = _kinds() if kinds is None else tuple(kinds)
-        self.pin = pin
-        self._pin_source = pin_source
+        self.apps_root = (moy_sync.apps_root(carts_root)
+                          if apps_root is None else apps_root)
+        self.auth = auth
+        self._auth_source = auth_source
+        self.on_paired = on_paired
         self.on_sync = on_sync
         self.on_run = on_run
         self.update = update
@@ -323,7 +316,6 @@ class WebHost:
         self.on_stop = on_stop
         self.on_serving = on_serving
         self.on_failed = on_failed
-        self._ensure_online = ensure_online
         self._dial = dial
         self._with_sd = with_sd or (lambda fn: fn())
         self._given_ip = None
@@ -371,30 +363,28 @@ class WebHost:
     def _configure(self, port):
         moy_net.web_start(port, self.carts_root, self.files_root,
                           self.kinds if self.files_root else None,
-                          self.pin or None, self._defer())
+                          self.auth or None, self._defer(), self.apps_root)
+
+    def _read_auth(self):
+        if self._auth_source is not None:
+            try:
+                self.auth = self._auth_source() or None
+            except Exception as exc:  # noqa: BLE001 -- a board then refuses every sealed route
+                print("WEBHOST sign-in folder unavailable:", exc)
 
     def start(self, ip=None):
         """Turn the switch on, never waiting for the link. `ip` is the address
         to serve on where the kernel has no driver of its own (the Zero, the
         host); a console's comes from its driver. OSError when the bind is
         refused at once (the link was already up)."""
-        if self._pin_source is not None:
-            # BEFORE the bind: a socket accepting writes for even one poll
-            # without the gate its own screen advertises is the bug this
-            # ordering makes impossible.
-            try:
-                self.pin = self._pin_source() or None
-            except Exception as exc:  # noqa: BLE001
-                print("WEBHOST pin unavailable:", exc)
-        if ip is None and self._ensure_online is not None:
-            ip = self._ensure_online()      # a board whose station is the port's
+        self._read_auth()
         self._given_ip = ip
         self.error = None
         self._why = None
         self._with_sd(lambda: None)          # the store's volume is up
         moy_net.wc_on(self.port, self.carts_root, self.files_root,
                       self.kinds if self.files_root else None,
-                      self.pin or None, self._defer(), ip)
+                      self.auth or None, self._defer(), ip, self.apps_root)
         st = moy_net.wc_state()
         if st[0] == self.JOINING and not st[2] and self._dial is not None:
             try:
@@ -427,14 +417,13 @@ class WebHost:
 
     def adopt(self, ws):
         """A host the kernel kept serving across a soft reset: take the radio
-        lease it rides on, and the pin this boot's console holds."""
+        lease it rides on, and the sign-in over this boot's store."""
         if not self.serving:
             return False
         try:
             ws.wifi_hold("web")
-            if self._pin_source is not None:
-                self.pin = self._pin_source() or None
-                moy_net.wc_set_pin(self.pin)
+            self._read_auth()
+            moy_net.web_auth(self.auth or None)
         except Exception as exc:         # noqa: BLE001 -- the console boots regardless
             print("WEBHOST adopt:", exc)
         return True
@@ -450,16 +439,21 @@ class WebHost:
         ev = moy_net.web_events()
         if ev & EV_SHELF and self.on_sync is not None:
             try:
-                self.on_sync()
+                self.on_sync(moy_net.web_shelf())
             except Exception as exc:     # noqa: BLE001
                 print("SYNC rescan failed:", exc)
         if ev & EV_STOPPED:
             self._stopped()
+        if ev & EV_PAIRED and self.on_paired is not None:
+            try:
+                self.on_paired()
+            except Exception as exc:     # noqa: BLE001 -- a hook is never fatal
+                print("WEBHOST on_paired:", exc)
         req = moy_net.web_take()
         if req is not None:
             did = True
             try:
-                resp = self.handle_http(req[0], req[1], req[2])
+                resp = self.answer_vm(req[0], req[1], req[2])
             except Exception as exc:     # noqa: BLE001 -- never fail the request
                 print("WEB ERR %s: %s" % (type(exc).__name__, exc))
                 resp = http_response(500, '{"error":"server"}')
@@ -538,30 +532,49 @@ class WebHost:
         return "http://%s:%d/" % (host, self.port)
 
     def paired_url(self):
-        """`url()` with the pin on it -- the ONE string worth handing a human."""
-        base = self.url()
-        if not self.pin:
-            return base
-        return base + "?pin=" + str(self.pin)
+        """The QR's link: `url()` with a FRESH single-use token and the
+        board's id after its `#` (moy_net.h, moy_wc_url), so each call spends
+        the last one's token. The page reads it and never sends it in a URL."""
+        got = moy_net.wc_url(True) if self._state() == self.SERVING else ""
+        return got or self.url()
 
-    def gate(self, target):
-        """None when a gated request may proceed, else the 403 to answer."""
-        if pin_ok(self.pin, query_param(target, "pin")):
-            return None
-        return http_response(403, PIN_REFUSED)
+    def browsers(self):
+        """The paired browsers, [(kid, created, seen, name)] (Unix seconds,
+        moy_net.h's moy_net_time), whether the switch is on or not: the
+        sign-in reads its folder's keys first. [] with no folder."""
+        self._read_auth()
+        if not self.auth:
+            return []
+        moy_net.web_auth(self.auth)
+        return moy_net.web_keys()
+
+    def forget(self, kid):
+        """Forget one paired browser by its id, or every one ("all"): how many
+        went. Their sessions end, and a web terminal one holds is cut."""
+        self._read_auth()
+        if not self.auth:
+            return 0
+        moy_net.web_auth(self.auth)
+        return moy_net.web_key_drop(kid)
 
     def handle_http(self, method, target, body):
-        """One request's whole response: the kernel's router, then the routes
-        the VM answers. Off a socket this is the host's seam (the tests and
-        the dev loop); on a board the poll calls it for parked requests only.
-        """
+        """One request's whole response off a socket (the host's seam: the
+        tests and the dev loop): the kernel's router, then the routes the VM
+        answers, sealed as the request was. A board's poll answers its parked
+        requests through answer_vm alone; its moy_net has no web_handle."""
         if self._state() == self.OFF and self._why is None:
             st = moy_net.web_state()
             if not (st[0] or st[1]):    # never re-point a kernel host that serves
-                self._configure(0)      # off a socket: this host's store and pin
-        resp = moy_net.web_handle(method, target, body or b"")
+                self._configure(0)      # off a socket: this host's store and sign-in
+        resp, plain = moy_net.web_handle(method, target, body or b"")
         if resp is not None:
             return resp
+        resp = self.answer_vm(method, target, plain)
+        return None if resp is None else moy_net.web_handle_answer(resp)
+
+    def answer_vm(self, method, target, body):
+        """A parked request's response from the routes the VM answers (its
+        body opened), or None for none of them. The C seals it."""
         path = target.split("?", 1)[0]
         if path == "/run" and method == "POST":
             return self._run(body)
@@ -576,21 +589,16 @@ class WebHost:
 
     def _console(self, target):
         """GET /console.json: the documents a page seeds its console's own
-        root from, gated off `?pin=` like the store's pulls."""
-        refused = self.gate(target)
-        if refused is not None:
-            return refused
+        root from."""
         return http_response(200, _json.dumps(self.system.pull()))
 
     def _system(self, body):
-        """A system batch the C parked (it checked the pin; so does this, for
-        the host's seam): merged into the console's Settings and badges inside
-        the storage gate, answered as the C answers a carts batch."""
-        ops, sent, root_id = moy_sync.parse_batch(body or b"")
+        """A system batch the C parked, merged into the console's Settings
+        and badges inside the storage gate, answered as the C answers a carts
+        batch."""
+        ops, root_id = moy_sync.parse_batch(body or b"")
         if ops is None or root_id != moy_sync.SYSTEM_ROOT_ID:
             return http_response(400, '{"error":"bad batch"}')
-        if not pin_ok(self.pin, sent):
-            return http_response(403, PIN_REFUSED)
         applied, errors = self._with_sd(lambda: self.system.apply(ops))
         if errors:
             print("SYNC system %d applied, %d refused: %s"
@@ -599,8 +607,8 @@ class WebHost:
             {"ok": applied, "err": [list(e) for e in errors]}))
 
     def _run(self, body):
-        """PLAY ON DEVICE (#197): `{"cart": "<title or folder>", "pin": ...}`.
-        Pin-gated like /sync: it starts code on the kid's console. The launch
+        """PLAY ON DEVICE (#197): `{"cart": "<title or folder>"}`, a sealed
+        route like /sync: it starts code on the kid's console. The launch
         runs inside the storage gate (it reads the cart off the store at the
         frame tail). The answer carries the TITLE that actually started."""
         try:
@@ -611,8 +619,6 @@ class WebHost:
             doc = None
         if not isinstance(doc, dict):
             return http_response(400, '{"error":"bad body"}')
-        if not pin_ok(self.pin, doc.get("pin")):
-            return http_response(403, PIN_REFUSED)
         if self.on_run is None:
             return http_response(501, '{"error":"no runner"}')
         name = doc.get("cart")
@@ -630,12 +636,9 @@ class WebHost:
 
     def _update(self, target, body):
         """The firmware endpoint (#41/#53); `body` is None on the GET. Both
-        methods are gated off `?pin=`: what a GET reveals is which firmware a
+        methods are sealed routes: what a GET reveals is which firmware a
         board on somebody's network runs. A request only QUEUES; the work is
         the backend's step()."""
-        refused = self.gate(target)
-        if refused is not None:
-            return refused
         if self.update is None:
             return http_response(503, NO_UPDATER)
         if body is None:
@@ -662,45 +665,35 @@ class WebHost:
         return http_response(200 if ok else 409, _json.dumps(doc))
 
 
-def ensure_online(wifi, autoconnect=None, wait_ms=None, step_ms=None):
-    """Connect if needed, WAIT for the link (`moy_ota.wait_online`, one body),
-    then report the STA IP the WEB CONSOLE row displays; OSError for a board
-    with no radio or no link."""
-    if wifi is None:
-        raise OSError("no wifi service")
-    import moy_ota
-    moy_ota.wait_online(
-        lambda: wifi.status()[0],
-        None if autoconnect is None else lambda: autoconnect(wifi),
-        moy_ota.ONLINE_WAIT_MS if wait_ms is None else wait_ms,
-        moy_ota.ONLINE_STEP_MS if step_ms is None else step_ms)
-    st = wifi.status()
-    if not st[0]:
-        raise OSError("no wifi")
-    return st[2]                       # the STA IP: what the row displays
+def _system_dir(ws):
+    try:
+        import ssh_service
+    except ImportError:                  # host: the runtime package
+        from runtime import ssh_service
+    return ssh_service.system_dir(ws)
 
 
-def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
-                 port=None, pin=None):
+def make_webhost(ws, carts_root, autoconnect=None, with_sd=None, port=None):
     """The WebHost every board injects -- built once, here, so no board is
     left without the web console by a per-board injection nobody wrote.
 
     Takes `ws` rather than `ws.wifi`: the wifi service is attached later, and
-    the closures read it when the switch is turned. The pin is read off the
-    live `ws` at START (an explicit `pin=` wins), and ConsoleUpdate asks `ws`
+    the closures read it when the switch is turned. The sign-in's folder is
+    the store's system folder, read off the live `ws` at START (where
+    `passwd` keeps the password, ssh_service.system_dir), and ConsoleUpdate asks `ws`
     whether this build can take an OTA at every request. The switch joins
     the network the kernel's driver kept; `dial` is the console's own
     fallback when it kept none. `autoconnect` is accepted for the boards'
     call shape and not used: nothing here waits for a link."""
     return WebHost(carts_root, port=port, with_sd=with_sd,
                    dial=lambda: dial_saved(getattr(ws, "wifi", None)),
-                   pin=pin,
-                   pin_source=None if pin else lambda: ws.web_pin(),
-                   on_sync=lambda: ws.rescan_carts(),
+                   auth_source=lambda: _system_dir(ws),
+                   on_sync=lambda folders: ws.rescan_carts(folders),
                    on_run=lambda name: ws.launch_named(name),
                    on_stop=lambda: ws.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),
                    on_failed=lambda: ws.web.on_failed(),
+                   on_paired=lambda: ws.web.on_paired(),
                    update=ConsoleUpdate(ws), system=ConsoleSystem(ws))
 
 

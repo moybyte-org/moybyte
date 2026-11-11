@@ -1,420 +1,1550 @@
-# The console APP API v1 — cartridge identity, system process
+# Writing an app for Moybyte
 
-**Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance
-and Storybook grew organically ("a cartridge identity backed by a
-responsive system process") into one public seam, aligned with
-`docs/history/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
-(`runtime/apps/calc_app.py` + `system_carts/moybyte.calc.moy`) is the reference app — small
-enough to read in one sitting, built ONLY on the seams below.
+The one guide to Moybyte's app and OS surface: read it top to bottom and you
+can build an app, a background service or a command on any tier. It is the
+authority for what makes a cart an APP: the manifest's `moybyte` fields,
+permissions, the `ui` verbs' place, files, prefs, intents, services,
+messages, alarms, notifications, achievements and what each tier can call.
 
-## The model
+What it is not: the GAME verbs (drawing, sprites, maps, sound, `btn`) are
+moy-spec's (SPEC.md, the console spec any moy host runs) and Moybyte's page
+of them is `docs/moy_cart_api.md`; an app calls them too. Where a truth is
+generated or held by code, this guide points at it rather than copying it:
 
-A system APP is two artifacts:
-
-1. **An identity cartridge** (`system_carts/<slug>.moy`): a normal `.moy` folder
-   (manifest + `main.py`). The manifest carries a marker permission (e.g.
-   `"calc"`); `main.py` is a small *fallback* body an older shell runs as a
-   plain cart ("UPDATE MOYBYTE TO OPEN"). The cart gives the app its launcher
-   tile, title, versioned re-seed (#47), and — because it is just a cart — it
-   stays editable on the home's Make tab like everything else.
-
-2. **A content Layer class** (one module in `runtime/`, staged to the firmware
-   builds like every shared module) implementing the Layer facets plus the app
-   protocol:
-
-   ```python
-   class MyAppLayer:
-       id = "myapp"          # process kind: router / back-stack / window key
-       domain = "system"     # draws on the responsive system canvas
-       TITLE = "MY APP"      # windowed WM title strip (falls back to id.upper())
-       NEEDS = ("surface", "theme", "damage")   # the shell roles you use
-
-       def __init__(self, ctx, names): ...   # ctx = your AppContext
-
-       def is_app(self, cart): ...   # claim the identity cart (title + marker
-                                     # permission + slug -- never a renamed copy)
-       def open(self): ...           # (re)enter on every launch
-       def relayout(self, w, h, fs): ...  # adopt a new canvas size / font scale
-       def close(self): ...          # OPTIONAL -- you are leaving the screen
-
-       def draw(self, dt): ...
-       def handle_input(self, i): ...
-       def handle_pointer(self, px, py, click): ...
-   ```
-
-3. **One registration** (console does this for the shipped apps, from the
-   manifest declaration; anything holding a `ws` can do it after construction):
-
-   ```python
-   ws.register_app(MyAppLayer(ws.app_context("myapp", MyAppLayer.NEEDS),
-                              NAMES, _in),
-                   text_mode=False,        # True = an app that types on every page
-                   min_size=(310, 230))    # windowed resize floor, fs-scaled
-   ```
-
-   `min_size` may be omitted when the app's live layout exposes `MIN_W` and
-   `MIN_H`; registration adopts those constants. `TITLE` is likewise captured
-   by the registry, so the WM never needs an app-id/title ladder.
-
-Everything else follows from the registration — **apps never edit console.py**:
-
-- a launcher tap on the claimed cart opens the app instead of the Player;
-- the router (`_content_layers`), back-stack kind, and windowed-WM window /
-  taskbar chip / title strip;
-- the per-window layout context (the WM captures every registered app's
-  `.layout` generically, so the app reflows per window);
-- the resize minimum (the ui.py min-size convention);
-- keyboard text mode after open (for typing apps);
-- the exitable bar itself — the strip draw and its back chevron's tap are the
-  router's, not the app's (see "The bar contract" below);
-- exit via the bar's back, Esc or B (`ws.app_back`) / `ws.exit()` —
-  return-to-caller is the WM's, not the app's. An app with pages of its own
-  implements `back(self)`: it steps back one page and answers True, or
-  answers False on its first page, and the host leaves the app.
-
-## What an app is HANDED: the AppContext (2026-08-19)
-
-An app used to hold `ws` -- the whole `Workstation` -- and reach through it for
-whatever it needed, private members included. Across the seven shipped apps that
-came to 41 distinct names and ~371 uses, 13 of the names private. Nothing could
-say what an app was permitted to do, which is the question user apps have to
-answer.
-
-An app now takes an **`AppContext`** (`runtime/shell/app_context.py`) carrying only the
-roles it declared:
-
-| role | what it is | verbs |
-|---|---|---|
-| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | `all()`, `again()` |
-| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
-| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names; the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
-| `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made with a files kind (a user app's) reaches that kind alone | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
-| `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
-| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
-| `ctx.prefs` | per-app settings on `system.json`'s rows, namespaced per app (the grant's namespace), a write saved as it is made | `get()`, `set()`, `clear()` |
-| `ctx.notify` | achievement events, and the badges themselves: one awarded by its id, how many are found, whether one is, the day it was and its progress, and today's date on the bar's clock as the badges record it | `achieve()`, `award()`, `count()`, `has()`, `found_on()`, `progress()`, `today()` |
-| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
-| `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | `current()`, `follow()` |
-| `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `put_text()`, `text()`, `kind()`, `seq()` |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()` |
-
-Read that module for the signatures. The verbs column is the role table's
-(`native/moy_app/roles.json`), and `tests/test_roles.py` holds the two equal.
-Every context holds a **grant**, a row of native/moy_app's grant table keyed by
-the app's id, and every role is native/moy_app's role object over it: a C row
-reads the kernel's state, and a shell row checks the grant and calls the server
-the console registers for the role (`runtime/shell/shell_servers.py`) with the grant
-first (the table's `server` column says which). The rows with a `wasm` type
-are what a compiled app imports ("A compiled user app" below).
-Four things about the roles are load-bearing:
-
-- **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
-  declared roles, so reaching an undeclared one raises immediately.
-  `tests/test_app_context.py` pins it in BOTH directions: a role your source
-  names must be declared, and a role you declare must be named. An
-  over-declaration is a capability granted for nothing, and user apps will be
-  handed exactly these tuples.
-- **Roles expose METHODS, and there is not one `property` in the module.**
-  Measured (`docs/history/ui_refactor_2026-08.md` Section 2.4): a plain attribute hop
-  costs +0.5us on the P4 and the same forward written as a descriptor costs
-  +5.1us. So `cv = ctx.surface.canvas()`, and a test asserts the absence.
-- **Hoist.** Bind the roles you use every frame once in `__init__`
-  (`self._surf = ctx.surface`) and read the live values once at the top of
-  `draw()`. Reading `ctx.surface.canvas()` per widget adds a call per widget;
-  a counter budget in `tests/test_roles.py` caps it at one per drawn frame.
-- **Storage returns `(value, err)` and never raises.** `err` is `None`, the
-  `NO_STORE` singleton, or the failure's text -- which is exactly what
-  `app_shell._persist` turns into CAN'T SAVE HERE versus CAN'T SAVE <why>.
-  Each verb is one store op, taking the bus gate around itself; `begin()` and
-  `end()` bracket a session, which is readiness only and holds no gate, so one
-  left open cannot stop the panel flushing -- the console ends it at the next
-  frame and at a run's end.
-
-**No role hands out the console.** An app reaches the shell only through the
-roles above. `tests/test_app_context.py` fails an app module that names the
-Workstation.
-
-## Lifecycle: `close()` is the LEAVING hook
-
-`close()` is optional and the host calls it when your app comes off the screen,
-whatever route took it there. Implement it if you persist on an idle debounce --
-it should be **change-gated and cheap**, because a pop home must not cost a
-store write for an app nobody edited — a write is a floor plus the payload
-(#154), and the floor alone is more than a frame.
-
-`commit()` (see "The bar contract" below) is its forced twin for an explicit
-exit GESTURE: the bar's back, or the WM strip's X on the windowed tier.
-
-`idle_step()` is optional too: work that must not land in a draw -- a file
-read, a decode -- that the app owes while `idle_owed` is True. The console
-calls it on a frame it has nothing to paint (the idle branch that warms the
-home's covers), once a frame, for the first app that owes; the app asks for
-the frame that shows the result through `ctx.damage`. My Art makes its cards'
-pictures this way, so its draw shows only pictures already made.
-
-This replaced a ladder in `go_home()` that named four apps and four different
-verbs. An app persisting on a debounce that nobody added to that list lost the
-kid's work -- the same shape as the bar bug, one level down. Neither list exists
-now.
-
-## What an app draws with
-
-An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
-2026-10-15): `runtime/toolkit/ui.py`'s verbs (the list is that doc's §1) and its
-rect algebra (`cut_*`/`inset`/`hsplit`/`vsplit`), the same calls a Lua cart and a compiled
-app make. The engine under them -- the rect-taking widgets (`button`,
-`chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
-`panel`, `toolbar`, `dialog`, `text_field`), the marks
-(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/toolkit/ui_draw.py`, the chrome's; the shipped apps not yet
-moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
-An app on the verbs sets `UI = True` and draws them into the frame its
-host side, `ctx.ui` (`ui_host.AppHost`), begins: its handlers hand it the
-input (`keys`, `point`, each answering whether a frame is owed) and its draw
-begins the frame (`begin`); Calc is the example.
-Theme tokens are `ctx.theme.colors()` and `ctx.theme.light()`; layout stays
-the app's Python.
-
-## The bar contract is the HOST's, not yours (2026-08-19)
-
-An app draws **no bar at all**. On the fullscreen tiers the router paints the
-exitable strip (the Moy button, the back chevron, your title and the status,
-spec `shell_ux_v1.md` §9) *after* your `draw()` — chrome over content — and routes a tap in that band
-*before* your `handle_pointer()`; in the windowed desk world it suppresses the
-strip, because the WM's title strip carries the close there. You get all of
-that from `register_app` alone, including in an app that has never heard of the
-bar.
-
-This used to be a paragraph here telling you to write both halves yourself, in
-the right order, and an app that forgot either became **unexitable** — silently,
-on device only. Seven apps carried the same two lines. `runtime/shell/console.py`'s
-`_app_bar_route` owns them now, pinned behaviourally by
-`tests/test_app_api.py` (a stub app that draws no strip and routes no bar tap
-must still show the strip and still exit on its back, and so must all seven
-shipped apps, through the same assertion).
-
-Two things follow for an app author:
-
-- **Lay out in the content rect.** The bar may sit on any edge the console's
-  layout puts it (docs/theme_and_shell_2026-11.md §8.5); the host paints over its
-  band and swallows taps inside it, so `handle_pointer` never sees one. Your
-  layout's `cx, cy, cw, ch` is the rest of your surface — the whole of it in a
-  window, where the WM's title strip is outside your buffer.
-  The calc/appearance/artwork heads set them, from `layout_base.content_of`, the function the bar
-  itself is placed by.
-- **Optional `commit(self)`** — the host calls it just before routing a bar
-  tap, because the back there is an exit path. An app that persists on an idle
-  debounce (#111) implements it (`storybook_app` does); forgetting it costs an
-  autosave, never the exit.
-- **Optional `glass`**, an attribute: true while the app holds the whole glass
-  (Storybook presenting). The host then paints no strip and routes the band's
-  taps to the app; its way out is its own back (Esc, B) and the console's key
-  opens the system menu as ever.
-- **Optional `page_title()`**: the page the app has open, by name. The
-  handheld bar shows it after the back chevron; on the desk it is the window's
-  title (its chip keeps the app's name).
-
-## Checklist for a new shipped app (2026-08-19: it is two files)
-
-1. `runtime/<name>_app.py` — the Layer, with its `NEEDS` tuple.
-2. `system_carts/moybyte.<slug>.moy` — the identity cart, whose manifest
-   carries an `"app"` block in its `"moybyte"` object (Moybyte's own fields,
-   SPEC.md §3.1):
-
-   ```json
-   "moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
-                         "text_mode": false, "order": 80 } }
-   ```
-
-   then regenerate the frozen copy:
-   `python tools/gen_device_carts.py --app-decls`.
-3. Tests (see `tests/test_app_api.py` for the Calc set).
-
-**That is the whole list.** Everything else is derived from the declaration:
-console constructs and registers it in a loop (there is no per-app line in
-`console.py`), the device seed order, the host↔device title map, and the web
-bundle's roster. `tests/test_app_registry.py` fails if any of them grows a
-hand-written app name back.
-
-Staging needs no entry either: a board declares what it DENIES in its
-`board.toml` (#161), so a new `runtime/` module reaches every target by default
-and keeping it off one is a written decision.
-
-The five lists this replaced were not merely tedious: **four of the five failed
-silently, and on device only.** Forgetting `CART_ORDER` meant the identity cart
-never seeded, so `is_app` never claimed it, so the app was unreachable on
-hardware while working perfectly on the host.
-
-## USER APPS: an app that is nothing but a cart (2026-08-19, #181)
-
-Everything above describes a SHIPPED app -- a Layer class in `runtime/`, frozen
-into the firmware, registered from a manifest. A USER APP is the other kind: an
-ordinary `.moy` cart, editable on the home's Make tab, that asks for shell
-capabilities in its own `manifest.json` and gets them as cart globals.
-
-    "moybyte": {"type": "app",
-                "permissions": ["graphics", "input", "files:docs", "prefs"]}
-
-The mechanism is `make_system_api(ctx_factory, cart, canvas, ...)`
-(`runtime/shell/system_api.py` -- READ IT, it is the authority and carries the policy
-argument for each entry). It is a FILTER over the `AppContext` above and not a
-second interface: it maps each declared permission to a role, calls the same
-`ws.app_context` factory a shipped app goes through, and returns the globals
-those roles publish. The Player merges that into the cart namespace.
-
-**An ungranted capability has NO NAME.** Not a stub, not an object with a nicer
-error -- absent, so touching it is a `NameError` in the cart. That is the same
-gate `wifi` has ridden since #38 and `net` since #65, and `tests/test_user_apps.py`
-proves it with one cart source opened twice, one manifest line apart.
-
-| permission | cart globals |
+| what | its authority |
 |---|---|
-| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name/badge`, scoped to ONE user-files kind (`docs` by default). `new_name(title)` takes a name a person typed and answers what it may be stored as; `badge(name)` is the mode table's short label for a row (`MD`/`TXT`/`JSON`/`PY`/`LUA`) |
-| `prefs` | `prefs.get` / `prefs.set`, namespaced under the cart's `id` (#162: the manifest's `<author>.<name>`, else its folder less `.moy`), so a renamed cart keeps them |
-| `appearance` | `set_theme(name)` / `themes()` |
-| `launch` | `open_app(id)` |
+| every call an app reaches, on every tier | the call table (§10), written from `native/os_calls.json` |
+| the `ui` verbs and their semantics | `docs/ui_api_2026-10.md` |
+| Python's `moybyte` verbs, each with its signature | `runtime/system/moybyte.py`'s header |
+| a Python app's globals per permission | `runtime/shell/system_api.py` |
+| how the OS runs processes, and why | `docs/os_2026-11/processes.md`, `tiers.md`, `between_apps.md` |
+| an app's own service: its `entries` and the calls that start it | §7, `runtime/system/scheduler.py` (AN APP'S OWN SERVICE) |
+| which board runs which tier | `docs/os_2026-11.md` §5 |
 
-Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
-author carts can escalate itself), `install` (the same, with somebody else's
-cart), `wallpaper`, `artwork`, `damage`, `surface`, `notify`. Firmware update and reboot are not roles at all: the update
-screen (`runtime/system/update_ui.py`) is kernel chrome, like the About card the
-system menu draws, not an app, and keeps the console. The
-policy is C's (native/moy_app: the permission table, the files kinds, the
-two-kinds refusal and the key a grant is made under, the cart's `id`), and its
-permission table is an ALLOWLIST, so a role nobody mapped is ungrantable by
-construction; a test asserts every role in `app_context.ROLES` is classified as
-one or the other, so ADDING a role forces the decision. A user app's grant is
-its run's and ends with it; its crash-guard strikes are keyed by the same id.
+Two worked examples run in the host suite, `tests/test_app_examples.py`: a
+Python app with a scrolling list and prefs (`tests/fixtures/apps/shopping.moy`)
+and a Lua service answering a message (`tests/fixtures/apps/echo_lua.moy`).
+`system_carts/moybyte.notes.moy` is the full-size app. Moy Mesh, an
+installable app in moybyte-org/carts (`carts/moymesh/`, `pkg install
+moymesh`), is the whole app in Lua: a window over a service that holds the
+LoRa radio by handle and wakes on it, a Meshtastic node of its own (the
+channels and presets a Meshtastic setup names, its NodeInfo under the
+console's name from `moybyte.name()`, direct messages under the nodes' X25519
+keys, its own pair the console's, `moybyte.key_make`); its copy
+`tests/fixtures/apps/moymesh.moy` runs in `tests/test_moymesh_app.py`.
 
-Five globals every `type: "app"` cart gets with no permission, because they are
-how an app draws rather than what it may reach: **`ui`** (`runtime/toolkit/ui.py`, the
-public UI API's verbs, the calls a Lua cart and a compiled app make;
-`ui_draw`, the engine layer under them, rides beside it while a system cart
-still draws with it), **`screen()`** (the canvas -- `ui_draw`'s `cv`),
-**`theme()`** (the live tokens -- its `th`), **`content_rect()`** (`(x, y, w, h)`, the part of
-the surface the host's exitable strip leaves you; lay out inside it, never
-hardcode 18) with **`bar_h()`**, its `y` -- what an app that knows only a top
-strip draws below. Under a strip at the bottom `bar_h()` is 0 and the strip
-covers your last rows, so a new app reads `content_rect()`.
+---
 
-Like a shipped app, a user app paints only when something changed
-(`docs/ui_api_2026-10.md`, "Drawn on change"). One that moves on its own
-says so in its manifest, `"moybyte": {"type": "app", "animates": true}`, and
-draws every frame.
+## 1. Your first app
 
-### A compiled user app (#224)
+An app is a `.moy` folder: `manifest.json` and a main script. No build, no
+registration, no firmware.
 
-A user app may be compiled: `"runtime": "wasm"` with `"extensions":
-["moybyte.app"]` in its manifest. It reaches its roles through IMPORTS from
-module `"moybyte.app"` (moy-spec SPEC.md §16.2's vendor-extension rule), each
-named `<role>_<verb>` at the type the role table's `wasm` column gives
-(`native/moy_app/roles.json`); `native/moy_app/moy_app_wasm.h` is the
-adapter's contract. A number answers as an `i32`, text or a blob is written
-into the caller's buffer and answers its length, and a negative answer is
-moy_app.h's code negated. The theme's reads are every app's, as `theme()` is;
-an import from any other role its permissions do not name is refused at load,
-the import named. The app is cart-shaped: fullscreen, its loop the cart's,
-and on the desk a fixed canvas in its player window, which the WM scales (a
-compiled app that reflows to its window is not built). When
-every row it imports is served in C it runs as a VM-free cart does; one that
-imports a row the Python console serves (`theme_set*`, `theme_edit_file`, `nav_open_app`) keeps
-the VM.
+**Python** (`hello.moy/`):
 
-**The public UI API's rows** (the table's `ui` role) are every compiled
-app's, with no permission: `docs/ui_api_2026-10.md` §1's verbs, the
-same C a Python app's `ui` and a Lua cart's draw (`native/moy_ui/moy_ui_api.h`),
-drawn into the app's canvas with no hop and no upcall
-(`native/moy_ui/moy_ui_wasm.h` is their contract). The engine keeps focus,
-the last frame's stops and each id's state for the run, so the app's memory
-holds no ui buffers, and it reads the frame's keys and pointer from the
-run's snapshot. A widget looks the same whatever palette, camera, clip or
-fill pattern the app left set, and the app finds them as it left them.
-`tests/fixtures/wasm/app_ui.moy` imports every row.
+```json
+{
+  "format": "moy-1",
+  "title": "Hello",
+  "id": "local.hello",
+  "runtime": "python",
+  "main": "main.py",
+  "moybyte": {"type": "app", "permissions": ["prefs"]}
+}
+```
 
-### The canvas: FIXED by default, responsive by opt-in
+```python
+FRUIT = ["Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"]
+cur = 0
 
-A shipped app is responsive because a Layer class can afford to be. A cart
-hardcodes coordinates, so **fixed is the default and there is no way to get the
-other by accident**: the manifest's `canvas` (320x240 unless it says otherwise)
-is the raster, and the WM centres and integer-scales it exactly as it does for a
-game. On the handheld nothing changed at all -- there is no new code on that path.
 
-A cart that defines a top-level `_layout(w, h, fs)` opts INTO the whole system
-surface: it draws on the system canvas, is called once before `_init` and again
-whenever the size or font scale changes, and gets the responsive exitable strip
-instead of the frozen 320-wide cluster. A cart that ALSO declares a small
-`canvas` (that has a SPEC contract behind it) keeps the fixed raster and is
-told so through `_layout`'s own arguments, which is the whole reason it takes
-them. In the windowed DESK world the screen is never bound -- a cart lives in a
-window whose blit source is `ws.canvas`, and binding the screen there makes the
-desktop blit itself -- so the cart gets a window surface of its own
-(`Workstation.app_window_canvas`): a canvas the desk's work area large, of which
-its window shows its content rect, with no strip inside the window, its title
-strip the way out; `_layout` and `content_rect()` are the window's content. From
-the fullscreen Library the same cart gets the full desktop surface.
+def _init():
+    global cur
+    cur = prefs.get("cur") or 0         # saved across runs and reboots
 
-Say the honest part out loud: **responsive is real authoring work most app carts
-should not take.** It means no literal coordinates anywhere, a rect-algebra
-layout pass, and testing at more than one size; `W`/`H` are bound once at start
-and go stale, so a responsive cart must read its `_layout` arguments instead.
-The payoff is one app that fills a 7" desktop and a 3.5" handheld. For a
-calculator or a notepad, fixed is the right answer.
 
-### What a user app costs to write
+def _draw():
+    global cur
+    ui.page("Hello")
+    new = ui.list("Fruit", FRUIT, cur)  # arrows, Enter, a tap or a drag
+    if new != cur:
+        cur = new
+        prefs.set("cur", cur)
+```
 
-`system_carts/moybyte.notes.moy` is the worked example: a notepad that types, saves into
-the kid's documents (the same `docs` kind Files browses -- open one
-there and it is really the same file), lists what it saved and remembers which
-note was open, on the public UI API's verbs. **One script of under 500 lines, no shell code, no registration, no
-`runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
-and re-runs on the device.
+**Lua** is the same app with `"runtime": "lua"` and `"main": "main.lua"`;
+a list's rows count from 1 and `nil` stands for Python's `None`:
 
-    system_carts/moybyte.notes.moy/manifest.json   "moybyte": "type": "app" + the permissions
-    system_carts/moybyte.notes.moy/main.py         _init / _update / _draw
-    system_carts/moybyte.notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
+```lua
+FRUIT = {"Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"}
+cur = 1
 
-Compare the shipped path in the checklist above: a Layer class, a `NEEDS` tuple,
-an `app` block, a regenerated `app_decls.py` and a firmware build.
+function _init()
+  cur = prefs.get("cur") or 1
+end
 
-### Crash isolation: three strikes (#160)
+function _draw()
+  ui.page("Hello")
+  local new = ui.list("Fruit", FRUIT, cur)
+  if new ~= cur then
+    cur = new
+    prefs.set("cur", cur)
+  end
+end
+```
 
-The Player turns a cart exception into the stop card (its See why opens the
-code on the line; docs/history/look_2026-10.md step 33). What it cannot catch is a cart that does not
-raise -- a hang, an OOM, a native fault -- and if the thing that died runs
-itself, the next boot runs it again. `runtime/shell/crash_guard.py` marks the app id in
-`system.json` BEFORE the cart's code is compiled and clears it after three
-painted frames (a compiled app whose frames the kernel's Player drew clears it
-at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
-the next tap on the ordinary stop card, whose See why opens its code. The
-cart stays on Make, because editing it is how it gets fixed.
+**Start from a template:** `moy app new hello --tier python` writes this
+folder (`--tier lua|wasm|wasi|c` the others, `--service <tier>` an app's own
+service), `moy app check hello.moy` says what the console would refuse and
+which permissions the code uses that the manifest does not ask for (or asks
+for and never uses), `moy app build hello.moy` compiles a wasm or C
+program from its `src/` (`--chip esp32s3|esp32p4|host`, which a C program
+must name; Python and Lua have nothing to build), and `moy app stubs
+hello.moy` gives an editor the tier's names. `moy app` is moy-spec's `moy` running Moybyte's plugin,
+`moy-app`, which `make setup` installs (`sdk/README.md`).
 
-The Player arms it for `type: "app"` carts only. Two small settings writes per
-open is not free, and a game that always crashes shows the panel and is not a
-brick. The wallpaper, which runs itself at every boot, has its own ledger; how
-it boots without those writes is in `runtime/shell/crash_guard.py`.
+**Run it in the simulator:** `python tools/simulate_desktop.py --cart hello.moy`
+(`--windowed --size 1024x600 --font-scale 2` for a P4's desk). The simulator
+copies the folder into its store, `~/.moybyte/projects`, over the copy there
+at every launch, so each run is the folder as it is; `moy app push hello.moy`
+copies it there without a launch.
 
-## Non-goals (v1)
+**Run it on a board:** `tools/board.py tdeck push hello.moy` (or `moy app
+push hello.moy --board tdeck`) copies the folder into the board's store, then
+`tools/board.py tdeck run Hello` opens it (any board id from
+`tools/board.py ports`; the `on-glass` skill has the rest).
+On the console itself, the home's Make tab makes and edits carts, apps
+included.
 
-- Multiple instances of one app.
+**Start here, per tier.** The same six steps in every tier; the rest of
+this guide is each step in full.
 
-Native apps are the direction (owner, 2026-11-01): C apps as ELF modules
-loaded on demand (#227).
+| step | Python | Lua | wasm app | WASI program | C program |
+|---|---|---|---|---|---|
+| the manifest (§2) | `"runtime": "python"` | `"runtime": "lua"` | `"runtime": "wasm"`, `"extensions": ["moybyte.app"]` | `"runtime": "wasm"`, `type` `command` or `service` | `"native": [chips]`, `type` `command` or `service` |
+| permissions (§6) | its list; the prompt calls it trusted | its list, enforced | its list, enforced at load | its list | `full_access` and its list |
+| entry points (§7, §11) | `_init`, `_update`, `_draw`; a service's `moy_start`; a command's `main(argv)` | `_init`, `_update`, `_draw`; `moy_start` | the exports `_init`, `_update`, `_draw` | `_start` | `main` |
+| messages and timers (§8, §9) | `moybyte.on`, `send`, `every`, `after`, `at` | the same | `moybyte_on`, `moybyte_recv`, `moybyte_every` | `poll_oneoff` on `MOY_EVQ_FD`, `moybyte.os` | `poll` on `MOY_EVQ_FD`, `moy_on` |
+| files (§5) | `files` | `files`, `io`, `os` | `files_*` imports | WASI's own and `moybyte.os` `files_*`, in the granted folder | POSIX, in the granted folder |
+| build and test on the host (§12) | `tools/simulate_desktop.py --cart`; `tests/test_app_examples.py` | the same | `moy app build`, then the simulator | `moy app build`; the terminal | `moy app build --chip host`; the terminal |
+| example | `tests/fixtures/apps/shopping.moy` | `tests/fixtures/apps/echo_lua.moy` | `tests/fixtures/wasm/app_talk.moy` | `tests/fixtures/wasm/wasi_svc.moy` | `tests/fixtures/elf/elf_svc.moy` |
 
-**App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
-anyway: `files_app` reached straight into the notebook app's layer across five
-sites, because "open this doc in the text app" is a real product need and there
-was no seam for it. `ctx.nav.open_app(id)` is the seam --
-resolution is by REGISTERED ID, so no app holds a reference to another app's
-class and a build without the target degrades to a status line. IPC beyond
-"open that, pointed here" is still out.
+Badges (`award`, `progress`, §9) are a call in every tier and may be called
+freely, every frame if need be.
 
-The Files ROUTER (docs/theme_and_shell_2026-11.md §10.2) is the seam's second customer,
-and it added verbs that are all "open that, pointed here":
-`nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
-the project Editor, `nav.open_text(name, kind, mode)` opens a document on
-the shell's text page in a `text_modes` mode, and `nav.open_image(name, kind,
-cart)` opens a picture in Paint -- a gallery drawing, or a cart's OWN image
-edited in place on that project's kind, which is the SAME console verb the
-Editor's ADVANCED files row takes, so there is one image route and not two. `projects()` is on `nav` and not
-on `ctx.carts` deliberately: a list of places to GO is navigation, and an app
-that browses projects has not thereby earned the right to author executable
-content.
+**Which tier for which work.** Every tier reaches the same calls (§10), so
+choose by cost and reach, not by what is available:
+
+| the work | the tier | why |
+|---|---|---|
+| an app with a window, most apps | Python or Lua | the fastest to write and change, and the console's own apps are Python; Lua is sealed to its permissions, Python is trusted (§6) |
+| light background work: a reminder, a sync, an alarm, a reply to messages | a Lua service | a small state of its own on its own task, sealed like a Lua app |
+| a game, or one binary for every board and the browser | a wasm app | compiled once for every chip, sealed by its imports |
+| a command, or heavy work that is portable: a codec, a protocol, a compressor | a WASI program | the same portability, with POSIX-style I/O; each running instance holds its own linear memory, in 64 KiB pages, which a P4 affords and an S3 feels, so prefer a Lua service for light work there |
+| work near the hardware, or one chip's full speed | a C program (ELF) | built per chip, and unsealed on the S3s (`full_access`, §6) |
+
+**What a service survives.** A service outlives its app's window on every
+tier. On the S3s a game that needs the whole board stops the VM. Python
+services pause: they are stopped before it and started again after it, a new
+process with fresh timers. Every Lua, wasm or C service keeps running: its pid
+and timers carry on and its messages to other services arrive, while a call
+that needs the console (a notification, a role the shell serves) waits until
+the game ends (`docs/os_2026-11/processes.md` §5). The P4s have no VM stop.
+
+## 2. The manifest
+
+moy-spec's fields sit at the top level (SPEC.md §3.1 is their authority):
+`format`, `title`, `id` (`<author>.<name>`, #162: what your grant, prefs,
+consent and crash strikes are keyed by; without it, the folder's name less
+`.moy`, which is also its name where another folder is named for that id:
+the folder `<id>.moy` owns it, `moy_store_base.id_in_folder`), `version` (an integer; bump it when a seed cart changes, #47),
+`runtime` (`python`, `lua`, `wasm`), `main`, `canvas` (`320x240`, the default,
+`160x120` or `128x128`), `fps`, `extensions`, `input` and `palette`
+(`docs/moy_cart_api.md` has how a Moybyte cart reads each).
+
+Moybyte's fields go in ONE object, `"moybyte"`; at the top level they read as
+absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
+
+| field | is | more in |
+|---|---|---|
+| `type` | `game` (the default), `app`, `service` or `command` | §3, §7, §10 |
+| `permissions` | what the app may reach: §6's names | §6 |
+| `required` | permissions it cannot run without: absent, its launch is refused by name | §6 |
+| `animates` | `true`: draw every frame (a clock, a meter); an app draws on change otherwise | §3 |
+| `handles` | the MIME types it opens (`"text/markdown"`, `"image/*"`) | §5 |
+| `receives` | the message names another app may send it | §8 |
+| `entries` | the cart's entry points beside `main`: `{"service": file}`, its own service's program | §7 |
+| `achievements` | the badges a game declares | §9 |
+| `native` | the chips a C cart carries a module for (`["esp32s3", "esp32p4"]`) | §10 |
+| `wasi` | `true`: an app that is a WASI command the Player runs, drawing with the toolkit it links (`sdk/include/moybyte/ui.h`) | `runtime/run/wasi_run.py`, `docs/ui_api_2026-10.md` |
+| `audio_ring` | a compiled cart's audio ring depth in frames | `docs/os_2026-11/hardware.md` §2 |
+| `config`, `edit` | the "Make it mine" values `cfg(key)` reads and the Editor's rows that change them | `runtime/carts/moy_carts.py`, `NEW_TEMPLATE` |
+| `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
+| `glass`, `pictures` | a wallpaper drawn per glass, a picture wallpaper | `docs/theme_and_shell_2026-11.md` §3.9 |
+| `graduated` | written by the Editor when blocks become code; never by hand | `runtime/editors/blocks.py` |
+| `system`, `order`, `targets`, `app` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration | §13 |
+
+## 3. Drawing an app
+
+**The verbs.** An app draws its interface with `ui`, the public UI API
+(`docs/ui_api_2026-10.md` §1 lists every verb, §2 their semantics): pages,
+labels, buttons, toggles, sliders, lists, tables, tabs, menus, dialogs,
+fields, cards, scroll regions and text views, themed by the console. The
+same verbs exist in Python, Lua and a compiled app (§10), drawn by one C
+engine (`native/moy_ui`), so a page looks the same from every tier. Call
+them in `_draw()`; the engine keeps focus, each list's row and each page's
+scroll by id, so your script keeps only its values. The game verbs
+(`rect`, `spr`, `print`) draw inside a `ui.part` or a `ui.at` rect.
+
+**One scroller, one frame path.** A list, a table, `ui.scroll` and
+`ui.text_view` scroll on the engine's one scroll model and get their fast
+frames from the engine (shift frames, `docs/surface_model_v1.md` §14.7). An
+app never keeps a scroll offset or a frame path of its own (owner,
+2026-10-29: the surfaces that did were folded back). A long document is a
+`ui.text_view`; a long list is one `ui.list` or `ui.table`.
+
+**The bar is the host's.** The console draws the bar (its back chevron,
+your title, the status) over your app and routes its taps; your app draws
+none. Lay out inside `content_rect()` (`x, y, w, h`), wherever the bar sits;
+`ui.page` already does on every tier, an app's `ui` frame being that rect
+(a game's is its whole canvas). `bar_h()` is that rect's `y`.
+
+**Drawn on change.** An app paints a frame only when something changed: its
+input, a message, a timer. One that moves on its own says
+`"animates": true` beside its `type` and is drawn every frame like a game;
+an app that lists `audio` is too, since its sound is pulled in the frame.
+
+**Five names with no permission**, because they are how an app draws: `ui`,
+`screen()` (the canvas), `theme()` (the live colour tokens),
+`content_rect()` and `bar_h()`. Lua holds `ui` and `content_rect()`, which
+answers four values.
+
+**The canvas: fixed by default, responsive by opt-in.** The manifest's
+`canvas` is the raster, and the console centres and integer-scales it, as it
+does a game's. A cart that defines `_layout(w, h, fs)` (each tier its own way,
+the table below) opts into the whole surface: it draws on the system canvas,
+is called before `_init` and again whenever the size or font scale changes,
+and gets the responsive bar. A cart that also declares a small `canvas` keeps the fixed raster and
+is told so through `_layout`'s arguments. On the desk the cart gets a window
+surface of its own, `_layout` and `content_rect()` being the window's
+content (`Workstation.app_window_canvas`); from the fullscreen Library, the
+whole desktop surface. Responsive is real work: no literal coordinates, a
+rect-algebra layout pass, testing at more than one size, and reading
+`_layout`'s arguments rather than `W`/`H`, which are bound once at start.
+For a calculator or a notepad, fixed is the right answer.
+
+The opt-in is the same on every tier, each defining the one callback its
+own way and the console finding it before the cart runs
+(`Player._wants_layout`):
+
+| tier | `_layout` is | how the console finds it | how it hears a change |
+|---|---|---|---|
+| Python | a top-level `def _layout(w, h, fs)` | the source, at column 0 (`system_api.wants_layout`) | called by the Player |
+| Lua | a global `function _layout(w, h, fs)` (or `_layout = function`) | the scripts, at column 0 (`lua_ext.wants_layout`); called only where the global is a function, as `_init` is | called by the Player (moycore's `layout`) |
+| compiled (wasm) | an export `_layout` of three i32 and no result | the module's export section (`moycore_glue.wasm_exports`) | called by the Player (moycore's `layout`, the host's `hw_layout`) |
+| WASI and native apps | `void _layout(int32_t w, int32_t h, int32_t fs)`, which `moybyte/ui.h` declares weak and exported | the module's exports (WASI) or dynamic symbols (`elf_run.elf_defines`) | the frame message's layout words (`MOY_FRAME_LAYOUT_*`), on which the toolkit it links calls `_layout` before its loop sees the frame |
+
+A Python, Lua or compiled app hears `_layout` before `_init`; a WASI or
+native app, which has no `_init`, before the first frame its loop reads.
+
+**A responsive app's `ui` looks like the shell's apps.** Its `ui` verbs draw
+in the theme's faces, colours, row styles and selection marks, as a
+built-in app's do, at the font scale of the canvas it draws on (the
+console's on a whole surface, 1 in a desk window and on the handheld's
+raster), and lay out on the desk's rows where its surface is the desk's.
+The same calls draw the same pixels on every tier
+(`tests/test_app_layout.py`): a Python app's frame is drawn by its Player
+(`ui_draw.CART_APP`, the boundary keeping only its `print` and its own
+colours), a Lua, compiled, WASI or native run's by the RUN face over the
+word its snapshot carries (`Player.ui_face`, `moy_ui_wasm.h`'s
+`MOYCORE_UI_FACE_*`). The rest of its drawing stays a cart's: `print` in
+petme128, colours MOY64. A game's `ui`, and a fixed app's, draws as a
+cart's.
+
+**Text editing: the editor handle (#112).** `open_editor` hands the cart the
+console's own text editor over one document. You draw it into a rect and
+forward taps; it does the text, the caret, the selection, wrap, undo, the
+clipboard, the Markdown rendering and the saving. There is no Save button to
+build: it writes on an idle pause and again when the cart exits.
+
+| call | does |
+|---|---|
+| `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind |
+| `open_editor()` | the document the console was asked to open (a file tapped in Files, a project's own file on the Editor's Config tab), or `None`. Call it once in `_init` |
+
+The kind that arrives with `open_editor()` may be one you were never granted:
+a person chose that file, not your cart. One of them is a whole project,
+`project:<folder>.moy`, a `.moy` folder's own files, reached only through the
+Config tab's Files so the cart loader re-reads the folder afterwards. You
+still just draw it. Everything else is on the handle:
+
+| call | does |
+|---|---|
+| `ed.draw(x, y, w, h)` | render the document into that rect, this frame; a `scale` for a big screen. On a `ui.page` given a `gen` it draws only the rows that changed |
+| `ed.tap(x, y, click)` | forward a pointer press. Answers what it meant: `("link", name)` a tapped `[[note]]`, `("check", row)` a checkbox it ticked, `("caret", None)` a plain place, `None` outside |
+| `ed.drag(x, y, down)` | forward what follows the press: it pans, or in SELECT mode grows the selection |
+| `ed.nav(dx, dy)` | move the caret by cells (the console feeds it from the T-Deck's trackball and the arrows while the handle has focus) |
+| `ed.focus(on)` / `ed.focused()` | take or release the keyboard; while a handle has it, `key()`/`keyp()` read nothing |
+| `ed.key(code)` | feed one byte (an on-screen key) |
+| `ed.undo()` / `ed.redo()` / `ed.can_undo()` / `ed.can_redo()` | one step, and whether there is one |
+| `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the console's clipboard with the `clipboard` permission, the document's own otherwise |
+| `ed.select_mode(on)` / `ed.selecting()` | SELECT mode: a drag and the trackball extend the selection, the way to mark a range with no shift-arrow |
+| `ed.has_selection()` / `ed.can_paste()` | for dimming those buttons |
+| `ed.wraps()` | whether the mode soft-wraps (`md`, `text`) or pans sideways (`code`, `json`) |
+| `ed.save()` / `ed.save(soft=True)` | write now; the soft one refuses a document its mode cannot parse and badges it |
+| `ed.badge()` / `ed.dirty()` | why the last save was refused (`""`: fine); edits no save has taken |
+| `ed.can_run()` / `ed.run()` | run a `.py`/`.lua` document on the console's script screen, saved first; your cart opens again on it after, `open_editor()` handing it back |
+| `ed.text()` / `ed.set_text(s)` / `ed.caret()` / `ed.scroll(rows, cols)` | the whole text, the caret's `(row, col)`, a pan without moving the caret |
+| `ed.name()` / `ed.mode()` / `ed.close()` | the document's name, its mode (`md`, `code`, `json`, `text`), save and let it go |
+
+A note is Markdown, rendered by the handle: `#` headings, `- [ ]` checkboxes
+ticked by a tap, `[[note]]` links and `![[a drawing]]`, one of Paint's
+pictures inline by name. Prose wraps; code and JSON pan. In Lua the handle
+is a table with the same verbs as methods (`ed:draw(...)`), `ed:tap`
+answering two values rather than a pair. `system_carts/moybyte.notes.moy`
+is built on it.
+
+## 4. Input
+
+**Keyboard first; never keyboard only.** The keyboard is the primary input on
+every board, and every surface must also work with a gamepad alone and with
+touch alone (#242, #239). The `ui` engine gives you all three: arrows (the
+T-Deck's WASD and trackball, a pad's d-pad) move focus between stops,
+Enter, A or a tap activates, a drag scrolls. So: every action is a stop
+(a button, a list row, a menu item), and a key shortcut only ever doubles
+one.
+
+**Back is the host's, and steps out of your views first.** Esc, B, the
+T-Deck's K (its B), the bar's back chevron and a desk window's are the
+console's way back; the ui never reads them. Back steps out of the app's own
+views before it leaves the app, on every tier:
+
+1. a `ui.popover` the last frame drew is dismissed (it answers false);
+2. else, while the app lends the bar its way back (`ui.bar`'s fourth
+   argument), the next `ui.bar` answers it -- `ui.UP` in Python, -1 in Lua,
+   -2 in a compiled app -- and the app steps back itself; the console shows
+   the chevron meanwhile, in a desk window's title strip too;
+3. else the chevron leaves the app, and Esc and B reach your `keyp` and
+   `btnp` (Notes calls `quit()` on Esc there).
+
+A second page, a dialog, a picker: lend the way back while it shows. A
+page's title is the bar's: `ui.page("Radio")` draws no head in the page
+and the bar reads "Radio" (a desk window "Moy Mesh · Radio") where
+`ui.bar` lends no title of its own.
+
+```lua
+page = "list"
+function _draw()
+  if ui.bar(page == "chat" and "Chat" or "", {}, {}, page == "chat") == -1 then
+    page = "list"                      -- back: the second page closes
+  end
+  ui.page("Mesh")
+  if page == "list" then
+    if ui.button("Open chat", "primary") then page = "chat" end
+  else
+    if ui.button("Who", "normal") then who = true end
+    if who then
+      who = ui.popover("who", 120)     -- back dismisses this first
+      ui.label("Nodes heard")
+      ui.popover()
+    end
+  end
+end
+```
+
+A shell app built into the console answers the same back through its
+`back()` and `has_page()` (`Workstation.app_back`); a running app cart's are
+the Player's, over its `ui` context. The console's own key (the T-Deck's
+Mic) opens the system menu and is never yours.
+
+**Tabs switch themselves.** `ui.tabs` takes Q and E (the `tabs` hint's
+keys) wherever the keys do not type into a field, left and right while it
+holds focus, and a tap, and answers the new tab; an app never reads Q or
+E for it (a `keyp` in `_draw` keeps the frame from settling):
+
+```lua
+tab = 1
+function _draw()
+  ui.page("Mesh")
+  ui.hints({"tabs", "Switch"})
+  tab = ui.tabs("Views", {"Chat", "Nodes"}, tab)
+  if tab == 1 then chat() else nodes() end
+end
+```
+
+**An empty page says what is missing.** `ui.empty(icon, title, lines)`
+draws the head of a page with nothing on it yet -- the icon on a disc, the
+title, then each line dim -- and answers the y under it; the one verb that
+fills the page follows as a button:
+
+```lua
+if #log == 0 then
+  ui.empty("bubble", "No messages yet", {"Say hello to the mesh"})
+  if ui.button("Write one", "primary") then ui.focus("msg") end
+end
+```
+
+**A chat is bubbles.** `ui.bubble(text, side, o)` is one message, a stop
+that wraps itself: `"in"` at the left with its sender (`o.head`) and the
+signal glyph (`o.signal`, 0 to 4 bars), `"out"` at the right in your
+colour, `o.tone = "failed"` as its tint; `o.status` is the line under it.
+It answers its rect and state; `ui.CUT` is set where the text ran past
+`o.lines` (4), the cue to offer the whole message on a page of its own.
+The details repeat the glyph on an info row, `ui.info("Signal", "-104
+dBm", {signal = 2})`:
+
+```lua
+for i, m in ipairs(log) do
+  local o = {id = "m" .. i}
+  if m.from then o.head, o.signal = m.name, m.bars end
+  if m.failed then o.tone, o.status = "failed", "Not sent" end
+  local x, y, w, h, st = ui.bubble(m.text, m.from and "in" or "out", o)
+  if st & 2 ~= 0 then open_details(i, st & ui.CUT ~= 0) end
+end
+```
+
+**Details hang from what they detail.** `ui.at` the rect `ui.bubble`
+answered (its height takes in the status line), then `ui.popover(id, w)`
+with the room's width less the gutters spans the chat; its buttons form one
+row at the card's foot, the primary last. `wash = "view"` washes the scroll
+region the bubble lies in, all but the bubble and its ring:
+
+```lua
+ui.scroll("history")
+-- ... the bubbles before it
+local x, y, w, h = ui.bubble(m.text, "out", {tone = "failed", anchor = true})
+ui.at(x, y, w, h)
+ui.scroll()
+details = ui.popover("details", pw - 16, {wash = "view"})   -- back or a press outside: false
+ui.info("Status", "Not sent")
+if ui.button("Delete", "danger") then delete(m) end
+if ui.button("Send again", "primary") then resend(m) end
+ui.popover()
+```
+
+**A list says more on its right.** `o.values` gives each `ui.list` row a
+secondary text in the dim ink, and `o.check` marks the current row with
+the check icon:
+
+```lua
+region = ui.list("Region", {"EU_868", "US"}, region,
+                 {values = {"Europe", "United States"}, check = true})
+```
+
+**A conversation is a two-line row.** `o.subs` makes each `ui.list` row
+two lines: its item the title, its sub the caption line under it, and its
+value the time at the right of the title. `o.icons` leads each row with an
+icon, or with `"@"` and a name, that person's initials on a disc;
+`o.counts` puts the unread badge at the row's right (`""` or 0 none), and a
+row with one draws its title in your colour; `o.tags` sets a pill after
+the title and `o.marks` an icon there. `{card = true}` opens a group with
+no caption around it, a card on every console (on the desk a ring round
+its rows, where a captioned group's rows have rules alone):
+
+```lua
+ui.group("", {card = true})
+local open = ui.list("", {"LongFast", "Ana Ridge"}, -1,
+                     {subs = {"Base Camp: Gate opens at seven", "Back by noon"},
+                      values = {"2 min", "1 h"}, icons = {"bubble", "@Ana Ridge"},
+                      counts = {0, 2}, tags = {"Public", ""}, marks = {"", "lock"}})
+ui.group()
+```
+
+**A note belongs to the page.** `ui.note(icon, lines)` is a card in the
+page's flow, no stop and no dialog: the icon (`"warn"` in the danger tone)
+and the lines, the first in `ink`, the rest dim. A row's tag, `{tag =
+"Public"}` on `ui.link` or `ui.info`, is a short pill at its right:
+
+```lua
+ui.note("warn", {"Every radio on a mesh uses one preset.",
+                 "On another one you hear none of them."})
+if ui.link("LongFast", "", {tag = "Public"}) then open_channel() end
+```
+
+**A field is a row's value.** In a group, `ui.field(label, text, max)` sits
+at the row's right as wide as its text, cut at `max` bytes; a text wider
+than it shows its tail after an ellipsis. `{disabled = true}` draws it off
+and takes no focus. The console's Paste (the desk's Ctrl+V) puts its
+clipboard into the focused field, as many whole characters as `max` leaves
+room for: the app reads no clipboard and needs no `clipboard` permission
+for it, on every tier. A confirm opens on the button `o.focus` names:
+
+```lua
+ui.group("This node")
+name = ui.field("Name", name, 39)
+short = ui.field("Short name", short, 4)
+ui.group()
+ui.field("", "", 200, {hint = "Replaced by Srbija", disabled = true})
+if ui.dialog("Switch to ShortFast?", {"Cancel", "Switch"}, "primary",
+             {focus = "Cancel"}) == 2 then switch() end
+ui.dialog()
+```
+
+**A settings page shows whole rows.** `{snap = true}` on `ui.page` or
+`ui.scroll` leaves out a row the view's edge would cut (a group's caption
+goes with its first row, a list's label with its first row, a list's rows
+are each a row), and the band the foot leaves says "More below". A drag let
+go, a fling or the wheel spent, and a focus step all rest the view with a
+row flush at its top:
+
+```lua
+ui.scroll("radio", {snap = true})
+ui.group("This node")
+ui.info("Name", name)
+ui.group("Channels")
+ch = ui.list("", channels, ch, {values = kinds})
+ui.group()
+ui.scroll()
+```
+
+**A chat's history rests on its foot.** `{follow = true}` on a snapping
+region opens it at its foot and keeps it there as messages arrive, until
+the person scrolls up; the gap its top leaves says "Older messages" while
+older ones lie above:
+
+```lua
+ui.scroll("chat", {snap = true, follow = true})
+for _, m in ipairs(history) do
+  ui.bubble(m.text, m.side, {head = m.from, status = m.status})
+end
+ui.scroll()
+```
+
+**A finger's rows come by themselves.** On a board whose tap floor stands
+(the Guition S3's 3.5-inch glass), a `ui.list` row and an info, link,
+toggle, slider, cycle, seg, swatch or tabs row are 36 px tall and a bubble takes larger
+pads and faces; the app's code is the same on every
+board (`docs/ui_api_2026-10.md`, the tap floor).
+
+**Hints name actions, not keys.** `ui.hints(("confirm", "Open", "menu",
+"Menu"))` names actions (`confirm`, `back`, `change`, `tabs`, `menu`,
+`cancel`, `flip`, `rotate`, `shift`, `clear`, `copy`, `more`, `search`,
+`move`, `scroll`) and the engine shows each input's own keys
+(`native/moy_ui/moy_ui_parts.c`, `ACT_KEYS`). The T-Deck has Enter, K, WASD
+and the trackball, Q E, Mic, F V, R, Del, M and Sym G, and no arrows, Tab,
+Esc, Ctrl or brackets: a hint or a shortcut naming those does not exist
+there.
+
+**Reading input yourself.** Beside the ui, an app reads the cart API's
+`btn`, `btnp`, `key`, `keyp` and `touch` (`docs/moy_cart_api.md`, Input),
+`textmode(True)` for typing, and `ui.keys_taken()` to skip a frame's keys
+the ui used. A Python process reads raw input records, timestamped, with
+`moybyte.on("keys" | "touch" | "pad", fn)` and `moybyte.events(into)`.
+
+## 5. Storage, files and other apps
+
+**Prefs** (`prefs`): `prefs.get(key)`, `prefs.set(key, value)`,
+`prefs.clear(key)`, any value JSON carries, each a row of the console's
+settings namespaced under your app's `id`, saved as it is written; `None`
+(Lua `nil`) for a key never set. Your app and its service share them.
+
+**Files** (`files` / `files:<folder>`): one of the user's shared folders,
+the ones the Files app shows: `files:documents` (the default),
+`files:pictures`, `files:music`, `files:recordings`; asking for two is a
+manifest error, and one the console has none of refuses the launch. The
+verbs are `files.list`, `load_text`/`save_text`, `load`/`save`, `rename`,
+`delete` (to the trash), `duplicate`, `new_name(title)` (what a typed name
+may be stored as) and `badge(name)` (the row's short label, `MD`, `TXT`,
+`JSON`, `PY`, `LUA`). Storage answers `(value, err)` and never raises (Lua:
+two results), `err` being `None` or why. In Lua the standard `io` and `os`
+libraries work in that one folder: `"notes.txt"` is a document there, a path
+that climbs, starts at `/` or names a folder is refused with
+`Permission denied`, a file is saved whole at its `flush` or `close`, and
+`os.remove` sends it to the trash. A game's own state is `pmem`
+(`docs/moy_cart_api.md`). `docs/os_2026-11/between_apps.md` §2 is the files
+model.
+
+**Python is trusted, not sandboxed.** A Python app runs in the shell's one VM
+with the real builtins, so `open()`, `os` and `socket` reach the whole tree
+with or without a grant; the manifest is what the install prompt tells the
+user (`docs/os_2026-11/processes.md` §2). Lua and wasm have no names past
+their grants.
+
+**Opening with another app.** Your manifest says what your app opens
+(`"handles": ["text/markdown", "image/*"]`), and a file is named by its path
+in the shared folders, as Files shows it:
+
+```python
+import moybyte
+
+moybyte.open_with("Documents/todo.md")            # in the app that opens Markdown
+moybyte.open_with("https://moybyte.org", True)    # always ask which app
+moybyte.share("a line of text", "text/plain")
+
+def moy_open(h):            # an item routed to this app
+    text = h.read()         # h.name, h.mime, h.url, h.mode ("r" or "rw")
+    h.write(text + "!")     # a file opened with open_with is "rw"
+```
+
+Where several apps open the type, the console asks once with its "open with"
+menu and keeps the answer; `True` as the second argument asks again. The
+handle reaches one item and ends with your run. `moybyte.pick("image/*")`
+asks the user for one of their files of that type in the console's picker,
+with no `files` permission; the one picked reaches `moy_open(h)` the same way
+(`moybyte.pick(mime, "rw")` to write it back), `None` reaching it on a
+cancel, and it answers `False` where no file has the type. A Lua service
+holds `open_with` and `share`. `docs/os_2026-11/between_apps.md` §1 has the
+routing.
+
+**From the background** (a service, or an app the player left) these verbs
+and `open_app` ask first: the player gets a notification ("Wants to open
+todo.md in Notes") that does it when opened, and the call answers `True` as
+though it went. The `front` permission lets them straight through
+(`runtime/system/front.py`).
+
+**The clipboard** is the `clipboard` permission: the console's own, at most
+4 KiB of text, the global `clipboard` (`put_text(text)`, False for a text
+too long; `text()`; `kind()`, "text" or none; `seq()`, which moves at every
+put), and what the editor handle's `cut`/`copy`/`paste` use (a compiled app
+imports its rows, §10).
+
+## 6. Permissions and consent
+
+What each permission hands an app, and the tiers that may hold it: the
+table is `native/os_calls.json`'s `"permissions"`, written here and into
+`runtime/shell/app_perms.py`'s `TABLE` (which the install prompt, the launch
+check and Settings read) by `tools/gen_os_table.py`. A permission's tiers are
+the tiers that serve what it hands an app; a cart with its own service (§7) is
+asked for what its own tier or its service's serves (`app_perms.tiers_of`):
+one consent covers both. Of the markers, `editor` names the app the console
+opens a text file from Files with (Notes).
+
+<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json: the permissions. Do not edit. -->
+| permission | what the app holds | tiers |
+|---|---|---|
+| `graphics`, `input`, `audio` | nothing extra: the floor every cart has | python, lua, wasm, elf |
+| `files`, `files:<folder>` | `files` (§5), `open_editor` (§3), Lua's `io` and `os` in the folder | python, lua, wasm, elf |
+| `prefs` | `prefs` (§5) | python, lua, wasm, elf |
+| `appearance` | `set_theme(name)`, `themes()` | python, lua, wasm |
+| `launch` | `open_app(id)`: another app, by its registered id | python, lua, wasm, elf |
+| `clipboard` | `clipboard`, the console's clipboard, which the editor handle uses too (§5) | python, lua, wasm, elf |
+| `network` | `wifi` | python, elf |
+| `multiplayer` | `net`, `on_net` (`docs/moy_cart_api.md`, Multiplayer) | python, lua, wasm, elf |
+| `pins` | `pin_write`, `pin_read` (`docs/moy_cart_api.md`, Pins); by handle on the compiled tiers (§10, Devices by handle) | python, lua, wasm, elf |
+| `console` | `print` writes to the text console's scrollback instead of drawing (a script's, the terminal's) | python, lua |
+| `notifications` | `moybyte.notify` posts (below) | python, lua, wasm, elf |
+| `front` | nothing by name: from the background, `open_app`, `open_with`, `share` and `pick` go straight through (§5) | python, lua, wasm, elf |
+| `autostart` | a service starts with the console (§7) | python, lua, wasm, elf |
+| `lease:<resource>` | `moybyte.lease(name)`: a board resource (a UART, a pin) as MicroPython's own object (`docs/os_2026-11/hardware.md` §1); by handle on the compiled tiers (§10) | python, lua, wasm, elf |
+| `full_access` | what a native (ELF) cart must ask for, and what admits an unsigned compiled module (§10) | wasm, elf |
+| `http`, `mic`, `lora`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url` | `moybyte.http` and the other device APIs (Python, `runtime/system/devices.py`); by handle on the compiled tiers too, `lora` with LoRaWAN (§10, Devices by handle) | python, lua, wasm, elf |
+| `alarms` | `moybyte.at` (§9) | python, lua, wasm, elf |
+| `editor`, `calc`, `terminal`, `getcarts`, `storybook`, `myart`, `artwork`, `music` | nothing: a marker, a shipped app's claim on its own cart (§13) | python |
+<!-- END GENERATED -->
+
+**Not asked for, not there.** An ungranted capability has no name: touching
+it is a `NameError` (Lua: `nil`), like a typo. A permission the user turned
+off in Settings (About → App permissions) has its names bound to `None`
+(`nil`), so `if prefs is None:` is how an app copes. A permission naming what
+this console lacks (`pins` on a board without them) leaves no name. Only a
+`required` one refuses the launch, naming what is missing, at install and
+again at launch; an app requiring a device the console lacks shows no run
+tile (the home's Games, Mine and Apps, the desk), while Files and Make still
+list it to edit. Never grantable, whatever a manifest says: the shell's own
+roles (`carts`, `install`, `wallpaper`, `artwork`, `damage`, `surface`,
+`notify`, `shell`); `tests/test_user_apps.py` pins it.
+
+**Consent.** A cart installed from Get Carts (or `pkg install`) shows what it
+asks for first and installs only on the user's yes, all or nothing; an update
+that adds a permission asks again. Any other cart brought in as files (a
+card, SFTP, USB, a browser's push) shows those lines when it is first opened,
+and runs only on a yes. Your own carts, written on the console, and the
+built-ins are never asked about. The record is kept per app id (`runtime/shell/app_perms.py`,
+`Consent`); `docs/os_2026-11/processes.md`
+§2 has the rules. What a permission, a tier and a signature protect
+against, and what they do not (a Python app is trusted, a C module on an S3
+is the whole console), is `docs/os_2026-11/threat_model.md`.
+
+**Notifications** (`notifications`): `moybyte.notify(summary, body="",
+icon=None, actions=(), urgency=1, replaces_id=0)` answers the notification's
+id, or `None` without the permission.
+
+```python
+import moybyte
+
+nid = moybyte.notify("Ana: are you coming?", "We start at eight.", "heart",
+                     ("default", "Open", "reply", "Reply"), 1)
+
+def moy_action(nid, key):       # the player opened it: "default", or "reply"
+    ...
+```
+
+The summary is a single line of at most 47 characters and the body at most
+200; the icon names one of the console's icons (`None` draws a bubble); the
+actions alternate keys and labels, `"default"` meaning a tap on the
+notification itself; urgency 0 lists it quietly, 1 shows a banner for 5 s
+and 2 for 10 s; `replaces_id` updates a notification you posted before. The
+banner draws over whatever is on screen; opening it (the banner, or the task
+manager's Notifications tab) brings your app to the front and calls
+`moy_action(id, key)`. `docs/os_2026-11/processes.md` §7 has the rules.
+
+**A status item.** `moybyte.status(icon, section, order=0)` puts an item in
+the bar for your process, its section drawn in the item's menu on the desk
+and in the control centre on a handheld; your process's end takes it out
+(`runtime/system/status_items.py`). An item with no section has no menu:
+a tap on it opens your app. A Lua or a compiled program describes its rows
+instead (§10, a status item).
+
+## 7. Services: background work and the one wait
+
+A **service** (`"type": "service"`) has no window: it starts, sleeps on its
+wake sources and runs a callback when one fires, whatever is on screen. On
+every tier a background program waits in the same single kernel wait, on
+its own event queue; Python's wakes, Lua's callbacks and a compiled loop's
+poll are three faces of it
+(`docs/os_2026-11/processes.md` §1, the service model):
+
+| tier | its shape | its example |
+|---|---|---|
+| Python | the script runs, then `moy_start()`; wakes are `moybyte.every(ms, fn)`, `after(ms, fn)`, `on(name, fn)`, `at(t, fn)`, or asyncio (`asyncio.run(main())`, `runtime/system/aio.py`) on the shell's one loop; `moy_stop()` on a stop | `system_carts/moybyte.achievements.moy` |
+| Lua | `moy_start()` and `moy_stop()`; the `moybyte` table a Lua app holds (§10), and `exit` | `tests/fixtures/apps/echo_lua.moy` |
+| wasm (WASI) | `_start` loops in `poll_oneoff` on the event descriptor, `MOY_EVQ_FD` (31), its nearest deadline the timeout; `moybyte.os` imports `send`, `on`, `notify`, `award`, `progress` and `log` | `tests/fixtures/wasm/wasi_svc.moy` |
+| C (ELF) | `main` loops in `poll` on `MOY_EVQ_FD`; `moy_send`, `moy_on` | `tests/fixtures/elf/elf_svc.moy` |
+
+A compiled service reads one record per event (its sender's pid and app id,
+the name, the arguments as JSON, `moy_evq_ev_t` in `sdk/include/moybyte/os.h`)
+and returns when the descriptor reads end of file, its stop. A timer is a
+deadline, never a per-frame tick: **no background process gets a frame**.
+A Python service with no wakes left has exited (0).
+
+**An app's own service: one cart, one id.** An app (`"type": "app"`) names
+its service's program beside its `main`, and the service is the cart's own:
+its id, its permissions and its one install prompt, its storage, its
+`receives`, its row under the cart's title in the task manager and under its
+id in `service` and `ps`; a notification it posts, tapped, opens the app as
+well as reaching its `moy_action`:
+
+```json
+"moybyte": {"type": "app", "permissions": ["prefs", "autostart"],
+            "entries": {"service": "service.lua"}}
+```
+
+`entries` is the smallest shape every tier fits: one key, `service`, and a
+file in the cart's folder whose extension is its tier, whatever the app's
+own: `.py` Python, `.lua` Lua, `.wasm` a WASI program (its `_start` is the
+loop, and a board runs its compiled form, `<stem>.<chip>.f<format>.aot`, as
+it does a cart's `main.wasm`), `.elf` a native module, which a board runs
+as `<stem>.<chip>.elf`, the chips those the folder carries. The app's own
+entry is `main`. A Lua app's Lua entry runs after the app's SHARED scripts:
+the ones its manifest's `sources` (`docs/moy_cart_api.md`) lists before
+`main`, in that order, each its own chunk, as the window runs them. So the
+two halves keep one copy of what they share (Moy Mesh's `mesh.lua`: its id,
+its regions and presets, the radio's setup and its channel links); what `sources` lists after `main` is the window's alone,
+and the entry never runs as a shared script, even where `sources` names it.
+A Lua `"type": "service"` cart runs its `sources` in order, as a window
+does. An entry that does not read (another key, an absolute or
+`..` path, another extension) is absent. A `"type": "service"` cart is still
+a service of its own, with its own id. `tools/wasm_cart.py` builds a `.wasm`
+entry from `src/<stem>.wat`, `.c` or `.rs`, and `tools/elf_cart.py` an `.elf`
+one from `src/<stem>/*.c`, each with its per-chip modules signed as a main's
+are; a native entry asks for `full_access`, as a native cart does.
+
+From any process of the app, on every tier (the call table, §10):
+
+| call | answers |
+|---|---|
+| `moybyte.service_start()` | the service's pid where it runs, else 0 with its start asked |
+| `moybyte.service_stop()` | 1 with its stop asked where it runs or its start was asked, else 0 |
+| `moybyte.service_running()` | its pid while it runs, else 0 |
+
+A start or a stop is ASKED: the console runs it at its next tick, as the
+shell, never inside the caller's call, and the last one asked wins. A
+compiled program's stop of a Lua, ELF or WASI service is the kernel's: the
+service is hung up (its TERM) on the caller's task, with or without the VM,
+and the console ends it as a stop asked (`docs/os_2026-11/processes.md`
+§5); a compiled program's start during an S3's VM stop waits for the VM. Each
+answers `ABSENT` (`moybyte.ABSENT`, -8) where the caller's app declares no
+service: the calls name no app, so no app reaches another's, and a
+`"type": "service"` cart's own process is answered ABSENT too. They need no
+permission beyond the cart's. A compiled app imports them as
+`moybyte_service_start` (`moybyte.app`), a WASI program as
+`moybyte.os.service_start`, a C program calls `moy_service_start`
+(`sdk/include/moybyte/os.h`), which answers -1 with `errno` `ENOENT` where
+the others answer ABSENT, a WASI program and a native module alike.
+
+**Its storage is its app's.** A service holds the roles its permissions
+grant, as a foreground run of the same app does: the same files folder, the
+same prefs namespace. Each write lands whole or not at all; ordering two
+writers is the app's own business.
+
+**Budgets and strikes.** Every tier's callbacks are charged to one
+supervisor (`native/moy_kernel/moy_super.h`): a callback over its slice
+(`MOY_BG_CALLBACK_US`, 20 ms) is an overrun, the first a warning and every
+later one a strike, and `MOY_BG_STRIKES` (3) strikes suspend the process
+until it is resumed. Python aborts a callback still running after
+`MOY_BG_ABORT_US` (300 ms) and counts a strike; Lua yields a runaway
+callback with a count hook; a watchdog strikes and kills a compiled wake
+that stops polling. `runtime/system/scheduler.py`'s header is the ladder.
+
+**Start, stop, restart.** A service runs from its start until it is stopped,
+exits, crashes, or strikes out. It starts by `autostart` (the permission: at
+the console's first drawn frame, which the user can turn off), by its app's
+`service_start()`, from the terminal (`service start NAME`, `stop`, `restart`, `status`) or the task
+manager. A stop runs `moy_stop()` (a compiled service: end of file) and
+kills what is still running after `MOY_SERVICE_STOP_MS` (2 s). The restart
+policy is the user's, never the manifest's: `never` (the default),
+`on-crash`, `always`, set with `service policy NAME POLICY`, with a back-off
+that doubles from 1 s and a cap of 3 ends in a row
+(`docs/os_2026-11/processes.md` §5).
+
+**Which boards.** Python services run on every console board, in the
+shell's VM; on the S3s they are stopped before a VM stop (a game that needs
+the whole board) and started again after it. Lua and WASI services run on
+every console board and the host, ELF services on both chips, on core 1 on
+the S3s, and they run on through a VM stop: their timers go off and their
+messages to other services arrive, while a call that needs the console
+(a notification, a role the shell serves) waits until the game ends. The browser's VM has no asyncio. The per-board table is
+`docs/os_2026-11.md` §5.
+
+## 8. Messages
+
+Every process has an event queue (`native/moy_kernel/moy_evq.h`), and a
+message is a name and arguments, any values JSON carries. The same two names
+on every tier:
+
+```python
+import moybyte
+
+def pong(sender, score):        # sender: the app id the OS stamped
+    print(sender, "says", score)
+
+moybyte.on("pong", pong)                    # listen
+moybyte.send("local.pinger", "ping", 42)    # every process of that app that listens
+```
+
+`send` answers how many processes took it, the sender apart. Who hears whom
+is the kernel's rule (`moy_evq.h`, THE RULE; the table is
+`docs/os_2026-11/processes.md` §1): a process of the same app always; another
+app only on a name the receiver's manifest lists under `receives`
+(`"receives": ["ping"]`), so an app chooses what the world may tell it; the
+console, as `"system"`, always. The sender is stamped by the kernel, never
+taken from the sender's word. The rule holds both ways: an app that waits
+for another app's answer lists the answer's name under its own `receives`
+too (`"receives": ["pong"]` beside a `send` of `"ping"`). The tier does not matter: a Lua service
+hears a Python app's `send`, and the app hears the service's answer. A process that
+does not listen on a name does not take it.
+
+A queue pushes back (`moy_evq.h`, BACKPRESSURE): it holds `MOY_EVQ_SENDER`
+(16) unread messages of one sender at most, `MOY_EVQ_DEPTH` (64) in all, and
+past that `send` answers FULL (`moybyte.FULL`, `-2`) and queues nothing, so
+a flood stops at its sender, which sends again later; the system is never
+refused. The receiver takes its senders' messages in turn, each sender's in
+its order, `MOY_EVQ_BATCH` (4) a step: a frame's start for a Python process,
+a run for a Lua service, a `poll` for a WASI or C service. A second app's
+message is served behind a flood's oldest, never behind the whole flood.
+
+A compiled program reads its messages: a WASI or C service from its event
+descriptor (§7), a compiled app with `moybyte_recv(buf, cap)`, which it calls
+in its `_update` as it reads its buttons. Each read takes the next message
+(its senders in turn) as one record: `moy_evq_ev_t` (`sdk/include/moybyte/os.h`: the sender's pid,
+the arguments' length, its app id, the name), then the arguments as a JSON
+array, then a NUL. A compiled app's read answers the record's length, the NUL
+counted, 0 when nothing waits, and FULL (`-2`) where the buffer is short,
+the message kept for the next read. `tests/fixtures/wasm/app_talk.moy` is a
+C app that pings a service and reads the answer.
+
+## 9. Alarms, connectivity and achievements
+
+**Alarms** (`alarms`): `moybyte.at(t, fn)` calls `fn()` once, no
+earlier than `t` in Unix seconds on the wall clock (`moybyte.clock()`, on
+every tier: a board's `time.time()` and Lua's `os.time()` count from 2000;
+`moybyte.clock_synced()` says whether NTP has set it), answers
+an id `moybyte.cancel` takes, refuses without the permission (Python's
+`OSError`, a Lua error), and lights the screen if the console had gone dark,
+so a background app can wake its player
+(`docs/os_2026-11/between_apps.md` §3). A Lua service's alarm is the
+kernel's, heard as the system's message `"moybyte.at"`
+(`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
+on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
+program's `moy_at`): the call answers the alarm's id on the program's own
+task, with or without the VM (`native/moy_kernel/moy_evq.h`, `moy_evq_at`,
+under the `alarms` the process's event queue was opened with), and the
+program reads `"moybyte.at"` from `"system"` with that id as its one
+argument. An alarm keeps its wall time when the clock steps (an NTP answer,
+the first one too), on every tier. A compiled program reads the clock as
+`moybyte_clock(local)` (a wasm app) and `moy_clock(local)` (a WASI or C
+program), a 32-bit number like `moybyte_at`'s `t`: the Unix seconds on the
+program's own task with or without the VM (`native/moy_app/moy_app.c`,
+`clock_row`), and with `local` 1 the console's local time from the zone the
+Python half holds, ABSENT (a WASI or C program's `ENOENT`) while NTP has not
+answered.
+
+**Timers** need no permission. A Python and a Lua program pass a function
+(`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program
+asks for the timer (`moybyte_every(ms)` and `moybyte_after(ms)` in a wasm
+app, `moy_every` and `moy_after` in a WASI or C program), which answers its
+id, and hears each time it goes off as the system's message
+`"moybyte.timer"` carrying that id. `cancel` (`moybyte_cancel(id)`,
+`moy_cancel(id)`) ends a timer or an alarm of the program's own, answering 1,
+or 0 where it has none of that id. A compiled program's timers and alarms
+are the kernel's (`native/moy_kernel/moy_evq.h`, TIMERS), sixteen at once:
+they go off, and are set and cancelled, with no console, so a service's run
+on through an S3's VM stop. The program listens on those two names for
+itself while it holds one, two of the eight names a process may listen on
+(`moy_evq.h`, `MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped. A compiled
+program holds 16 timers and alarms at once (`moybyte.TIMERS_MAX`, a Lua
+service's alarms counted the same): one more answers FULL (`-2` to a wasm
+app, `ERANGE` to a WASI or C program, as a short buffer reads). Each is its
+process's, and the process's end cancels what it left.
+
+```python
+import moybyte, time
+
+def ring():
+    moybyte.notify("Tea is ready", urgency=2)
+
+moybyte.at(time.time() + 4 * 60, ring)
+```
+
+**Connectivity.** The radios are messages from `"system"`:
+`moybyte.on("net", fn)` hears WiFi come and go as `fn("system", up, why)`,
+and `"ble"` the BLE host, `why` what took it down (0 when it was put down
+or came up). A Python service and a Lua service hear them alike
+(`docs/os_2026-11/between_apps.md` §4), and so does a compiled app that
+listens with `moybyte_on("net", 1)`: its record's arguments are `[up, why]`.
+The multiplayer `net` and `on_net` are a game's (moy-spec's netplay), not
+these events.
+
+**Achievements.** A game declares its badges and tells the console when it
+earns one; the console keeps them, shows the unlock banner ("Harpoon Pop:
+badge found!") and lists them in Settings → About → Achievements under the
+game's name, where they stay after the game is deleted.
+
+```json
+"moybyte": {"achievements": [
+  {"id": "first_clear", "title": "Bubble Buster", "icon": "star", "hint": "Clear level 1"},
+  {"id": "high_tide", "title": "High Tide", "icon": "run", "hint": "Reach level 5", "goal": 5},
+  {"id": "untouchable", "title": "Untouchable", "icon": "heart",
+   "hint": "Clear a level without losing a life", "secret": true}]}
+```
+
+`id`, `title`, `icon` (a name of the console's icon set) and `hint` are
+text, the id at most 32 bytes and unique; `goal` is a whole number of 1 or
+more; `secret` keeps the badge "Secret" until it is found. The list is read
+strictly: one entry that breaks a rule, or a key it does not know, and the
+game declares no badges.
+
+```python
+import moybyte
+
+moybyte.award("first_clear")          # found
+moybyte.progress("high_tide", level)  # the goal's current value: found once it reaches 5
+```
+
+`progress` reports the game's own count, a whole number, which the console
+stores as told (the last value, not the best); a fraction counts down to the
+whole below it (`2.9` is `2`), as the compiled tiers' `int32` value cannot
+carry one. A best or a total is the game's to keep, in `pmem`. Both may be
+called freely, every frame or on every kill: the kernel coalesces them per
+process and badge, every tier's alike (`native/moy_kernel/moy_notes.h`,
+BADGES), so a compiled game's answer on its own task with no VM; a send the
+achievements process is not there to take (through a VM stop) waits and
+goes in its turn. An `award` of a badge it found already sends
+nothing; `progress` keeps each badge's newest value and sends it once a
+quarter second (`MOY_NOTES_EVERY_MS`) at most, at once when it reaches the goal the
+manifest declares, and at the game's end; an unchanged value sends nothing.
+Each answers what its badge's last send answered. Each is a message to the achievements process
+(`moybyte.send("moybyte.achievements", "award", id)`), which takes those two
+names from every app. Because the kernel stamps the sender, a game unlocks
+only its own manifest's badges; the process refuses any other id and logs
+the refusal. A Lua
+game, app and service hold `moybyte.award` and `moybyte.progress` too, a
+compiled app imports `moybyte_award` and `moybyte_progress`, a WASI program
+`moybyte.os`'s `award` and `progress`, and a C program calls `moy_award`
+and `moy_progress`.
+`system_carts/moybyte.harpoon_pop.moy` uses all three kinds;
+`docs/os_2026-11/processes.md` §8 is the process.
+
+## 10. Tiers: what each can call
+
+| tier | an app | a service | a command | sealed by |
+|---|---|---|---|---|
+| Python | yes | yes | yes | nothing: trusted (§5) |
+| Lua | yes | yes | — | its state's names |
+| wasm | yes (`moybyte.app`) | yes, WASI | yes, WASI | its imports |
+| C (ELF) | — | yes | yes | U-mode and PMP on the P4s; nothing on the S3s |
+
+The calls a program reaches on more than one tier, each by its name there
+(`docs/os_2026-11/tiers.md` §1; the `ui` rows are
+`docs/ui_api_2026-10.md`'s, every app's with no permission):
+
+<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json. Do not edit. -->
+| call | permission | Python | Lua | wasm (`moybyte.app`; a WASI program's `moybyte.os`) | C (ELF) |
+|---|---|---|---|---|---|
+| `moy_term_size` | none |  |  |  | `moy_term_size` |
+| `theme.token` | none | `ctx.theme.token` | `theme.token` | `theme_token` |  |
+| `theme.gen` | none | `ctx.theme.gen` | `theme.gen` | `theme_gen` |  |
+| `theme.light` | none | `ctx.theme.light` | `theme.light` | `theme_light` |  |
+| `theme.name` | none | `ctx.theme.name` | `theme.name` | `theme_name` |  |
+| `theme.variant` | none | `ctx.theme.variant` | `theme.variant` | `theme_variant` |  |
+| `theme.set` | `appearance` | `ctx.theme.set`, `set_theme` | `set_theme` | `theme_set` |  |
+| `theme.set_variant` | `appearance` | `ctx.theme.set_variant` |  | `theme_set_variant` |  |
+| `theme.edit_file` | `appearance` | `ctx.theme.edit_file` |  | `theme_edit_file` |  |
+| `files.readable` | `files` | `ctx.files.readable` |  | `files_readable`, `moybyte.os.files_readable` | `moy_files_readable` |
+| `files.ready` | `files` | `ctx.files.ready`, `files.ready` | `files.ready` | `files_ready`, `moybyte.os.files_ready` | `moy_files_ready` |
+| `files.list` | `files` | `ctx.files.list`, `files.list` | `files.list` | `files_list`, `moybyte.os.files_list` | `moy_files_list` |
+| `files.count` | `files` | `ctx.files.count` |  | `files_count`, `moybyte.os.files_count` | `moy_files_count` |
+| `files.load` | `files` | `ctx.files.load`, `files.load`, `files.load_text` | `files.load`, `files.load_text` | `files_load`, `moybyte.os.files_load` | `moy_files_load` |
+| `files.save` | `files` | `ctx.files.save`, `files.save`, `files.save_text` | `files.save`, `files.save_text` | `files_save`, `moybyte.os.files_save` | `moy_files_save` |
+| `files.delete` | `files` | `ctx.files.delete`, `files.delete` | `files.delete` | `files_delete`, `moybyte.os.files_delete` | `moy_files_delete` |
+| `files.duplicate` | `files` | `ctx.files.duplicate`, `files.duplicate` | `files.duplicate` | `files_duplicate`, `moybyte.os.files_duplicate` | `moy_files_duplicate` |
+| `files.rename` | `files` | `ctx.files.rename`, `files.rename` | `files.rename` | `files_rename`, `moybyte.os.files_rename` | `moy_files_rename` |
+| `files.new_name` | `files` | `ctx.files.new_name`, `files.new_name` | `files.new_name` | `files_new_name`, `moybyte.os.files_new_name` | `moy_files_new_name` |
+| `nav.open_app` | `launch`, `front` | `ctx.nav.open_app`, `open_app` | `open_app` | `nav_open_app`, `moybyte.os.nav_open_app` | `moy_nav_open_app` |
+| `prefs.get` | `prefs` | `ctx.prefs.get`, `prefs.get` | `prefs.get` | `prefs_get`, `moybyte.os.prefs_get` | `moy_prefs_get` |
+| `prefs.set` | `prefs` | `ctx.prefs.set`, `prefs.set` | `prefs.set` | `prefs_set`, `moybyte.os.prefs_set` | `moy_prefs_set` |
+| `prefs.clear` | `prefs` | `ctx.prefs.clear`, `prefs.clear` | `prefs.clear` | `prefs_clear`, `moybyte.os.prefs_clear` | `moy_prefs_clear` |
+| `clipboard.put_text` | `clipboard` | `ctx.clipboard.put_text`, `clipboard.put_text` | `clipboard.put_text` | `clipboard_put_text`, `moybyte.os.clipboard_put_text` | `moy_clipboard_put_text` |
+| `clipboard.text` | `clipboard` | `ctx.clipboard.text`, `clipboard.text` | `clipboard.text` | `clipboard_text`, `moybyte.os.clipboard_text` | `moy_clipboard_text` |
+| `clipboard.kind` | `clipboard` | `ctx.clipboard.kind`, `clipboard.kind` | `clipboard.kind` | `clipboard_kind`, `moybyte.os.clipboard_kind` | `moy_clipboard_kind` |
+| `clipboard.seq` | `clipboard` | `ctx.clipboard.seq`, `clipboard.seq` | `clipboard.seq` | `clipboard_seq`, `moybyte.os.clipboard_seq` | `moy_clipboard_seq` |
+| `moybyte.notify` | `notifications` | `moybyte.notify` | `moybyte.notify` | `moybyte_notify`, `moybyte.os.notify` | `moy_notify` |
+| `moybyte.open_with` | `front` | `moybyte.open_with` | `moybyte.open_with` | `moybyte_open_with`, `moybyte.os.open_with` | `moy_open_with` |
+| `moybyte.share` | `front` | `moybyte.share` | `moybyte.share` | `moybyte_share`, `moybyte.os.share` | `moy_share` |
+| `moybyte.send` | none | `moybyte.send` | `moybyte.send` | `moybyte_send`, `moybyte.os.send` | `moy_send` |
+| `moybyte.award` | none | `moybyte.award` | `moybyte.award` | `moybyte_award`, `moybyte.os.award` | `moy_award` |
+| `moybyte.progress` | none | `moybyte.progress` | `moybyte.progress` | `moybyte_progress`, `moybyte.os.progress` | `moy_progress` |
+| `moybyte.on` | none | `moybyte.on` | `moybyte.on` | `moybyte_on`, `moybyte.os.on` | `moy_on` |
+| `moybyte.every` | none | `moybyte.every` | `moybyte.every` | `moybyte_every`, `moybyte.os.every` | `moy_every` |
+| `moybyte.after` | none | `moybyte.after` | `moybyte.after` | `moybyte_after`, `moybyte.os.after` | `moy_after` |
+| `moybyte.cancel` | none | `moybyte.cancel` | `moybyte.cancel` | `moybyte_cancel`, `moybyte.os.cancel` | `moy_cancel` |
+| `moybyte.pick` | `front` | `moybyte.pick` | `moybyte.pick` | `moybyte_pick`, `moybyte.os.pick` | `moy_pick` |
+| `moybyte.log` | none | `moybyte.log` | `moybyte.log` | `moybyte_log`, `moybyte.os.log` | `moy_log` |
+| `moybyte.recv` | none |  |  | `moybyte_recv` |  |
+| `moybyte.item_read` | none |  |  | `moybyte_item_read`, `moybyte.os.item_read` | `moy_item_read` |
+| `moybyte.item_write` | none |  |  | `moybyte_item_write`, `moybyte.os.item_write` | `moy_item_write` |
+| `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
+| `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
+| `console` | `console` | `print` | `print` |  |  |
+| `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |
+| `moybyte.service_start` | none | `moybyte.service_start` | `moybyte.service_start` | `moybyte_service_start`, `moybyte.os.service_start` | `moy_service_start` |
+| `moybyte.service_stop` | none | `moybyte.service_stop` | `moybyte.service_stop` | `moybyte_service_stop`, `moybyte.os.service_stop` | `moy_service_stop` |
+| `moybyte.service_running` | none | `moybyte.service_running` | `moybyte.service_running` | `moybyte_service_running`, `moybyte.os.service_running` | `moy_service_running` |
+| `moybyte.random` | none | `moybyte.random` | `moybyte.random` | `moybyte_random`, `moybyte.os.random` | `moy_random` |
+| `moybyte.sha256` | none | `moybyte.sha256` | `moybyte.sha256` | `moybyte_sha256`, `moybyte.os.sha256` | `moy_sha256` |
+| `moybyte.hmac_sha256` | none | `moybyte.hmac_sha256` | `moybyte.hmac_sha256` | `moybyte_hmac_sha256`, `moybyte.os.hmac_sha256` | `moy_hmac_sha256` |
+| `moybyte.aes_gcm_seal` | none | `moybyte.aes_gcm_seal` | `moybyte.aes_gcm_seal` | `moybyte_aes_gcm_seal`, `moybyte.os.aes_gcm_seal` | `moy_aes_gcm_seal` |
+| `moybyte.aes_gcm_open` | none | `moybyte.aes_gcm_open` | `moybyte.aes_gcm_open` | `moybyte_aes_gcm_open`, `moybyte.os.aes_gcm_open` | `moy_aes_gcm_open` |
+| `moybyte.x25519` | none | `moybyte.x25519` | `moybyte.x25519` | `moybyte_x25519`, `moybyte.os.x25519` | `moy_x25519` |
+| `moybyte.dev_open` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_open` | `moybyte_dev_open`, `moybyte.os.dev_open` | `moy_dev_open` |
+| `moybyte.dev_close` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_close` | `moybyte_dev_close`, `moybyte.os.dev_close` | `moy_dev_close` |
+| `moybyte.dev_read` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_read` | `moybyte_dev_read`, `moybyte.os.dev_read` | `moy_dev_read` |
+| `moybyte.dev_write` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_write` | `moybyte_dev_write`, `moybyte.os.dev_write` | `moy_dev_write` |
+| `moybyte.dev_xfer` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_xfer` | `moybyte_dev_xfer`, `moybyte.os.dev_xfer` | `moy_dev_xfer` |
+| `moybyte.dev_set` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_set` | `moybyte_dev_set`, `moybyte.os.dev_set` | `moy_dev_set` |
+| `moybyte.dev_get` | `lease`, `http`, `lora`, `mic`, `ble`, `usb`, `midi`, `camera`, `media`, `media:url`, `pins`, `multiplayer` |  | `moybyte.dev_get` | `moybyte_dev_get`, `moybyte.os.dev_get` | `moy_dev_get` |
+| `moybyte.ed25519_public` | none | `moybyte.ed25519_public` | `moybyte.ed25519_public` | `moybyte_ed25519_public`, `moybyte.os.ed25519_public` | `moy_ed25519_public` |
+| `moybyte.ed25519_sign` | none | `moybyte.ed25519_sign` | `moybyte.ed25519_sign` | `moybyte_ed25519_sign`, `moybyte.os.ed25519_sign` | `moy_ed25519_sign` |
+| `moybyte.ed25519_verify` | none | `moybyte.ed25519_verify` | `moybyte.ed25519_verify` | `moybyte_ed25519_verify`, `moybyte.os.ed25519_verify` | `moy_ed25519_verify` |
+| `moybyte.status_show` | none |  | `moybyte.status_show` | `moybyte_status_show`, `moybyte.os.status_show` | `moy_status_show` |
+| `moybyte.status_state` | none |  | `moybyte.status_state` | `moybyte_status_state`, `moybyte.os.status_state` | `moy_status_state` |
+| `moybyte.status_panel` | none |  | `moybyte.status_panel` | `moybyte_status_panel`, `moybyte.os.status_panel` | `moy_status_panel` |
+| `moybyte.status_remove` | none |  | `moybyte.status_remove` | `moybyte_status_remove`, `moybyte.os.status_remove` | `moy_status_remove` |
+| `moy_screen` | none |  |  | `moybyte.os.screen` | `moy_screen` |
+| `moy_present` | none |  |  | `moybyte.os.present` | `moy_present` |
+| `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
+| `moy_ui_font_pull` | none |  |  | `moybyte.os.ui_font_pull` | `moy_ui_font_pull` |
+| `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
+| `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
+| `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
+| `moybyte.name` | none | `moybyte.name` | `moybyte.name` | `moybyte_name`, `moybyte.os.name` | `moy_name` |
+| `moybyte.key_make` | none | `moybyte.key_make` | `moybyte.key_make` |  |  |
+| `moybyte.key_public` | none | `moybyte.key_public` | `moybyte.key_public` |  |  |
+| `moybyte.key_shared` | none | `moybyte.key_shared` | `moybyte.key_shared` |  |  |
+| `moybyte.clock` | none | `moybyte.clock` | `moybyte.clock` | `moybyte_clock`, `moybyte.os.clock` | `moy_clock` |
+<!-- END GENERATED -->
+
+Reading the table: the Python column names a shipped app's `ctx` role first
+and then a user app's global. The Lua column is a Lua app's and a Lua
+service's alike, each name under the permission a Python app's is under
+(`tests/test_app_examples.py` drives `tests/fixtures/apps/pinger_lua.moy`).
+In a Lua app the console calls (`notify`, `open_with`, `share`, `send`,
+`award`, `progress`, `pick`, `status_panel`) are the moybyte module's own functions run as
+the app's process, their arguments any values JSON carries; a wake
+(`on`, `every`, `after`, `at`) calls its function in the app's state at the
+start of a frame, as a Python app's, and `moybyte.log(level, text)` writes
+the OS log with `moybyte.ERR`, `WARNING` and `INFO` (`runtime/run/lua_ext.py`,
+PRELUDE_MOYBYTE). The theme's reads (`theme.token(role)`, `gen`, `light`,
+`name`, `variant`) are every Lua app's, as Python's `theme()` is; a Lua app
+hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
+the item a table whose `read()` answers its text and whose `write(text)`
+writes it back under an `"rw"` grant. Python holds the leases, the device
+APIs and a status item as objects (`moybyte.lease`, `moybyte.http` and the
+others, `moybyte.status`: `runtime/system/moybyte.py`), so their rows have
+no Python name: Lua and the compiled tiers hold the leases and devices by
+handle (the `dev_*` rows, below) and a status item as an icon in a state
+with a panel the shell draws (`status_show` to `status_remove`, §10, a
+status item). The rows with only wasm and C names (`moybyte.recv`,
+`item_read`, `item_write`) are what a compiled app or a native module reads
+where a Python or a Lua one is called back or handed an object: its
+messages (§8; a native module reads them from its event descriptor) and an
+item handed to it. Standard names come first on every tier: Python's
+`open`, `os`, `time`, `socket`, `requests`, `asyncio` and `logging`; POSIX
+in C; WASI preview1 in wasm; Lua's `io` and `os`.
+
+**Crypto** (`docs/os_2026-11/between_apps.md` §5): `moybyte.random(n)`,
+`sha256(data)`, `hmac_sha256(key, data)`, `aes_gcm_seal(key, plain)`,
+`aes_gcm_open(key, sealed)`, `aes_ctr(key, data)`, `aes_ccm_seal(key, data,
+tag)`, `aes_ccm_open(key, sealed, tag)`, `x25519(secret, peer)`,
+`ed25519_public(secret)`, `ed25519_sign(secret, msg)` and
+`ed25519_verify(pub, msg, sig)` are every
+program's, with no permission, one C body on every tier
+(`native/moy_net/moy_crypto.h`; Ed25519 is the vendored Monocypher's).
+Bytes in and bytes out (a Python `str` is its UTF-8). A seal is a fresh
+nonce, the ciphertext and the tag, 28 bytes longer than what it sealed, under
+a 16-, 24- or 32-byte key; an open that does not authenticate answers `None`
+in Python, `nil` in Lua, FORGED (10) negated to a compiled app and `EBADMSG`
+to a native or WASI program. `aes_ctr` and `aes_ccm_*` are for wire formats
+that fix their own nonce (Meshtastic's): `aes_ctr`'s `data` is the 16-byte
+initial counter block, then the bytes, and it answers the bytes XORed with
+the key stream (the same call decrypts); `aes_ccm_seal`'s `data` is the
+13-byte nonce, then the plaintext, and it answers the ciphertext and a
+`tag`-byte tag (4 to 16, even; no associated data); `aes_ccm_open` takes the
+nonce, the ciphertext and the tag and opens as a GCM open does. The nonce is
+the caller's to keep unique. `x25519` with no peer answers the secret's
+public key, with one the shared secret. Ed25519 is RFC 8032's: a 32-byte
+secret (the seed) gives a 32-byte public key and deterministic 64-byte
+signatures; `ed25519_verify` answers 1 or 0 (`True` or `False` in Python,
+`true` or `false` in Lua), 0 for any signature that does not check, a key or
+a signature that does not decode among them. A buffer too small is FULL
+(`ERANGE`), a length refused BAD (`EINVAL`; a `ValueError` in Python).
+
+**An app's own key pairs** (`docs/os_2026-11/between_apps.md` §5):
+`moybyte.key_make(name)`, `key_public(name)` and `key_shared(name, peer)` are
+console calls a Python or a Lua program holds, with no permission. The console keeps an X25519
+pair for the calling app under `name` (1 to 32 of a-z, 0-9, `_` and `-`),
+whose secret never reaches the app: `key_make` answers the public key,
+making the pair the first time; `key_public` answers it, or `None` (`nil`)
+where none was made; `key_shared` answers the X25519 shared secret with the
+peer's public key `peer`, or `None` where the pair is missing or the peer
+is of small order. Keys and secrets cross as 64 hex digits. The pairs go
+when the app is removed.
+
+**A compiled app (#224)** is `"runtime": "wasm"` with `"extensions":
+["moybyte.app"]`. It reaches its roles through imports from module
+`"moybyte.app"` (SPEC.md §16.2's vendor-extension rule), each named
+`<role>_<verb>` at the types its row's parameters give
+(`native/moy_app/moy_app_wasm.h` is the adapter's contract): a number answers
+as an `i32`, text or a blob is written into the caller's buffer and answers
+its length, and a negative answer is `moy_app.h`'s code negated. The theme's
+reads are every app's; an import from a role its permissions do not name is
+refused at load, the import named. The `ui` rows are every compiled app's
+(`native/moy_ui/moy_ui_wasm.h`), the same C a Python and a Lua app draw
+with; `tests/fixtures/wasm/app_ui.moy` imports every row. The console calls
+(`moybyte_notify`, `open_with`, `share`, `pick`, `send`, `award`,
+`progress`, `on`, `at`, `every`, `after`, `cancel`, `log`) are every
+compiled app's to import, each
+answered as the app's process under the permission the call names, as a
+Python app's is (`notifications`, `alarms`, the front's gate): a refused
+`notify` or `at` answers DENIED (`-4`), and `open_with`, `share` and
+`pick` answer 0 where Python's answer False. It hears what a Python app is called back for as
+messages from `"system"`: `_minimise`, `_restore`, `moy_action` (id, key)
+and `moy_open`, which it listens on with `moybyte_on`, and its wakes,
+`moybyte.at` and `moybyte.timer` (the wake's id, §9), which it listens on
+by asking for one. `moy_open` carries the item's handle, its type, its
+mode and its name (a cancelled pick's handle 0), the item read and written by its handle with
+`moybyte_item_read(h, buf, cap)` and `moybyte_item_write(h, data)`, on
+the app's own task under the store's lock where the item is a user file
+(the kernel's table of the items handed, `native/moy_kernel/moy_items.h`)
+and through the console otherwise. Each console call runs on the VM's task,
+a hop from a board's session thread. The app is
+cart-shaped: fullscreen, its loop the cart's, and on the desk a fixed canvas
+in its player window, which the WM scales. `tools/wasm_cart.py` builds the
+folder (`src/main.wat`, or C or Rust through wasi-sdk or `wasm32-wasip1`; a
+C app as a reactor, its memory the manifest's `memory` pages,
+`tests/fixtures/wasm/app_talk.moy`), `--chip` adding a board's signed AOT
+module; `native/moy_wasm/README.md` is the tier.
+
+**Devices by handle.** A compiled program (a compiled app, a WASI program,
+a native module) and a Lua program (an app or a service) hold a lease or a
+device API by a handle where a Python program holds an object (`native/moy_kernel/moy_dev.h` is the authority
+on the leases' names, keys and answers, `runtime/system/dev_handles.py` on
+the device APIs'). `dev_open(name, cfg)` answers the handle:
+`name` a lease row (`"gpio<n>"`, `"uart<n>"`, `"spi<n>"`, `"pwm<n>"`,
+`"adc<n>"`, `"i2c"`) or a device (`"http"`, `"lora"`, `"mic"`, `"ble"`, `"usb"`, `"midi"`, `"camera"`, `"media"`), the `pins` permission's
+pins (`"pins"`) or a port of the console-to-console radio link (`"net"`), `cfg` words
+`key=value` (`"mode=out value=1"`, `"baudrate=9600"`, `"scl=20 sda=21
+addr=0x48"`, `"url=http://example.com/ cap=4096"`). On the handle,
+`dev_read(h, buf, cap)` takes what waits (0 when nothing does),
+`dev_write(h, data, len)` sends, `dev_xfer(h, data, len, buf, cap)` writes
+then reads as one transfer (SPI's full duplex, an I²C register read),
+`dev_set(h, cfg)` configures it again and `dev_get(h, what)` reads one
+number (`"value"`, `"any"`, `"status"`, `"rssi"`, ...); `dev_close(h)` gives
+it back, and the process's end closes what it left open. A ring's records
+are read through the handle on every tier, never posted as messages: a
+pin's edges (`dev_set(h, "edges=both")`, then 8 bytes an edge from
+`dev_read`), a packet the radio heard, the microphone's samples, the BLE
+face's events. A program polls its handles where it polls its messages, in
+`_update` or on a timer. The radio also says when it has something: the
+holder of a `lora` handle that listens on `"lora"` (`moybyte.on("lora",
+fn)`, a compiled program's `moy_on`) is posted the system's message
+`"lora"` with the event (1 a packet heard, 2 one sent, then LoRaWAN's
+joined, join failed, downlink and uplink done) and a length for each, so a
+service sleeps until a packet comes; the packet is still read through the
+handle.
+
+Lua holds the rows as `moybyte.dev_open(name[, cfg])`,
+`dev_close(h)`, `dev_read(h[, cap])`, `dev_write(h, bytes)`,
+`dev_xfer(h, bytes[, cap])`, `dev_set(h, cfg)` and `dev_get(h, what)`
+(`native/moy_app/moy_app_lua.c`): a read answers the bytes as a string (at
+most `cap`, 4096 by default), an error is nil and its name (`"BUSY"`,
+`"DENIED"`, `"BAD"`, `"ABSENT"`, `"FULL"`, ...), and `dev_get` answers the
+number as the row does. A Lua service calls them on its own task, so its
+radio, its pins and its other kernel handles keep working through an S3's
+VM stop.
+
+The radios act by `dev_set` words, one action a set, and `dev_write`
+carries the bytes to where a word pointed it. A `ble` handle scans
+(`"scan=3000"`), connects (`"connect=aa:bb:cc:dd:ee:ff"`, `"connect=off"`),
+finds a characteristic (`"find=2a19"`, or the 128-bit UUID), reads it
+(`"read=0x20"`), subscribes (`"subscribe=0x10"`, `"unsubscribe=0x10"`) and
+advertises (`"advertise=name data=ffff0102"`, `"advertise=off"`);
+`"write=0x30"` makes each `dev_write` a write to that characteristic. What
+each did comes back from `dev_read` as records, Python's `ble.on` events
+with their bytes: a 12-byte head (the event, the bytes after it, `a`,
+`b`) then those bytes, an advertisement's address and name, a read's
+value, a notification's. A `lora` handle joins a LoRaWAN network with
+`"join=otaa dev_eui=... join_eui=... app_key=..."` (the keys in hex as a
+network console prints them) and `"send=2"` makes each `dev_write` an
+uplink on port 2 (`"send=raw"` a raw packet again); a downlink is read as
+a packet is, `dev_get(h, "port")` its port, and `"joined"` and `"busy"`
+say where the join stands.
+
+A `usb` handle holds the USB host. Its `dev_read` records have the same
+12-byte head, its `a` a device's bus address: the open reads as an ATTACH
+for each device already plugged in (its class, kind, vendor and product
+ids, then its name), then ATTACH and DETACH as devices come and go, a HID
+device's REPORT with the report, a serial device's DATA with the bytes it
+sent, SENT once a write went. `"serial=2 baud=9600"` opens a CDC-ACM
+device's line and `"write=2"` makes each `dev_write` a write to it (a
+serial or a USB-MIDI device).
+
+A `midi` handle is one MIDI port, named when it opens: `"uart=uart1"`
+(`"baud=31250"` by default, the row's `lease:uart1` too), `"usb=3"` (a
+USB-MIDI device) or `"ble=aa:bb:cc:dd:ee:ff"` (a BLE-MIDI peripheral,
+connected, found and subscribed for you; `dev_get(h, "state")` is 1 once
+its messages flow). `dev_write` sends whole MIDI messages and `dev_read`
+takes the port's messages, 3 bytes each (status, data1, data2). A process
+opens as many ports as it needs, and holds the MIDI API from its first to
+its last. A `camera` handle's `dev_read` is the latest frame, whole
+(`dev_get(h, "w")` by `"h"` RGB565 pixels, big-endian), nothing before the
+first.
+
+A `media` handle makes the process a client of the media service's one
+stream, the system's (`docs/os_2026-11/hardware.md` §3): `dev_write` plays
+the source its bytes name in place of what plays, whoever played it (a file
+or a playlist under `media`, an `http://` or `https://` URL under
+`media:url` and `http`), and the person is told when it takes over another
+app's list. A file plays only from the cart's
+own folder and the folder its `files:<folder>` permission names (owner,
+2026-11-09), a relative path being the cart folder's: any other, or a
+playlist naming one, is DENIED whether it is
+there or not, so a refusal tells nothing of what a folder holds, and
+`dev_xfer`'s probe refuses the same files. `dev_set` controls it
+(`"volume=60"`, `"pause=1"`, `"pause=0"`, `"seek=30"`, `"skip=next"`,
+`"skip=prev"`, `"stop=1"`), `dev_get` reads its numbers (`"state"`,
+`"paused"`, `"at"`, `"len"`, `"volume"`, `"stamp"`, which moves when they
+do, `"mine"`, 1 where this process's write set what plays, ...), `dev_read`
+its now-playing text as four lines (title, artist, station, source) and
+`dev_xfer` probes a file without playing it (its length in seconds as 4
+bytes, then its title and artist on two lines). Closing the handle, or the
+process's end, leaves the stream playing: it ends with its list, or a
+client's `"stop=1"`.
+
+A `pins` handle is Python's `pin_write` and `pin_read`: `dev_set(h,
+"gpio6=1 gpio20=0")` drives each pin it names, `dev_get(h, "gpio5")` reads
+one (an input where it was not driven). It takes each pin of the board's
+gpio row for the process at its first use, under `pins` alone (no
+`lease:gpio`), and its close gives them back, left safe.
+
+A `net` handle is one port of the radio link other consoles hear
+(`docs/netplay_v1.md`, Ports), the way a socket is: any process opens it,
+whatever runs in front, and each port's messages reach only its holder.
+`dev_open("net", "port=7")` takes port 7 (1 to 65535, one holder a port:
+port 0 is the game in front's `net.send` and `on_net`), `dev_write` sends
+one message of at most 240 bytes to every console in range on that port,
+and `dev_read` takes the messages heard on it as records: the sender's MAC
+(6 bytes), the port and the length (2 bytes each), then the bytes. Radio
+input is untrusted, so the sender is in every record for the program to
+judge; `"from=match"` narrows a port to the live match's peer and hears
+nothing outside a match. A port keeps four messages unread (`dev_get(h,
+"drops")` counts what it dropped while full); a process holds four ports and
+the console eight, FULL past either. A port's sends are budgeted so they
+cannot crowd a match's inputs off the air (`docs/netplay_v1.md`, Ports): a
+write past the budget is BUSY and sends nothing, and `"sent"` and
+`"refused"` count both. The radio stays up while any port is
+open, and a match's inputs never reach a port.
+
+Each name needs what Python's needs: `lease:<row>` (`lease:gpio` for
+anything on the pins: a pin, a PWM, an ADC, an I²C bus), `http`, `lora`,
+`mic`, `ble`, `usb`, `midi`, `camera`, `media` (or `media:url`), `pins`,
+`multiplayer` (`net`). One holder a lease or a device, whatever the tiers: a
+resource a Python program's object holds is BUSY to a handle and the
+reverse (`-11` to a compiled app, `EBUSY` to a native or WASI program), and
+a process opens a radio, the microphone, the USB host, the camera, the
+media service or its pins once. A refused permission is
+DENIED (`EACCES`), a name, key or value the console does not take BAD
+(`EINVAL`), a handle not open, or a radio verb that needs a connection or a
+join, ABSENT (`ENOENT`), a buffer that cannot hold one record FULL
+(`ERANGE`).
+
+**A status item** (owner, 2026-11-09, on #246). A compiled program, and a
+Lua program (an app or a service), puts an
+item in the bar as a Python program does (§6), but it never draws there: its
+item is an icon in a state, and its menu is a panel of rows it describes,
+which the shell draws (in the item's menu on the desk, in its card of the
+control centre on a handheld). `status_show(icon, state, order)` answers
+the item's handle (FULL, `ERANGE`, while the bar holds its four), `icon`
+a name of the console's icon set and `state` `MOY_STATUS_ON` (0, the
+accent), `MOY_STATUS_PAUSED` (1) or `MOY_STATUS_ERROR` (2, the danger ink);
+`status_state(h, state)` changes it, `status_remove(h)` takes it out, and
+the process's end takes out what it left. `status_panel(h, rows)`
+describes the panel, one row a line, eight at most:
+
+```
+text <label>[TAB<value>]               a row that shows, no stop
+button <id> <label>                    a row that acts
+toggle <id> <label> <0|1>              a two-state row
+slider <id> <label> <min> <max> <v>    a value from min to max
+```
+
+An id is the program's own word, at most 16 bytes; a label runs to the
+numbers that end its line. A press, a toggle's change or a slider's step
+reaches the program as the system's message `moybyte.status`,
+`[item, id, value]` (a button's value 1), which it hears without asking:
+its first panel listens on the name for it, one of the eight names a
+process listens on (`MOY_EVQ_LISTEN`). A row keeps the value it moved to
+until the program describes the panel again, as it does whenever what the
+rows say changes. An item with no panel, or an empty description, has no
+menu: a tap on it opens the app (its run comes to the front, or its cart
+opens). A description no kind reads is BAD (`EINVAL`), a handle not the
+process's ABSENT (`ENOENT`). In Lua, `moybyte.status_show(icon[, state[,
+order]])`, `status_state`, `status_panel(h[, rows])` and `status_remove`
+answer the row's number (the handle, 0, or the code negated: FULL -2, BAD
+-7, ABSENT -8), and the press is `moybyte.on("moybyte.status", fn)`'s
+`fn(from, item, id, value)`, `from` being `"system"`.
+`runtime/system/status_items.py` is the authority (`parse`, `Panel`).
+
+**A command** (`"type": "command"`) is a program the terminal runs by
+its id's name (`local.hello` is `hello`): in Python its `main(argv)`, with
+`print` and `input` on the session's streams, answering the exit code; in
+wasm a WASI program's `_start`; in C an ELF module's `main`
+(`runtime/shell/sh_door.py`, `docs/os_2026-11/system.md` §1).
+
+**A WASI program** (a command or a service) is any program wasi-sdk, Rust's
+`wasm32-wasip1` or Zig builds: files under its permissions, clocks, args, env,
+stdio; it imports `moybyte.os` for its messages (`send`, `on`), its
+notifications, badges and log lines (`notify`, `award`, `progress`, `log`),
+its wakes (`every`, `after`, `at`, `cancel`, §9), the front's calls
+(`open_with`, `share`, `pick`, `nav_open_app`) and a picked item's
+(`item_read`, `item_write`), its prefs and the clipboard (`prefs_get`,
+`prefs_set`, `prefs_clear`, `clipboard_put_text`, `clipboard_text`,
+`clipboard_kind`, `clipboard_seq`), the files role's documents
+(`files_list` to `files_new_name`), its leases and devices by handle
+(`dev_open` to `dev_get`, above) and its status item (`status_show` to
+`status_remove`, above), and `sdk/include/moybyte/os.h` declares
+each under its C name, `moy_notify`, `moy_prefs_get` and the rest. A console call waits for
+the console's answer: a service's at the scheduler's next poll, a
+foreground command's at its job's next step; a background command's answers
+AGAIN after 5 s, its door serving nothing while it runs. The files, nav,
+prefs, clipboard, device and item rows, and `share`, are the role table's
+for a grant its start makes, over the roles its granted permissions name
+(`runtime/system/scheduler.py`, `compiled_run`), as a C program's are: a
+permission it lacks answers ACCES and a buffer too small RANGE. The files
+rows reach the store's documents in the folder its `files` permission
+names, the folder its WASI files (§5) are rooted at. A WASI program has no
+window: its pick reaches it as the message `moy_open` (handle, mime, mode,
+name) on its event descriptor, which it listens on, as a C program's does
+(below), and the handle is its own process's.
+
+**A C program** is an ELF module built against the OS function table by
+`tools/elf_cart.py` with the SDK (`sdk/README.md`): a command's
+`main(argc, argv)`, or a service's loop. Its manifest names its chips
+(`"native": ["esp32s3", "esp32p4"]`) and asks for `full_access`;
+`native/moy_elf/README.md` is the tier and `tests/fixtures/elf/elf_app.moy`
+calls the app rows. `moy_pick(mime, mode)` puts the console's picker up for
+it as a compiled app's `pick` does (a command holds no `front` unless it asks,
+so its pick waits as a notification); the item picked reaches it as the
+message `moy_open` on its event descriptor, which it listens on with
+`moy_on`: its arguments the handle, the type, the mode and the name (a
+cancelled pick's handle 0), the handle what `moy_item_read(h, buf, cap)` and
+`moy_item_write(h, data, len)` take until the process ends
+(`runtime/system/moybyte.py`, `hand_item`, which hands an item to any
+process that is not the app on screen). Its leases and devices are
+`moy_dev_open` to `moy_dev_get` (above), each under the `lease:<row>` or
+device permission its manifest asks beside `full_access`, and its status
+item `moy_status_show` to `moy_status_remove` (above).
+
+## 11. Lifecycle
+
+`_init()` once, then `_update(dt)` and `_draw()` (a game's three, in
+`docs/moy_cart_api.md`), `_layout(w, h, fs)` for a responsive app on any
+tier (§3), and
+`quit()` to leave. Several apps run at once: an app the user minimises keeps
+its `_update` every frame with no `_draw` (a player, a download), hearing
+`_minimise()` going in and `_restore()` coming out; a minimised game is
+paused (`docs/os_2026-11/processes.md` §1). Closing the app ends its
+process, its sound and its wakes.
+
+**Three strikes (#160).** An exception opens the stop card, whose See why
+opens your code at the line. What the Player cannot catch (a hang, an
+out-of-memory, a native fault) is caught by the crash guard
+(`runtime/shell/crash_guard.py`): it marks the app before its code runs and
+clears the mark after three painted frames; three opens that never healed
+and the console stops running it, the next tap landing on the stop card. The
+cart stays on Make, where editing it is how it gets fixed. It arms for
+`type: "app"` carts only.
+
+## 12. Debugging
+
+- **The OS log** (`native/moy_kernel/moy_log.h`): every start, exit, crash
+  (a Python traceback, a Lua or wasm panel), strike, refusal and service
+  line, under its process id. Read it in Settings → About → System log, with
+  the terminal's `log`, or over the dev channel's `log [level] [+seq] [name]`
+  word (`tools/board.py tdeck tail 3 --send "log err"`). A Python app writes
+  to it with `logging`; a cart's `print` draws on the screen, and a service's
+  goes to the log.
+- **A crash** shows its stop card's See why; a background app's crash posts
+  a notification, and the task manager's row offers its details.
+- **Services**: `service status` in the terminal, or on a board
+  `tools/board.py p4 sh "service status"`.
+- **On a board**: `tools/board.py <board> state`, `shot`, `py "..."` (an
+  expression against the live console) and `tail`; the `on-glass` skill.
+- **On the host**: the console is the same code; `tests/test_app_examples.py`
+  drives an app with keys and a service with messages through
+  `tests/ws_helpers.py`'s `build_ws`, the way to pin an app's behaviour.
+
+## 13. Shipped apps: the console's own
+
+Everything above is a USER app: a cart, editable on Make. A SHIPPED app
+(Settings, Files, Paint, Calc) is a Layer class
+in `runtime/`, frozen into the firmware and registered from a manifest; only
+the console's own apps take this path. **Calc** (`runtime/apps/calc_app.py`,
+`system_carts/moybyte.calc.moy`) is the reference.
+
+**The two files.** An identity cart, `system_carts/moybyte.<slug>.moy`,
+gives the app its tile, title and re-seed, and its manifest declares the
+app. A built-in is known by where it came from: a folder the firmware's seed
+wrote (`moy_store_base.builtin_name`, against the roster the seed records
+for its store, `seeded`). Only the seed writes the built-ins' namespace (a
+carts index naming a `moybyte.` folder or id is refused, a cart made under
+an author of that name is made as `local.`'s), and an id of that namespace
+names a cart only in its own folder (any other id, only where no folder is
+named for it, §2), so a cart that copies a built-in's
+manifest, its id, title, marker and `"system": true` (which only
+`tools/gen_device_carts.py` reads, to pick the seed carts), is an ordinary
+user cart with its own grant key (`tests/test_user_apps.py`):
+
+```json
+"moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
+                      "text_mode": false, "order": 80 } }
+```
+
+then `python tools/gen_device_carts.py --app-decls` regenerates the frozen
+copy. The Layer:
+
+```python
+class MyAppLayer:
+    id = "myapp"          # process kind: router, back-stack, window key
+    domain = "system"     # draws on the responsive system canvas
+    TITLE = "MY APP"      # the windowed WM's title strip
+    NEEDS = ("surface", "theme", "damage")   # the roles it uses
+
+    def __init__(self, ctx, names): ...   # ctx: its AppContext
+    def is_app(self, cart): ...   # claim the identity cart (title, marker permission, slug)
+    def open(self): ...           # (re)enter on every launch
+    def relayout(self, w, h, fs): ...
+    def close(self): ...          # optional: it is leaving the screen
+    def draw(self, dt): ...
+    def handle_input(self, i): ...
+    def handle_pointer(self, px, py, click): ...
+```
+
+That is the whole list: the console registers it from the declaration
+(`ws.register_app`), and the launcher's claim, the router, the back-stack,
+the window and its chip, the resize floor (`min_size`, or the layout's
+`MIN_W`/`MIN_H`), text mode and the exitable bar all follow; a new `runtime/`
+module reaches every board unless a `board.toml` denies it (#161).
+`tests/test_app_registry.py` fails a hand-written app name anywhere else, and
+`tests/test_app_api.py` holds the Calc set.
+
+**The AppContext** (`runtime/shell/app_context.py`) carries only the roles
+`NEEDS` declares:
+
+<!-- GENERATED by tools/gen_os_table.py from native/os_calls.json: the roles. Do not edit. -->
+| role | what it is | granted by | verbs |
+|---|---|---|---|
+| `ctx.damage` | whole-surface invalidation: repaint next frame, or ask for one more frame from inside `draw()`; the kernel's flags, folded by the frame gate where it folds the console's dirty flag | the shell | `all()`, `again()` |
+| `ctx.surface` | the grant's surface row, which the shell writes wherever it changes (on the desk, the window the app is in): the canvas the app draws on, its size, its scales, the window flag, the content rect the host's exitable strip leaves a running app (`content_rect()`, `(x, y, w, h)`, and `bar_h()`, its `y` -- what a user app's ungated `content_rect()` and `bar_h()` read), the pointer in the surface's coordinates (`x`, `y`, `down`, `click`, `visible`). A glyph is `ui`'s (`ui.glyph`), not this role's | the shell | `canvas()`, `size()`, `font_scale()`, `chrome_scale()`, `windowed()`, `bar_h()`, `content_rect()`, `pointer()` |
+| `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names (the reads every app is given, the floor); the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `appearance` | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
+| `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/Documents/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made for a shared folder (a user app's) reaches the kinds in that folder alone | `files` | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
+| `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | the shell | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
+| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `launch` | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
+| `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `prefs` | `get()`, `set()`, `clear()` |
+| `ctx.notify` | the console's own badges and every game's, as Settings lists them: one of the console's awarded by its id, the badges by game (each found one's day, each goal's last value), and today's date on the bar's clock as the badges record it | the shell | `award()`, `groups()`, `today()` |
+| `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | the shell | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
+| `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | the shell | `current()`, `follow()` |
+| `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `clipboard` | `put_text()`, `text()`, `kind()`, `seq()` |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`) | the shell | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()` |
+<!-- END GENERATED -->
+
+Every context holds a grant, a row of `native/moy_app`'s grant table keyed by
+the app's id, and every role is that module's role object over it: a C row
+reads the kernel's state, a shell row checks the grant and calls the server
+the console registers for the role (`runtime/shell/shell_servers.py`).
+`notify`'s rows are the achievements process's (`runtime/system/achievements.py`).
+A user app's globals (§6) are a filter over the same contexts
+(`make_system_api`, `runtime/shell/system_api.py`). Four rules hold:
+
+- **`NEEDS` is a filter.** Reaching an undeclared role raises;
+  `tests/test_app_context.py` fails a role named and not declared, and one
+  declared and not named.
+- **Roles expose methods, never properties**: a descriptor was measured far
+  dearer than a plain call on the P4 (`docs/history/ui_refactor_2026-08.md`
+  §2.4), and a test asserts there is none.
+- **Hoist.** Bind the roles used every frame once in `__init__` and read the
+  live values once at the top of `draw()`; `tests/test_roles.py` budgets it.
+- **Storage answers `(value, err)` and never raises**; `begin()`/`end()`
+  bracket a session for readiness and hold no gate.
+
+No role hands out the console: `tests/test_app_context.py` fails an app
+module that names the Workstation.
+
+**What it draws with.** The same `ui` verbs (§3) into the frame its host,
+`ctx.ui` (`ui_host.AppHost`), begins, with `UI = True`; its handlers hand
+the host the input (`keys`, `point`). The engine under them,
+`runtime/toolkit/ui_draw.py`, is the chrome's; a shipped app not yet moved
+onto the verbs draws there, pinned by `tests/test_ui_public.py`.
+
+**The bar contract is the router's** (`runtime/shell/console.py`, `_app_bar_route`):
+it paints the strip after `draw()` and routes a tap in its band before
+`handle_pointer()`, so an app lays out in its content rect
+(`layout_base.content_of`) and never draws a bar. The optional hooks:
+
+- `close()`: leaving the screen, by any route. Change-gated and cheap: a
+  write costs more than a frame (#154).
+- `commit()`: just before the bar's back or the window's X, for an app that
+  persists on an idle debounce (#111).
+- `back()`: one page back, answering True, or False on the first page, when
+  the host leaves the app.
+- `idle_step()` while `idle_owed`: work that must not land in a draw (a
+  file read, a decode), run once on a frame with nothing to paint.
+- `page_title()`: the open page's name, after the back chevron or as the
+  window's title.
+- `glass` (true while it holds the whole glass: no strip, its own back),
+  `leave_asked` (its own way out, taken as the bar's back), `BACK_MINIMISES`
+  (a back on the first page minimises on the desk), `cancel_field()` (the
+  T-Deck's Mic inside an open field), `DESK_TILE` (False: off the desk's
+  column).
+
+**Between apps.** `ctx.nav.open_app(id)` opens another app by its registered
+id (a build without it degrades to a status line); the Files router's verbs
+are `nav.projects()`, `nav.edit(cart, tab)`, `nav.open_text(name, kind,
+mode)` and `nav.open_image(name, kind, cart)`, each "open that, pointed
+here". `projects()` is on `nav`, not `ctx.carts`: a list of places to go is
+navigation, not the right to author carts.
+
+## Non-goals
+
+- Several instances of one app.
+- IPC beyond messages (§8) and "open that, pointed here" (§5).

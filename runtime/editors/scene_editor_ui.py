@@ -161,9 +161,9 @@ class SceneEditorUI:
         manifest's element 0; a cart with none starts an empty "main"). Called
         from Workstation.set_menu_view("scene")."""
         ws = self.ws
-        if self.sceneedit is not None or ws.project.sheet is None:
+        if self.sceneedit is not None or ws.run.project.sheet is None:
             return
-        scenes = ws.project.scenes
+        scenes = ws.run.project.scenes
         names = getattr(scenes, "names", None) if scenes is not None else None
         self.scene_name = names[0] if names else "main"
         raw = scenes.raw(self.scene_name) if scenes is not None else None
@@ -193,7 +193,7 @@ class SceneEditorUI:
         _init sees them (the run copies them, `ProjectStore.play_world`). Called after
         every committed gesture and after undo/redo."""
         se = self.sceneedit
-        scenes = self.ws.project.scenes
+        scenes = self.ws.run.project.scenes
         if se is None or scenes is None or self.scene_name is None:
             return
         scenes.put(self.scene_name, se.serialize())
@@ -207,7 +207,7 @@ class SceneEditorUI:
         if se is None or self.scene_name is None:
             return
         self._sync_live()                       # the store text == the live text
-        if ws.project.commit_scene(self.scene_name, se.serialize()):
+        if ws.run.project.commit_scene(self.scene_name, se.serialize()):
             se.dirty = False
 
     # -- view metrics ---------------------------------------------------------
@@ -246,7 +246,7 @@ class SceneEditorUI:
         if se is None:
             return
         x0, y0, scale, vw, vh = self._sv_metrics()
-        ww, wh = se.world_size(self.ws.project.tilemap)
+        ww, wh = se.world_size(self.ws.run.project.tilemap)
         se.cam_x = max(0, min(max(0, ww - vw), se.cam_x))
         se.cam_y = max(0, min(max(0, wh - vh), se.cam_y))
 
@@ -289,7 +289,7 @@ class SceneEditorUI:
 
     def _palette_ids(self):
         """The tile ids on the current palette page (the map editor's window)."""
-        sheet = self.ws.project.sheet
+        sheet = self.ws.run.project.sheet
         if sheet is None:
             return []
         start = self.scene_page
@@ -455,7 +455,7 @@ class SceneEditorUI:
             return
         bx, by, bw, bh = lay.body_fill
         col = th["surface"]
-        if self.sceneedit is None or ws.project.sheet is None:
+        if self.sceneedit is None or ws.run.project.sheet is None:
             cv.rect(bx, by, bw, bh, col)
             return
         # The view fills its own rect first: the body round it is all that
@@ -479,9 +479,9 @@ class SceneEditorUI:
         ws = self.ws
         NAMES = self._NAMES
         se = self.sceneedit
-        sheet = ws.project.sheet
+        sheet = ws.run.project.sheet
         x0, y0, scale, vw, vh = self._sv_metrics()
-        tm = ws.project.tilemap
+        tm = ws.run.project.tilemap
         # -- the world view: dark field, tilemap backdrop, viewport frame, actors.
         va = self._sv_area()
         cv.rect(va[0], va[1], va[2], va[3], NAMES["dark_blue"])

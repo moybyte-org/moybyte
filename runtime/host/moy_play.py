@@ -3,6 +3,7 @@
 #   census            the VM-free rule over a cart folder
 #   Files             a cart's written files by the C store
 #   launch            the Player: launch, bind, open, frame, end, info, lockstep
+#   shares            THE SHARES' rows: the lines, the fit check, the kill threshold
 #   front_ops         the run in the kernel loop's front, on the host
 #   Match             the radio link and its lockstep session
 #   chrome_panel      the chrome's pieces: panel, toast, banner, strip, menu
@@ -26,10 +27,17 @@ so this is what it finds.
                    (native/moy_store/moy_files.c), with files_key,
                    files_path_of, files_folder and files_live: the parity
                    suite's view of it beside runtime/carts/cart_files.py. Host only.
+  shares([board]), share_held(row), kill_below(held)
+                   THE SHARES' rows (moy_play.h), as on a board; with
+                   share_use(board), share_take and share_give (host only)
+                   a test stands in for a board's line.
   front_ops(buf, w, h), front_frame, front_end, state_json
                    the kernel loop's half of a run in front (a board's loop
                    calls the C), over a buffer standing in for a compositor.
                    Host only.
+  panel(run, text), panel_up
+                   the panel a stopped run leaves (a board's moy_play_stop.c
+                   holds it), which front_end releases. Host only.
 """
 
 from __future__ import annotations
@@ -50,14 +58,14 @@ _APP = os.path.join(native_build.ROOT, "native", "moy_app")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SHIM = os.path.join(_PLAY, "moy_play_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_play")    # the parity builds'
-_SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
+_SOURCES = ("moy_play.h", "moy_play_rule.c", "moy_shares.c", "moy_rt.h", "moy_rt.c",
             "moy_tick.h", "moy_tick.c",
             "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_json.h",
             "moy_json.c", "moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
             "moy_store_host.c",
             # native/moy_app's table, which a compiled app's verdict reads its
             # imports through, as on a board
-            "moy_app.h", "moy_app.c", "moy_app_wasm.h", "moy_app_wasm.c",
+            "moy_app.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_wasm.h", "moy_app_wasm.c",
             "moy_htab.h", "moy_htab.c", "moy_settings.h", "moy_settings.c",
             "moy_route.h", "moy_route.c", "moy_ledger.h", "moy_ledger.c",
             "moy_input.h", "moy_ufiles.h")
@@ -148,7 +156,14 @@ def _lib(real="float"):
                 ("moy_tick_plan", [P, R, ctypes.POINTER(_U8)], _B),
                 ("moy_tick_note", [P, R], None),
                 ("moy_tick_cycle", [P, ctypes.c_int], R),
-                ("moy_tick_fits", [P, ctypes.c_int], _B)):
+                ("moy_tick_fits", [P, ctypes.c_int], _B),
+                ("moy_share_use", [ctypes.c_char_p], ctypes.c_int),
+                ("moy_share_row", [ctypes.c_char_p, _U8], _U32),
+                ("moy_share_held", [_U8], _U32),
+                ("moy_share_take", [_U8, _U32], ctypes.c_int),
+                ("moy_share_give", [_U8, _U32], None),
+                ("moy_share_kill_below", [_U32], _U32),
+                ("moy_play_stop_fit", [ctypes.c_uint64] * 6 + [_B], _U8)):
             f = getattr(d, name)
             f.argtypes = args
             f.restype = res
@@ -215,6 +230,65 @@ def census(path, lua=True, wasm=True):
         d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
     rt, verdict, why = out.value.decode().split(" ", 2)
     return rt, verdict == "free", why
+
+
+# -- THE SHARES' ROWS (native/moy_play/moy_play.h) ---------------------------
+
+SHARE_PROCS, SHARE_MEDIA, SHARE_RINGS, SHARE_ELF, SHARE_LANES = range(5)
+SHARE_ROWS = 5
+_ABSENT = 0xFFFFFFFF
+_NONE = 0xFFFFFFFE
+
+
+def _share(v):
+    return None if v >= _NONE else v
+
+
+def shares(board=None):
+    """(procs, media, rings, elf, lanes) in bytes for `board`'s line (None:
+    the line in use), None for an absent row; None when there is no line."""
+    d = _lib()
+    b = board.encode() if board is not None else None
+    if d.moy_share_row(b, SHARE_PROCS) == _NONE:
+        return None
+    return tuple(_share(d.moy_share_row(b, r)) for r in range(SHARE_ROWS))
+
+
+def share_held(row):
+    return _lib().moy_share_held(row)
+
+
+def kill_below(procs_held):
+    """The kill threshold with the running set holding `procs_held` of
+    PROCS, or None with no line."""
+    return _share(_lib().moy_share_kill_below(procs_held))
+
+
+def stop_fit(total, block, free, largest, held, media=0, force=False):
+    """The stop verdict's fit clauses (moy_play.h's moy_play_stop_fit): its
+    word in STOP_WHYS ("fits", "stops", "media" or "big")."""
+    return STOP_WHYS[_lib().moy_play_stop_fit(total, block, free, largest, held, media,
+                                              bool(force))]
+
+
+def share_use(board=None):
+    """Host only: stand in for `board`'s line (None: the image's own, which
+    on the host is no line), its rows' holdings cleared. False for a board
+    no line has. Garbage is collected first: a taker freed after the switch
+    gives back bytes the cleared rows never held (an input table an earlier
+    test dropped, freed by the collector in the middle of a measurement)."""
+    import gc
+    gc.collect()
+    return _lib().moy_share_use(board.encode() if board is not None else None) == 0
+
+
+def share_take(row, n):
+    """Host only: the fit check's take, True when the bytes fit."""
+    return _lib().moy_share_take(row, n) == 0
+
+
+def share_give(row, n):
+    _lib().moy_share_give(row, n)
 
 
 _IMG = [None]
@@ -391,7 +465,7 @@ def _rc(rc):
 
 
 # The stop verdict's words (moy_play.h's MOY_PLAY_STOPS and KEEP_*), in order.
-STOP_WHYS = ("stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big")
+STOP_WHYS = ("stops", "rule", "lever", "fits", "place", "lease", "ota", "front", "big", "media")
 # launch()'s flags beyond `paced` (moy_play.h).
 HOME = 2
 UNSIGNED = 4
@@ -425,11 +499,13 @@ def open(run):  # noqa: A001 -- the module's verb
     _rc(d.hl_play_open(int(run)))
 
 
-def frame(run, ticks, dt, render, x, y, touch, window=False):
+def frame(run, ticks, dt, render, x, y, touch, face=0, room=None):
     d, lb = _play()
     out = _U32(0)
+    rx, ry, rw, rh = room if room is not None else (0, 0, 0, 0)
     rc = d.hl_play_frame(int(run), int(ticks), float(dt), 1 if render else 0,
-                         int(x), int(y), int(touch), 1 if window else 0, ctypes.byref(out))
+                         int(x), int(y), int(touch), int(face),
+                         int(rx), int(ry), int(rw), int(rh), ctypes.byref(out))
     if rc == 8:                             # MOY_PLAY_RAISED: the cart's own text
         i = lb.PlayInfo()
         d.hl_play_info(int(run), ctypes.byref(i))
@@ -473,7 +549,7 @@ def info(run=None):
     stack_frame, end_why, stop, vm_down, fit, stuck), or None for a handle that names
     no run. `stop` is the launch's stop verdict ("stops", or the clause that
     kept the VM: STOP_WHYS); `fit` the verdict's fit check with the VM up
-    (need, need_block, free, largest, vm_heap), None where it reached none;
+    (need, need_block, free, largest, what a stop frees), None where it reached none;
     `stuck` the runaway watch ended a tick."""
     d, lb = _play()
     i = lb.PlayInfo()
@@ -498,10 +574,59 @@ def watch(ms):
 
 
 def current():
-    """The live run's handle, or 0."""
+    """The run launched last while it is live, or 0."""
     d, _ = _play()
     d.moy_play_current.restype = _U32
     return int(d.moy_play_current())
+
+
+def mute(run, on):
+    """A run held aside reads no input while `on` (moy_play.h)."""
+    d, _ = _play()
+    d.moy_play_mute.argtypes = [_U32, ctypes.c_bool]
+    d.moy_play_mute.restype = ctypes.c_int
+    _rc(d.moy_play_mute(int(run), bool(on)))
+
+
+class _AppRun(ctypes.Structure):
+    """moy_app_run.h's moy_app_run_t."""
+    _fields_ = [("a", ctypes.c_void_p), ("sn", _U32), ("g", _U32), ("roles", _U32)]
+
+
+class _ProcRow(ctypes.Structure):
+    """moy_proc.h's moy_proc_row_t, field for field."""
+    _fields_ = [("pid", _U32), ("owner", _U32), ("run", _U32), ("engine", ctypes.c_void_p),
+                ("app", _AppRun), ("exit", ctypes.c_int32), ("tier", _U8), ("kind", _U8),
+                ("state", _U8), ("id", ctypes.c_char * 32)]
+
+
+def proc_row(run):
+    """The run's process row (moy_proc.h): (pid, tier, kind, state, bound,
+    grant), or None for a VM run or a stale handle."""
+    d, _ = _play()
+    d.moy_play_proc.argtypes = [_U32]
+    d.moy_play_proc.restype = _U32
+    d.moy_proc_get.argtypes = [_U32, ctypes.POINTER(ctypes.POINTER(_ProcRow))]
+    d.moy_proc_get.restype = ctypes.c_int
+    p = ctypes.POINTER(_ProcRow)()
+    if d.moy_proc_get(d.moy_play_proc(int(run)), ctypes.byref(p)) != 0:
+        return None
+    r = p.contents
+    return (r.pid, r.tier, r.kind, r.state, bool(r.engine), r.app.g)
+
+
+def procs():
+    """How many process rows are live (moy_proc.h)."""
+    d, _ = _play()
+    d.moy_proc_count.restype = _U32
+    return int(d.moy_proc_count())
+
+
+def runs():
+    """How many runs are live (moy_play.h: MOY_PLAY_RUNS at once)."""
+    d, _ = _play()
+    d.moy_play_runs.restype = _U32
+    return int(d.moy_play_runs())
 
 
 def front(run):
@@ -528,21 +653,27 @@ _FCANVAS = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(cty
 _FPRESENT = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_bool)
 _FMAP = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32),
                          ctypes.POINTER(ctypes.c_int32))
+_FFRAME = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                           ctypes.POINTER(ctypes.c_void_p))
+_FFENCE = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
 
 class _FrontOps(ctypes.Structure):
     """moy_front_ops_t (native/moy_play/moy_play.h)."""
     _fields_ = [("canvas", _FCANVAS), ("present", _FPRESENT), ("map", _FMAP),
-                ("ctx", ctypes.c_void_p)]
+                ("ctx", ctypes.c_void_p), ("frame", _FFRAME), ("frame_fence", _FFENCE)]
 
 
 _FRONT = []
 
 
-def front_ops(buf, w, h, presents=None):
+def front_ops(buf, w, h, presents=None, frames=None):
     """Stand a compositor in for the front: the run draws into `buf` (a
     ctypes array of w*h uint16), and each present appends whether the frame
-    drew to `presents`. None withdraws."""
+    drew to `presents`. With `frames` (a list) the stand-in shows a compiled
+    run's frames from the cart's memory too, as a board's `frame` op does:
+    each one shown is copied into a kept buffer, whose bytes are appended to
+    `frames`, and every fence appends None. None withdraws."""
     d, _ = _play()
     d.moy_play_front_ops.argtypes = [ctypes.c_void_p]
     if buf is None:
@@ -561,11 +692,34 @@ def front_ops(buf, w, h, presents=None):
     def map_(ctx, x, y):
         return 0 <= x[0] < w and 0 <= y[0] < h
 
-    cbs = (_FCANVAS(canvas), _FPRESENT(present), _FMAP(map_))
-    ops = _FrontOps(cbs[0], cbs[1], cbs[2], None)
-    _FRONT[:] = [buf, cbs, ops]
+    kept = (ctypes.c_uint8 * (2 * w * h))()
+
+    def frame(ctx, px, lut, out):
+        if lut:
+            return False                # a palette frame: written into the canvas
+        ctypes.memmove(kept, px, 2 * w * h)
+        frames.append(bytes(kept))
+        out[0] = ctypes.addressof(kept)
+        return True
+
+    def fence(ctx):
+        frames.append(None)
+
+    cbs = (_FCANVAS(canvas), _FPRESENT(present), _FMAP(map_),
+           _FFRAME(frame) if frames is not None else _FFRAME(),
+           _FFENCE(fence) if frames is not None else _FFENCE())
+    ops = _FrontOps(cbs[0], cbs[1], cbs[2], None, cbs[3], cbs[4])
+    _FRONT[:] = [buf, cbs, ops, kept]
     d.moy_play_front_ops(ctypes.byref(ops))
     return True
+
+
+def wasm_take(take):
+    """moycore_wasm_take: which layouts the current compiled run's blits leave
+    in its memory (1 blit565's, 2 blit's), as a board's glue asks for them."""
+    d, _ = _play()
+    d.moycore_wasm_take.argtypes = [ctypes.c_int]
+    d.moycore_wasm_take(int(take))
 
 
 def front_frame(now_ms, dt_us):
@@ -583,8 +737,24 @@ def front_end(why):
     return bool(d.moy_play_front_end(int(why)))
 
 
+def panel(run, text=None):
+    """moy_play_panel: a stopped run's panel up for `run` (ended) showing
+    `text`, as moy_play_stop.c holds it while the VM is down; 0 takes it down."""
+    d, _ = _play()
+    d.moy_play_panel.argtypes = [_U32, ctypes.c_char_p]
+    d.moy_play_panel.restype = None
+    d.moy_play_panel(int(run), None if text is None else text.encode())
+
+
+def panel_up():
+    d, _ = _play()
+    d.moy_play_panel_up.restype = ctypes.c_bool
+    return bool(d.moy_play_panel_up())
+
+
 def state_json():
-    """The kernel's `state` answer while a run is in front, as text."""
+    """The kernel's `state` answer while a run is in front or a stopped run's
+    panel is up, as text."""
     d, _ = _play()
     out = ctypes.create_string_buffer(1024)
     d.moy_play_state_json.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
@@ -599,18 +769,24 @@ def state_json():
 # consoles in one process, where a board has the kernel's one (its
 # `moy_play.Match()` takes no io: native/moy_net's ring is its transport).
 # `io` is the transport: send(mac, payload) -> bool, recv() -> (mac, msg) or
-# None (raising on a radio error), add_peer(mac), recover() -> bool, say(line).
+# None (raising on a radio error), add_peer(mac), recover() -> bool,
+# channel(set) -> the channel, negated when pinned (0: none), say(line).
 
 _M_TAPE = 256
 _M_CART = 121
 _M_CFG = 101
 _M_FRAME = 250
+_M_CHECKS = 4
+_M_MSG = 240
+_M_PORTS = 8
+_M_PORT_DEPTH = 4
 
 
 class _Peer(ctypes.Structure):
     _fields_ = [("mac", _U8 * 6), ("name", ctypes.c_char * 24),
                 ("board", ctypes.c_char * 16), ("cart", ctypes.c_char * _M_CART),
-                ("state", _U8), ("seen", _U32), ("used", _B)]
+                ("state", _U8), ("seen", _U32), ("used", _B), ("hz", _U8),
+                ("ch", _U8), ("pinned", _B)]
 
 
 _I32, _F32 = ctypes.c_int32, ctypes.c_float
@@ -630,7 +806,36 @@ class _Lockstep(ctypes.Structure):
                 ("has_ema", _B), ("m_ema", _F32), ("win_mark", _I32),
                 ("win_stalls", _U32), ("tps_f", _I32), ("has_tps", _B), ("tps_ms", _U32),
                 ("held", _U8 * 2), ("prev", _U8 * 2), ("pressed", _U8 * 2),
-                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG)]
+                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG),
+                ("hist", _U32), ("world_f", _I32), ("world_d", _U32),
+                ("ck_f", _I32 * _M_CHECKS), ("ck_in", _U32 * _M_CHECKS),
+                ("ck_w", _U32 * _M_CHECKS), ("ck_last", _I32), ("peer_ck_f", _I32),
+                ("peer_ck_in", _U32), ("peer_ck_w", _U32), ("peer_ck_cmp", _I32),
+                ("desync", _I32), ("desync_kind", _U8), ("checks", _U32),
+                ("tick_hz", _U16), ("tick_rem", _U16), ("delay_max", ctypes.c_int),
+                ("escalate_ticks", _I32), ("escalate_at", _U32),
+                ("peer_margin", _U8), ("rep_min", _U8), ("last_win", _U8),
+                ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32),
+                ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
+                ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
+                ("lock_at", _U32), ("late_ms", _U32), ("stall_ms", _U32),
+                ("slew_ms", _I32), ("peer_mac", _U8 * 6), ("bound", _B)]
+
+
+class _Budget(ctypes.Structure):
+    _fields_ = [("credit", _U32), ("at", _U32), ("has_at", _B)]
+
+
+class _Port(ctypes.Structure):
+    _fields_ = [("port", _U16), ("from_", _U8), ("n", _U8), ("head", _U8), ("drops", _U32),
+                ("sent", _U32), ("refused", _U32), ("budget", _Budget),
+                ("mac", (_U8 * 6) * _M_PORT_DEPTH), ("len", _U8 * _M_PORT_DEPTH),
+                ("data", (_U8 * _M_MSG) * _M_PORT_DEPTH)]
+
+
+def _port(port):
+    port = int(port)
+    return port if 0 < port <= 0xFFFF else 0
 
 
 class _MatchS(ctypes.Structure):
@@ -645,8 +850,11 @@ class _MatchS(ctypes.Structure):
                 ("defer_mac", (_U8 * 6) * 8), ("defer_len", _U8 * 8),
                 ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
                 ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
-                ("inbox_drops", _U32), ("act", _U8), ("act_cart", ctypes.c_char * _M_CART),
-                ("error", ctypes.c_char * 48)]
+                ("inbox_drops", _U32), ("ports", _Port * _M_PORTS), ("act", _U8),
+                ("act_cart", ctypes.c_char * _M_CART),
+                ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8),
+                ("hold", _B), ("ch", _U8), ("pinned", _B), ("probe", _U8), ("probe_at", _U8),
+                ("ports_budget", _Budget)]
 
 
 _SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
@@ -655,12 +863,14 @@ _RECV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
                          ctypes.POINTER(_U8), _U32)
 _ADD = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8))
 _RECOVER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+_CHANNEL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int)
 _SAY = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p)
 
 
 class _Io(ctypes.Structure):
     _fields_ = [("send", _SEND), ("recv", _RECV), ("add_peer", _ADD),
-                ("recover", _RECOVER), ("say", _SAY), ("ctx", ctypes.c_void_p)]
+                ("recover", _RECOVER), ("channel", _CHANNEL), ("say", _SAY),
+                ("ctx", ctypes.c_void_p)]
 
 
 _MSIGS = (
@@ -679,6 +889,17 @@ _MSIGS = (
     ("moy_match_send_msg", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
     ("moy_match_take_msg", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t], ctypes.c_int),
     ("moy_match_action", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_port_open", [ctypes.c_void_p, _U16, ctypes.c_int], ctypes.c_int),
+    ("moy_match_port_close", [ctypes.c_void_p, _U16], ctypes.c_int),
+    ("moy_match_port_send", [ctypes.c_void_p, _U16, ctypes.c_char_p, ctypes.c_size_t, _U32],
+     ctypes.c_int),
+    ("moy_match_port_take", [ctypes.c_void_p, _U16, ctypes.c_void_p, ctypes.c_void_p,
+                             ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_port_drops", [ctypes.c_void_p, _U16], _I32),
+    ("moy_match_port_sent", [ctypes.c_void_p, _U16], _I32),
+    ("moy_match_port_refused", [ctypes.c_void_p, _U16], _I32),
+    ("moy_match_port_waiting", [ctypes.c_void_p, _U16], ctypes.c_int),
+    ("moy_match_ports_open", [ctypes.c_void_p], ctypes.c_int),
     ("moy_match_dispatch", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
                             ctypes.c_size_t, _U32], None),
     ("moy_match_candidate", [ctypes.c_void_p, ctypes.c_char_p, _U32], ctypes.c_void_p),
@@ -692,6 +913,15 @@ _MSIGS = (
     ("moy_lockstep_packet", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t, _U32, _B],
      ctypes.c_int),
     ("moy_lockstep_seed_of", [_U32, _I32], _U32),
+    ("moy_lockstep_world_due", [ctypes.c_void_p], _B),
+    ("moy_lockstep_world", [ctypes.c_void_p, _I32, _U32], None),
+    ("moy_match_world_check", [ctypes.c_void_p, _B], None),
+    ("moy_match_set_rate", [ctypes.c_void_p, ctypes.c_int, _B], None),
+    ("moy_lockstep_hz_at", [ctypes.c_void_p, _I32], ctypes.c_int),
+    ("moy_lockstep_gate", [ctypes.c_void_p, _U32, _B], _B),
+    ("moy_lockstep_ms", [ctypes.c_void_p, _I32], _I32),
+    ("moy_lockstep_rate", [ctypes.c_void_p, ctypes.c_int], None),
+    ("moy_lockstep_hash", [_U32, ctypes.c_char_p, ctypes.c_size_t], _U32),
     ("moy_lockstep_tps", [ctypes.c_void_p, _U32], _U32),
     ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
     ("moy_match_size", [], ctypes.c_size_t),
@@ -720,7 +950,7 @@ def seed_of(seed, frame):
 
 
 _LINK_FIELDS = ("active", "state", "rx", "tx", "drops", "recovers", "session_id",
-                "start_tries", "start_len", "inbox_drops")
+                "start_tries", "start_len", "inbox_drops", "world_check", "ch", "pinned")
 
 
 class Match:
@@ -737,7 +967,8 @@ class Match:
         self._m = _MatchS()
         self._io_obj = io
         self._io = _Io(_SEND(self._send), _RECV(self._recv), _ADD(self._add),
-                       _RECOVER(self._recover), _SAY(self._say), None)
+                       _RECOVER(self._recover), _CHANNEL(self._channel), _SAY(self._say),
+                       None)
         self._p = ctypes.cast(ctypes.byref(self._m), ctypes.c_void_p)
         d.moy_match_init(self._p, ctypes.cast(ctypes.byref(self._io), ctypes.c_void_p),
                          str(name).encode(), str(board).encode(),
@@ -780,6 +1011,13 @@ class Match:
         except Exception:  # noqa: BLE001
             return -1
 
+    def _channel(self, _ctx, set_to):
+        ch = getattr(self._io_obj, "channel", None)
+        try:
+            return 0 if ch is None else int(ch(int(set_to)))
+        except Exception:  # noqa: BLE001 -- a radio that cannot say never tunes
+            return 0
+
     def _say(self, _ctx, line):
         say = getattr(self._io_obj, "say", None)
         text = line.decode("utf-8", "replace")
@@ -805,6 +1043,10 @@ class Match:
             return c or None
         if name == "m_ema":
             return s.m_ema if s.has_ema else None
+        if name == "peer_margin":
+            return None if s.peer_margin == 255 else s.peer_margin
+        if name == "step_from":
+            return s.step_from if s.step_hz else None
         if name == "next_ms":
             return s.next_ms if s.has_next else None
         if name == "last_sent":
@@ -853,6 +1095,12 @@ class Match:
     def announce(self, cart, state):
         self._d.moy_match_announce(self._p, (cart or "").encode(), int(state))
 
+    def set_rate(self, hz, hold=False):
+        self._d.moy_match_set_rate(self._p, int(hz), bool(hold))
+
+    def rate(self, hz):
+        self._d.moy_lockstep_rate(self._p, int(hz))
+
     def set_config(self, cfg):
         self._d.moy_match_set_config(self._p, None if cfg is None else cfg.encode())
 
@@ -882,6 +1130,43 @@ class Match:
         buf = ctypes.create_string_buffer(_M_FRAME)
         n = self._d.moy_match_take_msg(self._p, buf, _M_FRAME)
         return None if n < 0 else buf.raw[:n]
+
+    def port_open(self, port, frm):
+        return self._d.moy_match_port_open(self._p, _port(port), int(frm))
+
+    def port_close(self, port):
+        return self._d.moy_match_port_close(self._p, _port(port))
+
+    def port_send(self, port, body, now):
+        body = bytes(body)
+        return self._d.moy_match_port_send(self._p, _port(port), body, len(body),
+                                           int(now) & 0xFFFFFFFF)
+
+    def port_take(self, port, cap):
+        """(sender, bytes) of the oldest record on `port`, None with none
+        waiting, or a MOY_MATCH_PORT_* code."""
+        mac = ctypes.create_string_buffer(6)
+        buf = ctypes.create_string_buffer(_M_MSG)
+        n = self._d.moy_match_port_take(self._p, _port(port), mac, buf,
+                                        max(0, min(int(cap), _M_MSG)))
+        if n == -1:
+            return None
+        return n if n < 0 else (mac.raw, buf.raw[:n])
+
+    def port_drops(self, port):
+        return self._d.moy_match_port_drops(self._p, _port(port))
+
+    def port_sent(self, port):
+        return self._d.moy_match_port_sent(self._p, _port(port))
+
+    def port_refused(self, port):
+        return self._d.moy_match_port_refused(self._p, _port(port))
+
+    def port_waiting(self, port):
+        return self._d.moy_match_port_waiting(self._p, _port(port))
+
+    def ports_open(self):
+        return self._d.moy_match_ports_open(self._p)
 
     def action(self):
         buf = ctypes.create_string_buffer(_M_CART)
@@ -942,6 +1227,26 @@ class Match:
     def tps(self, now):
         return self._d.moy_lockstep_tps(self._p, int(now) & 0xFFFFFFFF)
 
+    def arm_worlds(self, on):
+        self._d.moy_match_world_check(self._p, bool(on))
+
+    def gate(self, now, due):
+        return bool(self._d.moy_lockstep_gate(self._p, int(now) & 0xFFFFFFFF, bool(due)))
+
+    def hz_at(self, f):
+        return self._d.moy_lockstep_hz_at(self._p, int(f))
+
+    def ms(self, f):
+        return self._d.moy_lockstep_ms(self._p, int(f))
+
+    def world_due(self):
+        return bool(self._d.moy_lockstep_world_due(self._p))
+
+    def world(self, data):
+        data = data.encode() if isinstance(data, str) else bytes(data)
+        d = self._d.moy_lockstep_hash(2166136261, data, len(data))
+        self._d.moy_lockstep_world(self._p, self._m.s.frame, d or 1)
+
     def expand(self, f16):
         return self._d.moy_lockstep_expand(self._p, int(f16) & 0xFFFF)
 
@@ -977,6 +1282,7 @@ _CSIGS = (
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _CS, _B, _U32], None),
+    ("moy_chrome_note", [_CS, _CS, _CS, _U32], None),
     ("moy_chrome_overlay_draw", [_CP, _CI, _CI, _CP, _U32], _B),
     ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
     ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
@@ -1075,6 +1381,10 @@ def chrome_notice(title, sub, ok, until_ms):
 def chrome_toast_arm(head, name, icon, secret, until_ms):
     _clib().moy_chrome_toast_arm(_b(head), _b(name), _b(icon), bool(secret),
                                  int(until_ms) & 0xFFFFFFFF)
+
+
+def chrome_note(head, name, icon, until_ms):
+    _clib().moy_chrome_note(_b(head), _b(name), _b(icon), int(until_ms) & 0xFFFFFFFF)
 
 
 def chrome_overlay_draw(buf, w, h, pal, now_ms):

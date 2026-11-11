@@ -1,12 +1,10 @@
-// A cart as it travels (moy_pack.h has the contract; moy_store.mjs's zipStore
-// and unzip are the codec this mirrors).
+// A cart as it travels (moy_pack.h has the contract).
 
 #include <string.h>
 
 #include "moy_arena.h"
 #include "moy_cat.h"
 #include "moy_pack.h"
-#include "moy_seed.h"
 
 #ifdef MOY_STORE_MICROPYTHON
 #include "py/mpconfig.h"
@@ -19,6 +17,10 @@
 #endif
 
 #define DEPTH 6
+// What an archive's file passes through, either way: a member of any size
+// costs CHUNK (and, inflating, the deflate window), never its own size.
+#define CHUNK 4096u
+#define WINDOW 32768u
 
 // -- writing -----------------------------------------------------------------------
 
@@ -36,6 +38,7 @@ typedef struct {
     size_t len, cap;
     int history;
     int rc;
+    uint8_t *buf;               // CHUNK bytes: every file passes through it
 } zw_t;
 
 static void le16(uint8_t *p, uint32_t v) {
@@ -100,17 +103,52 @@ static void sort(ls_t *l) {
     }
 }
 
-static int add_file(zw_t *z, const char *path, const char *rel) {
-    moy_buf_t b;
-    int rc = moy_fs_read_file(path, (size_t)-1, &b);
+// The file at `path` read a CHUNK at a time into `buf`, at most `cap` bytes:
+// each piece handed to the crc (`crc` given) or to the archive (`z` given).
+// `*n` gets the bytes read.
+static int stream_file(const char *path, uint8_t *buf, uint32_t cap, uint32_t *crc,
+                       zw_t *z, uint32_t *n) {
+    moy_vol_t v;
+    const char *rest;
+    moy_vol_file_t *f;
+    *n = 0;
+    int rc = moy_vol_at(path, &v, &rest);
+    if (rc == 0) {
+        rc = moy_vol_open(&v, rest, MOY_VOL_READ, &f);
+    }
     if (rc != 0) {
+        return rc;
+    }
+    while (rc == 0 && *n < cap) {
+        size_t got = 0;
+        size_t want = cap - *n < CHUNK ? cap - *n : CHUNK;
+        rc = moy_vol_read(f, buf, want, &got);
+        if (rc != 0 || got == 0) {
+            break;
+        }
+        if (crc != NULL) {
+            *crc = moy_fs_crc32(*crc, buf, got);
+        } else {
+            put(z, buf, got);
+            rc = z->rc;
+        }
+        *n += (uint32_t)got;
+    }
+    int rc2 = moy_vol_close(f);
+    return rc ? rc : rc2;
+}
+
+// One file into the archive, read twice a CHUNK at a time -- its crc, then
+// its bytes -- so a file of any size costs the archive one CHUNK.
+static int add_file(zw_t *z, const char *path, const char *rel) {
+    uint32_t crc = 0, size = 0;
+    if (stream_file(path, z->buf, (uint32_t)-1, &crc, NULL, &size) != 0) {
         return 0;                       // an unreadable file: left out
     }
     if (z->len == z->cap) {
         size_t cap = z->cap ? z->cap * 2u : 16u;
         zent_t *e = moy_arena_alloc(&z->a, cap * sizeof(zent_t));
         if (e == NULL) {
-            moy_buf_free(&b);
             return MOY_ENOMEM;
         }
         if (z->len) {
@@ -122,9 +160,12 @@ static int add_file(zw_t *z, const char *path, const char *rel) {
     zent_t *e = &z->e[z->len++];
     e->n = strlen(rel);
     e->name = moy_arena_dup(&z->a, rel, e->n);
-    e->crc = moy_fs_crc32(0, b.p, b.n);
-    e->size = (uint32_t)b.n;
+    e->crc = crc;
+    e->size = size;
     e->offset = z->at;
+    if (e->name == NULL) {
+        return MOY_ENOMEM;
+    }
     uint8_t h[30];
     memset(h, 0, sizeof h);
     le32(h, 0x04034b50u);
@@ -136,9 +177,12 @@ static int add_file(zw_t *z, const char *path, const char *rel) {
     le16(h + 26, (uint32_t)e->n);
     put(z, h, sizeof h);
     put(z, rel, e->n);
-    put(z, b.p, b.n);
-    moy_buf_free(&b);
-    return e->name == NULL ? MOY_ENOMEM : z->rc;
+    uint32_t copied = 0;
+    int rc = z->rc ? z->rc : stream_file(path, z->buf, size, NULL, z, &copied);
+    if (rc == 0 && copied != size) {
+        rc = MOY_EIO;                   // the file shrank between the passes
+    }
+    return rc ? rc : z->rc;
 }
 
 static int walk(zw_t *z, const char *path, const char *rel, int depth) {
@@ -182,7 +226,8 @@ int moy_pack(const char *cart, const char *folder, const char *dest, int history
     if (rc != 0) {
         return -rc;
     }
-    rc = walk(&z, cart, folder, 0);
+    z.buf = moy_store_alloc(CHUNK);
+    rc = z.buf == NULL ? MOY_ENOMEM : walk(&z, cart, folder, 0);
     uint32_t cen = z.at;
     for (size_t i = 0; rc == 0 && i < z.len; i++) {
         zent_t *e = &z.e[i];
@@ -217,6 +262,9 @@ int moy_pack(const char *cart, const char *folder, const char *dest, int history
         rc = rc2;
     }
     int files = (int)z.len;
+    if (z.buf != NULL) {
+        moy_store_free(z.buf, CHUNK);
+    }
     moy_arena_free(&z.a);
     if (rc != 0) {
         moy_fs_remove(dest);
@@ -255,27 +303,81 @@ static int safe(const char *p, size_t n) {
     return 1;
 }
 
-static int inflate_to(const uint8_t *src, size_t n, uint8_t *dst, size_t want) {
+// One member's bytes: `left` of them still in the archive `f`, read a
+// CHUNK at a time into `in`.
+typedef struct {
+    moy_vol_file_t *f;
+    uint8_t *in;
+    uint32_t left;
+    int rc;
     #if MOY_PACK_INFLATE
-    uzlib_uncomp_t *d = moy_store_alloc(sizeof(uzlib_uncomp_t));
-    if (d == NULL) {
-        return MOY_ENOMEM;
+    uzlib_uncomp_t *d;
+    #endif
+} zr_t;
+
+static size_t refill(zr_t *r) {
+    size_t got = 0;
+    size_t want = r->left < CHUNK ? r->left : CHUNK;
+    if (want && r->rc == 0) {
+        r->rc = moy_vol_read(r->f, r->in, want, &got);
     }
-    uzlib_uncompress_init(d, NULL, 0);
-    d->source = src;
-    d->source_limit = src + n;
-    d->source_read_cb = NULL;
-    d->dest_start = d->dest = dst;
-    d->dest_limit = dst + want;
-    int st = want ? uzlib_uncompress(d) : UZLIB_DONE;
-    int ok = (st == UZLIB_DONE || st == UZLIB_OK) && d->dest == dst + want;
-    moy_store_free(d, sizeof(uzlib_uncomp_t));
-    return ok ? 0 : MOY_EINVAL;
+    r->left -= (uint32_t)got;
+    return got;
+}
+
+#if MOY_PACK_INFLATE
+static int next_byte(void *ctx) {
+    zr_t *r = ctx;
+    size_t got = refill(r);
+    if (got == 0) {
+        return -1;
+    }
+    r->d->source = r->in + 1;
+    r->d->source_limit = r->in + got;
+    return r->in[0];
+}
+#endif
+
+// The member `r` reads written to `out`: stored, copied a CHUNK at a time;
+// deflated, inflated through the WINDOW into `buf` a CHUNK at a time. 0 once
+// all `usize` bytes are written, MOY_EINVAL for a member that does not
+// inflate to them.
+static int member_to(zr_t *r, uint32_t method, uint32_t usize, uint8_t *buf,
+                     uint8_t *window, moy_vol_file_t *out) {
+    uint32_t wrote = 0;
+    int rc = 0;
+    if (method == 0) {
+        size_t got;
+        while (rc == 0 && (got = refill(r)) != 0) {
+            rc = moy_vol_write(out, r->in, got);
+            wrote += (uint32_t)got;
+        }
+        rc = rc ? rc : r->rc;
+        return rc ? rc : (wrote == usize ? 0 : MOY_EINVAL);
+    }
+    #if MOY_PACK_INFLATE
+    uzlib_uncompress_init(r->d, window, WINDOW);
+    r->d->source = NULL;
+    r->d->source_limit = NULL;
+    r->d->source_read_cb = next_byte;
+    r->d->source_read_data = r;
+    int st = usize ? UZLIB_OK : UZLIB_DONE;
+    while (rc == 0 && st == UZLIB_OK && wrote < usize) {
+        r->d->dest_start = r->d->dest = buf;
+        r->d->dest_limit = buf + (usize - wrote < CHUNK ? usize - wrote : CHUNK);
+        st = uzlib_uncompress(r->d);
+        size_t n = (size_t)(r->d->dest - buf);
+        if (n) {
+            rc = moy_vol_write(out, buf, n);
+            wrote += (uint32_t)n;
+        }
+    }
+    rc = rc ? rc : r->rc;
+    return rc ? rc : (st >= 0 && wrote == usize ? 0 : MOY_EINVAL);
     #else
-    (void)src;
-    (void)n;
-    (void)dst;
-    (void)want;
+    (void)buf;
+    (void)window;
+    (void)usize;
     return MOY_ENODEV;
     #endif
 }
@@ -294,42 +396,75 @@ static void make_dirs(moy_arena_t *a, const char *dest, const char *rel) {
     }
 }
 
+// `n` bytes of the archive `f` at `at` into `buf`.
+static int read_at(moy_vol_file_t *f, uint32_t at, uint8_t *buf, size_t n) {
+    size_t got = 0;
+    int rc = moy_vol_seek(f, at);
+    if (rc == 0) {
+        rc = moy_vol_read(f, buf, n, &got);
+    }
+    return rc ? rc : (got == n ? 0 : MOY_EINVAL);
+}
+
+// The archive is read by its central directory, held whole (it names the
+// members, a few dozen bytes each), and each member streamed to its file:
+// an archive of any size costs its directory, two CHUNKs and the WINDOW.
 int moy_unpack(const char *archive, const char *dest, char *top, size_t cap) {
-    moy_buf_t b;
     if (cap) {
         top[0] = 0;
     }
-    int rc = moy_fs_read_file(archive, (size_t)-1, &b);
+    moy_vol_t v;
+    const char *rest;
+    moy_vol_file_t *f;
+    int rc = moy_vol_at(archive, &v, &rest);
+    if (rc == 0) {
+        rc = moy_vol_open(&v, rest, MOY_VOL_READ, &f);
+    }
     if (rc != 0) {
         return -rc;
     }
-    const uint8_t *z = (const uint8_t *)b.p;
-    size_t zn = b.n;
-    long eocd = -1;
-    for (long i = (long)zn - 22; i >= 0 && i >= (long)zn - 66000; i--) {
-        if (rd32(z + i) == 0x06054b50u) {
-            eocd = i;
-            break;
-        }
-    }
-    if (eocd < 0) {
-        moy_buf_free(&b);
-        return -MOY_EINVAL;
-    }
     moy_arena_t a;
     memset(&a, 0, sizeof a);
-    uint32_t count = rd16(z + eocd + 10), at = rd32(z + eocd + 16);
+    uint32_t zn = 0;
+    rc = moy_vol_size(f, &zn);
+    // the end record, in the archive's last 64 KiB
+    uint32_t tail = zn < 66022u ? zn : 66022u;
+    uint8_t *t = rc == 0 && tail >= 22u ? moy_arena_alloc(&a, tail) : NULL;
+    long eocd = -1;
+    if (t != NULL && read_at(f, zn - tail, t, tail) == 0) {
+        for (long i = (long)tail - 22; i >= 0; i--) {
+            if (rd32(t + i) == 0x06054b50u) {
+                eocd = i;
+                break;
+            }
+        }
+    }
+    uint32_t count = 0, at = 0, cn = 0;
+    uint8_t *z = NULL;
+    if (eocd >= 0) {
+        count = rd16(t + eocd + 10);
+        cn = rd32(t + eocd + 12);
+        at = rd32(t + eocd + 16);
+        if ((uint64_t)at + cn <= zn) {
+            z = moy_arena_alloc(&a, cn ? cn : 1u);
+        }
+    }
+    if (z == NULL || read_at(f, at, z, cn) != 0) {
+        moy_vol_close(f);
+        moy_arena_free(&a);
+        return -MOY_EINVAL;
+    }
     // the one top folder every entry sits under, if there is one
     const char *tp = NULL;
     size_t tn = 0;
     int has_top = 1;
-    uint32_t p = at;
+    uint32_t p = 0;
     for (uint32_t i = 0; i < count && has_top; i++) {
-        if ((size_t)p + 46u > zn || rd32(z + p) != 0x02014b50u) {
+        if ((size_t)p + 46u > cn || rd32(z + p) != 0x02014b50u) {
             break;
         }
         uint32_t nl = rd16(z + p + 28), xl = rd16(z + p + 30), cl = rd16(z + p + 32);
-        if ((size_t)p + 46u + nl > zn) {
+        if ((size_t)p + 46u + nl > cn) {
             break;
         }
         const char *nm = (const char *)z + p + 46;
@@ -351,18 +486,24 @@ int moy_unpack(const char *archive, const char *dest, char *top, size_t cap) {
         memcpy(top, tp, k);
         top[k] = 0;
     }
+    zr_t r;
+    memset(&r, 0, sizeof r);
+    r.f = f;
+    r.in = moy_arena_alloc(&a, CHUNK);
+    uint8_t *buf = moy_arena_alloc(&a, CHUNK);
+    uint8_t *window = NULL;
+    rc = r.in == NULL || buf == NULL ? MOY_ENOMEM : 0;
     moy_fs_mkdir(dest);
     int files = 0;
-    rc = 0;
-    p = at;
+    p = 0;
     for (uint32_t i = 0; i < count && rc == 0; i++) {
-        if ((size_t)p + 46u > zn || rd32(z + p) != 0x02014b50u) {
+        if ((size_t)p + 46u > cn || rd32(z + p) != 0x02014b50u) {
             break;
         }
         uint32_t method = rd16(z + p + 10), csize = rd32(z + p + 20), usize = rd32(z + p + 24);
         uint32_t nl = rd16(z + p + 28), xl = rd16(z + p + 30), cl = rd16(z + p + 32);
         uint32_t local = rd32(z + p + 42);
-        if ((size_t)p + 46u + nl > zn) {
+        if ((size_t)p + 46u + nl > cn) {
             break;
         }
         const char *nm = (const char *)z + p + 46;
@@ -372,42 +513,56 @@ int moy_unpack(const char *archive, const char *dest, char *top, size_t cap) {
         }
         const char *rel = tn ? nm + tn + 1u : nm;
         size_t rn = tn ? nl - tn - 1u : nl;
-        if (!safe(rel, rn) || (size_t)local + 30u > zn || rd32(z + local) != 0x04034b50u) {
+        uint8_t h[30];
+        if (!safe(rel, rn) || (uint64_t)local + 30u > zn || read_at(f, local, h, 30) != 0
+            || rd32(h) != 0x04034b50u) {
             continue;
         }
-        size_t start = (size_t)local + 30u + rd16(z + local + 26) + rd16(z + local + 28);
-        if (start + csize > zn || (method != 0 && method != 8) || usize > MOY_SEED_MAX) {
+        uint64_t start = (uint64_t)local + 30u + rd16(h + 26) + rd16(h + 28);
+        if (start + csize > zn || (method != 0 && method != 8)) {
             continue;
         }
-        char *r = moy_arena_dup(&a, rel, rn);
-        char *path = r != NULL ? moy_arena_join(&a, dest, r) : NULL;
+        #if MOY_PACK_INFLATE
+        if (method == 8 && window == NULL) {
+            window = moy_arena_alloc(&a, WINDOW);
+            r.d = moy_arena_alloc(&a, sizeof(uzlib_uncomp_t));
+            if (window == NULL || r.d == NULL) {
+                rc = MOY_ENOMEM;
+                break;
+            }
+        }
+        #endif
+        char *rl = moy_arena_dup(&a, rel, rn);
+        char *path = rl != NULL ? moy_arena_join(&a, dest, rl) : NULL;
         if (path == NULL) {
             rc = MOY_ENOMEM;
             break;
         }
-        make_dirs(&a, dest, r);
-        if (method == 0) {
-            rc = moy_fs_write(path, z + start, csize);
-        } else {
-            uint8_t *out = moy_store_alloc(usize + 1u);
-            if (out == NULL) {
-                rc = MOY_ENOMEM;
-                break;
-            }
-            rc = inflate_to(z + start, csize, out, usize);
-            if (rc == 0) {
-                rc = moy_fs_write(path, out, usize);
-            } else {
-                rc = 0;                 // a damaged entry: left out
-                moy_store_free(out, usize + 1u);
-                continue;
-            }
-            moy_store_free(out, usize + 1u);
+        make_dirs(&a, dest, rl);
+        moy_vol_t ov;
+        const char *orest;
+        moy_vol_file_t *out;
+        rc = moy_vol_at(path, &ov, &orest);
+        if (rc == 0) {
+            rc = moy_vol_open(&ov, orest, MOY_VOL_WRITE, &out);
+        }
+        if (rc != 0) {
+            break;
+        }
+        r.left = csize;
+        r.rc = moy_vol_seek(f, (uint32_t)start);
+        rc = member_to(&r, method, usize, buf, window, out);
+        int rc2 = moy_vol_close(out);
+        rc = rc ? rc : rc2;
+        if (rc == MOY_EINVAL || rc == MOY_ENODEV) {
+            moy_fs_remove(path);        // a damaged or unreadable member: left out
+            rc = 0;
+            continue;
         }
         files += rc == 0;
     }
+    moy_vol_close(f);
     moy_arena_free(&a);
-    moy_buf_free(&b);
     return rc ? -rc : files;
 }
 

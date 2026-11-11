@@ -13,6 +13,9 @@ answers on the far side; that is each board's own on-glass suite, and those
 stay the gate.
 """
 
+import ast
+import re
+
 import pytest
 
 import on_glass
@@ -35,7 +38,11 @@ class _FakeBoard:
 
     def __init__(self, port, board_dir=None, attach_only=True,
                  expect_board="tdeck", state_reply="STATE {}",
-                 reset_is_damage=False):
+                 reset_is_damage=False, store=("celeste.moy", "doom.moy"),
+                 marked=()):
+        self.store = list(store)
+        self.marked = set(marked)
+        self.deleted = []
         self.port = port
         self.board_dir = board_dir
         self.attach_only = attach_only
@@ -63,8 +70,34 @@ class _FakeBoard:
     def verify_board(self):
         self.calls.append(("verify_board",))
 
+    def pyexec(self, code, timeout=30.0, strict=False):
+        self.calls.append(("pyexec",))
+        return True
+
+    def pyval(self, expr, timeout=30.0, strict=False):
+        """The store helpers `session()` calls (push_cart.STORE), answered from
+        a list of folders: `_folders` lists them with their marks, `_remove`
+        removes the ones it names, `_mark` marks one."""
+        self.calls.append(("pyval", timeout))
+        if expr.startswith("ws._g['_folders']"):
+            return sorted([f, f in self.marked] for f in self.store)
+        arg = ast.literal_eval(re.search(r"\]\((.*)\)$", expr).group(1))
+        if expr.startswith("ws._g['_remove']"):
+            self.deleted += [f for f in arg if f in self.store]
+            self.store = [f for f in self.store if f not in arg]
+            self.marked -= set(arg)
+            return 1
+        if expr.startswith("ws._g['_mark']"):
+            self.marked.add(arg.rsplit("/", 2)[-2])
+            return 1
+        raise AssertionError("an expression session() does not send: %r" % expr)
+
     def close(self):
         self.calls.append(("close",))
+
+
+def _no_shelf(calls):
+    return [c for c in calls if c[0] not in ("pyval", "pyexec")]
 
 
 def _install(monkeypatch, **kw):
@@ -88,8 +121,8 @@ def test_an_attach_only_board_is_probed_in_order_and_never_reset(monkeypatch):
     with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
         pass
     assert b is made[0]
-    assert b.calls == [("drain", 0.8), ("cmd", "state"),
-                       ("verify_board",), ("close",)]
+    assert _no_shelf(b.calls) == [("drain", 0.8), ("cmd", "state"),
+                                  ("verify_board",), ("close",)]
     assert b.board_dir == TDECK, "the suite's own board.toml is what was read"
 
 
@@ -124,8 +157,8 @@ def test_the_reset_capable_board_is_reset_and_never_probed_for_state(monkeypatch
     with on_glass.session("/dev/ttyACM3", board_dir=P4) as b:
         b.cmd("diag 1")                     # what the P4 suite does with it
     assert b is made[0]
-    assert b.calls == [("reset",), ("verify_board",),
-                       ("cmd", "diag 1"), ("close",)]
+    assert _no_shelf(b.calls) == [("reset",), ("verify_board",),
+                                  ("cmd", "diag 1"), ("close",)]
 
 
 def test_a_silent_attach_only_board_raises_and_still_closes(monkeypatch):
@@ -168,3 +201,71 @@ def test_all_three_suites_go_through_the_shared_session():
         assert "P4Board(" not in src, (
             "%s builds the driver itself again -- the attach/reset decision "
             "has left the one place that is guarded" % suite)
+
+
+def test_the_store_is_given_back_with_only_the_new_folders_removed(monkeypatch):
+    """What a suite pushed goes; what was there stays -- the owner's games
+    included, and a fixture written over a folder that was already there."""
+    made = _install(monkeypatch, attach_only=True)
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        b.store += ["wasm_tampered.moy", "wasm_hello", "custom.moy"]
+        b.store += ["local.ring_py%d.moy" % i for i in range(9)]
+    assert sorted(b.store) == ["celeste.moy", "doom.moy"]
+    assert sorted(b.deleted) == sorted(
+        ["wasm_tampered.moy", "wasm_hello", "custom.moy"]
+        + ["local.ring_py%d.moy" % i for i in range(9)])
+    assert made[0].calls[-1] == ("close",)
+
+
+def test_a_marked_push_goes_and_one_an_earlier_session_left_goes_first(monkeypatch):
+    """A session killed before it closed leaves its pushes marked; the next
+    session removes them when it opens, before it records what to keep, and a
+    push it marks itself goes when it closes."""
+    _install(monkeypatch, attach_only=True,
+             store=("celeste.moy", "elf_hello.moy"), marked=("elf_hello.moy",))
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        assert b.store == ["celeste.moy"], "the earlier session's push survived the open"
+        b.store.append("stuck_lua.moy")
+        on_glass.mark_pushed(b, "/sd/moybyte/carts/stuck_lua.moy")
+        assert b.marked == {"stuck_lua.moy"}
+    assert b.store == ["celeste.moy"]
+    assert b.deleted == ["elf_hello.moy", "stuck_lua.moy"]
+
+
+def test_the_removal_goes_in_batches_with_a_long_timeout(monkeypatch):
+    import push_cart
+    _install(monkeypatch, attach_only=True)
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        b.store += ["x%d.moy" % i for i in range(50)]
+    removes = [c for c in b.calls if c[0] == "pyval" and c[1] >= push_cart.REMOVE_S]
+    assert len(removes) >= 50 // push_cart.REMOVE_BATCH
+    assert b.store == ["celeste.moy", "doom.moy"]
+
+
+def test_a_failing_suite_still_gives_the_store_back(monkeypatch):
+    made = _install(monkeypatch, attach_only=True)
+    with pytest.raises(ValueError):
+        with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+            b.store.append("stuck_lua.moy")
+            raise ValueError("a test blew up")
+    assert made[0].store == ["celeste.moy", "doom.moy"]
+    assert made[0].calls[-1] == ("close",)
+
+
+def test_a_board_that_never_listed_its_store_is_left_alone(monkeypatch):
+    _install(monkeypatch, attach_only=True)
+    monkeypatch.setattr(_FakeBoard, "pyval",
+                        lambda self, expr, **kw: self.calls.append(
+                            ("pyval", 0)))
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        pass
+    assert b.calls.count(("pyval", 0)) == 1, "nothing recorded, nothing removed"
+
+
+def test_a_store_that_cannot_be_given_back_warns_and_does_not_raise(monkeypatch):
+    _install(monkeypatch, attach_only=True)
+    monkeypatch.setattr(_FakeBoard, "pyval", lambda self, expr, **kw: (
+        sorted([f, False] for f in self.store) if "_folders" in expr else 1))
+    with pytest.warns(UserWarning, match="left folders on the store"):
+        with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+            b.store.append("stuck.moy")

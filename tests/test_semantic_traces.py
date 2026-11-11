@@ -83,7 +83,7 @@ EXTENDED 2026-10-06 (#224, before the spine crosses in sprint 2): a third
 trace, the SPINE's (its Python oracle tests/spine_twin.py, and the strike ledger in
 runtime/shell/crash_guard.py). One session of handle tables (a foreign, released,
 forged and non-int handle each refused), the app registry, the back-stack and
-the return routes, the WiFi leases, the settings rows (the setter that
+the return routes, the settings rows (the setter that
 persists, the dirty store and its retried write, the read decoded afresh) and
 the ledger's arm / heal / strike / forgive / proof bracket over those rows,
 pinned verbatim on every VM like the store's: the handle values are kind.slot.generation. Mutation-tested: the
@@ -105,6 +105,7 @@ drivers says what each logs.
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -507,18 +508,22 @@ def run_side(kind):
         class Proj:
             pass
 
+        class Run:
+            cart_frame = view = cart_start_ms = None
+
         class Ws:
-            pass
+            def __init__(self):
+                self.run = Run()
 
         ws = Ws()
-        ws.canvas = canvas
+        ws.run.canvas = canvas
         proj = Proj()
         proj.sheet = sheet
         proj.tilemap = tilemap
-        ws.project = proj
+        ws.run.project = proj
         ws.input = inp
         ws.pmem = pmem
-        ws.audio = audio                    # the run's session: the drain's target
+        ws.run.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
         # _init ran inside run_begin (libmoy's moy_lua_init), so there is no
@@ -843,7 +848,7 @@ seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'pictures', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
+loaded ['achievements', 'audio_ring', 'author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'entries', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'handles', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'native', 'palette', 'permissions', 'pictures', 'receives', 'required', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'wasi', 'writable']
 publish True
 recover True True
 journal 1 None False False
@@ -1061,12 +1066,6 @@ for i in range(st.DEPTH - st.depth()):
     st.goto("k%d" % i)
 say("deep", st.depth(), tried(st.goto, "more"), st.goto("desk"), st.depth())
 
-ls = sp.Leases()
-say("hold", ls.hold("update"), ls.hold("web"), ls.hold("update"), ",".join(ls.holders()))
-say("held", ls.held("web"), ls.held("cart"), ls.mask())
-say("release", ls.release("link"), ls.release("update"), ls.release("web"), ls.holders())
-say("tags", tried(ls.hold, "wasm"), tried(ls.release, None), tried(ls.held, "nobody"))
-
 written = []
 s = sp.Settings(lambda text: written.append(text))
 say("load", s.load('{"theme": "outline", "fs": 2, "favorites": ["/a.moy"]}'),
@@ -1164,10 +1163,6 @@ remove True False False launcher/desk/settings
 refused TYPE VALUE VALUE TYPE TYPE
 index 2 -1 True 3 settings
 deep 32 OSERROR 28 2 2
-hold 2 3 3 web,update
-held True False 3
-release 3 1 0 []
-tags VALUE TYPE VALUE
 load 3 ['favorites', 'fs', 'theme'] False
 rows 3 ['/a.moy'] {"open": "files"} None 7 False 2
 written {"theme": "outline", "fs": 3, "favorites": ["/a.moy"]} {"theme": "outline", "fs": 3, "favorites": ["/a.moy"], "guard": {"open": "files"}}
@@ -1594,7 +1589,7 @@ frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew
 frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0/0/0 idle 0
 frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0/0/0 idle 0
 frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0/0/0 idle 0
-frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 0
 frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
 frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
 frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
@@ -1602,7 +1597,7 @@ frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0
 frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
 frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
 frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
-frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 2
 frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 3
 frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
 frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
@@ -1660,9 +1655,9 @@ BATCH = moy_net.encode_batch(1, None, [
     {"p": "hop.moy/journal/x", "t": "never"},
     {"p": "../escape", "t": "never"},
     {"p": "old.moy/main.py", "t": "x"},
-    {"p": "old.moy", "dc": 1}], "1234")
-ops, pin, root_id = moy_sync.parse_batch(BATCH.encode())
-say("parse", len(ops), pin, root_id)
+    {"p": "old.moy", "dc": 1}])
+ops, root_id = moy_sync.parse_batch(BATCH.encode())
+say("parse", len(ops), root_id)
 applied, errs, shelf = moy_sync.apply_ops(carts, ops, root_id)
 say("apply", applied, ",".join("%d:%s" % e for e in errs), int(shelf))
 say("rows", " ".join(tree(carts)))
@@ -1670,7 +1665,7 @@ say("refuse", moy_sync.parse_batch(moy_net.encode_batch(2, "nope", [])),
     moy_sync.parse_batch(moy_net.encode_batch(1, "files", [])),
     moy_sync.parse_batch(b"{"))
 files_ops = moy_sync.parse_batch(moy_net.encode_batch(2, "files", [{"p": "x"}]))
-say("files", files_ops[2], len(files_ops[0]))
+say("files", files_ops[1], len(files_ops[0]))
 
 # -- the OTA health machine on a canned install --------------------------------
 upd = ROOT + "/update"
@@ -1748,7 +1743,7 @@ except ValueError as e:
     say("dl", e)
 
 # -- the web-console switch (native/moy_net/moy_webconsole.c) ------------------
-moy_net.wc_on(0, carts, None, None, "1234", ("/run",), None)
+moy_net.wc_on(0, carts, None, None, ROOT + "/system", ("/run",), None)
 say("wc join", moy_net.wc_state()[0], moy_net.wc_url(True) == "")
 moy_net.wc_park(True)
 say("wc park", moy_net.wc_state()[1])
@@ -1766,10 +1761,10 @@ print("DRIVER_DONE")
 '''
 
 LINKS_TRACE = """\
-parse 9 1234 carts
+parse 9 carts
 apply 7 5:bad path,6:bad path 1
 rows hop.moy/big.lua=10 hop.moy/main.py=24 hop.moy/main.py.bak=46 hop.moy/manifest.json=16 hop.moy/manifest.json.bak=38
-refuse (None, None, None) (None, None, None) (None, None, None)
+refuse (None, None) (None, None) (None, None)
 files files 1
 boot ota_1 ota_1 ('ok', '0.8 -> 0.9')
 confirm [True, False] valid 0 marker 0
@@ -2001,9 +1996,17 @@ def _survival_trace(name, exe, tmp_path, tag, prelude=None):
     driver = SURVIVAL[name][0]
     work = tmp_path / ("%s_%s" % (name, tag))
     stage = work / "stage"
-    store = work / "store"
     stage.mkdir(parents=True)
-    store.mkdir()
+    # The store's root in a short folder: the webhost refuses a system folder
+    # past MOY_WEB_PATH_MAX (96 bytes), and a tmp_path or TMPDIR runs past it.
+    store = Path(tempfile.mkdtemp(prefix="moys", dir="/tmp"))
+    try:
+        return _run_survival(driver, exe, work, stage, store, prelude)
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
+def _run_survival(driver, exe, work, stage, store, prelude):
     # What a build stages under frozen names that the glass's canvas imports.
     shutil.copy(runtime_file("font.py"), stage / "moy_font.py")
     for f in ("moy_image.py", "moy_fs.py"):
@@ -2059,7 +2062,7 @@ def test_survival_trace_holds_over_the_native_spine(name, tmp_path):
 
 # -- the roles' trace (#224, sprint 5) -------------------------------------------
 #
-# Every row of the app ABI's role table (native/moy_app/roles.json) driven
+# Every row of the app ABI's role table (native/os_calls.json) driven
 # once through a context that holds every role, over a real Workstation and
 # its store, and the effect logged: the net sprint 5's steps swap the roles'
 # servers under. On CPython the Workstation is the host's (runtime/host/host_app.py);
@@ -2256,12 +2259,21 @@ def roles_trace(ws):
     ws.go_home()
 
     # -- notify
+    # award is a message to the achievements process, served at the start of
+    # the console's next frames (`mail`, a queue's batch a frame); groups
+    # reads what it keeps
+    import scheduler
     nt = ctx.notify
-    nt.achieve("open", "trace")
-    c0 = nt.count()
-    say("notify", nt.award("konami"), nt.award("konami"), nt.count() - c0,
-        nt.has("konami"), nt.found_on("konami") == nt.today(),
-        nt.progress("play_five") is not None, nt.found_on("decorator"))
+    a1 = nt.award("konami")
+    for _ in range(16):
+        scheduler.SCHED.mail()
+        if not scheduler.SCHED.wakes.queued:
+            break
+    shell = {}
+    for b in nt.groups()[0][2]:
+        shell[b[0]] = b
+    say("notify", a1, nt.award("konami"), nt.groups()[0][1],
+        shell["konami"][6] == nt.today(), shell["play_five"][4], shell["decorator"][6])
 
     # -- wallpaper
     w = ctx.wallpaper
@@ -2312,6 +2324,7 @@ def roles_trace(ws):
     say("lease", i.hold() in (True, False), i.release())
     say("op", i.op(lambda: 7))
     say("wifi page", i.wifi_open(), i.wifi(), i.wifi_open())
+    say("consent", i.consent() is ws.consent)
     ws.settings_layer.back()                # the panel goes back to where it was
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
@@ -2344,11 +2357,13 @@ def roles_trace(ws):
 
 
 def roles_rows():
-    """The role table's (role, verb) rows, in table order, but the toolkit's:
-    a compiled app's alone (tests/test_ui_wasm.py drives each)."""
-    import json
-    rows = json.loads((ROOT / "native" / "moy_app" / "roles.json").read_text())
-    return [(r["role"], r["verb"]) for r in rows["rows"] if r["role"] != "ui"]
+    """The role table's (role, verb) rows, in table order, of the roles an
+    AppContext serves: not the toolkit's, a compiled app's alone
+    (tests/test_ui_wasm.py drives each), nor the console calls'."""
+    from tools import gen_os_table
+    from runtime import app_context
+    return [(r["role"], r["verb"]) for r in gen_os_table.role_table()
+            if r["role"] in app_context.ROLES]
 
 
 def _roles_driver():
@@ -2426,7 +2441,7 @@ time.sleep_ms(50)
 '''
 
 
-def _roles_trace_board(exe, tmp_path):
+def _roles_trace_board(exe, tmp_path, driver=None):
     import test_frame_alloc as fa
     sys.path.insert(0, str(ROOT / "tools"))
     try:
@@ -2440,7 +2455,7 @@ def _roles_trace_board(exe, tmp_path):
         gen_device_carts.build_packed(str(ROOT / "system_carts"))))
     script = tmp_path / "roles_driver.py"
     script.write_text(ROLES_BOOT.replace("@ROOT@", repr(str(tmp_path)))
-                      .replace("@DRIVER@", repr(_roles_driver())))
+                      .replace("@DRIVER@", repr(driver or _roles_driver())))
     out = subprocess.run([exe, "-X", "heapsize=64M", str(script)],
                          capture_output=True, text=True, timeout=240,
                          stdin=subprocess.PIPE)
@@ -2496,7 +2511,7 @@ text_mode True False
 cover None
 cover_gen True
 play desktop
-notify True False 1 True True True None
+notify True False Moybyte True 5 None
 wallpaper None 'moybyte.wall_z'
 wallpaper carts True None True
 selected None custom
@@ -2515,6 +2530,7 @@ install True True False None True True True
 lease True None
 op 7
 wifi page False None True
+consent True
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2
@@ -2540,3 +2556,273 @@ def test_roles_trace_is_the_interface_on_every_vm(tmp_path):
     b32 = _roles_trace_board(exe, tmp_path / "board")
     assert b32 == want, ("the T-Deck desktop diverges: "
                          + _first_difference(b32, want))
+
+
+# -- the roles' trace for a Lua app (docs/os_2026-11.md §7 phase 5 step 1) --------
+#
+# The verbs an app cart's permissions name (docs/app_api_v1.md
+# section 6), driven once from a Python app and once from a Lua app
+# holding the same permissions, each over a fresh store: the two faces answer
+# every call alike, line for line. Python's `(value, err)` is Lua's two
+# results, its None Lua's nil. The Lua face is the role binding over the app
+# ABI's table and its ROLE door (native/moycore/moycore_app.h).
+
+APP_ROLES_PY = r'''
+LOG = []
+TRACE = ""
+
+
+def show(v):
+    if v is None:
+        return "nil"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return "%g" % v
+    if isinstance(v, str):
+        return "'" + v.replace("\n", "\\n") + "'"
+    if isinstance(v, (list, tuple)):
+        return "[" + ",".join(show(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ",".join(k + ":" + show(v[k]) for k in sorted(v)) + "}"
+    return "'" + str(v) + "'"
+
+
+def say(label, *a):
+    LOG.append(" ".join([label] + [show(x) for x in a]))
+
+
+def _init():
+    global TRACE
+    say("names", "clipboard" in globals(), "carts" in globals())
+    say("prefs absent", prefs.get("k"), prefs.get("k", 5))
+    say("prefs set", prefs.set("k", [1, "two"]), prefs.get("k"))
+    say("prefs map", prefs.set("m", {"a": 1, "b": True}), prefs.get("m"))
+    say("prefs text", prefs.set("s", "text"), prefs.get("s"))
+    say("prefs float", prefs.set("f", 1.5), prefs.get("f"))
+    say("prefs null", prefs.set("z", None), prefs.get("z", 7))
+    say("prefs cleared", prefs.clear("k"), prefs.get("k", "gone"))
+    say("ready", files.ready())
+    say("list", *files.list())
+    say("new_name", *files.new_name("trace note"))
+    say("auto name", *files.new_name())
+    say("save_text", *files.save_text("trace_note", "one\ntwo"))
+    say("load_text", *files.load_text("trace_note"))
+    say("load", *files.load("trace_note"))
+    say("duplicate", *files.duplicate("trace_note"))
+    say("rename", *files.rename("trace_note", "renamed"))
+    say("sorted", sorted(files.list()[0]))
+    say("delete", *files.delete("renamed"))
+    say("absent", *files.load("nope"))
+    say("absent text", *files.load_text("nope"))
+    say("refused", *files.load("a/b"))
+    say("save", *files.save("todo.txt", "x"))
+    say("badge", files.badge("todo.txt"), files.badge("trace_note_2"))
+    say("themes", "contrast" in themes())
+    say("set_theme", set_theme("contrast"))
+    say("open_app", open_app("nope"))
+    TRACE = "\n".join(LOG)
+
+
+def _draw():
+    cls(0)
+'''
+
+APP_ROLES_LUA = r'''
+LOG = {}
+TRACE = ""
+
+local function show(v)
+  if v == nil then return "nil" end
+  if v == true then return "true" end
+  if v == false then return "false" end
+  if math.type(v) == "integer" then return tostring(v) end
+  if type(v) == "number" then return string.format("%g", v) end
+  if type(v) == "string" then return "'" .. v:gsub("\n", "\\n") .. "'" end
+  if type(v) == "table" then
+    local keys = {}
+    for k in pairs(v) do
+      if type(k) == "string" then keys[#keys + 1] = k end
+    end
+    local out = {}
+    if #keys == 0 then
+      for i = 1, #v do out[i] = show(v[i]) end
+      return "[" .. table.concat(out, ",") .. "]"
+    end
+    table.sort(keys)
+    for i, k in ipairs(keys) do out[i] = k .. ":" .. show(v[k]) end
+    return "{" .. table.concat(out, ",") .. "}"
+  end
+  return "'" .. tostring(v) .. "'"
+end
+
+local function say(label, ...)
+  local t = {label}
+  for i = 1, select("#", ...) do t[#t + 1] = show((select(i, ...))) end
+  LOG[#LOG + 1] = table.concat(t, " ")
+end
+
+local function has(list, x)
+  for _, v in ipairs(list) do if v == x then return true end end
+  return false
+end
+
+function _init()
+  say("names", clipboard ~= nil, carts ~= nil)
+  say("prefs absent", prefs.get("k"), prefs.get("k", 5))
+  say("prefs set", prefs.set("k", {1, "two"}), prefs.get("k"))
+  say("prefs map", prefs.set("m", {a = 1, b = true}), prefs.get("m"))
+  say("prefs text", prefs.set("s", "text"), prefs.get("s"))
+  say("prefs float", prefs.set("f", 1.5), prefs.get("f"))
+  say("prefs null", prefs.set("z", nil), prefs.get("z", 7))
+  say("prefs cleared", prefs.clear("k"), prefs.get("k", "gone"))
+  say("ready", files.ready())
+  say("list", files.list())
+  say("new_name", files.new_name("trace note"))
+  say("auto name", files.new_name())
+  say("save_text", files.save_text("trace_note", "one\ntwo"))
+  say("load_text", files.load_text("trace_note"))
+  say("load", files.load("trace_note"))
+  say("duplicate", files.duplicate("trace_note"))
+  say("rename", files.rename("trace_note", "renamed"))
+  local names = files.list()
+  table.sort(names)
+  say("sorted", names)
+  say("delete", files.delete("renamed"))
+  say("absent", files.load("nope"))
+  say("absent text", files.load_text("nope"))
+  say("refused", files.load("a/b"))
+  say("save", files.save("todo.txt", "x"))
+  say("badge", files.badge("todo.txt"), files.badge("trace_note_2"))
+  say("themes", has(themes(), "contrast"))
+  say("set_theme", set_theme("contrast"))
+  say("open_app", open_app("nope"))
+  TRACE = table.concat(LOG, "\n")
+end
+
+function _draw()
+  cls(0)
+end
+'''
+
+APP_ROLES_PERMS = ["graphics", "input", "files:documents", "prefs", "appearance",
+                   "launch", "clipboard"]
+
+
+def _app_roles_trace(tmp_path, lua):
+    """The trace an app cart titled Tracer writes, run on the host's
+    Workstation: its lines, and the theme the console wears after it."""
+    import json
+    from ws_helpers import build_ws, select_on_home
+    d = tmp_path / "carts" / "Tracer.moy"
+    d.mkdir(parents=True)
+    man = {"title": "Tracer", "canvas": "320x240",
+           "moybyte": {"type": "app", "permissions": APP_ROLES_PERMS}}
+    if lua:
+        man.update({"runtime": "lua", "main": "main.lua"})
+    (d / "manifest.json").write_text(json.dumps(man))
+    (d / ("main.lua" if lua else "main.py")).write_text(
+        APP_ROLES_LUA if lua else APP_ROLES_PY)
+    (d / "config.json").write_text("{}")
+    ws = build_ws(tmp_path)
+    assert select_on_home(ws, "Tracer") is not None
+    ws.open()
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(1.0 / 30.0)
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    trace = (ws.run.player._lua.get_global("TRACE") if lua
+             else ws.run.player.ns["TRACE"])
+    return trace.split("\n"), ws.look.theme_name
+
+
+# The Lua app on the boards' object model: the T-Deck's own desktop (the
+# roles trace's boot), the cart written into its store and launched from its
+# home, the frames stepped by the kernel's loop.
+APP_ROLES_BOARD = r'''
+def roles_trace(ws):
+    import json
+    import os
+    import moy_loop
+    d = ws.carts_root + "/Tracer.moy"
+    os.mkdir(d)
+    files = {"manifest.json": json.dumps(MANIFEST), "main.lua": SRC,
+             "config.json": "{}"}
+    for name in files:
+        with open(d + "/" + name, "w") as f:
+            f.write(files[name])
+    ws.rescan_carts()
+    cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
+    __import__("app_perms").made_here(ws, cart)
+    ws.select_cart(cart)
+    ws.open()
+    for _ in range(6):
+        moy_loop.step()
+    if ws.run.player.cart_error is not None:
+        print("T ERROR " + str(ws.run.player.cart_error))
+        return
+    for line in ws.run.player._lua.get_global("TRACE").split("\n"):
+        print("T " + line)
+    print("T theme " + ws.look.theme_name)
+'''
+
+
+def _app_roles_board_driver():
+    man = {"title": "Tracer", "canvas": "320x240", "runtime": "lua",
+           "main": "main.lua",
+           "moybyte": {"type": "app", "permissions": APP_ROLES_PERMS}}
+    return ("MANIFEST = %r\nSRC = %r\n" % (man, APP_ROLES_LUA)) + APP_ROLES_BOARD
+
+
+APP_ROLES_TRACE = """\
+names true false
+prefs absent nil 5
+prefs set nil [1,'two']
+prefs map nil {a:1,b:true}
+prefs text nil 'text'
+prefs float nil 1.5
+prefs null nil nil
+prefs cleared nil 'gone'
+ready true
+list [] nil
+new_name 'trace_note' nil
+auto name 'doc_1' nil
+save_text 'trace_note' nil
+load_text 'one\\ntwo' nil
+load 'one\\ntwo' nil
+duplicate 'trace_note_2' nil
+rename 'renamed' nil
+sorted ['renamed','trace_note_2']
+delete 'renamed' nil
+absent nil nil
+absent text '' nil
+refused nil nil
+save 'todo.txt' nil
+badge 'TXT' 'MD'
+themes true
+set_theme nil
+open_app false
+"""
+
+
+def test_roles_trace_for_a_lua_app_is_the_python_apps(tmp_path):
+    want = APP_ROLES_TRACE.splitlines()
+    py, py_theme = _app_roles_trace(tmp_path / "python", lua=False)
+    assert py == want, "the app roles trace moved: " + _first_difference(py, want)
+    lua, lua_theme = _app_roles_trace(tmp_path / "lua", lua=True)
+    assert lua == want, ("the Lua app's roles diverge: "
+                         + _first_difference(lua, want))
+    assert lua_theme == py_theme == "contrast"
+    exe = require_unix_mp(
+        "moycore", "moy_gfx", "moy_audio", board_model=True,
+        why="A Lua app's role names on the boards' object model: the device "
+            "Lua run (native/moycore) over native/moy_app's binding.")
+    (tmp_path / "board").mkdir()
+    b32 = _roles_trace_board(exe, tmp_path / "board", _app_roles_board_driver())
+    assert b32 == want + ["theme contrast"], (
+        "the T-Deck desktop's Lua app diverges: "
+        + _first_difference(b32, want + ["theme contrast"]))

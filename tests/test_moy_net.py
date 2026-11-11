@@ -35,19 +35,21 @@ def test_a_blank_password_the_radio_did_not_verify_is_never_remembered():
 
 
 def test_the_batch_codec_round_trips_both_shapes():
-    v1 = moy_net.encode_batch(1, None, [{"p": "x"}], None)
+    v1 = moy_net.encode_batch(1, None, [{"p": "x"}])
     assert json.loads(v1) == {"v": 1, "ops": [{"p": "x"}]}
-    assert moy_net.decode_batch(v1) == (1, None, [{"p": "x"}], None)
-    v2 = moy_net.encode_batch(2, "files", [], "1234")
-    assert v2 == '{"v": 2, "root": "files", "ops": [], "pin": "1234"}'
-    assert moy_net.decode_batch(v2.encode()) == (2, "files", [], "1234")
+    assert moy_net.decode_batch(v1) == (1, None, [{"p": "x"}])
+    v2 = moy_net.encode_batch(2, "files", [])
+    assert v2 == '{"v": 2, "root": "files", "ops": []}'
+    assert moy_net.decode_batch(v2.encode()) == (2, "files", [])
+    assert moy_net.decode_batch('{"v": 1, "ops": [], "pin": "1234"}') == (1, None, []), \
+        "a field the envelope no longer has is read past"
     for bad in (b"\xff", "not json", "[]", b'{"v": 1, "t": "\xed\xa0\x80"}'):
         assert moy_net.decode_batch(bad) is None
 
 
 def test_a_repeated_field_reads_as_json_loads_keeps_it():
-    assert moy_net.decode_batch('{"v": 1, "ops": [], "v": 3}') == (3, None, [], None)
-    assert moy_net.decode_batch('{"\\u0076": 2, "ops": 7}') == (2, None, 7, None)
+    assert moy_net.decode_batch('{"v": 1, "ops": [], "v": 3}') == (3, None, [])
+    assert moy_net.decode_batch('{"\\u0076": 2, "ops": 7}') == (2, None, 7)
 
 
 def test_the_head_parser_reads_bytes_and_keeps_the_last_length():

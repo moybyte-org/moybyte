@@ -66,9 +66,9 @@ def test_the_hero_mark_lies_under_the_bar(tmp_path, monkeypatch, theme, mode):
     marks = []
     real = launcher_layer._ui_draw.focus
 
-    def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False):
-        got = real(cv, th, rect, size, r, after, fs, ring, selected)
-        if size == "card" and not after:
+    def focus(cv, th, rect, item="cell", r=0, after=False, fs=None, ring=False, selected=False):
+        got = real(cv, th, rect, item, r, after, fs, ring, selected)
+        if item == "card" and not after:
             marks.append((tuple(rect), tuple(got[1])))
         return got
 
@@ -163,9 +163,9 @@ def test_a_focused_cover_fills_its_mark(tmp_path, monkeypatch, config, theme, mo
     boxes, covers = [], []
     real_focus = launcher_layer._ui_draw.focus
 
-    def focus(cv, th, rect, size=None, r=0, after=False, **kw):
-        got = real_focus(cv, th, rect, size, r, after, **kw)
-        if size == "card" and not after and rect[0] >= 0:
+    def focus(cv, th, rect, item="cell", r=0, after=False, **kw):
+        got = real_focus(cv, th, rect, item, r, after, **kw)
+        if item == "card" and not after and rect[0] >= 0:
             boxes.append(tuple(got[1]))
         return got
 
@@ -217,7 +217,7 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
     ws.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.run(ws.project, ws.launcher_layer)
+    ws.play(ws.launcher_layer)
     _frame(ws, 3)
     ws.system_key()
     assert ws.pause.open
@@ -286,33 +286,40 @@ def _cover_rects(ws, monkeypatch):
 
 
 @pytest.mark.parametrize("theme,mode", [("moy", "dark"), ("moy", "light")])
-def test_the_desk_shelf_lifts_its_selected_card_under_every_input(tmp_path, monkeypatch,
+def test_the_desk_shelf_marks_its_selected_card_under_every_input(tmp_path, monkeypatch,
                                                                  theme, mode):
     """The selected shelf card is the one the details pane describes: it
-    keeps its lift under touch and while the pane's buttons hold the focus,
-    as under the keys (design review R4-09); only the keys' focus counts as
-    a focus mark."""
+    keeps its card mark under touch and while the pane's buttons hold the
+    focus, as under the keys (design review R4-09); only the keys' focus
+    counts as a focus mark."""
     ws = _ws(tmp_path, CONSOLE, theme, mode)
     _home(ws)
     _frame(ws, 2)
     home = ws.launcher_layer
+    real = launcher_layer._ui_draw.focus
 
-    def lift():
-        """(x of the raised card, how far it rises) on the shelf (the shelf
-        itself moves with the hint strip, which touch hides)."""
-        shelf = [r for r in _cover_rects(ws, monkeypatch) if r[2] < 200]
-        rest = max(r[1] for r in shelf)
-        up = [r for r in shelf if r[1] < rest]
-        assert len(up) == 1, "one card stands raised over the shelf: %s" % shelf
-        return up[0][0], rest - up[0][1]
-    keys = lift()
+    def marked():
+        """The x of the one shelf card that wears the card mark."""
+        got = []
+
+        def focus(cv, th, rect, item="cell", r=0, after=False, **kw):
+            if item == "card" and not after and rect[0] >= 0 and rect[2] < 200:
+                got.append(rect[0])
+            return real(cv, th, rect, item, r, after, **kw)
+        monkeypatch.setattr(launcher_layer._ui_draw, "focus", focus)
+        ws._dirty = True
+        _frame(ws, 1)
+        monkeypatch.setattr(launcher_layer._ui_draw, "focus", real)
+        assert len(set(got)) == 1, "one card wears the mark: %s" % got
+        return got[0]
+    keys = marked()
     ws.use_inputs([("local", "touch")])
     _frame(ws, 2)
-    assert lift() == keys, "touch flattens the selected card"
+    assert marked() == keys, "touch unmarks the selected card"
     ws.use_inputs([("local", "pad")])
     home._button_focus = 0
     _frame(ws, 2)
-    assert lift() == keys, "the buttons' focus flattens the selected card"
+    assert marked() == keys, "the buttons' focus unmarks the selected card"
 
 
 @pytest.mark.parametrize("config", [HANDHELD, CONSOLE])

@@ -1,0 +1,105 @@
+// moy_crypto: the crypto an app calls (native/os_calls.json's rows
+// moybyte.random, sha256, hmac_sha256, aes_gcm_seal, aes_gcm_open, aes_ctr,
+// aes_ccm_seal, aes_ccm_open, x25519, ed25519_public, ed25519_sign and
+// ed25519_verify, docs/app_api_v1.md section 10), one body every tier
+// reaches: a compiled app's and a native or WASI program's through the app
+// ABI's door (native/moy_app), a Lua run's through its role names, a Python
+// program's through the module moy_app. A board compiles it against the ESP-IDF's
+// mbedTLS (AES and SHA in hardware), the host's library and the browser's
+// wasm against the vendored copy of the same release (mbedtls/README.md),
+// beside moy_seal.c, whose random source it shares. Ed25519 is the vendored
+// Monocypher's on every tier (monocypher/README.md): mbedTLS has no EdDSA.
+//
+// Pure computation over the caller's buffers: nothing is kept, no key leaves
+// but into the buffer the caller handed, and every call answers the length
+// it wrote or a code below, never more than `cap` bytes written.
+//
+//   random       n bytes of the console's random source (moy_seal_random,
+//                moy_seal.h), n at most RANDOM_MAX.
+//   sha256       the digest, 32 bytes.
+//   hmac_sha256  HMAC-SHA256 (RFC 2104) under a key of any length, 32 bytes.
+//   aes_gcm_seal AES-GCM under a 16-, 24- or 32-byte key: a fresh random
+//                12-byte nonce, the ciphertext, the 16-byte tag, in that
+//                order (SEAL_OVER more bytes than the plaintext). A random
+//                nonce bounds one key to about 2^32 seals (NIST SP 800-38D
+//                section 8.3).
+//   aes_gcm_open what aes_gcm_seal made, back: the plaintext, or FORGED
+//                with the caller's buffer wiped where the tag does not check
+//                (the wrong key, or a byte changed).
+//   aes_ctr      AES-CTR (NIST SP 800-38A section 6.5) under a 16-, 24- or
+//                32-byte key over bytes that start with the 16-byte initial
+//                counter block: the rest, XORed with the key stream, the
+//                block counting up as one big-endian 128-bit number. Its own
+//                inverse; the counter block is the caller's to keep unique.
+//   aes_ccm_seal AES-CCM (NIST SP 800-38C, RFC 3610) under a 16-, 24- or
+//                32-byte key over bytes that start with the 13-byte nonce
+//                (L = 2: a plaintext of at most CCM_MAX bytes), with no
+//                associated data: the ciphertext, then the tag of `tag`
+//                bytes (4, 6, ... 16). The nonce is the caller's to keep
+//                unique under one key.
+//   aes_ccm_open the nonce, the ciphertext and the tag back to the
+//                plaintext, or FORGED with the caller's buffer wiped where
+//                the tag does not check.
+//   x25519       RFC 7748's X25519 of a 32-byte secret (clamped here) and
+//                a 32-byte peer key, or the base point for an empty peer
+//                (the secret's public key): 32 bytes. A peer key of small
+//                order answers POINT; an image built without the curve
+//                (MBEDTLS_ECP_DP_CURVE25519_ENABLED) ABSENT.
+//   ed25519_public  RFC 8032's Ed25519 public key of a 32-byte secret (the
+//                seed RFC 8032 section 5.1.5 hashes): 32 bytes.
+//   ed25519_sign the secret's Ed25519 signature of a message of any length
+//                (deterministic, section 5.1.6): 64 bytes.
+//   ed25519_verify  1 where the 64-byte signature is the 32-byte public
+//                key's of the message, else 0 (a changed byte, another key,
+//                a key or a signature that does not decode); a length
+//                refused is BAD.
+
+#ifndef MOY_CRYPTO_H
+#define MOY_CRYPTO_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define MOY_CRYPTO_HASH 32
+#define MOY_CRYPTO_NONCE 12
+#define MOY_CRYPTO_TAG 16
+#define MOY_CRYPTO_SEAL_OVER (MOY_CRYPTO_NONCE + MOY_CRYPTO_TAG)
+#define MOY_CRYPTO_KEY25519 32
+#define MOY_CRYPTO_SIG25519 64
+#define MOY_CRYPTO_RANDOM_MAX 4096
+#define MOY_CRYPTO_BLOCK 16
+#define MOY_CRYPTO_CCM_NONCE 13
+#define MOY_CRYPTO_CCM_MAX 65535
+
+enum {
+    MOY_CRYPTO_EBAD = -1,       // a length the call refuses: a key, a secret, a count
+    MOY_CRYPTO_EFULL = -2,      // the answer does not fit the caller's buffer
+    MOY_CRYPTO_EFORGED = -3,    // sealed bytes that do not open
+    MOY_CRYPTO_EPOINT = -4,     // a peer key of small order
+    MOY_CRYPTO_EABSENT = -5,    // an image built without it
+    MOY_CRYPTO_ENOMEM = -6,
+};
+
+int32_t moy_crypto_random(int32_t n, void *out, size_t cap);
+int32_t moy_crypto_sha256(const void *p, size_t n, void *out, size_t cap);
+int32_t moy_crypto_hmac_sha256(const void *key, size_t kn, const void *p, size_t n,
+                               void *out, size_t cap);
+int32_t moy_crypto_aes_gcm_seal(const void *key, size_t kn, const void *p, size_t n,
+                                void *out, size_t cap);
+int32_t moy_crypto_aes_gcm_open(const void *key, size_t kn, const void *p, size_t n,
+                                void *out, size_t cap);
+int32_t moy_crypto_aes_ctr(const void *key, size_t kn, const void *p, size_t n,
+                           void *out, size_t cap);
+int32_t moy_crypto_aes_ccm_seal(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap);
+int32_t moy_crypto_aes_ccm_open(const void *key, size_t kn, const void *p, size_t n,
+                                int32_t tag, void *out, size_t cap);
+int32_t moy_crypto_x25519(const void *secret, size_t sn, const void *peer, size_t pn,
+                          void *out, size_t cap);
+int32_t moy_crypto_ed25519_public(const void *secret, size_t sn, void *out, size_t cap);
+int32_t moy_crypto_ed25519_sign(const void *secret, size_t sn, const void *p, size_t n,
+                                void *out, size_t cap);
+int32_t moy_crypto_ed25519_verify(const void *pub, size_t pn, const void *p, size_t n,
+                                  const void *sig, size_t gn);
+
+#endif // MOY_CRYPTO_H

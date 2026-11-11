@@ -286,6 +286,6 @@ def test_a_verb_spelled_with_a_move_key_shows_no_key_on_the_tdeck(th):
     a hint or a menu row spelled with it draws no key there, and its row is
     still the way to it."""
     blank = bytes(make_system_canvas(320, 240)._buf)
-    assert _strip(th, ("W", "Wallpaper"), "tdeck") == (blank, ((5, 5),))
+    assert _strip(th, ("W", "Wallpaper"), "tdeck") == (blank, ((8, 8),))
     assert _strip(th, ("W", "Wallpaper"), "keys")[0] != blank
     assert _strip(th, ("C", "Colours"), "tdeck")[0] != blank

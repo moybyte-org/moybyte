@@ -15,7 +15,7 @@ name: Web console E2E
 #                                  round trip, and the negative case -- a
 #                                  BOARD-served page must keep nothing locally.
 #   tests/test_web_board_system_e2e.py  a board-served page's theme and badges
-#                                  land in the board twin's system.json and
+#                                  land in the board twin's system/settings and
 #                                  achievements.json, key by key, and a fresh
 #                                  browser comes back on them; a twin without
 #                                  the system root is sent no system batch.
@@ -37,9 +37,39 @@ name: Web console E2E
 #                                  error panel; Jet Teapot and ESP 88 play; Get
 #                                  Carts installs one by range, no module
 #                                  fetched, and it plays.
+#   tests/test_web_term_e2e.py     the Terminal in both web modes: a board-served
+#                                  page's is the board's shell over the sealed
+#                                  socket; the site's runs the shell in the
+#                                  wasm and its WASI commands on the page's
+#                                  engine (dist_site/, built below).
+#   tests/test_web_audio_stream_e2e.py  a live station plays a minute on each
+#                                  sink with every sample once, a stall
+#                                  starves into silence, a held main thread
+#                                  is counted.
+#   tests/test_web_music_e2e.py    #251: Music on the boards' MP3 decoder in the
+#                                  wasm -- a dropped song kept in OPFS plays
+#                                  from it, a board's song streams through
+#                                  its sealed GET /media, a station plays
+#                                  through the page's fetch or says it blocks
+#                                  browsers -- and the tone reaches the page.
 #   tests/test_web_look_parity.py  the console's frames in both arrangements
 #                                  are the host's in the board's, pixel for
 #                                  pixel, under every seed theme.
+#   tests/test_web_first_run_e2e.py  what an embedding page asks of a
+#                                  first run (its scheme, ?start, ?edit), a
+#                                  saved theme winning over it, and Esc over a
+#                                  handheld playtest.
+#   tests/test_web_desk_input_e2e.py  the desk's keys and mouse in Chrome: the
+#                                  Sprite tab's keys, Shift+Tab, Super and
+#                                  F11, the wheel, and the Code tab's drag,
+#                                  word, Shift+click and middle autoscroll.
+#   tests/test_web_update_e2e.py   updating the board that serves the page:
+#                                  its strip and panel, for a headless board
+#                                  and for one with glass.
+#
+# Every suite gated on MOYBYTE_WEB_E2E is named in the drive step below
+# (tests/test_preflight_web_filter.py), which is how first_run and
+# desk_input went untested for weeks: they were never on this list.
 #
 # All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -74,7 +104,9 @@ on:
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"  # the store suite builds its carts with it
       - "tests/fixtures/**"         # the p8 cart the drop suite imports, the wasm carts
+      - "tests/test_moy_tty.py"     # the terminal suite's board: its harness
       - "tests/tier_frame.py"       # the tier cart's golden, shared with the host
+      - "tests/crypto_vectors.py"   # the WASI crypto program's lines, shared with the host
       - "native/**"                 # the C the browser build compiles, its engine included
       - "ports/jet/**"              # the Jet carts the wasm suite builds
       - "tools/jet_cart.py"
@@ -95,7 +127,9 @@ on:
       - "tests/web_e2e.py"
       - "tests/cart_store_fixtures.py"
       - "tests/fixtures/**"
+      - "tests/test_moy_tty.py"
       - "tests/tier_frame.py"
+      - "tests/crypto_vectors.py"
       - "native/**"
       - "ports/jet/**"
       - "tools/jet_cart.py"
@@ -187,9 +221,14 @@ jobs:
       - name: Build the browser console
         run: firmware/web_runner/build.sh
 
+      # The site's, with the Terminal's shell: its own tree and dist_site/.
+      - name: Build the site's browser console
+        run: firmware/web_runner/build.sh --site
+
       # The wasm suite builds Jet Teapot and ESP 88 the way the carts' recipe
-      # does, with wasi-sdk 24 -- ci.yml's cache, under the sha256 the build
-      # pins, so a runner fetches it once.
+      # does, and the terminal suite the WASI command fixtures the site's
+      # Terminal runs, with wasi-sdk 24 -- ci.yml's cache, under the sha256 the
+      # build pins, so a runner fetches it once.
       - name: wasi-sdk pin
         id: wasi_sdk
         run: echo "sha256=$(sed -n 's/^WASI_SDK_SHA256 = "\(.*\)"$/\1/p' tools/jet_cart.py)" >> "$GITHUB_OUTPUT"
@@ -200,7 +239,7 @@ jobs:
           path: experiments/wasm_aot/toolchain/wasi-sdk
           key: wasi-sdk-${{ steps.wasi_sdk.outputs.sha256 }}
 
-      - name: wasi-sdk for the Jet carts
+      - name: wasi-sdk for the Jet carts and the WASI commands
         run: .venv/bin/python tools/jet_cart.py --toolchain
 
       # The hosted console's Python side reads user files through moy_ufiles,
@@ -214,9 +253,12 @@ jobs:
         run: |
           .venv/bin/python -m pytest -p xdist -n 4 -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
-            tests/test_web_board_system_e2e.py \
+            tests/test_web_board_system_e2e.py tests/test_web_term_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
+            tests/test_web_music_e2e.py tests/test_web_first_run_e2e.py \
+            tests/test_web_audio_stream_e2e.py \
+            tests/test_web_desk_input_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \
             tests/test_editor_ladder_icons.py
 
