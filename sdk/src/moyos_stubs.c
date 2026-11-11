@@ -1276,3 +1276,13 @@ int32_t moy_name(void *name, size_t name_cap)
     return ((moy_os_fn_moy_name *)__moy_os->fn[124])(name, name_cap);
 }
 #endif
+
+#if MOY_OS_ROW(125)
+#include "moybyte/os.h"
+typedef int32_t moy_os_fn_moy_clock(int32_t local);
+MOY_OS_USED(125);
+int32_t moy_clock(int32_t local)
+{
+    return ((moy_os_fn_moy_clock *)__moy_os->fn[125])(local);
+}
+#endif

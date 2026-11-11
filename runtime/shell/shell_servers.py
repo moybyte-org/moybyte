@@ -712,6 +712,10 @@ class ConsoleCalls:
         d = str(self._as(g, _moybyte.name) or "").encode("utf-8")
         return _DOOR_FULL if len(d) > cap else d
 
+    def clock(self, g, local):
+        t = _moybyte.clock(bool(local))
+        return _DOOR_ABSENT if t is None else t
+
     def item_read(self, g, h, cap):
         it = _moybyte._ITEMS.get(self.__ws.procs.pid_of(g), {}).get(h)
         if it is None:
@@ -828,6 +832,7 @@ DOOR_ARGS = {
     "moybyte.dev_get": "is",
     "moybyte.status_panel": "io",
     "moybyte.name": "i",
+    "moybyte.clock": "i",
 }
 # END GENERATED
 

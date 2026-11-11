@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 125
+#define MOY_OS_VERSION 126
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -771,6 +771,17 @@ static inline int32_t moy_name(void *name, size_t name_cap) {
     return (int32_t)r;
 }
 
+int32_t __moy_os_clock(int32_t local)
+    __attribute__((import_module("moybyte.os"), import_name("clock")));
+static inline int32_t moy_clock(int32_t local) {
+    int32_t r = __moy_os_clock(local);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int32_t)r;
+}
+
 #else
 
 // The table the OS hands a module at its load (sdk/src/moyos_crt.c).
@@ -853,6 +864,7 @@ int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t da
 int32_t moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap);   // moybyte.aes_ccm_seal
 int32_t moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap);   // moybyte.aes_ccm_open
 int32_t moy_name(void *name, size_t name_cap);   // moybyte.name
+int32_t moy_clock(int32_t local);   // moybyte.clock
 
 #endif // __wasm__
 

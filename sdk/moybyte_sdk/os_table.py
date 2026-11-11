@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 125
+VERSION = 126
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -31,6 +31,7 @@ WASM_APP = {
     'moybyte_at': ('alarms',),
     'moybyte_award': (),
     'moybyte_cancel': (),
+    'moybyte_clock': (),
     'moybyte_dev_close': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
     'moybyte_dev_get': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
     'moybyte_dev_open': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
@@ -140,6 +141,7 @@ WASM_OS = {
     'clipboard_put_text': ('clipboard',),
     'clipboard_seq': ('clipboard',),
     'clipboard_text': ('clipboard',),
+    'clock': (),
     'dev_close': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
     'dev_get': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
     'dev_open': ('lease', 'http', 'lora', 'mic', 'ble', 'usb', 'midi', 'camera', 'media', 'media:url', 'pins', 'multiplayer'),
@@ -317,6 +319,7 @@ ELF = {
     122: ('moy_aes_ccm_seal', ()),
     123: ('moy_aes_ccm_open', ()),
     124: ('moy_name', ()),
+    125: ('moy_clock', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls

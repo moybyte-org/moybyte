@@ -45,7 +45,9 @@
 // uart1 the first time and keeps it, writes "ping" and reads back what waits,
 // printing what it wrote and read; a "wake" carrying ["radio"] opens lora
 // and the mic the first time and keeps them, reads the next packet and the
-// samples waiting, and prints the packet and how many sample bytes it read; a "wake" carrying ["clip"] puts
+// samples waiting, and prints the packet and how many sample bytes it read; a
+// "wake" carrying ["clock"] prints the wall clock in Unix seconds and its
+// local time with its errno (NOENT while NTP has not answered); a "wake" carrying ["clip"] puts
 // "clipped" on the clipboard and reads it back; a "wake" carrying ["media", path]
 // opens the media service by handle, probes the file (its length and
 // title), plays it, prints whether the stream is its own and the source it
@@ -225,6 +227,12 @@ int main(void) {
             int k = r < 0 ? r : (int)moy_dev_read(mic, s, sizeof s);
             printf("radio %d %.*s mic %d errno %d\n", r, r > 0 ? r : 0, b, k,
                    r < 0 || k < 0 ? errno : 0);
+            fflush(stdout);
+        } else if (strcmp(m.ev.name, "wake") == 0
+                   && strcmp(m.b + sizeof m.ev, "[\"clock\"]") == 0) {
+            long t = (long)moy_clock(0);
+            long l = (long)moy_clock(1);
+            printf("clock %ld local %ld errno %d\n", t, l, l < 0 ? errno : 0);
             fflush(stdout);
         } else if (strcmp(m.ev.name, "wake") == 0
                    && strcmp(m.b + sizeof m.ev, "[\"clip\"]") == 0) {

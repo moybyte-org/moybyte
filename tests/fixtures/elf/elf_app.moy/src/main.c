@@ -30,6 +30,8 @@
 // reads the port until a record comes (two seconds at most) and prints it
 // (the sender's last byte, the port and the bytes), a second handle on the
 // port refused; it ends holding the port, for its end to close.
+// `app clock` prints the wall clock in Unix seconds, then its local time
+// (ENOENT while NTP has not answered).
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -266,6 +268,11 @@ static int net(void) {
 }
 
 int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "clock") == 0) {
+        said("clock", moy_clock(0), NULL);
+        said("local", moy_clock(1), NULL);
+        return 0;
+    }
     if (argc > 1 && strcmp(argv[1], "pick") == 0) {
         return pick();
     }

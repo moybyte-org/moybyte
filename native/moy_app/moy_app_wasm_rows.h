@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 115
+#define MOY_APP_WASM_N 116
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -413,6 +413,11 @@ static int32_t w_moybyte_name(void *e, uint8_t *name, uint32_t name_cap) {
     span_t f[1] = { NUM(q_name, name_cap) };
     return run(e, HOP, MOY_T_MOYBYTE_NAME, f, 1, name, name_cap);
 }
+static int32_t w_moybyte_clock(void *e, int32_t local) {
+    uint8_t q_local[4];
+    span_t f[1] = { NUM(q_local, local) };
+    return run(e, HERE, MOY_T_MOYBYTE_CLOCK, f, 1, NULL, 0);
+}
 
 // The natives, in their import names' order, and the table row each serves.
 static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
@@ -439,6 +444,7 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "moybyte_at", FN(w_moybyte_at), "(i)i", NULL },
     { "moybyte_award", FN(w_moybyte_award), "(*~)i", NULL },
     { "moybyte_cancel", FN(w_moybyte_cancel), "(i)i", NULL },
+    { "moybyte_clock", FN(w_moybyte_clock), "(i)i", NULL },
     { "moybyte_dev_close", FN(w_moybyte_dev_close), "(i)i", NULL },
     { "moybyte_dev_get", FN(w_moybyte_dev_get), "(i*~)i", NULL },
     { "moybyte_dev_open", FN(w_moybyte_dev_open), "(*~*~)i", NULL },
@@ -539,7 +545,7 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_FILES_RENAME, MOY_T_FILES_SAVE, MOY_T_MOYBYTE_AES_CCM_OPEN,
     MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CTR, MOY_T_MOYBYTE_AES_GCM_OPEN,
     MOY_T_MOYBYTE_AES_GCM_SEAL, MOY_T_MOYBYTE_AFTER, MOY_T_MOYBYTE_AT, MOY_T_MOYBYTE_AWARD,
-    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_GET,
+    MOY_T_MOYBYTE_CANCEL, MOY_T_MOYBYTE_CLOCK, MOY_T_MOYBYTE_DEV_CLOSE, MOY_T_MOYBYTE_DEV_GET,
     MOY_T_MOYBYTE_DEV_OPEN, MOY_T_MOYBYTE_DEV_READ, MOY_T_MOYBYTE_DEV_SET,
     MOY_T_MOYBYTE_DEV_WRITE, MOY_T_MOYBYTE_DEV_XFER, MOY_T_MOYBYTE_ED25519_PUBLIC,
     MOY_T_MOYBYTE_ED25519_SIGN, MOY_T_MOYBYTE_ED25519_VERIFY, MOY_T_MOYBYTE_EVERY,

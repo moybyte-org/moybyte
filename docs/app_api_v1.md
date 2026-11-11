@@ -861,7 +861,13 @@ task, with or without the VM (`native/moy_kernel/moy_evq.h`, `moy_evq_at`,
 under the `alarms` the process's event queue was opened with), and the
 program reads `"moybyte.at"` from `"system"` with that id as its one
 argument. An alarm keeps its wall time when the clock steps (an NTP answer,
-the first one too), on every tier.
+the first one too), on every tier. A compiled program reads the clock as
+`moybyte_clock(local)` (a wasm app) and `moy_clock(local)` (a WASI or C
+program), a 32-bit number like `moybyte_at`'s `t`: the Unix seconds on the
+program's own task with or without the VM (`native/moy_app/moy_app.c`,
+`clock_row`), and with `local` 1 the console's local time from the zone the
+Python half holds, ABSENT (a WASI or C program's `ENOENT`) while NTP has not
+answered.
 
 **Timers** need no permission. A Python and a Lua program pass a function
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program
@@ -1045,7 +1051,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.key_make` | none | `moybyte.key_make` | `moybyte.key_make` |  |  |
 | `moybyte.key_public` | none | `moybyte.key_public` | `moybyte.key_public` |  |  |
 | `moybyte.key_shared` | none | `moybyte.key_shared` | `moybyte.key_shared` |  |  |
-| `moybyte.clock` | none | `moybyte.clock` | `moybyte.clock` |  |  |
+| `moybyte.clock` | none | `moybyte.clock` | `moybyte.clock` | `moybyte_clock`, `moybyte.os.clock` | `moy_clock` |
 <!-- END GENERATED -->
 
 Reading the table: the Python column names a shipped app's `ctx` role first

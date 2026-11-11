@@ -129,6 +129,31 @@ def test_app_calls_answer_under_the_command_s_permissions(term):
     assert not ws.ach.has("elf.app", "far")
 
 
+def test_a_native_command_reads_the_wall_clock_and_its_local_time(term):
+    """`moy_clock` (elf_app.moy's `app clock`): the wall clock in Unix
+    seconds, answered on the command's own task; with 1 the console's local
+    time, the door's Python half's (runtime/system/wallclock.py's zone),
+    ENOENT while NTP has not answered."""
+    from runtime import wallclock as wc
+    _ws, app = term
+    try:
+        wc.set_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+        wc._kernel[:] = [lambda: 1, True]
+        t0 = wc.now()
+        lines = out(app, "elf.app/app clock; echo status $?")
+        t1 = wc.now()
+        assert len(lines) == 3 and lines[2] == "status 0" and "-1" not in lines[0], lines
+        unix, local = (int(ln.split()[1]) for ln in lines[:2])
+        assert t0 <= unix <= t1, (t0, unix, t1)
+        assert local - unix == wc.offset(unix) != 0, "Belgrade is east of UTC"
+        wc._kernel[:] = [lambda: 0, True]
+        lines = out(app, "elf.app/app clock; echo status $?")
+        assert lines[1:] == ["local -1 ENOENT", "status 0"], lines
+    finally:
+        wc.set_zone(wc.UTC)
+        wc._kernel[:] = [None, False]
+
+
 def test_a_native_command_picks_an_item_and_hears_it_as_a_message(term):
     """`moy_pick` from C (tests/fixtures/elf/elf_app.moy, `app pick`): a
     command holds no `front`, so its pick waits as a notification, whose

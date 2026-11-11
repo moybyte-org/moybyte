@@ -23,6 +23,7 @@
     X(clipboard_put_text, "(*~)i") \
     X(clipboard_seq, "()i") \
     X(clipboard_text, "(*~)i") \
+    X(clock, "(i)i") \
     X(dev_close, "(i)i") \
     X(dev_get, "(i*~)i") \
     X(dev_open, "(*~*~)i") \
@@ -92,6 +93,7 @@
     X(clipboard_put_text) \
     X(clipboard_seq) \
     X(clipboard_text) \
+    X(clock) \
     X(dev_close) \
     X(dev_get) \
     X(dev_open) \
@@ -463,6 +465,11 @@ static int32_t w_os_aes_ccm_open(wasm_exec_env_t e, const uint8_t *key, uint32_t
 static int32_t w_os_name(wasm_exec_env_t e, uint8_t *name, uint32_t name_cap) {
     const os_arg_t a[1] = { OS_CAP(name_cap) };
     return os_role(e, MOY_T_MOYBYTE_NAME, OS_HOP, a, 1, name, name_cap);
+}
+
+static int32_t w_os_clock(wasm_exec_env_t e, int32_t local) {
+    const os_arg_t a[1] = { OS_I(local) };
+    return os_role(e, MOY_T_MOYBYTE_CLOCK, OS_HERE, a, 1, NULL, 0);
 }
 
 #endif // MOY_WASI_OS_BODIES

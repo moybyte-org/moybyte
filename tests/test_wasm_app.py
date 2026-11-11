@@ -237,6 +237,33 @@ def test_a_compiled_app_talks_to_a_service_notifies_awards_and_hears_its_alarm(t
     assert "new_name note" in lines, lines          # a files row its permission grants
 
 
+@pytest.mark.parametrize("synced", [True, False])
+def test_a_compiled_app_reads_the_wall_clock_and_its_local_time(talk, synced):
+    """moybyte_clock: the wall clock in Unix seconds, answered where it is
+    called; with 1 the console's local time, the door's Python half's
+    (runtime/system/wallclock.py's zone), ABSENT while NTP has not answered."""
+    from runtime import wallclock as wc
+
+    def prep(_ws):
+        wc.set_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+        wc._kernel[:] = [lambda: int(synced), True]
+    try:
+        t0 = wc.now()
+        _ws, _pid, lines = talk(prep=prep)
+        t1 = wc.now()
+        unix = [int(ln.split()[1]) for ln in lines if ln.startswith("clock ")]
+        local = [int(ln.split()[1]) for ln in lines if ln.startswith("local ")]
+        assert len(unix) == 1 and t0 <= unix[0] <= t1, (t0, lines, t1)
+        if synced:
+            assert local == [unix[0] + wc.offset(unix[0])], lines
+            assert wc.offset(unix[0]) != 0, "Belgrade is east of UTC"
+        else:
+            assert local == [-8], lines                     # MOY_APP_ABSENT
+    finally:
+        wc.set_zone(wc.UTC)
+        wc._kernel[:] = [None, False]
+
+
 def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(talk):
     """moybyte_after and moybyte_every answer their timer's id and go off as
     the system's message "moybyte.timer" carrying it; moybyte_cancel ends a

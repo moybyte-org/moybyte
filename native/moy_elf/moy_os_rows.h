@@ -204,5 +204,6 @@ int32_t moy_os_moy_aes_ctr(const void *key, size_t key_len, const void *data, si
 int32_t moy_os_moy_aes_ccm_seal(const void *key, size_t key_len, const void *data, size_t data_len, int32_t tag, void *sealed, size_t sealed_cap);
 int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap);
 int32_t moy_os_moy_name(void *name, size_t name_cap);
+int32_t moy_os_moy_clock(int32_t local);
 
 #endif // MOY_OS_ROWS_H

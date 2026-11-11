@@ -5,6 +5,7 @@
 
 #include "moy_app.h"
 #include "moy_crypto.h"
+#include "moy_net.h"
 #include "moy_route.h"
 
 // The kernel's timers, messages and log (native/moy_kernel/moy_evq.h,
@@ -1806,6 +1807,7 @@ static int no_args(int row) {
         case MOY_ROW_MOYBYTE_ED25519_PUBLIC: case MOY_ROW_MOYBYTE_ED25519_SIGN:
         case MOY_ROW_MOYBYTE_ED25519_VERIFY: case MOY_ROW_MOYBYTE_AES_CTR:
         case MOY_ROW_MOYBYTE_AES_CCM_SEAL: case MOY_ROW_MOYBYTE_AES_CCM_OPEN:
+        case MOY_ROW_MOYBYTE_CLOCK:
             return 0;
         default:
             return 1;
@@ -2204,6 +2206,31 @@ static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
     return s_door(h, f->trow, f->p, f->n, ans, cap);
 }
 
+// moybyte.clock: the wall clock in Unix seconds (moy_net_time, the one epoch
+// every tier stamps with), on the caller's own task. Its local time is the
+// door's Python half's, which holds the zone (runtime/system/wallclock.py):
+// NEEDS_VM where the call runs where it was made, so the tier hops it, and
+// handed to the door on the VM's task, which answers ABSENT while NTP has
+// not answered.
+static int32_t clock_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
+                         size_t cap) {
+    if (grant_row(a, h) == NULL) {
+        return -MOY_APP_STALE;
+    }
+    int32_t local = arg_int(f);
+    if (f->bad || f->at != f->n) {
+        return -MOY_APP_BAD;
+    }
+    a->counts[row]++;
+    if (!local) {
+        return (int32_t)moy_net_time();
+    }
+    if (f->here || s_door == NULL) {
+        return -MOY_APP_NEEDS_VM;
+    }
+    return s_door(h, f->trow, f->p, f->n, ans, cap);
+}
+
 int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
     moy_grant_t *g = grant_row(a, h);
     if (g == NULL) {
@@ -2513,6 +2540,8 @@ static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *
             return dev_row(a, g, row, f, ans, cap);
         case MOY_ROW_MOYBYTE_SERVICE_RUNNING: case MOY_ROW_MOYBYTE_SERVICE_STOP:
             return svc_row(a, g, row, f, ans, cap);
+        case MOY_ROW_MOYBYTE_CLOCK:
+            return clock_row(a, g, row, f, ans, cap);
         case MOY_ROW_MOYBYTE_SEND:
             return send_row(a, g, f);
         case MOY_ROW_MOYBYTE_RECV:

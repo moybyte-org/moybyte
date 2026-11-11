@@ -61,7 +61,7 @@ enum {
     MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
     MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_MOYBYTE_STATUS_SHOW, MOY_ROW_MOYBYTE_STATUS_STATE,
     MOY_ROW_MOYBYTE_STATUS_REMOVE, MOY_ROW_MOYBYTE_AES_CTR, MOY_ROW_MOYBYTE_AES_CCM_SEAL,
-    MOY_ROW_MOYBYTE_AES_CCM_OPEN, MOY_ROW_N,
+    MOY_ROW_MOYBYTE_AES_CCM_OPEN, MOY_ROW_MOYBYTE_CLOCK, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -92,7 +92,7 @@ enum {
     "moybyte.dev_write", "moybyte.dev_xfer", "moybyte.dev_set", "moybyte.dev_get", \
     "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
     "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove", \
-    "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open", \
+    "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open", "moybyte.clock", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -367,7 +367,7 @@ enum {
     { "moybyte.key_make", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.key_public", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.key_shared", MOY_ROLE_MOYBYTE, -1 }, \
-    { "moybyte.clock", MOY_ROLE_MOYBYTE, -1 }, \
+    { "moybyte.clock", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_CLOCK }, \
 }
 
 // The permission each role is granted by: a role absent here is never

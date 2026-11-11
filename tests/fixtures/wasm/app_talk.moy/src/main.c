@@ -6,7 +6,9 @@
 // At _init it listens on "pong", pings the Echo service (local.echo), posts a
 // notification, awards the badge its manifest declares, sets an alarm that is
 // already due, a timer that goes off once and one that repeats, asks its
-// documents for a free name, writes the OS log, and opens leases by handle
+// documents for a free name, reads the wall clock in Unix seconds and its
+// local time (ABSENT while NTP has not answered), writes the OS log, and
+// opens leases by handle
 // (a pin it drives high and keeps until its run ends, a UART it writes and
 // reads back through its peer and closes), the `pins` permission's pins by
 // handle (gpio20 driven high and read back, kept until its run ends, a
@@ -67,6 +69,7 @@ int32_t moybyte_status_state(int32_t item, int32_t state) APP(moybyte_status_sta
 int32_t moybyte_status_panel(int32_t item, const char *rows,
                              uint32_t rows_n) APP(moybyte_status_panel);
 int32_t moybyte_status_remove(int32_t item) APP(moybyte_status_remove);
+int32_t moybyte_clock(int32_t local) APP(moybyte_clock);
 void cls(int32_t c) MOY(cls);
 
 static uint32_t len(const char *s) {
@@ -139,6 +142,12 @@ EXPORT(_init) void init(void) {
     } else {
         put_int(k);
     }
+    say();
+    put(S("clock "));
+    put_int(moybyte_clock(0));
+    say();
+    put(S("local "));
+    put_int(moybyte_clock(1));
     say();
     ticker = moybyte_every(1);
     put(S("every "));

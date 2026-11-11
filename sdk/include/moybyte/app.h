@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define MOYBYTE_APP_VERSION 125
+#define MOYBYTE_APP_VERSION 126
 
 #define MOYBYTE_APP_IMPORT(name) __attribute__((import_module("moybyte.app"), import_name(#name)))
 
@@ -342,6 +342,8 @@ int32_t moybyte_aes_ccm_open(const void *key, uint32_t key_n, const void *sealed
                              uint32_t plain_cap) MOYBYTE_APP_IMPORT(moybyte_aes_ccm_open);
 // moybyte.name
 int32_t moybyte_name(void *name, uint32_t name_cap) MOYBYTE_APP_IMPORT(moybyte_name);
+// moybyte.clock
+int32_t moybyte_clock(int32_t local) MOYBYTE_APP_IMPORT(moybyte_clock);
 
 #ifdef __cplusplus
 }

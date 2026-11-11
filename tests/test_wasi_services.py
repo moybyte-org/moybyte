@@ -329,6 +329,38 @@ def test_a_wasi_service_s_app_rows_answer_under_its_permissions(svc, perms):
     assert s.stop(pid)
 
 
+@pytest.mark.parametrize("synced", [True, False])
+def test_a_wasi_service_reads_the_wall_clock_and_its_local_time(svc, synced):
+    """moybyte.os `clock`: the wall clock in Unix seconds, answered on the
+    service's own task; with 1 the console's local time, the door's Python
+    half's (runtime/system/wallclock.py's zone), NOENT while NTP has not
+    answered."""
+    from runtime import wallclock as wc
+    ws, s, cart, peer = svc
+    try:
+        wc.set_zone("CET-1CEST,M3.5.0,M10.5.0/3")
+        wc._kernel[:] = [lambda: int(synced), True]
+        since = L.next()
+        pid = S.start_cart(ws, cart, s)
+        assert pid is not None
+        t0 = wc.now()
+        assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["clock"]')[0] == 1)
+        assert _polled(s, lambda: any(t.startswith("clock ") for t in _texts(since, pid)))
+        t1 = wc.now()
+        got = [t for t in _texts(since, pid) if t.startswith("clock ")][0].split()
+        unix = int(got[1])
+        assert t0 <= unix <= t1, (t0, got, t1)
+        if synced:
+            assert got[3:] == [str(unix + wc.offset(unix)), "errno", "0"], got
+            assert wc.offset(unix) != 0, "Belgrade is east of UTC"
+        else:
+            assert got[3:] == ["-1", "errno", "44"], got            # WASI's NOENT
+        assert s.stop(pid)
+    finally:
+        wc.set_zone(wc.UTC)
+        wc._kernel[:] = [None, False]
+
+
 @pytest.mark.parametrize("perms", [("launch", "front"), ()])
 def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, monkeypatch):
     """moybyte.os `nav_open_app`, `share` and `pick` pass the front's gate
