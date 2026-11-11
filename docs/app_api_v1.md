@@ -1538,7 +1538,9 @@ it paints the strip after `draw()` and routes a tap in its band before
 - `glass` (true while it holds the whole glass: no strip, its own back),
   `leave_asked` (its own way out, taken as the bar's back), `BACK_MINIMISES`
   (a back on the first page minimises on the desk), `cancel_field()` (the
-  T-Deck's Mic inside an open field), `DESK_TILE` (False: off the desk's
+  T-Deck's Mic inside an open field; an app without one has Mic asked of
+  its `ctx.ui` context, `ui_draw.app_cancel`, so a `ui.field` it draws
+  gives its draft back), `DESK_TILE` (False: off the desk's
   column).
 
 **Between apps.** `ctx.nav.open_app(id)` opens another app by its registered

@@ -1407,6 +1407,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # is dispatch precedence.
         self._apps = []
         self._apps_by_id = {}
+        self._app_hosts = {}            # id -> the AppHost of an app on the UI verbs
         self._init_apps()
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.

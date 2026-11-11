@@ -299,3 +299,67 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
     _mic(ws, drv)
     assert (lua.get_global("FIRST"), lua.get_global("SECOND")) == ("aa", "bb")
     assert not ws.sysmenu.open
+
+
+# -- the shell's own apps ---------------------------------------------------------
+#
+# A shell app's field is drawn through its AppHost's context, so Mic reaches it
+# there (`Workstation.cancel_field` asks `ui_draw.app_cancel` where the app has
+# no `cancel_field` of its own). Each row opens the app's field on a draft and
+# names where the app keeps it.
+
+def _files_rename(ws):
+    app = ws.files_app
+    app.open_place("documents")
+    app._act("NAME", "notes")
+    return lambda: app.rename_text
+
+
+def _appearance_name(ws):
+    app = ws.appearance_app
+    app._open_name()
+    app.name_text = "bubble"
+    app._damage.all()
+    return lambda: app.name_text
+
+
+def _storybook_rename(ws):
+    app = ws.storybook_app
+    app.typed = "Mine"
+    app.asking = "rename"
+    app._damage.all()
+    return lambda: app.typed
+
+
+def _myart_rename(ws):
+    app = ws.myart_app
+    app._verb("rename", "kite")
+    return lambda: app.renaming[1]
+
+
+SHELL_FIELDS = {"files": _files_rename, "appearance": _appearance_name,
+                "storybook": _storybook_rename, "myart": _myart_rename}
+
+
+@pytest.mark.parametrize("app_id", sorted(SHELL_FIELDS))
+def test_mic_cancels_a_shell_apps_field(tmp_path, app_id):
+    carts = str(tmp_path / "carts")
+    from runtime import moy_carts
+    moy_carts.save_file("docs", "notes", "x", carts)
+    moy_carts.save_file("drawings", "kite",
+                        moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64), carts)
+    ws = host_app.build_workstation(carts)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_app(ws._apps_by_id[app_id])
+    for _ in range(3):
+        drv.frame(DT)
+    draft = SHELL_FIELDS[app_id](ws)
+    for _ in range(3):
+        drv.frame(DT)
+    was = draft()
+    _type(drv, "xy")
+    assert draft() == was + "xy", "the field types each key once"
+    _mic(ws, drv)
+    assert draft() == was, "Mic gives the field back the text the edit began from"
+    assert not ws.sysmenu.open, "a cancel is not the console's key"
+    assert ws.wm.top_kind() == app_id, "and the app stays"

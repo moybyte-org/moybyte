@@ -535,8 +535,6 @@ class StorybookAppLayer(ListShellApp):
             if k == 27:
                 self.back()
                 return True
-            if self.asking == "rename":
-                self._type_into(k)
             if self._ui.keys(inp):
                 self._damage.all()
             return True
@@ -545,18 +543,6 @@ class StorybookAppLayer(ListShellApp):
         if self.page == "view":
             return self._view_keys(inp, k)
         return self._stories_keys(inp, k)
-
-    def _type_into(self, k):
-        """A dialog's field, typed into."""
-        if k == 8:
-            self.typed = self.typed[:-1]
-        elif 32 <= k < 127 and len(self.typed) < D.MAX_TITLE:
-            self.typed += chr(k)
-        elif k in (13, 10):
-            self._rename_done()
-        else:
-            return
-        self._damage.all()
 
     def _stories_keys(self, inp, k):
         entry = self._focused_story()

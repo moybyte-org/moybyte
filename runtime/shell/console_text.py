@@ -84,7 +84,10 @@ class TextVerbs:
         this inside a field (owner call, 2026-10-18), where its K types a
         letter; anywhere else Mic is the console's key. A running app's field
         with an edit in progress gets back the text the edit began from
-        (`Player.cancel_field`); with none, Mic stays the console's key. The same key closes
+        (`Player.cancel_field`), and so does a shell app's: its own
+        `cancel_field` where it has one, else its page's context
+        (`ui_draw.app_cancel` on its AppHost: Files' rename, Appearance's
+        name, Storybook's fields); with none, Mic stays the console's key. The same key closes
         what sits over the Editor's typing (See why's popover, the Make it
         mine and Blocks dialogs) and stops a script reading a line. True if it
         did."""
@@ -117,11 +120,19 @@ class TextVerbs:
             self._dirty = True          # a running app's field (Player.cancel_field)
             return True
         app = self._apps_by_id.get(self.wm.top_kind())
-        cancel = getattr(app, "cancel_field", None) if app is not None else None
-        if cancel is not None and cancel():
+        if app is None:
+            return False
+        cancel = getattr(app, "cancel_field", None)
+        if cancel is not None:
+            took = cancel()
+        else:
+            host = self._app_hosts.get(app.id)
+            took = host is not None and _ui_draw.app_cancel(host.ctx, True)
+            if took:
+                host.owed = True        # the next frame gives the text back
+        if took:
             self._dirty = True
-            return True
-        return False
+        return bool(took)
 
     def sync_keyboard_mode(self):
         """Put the board's keyboard in the mode of the surface on top, as
