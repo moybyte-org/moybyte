@@ -85,52 +85,78 @@ def session(port, board_dir):
             b.verify_board()
         else:
             b.reset()                  # verifies identity once the desk is up
-        shelf = shelf_ids(b)
+        before = take_store(b)
         try:
             yield b
         finally:
-            restore_shelf(b, shelf)
+            give_store_back(b, before)
     finally:
         b.close()
 
 
 # A suite pushes fixtures (the compiled wasm carts, the stuck pair, the jet,
 # the conformance carts ...) and most of them never take their own cart back
-# off: a pass left 25-75 of them on a board's shelf. The shelf is therefore
-# recorded when the session opens and every id that was not there is deleted
-# when it closes -- through `ws.carts.delete`, as the home's Delete does. A
-# cart that was already there is never touched, a fixture pushed over a
-# pre-existing id included, so the owner's own carts survive a pass.
+# off. The session gives the store back: every folder of the carts folder
+# that was not there when it opened goes when it closes, and so does every
+# folder a suite push made and marked (`mark_pushed`, the file PUSHED in it),
+# each removed the way the console removes a cart
+# (`push_cart.remove_folders`: pkg.removed, the record, the folder, the files
+# it wrote, its consent and keys). A session that never closed (killed, a
+# board that stopped answering) leaves its marks, and the next one removes
+# those folders when it opens, before it records the store. A push only marks
+# a folder it made, so a folder that was there -- the owner's own carts, an
+# installed Doom a test pushes over -- survives a pass.
 
-SHELF_DELETE_BATCH = 4          # a delete is SD work: ~1 s a cart on the T-Deck
-
-
-def shelf_ids(board):
-    """The ids on the board's shelf now (a sorted list), or None when the
-    board did not answer -- then the session has nothing to give back."""
-    return board.pyval("sorted(str(c.get('id')) for c in ws.carts.all)",
-                       timeout=30)
+PUSHED = ".on_glass"
 
 
-def restore_shelf(board, before):
-    """Delete every cart whose id is not in `before`. Never raises (it runs
-    while a failing suite unwinds): what it could not delete is a warning."""
+def mark_pushed(board, dest):
+    """Mark the folder `dest` (a path on the board), which a suite's push
+    made, so a later session removes it if this one never gives it back."""
+    import push_cart as pc
+    assert board.pyexec(pc.HELPERS + pc.STORE), "could not install the store helpers"
+    board.pyval("ws._g['_mark'](%r)" % (dest.rstrip("/") + "/" + PUSHED), timeout=30,
+                strict=True)
+
+
+def take_store(board):
+    """The carts folder's unmarked folders now (a list), after removing the
+    marked ones an earlier session left; None when the board did not list it
+    -- then the session has nothing to give back. Never raises."""
+    import push_cart as pc
+    try:
+        now = pc.store_folders(board, PUSHED)
+        if now is None:
+            return None
+        left = pc.remove_folders(board, [f for f, m in now if m])
+        if left:
+            warnings.warn("an earlier session's pushes are still on the store: %r"
+                          % (left,))
+        return [f for f, m in now if not m]
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn("could not read the store: %r" % (exc,))
+        return None
+
+
+def give_store_back(board, before):
+    """Remove every folder not in `before` and every marked one. Never raises
+    (it runs while a failing suite unwinds): what it could not remove is a
+    warning."""
+    import push_cart as pc
     if before is None:
         return
     try:
-        left = _new_on_shelf(board, before, rescan=True)
-        for _ in range(8):
-            if not left:
-                return
-            for i in range(0, len(left), SHELF_DELETE_BATCH):
-                board.pyval(
-                    "[ws.carts.delete(c) for c in list(ws.carts.all) "
-                    "if str(c.get('id')) in %r] and 0"
-                    % (left[i:i + SHELF_DELETE_BATCH],), timeout=120)
-            left = _new_on_shelf(board, before)
-        warnings.warn("the suite left carts on the shelf: %r" % (left,))
+        now = pc.store_folders(board, PUSHED)
+        if now is None:
+            raise RuntimeError("the board did not list its store")
+        had = set(before)
+        left = pc.remove_folders(board, [f for f, m in now if m or f not in had])
+        if left is None:
+            raise RuntimeError("the board did not list its store")
+        if left:
+            warnings.warn("the suite left folders on the store: %r" % (left,))
     except Exception as exc:  # noqa: BLE001
-        warnings.warn("could not give the shelf back: %r" % (exc,))
+        warnings.warn("could not give the store back: %r" % (exc,))
 
 
 # The store scanned again for the folders a suite pushed, each cart on the
@@ -140,19 +166,6 @@ def restore_shelf(board, before):
 # manifest as written.
 RESCAN = ("len(ws.rescan_carts() or ()) + len([ws.consent.made("
           "__import__('app_perms').app_id(c)) for c in ws.carts.all])")
-
-
-def _new_on_shelf(board, before, rescan=False):
-    """Ids on the shelf that `before` does not hold; `rescan` first picks up
-    folders a suite wrote with no rescan of their own."""
-    expr = ("sorted(str(c.get('id')) for c in ws.carts.all "
-            "if str(c.get('id')) not in %r)" % (list(before),))
-    if rescan:
-        expr = "(%s, %s)[1]" % (RESCAN, expr)
-    got = board.pyval(expr, timeout=120)
-    if got is None:
-        raise RuntimeError("the board did not list its shelf")
-    return got
 
 
 # -- the checks every fullscreen-tier board shares ---------------------------
@@ -3281,9 +3294,12 @@ def wasm_push(board, board_dir):
     dest = root.rstrip("/") + "/" + WASM_DIR
     link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    fresh = not board.pyval("ws._g['_ls'](%r)" % dest, timeout=30, strict=True)
     board.pyval("ws._g['_mkdirs'](%r)" % [dest])
     for name, local in sorted(mods.items()):
         pc.push_file_raw(board, local, "%s/%s.aot" % (dest, name), link)
+    if fresh:
+        mark_pushed(board, dest)
     return {name: "%s/%s.aot" % (dest, name) for name in mods}
 
 
@@ -3648,8 +3664,11 @@ def _push_folder(board, board_dir, local, dest):
     names = pc.cart_files(local)
     link = pc.raw_link(board, ser)
     assert board.pyexec(pc.HELPERS), "could not install the upload helpers"
+    fresh = not board.pyval("ws._g['_ls'](%r)" % dest, timeout=30, strict=True)
     pc.push_files(board, {n: os.path.join(local, n) for n in names}, names,
                   dest, link)
+    if fresh:
+        mark_pushed(board, dest)
 
 
 def wasm_carts_push(board, board_dir):
@@ -4144,10 +4163,14 @@ def wasm_app_push(board, board_dir):
 
 
 def remove_carts(board, titles):
-    """Delete the carts titled `titles` from the board's store, as the home's
-    Delete does (`CartManager.delete`): what a test pushed, given back."""
-    board.pyval("[ws.carts.delete(c) for c in list(ws.carts.all) "
-                "if c['title'] in %r] and 0" % (list(titles),), timeout=60)
+    """Remove the carts titled `titles` from the board's store as the console
+    removes a cart (`push_cart.remove_folders`): what a test pushed, given
+    back."""
+    import push_cart as pc
+    folders = board.pyval("[str(c['path']).rstrip('/').rsplit('/', 1)[-1] "
+                          "for c in ws.carts.all if c['title'] in %r]"
+                          % (list(titles),), timeout=20, strict=True)
+    pc.remove_folders(board, folders)
     left = board.pyval("[c['title'] for c in ws.carts.all if c['title'] in %r]"
                        % (list(titles),), timeout=20, strict=True)
     assert not left, "still on the board after the delete: %r" % left

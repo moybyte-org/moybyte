@@ -22,6 +22,8 @@
     tools/board.py tdeck perf "Brick Siege"     median drawn fps; --diag adds phase ms
     tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
                                                 a compiled cart gets its chip's module
+    tools/board.py tdeck remove x.moy           take it off the store as the console
+                                                removes a cart (push's counterpart)
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
     tools/board.py p4 sh "ls /proc" "pkg update"  lines in the C shell's serial
                                                 session: its output, its status
@@ -59,9 +61,9 @@ tty split its bytes, and a second open steals replies from whatever suite or
 agent opened it first.
 
 LEAVING THE DESK. `perf` ends its cart and restores diag and uncap; `push`
-changes the store and rescans it; `shot`, `pmem`, `state` and `mem` change
-nothing. `run`, `tap`, `swipe` and `open` change the console on purpose, and
-`desk` undoes them.
+changes the store and rescans it, `remove` takes a folder back off it;
+`shot`, `pmem`, `state` and `mem` change nothing. `run`, `tap`, `swipe` and
+`open` change the console on purpose, and `desk` undoes them.
 """
 
 import argparse
@@ -350,6 +352,24 @@ def cmd_py(b, a):
         else:
             print("%s -> %r" % (expr[:80], val))
     return status
+
+
+def cmd_remove(b, a):
+    """Each folder off the store as the console removes a cart
+    (push_cart.remove_folders); exit 1 when one is still there."""
+    need_console(b, a.board)
+    import push_cart
+    had = push_cart.store_folders(b)
+    if had is None:
+        raise BoardError("%s did not list its store" % a.board)
+    had = {f for f, _m in had}
+    left = push_cart.remove_folders(b, [f for f in a.folders if f in had])
+    if left is None:
+        raise BoardError("%s did not list its store after the removal" % a.board)
+    for f in a.folders:
+        print("%s %s" % (f, "not in the store" if f not in had
+                         else "still there" if f in left else "removed"))
+    return 1 if left else 0
 
 
 SH_ENDS = ("SH end ", "SH exit ", "SH more", "SH app ", "SH busy", "SH error")
@@ -1022,7 +1042,7 @@ ON_THE_CONSOLE = {"state": cmd_state, "py": cmd_py, "run": cmd_run,
                   "leave": cmd_leave, "desk": cmd_desk, "perf": cmd_perf,
                   "pmem": cmd_pmem, "mem": cmd_mem, "tap": cmd_tap,
                   "swipe": cmd_swipe, "open": cmd_open, "tail": cmd_tail,
-                  "shot": cmd_shot, "sh": cmd_sh}
+                  "shot": cmd_shot, "sh": cmd_sh, "remove": cmd_remove}
 
 
 def _common(ap, default):
@@ -1098,6 +1118,12 @@ def parser(dirs):
                         "(scenes/x.moyscene); repeatable")
     p.add_argument("--dest")
     p.add_argument("--no-rescan", action="store_true")
+    p = verb("remove", help="take folders of the carts folder off the store "
+                            "the way the console removes a cart (pkg.removed: "
+                            "the record, the folder, the files it wrote, its "
+                            "consent and keys); push's counterpart")
+    p.add_argument("folders", nargs="+", metavar="FOLDER",
+                   help="a name in the carts folder (elf_hello.moy)")
     p = verb("refresh-wasm", help="rebuild the stale compiled-cart modules "
                                   "this BOARD'S STORE actually has "
                                   "(tools/refresh_wasm.py) -- what a "

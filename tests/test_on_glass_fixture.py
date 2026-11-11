@@ -38,8 +38,10 @@ class _FakeBoard:
 
     def __init__(self, port, board_dir=None, attach_only=True,
                  expect_board="tdeck", state_reply="STATE {}",
-                 reset_is_damage=False, shelf=("celeste", "doom")):
-        self.shelf = list(shelf)
+                 reset_is_damage=False, store=("celeste.moy", "doom.moy"),
+                 marked=()):
+        self.store = list(store)
+        self.marked = set(marked)
         self.deleted = []
         self.port = port
         self.board_dir = board_dir
@@ -68,25 +70,34 @@ class _FakeBoard:
     def verify_board(self):
         self.calls.append(("verify_board",))
 
+    def pyexec(self, code, timeout=30.0, strict=False):
+        self.calls.append(("pyexec",))
+        return True
+
     def pyval(self, expr, timeout=30.0, strict=False):
-        """The three shelf expressions `session()` sends, answered from a list
-        of ids; a `ws.carts.delete` removes the ids it names."""
+        """The store helpers `session()` calls (push_cart.STORE), answered from
+        a list of folders: `_folders` lists them with their marks, `_remove`
+        removes the ones it names, `_mark` marks one."""
         self.calls.append(("pyval", timeout))
-        if expr.startswith("sorted") and "not in" not in expr:
-            return sorted(self.shelf)
-        names = ast.literal_eval(re.search(r"in (\[.*?\])", expr).group(1))
-        if "ws.carts.delete" in expr:
-            self.deleted += [n for n in names if n in self.shelf]
-            self.shelf = [n for n in self.shelf if n not in names]
-            return 0
-        return sorted(n for n in self.shelf if n not in names)
+        if expr.startswith("ws._g['_folders']"):
+            return sorted([f, f in self.marked] for f in self.store)
+        arg = ast.literal_eval(re.search(r"\]\((.*)\)$", expr).group(1))
+        if expr.startswith("ws._g['_remove']"):
+            self.deleted += [f for f in arg if f in self.store]
+            self.store = [f for f in self.store if f not in arg]
+            self.marked -= set(arg)
+            return 1
+        if expr.startswith("ws._g['_mark']"):
+            self.marked.add(arg.rsplit("/", 2)[-2])
+            return 1
+        raise AssertionError("an expression session() does not send: %r" % expr)
 
     def close(self):
         self.calls.append(("close",))
 
 
 def _no_shelf(calls):
-    return [c for c in calls if c[0] != "pyval"]
+    return [c for c in calls if c[0] not in ("pyval", "pyexec")]
 
 
 def _install(monkeypatch, **kw):
@@ -192,55 +203,69 @@ def test_all_three_suites_go_through_the_shared_session():
             "has left the one place that is guarded" % suite)
 
 
-def test_the_shelf_is_given_back_with_only_the_new_ids_deleted(monkeypatch):
+def test_the_store_is_given_back_with_only_the_new_folders_removed(monkeypatch):
     """What a suite pushed goes; what was there stays -- the owner's games
-    included, and a fixture written over an id that was already there."""
+    included, and a fixture written over a folder that was already there."""
     made = _install(monkeypatch, attach_only=True)
     with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
-        b.shelf += ["wasm_tampered", "conformance: a", "custom"]
-        b.shelf += ["local.ring_py%d" % i for i in range(9)]
-    assert sorted(b.shelf) == ["celeste", "doom"]
+        b.store += ["wasm_tampered.moy", "wasm_hello", "custom.moy"]
+        b.store += ["local.ring_py%d.moy" % i for i in range(9)]
+    assert sorted(b.store) == ["celeste.moy", "doom.moy"]
     assert sorted(b.deleted) == sorted(
-        ["wasm_tampered", "conformance: a", "custom"]
-        + ["local.ring_py%d" % i for i in range(9)])
-    assert "celeste" not in b.deleted and "doom" not in b.deleted
+        ["wasm_tampered.moy", "wasm_hello", "custom.moy"]
+        + ["local.ring_py%d.moy" % i for i in range(9)])
     assert made[0].calls[-1] == ("close",)
 
 
-def test_the_delete_goes_in_batches_with_a_long_timeout(monkeypatch):
-    made = _install(monkeypatch, attach_only=True)
+def test_a_marked_push_goes_and_one_an_earlier_session_left_goes_first(monkeypatch):
+    """A session killed before it closed leaves its pushes marked; the next
+    session removes them when it opens, before it records what to keep, and a
+    push it marks itself goes when it closes."""
+    _install(monkeypatch, attach_only=True,
+             store=("celeste.moy", "elf_hello.moy"), marked=("elf_hello.moy",))
     with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
-        b.shelf += ["x%d" % i for i in range(50)]
-    deletes = [c for c in b.calls if c[0] == "pyval" and c[1] >= 120]
-    assert len(deletes) >= 50 // on_glass.SHELF_DELETE_BATCH
-    assert b.shelf == ["celeste", "doom"]
+        assert b.store == ["celeste.moy"], "the earlier session's push survived the open"
+        b.store.append("stuck_lua.moy")
+        on_glass.mark_pushed(b, "/sd/moybyte/carts/stuck_lua.moy")
+        assert b.marked == {"stuck_lua.moy"}
+    assert b.store == ["celeste.moy"]
+    assert b.deleted == ["elf_hello.moy", "stuck_lua.moy"]
 
 
-def test_a_failing_suite_still_gives_the_shelf_back(monkeypatch):
+def test_the_removal_goes_in_batches_with_a_long_timeout(monkeypatch):
+    import push_cart
+    _install(monkeypatch, attach_only=True)
+    with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+        b.store += ["x%d.moy" % i for i in range(50)]
+    removes = [c for c in b.calls if c[0] == "pyval" and c[1] >= push_cart.REMOVE_S]
+    assert len(removes) >= 50 // push_cart.REMOVE_BATCH
+    assert b.store == ["celeste.moy", "doom.moy"]
+
+
+def test_a_failing_suite_still_gives_the_store_back(monkeypatch):
     made = _install(monkeypatch, attach_only=True)
     with pytest.raises(ValueError):
         with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
-            b.shelf.append("stuck_lua")
+            b.store.append("stuck_lua.moy")
             raise ValueError("a test blew up")
-    assert made[0].shelf == ["celeste", "doom"]
+    assert made[0].store == ["celeste.moy", "doom.moy"]
     assert made[0].calls[-1] == ("close",)
 
 
-def test_a_board_that_never_listed_its_shelf_is_left_alone(monkeypatch):
-    made = _install(monkeypatch, attach_only=True)
+def test_a_board_that_never_listed_its_store_is_left_alone(monkeypatch):
+    _install(monkeypatch, attach_only=True)
     monkeypatch.setattr(_FakeBoard, "pyval",
                         lambda self, expr, **kw: self.calls.append(
                             ("pyval", 0)))
     with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
         pass
-    assert b.calls.count(("pyval", 0)) == 1, "nothing recorded, nothing deleted"
+    assert b.calls.count(("pyval", 0)) == 1, "nothing recorded, nothing removed"
 
 
-def test_a_shelf_that_cannot_be_deleted_warns_and_does_not_raise(monkeypatch):
-    made = _install(monkeypatch, attach_only=True)
+def test_a_store_that_cannot_be_given_back_warns_and_does_not_raise(monkeypatch):
+    _install(monkeypatch, attach_only=True)
     monkeypatch.setattr(_FakeBoard, "pyval", lambda self, expr, **kw: (
-        sorted(self.shelf) if expr.startswith("sorted") and "not in" not in expr
-        else ["stuck"] if "not in" in expr else 0))
-    with pytest.warns(UserWarning, match="left carts on the shelf"):
-        with on_glass.session("/dev/ttyACM2", board_dir=TDECK):
-            pass
+        sorted([f, False] for f in self.store) if "_folders" in expr else 1))
+    with pytest.warns(UserWarning, match="left folders on the store"):
+        with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
+            b.store.append("stuck.moy")

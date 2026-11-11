@@ -256,6 +256,68 @@ def _drop(p):
     return _gated(lambda: _rm(p))
 """
 
+# A pushed folder taken back off the store, the way the console removes a
+# cart: `pkg.removed` (runtime/carts/pkg.py) over the install role, the steps
+# Get Carts' Remove and `pkg remove` take -- the shelf record's entry, the
+# folder, the files the cart wrote (`apps/<id>`), its consent and its keys,
+# then the shelf re-read there. A folder that is no cart (the modules a suite
+# loads by path) goes the same way. `_folders(mark)` is the carts folder's
+# names, each with whether it holds the file `mark`; `_mark(p)` writes one.
+STORE = """
+def _folders(mark=None):
+    r = str(ws.carts_root).rstrip('/')
+    def go():
+        return sorted([f, bool(mark) and _size(r + '/' + f + '/' + mark) > 0]
+                      for f in os.listdir(r))
+    return _gated(go)
+def _mark(p):
+    def go():
+        with open(p, 'w') as f:
+            f.write('1')
+        return 1
+    return _gated(go)
+def _remove(folders):
+    try:
+        import pkg, sh_roles, shell_servers
+    except ImportError:
+        from runtime import pkg, sh_roles, shell_servers
+    inst = sh_roles._Bound(shell_servers.InstallServer(ws), ws)
+    for f in folders:
+        for _ in pkg.through(pkg.removed(inst, f)):
+            pass
+    return 1
+"""
+
+REMOVE_BATCH = 4        # a removal is store work: ~1 s a cart on the T-Deck's card
+REMOVE_S = 180.0        # one batch's reply, a large cart's files included
+
+
+def store_folders(b, mark=None):
+    """`[[folder, marked], ...]` of the board's carts folder, `marked` whether
+    the folder holds the file `mark`; None when the board did not answer."""
+    if not b.pyexec(HELPERS + STORE):
+        return None
+    got = b.pyval("ws._g['_folders'](%r)" % (mark,), timeout=60)
+    return got if isinstance(got, list) else None
+
+
+def remove_folders(b, folders, batch=REMOVE_BATCH):
+    """Take each of `folders` (names in the carts folder) off the store as the
+    console removes a cart (`STORE`'s `_remove`). Returns the ones still
+    there, or None when the board did not list its store afterwards."""
+    folders = list(folders)
+    if not folders:
+        return []
+    if not b.pyexec(HELPERS + STORE):
+        return None
+    for i in range(0, len(folders), batch):
+        b.pyval("ws._g['_remove'](%r)" % (folders[i:i + batch],), timeout=REMOVE_S)
+    now = store_folders(b)
+    if now is None:
+        return None
+    there = {f for f, _m in now}
+    return [f for f in folders if f in there]
+
 
 class StoreFull(RuntimeError):
     """The board's store has no room for the cart."""

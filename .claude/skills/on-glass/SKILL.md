@@ -38,6 +38,7 @@ reader splits the replies and both sides fail ("multiple access on port" on one,
 ```bash
 tools/board.py tdeck state                    # stack, cart, error, diag, wifi (--json: all)
 tools/board.py tdeck push path/to/cart.moy    # copy to the store, rescan the shelf
+tools/board.py tdeck remove cart.moy          # take a folder back off, as the console removes a cart
 tools/board.py tdeck run "Brick Siege"        # by title; checks it came up without an error
 tools/board.py tdeck shot /tmp/tdeck.png      # then Read the PNG to see it
 tools/board.py tdeck leave                    # end the cart, reopen the desk it had
@@ -65,7 +66,8 @@ Never set or remove a board's SSH password with it (`passwd`): the console's
 is the owner's.
 
 `perf` ends its cart and puts diag and uncap back, `push` changes only the
-store, `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board
+store and `remove` undoes it (`pkg.removed`: the record, the folder, the files
+the cart wrote, its consent), `shot`/`pmem`/`state`/`mem` change nothing, and `desk` returns a board
 to where it boots (no cart, launcher on top, the desk
 open on a windowed tier). **Leave a board the way you found it** — a leftover
 menu or cart is what the next suite trips on.
@@ -183,5 +185,8 @@ MOYBYTE_GUITION_P4_PORT=$(tools/board.py guition_p4 port) .venv/bin/python -m py
 ```
 
 The Waveshare's suite resets its board at the start; the attach-only boards
-are attached to as they are, so their desk must be clean. `.claude/rules/testing.md`
+are attached to as they are, so their desk must be clean. Every suite gives the
+store back when its session closes: each folder that was not there when it
+opened goes, the way `remove` takes one, and a push marks the folder it makes
+(`.on_glass`) so the next session removes what a killed one left. `.claude/rules/testing.md`
 has the rules that bite when you write one.
