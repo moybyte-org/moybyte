@@ -37,7 +37,8 @@ UI_DIR = os.path.join(ROOT, "native", "moy_ui")
 # The toolkit's C a program links: every file but the MicroPython face and
 # the generated tables (constants).
 NOT_LINKED = {"modmoy_ui.c": "the MicroPython face: one VM's, never linked into a program",
-              "moy_ui_tables.c": "generated from style.json, constants only"}
+              "moy_ui_tables.c": "generated from style.json, constants only",
+              "fuzz_theme.c": "the loader's fuzz driver, a host program of its own"}
 
 BLOCK = "the theme block's: the console writes it between frames, a copy pulls it"
 SHARED = {

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_json.h"
 #include "moy_theme.h"
 
 #if __has_include("esp_heap_caps.h")
@@ -18,19 +19,21 @@
 #define UNSET_ROW INT32_MIN
 #define FX_UNSET 0xfe      // an effect no package has named yet
 
-// -- the reader: strict JSON over a byte span, no tree ------------------------
+// -- the reader: a cursor over moy_json's scanner, no tree -------------------
+//
+// Every value is scanned by native/moy_spine/moy_json.c: RFC 8259 alone
+// (MOY_JSON_RFC: no NaN, no infinities), and nested at most JSON_DEPTH deep,
+// the reader's own nesting counted. A string is decoded as json.loads does,
+// a number read in hundredths (moy_json_hundredths).
 
 typedef struct {
     const uint8_t *p, *end;
-    int depth;
+    int depth;                // the containers the reader is inside
     int32_t fix;              // the last number, in hundredths (saturated)
 } rd_t;
 
 static int peek(rd_t *r) {
-    while (r->p < r->end && (*r->p == ' ' || *r->p == '\t' || *r->p == '\n'
-                             || *r->p == '\r')) {
-        r->p++;
-    }
+    r->p = (const uint8_t *)moy_json_ws((const char *)r->p, (const char *)r->end);
     return r->p < r->end ? *r->p : -1;
 }
 
@@ -46,164 +49,55 @@ static int hex(int c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
 
-// A string, its bytes into `out` (NUL-terminated) while they fit in `cap`.
-// Its length, or -1: malformed. An escape stores its character; \uXXXX
-// stores '?'. *over is set when the string did not fit.
+// A string, decoded into `out` (NUL-terminated) while it fits in `cap`; *over
+// is set when it did not. Its decoded length, or -1: malformed.
 static int str(rd_t *r, char *out, size_t cap, int *over) {
     *over = 0;
-    if (!eat(r, '"')) {
+    if (peek(r) != '"') {
         return -1;
     }
-    size_t n = 0;
-    while (r->p < r->end) {
-        int c = *r->p++;
-        if (c == '"') {
-            if (out != NULL) {
-                out[n < cap ? n : cap - 1] = 0;
-            }
-            return (int)n;
-        }
-        if (c < 0x20) {
-            return -1;
-        }
-        if (c == '\\') {
-            if (r->p >= r->end) {
-                return -1;
-            }
-            c = *r->p++;
-            switch (c) {
-                case '"': case '\\': case '/': break;
-                case 'b': c = '\b'; break;
-                case 'f': c = '\f'; break;
-                case 'n': c = '\n'; break;
-                case 'r': c = '\r'; break;
-                case 't': c = '\t'; break;
-                case 'u':
-                    if (r->end - r->p < 4 || !hex(r->p[0]) || !hex(r->p[1])
-                        || !hex(r->p[2]) || !hex(r->p[3])) {
-                        return -1;
-                    }
-                    r->p += 4;
-                    c = '?';
-                    break;
-                default:
-                    return -1;
-            }
-        }
-        if (out != NULL && n + 1 < cap) {
-            out[n] = (char)c;
-        } else {
-            *over = 1;
-        }
-        n++;
-    }
-    return -1;
-}
-
-enum { V_INT, V_TRUE, V_FALSE, V_OTHER, V_FIX, V_NULL };
-
-static int word(rd_t *r, const char *w) {
-    size_t n = strlen(w);
-    if ((size_t)(r->end - r->p) < n || memcmp(r->p, w, n) != 0) {
-        return 0;
-    }
-    r->p += n;
-    return 1;
-}
-
-// A number. *iv gets an integer's value (saturated at +-1e6) and r->fix the
-// number in hundredths; a fraction makes it V_FIX, an exponent V_OTHER.
-// -1: malformed.
-static int number(rd_t *r, int32_t *iv) {
-    int neg = r->p < r->end && *r->p == '-';
-    r->p += neg;
-    if (r->p >= r->end || *r->p < '0' || *r->p > '9') {
+    const char *s = (const char *)r->p;
+    const char *e = moy_json_string(s, (const char *)r->end, 0, NULL, NULL);
+    if (e == NULL) {
         return -1;
     }
-    int32_t v = 0, frac = 0;
-    if (*r->p == '0') {
-        r->p++;
-    } else {
-        while (r->p < r->end && *r->p >= '0' && *r->p <= '9') {
-            v = v < 1000000 ? v * 10 + (*r->p - '0') : 1000000;
-            r->p++;
-        }
+    r->p = (const uint8_t *)e;
+    size_t n = moy_json_strlen(s, e);
+    *over = out == NULL || n >= cap;
+    if (out != NULL && cap > 0) {
+        out[moy_json_strcut(s, e, out, cap - 1)] = 0;
     }
-    int kind = V_INT;
-    if (r->p < r->end && *r->p == '.') {
-        r->p++;
-        if (r->p >= r->end || *r->p < '0' || *r->p > '9') {
-            return -1;
-        }
-        for (int k = 0; r->p < r->end && *r->p >= '0' && *r->p <= '9'; k++) {
-            if (k < 2) {
-                frac += (*r->p - '0') * (k ? 1 : 10);
-            }
-            r->p++;
-        }
-        kind = V_FIX;
-    }
-    if (r->p < r->end && (*r->p == 'e' || *r->p == 'E')) {
-        r->p++;
-        if (r->p < r->end && (*r->p == '+' || *r->p == '-')) {
-            r->p++;
-        }
-        if (r->p >= r->end || *r->p < '0' || *r->p > '9') {
-            return -1;
-        }
-        while (r->p < r->end && *r->p >= '0' && *r->p <= '9') {
-            r->p++;
-        }
-        kind = V_OTHER;
-    }
-    *iv = neg ? -v : v;
-    r->fix = (neg ? -1 : 1) * (v * 100 + frac);
-    return kind;
+    return (int)n;
 }
 
-static int value(rd_t *r, int32_t *iv);
+enum { V_INT, V_TRUE, V_FALSE, V_OTHER, V_FIX };
 
-// An object or an array, walked and dropped. 0, or -1: malformed or too deep.
-static int skip_nested(rd_t *r, int close) {
-    if (++r->depth > JSON_DEPTH) {
-        return -1;
-    }
-    if (!eat(r, close)) {
-        for (;;) {
-            int over;
-            int32_t iv;
-            if (close == '}' && (str(r, NULL, 0, &over) < 0 || !eat(r, ':'))) {
-                return -1;
-            }
-            if (value(r, &iv) < 0) {
-                return -1;
-            }
-            if (eat(r, ',')) {
-                continue;
-            }
-            if (eat(r, close)) {
-                break;
-            }
-            return -1;
-        }
-    }
-    r->depth--;
-    return 0;
-}
-
-// Any value: what kind it was (an integer's value in *iv), or -1: malformed.
+// Any value: what kind it was (an integer's value in *iv, saturated at
+// +-1e6, and any number's in hundredths in r->fix: a fraction makes it V_FIX,
+// an exponent V_OTHER), or -1: malformed, or nested too deep.
 static int value(rd_t *r, int32_t *iv) {
     int c = peek(r);
-    int over;
-    switch (c) {
-        case '{': r->p++; return skip_nested(r, '}') < 0 ? -1 : V_OTHER;
-        case '[': r->p++; return skip_nested(r, ']') < 0 ? -1 : V_OTHER;
-        case '"': return str(r, NULL, 0, &over) < 0 ? -1 : V_OTHER;
-        case 't': return word(r, "true") ? V_TRUE : -1;
-        case 'f': return word(r, "false") ? V_FALSE : -1;
-        case 'n': return word(r, "null") ? V_OTHER : -1;
-        default: return number(r, iv);
+    const char *v = (const char *)r->p;
+    const char *e = moy_json_value(v, (const char *)r->end,
+                                   (uint32_t)(r->depth + (MOY_JSON_DEPTH - JSON_DEPTH))
+                                   | MOY_JSON_RFC);
+    if (e == NULL) {
+        return -1;
     }
+    r->p = (const uint8_t *)e;
+    switch (c) {
+        case 't': return V_TRUE;
+        case 'f': return V_FALSE;
+        case '-': case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+            break;
+        default: return V_OTHER;
+    }
+    r->fix = moy_json_hundredths(v, e, iv);
+    if (memchr(v, 'e', (size_t)(e - v)) || memchr(v, 'E', (size_t)(e - v))) {
+        return V_OTHER;
+    }
+    return memchr(v, '.', (size_t)(e - v)) ? V_FIX : V_INT;
 }
 
 // -- the package -----------------------------------------------------------------
@@ -264,7 +158,8 @@ static int item(rd_t *r, item_t *it, int arr_ok) {
         return 0;
     }
     if (c == 'n') {
-        if (!word(r, "null")) {
+        int32_t iv;
+        if (value(r, &iv) < 0) {
             return -1;
         }
         it->k = I_NULL;

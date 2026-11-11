@@ -48,6 +48,10 @@ enum {
 const char *moy_json_ws(const char *p, const char *end);
 
 // One value at `p`, `depth` containers deep: the pointer past it, or NULL.
+// MOY_JSON_RFC or'd into `depth` takes RFC 8259 alone: NaN and the
+// infinities are refused, at any depth of the value (the theme loader's
+// reading, native/moy_ui/moy_theme.c).
+#define MOY_JSON_RFC 0x80000000u
 const char *moy_json_value(const char *p, const char *end, uint32_t depth);
 
 // The string whose opening quote is at `p`: the pointer past its closing quote,
@@ -92,6 +96,10 @@ size_t moy_json_strlen(const char *s, const char *s_end);
 // the length.
 size_t moy_json_str(const char *s, const char *s_end, char *out);
 
+// The decoded string's first bytes into `out`, at most `cap` of them and no
+// escape's character cut; returns how many.
+size_t moy_json_strcut(const char *s, const char *s_end, char *out, size_t cap);
+
 // Whether the key or string span `s` decodes to the `n` bytes at `want`.
 int moy_json_str_is(const char *s, const char *s_end, const char *want,
                     size_t n);
@@ -106,6 +114,13 @@ int moy_json_get(const char *obj, const char *obj_end, const char *key,
 
 // Python's bool() of the value json.loads makes of the span.
 int moy_json_truthy(const char *v, const char *v_end);
+
+// The number span `v` in hundredths: its whole part saturated at
+// +-MOY_JSON_WHOLE_MAX into `*whole`, and the answer that whole times 100 plus
+// the fraction's first two digits (truncated), signed. An exponent is not
+// applied: a caller that takes hundredths refuses one (moy_json_kind).
+#define MOY_JSON_WHOLE_MAX 1000000
+int32_t moy_json_hundredths(const char *v, const char *v_end, int32_t *whole);
 
 // Python's int() of the value json.loads makes of the span: 1 and the value
 // when it fits 64 bits, 2 when it is an int that does not (the caller converts

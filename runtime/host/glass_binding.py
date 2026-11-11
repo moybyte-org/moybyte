@@ -46,7 +46,7 @@ _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_present.h",
             "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api_int.h", "moy_ui_api.c", "moy_ui_api_text.c",
             "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c", "moy_ui_api_host.c",
             "moy_ui_text.h", "moy_ui_text.c",
-            "moy_ui_sink.c", "moy_theme.h", "moy_theme.c",
+            "moy_ui_sink.c", "moy_theme.h", "moy_theme.c", "moy_json.h", "moy_json.c",
             "moy_ui_tables.h",
             "moy_ui_tables.c", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
             # ...and the text path and the raster under it, as gfx_binding

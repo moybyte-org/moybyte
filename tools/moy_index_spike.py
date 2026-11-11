@@ -38,6 +38,8 @@ index's, because the spine has no Python twin an image could take instead.
 
     tools/moy_index_spike.py --component spine host|sanitize ...
                                                       the same two for the spine
+    tools/moy_index_spike.py --component theme sanitize
+                                                      the theme loader's suite and fuzz
 
 Results land as JSON in .build/moy_index_spike/ as well as on stdout. `sizes`
 and `bench` build in THIS tree, so run them from a worktree; `sizes` leaves the
@@ -197,7 +199,20 @@ FS = Component(
     cflags=['-DFFCONF_H="lib/oofatfs/ffconf.h"', "-DMOY_VOL_FAT=1",
             "-DMOY_VOL_LFS2=1", "-DLFS2_NO_MALLOC", "-DLFS2_NO_DEBUG",
             "-DLFS2_NO_WARN", "-DLFS2_NO_ERROR", "-DLFS2_NO_ASSERT"])
-COMPONENTS = {"index": INDEX, "spine": SPINE, "fs": FS}
+# The theme loader (native/moy_ui/moy_theme.c) over the spine's JSON scanner:
+# a fuzz driver and its suite, no twin and no host library of its own (the
+# host's one library builds it), so only `sanitize` takes it.
+NATIVE_UI = os.path.join(ROOT, "native", "moy_ui")
+THEME = Component(
+    "theme", [NATIVE_UI, NATIVE_SPINE, os.path.join(ROOT, "native", "moy_gfx"),
+              os.path.join(ROOT, "native", "moy_gfx", "libmoy"),
+              os.path.join(ROOT, "native", "moy_glass")],
+    None, [],
+    ("fuzz_theme.c", ["moy_theme.c", "moy_json.c", "moy_ui_tables.c"]),
+    r"\((mod)?moy_theme\.c\.obj\)$|/(mod)?moy_theme\.c\.obj$",
+    ["tests/test_theme_loader.py", "tests/test_theme_store.py"],
+    "theme", "theme-", "c")
+COMPONENTS = {"index": INDEX, "spine": SPINE, "fs": FS, "theme": THEME}
 
 
 def impl_of(arg=None, comp=INDEX):

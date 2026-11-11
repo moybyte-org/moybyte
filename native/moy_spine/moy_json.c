@@ -208,7 +208,7 @@ const char *moy_json_value(const char *p, const char *end, uint32_t depth) {
             return moy_json_string(p, end, 0, NULL, NULL);
         case '{':
         case '[': {
-            if (depth >= MOY_JSON_DEPTH) {
+            if ((depth & ~MOY_JSON_RFC) >= MOY_JSON_DEPTH) {
                 return NULL;
             }
             char close = *p == '{' ? '}' : ']';
@@ -254,12 +254,12 @@ const char *moy_json_value(const char *p, const char *end, uint32_t depth) {
         case 'n':
             return literal(p, end, "null");
         case 'N':
-            return literal(p, end, "NaN");
+            return depth & MOY_JSON_RFC ? NULL : literal(p, end, "NaN");
         case 'I':
-            return literal(p, end, "Infinity");
+            return depth & MOY_JSON_RFC ? NULL : literal(p, end, "Infinity");
         case '-':
             if (end - p >= 2 && p[1] == 'I') {
-                return literal(p, end, "-Infinity");
+                return depth & MOY_JSON_RFC ? NULL : literal(p, end, "-Infinity");
             }
             return scan_number(p, end);
         default:
@@ -363,6 +363,23 @@ int moy_json_next(moy_json_iter_t *it, const char **key, const char **key_end,
     }
     it->p = p;
     return 1;
+}
+
+int32_t moy_json_hundredths(const char *v, const char *v_end, int32_t *whole) {
+    int neg = v < v_end && *v == '-';
+    const char *p = v + neg;
+    int32_t w = 0, frac = 0;
+    for (; p < v_end && is_digit(*p); p++) {
+        w = w < MOY_JSON_WHOLE_MAX / 10 ? w * 10 + (*p - '0') : MOY_JSON_WHOLE_MAX;
+    }
+    if (p < v_end && *p == '.') {
+        p++;
+        for (int k = 0; k < 2 && p < v_end && is_digit(*p); k++, p++) {
+            frac += (*p - '0') * (k ? 1 : 10);
+        }
+    }
+    *whole = neg ? -w : w;
+    return (neg ? -1 : 1) * (w * 100 + frac);
 }
 
 int moy_json_kind(const char *v, const char *v_end) {
@@ -471,11 +488,15 @@ size_t moy_json_strlen(const char *s, const char *s_end) {
     return n;
 }
 
-size_t moy_json_str(const char *s, const char *s_end, char *out) {
+size_t moy_json_strcut(const char *s, const char *s_end, char *out, size_t cap) {
     const char *p = s + 1, *end = s_end - 1;
     size_t n = 0;
+    char b[4];
     while (p < end) {
         if (*p != '\\') {
+            if (n == cap) {
+                break;
+            }
             out[n++] = *p++;
             continue;
         }
@@ -483,9 +504,18 @@ size_t moy_json_str(const char *s, const char *s_end, char *out) {
         if (cp >= 0xd800u && cp <= 0xdfffu) {
             cp = 0xfffdu;
         }
-        n += utf8_put(cp, out + n);
+        size_t k = utf8_put(cp, b);
+        if (k > cap - n) {
+            break;
+        }
+        memcpy(out + n, b, k);
+        n += k;
     }
     return n;
+}
+
+size_t moy_json_str(const char *s, const char *s_end, char *out) {
+    return moy_json_strcut(s, s_end, out, (size_t)-1);
 }
 
 int moy_json_str_is(const char *s, const char *s_end, const char *want,

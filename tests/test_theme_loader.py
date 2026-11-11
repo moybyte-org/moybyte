@@ -34,7 +34,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import glass_binding
-from tools import gen_ui_tables
+from tools import gen_ui_tables, moy_index_spike
 from runtime import moy_ui_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -727,6 +727,35 @@ def test_mutated_themes_never_break_the_reader():
         if rc == OK:
             assert row[2] == OK
             _check_row(row[0])
+
+
+def test_the_theme_fuzz_runs_clean_under_the_sanitizers():
+    """native/moy_ui/fuzz_theme.c's seeded packages, built with ASan and
+    UBSan over moy_json's scanner: every package parsed, probed and
+    installed, and one that installs resolved for every answer."""
+    got = moy_index_spike.fuzz_seeded("c", seed=1, runs=2000,
+                                      comp=moy_index_spike.THEME)
+    if got is None:
+        if os.environ.get("CI"):
+            pytest.fail("no C compiler with AddressSanitizer here")
+        pytest.skip("no C compiler with AddressSanitizer here")
+    ok, _secs, out = got
+    assert ok, out[-4000:]
+    m = re.search(r"(\d+) packages, (\d+) installed", out)
+    assert m and int(m.group(1)) == 2000 and int(m.group(2)) > 200, out
+
+
+def test_the_reader_keeps_its_refusals():
+    """The loader reads through moy_json's scanner and keeps what a theme
+    refuses that JSON takes: NaN and the infinities, at any depth, and a
+    value nested deeper than eight containers, the package's own counted."""
+    for tok in (b"NaN", b"Infinity", b"-Infinity", b"[1, [NaN]]", b'{"a": Infinity}'):
+        src = _src("fz")[:-1] + b', "teapot": ' + tok + b"}"
+        assert moy_ui.theme_install(src)[0] == SYNTAX, tok
+    for k, rc in ((7, OK), (8, SYNTAX)):
+        src = _src("fz")[:-1] + b', "teapot": ' + b"[" * k + b"]" * k + b"}"
+        assert moy_ui.theme_install(src)[0] == rc, k
+    moy_ui.theme_uninstall()
 
 
 def _installed_answer(name):

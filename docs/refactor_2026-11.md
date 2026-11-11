@@ -179,7 +179,7 @@ Closes X4, L1, L2/T8, N3, L3, F1, F2.
 - **L2, T8.** `native/moy_ui/moy_theme.c` reads a package through
   `native/moy_spine/moy_json.c`'s scanner and a hundredths helper; its own
   reader goes. The loader keeps its refusals: depth 8, and no NaN or
-  Infinity. A theme target, `+native/moy_ui/fuzz_theme.c`, joins the native
+  Infinity. A theme target, `native/moy_ui/fuzz_theme.c`, joins the native
   fuzz lane.
 - **N3.** One wire-order call (`moy_gfx_wire`) sets text, shape and path
   together; the three setters and their partial callers go. The copied

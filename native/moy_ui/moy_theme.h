@@ -1,6 +1,8 @@
 // moy_theme: the theme loader (docs/theme_and_shell_2026-11.md §2-§4, §6). A theme
-// is a theme.json, untrusted data: this file parses it with a strict JSON
-// reader of its own, refuses what it cannot read, clamps and drops what it
+// is a theme.json, untrusted data: this file reads it through the kernel's
+// JSON scanner (native/moy_spine/moy_json.h) as RFC 8259 alone, no NaN or
+// infinities and nested at most eight deep, refuses what it cannot read
+// (native/moy_ui/fuzz_theme.c fuzzes it), clamps and drops what it
 // can, and flattens a theme into the live token row the toolkit's looks
 // resolve against (moy_ui_look_set) and native/moy_app publishes.
 //
