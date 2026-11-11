@@ -72,8 +72,8 @@ same table to publish the asset the page serves. Both tables read the reset
 pair off this board's `[flash]` block, so the page asks for the default reset
 (esptool-js takes its USB-Serial/JTAG path off the `303a:1001` PID and drives
 this board into the loader exactly as it does the Guition) and asks for no
-reset afterwards, because the `watchdog_reset` that gets it out is a sequence
-esptool-js does not implement. So the browser's gesture is a replug when the
+reset afterwards, because the `watchdog_reset` that gets it out is not one
+of the line sequences the page plays (`site/build.py` `HARD_RESET_LINES`). So the browser's gesture is a replug when the
 write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 

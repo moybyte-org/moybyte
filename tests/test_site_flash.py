@@ -21,6 +21,8 @@ import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -99,28 +101,103 @@ def test_manifest_carries_what_the_flasher_needs(site):
         assert entry["chip"] == table["chip"]        # the wrong-board guard
         assert entry["reset"] == table["reset"]
         assert entry["baud"] == table["baud"]
-        assert entry["usb_otg"] == table["usb_otg"]
         assert entry["after"] == table["after"]
+        assert entry["after_lines"] == table["after_lines"]
+        assert entry["rest"] == table["rest"]
         assert entry["done"] == table["done"]
     assert '<script type="module" src="flash.js"></script>' in html
 
 
-def test_a_board_that_cannot_be_reset_says_so_rather_than_trying():
-    """The T-Deck's reset line is unreachable over its own USB at BOTH ends --
-    it declares `before = usb_reset`, the one sequence that connects to its node
-    and the one esptool-js has not got -- so the page must not claim the board
-    is running when the write finishes."""
-    tdeck = {b["id"]: b for b in build.BOARDS}["tdeck"]
-    assert tdeck["reset"] == "no_reset"      # in: the human holds the trackball
-    assert tdeck["after"] is None            # out: the human presses RST
-    assert "RST" in tdeck["done"] and "RST" in tdeck["prep"]
+def test_the_page_resets_with_the_boards_lines_not_esptool_js():
+    """esptool-js 0.6.0's `after("hard_reset")` prints "Hard resetting via RTS
+    pin..." and only ever RELEASES RTS: it pulsed nothing, and a Waveshare P4
+    flashed from the page sat in the flasher stub with a dark screen
+    (2026-11-11). The page plays the board's own exit and leaves the lines at
+    the board's resting state before it closes the port."""
     js = open(os.path.join(ROOT, "site", "flash.js"), encoding="utf-8").read()
-    # `after` is asked for only where it exists, and the finish line is the
-    # board's own -- not a blanket "the board is running this build".
-    assert "b.after &&" in js                      # the call is guarded
-    assert "loader.after(b.after" in js
+    assert "loader.after(" not in js
+    assert "playLines(port, b.after_lines)" in js
+    assert "b.after_lines && !manual" in js           # only where it exists
+    assert "restLines(port, b.rest)" in js
+    # ...and the rest comes before the close, in the one exit every path takes.
+    tail = js[js.index("} finally {"):]
+    assert tail.index("restLines(") < tail.index("transport.disconnect()")
     assert "b.done" in js
     assert "board is running this build" not in js
+
+
+def test_the_tdeck_is_reset_in_by_its_usb_reset_and_out_by_hand():
+    """The T-Deck declares `before = usb_reset`, which esptool-js 0.6.0 runs
+    (its USB-Serial/JTAG sequence). A write's trailing reset does not start
+    the app on this board (its README), so the finish line names RST."""
+    tdeck = {b["id"]: b for b in build.BOARDS}["tdeck"]
+    assert tdeck["reset"] == "usb_reset"
+    assert tdeck["after_lines"] == build.HARD_RESET_LINES[True]
+    assert tdeck["rest"] == {"dtr": True, "rts": True}
+    assert "RST" in tdeck["done"] and "RST" in tdeck["prep"]
+    assert "trackball" in tdeck["manual"]
+
+
+# Plays every board's exit and rest from the BUILT manifest through the
+# shipped flash_reset.js against a fake Web Serial port, and prints what the
+# port was told: one setSignals() argument or {"wait": ms} per entry.
+_PLAY_JS = r"""
+import { readFileSync } from "node:fs";
+const [, , mod, manifest] = process.argv;
+const { playLines, restLines, parseLines } = await import(mod);
+const boards = JSON.parse(readFileSync(manifest, "utf8")).boards;
+const out = {};
+for (const b of boards) {
+  const calls = [];
+  const port = { setSignals: async (s) => { calls.push({ ...s }); } };
+  const wait = async (ms) => { calls.push({ wait: ms }); };
+  if (b.after_lines) await playLines(port, b.after_lines, wait);
+  const exit = calls.length;
+  await restLines(port, b.rest);
+  out[b.id] = { exit: calls.slice(0, exit), rest: calls.slice(exit) };
+}
+let bad = "accepted";
+try { parseLines("D0|X1"); } catch (e) { bad = "refused"; }
+console.log(JSON.stringify({ boards: out, bad }));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_the_reset_lines_reach_the_port_as_the_board_declares(site, tmp_path):
+    out, _ = site
+    script = tmp_path / "play.mjs"
+    script.write_text(_PLAY_JS)
+    mod = "file://" + os.path.join(out, "flash_reset.js")
+    p = subprocess.run(["node", str(script), mod,
+                        os.path.join(out, "firmware", "manifest.json")],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    got = json.loads(p.stdout)
+    assert got["bad"] == "refused"
+    table = {b["id"]: b for b in build.BOARDS}
+    for bid, seen in got["boards"].items():
+        board = table[bid]
+        if board["after_lines"]:
+            # The reset itself: RTS asserted while DTR is released, held, then
+            # RTS released -- one setSignals() per step, in the declared order.
+            dtr = rts = None
+            pulsed = False
+            for call in seen["exit"]:
+                dtr = call.get("dataTerminalReady", dtr)
+                rts = call.get("requestToSend", rts)
+                pulsed = pulsed or (rts is True and dtr is False)
+            assert pulsed and rts is False and dtr is False, (bid, seen)
+            assert any("wait" in c and c["wait"] >= 100 for c in seen["exit"]), bid
+        else:
+            assert seen["exit"] == [], bid
+        # The rest: both lines in ONE call, at the board's [serial] state.
+        assert seen["rest"] == [{"dataTerminalReady": board["rest"]["dtr"],
+                                 "requestToSend": board["rest"]["rts"]}], bid
+    assert got["boards"]["p4"]["exit"] == [
+        {"dataTerminalReady": False}, {"requestToSend": True}, {"wait": 100},
+        {"requestToSend": False}]
+    assert got["boards"]["p4"]["rest"] == [
+        {"dataTerminalReady": False, "requestToSend": False}]
 
 
 def test_a_reset_that_will_not_take_has_a_way_out():
@@ -131,7 +208,7 @@ def test_a_reset_that_will_not_take_has_a_way_out():
             assert board["manual"] is None, "nothing to skip on %s" % board["id"]
         else:
             assert board["manual"], "%s can strand a user" % board["id"]
-            assert "BOOT" in board["manual"]
+            assert "BOOT" in board["manual"] or "trackball" in board["manual"]
     js = open(os.path.join(ROOT, "site", "flash.js"), encoding="utf-8").read()
     assert '.manual input' in js                   # the card's checkbox
     assert 'manual ? "no_reset" : b.reset' in js
@@ -161,6 +238,8 @@ def test_ships_the_flasher_itself(site):
     assert os.path.exists(os.path.join(out, "flash.js"))
     js = open(os.path.join(out, "flash.js"), encoding="utf-8").read()
     assert "./vendor/esptool-js/bundle.js" in js
+    assert './flash_reset.js"' in js
+    assert os.path.exists(os.path.join(out, "flash_reset.js"))
     assert "http://" not in js and "https://" not in js
 
 
@@ -192,8 +271,8 @@ def test_no_firmware_at_all_still_builds_a_page(tmp_path):
     assert not os.path.isdir(os.path.join(out, "vendor"))
 
 
-def _declared_flash():
-    """{`[board] ota` id: (its dir, its [flash] block)} for every board that
+def _declared_flash(section="flash"):
+    """{`[board] ota` id: (its dir, its [`section`] block)} for every board that
     declares a cable flash. DERIVED from the tree rather than listed, so board
     N+1 joins the checks below by existing -- the hand-written map this replaced
     named two of the four boards, and the two it left out were never compared
@@ -206,7 +285,7 @@ def _declared_flash():
         cfg = board_config.load(d)
         ota = (cfg.get("board") or {}).get("ota")
         if ota and "flash" in cfg:
-            out[ota] = (d, cfg["flash"])
+            out[ota] = (d, cfg.get(section) or {})
     return out
 
 
@@ -237,9 +316,10 @@ def test_the_page_writes_what_the_cable_flash_writes():
         assert str(fl["image"]).split("/")[-1] == board["images"][0], bid
 
 
-def test_the_reset_pair_is_the_boards_own_declaration():
-    """`reset` and `after` are not written in the site table: they are read from
-    each board's `[flash]` block, the same one the cable flash obeys.
+def test_the_reset_is_the_boards_own_declaration():
+    """`reset`, `after`, `after_lines` and `rest` are not written in the site
+    table: they are read from each board's `[flash]` and `[serial]` blocks, the
+    same ones the cable flash and the on-glass driver obey.
 
     The translation is the only thing this file is allowed to know -- what a
     browser can perform -- and it is written out a second time here so the table
@@ -248,16 +328,28 @@ def test_the_reset_pair_is_the_boards_own_declaration():
     asserted a TinyUSB CDC id, and drew `no_reset` from it, for a fortnight
     after that board moved to USB-Serial/JTAG."""
     declared = _declared_flash()
+    serials = _declared_flash("serial")
     for board in build.BOARDS:
         _, fl = declared[board["id"]]
+        _, ser = serials[board["id"]]
         before = str(fl.get("before", "default_reset"))   # esptool's own defaults
         after = str(fl.get("after", "hard_reset"))
-        # esptool-js implements two entry sequences and one exit; a board whose
-        # entry it cannot perform is not asked to reset on the way out either.
-        reachable = before in ("default_reset", "no_reset")
+        # esptool-js runs three entry modes; a board whose entry it cannot
+        # perform is not reset on the way out either.
+        reachable = before in ("default_reset", "usb_reset", "no_reset")
         assert board["reset"] == (before if reachable else "no_reset"), board["id"]
-        assert board["after"] == (after if reachable and after == "hard_reset"
-                                  else None), board["id"]
+        out = reachable and before != "no_reset" and after == "hard_reset"
+        assert board["after"] == (after if out else None), board["id"]
+        jtag = ser.get("usb") == "303a:1001"
+        # esptool's HardReset: RTS asserted with DTR released, 0.1 s through a
+        # bridge's EN circuit, 0.2 s either side on USB-Serial/JTAG.
+        lines = ("D0|R1|W200|R0|W200" if jtag else "D0|R1|W100|R0") if out else None
+        assert board["after_lines"] == lines, board["id"]
+        assert board["rest"] == {"dtr": ser["dtr"], "rts": ser["rts"]}, board["id"]
+    # The board the 2026-11-11 report was about: its CH343 rests both lines low.
+    p4 = {b["id"]: b for b in build.BOARDS}["p4"]
+    assert p4["after_lines"] == "D0|R1|W100|R0"
+    assert p4["rest"] == {"dtr": False, "rts": False}
 
 
 def test_the_zero_is_reset_into_the_loader_but_not_out_of_it():
@@ -272,6 +364,7 @@ def test_the_zero_is_reset_into_the_loader_but_not_out_of_it():
     assert zero["chip"] == "ESP32-S3"
     assert zero["reset"] == "default_reset"   # in: the peripheral does it
     assert zero["after"] is None              # out: the human replugs
+    assert zero["after_lines"] is None
     assert "plug" in zero["done"]
     assert zero["manual"] and "BOOT" in zero["manual"]
     # The board's own file is the authority for both halves; if it stops saying

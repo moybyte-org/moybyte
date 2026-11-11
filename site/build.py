@@ -217,15 +217,16 @@ BOARDS = [
         "images": ("moybyte_tdeck.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "manual": None,                     # no reset to skip: see below
-        "usb_otg": True,                    # native USB, for esptool-js's sake
-        # Derives to (no_reset, None): this board declares `before = usb_reset`,
-        # which esptool-js does not implement, so the page cannot drive its reset
-        # line at either end and the human does both.
+        # A write's trailing reset does not start the app on this board, a
+        # second one does (its README, "Flashing"): the page resets it on the
+        # way out all the same, and the finish line names RST.
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold the <b>trackball</b> in while powering it on, "
+                  "then let go). Try this if connecting fails.",
         "done": "Written. Press <b>RST</b> on the board to start it.",
-        "prep": "This board has to be put into the loader by hand. <b>Hold the "
-                "trackball in</b> while you power it on, then let go. Flash, pick "
-                "its port, and when the write finishes <b>press RST</b>.",
+        "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
+                "loader on its own; when the write finishes, <b>press "
+                "RST</b>.",
         "erase": "Erase the whole chip first. Carts on an SD card survive it; "
                  "with no card they are on internal flash, and this deletes them "
                  "and their saves.",
@@ -238,7 +239,6 @@ BOARDS = [
         "images": ("moybyte_p4.bin",),
         "offset": 0x2000,
         "baud": 3000000,
-        "usb_otg": False,                   # a CH343 bridge, not native USB
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C debug port. It resets into "
                 "the loader and back on its own.",
@@ -260,7 +260,6 @@ BOARDS = [
         "images": ("moybyte_guition_p4.bin",),
         "offset": 0x2000,
         "baud": 921600,
-        "usb_otg": True,                    # native USB, like the Guition S3
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
                 "loader and back on its own.",
@@ -283,7 +282,6 @@ BOARDS = [
         "images": ("moybyte_guition_s3.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "usb_otg": True,                    # works on this one (unlike the T-Deck)
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
                 "loader and back on its own.",
@@ -307,15 +305,13 @@ BOARDS = [
         # the loader exactly as it does the Guition. Coming back out is the half
         # it cannot do: this board declares `after = watchdog_reset` (proven
         # here; `hard_reset` is an RTS wiggle with no circuit behind it), and
-        # esptool-js implements no such sequence -- so the card asks for a
-        # replug.
+        # the page performs no such sequence -- so the card asks for a replug.
         "id": "xiao_zero",
         "label": "Seeed XIAO ESP32-S3 (Zero)",
         "chip": "ESP32-S3",
         "images": ("moybyte_zero.bin",),
         "offset": 0x0,
         "baud": 460800,
-        "usb_otg": True,                    # native USB, for esptool-js's sake
         "manual": "Skip the reset &mdash; I have put the board in download mode "
                   "myself (hold <b>BOOT</b> while you plug it in). Try this if "
                   "connecting fails.",
@@ -329,18 +325,27 @@ BOARDS = [
     },
 ]
 
-# What esptool-js can actually perform: two entry sequences and one exit. The
-# declarations it cannot serve are real and are each a board's own measured
-# fact -- the T-Deck's `before = usb_reset` (the only sequence that connects to
-# its wedged USB-Serial/JTAG node) and the Zero's `after = watchdog_reset` (the
-# only one that gets it out of the loader). Both are honoured by the cable
-# flash and neither exists in the browser.
-ESPTOOL_JS_BEFORE = ("default_reset", "no_reset")
-ESPTOOL_JS_AFTER = ("hard_reset",)
+# The entry sequences esptool-js 0.6.0 performs (its `main(mode)`): on a
+# 303a:1001 port `default_reset` and `usb_reset` are both its USB-Serial/JTAG
+# sequence, elsewhere `default_reset` is the classic DTR/RTS one.
+ESPTOOL_JS_BEFORE = ("default_reset", "usb_reset", "no_reset")
+
+# The exits the PAGE performs, as DTR/RTS line sequences in esptool's custom
+# reset grammar (D = DTR, R = RTS, 1 asserted, 0 released, W = wait in ms),
+# keyed by whether the port is the chip's own USB-Serial/JTAG. They are
+# esptool's `HardReset`: RTS asserted with DTR released is the EN pulse on an
+# auto-reset bridge and the chip reset on USB-Serial/JTAG. They are not handed
+# to esptool-js because its 0.6.0 `after("hard_reset")` only ever RELEASES RTS
+# -- it prints "Hard resetting via RTS pin..." and pulses nothing, which left a
+# Waveshare P4 in the flasher stub with a dark screen (2026-11-11). A declared
+# exit that is not here (the Zero's `watchdog_reset`) is the human's.
+USB_SERIAL_JTAG = "303a:1001"
+HARD_RESET_LINES = {False: "D0|R1|W100|R0", True: "D0|R1|W200|R0|W200"}
 
 
-def declared_flash():
-    """{`[board] ota` id: that board's `[flash]` block}, read from the tree.
+def declared_boards():
+    """{`[board] ota` id: that board's parsed board.toml}, for every board that
+    declares a `[flash]` block.
 
     Derived rather than listed so board N+1 is described by its own file the
     day it lands.
@@ -351,34 +356,48 @@ def declared_flash():
         cfg = board_config.load(os.path.dirname(path))
         ota = (cfg.get("board") or {}).get("ota")
         if ota and "flash" in cfg:
-            out[ota] = cfg["flash"]
+            out[ota] = cfg
     return out
 
 
-def reset_pair(flash):
-    """(`reset`, `after`) for the page, from one board's `[flash]` block.
+def reset_facts(cfg):
+    """How the page resets one board, from its board.toml. -> dict.
+
+    `reset`: the entry sequence esptool-js runs. `after`: the declared exit
+    when the page performs it, else None. `after_lines`: that exit as a line
+    sequence (HARD_RESET_LINES). `rest`: the `[serial]` line state the board
+    rests in, which the page leaves on the port before it closes it; None for
+    a board that declares none.
 
     The defaults are esptool's own, which is what the cable flash falls back to
     when a board declares neither. A board whose ENTRY sequence esptool-js
-    cannot perform is not asked to reset on the way out either: it is the same
-    line and the same peripheral, so a page that cannot drive it in cannot
-    drive it out, and asking would log a failure for something that was never
-    going to work.
+    cannot perform is not reset on the way out either: it is the same line and
+    the same peripheral, so a page that cannot drive it in cannot drive it out.
     """
+    flash = (cfg or {}).get("flash")
+    serial = (cfg or {}).get("serial") or {}
+    rest = ({"dtr": bool(serial["dtr"]), "rts": bool(serial["rts"])}
+            if "dtr" in serial and "rts" in serial else None)
+    facts = {"reset": "no_reset", "after": None, "after_lines": None, "rest": rest}
     if not flash:                        # no declaration to follow: touch nothing
-        return "no_reset", None
+        return facts
     before = str(flash.get("before", "default_reset"))
     after = str(flash.get("after", "hard_reset"))
     if before not in ESPTOOL_JS_BEFORE:
-        return "no_reset", None
-    return before, (after if after in ESPTOOL_JS_AFTER else None)
+        return facts
+    facts["reset"] = before
+    if before != "no_reset" and after == "hard_reset":
+        usb = str(serial.get("usb", "")).lower() == USB_SERIAL_JTAG
+        facts["after"] = after
+        facts["after_lines"] = HARD_RESET_LINES[usb]
+    return facts
 
 
-_DECLARED = declared_flash()
+_DECLARED = declared_boards()
 for _board in BOARDS:
     # A card for a board that declares no cable flash at all gets the reading
     # that touches nothing -- the human does both ends -- rather than a guess.
-    _board["reset"], _board["after"] = reset_pair(_DECLARED.get(_board["id"], {}))
+    _board.update(reset_facts(_DECLARED.get(_board["id"])))
 del _board
 
 
@@ -540,8 +559,9 @@ def publish_image(board, folder, out, variant, vlabel):
         "offset": board["offset"],
         "baud": board["baud"],
         "reset": board["reset"],
-        "usb_otg": board["usb_otg"],
         "after": board["after"],
+        "after_lines": board["after_lines"],
+        "rest": board["rest"],
         "done": board["done"],
         # Provenance: the page states which build it is about to write, so
         # "the latest build" is checkable rather than a claim.
@@ -1446,8 +1466,8 @@ def main():
                   "w", encoding="utf-8") as f:
             json.dump({"boards": published}, f, indent=2, sort_keys=True)
             f.write("\n")
-        shutil.copyfile(os.path.join(HERE, "flash.js"),
-                        os.path.join(out, "flash.js"))
+        for js in ("flash.js", "flash_reset.js"):
+            shutil.copyfile(os.path.join(HERE, js), os.path.join(out, js))
         shutil.copytree(VENDOR_SRC, os.path.join(out, "vendor"))
     else:
         print("!! no firmware images under %s -- the page will say so "
