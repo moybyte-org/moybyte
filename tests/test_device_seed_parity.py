@@ -528,6 +528,25 @@ def test_the_sweep_runs_once_so_a_kids_own_cart_survives(tmp_path):
     assert not mine.exists()
 
 
+def test_the_seed_mesh_leaves_a_store_the_installed_mesh_does_not(tmp_path):
+    """The seed Mesh (moybyte.mesh.moy) left the seed set for moybyte-org/
+    carts, whose Mesh installs as mesh.moy: a store swept at generation 7 loses
+    the seed's folder at the next and keeps the installed one."""
+    from runtime import moy_carts
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    seeded, installed = Path(root) / "moybyte.mesh.moy", Path(root) / "mesh.moy"
+    for d in (seeded, installed):
+        d.mkdir()
+        (d / "manifest.json").write_text('{"title": "Mesh"}')
+    with open(moy_carts.retired_version_path(root), "w") as f:
+        f.write("7")
+    assert moy_carts.sweep_store(root) == 1
+    assert not seeded.exists() and installed.is_dir()
+    assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
+
+
 def test_the_boot_sweeps_before_it_scans(tmp_path):
     # The boot's store step is the one that sweeps, or every board needs its
     # own remembering; and it sweeps BEFORE the scan, or the shelf shows a

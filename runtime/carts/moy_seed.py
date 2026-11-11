@@ -558,11 +558,13 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # RETIRED_FOLDERS: the names a host store gave the built-ins whose source
 # folder was not their title's slug, before system_carts/ shipped each one
 # under its id. Generation 7 takes the Wi-Fi tool, deleted 2026-10-13 when
-# Settings' panel became the one Wi-Fi implementation.
+# Settings' panel became the one Wi-Fi implementation. Generation 8 takes the
+# seed Mesh, which left the seed set 2026-11-10 for moybyte-org/carts: by its
+# folder, never its title, whose bare folder (mesh.moy) is the installed one.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
-    "wallpaper_space", "wifi"))
-RETIRED_GEN = 7
+    "wallpaper_space", "wifi", "mesh"))
+RETIRED_GEN = 8
 RETIRED_VER_NAME = "retired.ver"
 
 
