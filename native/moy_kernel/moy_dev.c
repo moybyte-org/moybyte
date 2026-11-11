@@ -48,7 +48,7 @@ typedef struct {
     uint8_t pin;                // gpio, pwm, adc: its pin
     uint8_t unit;               // uart, spi: its unit
     uint8_t trigger;            // EDGE_* bits
-    uint8_t gen;
+    uint32_t gen;               // its handle's generation, 1 to MOY_DEV_GEN_MAX
     int16_t addr;               // i2c: the device's address, -1: none yet
     int8_t slot;                // pwm: its devbus slot
     uint32_t freq, duty;        // pwm
@@ -62,6 +62,8 @@ typedef struct {
 // a boot whose programs open no device holds none of it, and a row's gen
 // outlives its close.
 static dev_row_t *s_dev;
+
+_Static_assert(MOY_DEV_HANDLES <= (1u << MOY_DEV_SLOT_BITS), "a slot fits its bits");
 
 static int32_t lease_rc(int rc) {
     switch (rc) {
@@ -206,10 +208,11 @@ static int32_t gpio_cfg(const char *cfg, size_t n, pin_cfg_t *c, bool edges) {
 // -- the table -----------------------------------------------------------------------
 
 static dev_row_t *row_of(uint32_t pid, int32_t h) {
-    if (!(h & MOY_DEV_BASE)) {
+    if (h < 0 || !(h & MOY_DEV_BASE)) {
         return NULL;
     }
-    uint32_t slot = (uint32_t)h & 0xffu, gen = ((uint32_t)h >> 8) & 0xffu;
+    uint32_t slot = (uint32_t)h & MOY_DEV_SLOT_MASK;
+    uint32_t gen = ((uint32_t)h & ~(uint32_t)MOY_DEV_BASE) >> MOY_DEV_SLOT_BITS;
     if (s_dev == NULL || slot >= MOY_DEV_HANDLES || s_dev[slot].pid != pid
         || s_dev[slot].gen != gen) {
         return NULL;
@@ -218,7 +221,7 @@ static dev_row_t *row_of(uint32_t pid, int32_t h) {
 }
 
 static int32_t handle_of(const dev_row_t *d) {
-    return (int32_t)(MOY_DEV_BASE | (uint32_t)d->gen << 8 | (uint32_t)(d - s_dev));
+    return (int32_t)(MOY_DEV_BASE | d->gen << MOY_DEV_SLOT_BITS | (uint32_t)(d - s_dev));
 }
 
 static dev_row_t *row_new(uint32_t pid, uint8_t kind) {
@@ -233,9 +236,9 @@ static dev_row_t *row_new(uint32_t pid, uint8_t kind) {
     for (uint32_t i = 0; i < MOY_DEV_HANDLES; i++) {
         dev_row_t *d = &s_dev[i];
         if (d->pid == 0) {
-            uint8_t gen = (uint8_t)(d->gen + 1u);
+            uint32_t gen = d->gen < MOY_DEV_GEN_MAX ? d->gen + 1u : 1u;
             memset(d, 0, sizeof *d);
-            d->gen = gen != 0 ? gen : 1u;
+            d->gen = gen;
             d->pid = pid;
             d->kind = kind;
             d->reader = -1;

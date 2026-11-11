@@ -204,8 +204,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// A handle is a positive int32 on every tier: MOY_DEV_BASE, then its row's
+// generation, then its slot. A row's generation moves at each open of it and
+// wraps past MOY_DEV_GEN_MAX (2^25 - 1 opens of one slot), so a handle its
+// process closed stays ABSENT to it however often the slot is reused.
 #define MOY_DEV_BASE 0x40000000         // every handle of this table has it
 #define MOY_DEV_HANDLES 32u
+#define MOY_DEV_SLOT_BITS 5u
+#define MOY_DEV_SLOT_MASK ((1u << MOY_DEV_SLOT_BITS) - 1u)
+#define MOY_DEV_GEN_MAX ((MOY_DEV_BASE >> MOY_DEV_SLOT_BITS) - 1u)
 #define MOY_DEV_EDGE_DEPTH 64u          // a pin's edge ring
 #define MOY_DEV_PASS (-1000)            // not this table's: the console's Python serves it
 

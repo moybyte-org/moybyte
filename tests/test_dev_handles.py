@@ -343,6 +343,25 @@ def test_a_handle_is_its_process_s_own():
     assert _kclose(a, u) == 0 and _kclose(a, u) == H.ABSENT
 
 
+def test_a_closed_handle_stays_absent_to_its_process_however_often_its_slot_is_reused():
+    """A row's generation is wider than a byte (moy_dev.h's MOY_DEV_GEN_MAX):
+    the same process opening and closing one slot past 256 times never gets
+    its first handle back, and that handle stays ABSENT throughout."""
+    pid = L.spawn("t.aba")
+    first = _kopen(pid, "gpio6", "mode=out")
+    assert first > 0 and _kclose(pid, first) == 0
+    seen = {first}
+    for _ in range(600):
+        h = _kopen(pid, "gpio6", "mode=out")
+        assert h > 0 and h & 31 == first & 31, "the same slot, reused"
+        assert h not in seen
+        seen.add(h)
+        assert _kget(pid, first, "value") == H.ABSENT
+        assert _kclose(pid, first) == H.ABSENT
+        assert _kget(pid, h, "value") == 0 and _kclose(pid, h) == 0
+    assert _K().moy_dev_count() == 0
+
+
 def test_the_process_s_end_closes_every_handle_and_leaves_the_pins_safe():
     was = moybyte.WAKES.table
     moybyte.bind(mi.kernel())
