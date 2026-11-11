@@ -44,6 +44,10 @@ int moy_wasm_tlanes_stats(moy_wasm_tlane_stats_t *out) {
     return 0;
 }
 
+int moy_wasm_tlane_here(void) {
+    return 0;
+}
+
 #else
 
 #include <pthread.h>
@@ -396,6 +400,17 @@ int moy_wasm_tlanes_start(moy_wasm_env env, const moy_wasm_tlane_sink_t *sink,
 int moy_wasm_tlanes_stats(moy_wasm_tlane_stats_t *out) {
     memcpy(out, g_stats, sizeof(g_stats));
     return MOY_WASM_TLANES;
+}
+
+int moy_wasm_tlane_here(void) {
+    tls_t *t = g_tl;
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    for (int k = 0; t != NULL && k < MOY_WASM_TLANES; k++) {
+        if (t->lane[k].up && t->lane[k].task == me) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 #endif

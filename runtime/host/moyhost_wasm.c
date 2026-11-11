@@ -273,6 +273,7 @@ const moy_app_run_t *moy_app_wasm_run_of(void *e)
 {
     wasm_module_inst_t inst = e ? wasm_runtime_get_module_inst((wasm_exec_env_t)e) : NULL;
     void *w = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    if (w && ((const moy_wasm *)w)->items) return NULL;   /* a par item calls no import */
     if (w && moy_proc_of_engine(w)) return moy_proc_app_of(w);
     for (host_wasm *r = G_RUNS; r && w; r = (host_wasm *)r->next)
         if ((void *)&r->w == w) return r->app.g ? &r->app : NULL;

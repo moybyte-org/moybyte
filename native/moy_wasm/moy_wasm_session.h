@@ -229,6 +229,11 @@ int moy_wasm_tlanes_start(moy_wasm_env env, const moy_wasm_tlane_sink_t *sink,
 // a struck one's task deleted, and the LANES row given back.
 void moy_wasm_tlanes_stop(void);
 
+// Whether the calling task is one of the running session's lanes: an import
+// that must not run beside the session's thread (the toolkit's rows, which
+// read no instance) refuses on it.
+int moy_wasm_tlane_here(void);
+
 // What a session's lanes did, kept past its end: per lane, whether it ran,
 // its calls, frames rendered, the longest call in microseconds, and whether
 // and why it was struck.

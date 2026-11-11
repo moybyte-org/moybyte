@@ -95,6 +95,7 @@ const struct moy_app_run *moy_app_wasm_run_of(void *e)
     e = inst ? wasm_runtime_get_custom_data(inst) : NULL;
     if (!e) return NULL;
 #endif
+    if (((const moy_wasm *)e)->items) return NULL;   // a par item calls no import
     if (moy_proc_of_engine(e)) return moy_proc_app_of(e);
     return WR && e == (void *)&WR->w && WR->app.g ? &WR->app : NULL;
 }
@@ -1010,11 +1011,15 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_settle_obj, mod_frame_settle);
 // the run's draw target, an owed or kept frame on the screen written in
 // first, as libmoy's own verbs settle it before they draw. NULL with no
 // compiled run, or inside one of par's items, which reach no import.
+int moy_wasm_tlane_here(void) __attribute__((weak));
 void *moycore_ui_target(void);
 void *moycore_ui_target(void)
 {
 #if MOYCORE_WASM
     if (!RUN.wasm || !WR || WR->w.items) return NULL;
+#if MOY_WASM
+    if (moy_wasm_tlane_here != NULL && moy_wasm_tlane_here()) return NULL;
+#endif
     moy_wasm *w = &WR->w;
 #if MOY_WASM
     if (w->target == w->screen && (w->owed || w->kept)) {
