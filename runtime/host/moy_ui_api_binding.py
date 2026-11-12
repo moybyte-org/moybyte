@@ -440,14 +440,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             return None
         return tuple(v) if r is None else r
 
-    def api_floor(ctx):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 96)()
-        n = int(lib.moy_ui_api_floor(p, v, 24))
-        if n < 0:
-            return None
-        return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
-
     def api_floor_box(ctx, out):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
@@ -821,7 +813,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
               api_shift_plan, api_shift_break,
-              api_shift_drawn, api_band, api_floor, api_floor_box, api_change_box,
+              api_shift_drawn, api_band, api_floor_box, api_change_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,
               api_host_whole, api_keys_back,
               api_pop_box,

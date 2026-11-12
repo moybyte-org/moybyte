@@ -67,7 +67,7 @@
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
 // WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
-// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h, and its
+// unix-port build has no esp_async_memcpy.h, and its
 // layer restore refuses the engine and copies synchronously.
 #if defined(__has_include)
 #if __has_include("esp_async_memcpy.h")

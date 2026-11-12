@@ -14,6 +14,7 @@ quietly stop engaging (L8's silent-disable direction). The engine's record
 audit runs throughout: a shift frame whose stops differ from the last
 frame's outside the floor fails it (L8's correctness direction)."""
 
+import ctypes
 from array import array
 from pathlib import Path
 
@@ -24,6 +25,22 @@ from runtime.host_canvas import make_system_canvas
 from ws_helpers import build_ws
 
 _C = ui_draw._C
+
+
+def _floor(ctx):
+    """The shift frame's floor as rects (x, y, w, h), or None: the host's own
+    read of engine state (moy_ui_api_floor, native/moy_ui/moy_ui_api_host.c)."""
+    from runtime import host_native
+    lib = ctypes.CDLL(host_native.build())
+    lib.moy_ui_api_ctx.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    lib.moy_ui_api_ctx.restype = ctypes.c_void_p
+    lib.moy_ui_api_floor.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+    raw = (ctypes.c_char * len(ctx)).from_buffer(ctx)
+    v = (ctypes.c_int32 * 96)()
+    n = lib.moy_ui_api_floor(lib.moy_ui_api_ctx(raw, len(ctx)), v, 24)
+    if n < 0:
+        return None
+    return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
 _DOWN, _UP = 1 << 3, 1 << 2
 W, H = 320, 240
 
@@ -714,7 +731,7 @@ def test_the_band_is_the_floor_in_the_pages_coordinates(th, monkeypatch):
         real(id, o)
         if id and ui._T[1] is r.cv:
             seen.append((ui.band(), ui_draw._C.api_offset(r.a.ctx, 160, 100)))
-            rects = _C.api_floor(r.a.ctx)
+            rects = _floor(r.a.ctx)
             floors.append(rects or ())
             if rects:                      # the band is the floor's bounding rect
                 y0 = min(f[1] for f in rects) - 40 + seen[-1][1]

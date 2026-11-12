@@ -16,7 +16,7 @@ center it plays through: each screen drawn with the public UI API's verbs on
 the goldens' workstation (`tests/test_shell_goldens.py`), at the real sizes,
 in Moy, written as PNGs.
 
-usage: .venv/bin/python tools/music_mockups.py OUT [FILTER ...] [--theme NAME]
+usage: .venv/bin/python experiments/music_mockups/music_mockups.py OUT [FILTER ...] [--theme NAME]
 
 A scene is a page of `MusicMock` (a stand-in for the app with the media
 face's answers faked) or the shell with a stand-in component open in its
@@ -38,7 +38,7 @@ import os
 import sys
 from array import array
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import look_shots as L  # noqa: E402  -- the review kit's renderer
