@@ -25,43 +25,22 @@ construction instead of imported back from console.py, which would be a
 circular import.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-try:
-    from editors_block import BlockEditor, _clone_tree
-    from editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
-                              text_key as _text_key)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_block import BlockEditor, _clone_tree
-    from runtime.editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
-                                      text_key as _text_key)
+from editors_block import BlockEditor, _clone_tree
+from editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
+                          text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
 # this module directly without that alias.
-try:
-    import blocks as _blocks_mod
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import blocks as _blocks_mod
-
-try:
-    from widgets import arm_prompt as _arm_prompt
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import arm_prompt as _arm_prompt
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
-    import layout_base as _layout_base
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
-    from runtime import layout_base as _layout_base
+import blocks as _blocks_mod
+from widgets import arm_prompt as _arm_prompt
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+import layout_base as _layout_base
 
 # The page (editor_blocks.py): the objects' tab row over the outline, a row's
 # pitch and a depth's indent, and the foot under it.
@@ -249,10 +228,7 @@ class BlockEditorUI:
     def page(self):
         """The Blocks page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_blocks import BlocksPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_blocks import BlocksPage
+            from editor_blocks import BlocksPage
             self._page = BlocksPage(self, _ui_draw.AppHost("editor_blocks"))
         return self._page
 

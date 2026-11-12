@@ -18,10 +18,7 @@ import json
 # web_input decodes into the HOST class, so it must name it unambiguously; the
 # bare-name branch is for the wasm head, which stages runtime/shell/input.py as `input`
 # and has no `runtime` package.
-try:
-    from runtime.input import InputState
-except ImportError:  # pragma: no cover - wasm head (frozen as `input`)
-    from input import InputState
+from input import InputState
 
 # The console's button set, as the wire names them.
 BUTTON_NAMES = InputState.BUTTONS

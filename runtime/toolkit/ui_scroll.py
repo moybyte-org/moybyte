@@ -411,7 +411,4 @@ class DragTap:
 
 
 # The look the scrollbar draws in is ui_draw's; imported last (see above).
-try:
-    from ui_draw import _look
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import _look
+from ui_draw import _look

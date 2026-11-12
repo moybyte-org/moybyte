@@ -38,12 +38,8 @@ through `ws` makes that trap structurally impossible rather than merely
 avoided by ordering.
 """
 
-try:
-    from chrome import _err_text
-    from moy_spine import Settings
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _err_text
-    from runtime.moy_spine import Settings
+from chrome import _err_text
+from moy_spine import Settings
 
 
 def _rows(save):
@@ -103,10 +99,7 @@ class StoreHandle:
         `ready`/`writable` answer now. The console binds it where it wires the
         store, and again wherever the root or `can_manage` changes."""
         ws = self.ws
-        try:
-            from app_context import NO_STORE
-        except ImportError:  # pragma: no cover - host package lane
-            from runtime.app_context import NO_STORE
+        from app_context import NO_STORE
         ready = self.ready()
         ws.app_abi.store_bind(ws.carts_root if ready else None, ready,
                               self.writable(), NO_STORE)

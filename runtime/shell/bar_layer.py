@@ -34,16 +34,10 @@ other extracted UIs use, since console.py builds the one BarLayer instance a
 Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
 `_ticks_diff` are duplicated here (time-only) for the clock.
 """
-try:
-    import wallclock as _wc
-    from layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
-                             content_of)
-    from shell_layout import pack as _pack, cell_of as _cell_of, without as _without
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import wallclock as _wc
-    from runtime.layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
-                                     content_of)
-    from runtime.shell_layout import pack as _pack, cell_of as _cell_of, without as _without
+import wallclock as _wc
+from layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
+                         content_of)
+from shell_layout import pack as _pack, cell_of as _cell_of, without as _without
 
 
 # The clock's text while the wall clock does not hold real time, and its date.
@@ -123,34 +117,15 @@ _YIELD = ("battery", "wifi")
 LOW_BATTERY = 15
 
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    from widgets import _in
-except ImportError:                     # host: the runtime package
-    from runtime.widgets import _in
-
-try:
-    import chrome_ops as _ch
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _layout_base
-    import iconsets as _iconsets
-    from shell_layout import STATUS as _STATUS, ITEMS as _SL_ITEMS, RING_ROOM as _RING_ROOM
-    from status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui, ui_draw as _ui_draw
-    from runtime import layout_base as _layout_base
-    from runtime import iconsets as _iconsets
-    from runtime.shell_layout import (STATUS as _STATUS, ITEMS as _SL_ITEMS,
-                                      RING_ROOM as _RING_ROOM)
-    from runtime.status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
+from ticks import _ticks_ms, _ticks_diff
+from widgets import _in
+import chrome_ops as _ch
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _layout_base
+import iconsets as _iconsets
+from shell_layout import STATUS as _STATUS, ITEMS as _SL_ITEMS, RING_ROOM as _RING_ROOM
+from status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
 
 
 def _bar_text_w(s):

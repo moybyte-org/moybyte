@@ -43,39 +43,17 @@ verbs draw in is begun by the host side the console hands it
 pointer this layer is routed.
 """
 
-try:
-    import ssh_service as _ssh
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ssh_service as _ssh
-
-try:
-    import ui as _ui
-    import layout_base as _lb
-    from crash_guard import clear_core_dump, core_dump, crash_available, crash_lines, last_crash
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import layout_base as _lb
-    from runtime.crash_guard import (clear_core_dump, core_dump, crash_available,
-                                      crash_lines, last_crash)
-
-try:
-    from achievements_ui import AchievementsPage
-    from about_ui import LicencesPage, version_words, board_words
-    from log_ui import LogPage
-    from perms_ui import PermsPage
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.achievements_ui import AchievementsPage
-    from runtime.about_ui import LicencesPage, version_words, board_words
-    from runtime.log_ui import LogPage
-    from runtime.perms_ui import PermsPage
-try:
-    from editors_base import TextEntry
-    from audio_session import console_volume
-    import wallclock as _wc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import TextEntry
-    from runtime.audio_session import console_volume
-    from runtime import wallclock as _wc
+import ssh_service as _ssh
+import ui as _ui
+import layout_base as _lb
+from crash_guard import clear_core_dump, core_dump, crash_available, crash_lines, last_crash
+from achievements_ui import AchievementsPage
+from about_ui import LicencesPage, version_words, board_words
+from log_ui import LogPage
+from perms_ui import PermsPage
+from editors_base import TextEntry
+from audio_session import console_volume
+import wallclock as _wc
 
 # -- settings-screen geometry: the row height console's Layout scales ---------
 _SET_ROW_H = 26
@@ -789,19 +767,12 @@ class SettingsLayer:
         wake, until neither runs."""
         if self._wifi_wake is not None:
             return
-        try:
-            import moybyte as _mb
-            import devices as _D
-        except ImportError:  # host: the runtime package
-            from runtime import moybyte as _mb
-            from runtime import devices as _D
+        import moybyte as _mb
+        import devices as _D
         try:
             import moy_log as _L
-        except ImportError:
-            try:
-                from runtime import moy_log as _L
-            except ImportError:  # the browser: one process table, no log
-                _L = None
+        except ImportError:  # the browser: one process table, no log
+            _L = None
         was = _L.current() if _L is not None else None
         if _L is not None:
             _L.current(_D.SHELL)
@@ -815,10 +786,7 @@ class SettingsLayer:
         wid = self._wifi_wake
         self._wifi_wake = None
         if wid is not None:
-            try:
-                import moybyte as _mb
-            except ImportError:
-                from runtime import moybyte as _mb
+            import moybyte as _mb
             _mb.WAKES.cancel(wid)
 
     def _wifi_tick(self):

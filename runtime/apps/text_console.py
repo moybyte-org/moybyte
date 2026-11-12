@@ -59,26 +59,12 @@ none of this ring: its scrollback is the shell's cell grid in C
 
 from array import array as _array
 
-try:
-    from editors_code import CodeEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor
-    from runtime.editors_base import KeyEdge
-
-try:
-    import os_log as _os_log
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import os_log as _os_log
-
-try:
-    from code_layer import symbols_for, draw_symbol_keys
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import symbols_for, draw_symbol_keys
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+from editors_code import CodeEditor
+from editors_base import KeyEdge
+import os_log as _os_log
+from code_layer import symbols_for, draw_symbol_keys
+import ui as _ui
+import ui_draw as _ui_draw
 
 # Where an echoed line's answer starts in its row: what was typed draws in
 # `value` (`draw`), and the row as read has no mark.

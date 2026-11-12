@@ -590,10 +590,7 @@ def binding(sanitize=False):
             if root is None:
                 _check(lib.moy_app_store_bind(self._p, None, b"", 0, 0, 0))
                 return
-            try:
-                import moy_ufiles_binding
-            except ImportError:
-                from runtime import moy_ufiles_binding
+            import moy_ufiles_binding
             rb = _str(str(root))
             parent = str(root).rsplit("/", 1)[0]
             moy_ufiles_binding.library().moy_fs_root((parent or str(root)).encode())
@@ -1159,10 +1156,7 @@ def binding(sanitize=False):
         if not on:
             lib.moy_app_door_bind(None)
             return
-        try:
-            import moy_loop
-        except ImportError:
-            from runtime import moy_loop
+        import moy_loop
         fn = moy_loop._lib().moy_loop_role
         lib.moy_app_door_bind(c.cast(fn, c.c_void_p))
 

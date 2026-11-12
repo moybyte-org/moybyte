@@ -72,10 +72,7 @@ of its own), so a device's records never ride the event queue, whose
 messages are text for the console's events. Python's callbacks (`irq`, a
 face's `on`) stay Python's."""
 
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moybyte as _moybyte
 
 # moy_app.h's codes, negated: what a row answers when it fails.
 STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, -11
@@ -98,10 +95,7 @@ def _code(exc):
 
 
 def _face(name):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     f = devices.api(name)
     if f is None:
         raise OSError(ENODEV, "this console has no %s" % name)
@@ -196,10 +190,7 @@ _NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO, -6: EBUSY}
 
 
 def _link():
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     ws = devices.console
     link = getattr(ws, "link", None)
     if link is None:
@@ -291,10 +282,7 @@ _PERMS = {"net": ("multiplayer",)}
 
 
 def _need(pid, name):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     perms = _PERMS.get(name, (name,))
     for perm in perms:
         if devices.may(pid, perm):

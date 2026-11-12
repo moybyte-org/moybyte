@@ -18,14 +18,9 @@ handheld tabs edit (`SceneEditor`, `MusicEditor`), and answers its taps and
 keys through the verbs. A change is the core's own (its undo step), synced
 to the running game as the tab's is."""
 
-try:
-    import ui
-    import editor_sound as Sound
-    import blocks as B
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-    from runtime import editor_sound as Sound
-    from runtime import blocks as B
+import ui
+import editor_sound as Sound
+import blocks as B
 
 PARTS = ("actor", "sounds", "song", "log", "maps", "palette", "made")
 

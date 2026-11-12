@@ -18,23 +18,12 @@ version, the board) that the system menu's About card
 The page reaches the shell through its AppContext (`LicencesPage.NEEDS`).
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    import licences as _lic
-    import achievements_ui as _ach
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime import licences as _lic
-    from runtime import achievements_ui as _ach
-
-try:
-    from moy_input import KEY_PGUP, KEY_PGDN
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import KEY_PGUP, KEY_PGDN
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+import licences as _lic
+import achievements_ui as _ach
+from moy_input import KEY_PGUP, KEY_PGDN
 
 _LEAD = {"tone": "dim", "wrap": True, "lines": 3, "inset": True}
 _LEAD_DESK = {"tone": "dim", "wrap": True, "lines": 3}

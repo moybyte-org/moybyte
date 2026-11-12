@@ -13,10 +13,7 @@ uart_set_loop_back does; `SPI_LOG[id]` every buffer an SPI host wrote;
 takes from its pointer (the last byte written) and a write fills after it;
 `ADC_LEVEL[pin]` what an ADC reads."""
 
-try:
-    import moy_lease as _N
-except ImportError:  # CPython: the runtime package
-    from runtime import moy_lease as _N
+import moy_lease as _N
 
 _RX = {}            # unit -> bytearray its peer sent, unread
 _TX = {}            # unit -> bytearray it wrote

@@ -196,21 +196,14 @@ except ImportError:  # pragma: no cover
 
 import json as _json
 
-try:
-    from moy_fs import _crc32
-except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_fs import _crc32
+from moy_fs import _crc32
 
 try:
     from moy_net import encode_batch, sync_batch, sync_apply, sync_path, sync_song
 except ImportError:  # pragma: no cover - host package lane
     from runtime.net_binding import (encode_batch, sync_batch,
                                      sync_apply, sync_path, sync_song)
-try:
-    from moy_store_base import apps_root, cart_path, store_path, USER_NS_KEY
-except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_store_base import (apps_root, cart_path, store_path,
-                                        USER_NS_KEY)
+from moy_store_base import apps_root, cart_path, store_path, USER_NS_KEY
 
 try:
     import binascii as _binascii
@@ -342,11 +335,8 @@ def _moy_carts():
     if not _CARTS:
         try:
             import moy_carts as mc
-        except ImportError:                  # host / CPython: the runtime package
-            try:
-                from runtime import moy_carts as mc
-            except ImportError:              # pragma: no cover -- no store at all
-                return None
+        except ImportError:              # pragma: no cover -- no store at all
+            return None
         _CARTS.append(mc)
     return _CARTS[0]
 
@@ -669,10 +659,7 @@ def seed_store(root_id, src, carts_root):
     every other root the bundle whole when it holds none of its files yet.
     The same report either way: {"first", "wrote", "removed"}. The carts'
     served folders stay behind for `served_carts`."""
-    try:
-        import moy_seed
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime import moy_seed
+    import moy_seed
     root = root_by_id(root_id)
     dest = root.path(carts_root)
     if root_id == CARTS_ROOT_ID:

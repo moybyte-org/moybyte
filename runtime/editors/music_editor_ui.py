@@ -14,26 +14,11 @@ it for the cart's audio session and `save_sounds`. Workstation.go_home() does
 not reset musicedit/music_preview (blocks/map's go_home does reset their
 active editor). Ctrl+Z/Ctrl+Y walk the editor's undo (`_music_input`)."""
 
-try:
-    from editors_music import MusicEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_music import MusicEditor
-    from runtime.editors_base import KeyEdge
-try:
-    from audio import MusicTrack, SFX
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import MusicTrack, SFX
-
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from layout_base import LayoutBase
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase
+from editors_music import MusicEditor
+from editors_base import KeyEdge
+from audio import MusicTrack, SFX
+import ui_draw as _ui_draw
+from layout_base import LayoutBase
 
 
 class MusicLayout(LayoutBase):
@@ -65,10 +50,7 @@ class MusicEditorUI:
     def page(self):
         """The handheld's Music page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_music import MusicPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_music import MusicPage
+            from editor_music import MusicPage
             self._page = MusicPage(self, _ui_draw.AppHost("editor_music"))
         return self._page
 

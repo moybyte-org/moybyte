@@ -7,12 +7,8 @@
 #
 # MicroPython-safe (_mkdir from the moy_fs leaf).
 
-try:
-    from moy_fs import _mkdir
-    from moy_store_base import THUMBS_DIR
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import _mkdir
-    from runtime.moy_store_base import THUMBS_DIR
+from moy_fs import _mkdir
+from moy_store_base import THUMBS_DIR
 
 
 class Image:

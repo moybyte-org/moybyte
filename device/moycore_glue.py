@@ -62,33 +62,18 @@ split it justified.
 
 from array import array
 
-try:
-    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                         install_handles, end_handles, put_scenes, layer_restore,
-                         layer_restore_end,
-                         snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
-                         drain_audio, cfg_blob, wants_layout)
-except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                                 install_handles, end_handles, put_scenes,
-                                 layer_restore, layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, run_room, run_face, sync_view, drain_audio, cfg_blob,
-                                 wants_layout)
-
-try:
-    from moy_input import pointer_state
-except ImportError:                      # host tests importing the device module
-    from runtime.moy_input import pointer_state
+from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
+                     LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
+                     install_handles, end_handles, put_scenes, layer_restore,
+                     layer_restore_end,
+                     snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
+                     drain_audio, cfg_blob, wants_layout)
+from moy_input import pointer_state
 
 try:
     import moycore as _moycore
-except ImportError:
-    try:                                 # the host: its ctypes binding
-        import runtime.moycore as _moycore
-    except ImportError:                  # a build without the module
-        _moycore = None
+except ImportError:                  # a build without the module
+    _moycore = None
 
 try:
     import moy_wasm as _moy_wasm         # the compiled cart's engine
@@ -98,10 +83,7 @@ except ImportError:                      # a build without it: no wasm runtime
 try:
     import moy_play as _moy_play         # the kernel's Player: the run's frame
 except ImportError:
-    try:                                 # the host: its ctypes binding
-        import runtime.moy_play as _moy_play
-    except ImportError:
-        _moy_play = None
+    _moy_play = None
 
 # The cart's clock: ms since the Player's stamp, which snap_shared writes into
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
@@ -111,15 +93,8 @@ try:
 except ImportError:                      # host tests: the ctypes binding
     from runtime import glass_binding as _glass
 
-try:
-    from ticks import _since_ms
-except ImportError:                      # host tests importing the device module
-    from runtime.ticks import _since_ms
-
-try:
-    from app_perms import run_admits_unsigned
-except ImportError:                      # host tests importing the device module
-    from runtime.app_perms import run_admits_unsigned
+from ticks import _since_ms
+from app_perms import run_admits_unsigned
 
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
@@ -1282,10 +1257,7 @@ class WasmRuntime:
     def __call__(self, ns, src):
         cart = getattr(self.ws, "cart", None) or {}
         if cart.get("wasi"):
-            try:
-                from wasi_run import WasiApp
-            except ImportError:                      # the host: the runtime package
-                from runtime.wasi_run import WasiApp
+            from wasi_run import WasiApp
             return WasiApp(self, self.ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
         return WasmRun(self.ws, ns, src)
 
@@ -1489,10 +1461,7 @@ def make_runtimes(ws):
     manifest name a cart gives it. An absent key is a runtime this build lacks,
     and the Player's runtime-missing panel is what a cart naming it gets."""
     out = {}
-    try:
-        from elf_run import make_elf_runtime
-    except ImportError:
-        from runtime.elf_run import make_elf_runtime
+    from elf_run import make_elf_runtime
     for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime),
                        ("elf", make_elf_runtime)):
         rt = make(ws)

@@ -25,10 +25,7 @@ try:
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moybyte as _moybyte
 
 EPERM, EBADF, ENODEV, EBUSY, EINVAL = 1, 9, 19, 16, 22
 SHELL = 1

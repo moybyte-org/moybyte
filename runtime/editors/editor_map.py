@@ -19,10 +19,7 @@ its own while it is open."""
 
 from array import array
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 # The foot's tools: (icon, word, the editor's tool, erasing).
 TOOLS = (("pencil", "Pen", "stamp", False), ("rect", "Box", "rect", False),

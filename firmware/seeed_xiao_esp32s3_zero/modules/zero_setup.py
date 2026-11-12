@@ -97,10 +97,7 @@ import json
 import moy_net
 from moy_net import http_response
 
-try:
-    from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
-except ImportError:                  # host / CPython: the runtime package
-    from runtime.ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
+from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
 
 AP_PREFIX = "moybyte-zero-"
 SETUP_PORT = 80

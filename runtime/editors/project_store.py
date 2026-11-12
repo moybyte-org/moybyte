@@ -34,40 +34,21 @@ test loads this module directly.
 
 import json
 
-try:
-    from editors_sheet import SpriteSheet, TileMap
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import SpriteSheet, TileMap
-try:
-    from audio import AudioBank
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import AudioBank
-try:
-    from widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from audio_session import AudioSession
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
-    from runtime.audio_session import AudioSession
+from editors_sheet import SpriteSheet, TileMap
+from audio import AudioBank
+from widgets import Pmem, Scenes, _err_text, _ticks_ms, _ticks_diff
+from audio_session import AudioSession
 # The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
 # module rather than transcribed: `ws.carts_store` may be absent (a bare test
 # workstation), and a second parser here is exactly the drift the one-body rule
 # forbids.
-try:
-    from moy_carts import TILE_FLAGS, parse_flags as _parse_flags
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_carts import TILE_FLAGS, parse_flags as _parse_flags
+from moy_carts import TILE_FLAGS, parse_flags as _parse_flags
 # The block vocabulary/compiler (#29) -- graduation detection recompiles the cart's
 # frozen blocks.json + normalize-compares (Stage 8). Same bare-or-package fallback
 # console.py/block_editor_ui use: bare `blocks` on the device / once host_app aliased
 # it, `runtime.blocks` when a test imports this module directly.
-try:
-    import blocks as _blocks_mod
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import blocks as _blocks_mod
-try:
-    import moy_catalogue
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_catalogue
+import blocks as _blocks_mod
+import moy_catalogue
 
 # How slow a code commit has to be before the perf_capture COMMIT line prints.
 # It is a NOISE FLOOR, not a measurement: a normal commit stays silent so the

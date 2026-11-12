@@ -81,39 +81,21 @@ keys and the pointer). The draw stack's choice of what a frame paints stays
 here, with the window table, the modes and the window verbs.
 """
 
-try:
-    from wm import FullscreenStackWM
-    from widgets import _ticks_ms, _ticks_diff, _err_text
-    from wm_desk import _BackdropLayer
-    from wm_parts import (_LayoutCtx, _Win, _Parked, _WindowStackLayer, _RepeatLayer,
-                          _PlayerWindowLayer, _PopoverUnderLayer, _PopoverOverLayer,
-                          MODE_MARK, _SHOWN)
-    from wm_chrome import WindowChrome, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR
-    from wm_overlays import WindowOverlays
-    from wm_paint import WindowPaint
-    from wm_route import WindowRoute
-    from moy_spine import EDITOR
-    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
-    from notifications import NOTES as _NOTES
-    import layout_base as _layout_base
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm import FullscreenStackWM
-    from runtime.widgets import _ticks_ms, _ticks_diff, _err_text
-    from runtime.wm_desk import _BackdropLayer
-    from runtime.wm_parts import (_LayoutCtx, _Win, _Parked, _WindowStackLayer, _RepeatLayer,
-                                  _PlayerWindowLayer, _PopoverUnderLayer, _PopoverOverLayer,
-                                  MODE_MARK, _SHOWN)
-    from runtime.wm_chrome import (WindowChrome, RZ_L, RZ_R, RZ_T, RZ_B,
-                                   RZ_CURSOR)
-    from runtime.wm_overlays import WindowOverlays
-    from runtime.wm_paint import WindowPaint
-    from runtime.wm_route import WindowRoute
-    from runtime.moy_spine import EDITOR
-    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
-    from runtime.notifications import NOTES as _NOTES
-    from runtime import layout_base as _layout_base
-    from runtime import ui_draw as _ui_draw
+from wm import FullscreenStackWM
+from widgets import _ticks_ms, _ticks_diff, _err_text
+from wm_desk import _BackdropLayer
+from wm_parts import (_LayoutCtx, _Win, _Parked, _WindowStackLayer, _RepeatLayer,
+                      _PlayerWindowLayer, _PopoverUnderLayer, _PopoverOverLayer,
+                      MODE_MARK, _SHOWN)
+from wm_chrome import WindowChrome, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR
+from wm_overlays import WindowOverlays
+from wm_paint import WindowPaint
+from wm_route import WindowRoute
+from moy_spine import EDITOR
+from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+from notifications import NOTES as _NOTES
+import layout_base as _layout_base
+import ui_draw as _ui_draw
 
 
 # The desk's default OUTER sizes of the apps the 2026-10 look sizes to their

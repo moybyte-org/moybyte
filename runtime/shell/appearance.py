@@ -89,56 +89,24 @@ read, before the layer stack exists -- so `carts_store`, `carts_root`,
 at the moment of use and never captured here.
 """
 
-try:
-    from moy_store_base import BUILTIN_NS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import BUILTIN_NS
-
-try:
-    from chrome import (_default_icon_sheet, _err_text,
-                        DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                        theme_known, THEME_NAMES,
-                        THEME_VARIANTS, text_scale_floor, adopt_packages,
-                        package, theme_names, forget_package, live_colors,
-                        backdrop as _backdrop)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_default_icon_sheet, _err_text,
-                                DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                                theme_known,
-                                THEME_NAMES, THEME_VARIANTS, text_scale_floor,
-                                adopt_packages, package, theme_names,
-                                forget_package, live_colors,
-                                backdrop as _backdrop)
-try:
-    from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
-                              PICTURE_FILE, derived_of, font_files, keys_of,
-                              manifest, minified, name_ok, named, overlay,
-                              read_look, sheet_files, wall_keys)
-    from moy_store_base import cart_path
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
-                                      PETME128, PICTURE_FILE, derived_of, font_files,
-                                      keys_of, manifest, minified, name_ok,
-                                      named, overlay, read_look, sheet_files,
-                                      wall_keys)
-    from runtime.moy_store_base import cart_path
+from moy_store_base import BUILTIN_NS
+from chrome import (_default_icon_sheet, _err_text,
+                    DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
+                    theme_known, THEME_NAMES,
+                    THEME_VARIANTS, text_scale_floor, adopt_packages,
+                    package, theme_names, forget_package, live_colors,
+                    backdrop as _backdrop)
+from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
+                          PICTURE_FILE, derived_of, font_files, keys_of,
+                          manifest, minified, name_ok, named, overlay,
+                          read_look, sheet_files, wall_keys)
+from moy_store_base import cart_path
 from binascii import crc32 as _crc32
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-try:
-    import fontset as _fontset
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import fontset as _fontset
-try:
-    import shell_layout as _shell_layout
-    import layout_base as _layout_base
-    import iconsets as _iconsets
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import shell_layout as _shell_layout
-    from runtime import layout_base as _layout_base
-    from runtime import iconsets as _iconsets
+import ui_draw as _ui_draw
+import fontset as _fontset
+import shell_layout as _shell_layout
+import layout_base as _layout_base
+import iconsets as _iconsets
 _ui_is_light = _ui_draw.is_light
 
 def _ui_text_w(t):
@@ -232,10 +200,7 @@ _FULL = [False]         # a load found the slots full and reset them
 
 def _keep_splash(th):
     """The next boot's first light on theme roles `th` (console.keep_splash)."""
-    try:
-        from console import keep_splash
-    except ImportError:  # pragma: no cover - host package lane
-        from runtime.console import keep_splash
+    from console import keep_splash
     return keep_splash(th)
 
 

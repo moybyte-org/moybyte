@@ -17,11 +17,7 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-try:
-    from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, set_publish_root,
-                                _native as _store)
+from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
 if _store is not None and not hasattr(_store, "rmtree"):
     _store = None
 

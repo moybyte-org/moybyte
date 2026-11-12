@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import ctypes
 
-try:                                    # the host's runtime package
-    from . import moy_loop as _loop
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import moy_loop as _loop
+import moy_loop as _loop
 
 EMERG, ALERT, CRIT, ERR, WARNING, NOTICE, INFO, DEBUG = range(8)
 KERNEL, SHELL = 0, 1

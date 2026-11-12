@@ -12,17 +12,10 @@ binding its constants, so either may load first. MicroPython-safe.
 
 try:
     import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    try:
-        from runtime import moybuf as _moybuf
-    except ImportError:
-        _moybuf = None
-try:
-    from artwork import read_cover
-    from file_widgets import Bitmap
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.artwork import read_cover
-    from runtime.file_widgets import Bitmap
+except ImportError:
+    _moybuf = None
+from artwork import read_cover
+from file_widgets import Bitmap
 
 
 class Viewer:
@@ -188,7 +181,4 @@ class Viewer:
 
 
 # paint_app's zoom word, imported last (see above).
-try:
-    from paint_app import FIT
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.paint_app import FIT
+from paint_app import FIT

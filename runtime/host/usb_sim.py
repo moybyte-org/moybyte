@@ -10,10 +10,7 @@ sees what an app on a P4 would.
   sent(addr) -> (bytes, baud)       what the console sent it, and its line
   remove()                          no USB host again"""
 
-try:
-    from . import moy_usb as _N
-except ImportError:  # loaded flat
-    import moy_usb as _N
+import moy_usb as _N
 
 
 def install():

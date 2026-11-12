@@ -21,21 +21,12 @@ Python side of each verb: the app objects (`_apps`, `_apps_by_id`), the
 surfaces a route lands on, and the radio service the lease powers.
 """
 
-try:
-    from app_decls import APPS
-    from chrome import DEFAULT_VARIANT, NAMES
-    from settings_layer import SETTINGS_TOGGLES
-    from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
-    from ui_draw import AppHost
-    from achievements import is_proc as _is_ach_proc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_decls import APPS
-    from runtime.chrome import DEFAULT_VARIANT, NAMES
-    from runtime.settings_layer import SETTINGS_TOGGLES
-    from runtime.moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR,
-                                   ROUTE_WINDOW)
-    from runtime.ui_draw import AppHost
-    from runtime.achievements import is_proc as _is_ach_proc
+from app_decls import APPS
+from chrome import DEFAULT_VARIANT, NAMES
+from settings_layer import SETTINGS_TOGGLES
+from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
+from ui_draw import AppHost
+from achievements import is_proc as _is_ach_proc
 import moy_app as _moy_app
 
 # The radio's holders: a process's tags, each held under its pid, and the
@@ -163,10 +154,7 @@ class SpineVerbs:
         if self.look.theme_name != name:
             self.look.set_theme_variant(DEFAULT_VARIANT, persist=False)
         # The kernel lights the next boot's glass on this theme's ground.
-        try:
-            from console import keep_splash
-        except ImportError:  # pragma: no cover - host package lane
-            from runtime.console import keep_splash
+        from console import keep_splash
         keep_splash(self.theme_colors)
         # Every persisted ON/OFF setting, through the verb its registry entry
         # names (#209 section 7): the key is the system/settings key, the default is

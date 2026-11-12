@@ -47,30 +47,11 @@ board's task watchdog fed meanwhile.
 
 import gc
 
-try:
-    import devfs as _devfs
-except ImportError:  # host: the runtime package
-    from runtime import devfs as _devfs
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    import scheduler as _sched
-except ImportError:  # host: the runtime package
-    from runtime import scheduler as _sched
-
-try:
-    import moy_app as _moy_app
-except ImportError:  # host: the runtime package
-    from runtime import moy_app as _moy_app
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import devfs as _devfs
+from ticks import _ticks_ms, _ticks_diff
+import scheduler as _sched
+import moy_app as _moy_app
+import moybyte as _moybyte
 
 try:
     import moy_log as _L
@@ -98,10 +79,7 @@ ASKED = object()                # _first_run: the session asks, the next line an
 
 
 def _cron():
-    try:
-        import cron
-    except ImportError:  # host: the runtime package
-        from runtime import cron
+    import cron
     return cron
 
 
@@ -280,10 +258,7 @@ def exit_code(v, stderr):
 
 
 def traceback_text(exc):
-    try:
-        from os_log import traceback_text as tt
-    except ImportError:  # host: the runtime package
-        from runtime.os_log import traceback_text as tt
+    from os_log import traceback_text as tt
     return tt(exc) or repr(exc)
 
 
@@ -350,10 +325,7 @@ def wasi_roots(granted):
     No folder is none: a manifest naming two is refused before it runs
     (`moy_app.manifest_error`), and Downloads, `.Trash` and `.history` are
     no grant's."""
-    try:
-        from moy_store_base import FILE_KIND_DIRS
-    except ImportError:  # host: the runtime package
-        from runtime.moy_store_base import FILE_KIND_DIRS
+    from moy_store_base import FILE_KIND_DIRS
     kind = _moy_app.policy(granted)[1]
     return [] if kind is None else ["files/" + FILE_KIND_DIRS[kind]]
 
@@ -502,10 +474,7 @@ class ShellDoor:
         its pid (the code kept for `status`). A foreground compiled command
         given a `job` (the session's, as `role` names it) answers RUNNING and
         goes on in `step JOB`s."""
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         tier = app_perms.tier_of(cart)
         if tier in ("wasm", "elf"):
             return self.run_compiled(cart, name, argv, bg, tier, job)
@@ -565,10 +534,7 @@ class ShellDoor:
         shell's prompt and ends the run, ASKED coming back: the line typed
         next is the answer, and the line runs again with it (`io.answer`),
         so no run waits on the terminal for it."""
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         if rec is not app_perms.UNASKED or bg or self.io is None:
             return rec
         if getattr(self.io, "ask", None) is not None:
@@ -602,10 +568,7 @@ class ShellDoor:
         (`_compiled_steps`): RUNNING. Its process has an event queue (its app
         id and its manifest's `receives`), which the program reads as its
         event descriptor (native/moy_kernel/moy_evq.h) and its end closes."""
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         rt = (getattr(self.ws, "runtimes", None) or {}).get(tier)
         if rt is None or not hasattr(rt, "command"):
             self.err(name, "needs the %s tier, which this console lacks"
@@ -725,10 +688,7 @@ class ShellDoor:
     def v_role(self, job, *argv):
         if not argv:
             return ABSENT
-        try:
-            import sh_roles
-        except ImportError:  # host: the runtime package
-            from runtime import sh_roles
+        import sh_roles
         fn = getattr(sh_roles, "r_" + argv[0], None)
         if fn is None:
             return ABSENT
@@ -765,10 +725,7 @@ class ShellDoor:
     def _as_shell(self, name, fn):
         """fn() as the shell (pid 1): its answer, a generator's return value
         at its end, 1 for its failure (said on fd 2)."""
-        try:
-            import sh_roles
-        except ImportError:  # host: the runtime package
-            from runtime import sh_roles
+        import sh_roles
         was = _L.current() if _L is not None else None
         if _L is not None:
             _L.current(SHELL)

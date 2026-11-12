@@ -13,10 +13,7 @@ try:                        # a VM: the kernel's frame loop (native/moy_kernel)
 except ImportError:         # host CPython: the host drives its own frames
     _loop = None
 
-try:
-    import wallclock as _wc
-except ImportError:  # pragma: no cover - host package lane
-    from runtime import wallclock as _wc
+import wallclock as _wc
 
 
 class SettingsToggles:

@@ -9,10 +9,7 @@ over the driver, so a test hears what an app reads.
 
 import math
 
-try:
-    from . import moy_mic as _N
-except ImportError:  # loaded flat
-    import moy_mic as _N
+import moy_mic as _N
 
 _PHASE = [0.0]
 

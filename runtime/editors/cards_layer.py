@@ -31,32 +31,12 @@ EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    import layout_base as _layout_base
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _layout_base
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import text_modes as _modes
-
-try:
-    from layout_base import LayoutBase
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase
-
-try:
-    from widgets import arm_prompt as _arm_prompt
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import arm_prompt as _arm_prompt
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _layout_base
+import text_modes as _modes
+from layout_base import LayoutBase
+from widgets import arm_prompt as _arm_prompt
 
 
 class _Prompt:
@@ -411,10 +391,7 @@ class CardsLayer:
     def page(self):
         """The Settings page on the verbs, built at its first draw."""
         if self._page is None:
-            try:
-                from editor_settings import SettingsPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_settings import SettingsPage
+            from editor_settings import SettingsPage
             self._page = SettingsPage(self.ws, _ui_draw.AppHost("editor_settings"),
                                       (self._open_meta, self._open_files))
         return self._page

@@ -290,10 +290,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # WAMR) is an absent key.
     host_canvas.install()
     import moycore_glue                 # device/, on the path host_canvas puts it
-    try:
-        from runtime import wasm_host
-    except ImportError:  # pragma: no cover
-        import wasm_host
+    import wasm_host
 
     runtimes = {}
     lua = moycore_glue.make_moycore_runtime(ws)

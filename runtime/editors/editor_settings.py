@@ -18,10 +18,7 @@ label is its `card` text up to its value, as a kid reads it ("Run at").
 A change is the config's and the undo history's, as a stepper's was
 (`Project.record_config`)."""
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 
 def card_label(f):

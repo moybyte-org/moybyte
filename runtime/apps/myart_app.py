@@ -22,27 +22,16 @@ Trash gives a drawing back. On the desk the foot carries the focused card's
 verbs. With nothing drawn yet the page says so and offers New drawing.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 from array import array
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from moy_store_base import builtin_name
-    from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
-    from picture_copies import PictureCopies
-    from drawing_pages import GamePage, shown, dot
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from runtime.moy_store_base import builtin_name
-    from runtime.artwork import DrawingCovers, picture_size, GAME_W, GAME_H
-    from runtime.picture_copies import PictureCopies
-    from runtime.drawing_pages import GamePage, shown, dot
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from moy_store_base import builtin_name
+from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
+from picture_copies import PictureCopies
+from drawing_pages import GamePage, shown, dot
+from ticks import _ticks_ms, _ticks_diff
 
 
 DRAWINGS = "drawings"

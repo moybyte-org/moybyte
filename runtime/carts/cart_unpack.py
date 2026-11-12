@@ -29,12 +29,8 @@ try:
 except ImportError:  # pragma: no cover
     _io = None
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-    from moy_fs import _exists
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_fs import _exists
+from ticks import _ticks_ms, _ticks_diff
+from moy_fs import _exists
 
 
 def _exact(src, n, job):
@@ -711,11 +707,6 @@ class _Local:
 
 
 # cart_index's words and fetch helpers, imported last (see above).
-try:
-    from cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
-                            _Fetched, _MP, _hex, _log, _ranged_bytes,
-                            _tail_bytes, net_text, resolve, stage_root)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
-                                    _Fetched, _MP, _hex, _log, _ranged_bytes,
-                                    _tail_bytes, net_text, resolve, stage_root)
+from cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
+                        _Fetched, _MP, _hex, _log, _ranged_bytes,
+                        _tail_bytes, net_text, resolve, stage_root)

@@ -11,10 +11,7 @@ the native module has none.
 
 from __future__ import annotations
 
-try:
-    from runtime import lua_binding as _lb
-except ImportError:                      # loaded flat, runtime/ on sys.path
-    import lua_binding as _lb            # type: ignore[no-redef]
+import lua_binding as _lb            # type: ignore[no-redef]
 
 if not _lb.HostLuaRun.available():
     raise ImportError("moycore: no host Lua binding (a C compiler builds it)")

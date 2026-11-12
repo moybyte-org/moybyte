@@ -8,10 +8,7 @@ the shelf's scan reads straight off the card)."""
 
 from binascii import hexlify as _hexlify
 
-try:
-    from moy_store_base import icon_rows
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import icon_rows
+from moy_store_base import icon_rows
 
 
 # moy SPEC.md 3.2 fixes a CART sheet at 128 x 256 pixels -- 16 cols x 32 rows of

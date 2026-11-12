@@ -20,14 +20,8 @@ console can do:
               the game keeps the glass, and the ladder still dims and blanks.
 """
 
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # host: the runtime package
-    from runtime import ui_draw as _ui_draw
-try:
-    from chrome import _ticks_ms, _ticks_diff
-except ImportError:  # host: the runtime package
-    from runtime.chrome import _ticks_ms, _ticks_diff
+import ui_draw as _ui_draw
+from chrome import _ticks_ms, _ticks_diff
 
 DIM, SAVER, BLANK = 1, 2, 3
 

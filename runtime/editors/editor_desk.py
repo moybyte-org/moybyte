@@ -30,24 +30,14 @@ half-size surface) the focused pane stands alone over the panes area, as a
 grown one does, and the keys move it to the next. On a handheld the
 Editor is one tab at a time under its one bar (`EditorApp`)."""
 
-try:
-    import moybuf
-    import ui
-    import editor_panes as P
-    import editor_parts as Parts
-    import editor_sound as Sound
-    import layout_base as _lb
-    from layers import Layer
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybuf
-    from runtime import ui
-    from runtime import editor_panes as P
-    from runtime import editor_parts as Parts
-    from runtime import editor_sound as Sound
-    from runtime import layout_base as _lb
-    from runtime.layers import Layer
-    from runtime.ticks import _ticks_ms, _ticks_diff
+import moybuf
+import ui
+import editor_panes as P
+import editor_parts as Parts
+import editor_sound as Sound
+import layout_base as _lb
+from layers import Layer
+from ticks import _ticks_ms, _ticks_diff
 
 from array import array
 

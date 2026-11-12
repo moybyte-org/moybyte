@@ -147,23 +147,13 @@ try:
 except ImportError:  # pragma: no cover
     _io = None
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
-                                builtin_ns, cart_path)
-    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
-    import moy_carts as _store
-    import cart_files as _cart_files
-    import cart_listing as _cl
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import (_sibling_path, _is_dir,
-                                        COVER_MAX_BYTES, builtin_ns, cart_path)
-    from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
-                                _write_atomic_steps)
-    from runtime import moy_carts as _store
-    from runtime import cart_files as _cart_files
-    from runtime import cart_listing as _cl
+from ticks import _ticks_ms, _ticks_diff
+from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
+                            builtin_ns, cart_path)
+from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
+import moy_carts as _store
+import cart_files as _cart_files
+import cart_listing as _cl
 
 # The record and the removal are native/moy_store/moy_shelf.h's on every tier:
 # the image's moy_store, or the same C over ctypes on CPython.
@@ -791,10 +781,7 @@ def cart_state(cart, p, entry, present, manifest=None):
 
 
 def _moy_carts():
-    try:
-        import moy_carts
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime import moy_carts
+    import moy_carts
     return moy_carts
 
 
@@ -1839,7 +1826,4 @@ def _copy_bytes(src, dst):
 # -- the stream readers ---------------------------------------------------------
 # The stream readers (cart_unpack), this module's names too. Imported at the
 # foot because cart_unpack takes this module's words and fetch helpers.
-try:
-    from cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local
+from cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local

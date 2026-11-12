@@ -20,10 +20,7 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-try:                                    # the host's runtime package
-    from . import native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import native_build
+import native_build
 
 NET = os.path.join(native_build.ROOT, "native", "moy_net")
 MBEDTLS = os.path.join(NET, "mbedtls")

@@ -2,10 +2,7 @@
 a word): `vol N`, the console's level, stored in its settings row and applied
 to the kernel's; `hush`, every session silent from the next block."""
 
-try:
-    from audio_session import console_volume, hush as _hush
-except ImportError:                     # host: the runtime package
-    from runtime.audio_session import console_volume, hush as _hush
+from audio_session import console_volume, hush as _hush
 
 
 def vol(chan, ws, parts, line):

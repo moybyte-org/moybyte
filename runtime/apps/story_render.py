@@ -21,20 +21,9 @@ try:
 except ImportError:  # pragma: no cover - a port with only uio
     import uio as _io
 
-try:
-    import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybuf as _moybuf
-
-try:
-    from moyimg import cover_stream as _cover_stream
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream as _cover_stream
-
-try:
-    import story_doc as _doc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import story_doc as _doc
+import moybuf as _moybuf
+from moyimg import cover_stream as _cover_stream
+import story_doc as _doc
 
 SW, SH = _doc.SW, _doc.SH
 FACE = {"sans": 0, "sans_bold": 1, "mono": 2}

@@ -60,10 +60,7 @@ except ImportError:                      # host: the C over ctypes
 http_response = moy_net.http_response
 query_param = moy_net.query_param
 
-try:
-    import moy_sync
-except ImportError:                      # host / CPython: the runtime package
-    from runtime import moy_sync
+import moy_sync
 
 DEFAULT_PORT = 80
 
@@ -666,10 +663,7 @@ class WebHost:
 
 
 def _system_dir(ws):
-    try:
-        import ssh_service
-    except ImportError:                  # host: the runtime package
-        from runtime import ssh_service
+    import ssh_service
     return ssh_service.system_dir(ws)
 
 

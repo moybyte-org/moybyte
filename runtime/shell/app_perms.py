@@ -52,14 +52,8 @@ manifest permissions consented at install or first run (None for a cart
 made here, and for a Settings switch on a cart with no record) and the ones
 turned off since. A malformed entry reads as no entry."""
 
-try:
-    import moy_app as _moy_app
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import moy_app as _moy_app
-try:
-    from moy_store_base import builtin_name, id_in_folder, vendor
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_store_base import builtin_name, id_in_folder, vendor
+import moy_app as _moy_app
+from moy_store_base import builtin_name, id_in_folder, vendor
 
 ALL = ("python", "lua", "wasm", "elf")
 
@@ -222,10 +216,7 @@ def tiers_of(cart):
     own = tier_of(cart)
     if not cart or cart.get("type") == "service":
         return (own,)
-    try:
-        import scheduler
-    except ImportError:  # host: the runtime package
-        from runtime import scheduler
+    import scheduler
     got = scheduler.entry_of(cart)
     return (own,) if got is None or got[1] == own else (own, got[1])
 
@@ -238,20 +229,14 @@ def services(ws):
     for name in ("wifi", "net", "gpio"):
         if getattr(ws, name, None) is not None:
             out.append(name)
-    try:
-        import devices
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime import devices
+    import devices
     return tuple(out) + devices.apis() + leasable()
 
 
 def leasable():
     """`lease:<row>` for each row this console leases: none where it has no
     machine objects to hand out (a host)."""
-    try:
-        from leases import LEASES
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime.leases import LEASES
+    from leases import LEASES
     if LEASES.machine is None:
         return ()
     return tuple("lease:" + o[0] for o in LEASES.offers())
@@ -301,10 +286,7 @@ def run_admits_unsigned(ws, cart):
 
 def board_words():
     """This board's name as Settings' About says it, or None (the host)."""
-    try:
-        from settings_layer import board_name
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime.settings_layer import board_name
+    from settings_layer import board_name
     return board_name()
 
 
@@ -471,10 +453,7 @@ def show(ui, lines):
 
 def _has_service(cart):
     """An app cart declaring its own service (scheduler.entry_of)."""
-    try:
-        import scheduler
-    except ImportError:  # host: the runtime package
-        from runtime import scheduler
+    import scheduler
     return scheduler.entry_of(cart) is not None
 
 
@@ -514,10 +493,7 @@ def regrant(ws, aid):
     roles, kind = _moy_app.policy(consent.check(cart)[0])
     svc = roles
     if cart.get("type") != "service":
-        try:
-            import scheduler
-        except ImportError:  # host: the runtime package
-            from runtime import scheduler
+        import scheduler
         got = scheduler.entry_of(cart)
         if got is not None and got[1] != tier_of(cart):
             # its service runs on a tier of its own, which may grant less

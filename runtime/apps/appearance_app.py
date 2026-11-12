@@ -36,30 +36,12 @@ backs out.
 from array import array
 
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-
-try:
-    from moy_store_base import BUILTIN_NS, builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import BUILTIN_NS, builtin_name
-
-try:
-    from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look, theme_modes,
-                        theme_names, theme_presets, theme_tints, RGB, PAINT, LOOK_NONE,
-                        rgb565_of, nearest_of)
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look,
-                                theme_modes,
-                                theme_names, theme_presets, theme_tints, RGB, PAINT,
-                                LOOK_NONE, rgb565_of, nearest_of)
-
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from moy_store_base import BUILTIN_NS, builtin_name
+from chrome import (THEME_NAMES, theme_accents, theme_colors, theme_look, theme_modes,
+                    theme_names, theme_presets, theme_tints, RGB, PAINT, LOOK_NONE,
+                    rgb565_of, nearest_of)
+import ui
 
 # The theme's picture's wallpaper id (`Appearance.PICTURE`), and the change
 # value that puts the source theme's own wallpaper back (`Appearance.change`).

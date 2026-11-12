@@ -21,12 +21,8 @@ pointer here."""
 
 from array import array
 
-try:
-    import ui
-    from audio import SFX_NAME_MAX
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-    from runtime.audio import SFX_NAME_MAX
+import ui
+from audio import SFX_NAME_MAX
 
 # The brush's order (EDITOR_LAYOUT.md's pictures), as wave ids
 # (`audio.WAVE_*`): square, triangle, saw, pulse, organ, noise, phaser, tilted.

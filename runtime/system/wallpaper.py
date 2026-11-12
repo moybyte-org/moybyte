@@ -50,18 +50,9 @@ try:
     from binascii import crc32
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
-try:
-    from ui_draw import cart_text as _cart_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import cart_text as _cart_text
-try:
-    from widgets import Pmem, _Blit, _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _Blit, _err_text
-try:
-    from file_widgets import Bitmap, cover_indices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.file_widgets import Bitmap, cover_indices
+from ui_draw import cart_text as _cart_text
+from widgets import Pmem, _Blit, _err_text
+from file_widgets import Bitmap, cover_indices
 # #186: the picture's resampled indices. Off-heap for the same reason its
 # RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices is
 # 153,600 bytes on the Guition's 480x320 desk, and that board's largest
@@ -69,19 +60,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # bytearray on the host and wherever PSRAM is out, so this stays one code path.
 try:
     import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    try:
-        from runtime import moybuf as _moybuf
-    except ImportError:
-        _moybuf = None
-try:
-    from moyimg import cover_stream, file_sig, text_sig
-    from moy_image import (load_picture_bake, load_wallpaper_preview,
-                           save_picture_bake, save_wallpaper_preview)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream, file_sig, text_sig
-    from runtime.moy_image import (load_picture_bake, load_wallpaper_preview,
-                                   save_picture_bake, save_wallpaper_preview)
+except ImportError:
+    _moybuf = None
+from moyimg import cover_stream, file_sig, text_sig
+from moy_image import (load_picture_bake, load_wallpaper_preview,
+                       save_picture_bake, save_wallpaper_preview)
 
 
 def _rect(v):

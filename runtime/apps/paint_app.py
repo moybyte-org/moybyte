@@ -37,27 +37,11 @@ Autosave (#108): a drawing persists on an idle debounce, a kid never saves;
 the first save of a new drawing says its name in a toast.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-
-try:
-    from artwork import ArtworkService, PaintDocument, DESK_W, DESK_H, GAME_W, GAME_H
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.artwork import ArtworkService, PaintDocument, DESK_W, DESK_H, GAME_W, GAME_H
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    from drawing_pages import GamePage, StoryPage, shown, stories_here
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.drawing_pages import GamePage, StoryPage, shown, stories_here
+import ui
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from artwork import ArtworkService, PaintDocument, DESK_W, DESK_H, GAME_W, GAME_H
+from ticks import _ticks_ms, _ticks_diff
+from drawing_pages import GamePage, StoryPage, shown, stories_here
 
 
 # The tools, in their order: (icon, key, word). Shape's icon is the shape in use.
@@ -213,12 +197,8 @@ _RING = 3
 # Viewer and the draw half live in modules of their own (paint_viewer,
 # paint_draw), which take this module's constants at their foot: imported
 # here, after those are bound.
-try:
-    from paint_viewer import Viewer
-    from paint_draw import PaintDraw
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.paint_viewer import Viewer
-    from runtime.paint_draw import PaintDraw
+from paint_viewer import Viewer
+from paint_draw import PaintDraw
 
 
 class PaintAppLayer(PaintDraw):

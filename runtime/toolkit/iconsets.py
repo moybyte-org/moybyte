@@ -36,14 +36,9 @@ and the desk's (tools/make_font.py's `module`).
   plus(cv, rect, ink, spec, stepped)          the set's `new` at any size
 """
 
-try:
-    import fontset as _fontset
-    import ui_draw as _ui_draw
-    from editors_sheet import IconSheet, _SheetSprite
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import fontset as _fontset
-    from runtime import ui_draw as _ui_draw
-    from runtime.editors_sheet import IconSheet, _SheetSprite
+import fontset as _fontset
+import ui_draw as _ui_draw
+from editors_sheet import IconSheet, _SheetSprite
 
 SLOTS = (
     "moy", "home", "wifi", "wifi_off", "battery", "search", "play", "projects",

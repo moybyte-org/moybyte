@@ -32,24 +32,12 @@ an old story cart's deck) is not listed: it reads as absent.
 
 from array import array
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    from app_shell import ListShellApp
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from ticks import _ticks_ms, _ticks_diff
-    import story_doc as D
-    import story_render as R
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_shell import ListShellApp
-    from runtime.layout_base import (bar_rows, content_of, metric_class, window_foot,
-                                     DESK)
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime import story_doc as D
-    from runtime import story_render as R
+import ui
+from app_shell import ListShellApp
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from ticks import _ticks_ms, _ticks_diff
+import story_doc as D
+import story_render as R
 
 KIND = "stories"
 DOC = "story.json"
@@ -370,10 +358,7 @@ class StorybookAppLayer(ListShellApp):
         self.toast = None
         self._scan()
         if self.layout.desk and self.ed is None:
-            try:
-                from story_edit import Editor
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.story_edit import Editor
+            from story_edit import Editor
             self.ed = Editor(self)
         if self.stories:
             self._focus = self._card_id(self.stories[0]["name"])

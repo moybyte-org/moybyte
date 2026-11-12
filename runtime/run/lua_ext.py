@@ -899,10 +899,7 @@ def end_handles(pins):
 
 
 def _moybyte_mod():
-    try:
-        import moybyte as mod
-    except ImportError:  # host: the runtime package
-        from runtime import moybyte as mod
+    import moybyte as mod
     return mod
 
 

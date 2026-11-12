@@ -332,10 +332,7 @@ class LoopbackNet(NetService):
 # net.pump() runs every frame of a multiplayer cart (#66 has the cost).
 import json
 
-try:
-    import moy_play as _mp
-except ImportError:                     # CPython: the host's ctypes module
-    from runtime import moy_play as _mp
+import moy_play as _mp
 
 PROTO = 3
 T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
@@ -986,10 +983,7 @@ class EspNowLink:
         if notice is None:
             return
         try:
-            try:
-                import ui_draw as _ud
-            except ImportError:
-                from runtime import ui_draw as _ud
+            import ui_draw as _ud
             notice(_ud.s("notice.out_of_sync"), _ud.s("notice.out_of_sync_why"), "warn")
         except Exception as exc:  # noqa: BLE001 -- a notice must never kill a frame
             print("Moybyte link: notice failed:", exc)
@@ -1101,10 +1095,7 @@ def match_rate(fps):
 
 
 def _cart_buttons():
-    try:
-        from cart_api import CART_BUTTONS
-    except ImportError:
-        from runtime.cart_api import CART_BUTTONS
+    from cart_api import CART_BUTTONS
     return CART_BUTTONS
 
 

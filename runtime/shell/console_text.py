@@ -15,20 +15,14 @@ points (`set_menu_view`, `_open_menu`/`_open_paint`/`_open_map`/..., `edit_theme
 (`_menu_keys`, `_sync_cart_text_mode`) is console_input's.
 """
 
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
+import ui_draw as _ui_draw
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
 # without that alias (the device path is plain `import blocks`). Mirrors
 # moy_carts._import_blocks so neither module hard-depends on import order.
-try:
-    import blocks as _blocks_mod
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import blocks as _blocks_mod
+import blocks as _blocks_mod
 
 # The inputs that type (`can_type`).
 _TYPING_INPUTS = ("keys", "tdeck")
@@ -224,10 +218,7 @@ class TextVerbs:
         first): the theme opened in the Editor's theme mode, on its Config tab;
         `made` names the theme a copy was just made from, which Config's status
         line names once. Done comes back to the surface it was opened from."""
-        try:
-            from theme_editor import ThemeDoc
-        except ImportError:  # pragma: no cover - host fallback when not yet aliased
-            from runtime.theme_editor import ThemeDoc
+        from theme_editor import ThemeDoc
         doc = ThemeDoc(self, made)
         self.editor_app.open_theme(doc, self.wm.top_kind())
         return True

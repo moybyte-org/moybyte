@@ -13,11 +13,8 @@ it to the pointer exactly as it hands over a finger's.
 
 try:                        # a VM: the kernel's module
     import moy_loop as _loop
-except ImportError:         # host CPython: the ctypes binding
-    try:
-        from runtime import moy_loop as _loop
-    except ImportError:     # a tier whose frames are not the kernel's yet
-        _loop = None
+except ImportError:     # a tier whose frames are not the kernel's yet
+    _loop = None
 
 
 def tap(chan, ws, parts, line):

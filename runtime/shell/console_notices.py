@@ -19,80 +19,30 @@ over what is running: the pause and stop cards (`PauseMenu`), the delete
 confirm, the system menu (`SystemMenuUI`) and its About card (`AboutCard`).
 """
 
-try:
-    from chrome import (_ticks_ms, _ticks_diff)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_ticks_ms, _ticks_diff)
-try:
-    from widgets import (TOAST_MS,
-                         DANGER_ICON as _DANGER_ICON)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (TOAST_MS,
-                                 DANGER_ICON as _DANGER_ICON)
-try:
-    import chrome_ops as _ch
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
-try:
-    import ui_draw as _ui_draw
-    import ui as _ui
-    import layout_base as _lb
-    import shell_layout as _shell_layout
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-    from runtime import ui as _ui
-    from runtime import layout_base as _lb
-    from runtime import shell_layout as _shell_layout
-try:
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name as _builtin_name
-try:
-    import app_perms as _perms
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import app_perms as _perms
-try:
-    from notifications import NOTES as _NOTES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.notifications import NOTES as _NOTES
-try:
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import devices as _devices
-try:
-    import scheduler as _scheduler
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import scheduler as _scheduler
-try:
-    from front import FRONT as _FRONT
-except ImportError:  # host: the runtime package
-    from runtime.front import FRONT as _FRONT
-try:
-    from intents import INTENTS as _INTENTS
-    import intents as _intents
-    import iconsets as _iconsets
-    import system_api as _system_api
-    import text_modes as _text_modes
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime.intents import INTENTS as _INTENTS
-    from runtime import intents as _intents
-    from runtime import iconsets as _iconsets
-    from runtime import system_api as _system_api
-    from runtime import text_modes as _text_modes
-    from runtime import moybyte as _moybyte
-try:
-    from status_items import ITEMS as _ITEMS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.status_items import ITEMS as _ITEMS
-try:
-    import achievements_ui as _ach_ui
-    import about_ui as _about_ui
-    import achievements as _ach
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import achievements_ui as _ach_ui
-    from runtime import about_ui as _about_ui
-    from runtime import achievements as _ach
+from chrome import (_ticks_ms, _ticks_diff)
+from widgets import (TOAST_MS,
+                     DANGER_ICON as _DANGER_ICON)
+import chrome_ops as _ch
+import ui_draw as _ui_draw
+import ui as _ui
+import layout_base as _lb
+import shell_layout as _shell_layout
+from moy_store_base import builtin_name as _builtin_name
+import app_perms as _perms
+from notifications import NOTES as _NOTES
+import devices as _devices
+import scheduler as _scheduler
+from front import FRONT as _FRONT
+from intents import INTENTS as _INTENTS
+import intents as _intents
+import iconsets as _iconsets
+import system_api as _system_api
+import text_modes as _text_modes
+import moybyte as _moybyte
+from status_items import ITEMS as _ITEMS
+import achievements_ui as _ach_ui
+import about_ui as _about_ui
+import achievements as _ach
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
@@ -595,10 +545,7 @@ class Notices:
             if brought:
                 self.run.player.window_event("moy_action", n.id, key)
             return
-        try:
-            import scheduler as _sched
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import scheduler as _sched
+        import scheduler as _sched
         hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
         c = n.cart
         if hooked and not (c and c.get("entry") and c.get("path")):
@@ -1995,10 +1942,7 @@ class AboutCard:
         u = ws.updater
         v = _about_ui.version_words(u, ws._ota_channel() if u is not None else None)
         b = _about_ui.board_of()
-        try:
-            from settings_layer import BOARDS
-        except ImportError:
-            from runtime.settings_layer import BOARDS
+        from settings_layer import BOARDS
         upd = None
         if u is not None:
             ready = getattr(ws.update_ui, "offered", None)

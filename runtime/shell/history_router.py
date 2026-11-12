@@ -82,25 +82,10 @@ an editor or a layer stack -- so `project`, `editor`, `menu_view`, `cart`,
 reached through `ws` at the moment of use and never captured here.
 """
 
-try:
-    from op_history import History, TextEditCodec, text_diff_op
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, TextEditCodec, text_diff_op
-
-try:
-    import moy_catalogue
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_catalogue
-
-try:
-    from chrome import _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _err_text
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from op_history import History, TextEditCodec, text_diff_op
+import moy_catalogue
+from chrome import _err_text
+from ticks import _ticks_ms, _ticks_diff
 
 # The Editor tabs a kid DRAWS on rather than types on: they take the long quiet
 # window in `idle_tick`. Code/blocks/config are typed or tapped a field at a time,

@@ -26,24 +26,16 @@ try:
 except ImportError:  # pragma: no cover
     _time = None
 
-try:
-    from moy_fs import (_mkdir, _read, _write, _write_atomic, _remove,
-                        _claim_bak, _read_stamped, _stamp_of, _read_recover,
-                        _forget_bak)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_mkdir, _read, _write, _write_atomic, _remove,
-                                _claim_bak, _read_stamped, _stamp_of,
-                                _read_recover, _forget_bak)
+from moy_fs import (_mkdir, _read, _write, _write_atomic, _remove,
+                    _claim_bak, _read_stamped, _stamp_of, _read_recover,
+                    _forget_bak)
 
 
 def _set_graduated_flag(cart_dir, value):
     """Set the manifest's `graduated` flag via moy_carts (bare on device, package
     on host). Lazy: moy_carts re-exports this module's verbs, so a top-level
     import here would be circular."""
-    try:
-        from moy_carts import _manifest_set_graduated
-    except ImportError:
-        from runtime.moy_carts import _manifest_set_graduated
+    from moy_carts import _manifest_set_graduated
     _manifest_set_graduated(cart_dir, value)
 
 #

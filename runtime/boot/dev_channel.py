@@ -70,16 +70,11 @@ only tools/push_cart.py builds one -- and `moy-rescan` says so in a
 `moy-note` line the tool shows to the person pushing.
 """
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_diff, _ticks_ms
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_diff, _ticks_ms
-try:                                    # each subsystem's words
-    import devch_input
-    import devch_audio
-    import devch_links
-except ImportError:                     # host: the runtime package
-    from runtime import devch_input, devch_audio, devch_links
+from ticks import _ticks_diff, _ticks_ms
+# each subsystem's words
+import devch_input
+import devch_audio
+import devch_links
 try:                       # device (device_util is staged from device/)
     from device_util import _diag_log
 except ImportError:        # host / test -- no diag ring; print is it
@@ -108,12 +103,8 @@ except ImportError:        # host, and a board without the kernel
 # serial words below are derived from it -- an entry with a `dev` name IS the
 # command, gate and all, so a new toggle reaches the channel without a branch
 # being written here.
-try:
-    from settings_layer import SETTINGS_TOGGLES
-    from crash_guard import core_dump, last_crash
-except ImportError:        # host / test -- the runtime package
-    from runtime.settings_layer import SETTINGS_TOGGLES
-    from runtime.crash_guard import core_dump, last_crash
+from settings_layer import SETTINGS_TOGGLES
+from crash_guard import core_dump, last_crash
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
@@ -431,10 +422,7 @@ def stale_handle_probe(ws):
     times and still serves the live handle. `impl` is where the spine runs:
     `native` is native/moy_spine, which every tier runs; `python` is the
     suites' oracle, tests/spine_twin.py."""
-    try:
-        import moy_spine as sp
-    except ImportError:        # host / test -- the runtime package
-        from runtime import moy_spine as sp
+    import moy_spine as sp
     reg = ws.apps
     live = reg.handles()[0]
     scratch = sp.Table(sp.KIND_APP, "app", 4)

@@ -18,26 +18,13 @@ imported back from console.py, which would be a circular import.
 
 from array import array
 
-try:
-    import ui as _ui              # frozen on device
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui              # frozen on device
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:
-    from editors_paint_map import MapEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_paint_map import MapEditor
-    from runtime.editors_base import KeyEdge
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane)
+from editors_paint_map import MapEditor
+from editors_base import KeyEdge
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 
 # The handheld page (editor_map.py): the right column's width and the foot's
 # height, beside and under the view.
@@ -190,10 +177,7 @@ class MapEditorUI:
     def page(self):
         """The handheld's Map page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_map import MapPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_map import MapPage
+            from editor_map import MapPage
             self._page = MapPage(self, _ui_draw.AppHost("editor_map"))
         return self._page
 

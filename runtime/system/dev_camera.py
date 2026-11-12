@@ -24,10 +24,7 @@ if _N is None:
     except ImportError:  # a console with no camera
         _N = None
 
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
+import devices as _D
 
 
 def _take():

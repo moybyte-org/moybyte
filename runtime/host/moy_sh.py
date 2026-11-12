@@ -22,11 +22,8 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
+import host_native
+import native_build
 
 SH = os.path.join(native_build.ROOT, "native", "moy_sh")
 _DASH = os.path.join(SH, "dash")

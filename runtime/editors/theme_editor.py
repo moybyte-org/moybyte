@@ -45,34 +45,19 @@ workspace), the tab following the focused one (F6).
 
 import json as _json
 
-try:
-    import iconsets as _iconsets
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import text_modes as _modes
-    import layout_base as _lb
-    from code_layer import CodeLayer, _status_line
-    from chrome import CodeLayout
-    from editors_code import CodeEditor
-    from editors_paint_map import PaintEditor
-    from editor_map import checker as _checker
-    from moy_input import CTRL as _CTRL
-    from theme_custom import dumps as _dumps
-    from widgets import _in
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import iconsets as _iconsets
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import text_modes as _modes
-    from runtime import layout_base as _lb
-    from runtime.code_layer import CodeLayer, _status_line
-    from runtime.chrome import CodeLayout
-    from runtime.editors_code import CodeEditor
-    from runtime.editors_paint_map import PaintEditor
-    from runtime.editor_map import checker as _checker
-    from runtime.moy_input import CTRL as _CTRL
-    from runtime.theme_custom import dumps as _dumps
-    from runtime.widgets import _in
+import iconsets as _iconsets
+import ui as _ui
+import ui_draw as _ui_draw
+import text_modes as _modes
+import layout_base as _lb
+from code_layer import CodeLayer, _status_line
+from chrome import CodeLayout
+from editors_code import CodeEditor
+from editors_paint_map import PaintEditor
+from editor_map import checker as _checker
+from moy_input import CTRL as _CTRL
+from theme_custom import dumps as _dumps
+from widgets import _in
 
 TAB_CONFIG = "theme_config"
 TAB_SPRITES = "theme_sprites"
@@ -474,10 +459,7 @@ class ThemeDoc:
 
 
 def _builtin_names():
-    try:
-        from chrome import THEME_NAMES
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime.chrome import THEME_NAMES
+    from chrome import THEME_NAMES
     return THEME_NAMES
 
 

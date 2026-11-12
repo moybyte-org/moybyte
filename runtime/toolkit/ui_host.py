@@ -965,21 +965,11 @@ def _release(lay):
 
 
 # ui_draw's frame state and helpers, imported last (see above).
-try:
-    from ui_draw import (
-        UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
-        _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW, KEY_PASTE,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
-        window_frame, within)
-    from ui_scroll import PaintRing
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import (
-        UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
-        _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW, KEY_PASTE,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
-        window_frame, within)
-    from runtime.ui_scroll import PaintRing
+from ui_draw import (
+    UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
+    _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
+    _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
+    _WHOLE, _WINDOW, KEY_PASTE,
+    _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
+    window_frame, within)
+from ui_scroll import PaintRing

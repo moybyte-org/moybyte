@@ -62,18 +62,10 @@ Admission (`launch`) is player_fit.admit over the running set; a refusal is
 the confirm dialog naming what to close.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-try:
-    import player_fit as _fit
-    import audio_session as _aud
-    from player import BAR_TYPES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import player_fit as _fit
-    from runtime import audio_session as _aud
-    from runtime.player import BAR_TYPES
+from ticks import _ticks_ms, _ticks_diff
+import player_fit as _fit
+import audio_session as _aud
+from player import BAR_TYPES
 try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
@@ -82,14 +74,8 @@ try:
     import moy_loop as _loop
 except ImportError:  # host: no kernel loop to pace
     _loop = None
-try:
-    import moy_app as _moy_app
-except ImportError:  # host: the runtime package
-    from runtime import moy_app as _moy_app
-try:
-    import scheduler as _sched
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import scheduler as _sched
+import moy_app as _moy_app
+import scheduler as _sched
 
 RUN = "run:"                    # a Proc window's key prefix
 FRONT = "desktop"               # the front run's window key

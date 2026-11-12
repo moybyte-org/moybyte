@@ -19,19 +19,10 @@ and reads its window table, focus and freeze streaks, and owns no state of its
 own.
 """
 
-try:
-    from chrome import NAMES, MIN_TAP_MM   # not palette: chrome is the device-safe home
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import NAMES, MIN_TAP_MM
-
-try:
-    import layout_base as _layout_base
-    import ui_draw as _ui_draw
-    import iconsets as _iconsets
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _layout_base
-    from runtime import ui_draw as _ui_draw
-    from runtime import iconsets as _iconsets
+from chrome import NAMES, MIN_TAP_MM   # not palette: chrome is the device-safe home
+import layout_base as _layout_base
+import ui_draw as _ui_draw
+import iconsets as _iconsets
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.

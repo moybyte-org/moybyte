@@ -11,12 +11,8 @@ AppContext (`PermsPage.NEEDS`): the carts role for the shelf, the install
 role for the consent records, the nav role for which carts are the shell's.
 """
 
-try:
-    import ui as _ui
-    import app_perms as _perms
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import app_perms as _perms
+import ui as _ui
+import app_perms as _perms
 
 TITLE = "App permissions"
 

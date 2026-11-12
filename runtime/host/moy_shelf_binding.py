@@ -36,10 +36,7 @@ _LIB = [None]
 
 def _lib():
     if _LIB[0] is None:
-        try:
-            from runtime import host_native
-        except ImportError:  # loaded flat
-            import host_native
+        import host_native
         path = host_native.build()
         if path is None:
             raise ImportError("moy_shelf: no C compiler for the host build")

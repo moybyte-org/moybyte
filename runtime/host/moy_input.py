@@ -45,13 +45,9 @@ from __future__ import annotations
 import ctypes
 import os
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-    from .ticks import _ticks_ms, _ticks_us
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
-    from ticks import _ticks_ms, _ticks_us
+import host_native
+import native_build
+from ticks import _ticks_ms, _ticks_us
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")

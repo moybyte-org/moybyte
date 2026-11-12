@@ -14,10 +14,7 @@ frame) stays on Player itself, so its lookups never reach here; these run
 at a start, an exit or a report. MicroPython-safe.
 """
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms
+from ticks import _ticks_ms
 # The kernel's frame loop (native/moy_kernel), on a tier whose frames are the
 # kernel's; host CPython drives its own frames.
 try:
@@ -185,10 +182,7 @@ class PlayerDiag:
     def _audio_diag(self):
         """The kernel's audio as the run found it: the output's state, the
         focused session's voices, the mix's verb count."""
-        try:
-            from audio_session import native
-        except ImportError:
-            from runtime.audio_session import native
+        from audio_session import native
         try:
             na = native()
             if na is None:

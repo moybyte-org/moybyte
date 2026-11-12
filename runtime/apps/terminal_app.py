@@ -12,17 +12,9 @@ bar, and the frame's keys; the face answers what the host owes after it.
 import sys as _sys
 from array import array as _array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _lb
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
 
 try:
     import moy_sh as _sh
@@ -93,10 +85,7 @@ class TerminalAppLayer:
         path = cart.get("path")
         if not path:
             return int(cart.get("version", 0)) >= 1
-        try:
-            from moy_store_base import builtin_name
-        except ImportError:  # host: the runtime package
-            from runtime.moy_store_base import builtin_name
+        from moy_store_base import builtin_name
         return builtin_name(path) == "moybyte.terminal.moy"
 
     def open(self):

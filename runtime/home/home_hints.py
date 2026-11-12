@@ -16,16 +16,10 @@ order. It owns no state of its own: the tab row's focus and the selection
 it names are the layer's.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import _VERB_HINT
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import _VERB_HINT
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import _VERB_HINT
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The strip's words and keys: the star's, the verbs' letters, the strips'

@@ -39,10 +39,7 @@ and fixed precision (runtime/host/moy_play.py), a sanitizer build
 import os
 import sys
 
-try:                                    # the host's runtime package
-    from . import native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import native_build
+import native_build
 
 CACHE = os.path.join(native_build.ROOT, ".build", "host")
 

@@ -34,18 +34,9 @@ one function OBJECT, not three agreeing copies.
 
 import random
 
-try:                                    # staged/frozen flat namespace (boards, web)
-    from moy_image import Image
-except ImportError:                     # host: the runtime package
-    from runtime.moy_image import Image
-try:
-    from ticks import _since_ms
-except ImportError:
-    from runtime.ticks import _since_ms
-try:
-    from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
-except ImportError:
-    from runtime.moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
+from moy_image import Image
+from ticks import _since_ms
+from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 
 
 # owner -> the Image subclass a cart of that owner constructs (below).
@@ -83,10 +74,7 @@ def _rotate_indices(*args):
     """widgets.rotate_indices (#85/#93 all-around sprite rotation), bound
     lazily for the same leaf-module reason as color() above -- only the scene
     rotation path needs it, and widgets is not leaf-weight."""
-    try:
-        from widgets import rotate_indices
-    except ImportError:
-        from runtime.widgets import rotate_indices
+    from widgets import rotate_indices
     return rotate_indices(*args)
 
 # The logical buttons a CART may read (moy SPEC.md 7.3): four directions, a/b,
@@ -111,10 +99,7 @@ def color(name_or_index):
     has long imported chrome, so the lazy bind costs one getattr ever."""
     global _color
     if _color is None:
-        try:
-            from chrome import color as _c
-        except ImportError:
-            from runtime.chrome import color as _c
+        from chrome import color as _c
         _color = _c
     return _color(name_or_index)
 
@@ -128,10 +113,7 @@ def _decode_moyimg(text):
     one -- and a picture whose format the caller had not thought of came back as
     a silently blank image on whichever tier held the other half."""
     try:
-        try:
-            import moyimg
-        except ImportError:
-            from runtime import moyimg
+        import moyimg
         return moyimg.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None

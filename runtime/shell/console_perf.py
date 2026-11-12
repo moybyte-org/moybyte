@@ -6,14 +6,8 @@ every field it writes is a flat attribute the frame loop and both WMs read
 directly, but for what changes every frame, which lives on `FrameState`.
 """
 
-try:
-    from chrome import (_ticks_ms, _ticks_us, _ticks_diff)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff)
-try:
-    from settings_layer import SETTINGS_TOGGLES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import SETTINGS_TOGGLES
+from chrome import (_ticks_ms, _ticks_us, _ticks_diff)
+from settings_layer import SETTINGS_TOGGLES
 
 
 def _ema(cur, sample):

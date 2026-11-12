@@ -15,25 +15,14 @@ model, its own geometry, motion and draw. Its instances are ws.launcher in
 the `carousel` arrangement and ws.projects_grid.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import (_clean_side, _COVER_BASE, _COVER_SIDE, desk_button_span,
-                           _DESK_VERB_SETS, DETAILS_MIN, _dot_top, _draw_star_badge,
-                           _HH_CAPTION, _HH_CARD, _HH_GAP, _HH_SQUEEZE, _hint_strip,
-                           HOME_SCALE_HH, _in, Launcher, NEW_TILE_TYPE, _NO_KEYS, _PART,
-                           _PART_COL, PSEUDO_TILE_TYPES, SHELF_GAP, _TAB_NAME, text_scale)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import (_clean_side, _COVER_BASE, _COVER_SIDE, desk_button_span,
-                                   _DESK_VERB_SETS, DETAILS_MIN, _dot_top, _draw_star_badge,
-                                   _HH_CAPTION, _HH_CARD, _HH_GAP, _HH_SQUEEZE, _hint_strip,
-                                   HOME_SCALE_HH, _in, Launcher, NEW_TILE_TYPE, _NO_KEYS, _PART,
-                                   _PART_COL, PSEUDO_TILE_TYPES, SHELF_GAP, _TAB_NAME,
-                                   text_scale)
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import (_clean_side, _COVER_BASE, _COVER_SIDE, desk_button_span,
+                       _DESK_VERB_SETS, DETAILS_MIN, _dot_top, _draw_star_badge,
+                       _HH_CAPTION, _HH_CARD, _HH_GAP, _HH_SQUEEZE, _hint_strip,
+                       HOME_SCALE_HH, _in, Launcher, NEW_TILE_TYPE, _NO_KEYS, _PART,
+                       _PART_COL, PSEUDO_TILE_TYPES, SHELF_GAP, _TAB_NAME, text_scale)
 
 
 class Carousel(Launcher):

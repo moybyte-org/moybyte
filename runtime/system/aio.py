@@ -49,15 +49,8 @@ awaited it by the step that raised it. The browser's VM has no asyncio:
 
 import sys as _sys
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moybyte as _moybyte
 
 try:
     import moy_log as _L

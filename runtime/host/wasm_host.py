@@ -35,16 +35,10 @@ at the pace the host plays, as a board's speaker drains it.
 Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
-try:
-    from runtime.lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
-                                 run_face, sync_view, drain_audio)
-    from runtime.moy_input import pointer_state
-    from runtime.ticks import _since_ms
-except ImportError:                                  # pragma: no cover
-    from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
-                         run_face, sync_view, drain_audio)
-    from moy_input import pointer_state
-    from ticks import _since_ms
+from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
+                     run_face, sync_view, drain_audio)
+from moy_input import pointer_state
+from ticks import _since_ms
 
 
 # What the host gives a compiled cart: the most any console board has, the

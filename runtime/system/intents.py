@@ -69,10 +69,7 @@ SHELL = 1
 
 
 def _front():
-    try:
-        from front import FRONT
-    except ImportError:  # host: the runtime package
-        from runtime.front import FRONT
+    from front import FRONT
     return FRONT
 
 
@@ -88,18 +85,12 @@ def _file_name(kind, name):
 
 
 def _dirs():
-    try:
-        from moy_store_base import FILE_KIND_DIRS
-    except ImportError:  # host: the runtime package
-        from runtime.moy_store_base import FILE_KIND_DIRS
+    from moy_store_base import FILE_KIND_DIRS
     return FILE_KIND_DIRS
 
 
 def _modes():
-    try:
-        import text_modes
-    except ImportError:  # host: the runtime package
-        from runtime import text_modes
+    import text_modes
     return text_modes
 
 

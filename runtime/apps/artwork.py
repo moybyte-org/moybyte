@@ -35,30 +35,11 @@ The Player hands the service only to the shipped Paint cart, by its identity
 and cannot reach the store through this object.
 """
 
-try:
-    from moy_store_base import builtin_name, COVER_FILE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name, COVER_FILE
-
-try:
-    from file_widgets import Bitmap
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.file_widgets import Bitmap
-
-try:
-    from app_context import NO_STORE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import NO_STORE
-
-try:
-    from picture_copies import PictureCopies
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.picture_copies import PictureCopies
-
-try:
-    from moyimg import cover_stream
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream
+from moy_store_base import builtin_name, COVER_FILE
+from file_widgets import Bitmap
+from app_context import NO_STORE
+from picture_copies import PictureCopies
+from moyimg import cover_stream
 
 try:
     import moy_gfx as _gfx
@@ -75,10 +56,7 @@ try:
 except ImportError:  # pragma: no cover - a board without the layer
     _uf = None
 
-try:
-    import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybuf as _moybuf
+import moybuf as _moybuf
 
 # A cart's cover is this square, always (SPEC.md 3.6).
 COVER_SIDE = 128

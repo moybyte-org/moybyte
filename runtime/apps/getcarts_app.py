@@ -83,36 +83,15 @@ in that step and in the browser gives the frame back until its bytes come.
 import json
 from array import array
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    from app_shell import ListShellApp
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.app_shell import ListShellApp
-    from runtime.layout_base import (bar_rows, content_of, metric_class, window_foot,
-                                     DESK)
-
-try:
-    import app_perms as _perms
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import app_perms as _perms
-
-try:
-    import cart_index as _ci
-    import cart_listing as _cl
-    from moy_fs import _exists, _read
-    from ticks import _ticks_ms, _ticks_diff
-    import pkg as _pkg
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import cart_index as _ci
-    from runtime import cart_listing as _cl
-    from runtime.moy_fs import _exists, _read
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime import pkg as _pkg
+import ui
+from app_shell import ListShellApp
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+import app_perms as _perms
+import cart_index as _ci
+import cart_listing as _cl
+from moy_fs import _exists, _read
+from ticks import _ticks_ms, _ticks_diff
+import pkg as _pkg
 
 
 # An index fetched this session is reused for this long before the app checks
@@ -745,10 +724,7 @@ class GetCartsAppLayer(ListShellApp):
             return True
         if data is None:
             return False
-        try:
-            import cover_png as _cp
-        except ImportError:  # pragma: no cover - direct host import
-            from runtime import cover_png as _cp
+        import cover_png as _cp
         side = self.layout.side
         swapped = getattr(self._surf.canvas(), "swapped565", False)
         try:

@@ -11,18 +11,12 @@ _CHROME_ROLES = ("bar", "bar_edge", "chrome_ink", "chrome_ink_dim", "surface",
                  "border", "ink", "ink_dim", "play", "panel", "edge")
 _mp_chrome = []
 
-try:
-    import ui_draw as _ui_draw
-except ImportError:                         # CPython: the runtime package's
-    from runtime import ui_draw as _ui_draw
+import ui_draw as _ui_draw
 
 
 def _moy_play():
     if not _mp_chrome:
-        try:
-            import moy_play
-        except ImportError:                 # CPython: the host's ctypes module
-            from runtime import moy_play
+        import moy_play
         _mp_chrome.append(moy_play)
     return _mp_chrome[0]
 

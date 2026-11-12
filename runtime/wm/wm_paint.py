@@ -28,20 +28,12 @@ no state of its own: the windows, stamps and rings it reads are the WM's,
 made in `WindowedWM.__init__`.
 """
 
-try:
-    from wm import FullscreenStackWM, _VIEWPORT_BEZEL
-    from wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
-    from wm_chrome import _SHADOW
-    from widgets import _Blit, _ticks_ms
-    import layout_base as _layout_base
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
-    from runtime.wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
-    from runtime.wm_chrome import _SHADOW
-    from runtime.widgets import _Blit, _ticks_ms
-    from runtime import layout_base as _layout_base
-    from runtime import ui_draw as _ui_draw
+from wm import FullscreenStackWM, _VIEWPORT_BEZEL
+from wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
+from wm_chrome import _SHADOW
+from widgets import _Blit, _ticks_ms
+import layout_base as _layout_base
+import ui_draw as _ui_draw
 
 
 class WindowPaint:

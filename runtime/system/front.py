@@ -32,18 +32,12 @@ SHELL = 1
 
 
 def _devices():
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     return devices
 
 
 def _notes():
-    try:
-        from notifications import NOTES
-    except ImportError:  # host: the runtime package
-        from runtime.notifications import NOTES
+    from notifications import NOTES
     return NOTES
 
 

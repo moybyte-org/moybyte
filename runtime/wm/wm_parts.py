@@ -15,14 +15,9 @@ share. Each layer is a thin face that calls back into the WM; none owns state
 of the WM's.
 """
 
-try:
-    from layers import Layer
-    from widgets import _ticks_ms
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layers import Layer
-    from runtime.widgets import _ticks_ms
-    from runtime import ui_draw as _ui_draw
+from layers import Layer
+from widgets import _ticks_ms
+import ui_draw as _ui_draw
 
 
 class _LayoutCtx:

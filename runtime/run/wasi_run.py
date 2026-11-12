@@ -19,14 +19,9 @@ is a stop the stop card reports.
 
 from array import array
 
-try:
-    import moy_evq as _E
-    import moybyte as _moybyte
-    from elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
-    from runtime import moybyte as _moybyte
-    from runtime.elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
+import moy_evq as _E
+import moybyte as _moybyte
+from elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
 
 # The longest a tick waits for a present (elf_run.WAIT_US_MAX's).
 WAIT_MS_MAX = 50

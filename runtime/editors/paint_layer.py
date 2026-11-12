@@ -37,30 +37,17 @@ big panel the zoomed pixel grid GROWS to fill the space (a multiple of 48px so t
 the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 """
 
-try:
-    import ui as _ui              # frozen on device
-    import ui_draw as _ui_draw
-    from editor_map import checker as _checker, checker_quads as _checker_quads
-    from editors_paint_map import PaintEditor, _pe_line
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime.editor_map import checker as _checker, checker_quads as _checker_quads
-    from runtime.editors_paint_map import PaintEditor, _pe_line
-    from runtime.editors_base import KeyEdge
+import ui as _ui              # frozen on device
+import ui_draw as _ui_draw
+from editor_map import checker as _checker, checker_quads as _checker_quads
+from editors_paint_map import PaintEditor, _pe_line
+from editors_base import KeyEdge
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from array import array
 
-try:
-    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             metric_class as _metric_class, DESK as _DESK,
-                             render_scale as _render_scale, pane as _in_pane)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H,
-                                     metric_class as _metric_class, DESK as _DESK,
-                                     render_scale as _render_scale, pane as _in_pane)
+from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
+                         metric_class as _metric_class, DESK as _DESK,
+                         render_scale as _render_scale, pane as _in_pane)
 
 
 # -- paint geometry (single source; console.py imports these back) ------------

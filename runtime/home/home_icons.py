@@ -11,19 +11,11 @@ on the desk every tile is named under it. A `Launcher` (home_grid.py): the
 same selection model over a grid that scrolls down.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import (_Cells, _cover_div_for, _COVER_HALF, _dot_top, _GROW, _hint_strip,
-                           _ICONS_DK, _ICONS_HH, Launcher, _NO_KEYS, PSEUDO_TILE_TYPES, _WIDE)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import (_Cells, _cover_div_for, _COVER_HALF, _dot_top, _GROW,
-                                   _hint_strip, _ICONS_DK, _ICONS_HH, Launcher, _NO_KEYS,
-                                   PSEUDO_TILE_TYPES, _WIDE)
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import (_Cells, _cover_div_for, _COVER_HALF, _dot_top, _GROW, _hint_strip,
+                       _ICONS_DK, _ICONS_HH, Launcher, _NO_KEYS, PSEUDO_TILE_TYPES, _WIDE)
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 

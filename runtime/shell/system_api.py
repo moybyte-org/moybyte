@@ -138,14 +138,9 @@ must not be able to crash on a missing SD card, and a `try/except` around every
 save is not a thing to teach.
 """
 
-try:
-    import ui
-    from app_context import NO_STORE
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-    from runtime.app_context import NO_STORE
-    from runtime.moy_store_base import builtin_name as _builtin_name
+import ui
+from app_context import NO_STORE
+from moy_store_base import builtin_name as _builtin_name
 
 
 import moy_app as _moy_app
@@ -240,10 +235,7 @@ class ScopedFiles:
         Imported at the CALL, like `_themes` below and for the same reason:
         this module is a leaf on the Player's start path for every cart, and
         the mode table reaches the store behind it."""
-        try:
-            import text_modes
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import text_modes
+        import text_modes
         return text_modes.badge_for_kind(self.kind, name)
 
     # -- text documents ------------------------------------------------------
@@ -400,10 +392,7 @@ def granted_names(ctx, roles, kind):
             `chrome` is imported here and not at module scope: this module is
             reached from the Player's hot start path on every cart, and only an
             appearance-granted app ever needs the table."""
-            try:
-                import chrome
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime import chrome
+            import chrome
             # NAMES: `set_theme` beside this takes a name and falls back to
             # DEFAULT_THEME on anything else.
             return list(chrome.theme_names())
@@ -459,10 +448,7 @@ def grant_devices(ctx, perms, cart=None):
     where they reach its own files (moy_app_grant_folder)."""
     fn = getattr(getattr(ctx, "_app", None), "grant_devs", None)
     if fn is not None and perms:
-        try:
-            import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
+        import devices
         fn(ctx.grant, tuple(perms), devices.folder(cart))
 
 

@@ -32,48 +32,18 @@ card shows as well (`Stream.follow`, from the label each play() names).
 A console with no media service (the Guition S3) shows the no-audio page.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
-
-try:
-    from moy_store_base import builtin_name, files_root
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name, files_root
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybyte as _moybyte
-
-try:
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import devices as _devices
-
-try:
-    import status_items as _status
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import status_items as _status
+import ui
+import ui_draw as _ui_draw
+from layout_base import bar_rows, content_of, metric_class, DESK
+from moy_store_base import builtin_name, files_root
+import moybyte as _moybyte
+import devices as _devices
+import status_items as _status
 
 try:
     import moy_log as _L
-except ImportError:  # host: the runtime package
-    try:
-        from runtime import moy_log as _L
-    except ImportError:  # pragma: no cover - an image without the kernel
-        _L = None
+except ImportError:  # pragma: no cover - an image without the kernel
+    _L = None
 
 from array import array
 

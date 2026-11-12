@@ -42,20 +42,9 @@ neither holds a frame.
 The host serves a request as it is queued (the driver's `run`), over the
 real client, which speaks plain TCP there."""
 
-try:
-    import moy_http as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_http as _N
-
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moy_http as _N
+import devices as _D
+import moybyte as _moybyte
 
 CAP_MAX = _N.CAP_MAX
 TAG = "http"

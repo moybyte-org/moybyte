@@ -51,26 +51,12 @@ import hashlib
 import json
 import os
 
-try:
-    import cart_index as _ci
-    from moy_store_base import _sibling_path
-    from moy_fs import _exists, _mkdir, _read, _remove
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import cart_index as _ci
-    from runtime.moy_store_base import _sibling_path
-    from runtime.moy_fs import _exists, _mkdir, _read, _remove
-
-try:
-    import app_keys as _keys
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import app_keys as _keys
-
-try:
-    import app_perms as _perms
-    from player_fit import fit_notice as _fit_notice, board_share as _board_share
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import app_perms as _perms
-    from runtime.player_fit import fit_notice as _fit_notice, board_share as _board_share
+import cart_index as _ci
+from moy_store_base import _sibling_path
+from moy_fs import _exists, _mkdir, _read, _remove
+import app_keys as _keys
+import app_perms as _perms
+from player_fit import fit_notice as _fit_notice, board_share as _board_share
 
 InstallError = _ci.InstallError
 CACHE_DIR = "pkg"

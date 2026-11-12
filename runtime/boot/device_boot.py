@@ -59,27 +59,11 @@ boards by their `board.toml` denylists and to the wasm head by its `DENY` glob,
 importable on all three (`tests/test_staging_closure.py`).
 """
 
-try:
-    from console import draw_splash
-except ImportError:  # pragma: no cover - host package lane
-    from runtime.console import draw_splash
-
-try:
-    from chrome import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host package lane
-    from runtime.chrome import _ticks_ms, _ticks_diff
-
-try:
-    from boot_carts import BootCarts
-    from crash_guard import core_dump, take_crash
-except ImportError:  # pragma: no cover - host package lane
-    from runtime.boot_carts import BootCarts
-    from runtime.crash_guard import core_dump, take_crash
-
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host package lane
-    from runtime import ui_draw as _ui_draw
+from console import draw_splash
+from chrome import _ticks_ms, _ticks_diff
+from boot_carts import BootCarts
+from crash_guard import core_dump, take_crash
+import ui_draw as _ui_draw
 
 try:
     import moy_kernel as _kernel

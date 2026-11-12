@@ -6,10 +6,7 @@ and Config tabs), the per-tab commit entry points the surfaces dispatch to
 A mixin of `Workstation`.
 """
 
-try:
-    from editors_sheet import SpriteSheet
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import SpriteSheet
+from editors_sheet import SpriteSheet
 
 
 class SaveVerbs:

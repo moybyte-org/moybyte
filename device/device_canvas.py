@@ -512,10 +512,7 @@ _DMA_FILL_MIN = 16384
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
 # that used to carry the other copy. Re-exported because device_api and the cart
 # namespace import it from here by name.
-try:
-    from moy_image import Image         # noqa: F401
-except ImportError:  # pragma: no cover - host tree: the package-relative lane
-    from runtime.moy_image import Image  # noqa: F401
+from moy_image import Image         # noqa: F401
 
 
 # _decode_moyimg lived here until 2026-08-17; THE copy is

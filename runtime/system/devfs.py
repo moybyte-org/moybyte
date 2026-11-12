@@ -20,15 +20,8 @@ The process rows are the shell (pid 1), the scheduler's services and what
 `RUNS` answers, the console's runs: fn() -> [(pid, name, kind, state)].
 """
 
-try:
-    import leases as _leases
-except ImportError:  # host: the runtime package
-    from runtime import leases as _leases
-
-try:
-    import scheduler as _sched
-except ImportError:  # host: the runtime package
-    from runtime import scheduler as _sched
+import leases as _leases
+import scheduler as _sched
 
 try:
     import moy_log as _L

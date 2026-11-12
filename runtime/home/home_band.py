@@ -16,10 +16,7 @@ ground, the ink over a wallpaper, the dim, the cursor's stamp). A leaf: it
 reads the layer and the grid it is handed and imports no home module.
 """
 
-try:
-    from chrome import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _ticks_ms, _ticks_diff
+from chrome import _ticks_ms, _ticks_diff
 
 _UNSET = -2147483648      # a look leaf the theme leaves silent
 

@@ -24,12 +24,8 @@ A LEAF beside `layout_base`, the one module it imports, whose bar rects it
 packs.
 """
 
-try:
-    from layout_base import (BAR_ROWS, DEFAULT_BARS, DESK, bar_rects_of, bar_rows,
-                             bars as _bars, metric_class)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (BAR_ROWS, DEFAULT_BARS, DESK, bar_rects_of, bar_rows,
-                                     bars as _bars, metric_class)
+from layout_base import (BAR_ROWS, DEFAULT_BARS, DESK, bar_rects_of, bar_rows,
+                         bars as _bars, metric_class)
 
 EDGES = ("top", "bottom", "left", "right")
 REQUIRED = ("menu", "zone")

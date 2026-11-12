@@ -111,23 +111,13 @@ if _N is None:
     except ImportError:  # a console with no media service (the Guition S3)
         _N = None
 
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import devices as _D
+import moybyte as _moybyte
 
 try:
     import moy_log as _L
-except ImportError:  # pragma: no cover - an image without the kernel
-    try:
-        from runtime import moy_log as _L
-    except ImportError:
-        _L = None
+except ImportError:
+    _L = None
 
 EPERM, ENOENT, EIO, EBADF, EINVAL, ENOSPC = 1, 2, 5, 9, 22, 28
 EPROTONOSUPPORT = 93
@@ -155,11 +145,8 @@ def _shares_media():
     True where there is no line (nothing is counted)."""
     try:
         import moy_play as _P
-    except ImportError:  # host: the runtime package
-        try:
-            from runtime import moy_play as _P
-        except ImportError:
-            return True
+    except ImportError:
+        return True
     fn = getattr(_P, "shares", None)
     rows = fn() if fn is not None else None
     if rows is None:
@@ -201,10 +188,7 @@ def tls():
     page's fetch verifies its own)."""
     if _net() is not None:
         return True
-    try:
-        import moy_http
-    except ImportError:  # host: the runtime package
-        from runtime import moy_http
+    import moy_http
     return bool(moy_http.tls())
 
 
@@ -242,10 +226,7 @@ def _rate():
 
 
 def _sched():
-    try:
-        import scheduler
-    except ImportError:  # host: the runtime package
-        from runtime import scheduler
+    import scheduler
     return scheduler.SCHED
 
 
@@ -542,10 +523,7 @@ def _took(was):
     the person is told, as the system (moy_media_tell's notification, its
     text the C's for every client), the console's list taking it now."""
     if was and _N.tell(was):
-        try:
-            from notifications import NOTES
-        except ImportError:  # host: the runtime package
-            from runtime.notifications import NOTES
+        from notifications import NOTES
         NOTES.drain()
 
 

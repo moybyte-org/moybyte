@@ -17,10 +17,7 @@ except ImportError:  # pragma: no cover - host lane: no device tier staged
     def sram_census(stage):
         """No second region off-board, so nothing to weigh."""
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host package lane
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from ticks import _ticks_ms, _ticks_diff
 
 # The seed's progress bar repaints at most this often. A cart the seed WRITES
 # takes ~550ms, so every one still moves the bar; a seed that writes nothing

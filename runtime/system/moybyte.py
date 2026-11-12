@@ -273,25 +273,15 @@ it too, so a run the kernel drives makes no crossing for a message its
 launch sent.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-
-try:
-    import moy_input as _I
-except ImportError:  # host: the runtime package
-    from runtime import moy_input as _I
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moy_input as _I
 
 try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+import moy_evq as _E
 
 try:
     import json as _json
@@ -682,10 +672,7 @@ def _wall():
     """The wall clock's Unix seconds (wallclock.now)."""
     wc = _WC[0]
     if wc is None:
-        try:
-            import wallclock as wc
-        except ImportError:  # host: the runtime package
-            from runtime import wallclock as wc
+        import wallclock as wc
         _WC[0] = wc
     return wc.now()
 
@@ -723,10 +710,7 @@ def after(ms, fn):
 
 
 def _may_alarm(pid):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     if not devices.may(pid, ALARMS):
         raise OSError(EPERM, 'needs "%s"' % ALARMS)
 
@@ -772,10 +756,7 @@ def pins():
 
 
 def _leases():
-    try:
-        import leases
-    except ImportError:  # host: the runtime package
-        from runtime import leases
+    import leases
     return leases
 
 
@@ -846,18 +827,12 @@ ENDS.append(_snd_end)
 
 
 def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
-    try:
-        from notifications import NOTES
-    except ImportError:  # host: the runtime package
-        from runtime.notifications import NOTES
+    from notifications import NOTES
     return NOTES.post(_pid(), summary, body, icon, actions, urgency, replaces_id)
 
 
 def _items():
-    try:
-        from status_items import ITEMS
-    except ImportError:  # host: the runtime package
-        from runtime.status_items import ITEMS
+    from status_items import ITEMS
     if ITEMS.post is None:
         ITEMS.post = WAKES.post     # a compiled item's panel posts its presses
     return ITEMS
@@ -881,10 +856,7 @@ def panel_of(pid, h, rows=None):
     it = items.of(pid, h)
     if it is None:
         return ABSENT
-    try:
-        from status_items import parse, STATUS
-    except ImportError:  # host: the runtime package
-        from runtime.status_items import parse, STATUS
+    from status_items import parse, STATUS
     got = parse(rows or "") if rows is None or isinstance(rows, str) else None
     if got is None:
         return BAD
@@ -915,10 +887,7 @@ ENDS.append(_status_end)
 
 
 def _intents():
-    try:
-        from intents import INTENTS
-    except ImportError:  # host: the runtime package
-        from runtime.intents import INTENTS
+    from intents import INTENTS
     return INTENTS
 
 
@@ -953,10 +922,7 @@ def name():
         got = fn()
         if got:
             return got
-    try:
-        import ssh_service as _ssh
-    except ImportError:  # host: the runtime package
-        from runtime import ssh_service as _ssh
+    import ssh_service as _ssh
     return _ssh.default_name()
 
 
@@ -1093,10 +1059,7 @@ _A = []
 
 def _app():
     if not _A:
-        try:
-            import moy_app
-        except ImportError:  # host: the runtime package
-            from runtime import moy_app
+        import moy_app
         _A.append(moy_app)
     return _A[0]
 
@@ -1150,18 +1113,12 @@ def ed25519_verify(pub, msg, sig):
 
 
 def clock_synced():
-    try:
-        import wallclock
-    except ImportError:  # host: the runtime package
-        from runtime import wallclock
+    import wallclock
     return wallclock.synced()
 
 
 def clock(local=False):
-    try:
-        import wallclock
-    except ImportError:  # host: the runtime package
-        from runtime import wallclock
+    import wallclock
     t = wallclock.now()
     if not local:
         return t
@@ -1170,9 +1127,6 @@ def clock(local=False):
 
 def __getattr__(name):
     if name in ("http", "mic", "lora", "ble", "usb", "midi", "camera", "media"):
-        try:
-            import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
+        import devices
         return devices.api(name)
     raise AttributeError(name)

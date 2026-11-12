@@ -47,16 +47,10 @@ encoding); `RoleDoor` decodes them, calls the same server and answers what the
 door copies back.
 """
 
-try:
-    from app_context import NO_STORE
-    from achievements import NotifyRole
-    from front import FRONT as _FRONT
-    import moybyte as _moybyte
-except ImportError:  # pragma: no cover - host package lane
-    from runtime.app_context import NO_STORE
-    from runtime.achievements import NotifyRole
-    from runtime.front import FRONT as _FRONT
-    from runtime import moybyte as _moybyte
+from app_context import NO_STORE
+from achievements import NotifyRole
+from front import FRONT as _FRONT
+import moybyte as _moybyte
 
 try:
     import moy_log as _L
@@ -188,19 +182,13 @@ class _Session(_Store):
 
 def _app_perms():
     """The permission table's module (`app_perms`), imported at the call."""
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     return app_perms
 
 
 def _catalogue():
     """The store's cart interface (`moy_catalogue`), imported at the call."""
-    try:
-        import moy_catalogue
-    except ImportError:  # pragma: no cover - host package lane
-        from runtime import moy_catalogue
+    import moy_catalogue
     return moy_catalogue
 
 
@@ -474,10 +462,7 @@ class _AsShell:
 def _http_worker():
     """The http device API where its https verifies (the boards), else None
     (the host's transport fetches over plain TCP)."""
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     try:
         f = devices.api("http")
         return _AsShell(f, devices._L) if f is not None and f.tls() else None
@@ -510,10 +495,7 @@ class InstallServer:
             if http is None:
                 self.__wrapped = net
             else:
-                try:
-                    from cart_index import Worker
-                except ImportError:  # host: the runtime package
-                    from runtime.cart_index import Worker
+                from cart_index import Worker
                 self.__wrapped = Worker(net, http)
         return self.__wrapped
 
@@ -795,10 +777,7 @@ class ConsoleCalls:
 
 
 def _dev_handles():
-    try:
-        import dev_handles
-    except ImportError:  # host: the runtime package
-        from runtime import dev_handles
+    import dev_handles
     return dev_handles
 
 
@@ -915,10 +894,7 @@ class RoleDoor:
     def __call__(self, g, row, args):
         if row == SH_DOOR:
             if self._sh is None:
-                try:
-                    from sh_door import ShellDoor
-                except ImportError:  # host: the runtime package
-                    from runtime.sh_door import ShellDoor
+                from sh_door import ShellDoor
                 self._sh = ShellDoor(self._ws)
             return self._sh(args)
         name = self._table[row] if 0 <= row < len(self._table) else None
@@ -959,10 +935,7 @@ def _door_open(ws, servers):
     in moy_app (where this tier carries both)."""
     try:
         import moy_app
-        try:
-            import moy_loop
-        except ImportError:  # pragma: no cover - host package lane
-            from runtime import moy_loop
+        import moy_loop
         moy_loop.role(RoleDoor(ws, servers, moy_app.table()))
     except ImportError:  # a host with no C compiler: no loop, no door
         return

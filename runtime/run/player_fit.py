@@ -25,20 +25,10 @@ MicroPython-safe.
 
 import sys
 
-try:
-    import chrome_ops as _ch
-    from widgets import _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
-    from runtime.widgets import _err_text
-try:
-    import moy_carts as _carts
-except ImportError:  # pragma: no cover - host
-    from runtime import moy_carts as _carts
-try:
-    import moy_play as _moy_play
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_play as _moy_play
+import chrome_ops as _ch
+from widgets import _err_text
+import moy_carts as _carts
+import moy_play as _moy_play
 
 
 def _nativize(src):

@@ -82,18 +82,11 @@ knows its folder makes instead of a scan: a folder that reads takes (or keeps)
 its row, and one that does not -- removed, or no cart -- has its row released.
 """
 
-try:
-    import moy_carts
-    import moy_journal
-    from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
-    from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
-    from moy_store_base import BUILTIN_NS, cart_folder, seeded
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_carts
-    from runtime import moy_journal
-    from runtime.moy_index import Index, ROOTS, StaleHandle  # noqa: F401
-    from runtime.moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
-    from runtime.moy_store_base import BUILTIN_NS, cart_folder, seeded
+import moy_carts
+import moy_journal
+from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
+from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
+from moy_store_base import BUILTIN_NS, cart_folder, seeded
 
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs

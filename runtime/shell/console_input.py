@@ -17,16 +17,10 @@ on the keyboard) and `focused_cart_editor`. A mixin of `Workstation`; the state 
 created in console.py's `_init_state`.
 """
 
-try:
-    from moy_input import SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
-    from editor_app import COMMIT_TABS, THEME_TABS
-    from chrome import _ticks_ms, _ticks_us, _ticks_diff
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_input import SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
-    from runtime.editor_app import COMMIT_TABS, THEME_TABS
-    from runtime.chrome import _ticks_ms, _ticks_us, _ticks_diff
-    from runtime import ui_draw as _ui_draw
+from moy_input import SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
+from editor_app import COMMIT_TABS, THEME_TABS
+from chrome import _ticks_ms, _ticks_us, _ticks_diff
+import ui_draw as _ui_draw
 
 
 # How long the console's key is held to open the task manager, ms.

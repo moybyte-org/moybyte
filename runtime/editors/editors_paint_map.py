@@ -21,10 +21,7 @@ own pre-image, so the SAME batch a stroke records in RAM is the batch a project
 commit embeds in its journal line (`History.flush()`), and the #88 bar UNDO/REDO
 icons walk it before falling back to the coarse whole-commit journal (#111)."""
 
-try:
-    from op_history import History, OpHistoryMixin
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpHistoryMixin
+from op_history import History, OpHistoryMixin
 
 try:                                              # binascii = MicroPython + CPython
     import ubinascii as _binascii

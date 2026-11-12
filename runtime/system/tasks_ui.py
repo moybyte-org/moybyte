@@ -26,21 +26,11 @@ and the surface on top on a handheld, where it holds the front game while
 it shows.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-
-try:
-    from layers import Layer
-    from notifications import NOTES
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.layers import Layer
-    from runtime.notifications import NOTES
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from layers import Layer
+from notifications import NOTES
 
 TITLE = "Tasks"
 COLUMNS = ("Name", "State", "CPU", "Mem")

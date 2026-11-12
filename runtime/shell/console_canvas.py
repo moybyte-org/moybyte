@@ -10,12 +10,8 @@ coordinates the frame reads every frame (`_composite_game`, `game_view`,
 `_game_xy`, `app_window_size`) stay on the class.
 """
 
-try:
-    from chrome import _err_text
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _err_text
-    from runtime import ui_draw as _ui_draw
+from chrome import _err_text
+import ui_draw as _ui_draw
 
 
 class CanvasBinding:

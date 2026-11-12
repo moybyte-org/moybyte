@@ -41,15 +41,8 @@ cross-import web. It's cohesive with the launcher-home rendering, so it's left p
 import json
 
 
-try:
-    from layout_base import bar_rows as _bar_rows
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows as _bar_rows
-
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_diff  # noqa: F401 -- re-exported
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff  # noqa: F401 -- re-exported
+from layout_base import bar_rows as _bar_rows
+from ticks import _ticks_ms, _ticks_diff  # noqa: F401 -- re-exported
 
 
 def _err_text(exc):

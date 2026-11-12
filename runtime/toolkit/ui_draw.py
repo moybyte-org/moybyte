@@ -2165,17 +2165,10 @@ def fill_uncovered(cv, inner, outer, col):
 # The scrolling, the coverless cart's cover and an app's host live in modules
 # of their own; their names are this module's too. Imported here, at the foot,
 # because ui_scroll and ui_host take their share of this module's state from it.
-try:
-    from ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
-    from ui_cover import initial_block, initial_cover, initial_parts
-    from ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
-                         HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
-                         held_layer, release_held)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
-    from runtime.ui_cover import initial_block, initial_cover, initial_parts
-    from runtime.ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
-                                 HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
-                                 held_layer, release_held)
+from ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
+from ui_cover import initial_block, initial_cover, initial_parts
+from ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
+                     HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
+                     held_layer, release_held)
 
 _load_metrics()

@@ -70,28 +70,14 @@ is swapped for the native SD attach after that. Same rule the sibling
 collaborators follow.
 """
 
-try:
-    from editors_sheet import SpriteSheet
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import SpriteSheet
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    import cover_png
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import cover_png
+from editors_sheet import SpriteSheet
+from ticks import _ticks_ms, _ticks_diff
+import cover_png
 
 # #186 moy_buf: cover payloads (source files, decoded pictures, the decode
 # scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops taxing
 # every GC collect. On the host this is a transparent no-op layer.
-try:
-    import moybuf as _moybuf
-except ImportError:
-    from runtime import moybuf as _moybuf
+import moybuf as _moybuf
 
 # The three decodes of a cover, named by the reduction each one is (the
 # `div` cover_png takes): see the module docstring for who asks for which.

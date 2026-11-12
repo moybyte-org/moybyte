@@ -209,10 +209,7 @@ A soft reset has no record: the kernel stops those services in its place
 (moy_os_services_end, moy_wasm_services_end, moycore_svc_vm_stop).
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+from ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 try:
     from time import sleep_ms as _sleep_ms
@@ -256,10 +253,7 @@ try:
 except ImportError:  # pragma: no cover - every VM has it
     _json = None
 
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+import moy_evq as _E
 
 try:
     import moy_log as _L
@@ -313,10 +307,7 @@ ENTRY = "service"                   # the entry `entries` names a service by
 ENTRY_TIERS = {"py": "python", "lua": "lua", "wasm": "wasm", "elf": "elf"}
 ABSENT = -8                         # `own`'s answer where the app has no service
 
-try:
-    from crash_guard import CrashGuard as _CG
-except ImportError:  # host: the runtime package
-    from runtime.crash_guard import CrashGuard as _CG
+from crash_guard import CrashGuard as _CG
 RESTART_CAP = _CG.STRIKES           # ends in a row that leave a service down
 
 ALLOC_WRAP = _WRAP              # `allocated()` wraps here: a difference is masked by it
@@ -768,10 +759,7 @@ class Scheduler:
             elif w is not None:
                 self.wakes.cancel(w[0])
             return
-        try:
-            from os_log import crashed
-        except ImportError:  # host: the runtime package
-            from runtime.os_log import crashed
+        from os_log import crashed
         crashed(pid, exc)
         if p is not None and p.kind == SERVICE:
             self._exit(p, EXIT_CRASHED)
@@ -788,10 +776,7 @@ class Scheduler:
         what a restart launches again (`start_cart`). A cart already running
         answers its pid. Answers its pid, or None when the launch was refused
         or it ended in its start."""
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         name = _svc_name(cart)
         running = self.find(name)
         if running is not None:
@@ -860,10 +845,7 @@ class Scheduler:
         factory = getattr(ws, "app_context", None)
         if factory is None:
             return (), {}
-        try:
-            import app_perms, system_api
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms, system_api
+        import app_perms, system_api
         p.ctx, roles, names = system_api.service_api(
             factory, cart, p.granted, p.pid, app_perms.tier_of(cart) == "lua")
         return roles, names
@@ -1270,11 +1252,8 @@ class Scheduler:
             return None
         try:
             import ssh_service as _ssh
-        except ImportError:  # host: the runtime package
-            try:
-                from runtime import ssh_service as _ssh
-            except ImportError:  # an image without it
-                return None
+        except ImportError:  # an image without it
+            return None
         return _ssh.name(self.ws)
 
     def _cart(self, pid):
@@ -1291,10 +1270,7 @@ class Scheduler:
         if app is None:
             cart = cart if cart is not None else self._cart(pid)
             if cart is not None:
-                try:
-                    import app_perms
-                except ImportError:  # host: the runtime package
-                    from runtime import app_perms
+                import app_perms
                 app = app_perms.app_id(cart)
         return app
 
@@ -1308,10 +1284,7 @@ class Scheduler:
         app = self.app_id(pid) if pid != SHELL and root is not None else None
         if app is None:
             return None
-        try:
-            import app_keys as _keys
-        except ImportError:  # host: the runtime package
-            from runtime import app_keys as _keys
+        import app_keys as _keys
         if verb == "make":
             fn = lambda: _keys.make(root, app, name)  # noqa: E731
         elif verb == "public":
@@ -1538,10 +1511,7 @@ class Scheduler:
         its restart policy follows; one a compiled program stopped during it
         (THE STOPS ASKED) is a stop asked, ended now or by `stop`. Answers
         the pids taken back."""
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         out = []
         kept, self.kept = self.kept, ()
         carts = getattr(ws, "carts", None)
@@ -1667,19 +1637,13 @@ def _handles_end(pid):
     are Python objects in the VM's heap)."""
     try:
         import dev_handles
-    except ImportError:  # host: the runtime package
-        try:
-            from runtime import dev_handles
-        except ImportError:
-            return
+    except ImportError:
+        return
     dev_handles.sweep(pid)
 
 
 def _devices():
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     return devices
 
 
@@ -1688,10 +1652,7 @@ def _svc():
     try:
         import moycore
     except ImportError:
-        try:
-            from runtime import moycore
-        except ImportError:
-            return None
+        return None
     return moycore if hasattr(moycore, "svc_start") else None
 
 
@@ -1799,10 +1760,7 @@ def _env_text(env):
 
 
 def _aio():
-    try:
-        import aio
-    except ImportError:  # host: the runtime package
-        from runtime import aio
+    import aio
     return aio
 
 
@@ -1830,10 +1788,7 @@ def prepared(ws, cart, service=False):
         run = as_service(run)
         if run is None:
             return None
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     if run.get("src") is None and app_perms.tier_of(run) not in COMPILED:
         return None
     consent = getattr(ws, "consent", None)
@@ -1857,19 +1812,13 @@ def compiled_run(ws, p, cart):
     app = getattr(ws, "app_abi", None)
     if factory is None or app is None:
         return None
-    try:
-        import moy_app
-    except ImportError:  # host: the runtime package
-        from runtime import moy_app
+    import moy_app
     roles, kind = moy_app.policy(p.granted)
     app_id = moy_app.id_for(cart.get("id"), cart.get("title"))
     p.ctx = factory(app_id, roles, app_id, run=True, kind=kind, owner=p.pid)
     devs = getattr(app, "grant_devs", None)
     if devs is not None and p.granted:
-        try:
-            import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
+        import devices
         # its device handles' (moy_dev.h), and the folder they read its files in
         devs(p.ctx.grant, tuple(p.granted), devices.folder(cart))
     return app.run(p.ctx.grant, roles)
@@ -1914,10 +1863,7 @@ def wants_autostart(ws, cart):
     consent = getattr(ws, "consent", None)
     if consent is None:
         return True
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     return consent.is_on(app_perms.app_id(cart), "autostart")
 
 

@@ -22,19 +22,11 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-try:
-    from moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, USER_NS, _listing,
-                                _rmtree, _sibling_path, cart_path, theme_name_ok)
-    from moy_fs import (_exists, _mkdir, _read, _read_bytes, _remove, _write,
-                        _write_bytes)
-    from moy_fs import _native as _store
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, USER_NS,
-                                        _listing, _rmtree, _sibling_path, cart_path,
-                                        theme_name_ok)
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_bytes, _remove, _write,
-                                _write_bytes)
-    from runtime.moy_fs import _native as _store
+from moy_store_base import (CARTS_DIR, CART_EXT, THEME_NAME_MAX, USER_NS, _listing,
+                            _rmtree, _sibling_path, cart_path, theme_name_ok)
+from moy_fs import (_exists, _mkdir, _read, _read_bytes, _remove, _write,
+                    _write_bytes)
+from moy_fs import _native as _store
 if _store is not None and not hasattr(_store, "catalogue"):
     _store = None              # the same native store moy_carts reaches
 

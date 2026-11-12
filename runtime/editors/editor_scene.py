@@ -19,12 +19,8 @@ the verbs take the taps. A tag is typed in a popover, whose keys are its own
 while it is open. Every change is the core's (`SceneEditor`), synced to the
 running game as the tab's taps are."""
 
-try:
-    import ui
-    from editor_map import checker
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-    from runtime.editor_map import checker
+import ui
+from editor_map import checker
 
 ACTOR_VERBS = ("Tag", "Flip", "Front", "Back", "Remove")
 ACTOR_ICONS = ("notes", "flip", "arrow_up", "arrow_down", "del")

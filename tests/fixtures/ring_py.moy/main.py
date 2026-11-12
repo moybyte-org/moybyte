@@ -2,10 +2,7 @@
 # section 2): a 441 Hz square wave, DEPTH frames deep, refilled from the loop.
 # The ring's counters are moybyte.snd_counts() and the AUDIORATE line's snd=.
 
-try:
-    import moybyte
-except ImportError:  # the host: the runtime package
-    from runtime import moybyte
+import moybyte
 
 DEPTH = 2048
 PERIOD = 50

@@ -25,16 +25,10 @@ True while typed keys are its own (B and ESC are then the text field's);
 `closed()` on every close, a tap outside included.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from status_items import ITEMS as _ITEMS
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.status_items import ITEMS as _ITEMS
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from status_items import ITEMS as _ITEMS
 
 
 def shift_month(y, m, n):

@@ -13,12 +13,8 @@ every frame. It owns no state of its own: the query is the console's
 (`ws.search_query`, `ws.search_typing`).
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 

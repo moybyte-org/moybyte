@@ -29,12 +29,8 @@ free apart from the shared editor cores below.
 
 # The cores the shell itself needs, each from its own module, so a start that
 # never opens the Editor loads none of the others.
-try:
-    from editors_code import CodeEditor
-    from editors_sheet import _SheetSprite
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor
-    from runtime.editors_sheet import _SheetSprite
+from editors_code import CodeEditor
+from editors_sheet import _SheetSprite
 # (the #111 op-history core is history_router.py's import now, not this file's --
 # #209 landing E took the code tab's History and its typing-burst codec with it)
 # The glass (native/moy_glass): the frame gate folds a dirty frame into the
@@ -137,52 +133,31 @@ def _first_use(attr, build):
 # frame-time breakdown + its tap target. The perf *query* API
 # (perf_sample/perf_breakdown/...) is the Workstation's, in console_perf.py (the
 # device diag's measurement contract). Same bare-or-package fallback as above.
-try:
-    import iconsets as _iconsets
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import iconsets as _iconsets
-try:
-    from perf_hud import PerfHud
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.perf_hud import PerfHud
+import iconsets as _iconsets
+from perf_hud import PerfHud
 
 # The firmware-update (OTA) SCREEN's UI layer (#53): the
 # confirm/download/install/done lifecycle + its pump + drawing. The update
 # *queries* (_update_available/_online_update_available) stay below, and the
 # channel choice (_ota_channel/_cycle_channel) is the SettingsToggles mixin's
 # (console_settings.py). Same bare-or-package fallback as the editors above.
-try:
-    from update_ui import UpdateUI
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.update_ui import UpdateUI
+from update_ui import UpdateUI
 
 # The WEB CONSOLE switch (#197, web_console.py): wasm mode's own object -- the
 # pin, the paired url, the park/unpark of the glass, and the connection screen
 # (web_console_ui.py) it holds. The first Workstation collaborator (#209).
-try:
-    from web_console import WebConsole
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.web_console import WebConsole
+from web_console import WebConsole
 
 # The OS's own names for a Python app (moybyte.py): its events read the rings
 # of the input this Workstation is built over.
-try:
-    import moybyte as _moybyte
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybyte as _moybyte
+import moybyte as _moybyte
 
 # The cooperative scheduler (scheduler.py): the services this console starts
 # at its first drawn frame.
-try:
-    import scheduler as _scheduler
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import scheduler as _scheduler
+import scheduler as _scheduler
 
 # The SSH server, served at the first frame where a password is set.
-try:
-    import ssh_service as _ssh
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ssh_service as _ssh
+import ssh_service as _ssh
 
 
 try:
@@ -197,75 +172,46 @@ def _log_info(pid, text):
 
 
 # The crontab's lines and the shell's at jobs (cron.py), read at the first frame.
-try:
-    import cron as _cron
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import cron as _cron
+import cron as _cron
 
 # The hardware leases (leases.py): the `pins` verbs' local service, and the
 # grants a lease and a device API (devices.py) check; devfs.py's process rows.
-try:
-    import leases as _hwleases
-    import devfs as _devfs
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import leases as _hwleases
-    from runtime import devfs as _devfs
-    from runtime import devices as _devices
+import leases as _hwleases
+import devfs as _devfs
+import devices as _devices
 
 # CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
 # their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
-try:
-    from cover_cache import CoverCache
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cover_cache import CoverCache
+from cover_cache import CoverCache
 
 # CartManager (cart_manager.py): ws.carts -- the scanned roster `carts.all`, the
 # store-writing verbs (new/dup/delete), the sync re-scan, the #66 live-set diet
 # and the #105 favorites/recents. What a shelf CARD looks like (the pseudo
 # tiles, the search filter, the app-claim hiding) stays kernel, below.
-try:
-    from cart_manager import CartManager
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_manager import CartManager
+from cart_manager import CartManager
 
 # system/settings' owner (#209 landing B, system_store.py): the settings rows
 # `ws.system` aliases (written through one persisting setter), and the
 # achievements list's store halves -- over a StoreHandle that reads the
 # store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
 # settings (load_system's cascade) stays kernel policy, below.
-try:
-    from system_store import (StoreHandle, SystemStore)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.system_store import (StoreHandle, SystemStore)
+from system_store import (StoreHandle, SystemStore)
 
 # The #111 undo ROUTER (#209 landing E, history_router.py): the bar UNDO/REDO
 # pair, the code tab's typing burst, the tab-scoped journal walk they fall
 # through to, and the idle-typing autosave the frame loop ticks. Takes the same
 # StoreHandle -- the walk re-derived that guard by hand until this landing.
-try:
-    from history_router import HistoryRouter
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.history_router import HistoryRouter
+from history_router import HistoryRouter
 
 # The ≡ system menu's rows and actions (#52); its drawing is the kernel's chrome
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
-try:
-    from notifications import NOTES as _NOTES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.notifications import NOTES as _NOTES
+from notifications import NOTES as _NOTES
 # The media service's face once the console has booted its services: each
 # frame starts with its check for a run a compiled program's handle started.
 _MEDIA = [None]
-try:
-    from procs import Procs, Run
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.procs import Procs, Run
-try:
-    from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
+from procs import Procs, Run
+from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
 # badges are the achievements process's (`ach`, its link); starting it and the
@@ -273,45 +219,29 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # mixin (console_notices.py), and the banner's
 # DEADLINE the unlock pushes into at event time is created in _init_overlays
 # below (#209 landing B). Same bare-or-package fallback.
-try:
-    from achievements_ui import AchievementsUI
-    from achievements import Link as _AchLink
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.achievements_ui import AchievementsUI
-    from runtime.achievements import Link as _AchLink
+from achievements_ui import AchievementsUI
+from achievements import Link as _AchLink
 
 # The Layer protocol + the self-contained surface adapters (extracted from this
 # file -- see layers.py): the router builds the stack from these. layers.py is a
 # dependency-free leaf (every class references only its self.ws back-ref), so there
 # is no circular import back into console. Same bare-or-package fallback as above.
-try:
-    from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
-                        _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
-                        _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
-                        _PauseLayer, _ConfirmLayer)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
-                                _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
-                                _SysMenuLayer, _AboutLayer,
-                                _WebConsoleLayer, _PauseLayer, _ConfirmLayer)
+from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
+                    _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
+                    _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
+                    _PauseLayer, _ConfirmLayer)
 
 # The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
 # SINGLE SOURCE of the bar geometry constants (_STATUS_H, _BAR_*); the ones
 # tests reference as console._X are imported back here rather than
 # duplicated. NAMES is injected into the one BarLayer a Workstation builds
 # (circular-import dodge).
-try:
-    from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import BarLayer, _BAR_ICON, _STATUS_H
+from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
 # The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
 # STATE stays on Workstation: ws.config / ws.apply; the tab's page mutates
 # ws.config in place.
-try:
-    from cards_layer import CardsLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cards_layer import CardsLayer
+from cards_layer import CardsLayer
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
@@ -320,14 +250,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # ws.look (the launcher shares that backdrop). settings_layer.py is the single
 # source of the _SET_* geometry constants; the two tests reach as console._X are
 # imported back here.
-try:
-    from settings_layer import SettingsLayer
-    from tasks_ui import TasksLayer
-    from popover import component_for as _component_for
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import SettingsLayer
-    from runtime.tasks_ui import TasksLayer
-    from runtime.popover import component_for as _component_for
+from settings_layer import SettingsLayer
+from tasks_ui import TasksLayer
+from popover import component_for as _component_for
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
 # the full-screen text view + drawing + code-UI state; the shared ws.editor
@@ -335,90 +260,56 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # code_layout stay on ws. code_layer.py is the single source of the code
 # geometry constants + the MicroPython-safe syntax highlighter; the constants
 # tests reach as console._X are imported back here.
-try:
-    from code_layer import CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_SYMBOLS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH,
-                                    _CODE_SYMBOLS)
+from code_layer import CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_SYMBOLS
 
 # Self-contained support widgets (see widgets.py): Pmem (cart persistent RAM)
 # and the Popup, the one popover, and the Pointer cursor (moy_input.py).
 # Leaves; imported back here so console.Pointer / console.Popup / ... resolve
 # for Workstation + host_app + tests.
-try:
-    from widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
-    from moy_input import Pointer, ball_coast as _ball_coast
-    from audio_session import console_volume
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
-    from runtime.moy_input import Pointer, ball_coast as _ball_coast
-    from runtime.audio_session import console_volume
+from widgets import (Pmem, Popup, _POPUP_X, _POPUP_Y, _POPUP_W)
+from moy_input import Pointer, ball_coast as _ball_coast
+from audio_session import console_volume
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
 # the rendering + the compiled-cart cache; the CHOICE is the theme's, and it and
 # the picker/query API are ws.look's (appearance.py drives the component).
-try:
-    from wallpaper import Wallpaper
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wallpaper import Wallpaper
+from wallpaper import Wallpaper
 
 # The narrowed shell interface a SYSTEM APP is handed (ui_refactor_2026-08
 # Phase 6). An app no longer holds `ws`; it holds an AppContext carrying only
 # the roles its NEEDS tuple declares -- see runtime/shell/app_context.py.
-try:
-    from app_context import AppContext
-    import shell_servers as _shell_servers
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import AppContext
-    from runtime import shell_servers as _shell_servers
+from app_context import AppContext
+import shell_servers as _shell_servers
 import moy_app as _moy_app
 
 # Crash isolation for content the shell runs on the kid's behalf (#160,
 # ui_refactor_2026-08 Phase 8): three failed runs and an app cart, or the
 # wallpaper, stops being run -- see runtime/shell/crash_guard.py for why an
 # in-process except cannot do this job.
-try:
-    from crash_guard import CrashGuard, WALLPAPER_KEY
-    import app_perms as _app_perms
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.crash_guard import CrashGuard, WALLPAPER_KEY
-    from runtime import app_perms as _app_perms
+from crash_guard import CrashGuard, WALLPAPER_KEY
+import app_perms as _app_perms
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the system font scale, the theme's wallpaper, `custom`
 # (the theme a change makes) and the top-bar icon sheet. It also installs the theme's shape (`ui.use_shape`): the
 # choice is a persisted setting and the installed shape is process-wide state
 # inside `ui`. Every surface just draws through `ui`.
-try:
-    from appearance import Appearance
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.appearance import Appearance
-
-try:
-    import layout_base as _layout_base
-    import shell_layout as _shell_layout
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _layout_base
-    from runtime import shell_layout as _shell_layout
+from appearance import Appearance
+import layout_base as _layout_base
+import shell_layout as _shell_layout
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
 # identity helper here; the Player is what builds the namespace.
-try:
-    import system_api
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import system_api
+import system_api
 
 
 # The home's layers (docs/theme_and_shell_2026-11.md §8.10, see
 # launcher_layer.py): LauncherHomeLayer (the "launcher" content Layer -- the
 # tab row, the cards and their input) and HomeWindowLayer, the same home in a
 # desk window. The card models and the home's verbs are console_home's.
-try:
-    from launcher_layer import LauncherHomeLayer, HomeWindowLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.launcher_layer import LauncherHomeLayer, HomeWindowLayer
+from launcher_layer import LauncherHomeLayer, HomeWindowLayer
 # The layers that draw a menu holding the keys (`Workstation._modal_layer`):
 # the system menu's own, and a desk popover frame's that paints it alone.
 _PAUSE_LAYERS = ("pause", "popover_over")
@@ -427,12 +318,8 @@ _SYSMENU_LAYERS = ("sysmenu", "popover_over")
 # What a text field says where the input in use cannot type (`can_type`).
 NO_KEYBOARD_TEXT = "Pair a keyboard to type"
 
-try:
-    import ui_draw as _ui_draw
-    import ui as _uiv
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-    from runtime import ui as _uiv
+import ui_draw as _ui_draw
+import ui as _uiv
 
 # The loading pill's icon by the kind of cart being opened (GAPS 51).
 _LOADING_ICON = {"game": "game", "app": "app", "tool": "app", "wallpaper": "wallpaper",
@@ -443,62 +330,41 @@ _FLAT = {"flat": True}
 # Project (project.py): the open cart's DATA + commit_* verbs; its six data
 # fields are forwarding properties here so the surface files + tests keep the
 # ws.<X> spelling.
-try:
-    from project import Project
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.project import Project
+from project import Project
 
 # Player (player.py): the run-loop black box; its cart-run fields
 # (cart_error/crash_line/ns/...) are forwarding properties here for the same
 # reason. A game is left through the pause menu (the console's key, `start`),
 # a tool through the bar X; the #71 BACKSPACE pause is retired, do not
 # reintroduce it.
-try:
-    from player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
+from player import (Player, BAR_TYPES, SCRIPT_TYPE, _SIG_FPS)
 
 # The TEXT CONSOLE (text_console.py): the surface a `type: "script"` cart runs
 # on -- scrollback + prompt, drawn by the shell as the run's `_draw` so a
 # script cannot paint over the line it is reading from.
-try:
-    from text_console import TextConsole
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.text_console import TextConsole
+from text_console import TextConsole
 
 # The editor MODE table (text_modes.py): here for `script_runtime`, which is
 # what says a vault file is a program and which tier runs it.
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import text_modes as _modes
+import text_modes as _modes
 
 # EditorApp (editor_app.py): the tab ladder + PLAY. ws.menu_view is a
 # forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
 # stay one-line forwards (tested surface).
-try:
-    from editor_app import EditorApp
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_app import EditorApp
+from editor_app import EditorApp
 
 # FullscreenStackWM (wm.py): viewport composite (#39), the back-stack `screen`
 # projects onto, and the MEMOIZED visible/draw stack (rebuilt only on push/pop
 # or overlay-gate change -- a static top-of-stack allocates no per-frame list).
 # ws._composite_game/_game_xy/_viewport stay one-line forwards (tested surface).
-try:
-    from wm import FullscreenStackWM
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm import FullscreenStackWM
+from wm import FullscreenStackWM
 
 # The unified multiplayer input router (#65): PlayerRouter maps input SOURCES to
 # player SLOTS behind btn(name, player)/players(). Slot 0 is the local console
 # (untouched); extra slots stay empty until a transport (USB pad / phone / ESP-NOW
 # peer) registers one. Attached to the InputState in wire_workstation_core so host +
 # both boards share it. Same bare-or-package fallback as the extracted modules above.
-try:
-    from players import PlayerRouter
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.players import PlayerRouter
+from players import PlayerRouter
 
 
 
@@ -510,20 +376,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # still makes resolves (`_in` is one of those: nothing here calls it). chrome.py is a leaf (it imports only editors/widgets +
 # surface geometry constants, none of which import back), so there is no cycle.
 # Same bare-or-package fallback as the surfaces above.
-try:
-    from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
-                        RESIZE_CURSORS, NAMES, THEME_VARIANTS,
-                        _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                        _ICON, chrome_scale_floor,
-                        chrome_scale_choices, _cursor_delta,
-                        _clamp_scroll, _in, _SPLASH_MS)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
-                                RESIZE_CURSORS,
-                                NAMES, THEME_VARIANTS, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                                _ICON,
-                                chrome_scale_floor, chrome_scale_choices,
-                                _cursor_delta, _clamp_scroll, _in, _SPLASH_MS)
+from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
+                    RESIZE_CURSORS, NAMES, THEME_VARIANTS,
+                    _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
+                    _ICON, chrome_scale_floor,
+                    chrome_scale_choices, _cursor_delta,
+                    _clamp_scroll, _in, _SPLASH_MS)
 
 
 # The Workstation's mixins -- what a kernel does not need to be in the same
@@ -539,30 +397,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # is looked up base by base in the order listed, so the bases that hold the
 # per-frame verbs come first, and the verbs `frame` itself calls stay on the
 # class.
-try:
-    from console_input import InputVerbs
-    from console_home import HomeVerbs
-    from console_text import TextVerbs
-    from console_canvas import CanvasBinding
-    from console_perf import PerfMeters, _ema
-    from console_settings import SettingsToggles
-    from console_saves import SaveVerbs
-    from console_notices import Notices
-    from console_spine import SpineVerbs
-    from moy_spine import AppRegistry, Returns
-    from moy_lease import Wifi, wifi_reset
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.console_input import InputVerbs
-    from runtime.console_home import HomeVerbs
-    from runtime.console_text import TextVerbs
-    from runtime.console_canvas import CanvasBinding
-    from runtime.console_perf import PerfMeters, _ema
-    from runtime.console_settings import SettingsToggles
-    from runtime.console_saves import SaveVerbs
-    from runtime.console_notices import Notices
-    from runtime.console_spine import SpineVerbs
-    from runtime.moy_spine import AppRegistry, Returns
-    from runtime.moy_lease import Wifi, wifi_reset
+from console_input import InputVerbs
+from console_home import HomeVerbs
+from console_text import TextVerbs
+from console_canvas import CanvasBinding
+from console_perf import PerfMeters, _ema
+from console_settings import SettingsToggles
+from console_saves import SaveVerbs
+from console_notices import Notices
+from console_spine import SpineVerbs
+from moy_spine import AppRegistry, Returns
+from moy_lease import Wifi, wifi_reset
 
 
 def _kernel_tables():
@@ -644,10 +489,7 @@ def splash_pal(th):
     toward the dim ink, or where the value would not keep 3:1 on it the
     ground edged in the dim ink (Contrast's)."""
     from array import array
-    try:
-        from chrome import rgb565_of
-    except ImportError:  # pragma: no cover - host package lane
-        from runtime.chrome import rgb565_of
+    from chrome import rgb565_of
     bg, ink, dim = (rgb565_of(th[k]) for k in ("panel", "ink", "ink_dim"))
     value = rgb565_of(th.get("value", th["accent"]))
     rest = _mix565(rgb565_of(th["border"]), dim, 64)
@@ -704,10 +546,7 @@ def draw_splash(cv, frac=None, status=None, pal=None):
     if pal is None:
         pal = _kernel_splash()
     if pal is None:
-        try:
-            from chrome import theme_colors
-        except ImportError:  # pragma: no cover - host package lane
-            from runtime.chrome import theme_colors
+        from chrome import theme_colors
         pal = splash_pal(theme_colors("moy", "light"))
     permille = -1 if frac is None else int(1000 * min(max(frac, 0.0), 1.0))
     cv.splash(pal, permille, status or "")
@@ -1456,11 +1295,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if desk is None and _layout_base.metric_class() == _layout_base.DESK:
             try:
                 from editor_desk import EditorDesk
-            except ImportError:  # pragma: no cover - host fallback
-                try:
-                    from runtime.editor_desk import EditorDesk
-                except ImportError:  # an image without the desk tier
-                    return None
+            except ImportError:  # an image without the desk tier
+                return None
             desk = self._editor_desk = EditorDesk(self, _ui_draw.AppHost)
         return desk
 
@@ -1804,10 +1640,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """The kernel's ladder entered or left its SAVER rung. Never over a
         running cart: the game keeps the glass."""
         if on and not self.wm.top_is_player():
-            try:
-                from idle_ladder import Saver
-            except ImportError:  # host: the runtime package
-                from runtime.idle_ladder import Saver
+            from idle_ladder import Saver
             self._saver = Saver(self)
         else:
             self._saver = None
@@ -3444,10 +3277,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _music_follows(self):
         """A run of the media service found, whoever played it: Music's card
         and its status item follow it (music_app.follow)."""
-        try:
-            import music_app
-        except ImportError:  # host: the runtime package
-            from runtime import music_app
+        import music_app
         music_app.follow(self)
 
     def frame(self, dt):

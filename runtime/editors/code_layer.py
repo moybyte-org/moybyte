@@ -40,14 +40,9 @@ from editors_code import CodeEditor
 from editors_base import KeyEdge
 from array import array as _array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 # the text view's syntaxes by the highlighter's language (ui.text_options's)
 _SYNTAX = {"plain": 0, "python": 1, "lua": 2, "json": 3}
@@ -74,31 +69,18 @@ _STOP_DIM = {"tone": "dim"}
 
 def _desk():
     return _lb.metric_class() == _lb.DESK
-try:
-    from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-try:
-    from editors_code import TextMouse
-    from ticks import _ticks_ms
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.editors_code import TextMouse
-    from runtime.ticks import _ticks_ms
+from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+from editors_code import TextMouse
+from ticks import _ticks_ms
 
 # The cart API's names, once (see runtime/run/cart_verbs.py) -- the syntax
 # highlighter's builtin class is derived from them below.
-try:
-    from cart_verbs import CART_VERBS as _CART_VERBS
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+from cart_verbs import CART_VERBS as _CART_VERBS
 
 # The console-wide editor MODE table (docs/theme_and_shell_2026-11.md §10): this tab
 # edits a cart's MAIN file, so its language and its parse gate are the `code`
 # mode's, asked here rather than re-derived.
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import text_modes as _modes
+import text_modes as _modes
 
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
 # palette row draw a 12x12 glyph per button instead of the terse 2-3 char label.

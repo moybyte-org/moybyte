@@ -15,18 +15,11 @@ moves, and the verbs are made again only when what they are made of moves
 frame, stays on the class. It owns no state of its own.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
-    from runtime.moy_store_base import builtin_name as _builtin_name
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
+from moy_store_base import builtin_name as _builtin_name
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 

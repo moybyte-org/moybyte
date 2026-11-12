@@ -60,40 +60,21 @@ try:
 except ImportError:  # pragma: no cover
     _time = None
 
-try:
-    from moy_fs import _native as _store
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import _native as _store
+from moy_fs import _native as _store
 if _store is not None and not hasattr(_store, "catalogue"):
     _store = None
 
-try:
-    from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root, CARTS_DIR,
-                                CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
-                                IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
-                                SCENE_EXT, _normalize_canvas, _canvas_str,
-                                _sibling_path, slug, ensure_dirs,
-                                _rmtree, COVER_FILE, COVER_MAX_BYTES,
-                                SPRITES_NAME, icon_rows, _listing, _absent,
-                                _has, _cwd, _enter, _leave, CART_EXT,
-                                cart_path, cart_folder,
-                                USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                                is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX, theme_name_ok)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root,
-                                        CARTS_DIR, CART_FORMAT, CANVAS_SIZES,
-                                        IMAGES_DIR, IMAGE_EXT, FLAGS_NAME,
-                                        TILE_FLAGS, SCENES_DIR, SCENE_EXT,
-                                        _normalize_canvas, _canvas_str,
-                                        _sibling_path, slug, ensure_dirs,
-                                        _rmtree, COVER_FILE,
-                                        COVER_MAX_BYTES, SPRITES_NAME,
-                                        icon_rows, _listing, _absent, _has,
-                                        _cwd, _enter, _leave, CART_EXT,
-                                        cart_path, cart_folder,
-                                        USER_NS, BUILTIN_NS, VENDOR_KEY,
-                                        vendor, is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX,
-                                        theme_name_ok)
+from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root, CARTS_DIR,
+                            CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
+                            IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
+                            SCENE_EXT, _normalize_canvas, _canvas_str,
+                            _sibling_path, slug, ensure_dirs,
+                            _rmtree, COVER_FILE, COVER_MAX_BYTES,
+                            SPRITES_NAME, icon_rows, _listing, _absent,
+                            _has, _cwd, _enter, _leave, CART_EXT,
+                            cart_path, cart_folder,
+                            USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
+                            is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX, theme_name_ok)
 
 
 # Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
@@ -199,25 +180,12 @@ def flags_to_hex(flags):
 # modules (moyimg / moy_fs); imported back + re-exported under these names so
 # every `store.X` lookup reaches them. Same bare-or-package fallback as every
 # shared module.
-try:
-    import cart_listing as _cart_listing
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import cart_listing as _cart_listing
-
-try:
-    from moy_store_base import THUMBS_DIR
-    from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
-    from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
-                        _write_atomic, _read_recover, _read_bak, _forget_bak,
-                        set_publish_root, _read_bytes, _write_bytes)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import THUMBS_DIR
-    from runtime.moyimg import (_b64_encode, encode_moyimg, decode_moyimg,
-                                text_sig)
-    from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
-                                _write_atomic, _read_recover, _read_bak,
-                                _forget_bak, set_publish_root, _read_bytes,
-                                _write_bytes)
+import cart_listing as _cart_listing
+from moy_store_base import THUMBS_DIR
+from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
+from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
+                    _write_atomic, _read_recover, _read_bak, _forget_bak,
+                    set_publish_root, _read_bytes, _write_bytes)
 
 
 def load_cover(path):
@@ -239,10 +207,7 @@ def save_cover(cart, data):
 def _cover_png():
     # Imported where it is used: the headless Zero carries this store and no
     # cover reader, and never asks for one.
-    try:
-        import cover_png
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime import cover_png
+    import cover_png
     return cover_png
 
 
@@ -1353,23 +1318,12 @@ def save_map(cart, hex_text):
 # full-file snapshots + the atomic cursor). Imported back + re-exported so the
 # `store.journal_*` call sites (project.py / console.py) and the tests are
 # unchanged; the design doc lives at the top of moy_journal.py.
-try:
-    from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
-                             JOURNAL_SNAP_DIR, journal_append, journal_undo,
-                             journal_redo, journal_can_undo, journal_can_redo,
-                             journal_list, journal_snap, journal_restore,
-                             _journal_paths, _journal_load_entries,
-                             _journal_current_snap, _journal_total_len)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
-                                     JOURNAL_SNAP_DIR, journal_append,
-                                     journal_undo, journal_redo,
-                                     journal_can_undo, journal_can_redo,
-                                     journal_list, journal_snap,
-                                     journal_restore,
-                                     _journal_paths, _journal_load_entries,
-                                     _journal_current_snap,
-                                     _journal_total_len)
+from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
+                         JOURNAL_SNAP_DIR, journal_append, journal_undo,
+                         journal_redo, journal_can_undo, journal_can_redo,
+                         journal_list, journal_snap, journal_restore,
+                         _journal_paths, _journal_load_entries,
+                         _journal_current_snap, _journal_total_len)
 
 
 def _import_blocks():
@@ -1797,35 +1751,18 @@ def delete(cart):
 #
 # Nothing in the core above reads any of these; every caller reaches them as
 # `moy_carts.X`, so the umbrella is the import site and the leaves stay leaves.
-try:
-    from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
-                          _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
-                          SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
-                          settings_text, load_system, save_system, save_system_steps)
-    from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
-                          import_archive, import_base, import_target)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
-                                  _wifi_networks, load_wifi, save_wifi, remember_wifi,
-                                  forget_wifi, SYSTEM_DIR, SETTINGS_NAME,
-                                  system_store_path, parse_settings, settings_text,
-                                  load_system, save_system, save_system_steps)
-    from runtime.moy_pack import (save_package, rename_package, pack_skip, pack, unpack,
-                                  adopt, import_archive, import_base, import_target)
-try:
-    from moy_seed import (
-        seed_builtins, seed_folders,
-        _SEED_WBITS, unpack_seed, seed_packed, is_packed,
-        RETIRED, RETIRED_GEN, retired_version_path,
-        load_retired_version, prune_retired, sweep_store, seed_any,
-        embedded_floor)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_seed import (
-        seed_builtins, seed_folders,
-        _SEED_WBITS, unpack_seed, seed_packed, is_packed,
-        RETIRED, RETIRED_GEN, retired_version_path,
-        load_retired_version, prune_retired, sweep_store, seed_any,
-        embedded_floor)
+from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
+                      _wifi_networks, load_wifi, save_wifi, remember_wifi, forget_wifi,
+                      SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
+                      settings_text, load_system, save_system, save_system_steps)
+from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
+                      import_archive, import_base, import_target)
+from moy_seed import (
+    seed_builtins, seed_folders,
+    _SEED_WBITS, unpack_seed, seed_packed, is_packed,
+    RETIRED, RETIRED_GEN, retired_version_path,
+    load_retired_version, prune_retired, sweep_store, seed_any,
+    embedded_floor)
 
 
 # The user-files layer's names, `moy_carts.list_files` as before, served by

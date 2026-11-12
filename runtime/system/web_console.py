@@ -16,15 +16,8 @@ settings load later still (the same ordering `make_webhost` respects by reading
 the sign-in's folder at `start()` rather than at construction).
 """
 
-try:
-    from web_console_ui import WebConsoleUI
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.web_console_ui import WebConsoleUI
-
-try:
-    from chrome import _ticks_us
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _ticks_us
+from web_console_ui import WebConsoleUI
+from chrome import _ticks_us
 
 
 def _moy_net():
@@ -105,10 +98,7 @@ class WebConsole:
         """How a browser that cannot scan the code signs in, one sentence,
         read with the link it sits beside (the password file is a read)."""
         if self._hint is None:
-            try:
-                import ssh_service
-            except ImportError:  # host: the runtime package
-                from runtime import ssh_service
+            import ssh_service
             self._hint = ("Or type this console's password" if ssh_service.is_set(self.ws)
                           else "Scan to pair: set a password (passwd) to type one instead")
         return self._hint

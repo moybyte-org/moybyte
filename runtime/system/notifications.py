@@ -46,14 +46,8 @@ one notification whoever posted it.
 `gen` moves with every change, the task manager's cue to read the list again.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moy_evq as _E
 
 LOW, NORMAL, CRITICAL = 0, 1, 2
 BANNER_MS = 5000                # a NORMAL banner's time up

@@ -19,10 +19,7 @@ its absence is a no-op. Every diag line is also a record of the OS log
 (native/moy_kernel/moy_log.h) under the shell, at info.
 """
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+from ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 try:                                    # the OS log, on every tier
     import moy_log as _log

@@ -22,12 +22,8 @@ stay on the class. It owns no state of its own: the slots and seqs it reads
 are the WM's, made in `WindowedWM.__init__`.
 """
 
-try:
-    from wm_parts import _overlap, _inside, _bands, _grow
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm_parts import _overlap, _inside, _bands, _grow
-    from runtime import ui_draw as _ui_draw
+from wm_parts import _overlap, _inside, _bands, _grow
+import ui_draw as _ui_draw
 
 
 class WindowOverlays:

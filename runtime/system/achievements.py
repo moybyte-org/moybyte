@@ -27,14 +27,8 @@ moves when the row's text does, so the process can hold the row in memory
 and read it again only after a write that is not its own (`seed`, a sync).
 """
 
-try:
-    import scheduler as _sched
-except ImportError:  # host: the runtime package
-    from runtime import scheduler as _sched
-try:
-    import app_perms as _perms
-except ImportError:  # host: the runtime package
-    from runtime import app_perms as _perms
+import scheduler as _sched
+import app_perms as _perms
 try:
     import json as _json
 except ImportError:  # pragma: no cover

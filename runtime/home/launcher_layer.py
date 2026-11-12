@@ -59,66 +59,25 @@ grid's.
 
 from array import array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-try:
-    from moy_input import SHIFT as _SHIFT
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import SHIFT as _SHIFT
+import ui as _ui
+import ui_draw as _ui_draw
+from moy_input import SHIFT as _SHIFT
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 # The tick helpers feed the perf_capture-gated home-frame split (see draw below).
-try:
-    from chrome import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _ticks_ms, _ticks_diff
-
-try:
-    import layout_base as _lb
-    import shell_layout as _shell_layout
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _lb
-    from runtime import shell_layout as _shell_layout
-
-try:
-    from home_band import (_wall_ink, _overlaps_any, _ground_of, _dim_of, _cursor_stamp,
-                           _statics_base, _Keyed, _band_key, _band_frame)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_band import (_wall_ink, _overlaps_any, _ground_of, _dim_of, _cursor_stamp,
-                                   _statics_base, _Keyed, _band_key, _band_frame)
-try:
-    from home_hints import HomeHints, modal_keys
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_hints import HomeHints, modal_keys
-try:
-    from home_zone import HomeZone
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_zone import HomeZone
-try:
-    from home_details import HomeDetails
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_details import HomeDetails
-try:
-    from home_search import HomeSearch
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_search import HomeSearch
-try:
-    from home_icons import IconHome
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_icons import IconHome
-try:
-    from home_carousel import Carousel
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_carousel import Carousel
-try:
-    from home_grid import (HOME_SCALE_HH, HOME_TABS, PSEUDO_TILE_TYPES)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_grid import (HOME_SCALE_HH, HOME_TABS, PSEUDO_TILE_TYPES)
+from chrome import _ticks_ms, _ticks_diff
+import layout_base as _lb
+import shell_layout as _shell_layout
+from home_band import (_wall_ink, _overlaps_any, _ground_of, _dim_of, _cursor_stamp,
+                       _statics_base, _Keyed, _band_key, _band_frame)
+from home_hints import HomeHints, modal_keys
+from home_zone import HomeZone
+from home_details import HomeDetails
+from home_search import HomeSearch
+from home_icons import IconHome
+from home_carousel import Carousel
+from home_grid import (HOME_SCALE_HH, HOME_TABS, PSEUDO_TILE_TYPES)
 
 
 # The home layer's own words: the tab row's order, the long press, the

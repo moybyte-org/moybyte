@@ -13,12 +13,8 @@ never on a still frame. It owns no state of its own: the drag, the resize
 and the focus it moves are the WM's.
 """
 
-try:
-    from widgets import _in
-    from moy_input import PB_MIDDLE as _PB_MIDDLE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _in
-    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE
+from widgets import _in
+from moy_input import PB_MIDDLE as _PB_MIDDLE
 
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 

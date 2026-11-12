@@ -60,16 +60,10 @@ SIGNALS = {4: "SIGILL", 5: "SIGTRAP", 7: "SIGBUS", 9: "SIGKILL", 11: "SIGSEGV",
 WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access",
         9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
 
-try:
-    from lua_ext import MOY_BUTTONS, run_face, run_room
-    from moy_input import pointer_state
-    from ui_draw import KEY_PASTE, paste_text
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime.lua_ext import MOY_BUTTONS, run_face, run_room
-    from runtime.moy_input import pointer_state
-    from runtime.ui_draw import KEY_PASTE, paste_text
-    from runtime import moy_evq as _E
+from lua_ext import MOY_BUTTONS, run_face, run_room
+from moy_input import pointer_state
+from ui_draw import KEY_PASTE, paste_text
+import moy_evq as _E
 
 from array import array
 
@@ -280,10 +274,7 @@ class ElfRuntime:
                 ws.wifi_release(NET_TAG, pid)
 
     def _flags(self, cart, net):
-        try:
-            import app_perms
-        except ImportError:  # host: the runtime package
-            from runtime import app_perms
+        import app_perms
         unsigned = app_perms.run_admits_unsigned(self.ws, cart)
         return ((getattr(self.engine, "NET", 1) if net else 0)
                 | (getattr(self.engine, "UNSIGNED", 2) if unsigned else 0))

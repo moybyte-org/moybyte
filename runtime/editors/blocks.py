@@ -100,39 +100,21 @@ except ImportError:  # pragma: no cover
 
 # The cart API's names, once (see runtime/run/cart_verbs.py) -- _RESERVED_NAMES
 # below is derived from them.
-try:
-    from cart_verbs import CART_VERBS as _CART_VERBS
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+from cart_verbs import CART_VERBS as _CART_VERBS
 
 
 # The vocabulary and its queries (blocks_catalog), this module's names too.
-try:
-    from blocks_catalog import (SLOT_NUMBER, SLOT_TEXT, SLOT_VARIABLE, SLOT_LIST,
-                                SLOT_DROPDOWN, SLOT_EXPR, CAT_EVENTS, CAT_CONTROL,
-                                CAT_DRAW, CAT_INPUT, CAT_VARIABLES, CAT_LISTS,
-                                CAT_ACTORS, CAT_LOOKS, CAT_OPERATORS, CAT_SOUND,
-                                CAT_PROCS, CATEGORY_ORDER, SHAPE_HAT, SHAPE_STATEMENT,
-                                SHAPE_CBLOCK, SHAPE_EXPR, SHAPE_DEF, CATALOG, PROC_DEF,
-                                CALL, ELSE_MARKER, COLORS, BUTTONS, ROTSTYLES,
-                                OPTION_SETS, categories, blocks_in_category, block_def,
-                                slot_options, is_expr, is_cblock, is_def, proc_name,
-                                proc_params, call_args, find_proc, block_slots,
-                                block_label)
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.blocks_catalog import (SLOT_NUMBER, SLOT_TEXT, SLOT_VARIABLE,
-                                        SLOT_LIST, SLOT_DROPDOWN, SLOT_EXPR,
-                                        CAT_EVENTS, CAT_CONTROL, CAT_DRAW, CAT_INPUT,
-                                        CAT_VARIABLES, CAT_LISTS, CAT_ACTORS,
-                                        CAT_LOOKS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
-                                        CATEGORY_ORDER, SHAPE_HAT, SHAPE_STATEMENT,
-                                        SHAPE_CBLOCK, SHAPE_EXPR, SHAPE_DEF, CATALOG,
-                                        PROC_DEF, CALL, ELSE_MARKER, COLORS, BUTTONS,
-                                        ROTSTYLES, OPTION_SETS, categories,
-                                        blocks_in_category, block_def, slot_options,
-                                        is_expr, is_cblock, is_def, proc_name,
-                                        proc_params, call_args, find_proc, block_slots,
-                                        block_label)
+from blocks_catalog import (SLOT_NUMBER, SLOT_TEXT, SLOT_VARIABLE, SLOT_LIST,
+                            SLOT_DROPDOWN, SLOT_EXPR, CAT_EVENTS, CAT_CONTROL,
+                            CAT_DRAW, CAT_INPUT, CAT_VARIABLES, CAT_LISTS,
+                            CAT_ACTORS, CAT_LOOKS, CAT_OPERATORS, CAT_SOUND,
+                            CAT_PROCS, CATEGORY_ORDER, SHAPE_HAT, SHAPE_STATEMENT,
+                            SHAPE_CBLOCK, SHAPE_EXPR, SHAPE_DEF, CATALOG, PROC_DEF,
+                            CALL, ELSE_MARKER, COLORS, BUTTONS, ROTSTYLES,
+                            OPTION_SETS, categories, blocks_in_category, block_def,
+                            slot_options, is_expr, is_cblock, is_def, proc_name,
+                            proc_params, call_args, find_proc, block_slots,
+                            block_label)
 
 
 

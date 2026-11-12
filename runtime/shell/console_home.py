@@ -18,28 +18,16 @@ model, the tab and search state and the title the bar shows. A mixin of
 console.py.
 """
 
-try:
-    from home_icons import IconHome
-    from home_carousel import Carousel
-    from home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
-                           HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
-    from project import Project
-    from cart_manager import today_ymd as _today_ymd
-    from chrome import NAMES
-    import scheduler as _scheduler
-    import cron as _cron
-    from achievements import is_proc as _is_ach_proc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_icons import IconHome
-    from runtime.home_carousel import Carousel
-    from runtime.home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
-                                   HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
-    from runtime.project import Project
-    from runtime.cart_manager import today_ymd as _today_ymd
-    from runtime.chrome import NAMES
-    from runtime import scheduler as _scheduler
-    from runtime import cron as _cron
-    from runtime.achievements import is_proc as _is_ach_proc
+from home_icons import IconHome
+from home_carousel import Carousel
+from home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
+                       HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
+from project import Project
+from cart_manager import today_ymd as _today_ymd
+from chrome import NAMES
+import scheduler as _scheduler
+import cron as _cron
+from achievements import is_proc as _is_ach_proc
 
 RESUME_MAX = 512        # the kernel's resume record's bytes (MOY_KERNEL_RESUME_MAX)
 

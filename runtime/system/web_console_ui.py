@@ -33,23 +33,12 @@ it the content rect and draws the bar's status strip over it. NAMES is
 injected at construction rather than imported back from console.py.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:
-    import moy_qr as _qr
-except ImportError:  # host: the runtime package
-    from runtime import moy_qr as _qr
-
-try:
-    import layout_base as _lb
-except ImportError:  # host: the runtime package
-    from runtime import layout_base as _lb
+import moy_qr as _qr
+import layout_base as _lb
 
 _HEAD = {"face": "title"}
 _SAY = {"tone": "dim", "wrap": True, "lines": 3}

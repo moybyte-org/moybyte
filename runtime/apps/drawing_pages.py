@@ -7,18 +7,12 @@ Paint and My Art both open over a drawing (docs/media/look_2026-10/
 APPS_RESTYLE.md), on the public UI API's verbs. A page is drawn in the app's
 frame and answers the frame its row or card is chosen."""
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 try:
     import storybook_app as _stories
-except ImportError:  # pragma: no cover - direct host import
-    try:
-        from runtime import storybook_app as _stories
-    except ImportError:
-        _stories = None
+except ImportError:
+    _stories = None
 
 
 def dot():

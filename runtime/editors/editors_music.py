@@ -9,10 +9,7 @@
 AudioBank; undo/redo rides the
 shared #111 op-history core (runtime/editors/op_history.py)."""
 
-try:
-    from op_history import History, OpCodec, OpHistoryMixin
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpCodec, OpHistoryMixin
+from op_history import History, OpCodec, OpHistoryMixin
 
 
 _ME_REST = -1

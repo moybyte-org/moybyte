@@ -33,22 +33,13 @@ imports no home module.
 
 from array import array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import cart_listing as _cl
-    import iconsets as _iconsets
-    import layout_base as _lb
-    from chrome import _ticks_ms, _ticks_diff
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import cart_listing as _cl
-    from runtime import iconsets as _iconsets
-    from runtime import layout_base as _lb
-    from runtime.chrome import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import builtin_name as _builtin_name
+import ui as _ui
+import ui_draw as _ui_draw
+import cart_listing as _cl
+import iconsets as _iconsets
+import layout_base as _lb
+from chrome import _ticks_ms, _ticks_diff
+from moy_store_base import builtin_name as _builtin_name
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -372,10 +363,7 @@ class Launcher:
         if layout is None:
             # a bare Launcher(items) (unit construction); lazy, so there is
             # no launcher_layer<->console module-load cycle
-            try:
-                from console import Layout
-            except ImportError:  # pragma: no cover - host fallback when not yet aliased
-                from runtime.console import Layout
+            from console import Layout
             layout = Layout()
         self.set_layout(layout)
 

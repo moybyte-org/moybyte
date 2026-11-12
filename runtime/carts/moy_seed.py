@@ -17,24 +17,11 @@ the core, so `moy_carts` re-exports these names rather than the reverse.
 
 import json
 
-try:
-    from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
-                        _remove, _write, _write_atomic, _write_bytes)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
-                                _remove, _write, _write_atomic, _write_bytes)
-try:
-    from moyimg import _b64_decode
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import _b64_decode
-try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
-try:
-    from moy_fs import _native as _store
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import _native as _store
+from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
+                    _remove, _write, _write_atomic, _write_bytes)
+from moyimg import _b64_decode
+from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+from moy_fs import _native as _store
 if _store is not None and not hasattr(_store, "seed"):
     _store = None
 

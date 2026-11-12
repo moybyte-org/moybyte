@@ -44,18 +44,11 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 """
 
 
-try:
-    import ui as _ui
-    from ui_draw import AppHost
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime.ui_draw import AppHost
+import ui as _ui
+from ui_draw import AppHost
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from ticks import _ticks_ms, _ticks_diff
 
 
 def _dots():

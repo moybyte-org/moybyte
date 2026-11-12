@@ -49,36 +49,13 @@ its checkboxes and `[[links]]` answer a tap, read off the line under it
 the record of the rows it drew, so a frame draws the rows that changed.
 """
 
-try:
-    from editors_code import CodeEditor, TextMouse
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor, TextMouse
-try:
-    from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-
-try:
-    from op_history import History, TextEditCodec, text_diff_op
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.op_history import History, TextEditCodec, text_diff_op
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import text_modes as _modes
-
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from editors_code import CodeEditor, TextMouse
+from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+from op_history import History, TextEditCodec, text_diff_op
+import text_modes as _modes
+import ui as _ui
+import ui_draw as _ui_draw
+from ticks import _ticks_ms, _ticks_diff
 from array import array as _array
 
 

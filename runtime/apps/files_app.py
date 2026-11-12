@@ -35,35 +35,12 @@ packages, whose rows open the Appearance app.
 
 from array import array
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
-
-try:
-    from picture_copies import PictureCopies
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.picture_copies import PictureCopies
-
-try:
-    from app_shell import ListShellApp
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.app_shell import ListShellApp
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import text_modes as _modes
-
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    import intents as _intents
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import intents as _intents
+from layout_base import bar_rows, content_of, metric_class, DESK
+from picture_copies import PictureCopies
+from app_shell import ListShellApp
+import text_modes as _modes
+import ui
+import intents as _intents
 
 
 # The carts root, as a place beside the user-files kinds. NOT a

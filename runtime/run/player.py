@@ -50,41 +50,18 @@ is the code line-height for the crash panel, imported from the code editor leaf
 test load).
 """
 
-try:
-    import chrome_ops as _ch
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
+import chrome_ops as _ch
 
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
 # from cart_api (its one author) and is handed to the session.
-try:
-    from players import mask_of as _netplay_mask, world_text as _world_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.players import mask_of as _netplay_mask, world_text as _world_text
-try:
-    from cart_api import CART_BUTTONS as _NET_BUTTONS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
-try:
-    import os_log as _os_log
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import os_log as _os_log
-try:
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import devices as _devices
-try:
-    import moybyte as _moybyte
-    import scheduler as _scheduler
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybyte as _moybyte
-    from runtime import scheduler as _scheduler
-try:
-    from moy_play import Tick as TickScheduler     # the kernel's tick model
-    import moy_play as _moy_play
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_play import Tick as TickScheduler
-    from runtime import moy_play as _moy_play
+from players import mask_of as _netplay_mask, world_text as _world_text
+from cart_api import CART_BUTTONS as _NET_BUTTONS
+import os_log as _os_log
+import devices as _devices
+import moybyte as _moybyte
+import scheduler as _scheduler
+from moy_play import Tick as TickScheduler     # the kernel's tick model
+import moy_play as _moy_play
 
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
@@ -153,12 +130,8 @@ SUPPORTED_EXTENSIONS = (
 APP_EXT = "moybyte.app"
 
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff, _ticks_add
-    from widgets import _err_text, _in
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff, _ticks_add
-    from runtime.widgets import _err_text, _in
+from ticks import _ticks_ms, _ticks_us, _ticks_diff, _ticks_add
+from widgets import _err_text, _in
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
@@ -166,22 +139,12 @@ except ImportError:                     # host: the runtime package
 # The words of `ui_face` (native/moy_ui/moy_ui_wasm.h's MOYCORE_UI_FACE_*).
 _FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_TAP, _FACE_FS_SHIFT = 1, 2, 4, 8, 8
 
-try:
-    from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
-    from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE,
-                         _IN_REP as _UI_IN_REP, _IN_KEYREP as _UI_IN_KEYREP)
-    from moy_input import pointer_state as _pointer_state
-    import layout_base as _layout_base
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import cart_text as _cart_text
-    from runtime.ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE,
-                         _IN_REP as _UI_IN_REP, _IN_KEYREP as _UI_IN_KEYREP)
-    from runtime.moy_input import pointer_state as _pointer_state
-    from runtime import layout_base as _layout_base
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host
-    from runtime import ui_draw as _ui_draw
+from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
+from ui_draw import (ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE,
+                     _IN_REP as _UI_IN_REP, _IN_KEYREP as _UI_IN_KEYREP)
+from moy_input import pointer_state as _pointer_state
+import layout_base as _layout_base
+import ui_draw as _ui_draw
 from array import array as _array
 _UI_MASKS = [0, 0]                      # reused: the frame's button masks
 _RUN_STEPS = _array("i", [0, 0])        # reused: a run face's frame's steps
@@ -201,42 +164,22 @@ def _steps(inp, a, i):
 
 _P_LIVE = 1                             # moy_ui_api.h's MOY_UI_P_LIVE: a pointer over the page
 _UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
-try:
-    from system_api import draws_in_look, make_system_api, wants_layout
-except ImportError:                     # host: the runtime package
-    from runtime.system_api import draws_in_look, make_system_api, wants_layout
+from system_api import draws_in_look, make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
-try:
-    import app_perms as _perms
-except ImportError:                     # host: the runtime package
-    from runtime import app_perms as _perms
-try:
-    from audio_session import native as _audio_native
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio_session import native as _audio_native
+import app_perms as _perms
+from audio_session import native as _audio_native
 
 # The cart-facing text editor (docs/history/text_editing_2026-09.md step 3),
 # imported here rather than reached through the shell: it is a leaf over the
 # Files role and the cart's canvas.
-try:
-    from editor_handle import EditorHandle
-except ImportError:                     # host: the runtime package
-    from runtime.editor_handle import EditorHandle
+from editor_handle import EditorHandle
 # What the Player decides about a cart (player_fit) and its diagnostics
 # (player_diag), imported by name so a call costs what it did in this file.
-try:
-    from player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES, _compiled,
-                            INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, INTERP_NOTICE_SUB_DEFAULT,
-                            _Refused, newer_notice, fit_notice, _cart_fit, _fits,
-                            _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where)
-    from player_diag import PlayerDiag, _heap_stats, _moycore_sram
-except ImportError:                     # host: the runtime package
-    from runtime.player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES,
-                                    _compiled, INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB,
-                                    INTERP_NOTICE_SUB_DEFAULT, _Refused, newer_notice,
-                                    fit_notice, _cart_fit, _fits, _cart_missing,
-                                    _out_of_memory, _lua_err_text, _lua_cart_where)
-    from runtime.player_diag import PlayerDiag, _heap_stats, _moycore_sram
+from player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES, _compiled,
+                        INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, INTERP_NOTICE_SUB_DEFAULT,
+                        _Refused, newer_notice, fit_notice, _cart_fit, _fits,
+                        _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where)
+from player_diag import PlayerDiag, _heap_stats, _moycore_sram
 # The kernel's frame loop (native/moy_kernel), on a tier whose frames are the
 # kernel's: the Player tells it the cadence a paced game runs at.
 try:
@@ -245,10 +188,7 @@ except ImportError:                     # host CPython: the host drives its fram
     _loop = None
 
 
-try:
-    from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
-except ImportError:                     # host: the runtime package
-    from runtime.scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
+from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
 
 
 # Compiled-code cache (#66 exec-arena fix, see Player.start): one entry per

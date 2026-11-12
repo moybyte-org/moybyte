@@ -29,26 +29,13 @@ TileMap gives the map tab. SAVE persists through Project.commit_scene (atomic
 write + the durable undo journal, Stage 1). The editor manages the cart's
 DEFAULT scene (multi-scene UX is a deferred follow-up, #85 decision log 4)."""
 
-try:
-    import ui as _ui              # frozen on device
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui              # frozen on device
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:
-    from editors_scene import SceneEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_scene import SceneEditor
-    from runtime.editors_base import KeyEdge
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane)
+from editors_scene import SceneEditor
+from editors_base import KeyEdge
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 
 # The handheld page (editor_scene.py): the right column's width and the
 # foot's height, beside and under the view.
@@ -123,10 +110,7 @@ class SceneEditorUI:
     def page(self):
         """The handheld's Scene page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_scene import ScenePage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_scene import ScenePage
+            from editor_scene import ScenePage
             self._page = ScenePage(self, _ui_draw.AppHost("editor_scene"))
         return self._page
 

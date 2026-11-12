@@ -90,15 +90,8 @@ the http worker's own wait), never `online()`.
                              front (`--repl LINE`, a line at a time)
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    import sh_door as _door
-except ImportError:  # host: the runtime package
-    from runtime import sh_door as _door
+from ticks import _ticks_ms, _ticks_diff
+import sh_door as _door
 
 USAGE = 2
 INTERRUPTED = _door.INTERRUPTED
@@ -151,10 +144,7 @@ def _usage(d, name, text):
 
 
 def _api(d, name):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     f = devices.api(name)
     if f is None:
         d.err(name, _WHY[19])
@@ -162,10 +152,7 @@ def _api(d, name):
 
 
 def _sched():
-    try:
-        import scheduler
-    except ImportError:  # host: the runtime package
-        from runtime import scheduler
+    import scheduler
     return scheduler
 
 
@@ -173,10 +160,7 @@ def _sched():
 
 
 def _perm_carts(ws):
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     out = []
     for cart in ws.carts.all:
         if ws.is_system_app(cart):
@@ -220,10 +204,7 @@ def r_perm(d, a):
 
 
 def _notes():
-    try:
-        import notifications
-    except ImportError:  # host: the runtime package
-        from runtime import notifications
+    import notifications
     return notifications
 
 
@@ -266,10 +247,7 @@ def r_notify(d, a):
 
 
 def _cron():
-    try:
-        import cron
-    except ImportError:  # host: the runtime package
-        from runtime import cron
+    import cron
     return cron
 
 
@@ -432,10 +410,7 @@ def _svc_policy(d, sch, rows, a):
 
 
 def _settings_text(rows):
-    try:
-        from moy_carts import settings_text
-    except ImportError:  # host: the runtime package
-        from runtime.moy_carts import settings_text
+    from moy_carts import settings_text
     return settings_text(rows.dump() or "{}")
 
 
@@ -497,12 +472,8 @@ def _then_release(p, verb):
 
 
 def r_pkg(d, a):
-    try:
-        import pkg
-        from shell_servers import ShellInstall
-    except ImportError:  # host: the runtime package
-        from runtime import pkg
-        from runtime.shell_servers import ShellInstall
+    import pkg
+    from shell_servers import ShellInstall
     yes = "-y" in a
     a = [w for w in a if w != "-y"]
     p = pkg.Pkg(ShellInstall(d.ws), d.out, lambda line: d.err("pkg", line),
@@ -541,20 +512,14 @@ def r_pkg(d, a):
 def r_lease(d, a):
     if a:
         return _usage(d, "lease", "")
-    try:
-        from leases import pins
-    except ImportError:  # host: the runtime package
-        from runtime.leases import pins
+    from leases import pins
     text = pins()
     d.out(text + "\n" if text else "")
     return 0
 
 
 def r_passwd(d, a):
-    try:
-        import ssh_service
-    except ImportError:  # host: the runtime package
-        from runtime import ssh_service
+    import ssh_service
     return ssh_service.passwd(d, a)
 
 
@@ -620,10 +585,7 @@ def r_midi(d, a):
         return 1
     if not a:
         names = list(f._uart_rows())
-        try:
-            import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
+        import devices
         names += [t for t in ("usb", "ble") if devices.present(t)]
         d.out("".join(n + "\n" for n in names))
         return 0
@@ -686,10 +648,7 @@ def r_media(d, a):
 
 
 def r_snd(d, a):
-    try:
-        import moybyte as m
-    except ImportError:  # host: the runtime package
-        from runtime import moybyte as m
+    import moybyte as m
     if not a:
         c = m.snd_counts()
         if c is None:
@@ -742,10 +701,7 @@ _REPL = [None]                  # the interactive REPL's namespace and held line
 
 
 def _python_ns(stdin, stdout, stderr):
-    try:
-        import moybyte
-    except ImportError:  # host: the runtime package
-        from runtime import moybyte
+    import moybyte
     ns = {"__name__": "__main__", "moybyte": moybyte}
     ns.update(_door.stdio_names(stdin, stdout, stderr))
     return ns

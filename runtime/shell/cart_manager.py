@@ -53,16 +53,9 @@ named, which the verbs below already read as "nothing to load".
 # collect (#66 live-set diet). Opening a cart rehydrates them from the store,
 # and switching carts re-slims the previous one. "icon_rows" is what the scan
 # read for the cart's icon, dropped once slim() has baked it.
-try:
-    import moy_catalogue
-    from moy_carts import PAYLOADS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_catalogue
-    from runtime.moy_carts import PAYLOADS
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host package lane
-    from runtime import ui_draw as _ui_draw
+import moy_catalogue
+from moy_carts import PAYLOADS
+import ui_draw as _ui_draw
 _SLIM_DROPS = PAYLOADS + ("icon_rows",)
 
 
@@ -72,22 +65,15 @@ def _folder_order(cart):
 
 def _perms():
     """The permission table's module (`app_perms`), imported at the call."""
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     return app_perms
 
 
 def _removal():
     """`(pkg, ShellInstall)`: a cart's one removal and the install server it
     steps over, imported at the call."""
-    try:
-        import pkg
-        from shell_servers import ShellInstall
-    except ImportError:  # host: the runtime package
-        from runtime import pkg
-        from runtime.shell_servers import ShellInstall
+    import pkg
+    from shell_servers import ShellInstall
     return pkg, ShellInstall
 
 

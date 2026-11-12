@@ -17,25 +17,13 @@ binding them, so either may load first. MicroPython-safe; a frame allocates
 nothing here that it did not before.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-try:
-    from artwork import colour_name, GAME_W, GAME_H
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.artwork import colour_name, GAME_W, GAME_H
+import ui
+from artwork import colour_name, GAME_W, GAME_H
 try:
     import moy_loop as _loop
-except ImportError:  # pragma: no cover - direct host import
-    try:
-        from runtime import moy_loop as _loop
-    except ImportError:
-        _loop = None
-try:
-    from drawing_pages import shown, dot as _dot
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.drawing_pages import shown, dot as _dot
+except ImportError:
+    _loop = None
+from drawing_pages import shown, dot as _dot
 
 
 class PaintDraw:
@@ -905,8 +893,4 @@ class PaintDraw:
 
 
 # paint_app's tools, zooms and helpers, imported last (see above).
-try:
-    from paint_app import FIT, PICK, SHAPE, SHAPES, TOOLS, ZOOM_SEG, _RING, _grow, _zoom_word
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.paint_app import (FIT, PICK, SHAPE, SHAPES, TOOLS, ZOOM_SEG, _RING, _grow,
-                                   _zoom_word)
+from paint_app import FIT, PICK, SHAPE, SHAPES, TOOLS, ZOOM_SEG, _RING, _grow, _zoom_word

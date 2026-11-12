@@ -47,20 +47,9 @@ fallback console.py uses: bare names on the device / once host_app has aliased t
 tab's first build, so the shell's start does not load the paint/map cores.
 """
 
-try:
-    from editors_code import CodeEditor
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor
-
-try:
-    from bar_layer import _BAR_ICON
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _BAR_ICON
-
-try:
-    from code_layer import _CODE_INSET
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import _CODE_INSET
+from editors_code import CodeEditor
+from bar_layer import _BAR_ICON
+from code_layer import _CODE_INSET
 
 
 # The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
@@ -174,25 +163,13 @@ THEME_TABS = ("theme_config", "theme_sprites")
 
 def _te():
     """runtime/editors/theme_editor.py, imported at the theme mode's first use."""
-    try:
-        import theme_editor
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime import theme_editor
+    import theme_editor
     return theme_editor
 
-try:
-    from editor_panes import WORKSPACES as _WORKSPACES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_panes import WORKSPACES as _WORKSPACES
-
-try:
-    import iconsets as _iconsets
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import iconsets as _iconsets
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+from editor_panes import WORKSPACES as _WORKSPACES
+import iconsets as _iconsets
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -510,10 +487,7 @@ class EditorApp:
                     ws.code_err_row = None
         elif view == "paint":
             if ws.paint is None and ws.sheet is not None:
-                try:
-                    from editors_paint_map import PaintEditor
-                except ImportError:  # pragma: no cover - host fallback
-                    from runtime.editors_paint_map import PaintEditor
+                from editors_paint_map import PaintEditor
                 ws.paint = PaintEditor(ws.sheet)
         elif view == "map":
             # Mirror the paint branch: build the MapEditor over the cart's TileMap

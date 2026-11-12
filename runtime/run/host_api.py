@@ -13,29 +13,12 @@ portable Python: no pygame, no sockets, no threading (#151: the web runner
 freezes this module under MicroPython-WASM).
 """
 
-try:                                    # a VM: the kernel's frame loop
-    import moy_loop as _loop
-except ImportError:                     # CPython: its ctypes binding
-    from runtime import moy_loop as _loop
-try:                                    # staged/frozen flat namespace (web runner)
-    from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
-                          _decode_moyimg, make_api)
-except ImportError:                     # host: the runtime package
-    from runtime.cart_api import (CART_BUTTONS, _Layer,  # noqa: F401
-                                  _decode_moyimg, make_api)
-
-try:                                    # a VM: the native module
-    import moy_input as _mi
-except ImportError:
-    from runtime import moy_input as _mi
-try:                                    # staged/frozen flat namespace
-    import moybyte as _moybyte
-except ImportError:                     # host: the runtime package
-    from runtime import moybyte as _moybyte
-try:                                    # staged/frozen flat namespace (web runner)
-    from scheduler import SCHED as _sched
-except ImportError:                     # host: the runtime package
-    from runtime.scheduler import SCHED as _sched
+import moy_loop as _loop  # a VM: the kernel's frame loop
+from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
+                      _decode_moyimg, make_api)
+import moy_input as _mi  # a VM: the native module
+import moybyte as _moybyte
+from scheduler import SCHED as _sched
 
 # A desk keyboard's keys on a host (the simulator's and the browser page's),
 # in one place: the button each presses beside what it types. The arrows and

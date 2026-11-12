@@ -33,18 +33,11 @@ host_app has aliased it, `runtime.X` for a direct test load), so it never import
 into console (no circular import).
 """
 
-try:
-    from widgets import _Blit, _ticks_ms, _ticks_diff
-    from moy_spine import BackStack, STAYED
-    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
-    from notifications import NOTES as _NOTES
-    from devices import MIC as _MIC
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.devices import MIC as _MIC
-    from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
-    from runtime.moy_spine import BackStack, STAYED
-    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
-    from runtime.notifications import NOTES as _NOTES
+from widgets import _Blit, _ticks_ms, _ticks_diff
+from moy_spine import BackStack, STAYED
+from shell_layout import WIDGETS as _LAYOUT_WIDGETS
+from notifications import NOTES as _NOTES
+from devices import MIC as _MIC
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
