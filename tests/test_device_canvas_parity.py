@@ -64,7 +64,6 @@ from runtime.editors_sheet import SpriteSheet, TileMap  # noqa: E402
 from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
-from tools.board_config import runtime_file
 
 DEV = ROOT / "device"
 
@@ -446,11 +445,6 @@ class _FakeComp:
 def _load_device_canvas():
     # Inject the fake framebuf, then load moy_runtime's DeviceCanvas under CPython.
     sys.modules["framebuf"] = _FakeFramebuf()
-    for name in ("editors_sheet", "audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        sys.modules[name] = mod
     # runtime/toolkit/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
     # it under that name so the native-text path activates here too.
     sys.modules["moy_font"] = _host_font
@@ -2391,10 +2385,7 @@ def test_the_sprite_preview_stretch_draws_what_its_span_image_drew():
     sprite's span with one `sspr` a size where it built a `tile_span_image`
     and `spr`'d it: the same pixels at 1x, 2x and 4x for every sprite size,
     at the sheet's right and bottom edges too, colour 0 clear."""
-    try:
-        from runtime.editors_sheet import SpriteSheet
-    except ImportError:  # pragma: no cover
-        from editors_sheet import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet()
     for i in range(len(sheet.pix)):
         sheet.pix[i] = (i * 7 + i // 13) % 16

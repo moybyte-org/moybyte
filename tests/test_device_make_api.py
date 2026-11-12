@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 
 from ws_helpers import StubInput
-from tools.board_config import runtime_file
 
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
@@ -56,20 +55,6 @@ def _editor_class(name):
 def _load_moy_runtime():
     global _DEVICE_API
     saved = {}
-    # moy_runtime does `from console import ...`; the device freezes
-    # build-staged copies of the runtime/ modules as top-level modules. Register those
-    # same canonical files so the device module loads under CPython (the editor
-    # UIs [block_editor_ui #29 Part 2 / map_editor_ui #32 / music_editor_ui #50
-    # / perf_hud #43/#44] + audio first -- console imports all of them).
-    for name in ("block_editor_ui", "map_editor_ui", "scene_editor_ui",
-                 "music_editor_ui",
-                 "perf_hud", "update_ui", "achievements_ui",
-                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
-        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
-        mod = importlib.util.module_from_spec(spec)
-        _swap_in(saved, name, mod)
-        spec.loader.exec_module(mod)
-
     # moy_runtime now also does `from device_util import ...` / `from device_wifi
     # import ...` -- device-only modules authored in the shared device/ tree at
     # the repo root (staged into modules/ at build; the staged copies are

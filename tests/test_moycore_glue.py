@@ -608,12 +608,18 @@ class World:
     exercise the first one's board.
     """
 
-    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "lua_ext",
-             "moy_wasm")
+    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "moy_wasm")
 
-    def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
+    def __init__(self, moycore=True, fake_ticks=True,
                  wire_fallback=b"\1" * 128, wasm_chip=None):
         self.saved = {n: sys.modules.get(n, KeyError) for n in self.NAMES}
+        try:
+            self._load(moycore, fake_ticks, wire_fallback, wasm_chip)
+        except BaseException:
+            self.close()
+            raise
+
+    def _load(self, moycore, fake_ticks, wire_fallback, wasm_chip):
         if wasm_chip is None:
             sys.modules["moy_wasm"] = None     # no engine in this build
         else:
@@ -621,8 +627,6 @@ class World:
             mw.CHIP = wasm_chip
             mw.FORMAT = format_version()
             sys.modules["moy_wasm"] = mw
-        if not flat_lua_ext:
-            sys.modules["lua_ext"] = None      # no frozen flat name: the host
         self.clock = Clock()
         self.core = FakeMoycore() if moycore else None
         if moycore:
@@ -630,12 +634,12 @@ class World:
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
             sys.modules["runtime.moycore"] = None   # ...and the host's binding
-        if flat_ticks:
+        if fake_ticks:                         # the real one, on this clock
+            from runtime import ticks
             tk = types.ModuleType("ticks")
+            tk.__dict__.update(ticks.__dict__)
             tk._since_ms = self.clock.since_ms
             sys.modules["ticks"] = tk
-        else:
-            sys.modules["ticks"] = None        # the host: runtime.ticks
         if wire_fallback is not None:
             dc = types.ModuleType("device_canvas")
             dc._PAL565_WIRE_BUF = wire_fallback
@@ -957,22 +961,6 @@ def test_non_callable_namespace_entries_are_skipped(w):
     assert "_moy_cfg" not in w.core.registered
 
 
-def test_the_glue_finds_the_shared_lists_with_or_without_the_frozen_flat_name():
-    """A board freezes `lua_ext` flat; a host has only the `runtime` package.
-    Both arms must bind the SAME objects -- the fallback is what makes this
-    file, and every other host test of the device module, real."""
-    from runtime import lua_ext
-
-    world = World(flat_lua_ext=False)
-    try:
-        assert world.mod.LIBMOY_VERBS is lua_ext.LIBMOY_VERBS
-        assert world.mod.MOY_BUTTONS is lua_ext.MOY_BUTTONS
-        assert world.mod.install_handles is lua_ext.install_handles
-        world.run()                        # and it still builds a run
-    finally:
-        world.close()
-
-
 def test_the_deny_lists_are_the_shared_ones_and_not_a_local_copy(w):
     """They lived twice -- here and in `lua_host` -- with 46 names agreeing by
     hand and nothing comparing them."""
@@ -1290,11 +1278,11 @@ def test_a_run_with_no_cart_clock_leaves_the_time_slot_alone(w):
 
 
 def test_the_host_import_path_reads_the_same_clock():
-    """With no flat `ticks` the glue takes `runtime.ticks` -- the clock the
-    Player stamps with -- and still fills the slot: a tier that skipped it ran
-    every Lua and compiled cart's time() at 0 plus the tick's own ms."""
+    """The glue takes `ticks`, which is `runtime.ticks` on the host -- the
+    clock the Player stamps with -- and fills the slot: a tier that skipped it
+    ran every Lua and compiled cart's time() at 0 plus the tick's own ms."""
     from runtime import ticks
-    world = World(flat_ticks=False)
+    world = World(fake_ticks=False)
     try:
         assert world.mod._since_ms is ticks._since_ms
         run = world.run(ws=FakeWs(start=ticks._ticks_ms() - 5000))

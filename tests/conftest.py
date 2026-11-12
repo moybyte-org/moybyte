@@ -55,26 +55,14 @@ if _REPO_ROOT not in sys.path:
 _RENAMED = {"moy_font": "font", "moy_net": "net_binding"}
 
 
-class _AliasLoader(importlib.abc.Loader):
-    """Hand the import machinery an EXISTING module object (the runtime one)."""
-
-    def __init__(self, module):
-        self._module = module
-
-    def create_module(self, spec):
-        return self._module
-
-    def exec_module(self, module):
-        pass                      # already executed as runtime.<name>
-
-
 class _RenamedRuntimeFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         name = _RENAMED.get(fullname)
         if name is None:
             return None
-        module = importlib.import_module("runtime." + name)
-        return importlib.machinery.ModuleSpec(fullname, _AliasLoader(module))
+        import runtime
+        return importlib.machinery.ModuleSpec(fullname,
+                                              runtime._SameModule(name))
 
 
 # Device-only modules: authored in the T-Deck modules/ tree with no runtime/

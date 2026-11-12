@@ -58,7 +58,6 @@ def _draw():
 
 
 from ws_helpers import StubInput, open_cart as _open_cart
-from tools.board_config import runtime_file
 
 
 def _make_ws_with_carts(tmp_path):
@@ -225,11 +224,6 @@ def test_textmode_in_both_make_api_namespaces(monkeypatch):
     from runtime import host_app
 
     SYSTEM_CARTS = ROOT / "system_carts"
-    for name in ("audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        sys.modules[name] = mod
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
