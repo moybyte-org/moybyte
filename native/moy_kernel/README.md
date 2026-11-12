@@ -30,6 +30,54 @@ its piece works; `moy_kernel.h` holds the rules every kernel module keeps
 memory shares. The design record is `docs/history/native_kernel_2026-09.md`
 and its sprint docs beside it.
 
+## The threading model
+
+Who runs where, and what each may touch. The platform layer every module
+builds on is three headers: `moy_platform.h` (what a build is for, the
+monotonic clock, the mutex), `moy_kmem.h` (every allocation, its placement in
+its flags) and `moy_tasks.h` (every task the native tier starts, one table);
+`tests/test_native_platform.py` holds our C to them.
+
+**The tasks** are `moy_tasks.h`'s table, plus MicroPython's `mp_task` (the
+VM: `moy_kernel.c` starts it on the core the port names, core 1 on the
+dual-core chips), the panel's flush feeder (`native/moy_flush`) and the P4
+silicon tier's (`native/p4`). On the host the same code runs as threads
+(`MOY_THREADS`); in the browser as stepped callbacks (`MOY_BROWSER`), where
+every lock is empty and nothing blocks.
+
+| task | may touch | through |
+|---|---|---|
+| `mp_task`, the VM | the VM's heap and every Python object, which no other task touches; the kernel's tables | the locks below |
+| `moy_loop`, the frame while no VM runs | the frame loop's state, the glass and input stages | the VM's own: it exists only while the VM does not |
+| `moy_input` | the input rings the ISRs fill, the event queue | the ISRs' spinlock (`moy_input.c`'s `ISR_LOCK`); `moy_sync.h`'s lock |
+| `moy_audio`, `moy_mic`, `midi` | the mixer, the microphone's ring, a MIDI port's ring | the output's mixer lock (`moy_aud_out.c`), a critical section (`moy_mic.c`), one writer per ring (`moy_midi.c`) |
+| `moy_media` | its stream's state and buffers | the stream's mutex (`moy_media.c`) |
+| `moy_fetch`, `moy_lora`, `usbdisk` | their request rows | a critical section (`moy_fetch.c`), the radio's timed mutex (`moy_lora.c`), a binary semaphore (`moy_usbdisk.c`); each woken by a task notification |
+| `moy_svc` (a Lua service), `moy_elf` (a compiled program's thread) | the kernel's tables through their APIs: status, notes, items, devices, leases | `moy_sync.h`'s lock, the lease lock; the VM only by a hop |
+| `moy_sh` (a shell runner), a terminal's face (SSH, serial, web) | the store, the process table, their session | the store's lock (`moy_store_lock`); the VM only by a hop |
+| `moy_pake`, the web login's key job | its one job record | atomics and a task notification (`moy_webauth.c`) |
+
+**The VM is reached from another task through `moy_vmq.h` only**: a hop
+(`moy_vmq_hop`, the door a compiled program's file rows and a wasm row take:
+the function runs on the VM's task while the caller waits) or a posted call
+with a ticket (`moy_vmq_post`). The VM's stop (`moy_kernel.h`) ends the tasks
+that hold VM state before it sweeps.
+
+**One lock per kind of hold.**
+- A few loads and stores: `moy_sync.h`'s lock, a critical section on a board
+  and a spinlock elsewhere, never held across an allocation or a wait. The
+  event queues, the VM queue, the supervisor, the notes, the items, the
+  status items and the screen slot keep their tables under it; their waiters
+  block in `moy_sync_wait`, never under the lock.
+- A hold across a wait, an allocation or a copy: a `moy_mutex_t`
+  (`moy_platform.h`). The lease table (recursive: a driver reached under it
+  may lease again), the store's volume lock (`moy_store_lock`, recursive and
+  per task), the settings, the watch on a run, and `moy_lock.h`, which the
+  app ABI's seqlock writers and the tiers' service tables take.
+- The locks a module makes itself (a radio's timed lock, a runner's binary
+  semaphores, the audio output's start-and-stop pair) are the guard's
+  allowlist, each with its reason.
+
 ## Decisions
 
 - **The OS is native code below the app verb table; Python is an app runtime**

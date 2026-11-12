@@ -81,7 +81,7 @@ independently.
     `moy_net/moy_net_port.c` is a third platform layer ("the clock, sleep and
     memory under them").
 - **What to do.**
-  - Add `+native/moy_kernel/moy_platform.h`, header-only and linked by every
+  - Add `native/moy_kernel/moy_platform.h`, header-only and linked by every
     image already through the kernel:
     - `MOY_ON_BOARD`, `MOY_THREADS` and `MOY_BROWSER`, decided once;
     - `moy_now_us()` (int64) and `moy_now_ms()` (uint64);

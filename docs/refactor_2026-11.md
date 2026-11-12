@@ -220,19 +220,19 @@ Closes N1, N2, N4, N10, X5.
 
 **Changes**
 
-- `+native/moy_kernel/moy_platform.h`: on-a-board, threads and browser
+- `native/moy_kernel/moy_platform.h`: on-a-board, threads and browser
   decided once; `moy_now_us` and `moy_now_ms`; a portable mutex, plain and
   recursive. `moy_sync.h`'s platform half folds into it; its critical
   section stays what it is. Every per-module probe macro, private clock and
   lazily-made mutex copy becomes a use of it.
-- `+native/moy_kernel/moy_kmem.h`: one allocator whose flags say small
+- `native/moy_kernel/moy_kmem.h`: one allocator whose flags say small
   (kpool), PSRAM, internal allowed, DMA. Each of the private helpers becomes
   one call **with the policy it has today** written in its flags. No block
   changes where it lands.
 - Each consumer of an optional symbol includes the owning header and marks
   the name `#pragma weak`; the hand-typed weak prototypes go. An image that
   denies the module keeps a declaration, generated.
-- `+native/moy_kernel/moy_tasks.h`: one table of every task (name, stack,
+- `native/moy_kernel/moy_tasks.h`: one table of every task (name, stack,
   priority, core per chip, PSRAM stack) and one spawn call. Every value is
   the one in the tree today.
 - X5: `native/moy_kernel/README.md` gains the threading model, one page: the
@@ -250,7 +250,7 @@ Closes N1, N2, N4, N10, X5.
 the sanitizer lane (`tools/asan_pytest.sh`). T-Deck and P4 pass: the heap
 lines and the PERF line read as before (#66, #58). Goldens unchanged.
 
-**Guard.** `+tests/test_native_platform.py`, a scan of our C: the probe, the
+**Guard.** `tests/test_native_platform.py`, a scan of our C: the probe, the
 raw clocks, semaphore creation, `heap_caps_*alloc`/`malloc`/`calloc`,
 `xTaskCreate*` and weak prototypes appear only in their owner and in an
 allowlist whose every entry has a reason (ISR rings, DMA drivers,
