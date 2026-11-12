@@ -15,8 +15,9 @@
 // KERNEL DATA IS PSRAM. Moving state out of the GC heap into C can be a net
 // internal SRAM loss (.bss, task stacks and small mallocs land internal, and
 // the S3's internal budget is shared with WiFi, BLE and the panel's DMA), so
-// kernel data is allocated with heap_caps(MALLOC_CAP_SPIRAM) unless it is
-// latency-bound, and tests/test_moy_spine_twins.py asserts the placement. The
+// kernel data is placed in PSRAM unless it is latency-bound. Every block is
+// one moy_kalloc call whose flags name its placement (moy_kmem.h);
+// tests/test_native_platform.py holds every native allocation to it. The
 // kernel's share is configuration (native/moy_play/moy_play.h, "the shares").
 //
 // STOPPING THE VM. The VM runs the console; the kernel stops it for a run
