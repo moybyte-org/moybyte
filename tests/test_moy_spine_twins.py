@@ -1,5 +1,5 @@
 """The kernel spine's native twin beyond the interface suite: the part of
-sprint 2's harness (tools/moy_index_spike.py --component spine) CI runs.
+native checks (tools/native_check.py --component spine) CI runs.
 
   * tests/test_moy_spine.py itself, run on the boards' VM -- the desktop
     MicroPython, both object models -- over the native module and over the
@@ -32,7 +32,8 @@ import pytest
 
 import vm_suite
 import spine_twin as moy_spine    # the oracle (tests/spine_twin.py)
-from tools import moy_index_spike
+from runtime import native_parts
+from tools import native_check
 from runtime import moy_spine_binding
 from unix_mp import find_unix_mp, require_unix_mp
 
@@ -524,8 +525,8 @@ def _nest(n):
 def test_the_api_fuzz_runs_clean_under_the_sanitizers():
     """fuzz_spine's seeded programs, built with ASan and UBSan: every answer
     checked against its model, every byte returned."""
-    got = moy_index_spike.fuzz_seeded("c", seed=1, runs=150,
-                                      comp=moy_index_spike.SPINE)
+    got = native_check.fuzz_seeded("c", seed=1, runs=150,
+                                   comp=native_parts.SPINE)
     if got is None:
         if os.environ.get("CI"):
             pytest.fail("no C compiler with AddressSanitizer here")

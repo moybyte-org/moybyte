@@ -880,12 +880,12 @@ moybyte_kernel_entry() {
 
 # The build's native configuration, as one line: the native modules this board
 # stages (board.toml's takes and denials) and every MOY_*_IMPL hook in the
-# environment (tools/moy_index_spike.py names them, MOY_INDEX_BENCH included).
+# environment (tools/native_check.py names them).
 # Reads BUILD_PYTHON SCRIPT_DIR.
 moybyte_native_config() {
   {
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" list-native "${SCRIPT_DIR}"
-    env | { grep -E '^MOY_([A-Z]+_IMPL|INDEX_BENCH)=' || true; } | sort
+    env | { grep -E '^MOY_[A-Z]+_IMPL=' || true; } | sort
     # The board's own switches (MICROPY_PY_BLUETOOTH, MOY_NET_*) decide which
     # modules a source registers, as surely as a take or a deny does.
     if [ -n "${BOARD_DIR:-}" ] && [ -f "${BOARD_DIR}/mpconfigboard.h" ]; then

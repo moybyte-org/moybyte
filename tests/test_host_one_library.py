@@ -26,7 +26,7 @@ def _addr(lib, name):
 def test_every_host_binding_loads_the_one_library():
     from runtime import (gfx_binding, glass_binding, host_native, lua_binding,
                          moy_input, moy_loop, moy_play, net_binding)
-    import tools.moy_index_spike as spike
+    from runtime import native_parts as spike
     path = host_native.build()
     assert path is not None
     libs = {"gfx": gfx_binding._lib(), "glass": glass_binding._lib(),

@@ -34,7 +34,8 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import glass_binding
-from tools import gen_ui_tables, moy_index_spike
+from runtime import native_parts
+from tools import gen_ui_tables, native_check
 from runtime import moy_ui_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -733,8 +734,8 @@ def test_the_theme_fuzz_runs_clean_under_the_sanitizers():
     """native/moy_ui/fuzz_theme.c's seeded packages, built with ASan and
     UBSan over moy_json's scanner: every package parsed, probed and
     installed, and one that installs resolved for every answer."""
-    got = moy_index_spike.fuzz_seeded("c", seed=1, runs=2000,
-                                      comp=moy_index_spike.THEME)
+    got = native_check.fuzz_seeded("c", seed=1, runs=2000,
+                                   comp=native_parts.THEME)
     if got is None:
         if os.environ.get("CI"):
             pytest.fail("no C compiler with AddressSanitizer here")

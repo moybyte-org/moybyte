@@ -186,7 +186,7 @@ the desktop MicroPython and the CPython host give each console its own
 (`grants=N`), which the T-Deck's suite holds flat across stops.
 
 The host's binding is `runtime/host/moy_app_binding.py`, over ctypes, from the spine's
-host library (`tools/moy_index_spike.py`'s SPINE carries these sources), which
+host library (`runtime/host/native_parts.py`'s SPINE carries these sources), which
 the `runtime` package registers as `moy_app`; the user-files layer is a library
 of its own there (`runtime/host/moy_ufiles_binding.py`), whose verb table `store_bind`
 hands the state. The Zero denies the module: it runs no apps, and its sync

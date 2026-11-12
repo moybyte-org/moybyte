@@ -24,7 +24,8 @@ import sys
 import pytest
 
 from runtime import moy_fs
-from tools import moy_index_spike as spike
+from runtime import native_parts
+from tools import native_check
 from unix_mp import require_unix_mp, runtime_tree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +39,7 @@ def _no_toolchain(what):
 
 
 def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
-    got = spike.fuzz_matrix(spike.FS)
+    got = native_check.fuzz_matrix(native_parts.FS)
     if got is None:
         _no_toolchain("no sanitizer toolchain or no MicroPython tree "
                       "(make unix-micropython)")
@@ -56,9 +57,9 @@ def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
 
 
 def test_the_seeded_fuzz_runs_clean_under_the_sanitizers():
-    if not os.path.isdir(os.path.join(spike.MPY, "lib", "oofatfs")):
+    if not os.path.isdir(os.path.join(native_parts.MPY, "lib", "oofatfs")):
         _no_toolchain("no MicroPython tree (make unix-micropython)")
-    got = spike.fuzz_seeded("c", seed=1, runs=300, comp=spike.FS)
+    got = native_check.fuzz_seeded("c", seed=1, runs=300, comp=native_parts.FS)
     if got is None:
         _no_toolchain("no C compiler with AddressSanitizer here")
     ok, secs, out = got
@@ -76,13 +77,14 @@ class _Buf(ctypes.Structure):
 def _lib():
     san = os.environ.get("MOY_FS_SANITIZE") == "1"
     if san:
-        path = spike.host_library("c", sanitize=True, comp=spike.FS)
+        path = native_parts.host_library("c", sanitize=True, comp=native_parts.FS)
     else:
         # The store's part alone, a library of this suite's own: its leak and
         # roots checks clear process-wide state the host's one library shares
         # with every other store user.
         from runtime import native_build
-        path = native_build.build_parts("moy_fs_c", [spike.part(spike.FS)], spike.FS.cache)
+        path = native_build.build_parts("moy_fs_c", [native_parts.part(native_parts.FS)],
+                                            native_parts.FS.cache)
     if path is None:
         _no_toolchain("no C compiler")
     lib = ctypes.CDLL(path)

@@ -1,6 +1,6 @@
 // The theme loader on untrusted packages, under the sanitizers.
 //
-// tools/moy_index_spike.py builds it (`--component theme sanitize`), and so
+// tools/native_check.py builds it (`--component theme sanitize`), and so
 // does tests/test_theme_loader.py. With clang's libFuzzer
 // (-fsanitize=fuzzer,address,undefined) it is a LLVMFuzzerTestOneInput; with
 // -DMOY_THEME_FUZZ_MAIN it is a seeded driver any compiler builds,

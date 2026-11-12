@@ -2,7 +2,7 @@
 // the card volume's read cache (moy_cache.h, every hit compared with the card)
 // and littlefs2 on a RAM flash, under the sanitizers.
 //
-// tools/moy_index_spike.py --component fs builds it (`sanitize`), and so does
+// tools/native_check.py --component fs builds it (`sanitize`), and so does
 // tests/test_moy_store.py. `fuzz_fs --matrix` is the power-cut matrix: every
 // scripted write sequence, on both media, cut at every block write it makes;
 // `fuzz_fs SEED RUNS` (MOY_FS_FUZZ_MAIN) runs seeded random sequences with a

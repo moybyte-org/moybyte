@@ -6,7 +6,7 @@
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
 native/moy_app builds, as Python loads it by ctypes from the host's one
-library (runtime/host/host_native.py; tools/moy_index_spike.py's SPINE part
+library (runtime/host/host_native.py; runtime/host/native_parts.py's SPINE part
 carries native/moy_app). The
 runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
@@ -26,13 +26,11 @@ import collections
 import ctypes
 import json
 import os
-import sys
 import types
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
+import native_parts
 
-import moy_index_spike  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 c = ctypes
 _P = c.c_void_p
@@ -394,7 +392,7 @@ def binding(sanitize=False):
     """The moy_app module over the host's one library, or None with no C
     compiler. The library is the one runtime/host/moy_spine_binding.py loads, so a
     Settings it made is a pointer this one writes."""
-    path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
+    path = native_parts.host_library("c", sanitize, native_parts.SPINE)
     if path is None:
         return None
     lib = c.CDLL(path)

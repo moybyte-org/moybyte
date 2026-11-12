@@ -7,7 +7,7 @@ The data half of the kernel's spine, in C (#224 sprint 2; the design record is
 `native/moy_index/` is (see its README), with no hook: every image, the
 desktop MicroPython and the CPython host (`runtime/host/moy_spine_binding.py`, which
 the `runtime` package registers as `moy_spine`) run it;
-`tools/moy_index_spike.py --component spine` runs its host suite and
+`tools/native_check.py --component spine` runs its host suite and
 sanitizers.
 
 | file | what it is |

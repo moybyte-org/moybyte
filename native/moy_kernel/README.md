@@ -98,7 +98,7 @@ that hold VM state before it sweeps.
   every parser of untrusted bytes is fuzzed, the kernel stays small and
   crash-only (it records its reason and reboots to the floor or the launcher),
   and runtimes hold handles, never pointers (`moy_kernel.h`).
-  `tools/moy_index_spike.py` runs each component's suite and fuzz under both
+  `tools/native_check.py` runs each component's suite and fuzz under both
   sanitizers.
 - **Rust is revisited per subsystem, never assumed**: when upstream LLVM's
   Xtensa support lets the S3 build with a stock compiler, or for a

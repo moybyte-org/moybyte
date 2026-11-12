@@ -1,6 +1,6 @@
 // The spine's API sequences, fuzzed against models, under the sanitizers.
 //
-// tools/moy_index_spike.py builds it (`--component spine sanitize`), and so does
+// tools/native_check.py builds it (`--component spine sanitize`), and so does
 // tests/test_moy_spine_twins.py. With clang's libFuzzer
 // (-fsanitize=fuzzer,address,undefined) it is a LLVMFuzzerTestOneInput; with
 // -DMOY_SPINE_FUZZ_MAIN it is a seeded random driver any compiler builds,

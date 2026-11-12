@@ -16,13 +16,9 @@ codes to the exceptions the twin raises, which is modmoy_spine.c's job on a VM.
 import ctypes
 import json
 import os
-import sys
 import types
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
-
-import moy_index_spike  # noqa: E402
+import native_parts
 
 c = ctypes
 OK, STALE, FULL, NOMEM, DUP, BAD = range(6)
@@ -119,7 +115,7 @@ SAVE_FN = c.CFUNCTYPE(c.c_int, _P, _P, _SIZE)
 
 def binding(sanitize=False):
     """The spine module over the host library, or None with no C compiler."""
-    path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
+    path = native_parts.host_library("c", sanitize, native_parts.SPINE)
     if path is None:
         return None
     lib = c.CDLL(path)

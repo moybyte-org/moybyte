@@ -92,7 +92,7 @@ NATIVE = {
     # moy_index, the store's native index, and moy_spine, the kernel's spine
     # (the handle table moy_index shares), stage on every target but the
     # Zero, which denies the index (its board.toml says why): the index
-    # compiles unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py), the spine
+    # compiles unless MOY_INDEX_IMPL=py (tools/native_check.py), the spine
     # everywhere. moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
     # board, the Zero's floor serial only (each board.toml says why). moy_glass,

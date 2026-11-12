@@ -2,7 +2,7 @@
 // moy_settings.h) as the module runtime/moy_spine.py is, name for name -- Table,
 // AppRegistry, BackStack, Returns, Settings, StaleHandle and the
 // constants. The same binding serves the interface suite and the spine trace;
-// which build takes it is MOY_SPINE_IMPL (tools/moy_index_spike.py's header).
+// which build takes it is MOY_SPINE_IMPL (tools/native_check.py's header).
 //
 // It registers EXTENSIBLE, so a moy_spine.py on the import path wins over it. A
 // build that takes the native module stages no such file
