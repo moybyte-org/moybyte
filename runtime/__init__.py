@@ -10,8 +10,10 @@ There is no host canvas CLASS to export any more: the raster is the boards' own
 (`make_canvas` / `make_system_canvas`).
 """
 
+import importlib as _importlib
 import os as _os
 import sys as _sys
+from importlib.machinery import ModuleSpec as _ModuleSpec
 
 
 def _folders():
@@ -31,6 +33,53 @@ def _folders():
 
 
 __path__.extend(_folders())
+
+
+def _flat_names():
+    """Every module's basename across the folders."""
+    return frozenset(f[:-3] for folder in __path__ for f in _os.listdir(folder)
+                     if f.endswith(".py") and f != "__init__.py")
+
+
+class _SameModule:
+    """Hands the import machinery the module `runtime.<name>` is. It imports
+    that module at create time, not while the finder looks: a module whose
+    own imports reach its flat name again then meets itself half-built, as
+    any circular import does, and is never executed a second time."""
+
+    def __init__(self, name):
+        self._name = "runtime." + name
+        self._spec = None
+
+    def create_module(self, spec):
+        module = _importlib.import_module(self._name)
+        self._spec = module.__spec__
+        return module
+
+    def exec_module(self, module):
+        if getattr(self._spec, "name", None) == self._name:
+            module.__spec__ = self._spec      # it stays `runtime.<name>`
+
+
+class FlatFinder:
+    """`import console` is `runtime.console`, one module object, as a board's
+    flat image has one: the boards and the browser freeze every runtime file
+    by basename, and here a bare runtime name resolves to the package's
+    module. It sits first on `sys.meta_path`, so a build-staged copy on
+    `sys.path` never stands in for the source."""
+
+    names = frozenset()
+
+    def find_spec(self, fullname, path=None, target=None):
+        if path is not None or fullname not in self.names:
+            return None
+        return _ModuleSpec(fullname, _SameModule(fullname))
+
+
+FlatFinder.names = _flat_names()
+_sys.meta_path[:] = [f for f in _sys.meta_path
+                     if type(f).__qualname__ != "FlatFinder"]
+_sys.meta_path.insert(0, FlatFinder())
 
 
 def _native_spine():
@@ -104,31 +153,7 @@ def _native_ui():
 moy_ui = _native_ui()
 
 
-def _native_log():
-    """The OS log (native/moy_kernel/moy_log.h) over the host's one library,
-    registered as `moy_log` like the boards' module (runtime/host/moy_log.py)."""
-    if "moy_log" in _sys.modules:
-        return _sys.modules["moy_log"]
-    from . import moy_log as mod
-    _sys.modules["moy_log"] = mod
-    return mod
-
-
-moy_log = _native_log()
-
-
-def _native_evq():
-    """The service model's queues and supervisor (native/moy_kernel/moy_evq.h,
-    moy_super.h, moy_vmq.h) over the host's one library, registered as
-    `moy_evq` like the boards' module (runtime/host/moy_evq.py)."""
-    if "moy_evq" in _sys.modules:
-        return _sys.modules["moy_evq"]
-    from . import moy_evq as mod
-    _sys.modules["moy_evq"] = mod
-    return mod
-
-
-moy_evq = _native_evq()
+from . import moy_evq, moy_log  # noqa: E402,F401  (the OS log and the service queues)
 
 from .editors_code import CodeEditor  # noqa: E402
 from .editors_paint_map import PaintEditor  # noqa: E402

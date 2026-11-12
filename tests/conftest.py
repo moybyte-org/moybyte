@@ -19,12 +19,14 @@ alone but fail in every full-suite run, because a since-deleted suite's
 collection had already cached the pre-fix staged page under the bare
 `web_view_page` name, and runtime/web_view.py's bare-first import picked it up.
 
-The meta-path finder below routes any bare import whose name matches a
-runtime/ module (any subfolder) to that runtime module object itself. sys.meta_path is
-consulted before sys.path, so the repo source always wins on the host no
-matter what staging dirs a test added or what order files were collected in.
-Authored device-only modules (no runtime/ counterpart) are untouched, and the
-device itself is untouched by definition (conftest never ships).
+The runtime package's own finder (`runtime.FlatFinder`, first on
+sys.meta_path) routes any bare import whose name matches a runtime/ module (any
+subfolder) to that runtime module object itself, so the repo source always wins
+on the host no matter what staging dirs a test added or what order files were
+collected in. This conftest imports the package before any test, adds the two
+names a build stages under ANOTHER basename, and resolves the authored
+device-only modules from their tree; the device itself is untouched by
+definition (conftest never ships).
 """
 
 import importlib
@@ -48,13 +50,6 @@ os.environ["MOYBYTE_TIMINGS"] = os.devnull
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-_RUNTIME_DIR = os.path.join(_REPO_ROOT, "runtime")
-# Every module under runtime/, subfolders included: the package's __path__
-# spans them, so `runtime.<name>` resolves whichever folder holds the file.
-_SHARED = {
-    f[:-3] for _base, _dirs, _files in os.walk(_RUNTIME_DIR) for f in _files
-    if f.endswith(".py") and f != "__init__.py"
-}
 # Shared modules the build stages under a DIFFERENT bare name, and native
 # modules whose host face is a ctypes binding under runtime/.
 _RENAMED = {"moy_font": "font", "moy_net": "net_binding"}
@@ -73,11 +68,11 @@ class _AliasLoader(importlib.abc.Loader):
         pass                      # already executed as runtime.<name>
 
 
-class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
+class _RenamedRuntimeFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        name = _RENAMED.get(fullname, fullname)
-        if name not in _SHARED:
-            return None           # not a shared runtime module -> normal lookup
+        name = _RENAMED.get(fullname)
+        if name is None:
+            return None
         module = importlib.import_module("runtime." + name)
         return importlib.machinery.ModuleSpec(fullname, _AliasLoader(module))
 
@@ -96,7 +91,7 @@ class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
 # is: it punishes exactly the person running the one file they just touched.
 #
 # Resolving them from the tree instead means the next device module needs no
-# test change. Runtime modules still win: _SHARED is subtracted, so a staged
+# test change. Runtime modules still win: their names are subtracted, so a staged
 # copy can never shadow the source of truth.
 _DEVICE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -108,10 +103,7 @@ _DEVICE_DIR = os.path.join(
 # change locally and only failed in CI. Host tests see the committed source's
 # identity, always; a test that wants a stamp sets the module globals itself.
 _BUILD_STAMPED = {"_ota_build"}
-_DEVICE_ONLY = {
-    f[:-3] for f in os.listdir(_DEVICE_DIR)
-    if f.endswith(".py") and f != "__init__.py"
-} - _SHARED - set(_RENAMED) - _BUILD_STAMPED
+_DEVICE_ONLY = set()     # filled once the runtime package is imported, below
 
 
 @pytest.fixture(autouse=True)
@@ -158,9 +150,9 @@ class _DeviceModuleFinder(importlib.abc.MetaPathFinder):
             fullname, os.path.join(_DEVICE_DIR, fullname + ".py"))
 
 
-# Runtime aliasing first: a device module must never shadow a shared one.
+# Runtime names first: a device module must never shadow a shared one.
 sys.meta_path.insert(0, _DeviceModuleFinder())
-sys.meta_path.insert(0, _SharedRuntimeAliasFinder())
+sys.meta_path.insert(0, _RenamedRuntimeFinder())
 
 # A module this checkout no longer has fails here as it fails in CI: neither
 # the shared venv's editable finder (which maps `runtime` to the MAIN
@@ -171,6 +163,14 @@ import import_guard  # noqa: E402  (tests/ is on sys.path for its conftest)
 import_guard.drop_foreign_editable_finders(_REPO_ROOT)
 sys.meta_path.insert(2, import_guard.StagedCopyRefusal(
     import_guard.staging_dirs(_REPO_ROOT)))
+
+# The package's finder goes first on sys.meta_path as it imports.
+import runtime  # noqa: E402
+
+_DEVICE_ONLY.update({
+    f[:-3] for f in os.listdir(_DEVICE_DIR)
+    if f.endswith(".py") and f != "__init__.py"
+} - runtime.FlatFinder.names - set(_RENAMED) - _BUILD_STAMPED)
 
 
 def pytest_addoption(parser):
