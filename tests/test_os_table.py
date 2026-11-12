@@ -137,7 +137,7 @@ def test_the_sdk_s_log_levels_and_event_record_are_the_kernel_s():
     order = ["MOY_LOG_EMERG"] + [n.strip() for n in names.split(",") if n.strip()]
     for name, value in re.findall(r"#define (MOY_LOG_\w+) (\d+)", sdk):
         assert order.index(name) == int(value), name
-    assert gen_os_table._evq_block() in sdk
+    assert gen_os_table.evq_block() in sdk
 
 
 @pytest.fixture(scope="module")
