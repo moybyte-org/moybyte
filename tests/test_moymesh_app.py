@@ -638,15 +638,22 @@ def _frames(drv, n=4):
         S.SCHED.poll()
 
 
-def _sent(drv):
+def _sent(drv, quiet=3):
     """Every transmission the service makes now, each one's air time done
-    before the next."""
+    before the next. The scheduler's slice is time-budgeted, so under load a
+    service's send can take more frames to come: nothing is concluded until
+    the radio stays quiet for `quiet` rounds in a row."""
     out = []
-    for _ in range(16):
+    empty = 0
+    for _ in range(16 + quiet):
         _frames(drv)
         got = lora_sim.sent()
         if got is None:
-            return out
+            empty += 1
+            if empty >= quiet:
+                return out
+            continue
+        empty = 0
         out.append(got)
         N.step(0)
     return out
