@@ -1,6 +1,8 @@
 // moy_wasi_web: WAMR's names for the WASI adapter over the page's engine
 // (moy_wasi_web.h). The page's half is worker.js's command engine.
 
+#include "moy_kmem.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -198,8 +200,8 @@ int moy_wasi_web_load(const uint8_t *bytes, uint32_t len, moy_wasi_web_module_t 
         lines += *p == '\n';
     }
     m->text = text;
-    m->imports = calloc(lines ? lines : 1, sizeof *m->imports);
-    m->exports = calloc(lines ? lines : 1, sizeof *m->exports);
+    m->imports = moy_kalloc((lines ? lines : 1) * sizeof *m->imports, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
+    m->exports = moy_kalloc((lines ? lines : 1) * sizeof *m->exports, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
     if (m->imports == NULL || m->exports == NULL) {
         moy_wasi_web_close(m);
         snprintf(err, errlen, "out of memory");

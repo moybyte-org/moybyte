@@ -7,6 +7,8 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -18,6 +20,8 @@
 #include "moy_chrome.h"
 #include "moy_loop.h"
 #include "moy_play.h"
+#pragma weak moy_play_stop_verdict
+#pragma weak moy_play_interrupt_pending
 #include "moy_rt.h"
 #include "moy_tick.h"
 #include "moycore_lua.h"
@@ -29,10 +33,9 @@ _Static_assert(MOY_PLAY_UPC == MOY_UPC_CLASSES, "a run's books carry every cross
 
 // The calling task's stack, on a board: FreeRTOS's high-water mark.
 #if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+#ifdef MOY_ON_BOARD
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#define MOY_PLAY_STACK 1
 #endif
 #endif
 
@@ -52,30 +55,23 @@ static struct {
     bool on;                        // the watcher polls
 } W;
 
-#if defined(MOY_PLAY_STACK)
-#include "esp_timer.h"
-#include "freertos/semphr.h"
-static SemaphoreHandle_t s_watch_lock;
-static esp_timer_handle_t s_watch_timer;
+static moy_mutex_t s_watch_mu = MOY_MUTEX_INIT;
 static void watch_lock(void) {
-    if (s_watch_lock != NULL) {
-        xSemaphoreTake(s_watch_lock, portMAX_DELAY);
-    }
+    moy_mutex_lock(&s_watch_mu);
 }
 static void watch_unlock(void) {
-    if (s_watch_lock != NULL) {
-        xSemaphoreGive(s_watch_lock);
-    }
+    moy_mutex_unlock(&s_watch_mu);
 }
+
+#if defined(MOY_ON_BOARD)
+#include "esp_timer.h"
+static esp_timer_handle_t s_watch_timer;
 static void watch_cb(void *arg) {
     (void)arg;
     moy_play_watch(moycore_run_now_ms());
 }
 // Made once, before the VM's first area on a board (moy_play_reserve).
 static void watch_make(void) {
-    if (s_watch_lock == NULL) {
-        s_watch_lock = xSemaphoreCreateMutex();
-    }
     if (s_watch_timer == NULL) {
         const esp_timer_create_args_t a = { .callback = watch_cb, .name = "moy_watch" };
         if (esp_timer_create(&a, &s_watch_timer) != ESP_OK) {
@@ -98,14 +94,7 @@ static void watch_run(bool on) {
 #elif !defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #include <time.h>
-static pthread_mutex_t s_watch_mu = PTHREAD_MUTEX_INITIALIZER;
 static bool s_watch_thread;
-static void watch_lock(void) {
-    pthread_mutex_lock(&s_watch_mu);
-}
-static void watch_unlock(void) {
-    pthread_mutex_unlock(&s_watch_mu);
-}
 static void *watch_main(void *arg) {
     (void)arg;
     const struct timespec poll = { 0, (long)MOY_PLAY_WATCH_POLL_MS * 1000000L };
@@ -132,10 +121,6 @@ static void watch_run(bool on) {
 #else
 // The browser's page runs one thread: nothing can watch a tick that never
 // returns, and the page's own "not responding" is the floor.
-static void watch_lock(void) {
-}
-static void watch_unlock(void) {
-}
 static void watch_make(void) {
 }
 static void watch_run(bool on) {
@@ -191,7 +176,7 @@ static bool watch_end(void) {
 }
 
 uint32_t moy_play_stack_free(void) {
-#ifdef MOY_PLAY_STACK
+#ifdef MOY_ON_BOARD
     return (uint32_t)uxTaskGetStackHighWaterMark(NULL) * (uint32_t)sizeof(StackType_t);
 #else
     return MOY_PLAY_NO_STACK;
@@ -200,11 +185,13 @@ uint32_t moy_play_stack_free(void) {
 
 // The crash record's OPEN id (moy_crash.h's GAME role): the board's kernel
 // keeps it; weak, so an image or a host without one arms nothing.
-void moy_kernel_arm(int role, const char *id) __attribute__((weak));
-void moy_kernel_arm_pid(uint32_t pid) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_arm
+#pragma weak moy_kernel_arm_pid
 // The OS log's current process (moy_log.h): the run's, set by the console
 // as it starts the run, before the launch. Weak: an image without the log.
-uint32_t moy_log_current(void) __attribute__((weak));
+#include "moy_log.h"
+#pragma weak moy_log_current
 
 static void arm(const char *id) {
     if (moy_kernel_arm != NULL) {
@@ -643,7 +630,7 @@ static void drain(run_t *r, int32_t *aq) {
 // Lua run's own raise carries them after the line it was on; a compiled
 // cart's says it was terminated, and a tick that came back as the watch
 // fired had run past its budget all the same.
-void moy_kernel_say(const char *line) __attribute__((weak));
+#pragma weak moy_kernel_say
 
 static void stuck(run_t *r, bool raised) {
     moycore_lua_unstuck();
@@ -916,12 +903,12 @@ int moy_play_info(uint32_t run, moy_play_info_t *out) {
 
 // Whether a VM runs (moy_loop.c): weak, for a build of the Player without
 // the loop (the host's), where one always does.
-extern __typeof__(moy_loop_vm) moy_loop_vm __attribute__((weak));
+#pragma weak moy_loop_vm
 // The compiled run's frame hand-off (moycore_lua.h): weak, for an image whose
 // moycore runs no compiled cart.
-extern __typeof__(moycore_wasm_owed) moycore_wasm_owed __attribute__((weak));
-extern __typeof__(moycore_wasm_presented) moycore_wasm_presented __attribute__((weak));
-extern __typeof__(moycore_wasm_settle) moycore_wasm_settle __attribute__((weak));
+#pragma weak moycore_wasm_owed
+#pragma weak moycore_wasm_presented
+#pragma weak moycore_wasm_settle
 
 // -- the run in front ------------------------------------------------------------
 

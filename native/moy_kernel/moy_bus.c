@@ -1,20 +1,14 @@
 // moy_bus: the kernel's I2C master bus. moy_bus.h has the contract.
 
+#include "moy_platform.h"
+
 #include "moy_bus.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if defined(__has_include)
-#if __has_include("driver/i2c.h")
-#define MOY_BUS_BOARD 1
-#endif
-#endif
-
-#ifdef MOY_BUS_BOARD
+#ifdef MOY_ON_BOARD
 #include "py/mpconfig.h"        // the board's MOY_BUS_I2C_* (mpconfigboard.h)
 #endif
 
-#if defined(MOY_BUS_BOARD) && defined(MOY_BUS_I2C_PORT)
+#if defined(MOY_ON_BOARD) && defined(MOY_BUS_I2C_PORT)
 
 #include <stdbool.h>
 

@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "moy_json.h"
+#include "moy_kmem.h"
 #include "moy_seal.h"
 
 #ifdef __EMSCRIPTEN__
@@ -52,7 +53,7 @@ static struct {
 KEEP char *moy_sw_buf(size_t n) {
     if (n + 64 > C.cap) {
         size_t cap = n + 64 > 2 * C.cap ? n + 64 : 2 * C.cap;
-        char *b = realloc(C.buf, cap);
+        char *b = moy_krealloc(C.buf, cap, MOY_KMEM_LIBC);
         if (b == NULL) {
             return NULL;
         }

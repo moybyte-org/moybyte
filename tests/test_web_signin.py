@@ -1090,7 +1090,7 @@ def test_every_stamp_is_unix_seconds(tmp_path):
     from runtime import moy_journal, wallclock
     assert moy_journal._EPOCH == wallclock._EPOCH
     hdr = (ROOT / "native" / "moy_net" / "moy_net.h").read_text()
-    assert "#if __has_include(\"esp_heap_caps.h\")\n#define MOY_NET_CLOCK_EPOCH 946684800" in hdr
+    assert "#ifdef MOY_ON_BOARD\n#define MOY_NET_CLOCK_EPOCH 946684800" in hdr
     assert "return (int64_t)time(NULL) + MOY_NET_CLOCK_EPOCH;" in hdr
     for name in ("moy_webauth.c", "moy_webhost.c", "modmoy_net.c"):
         src = (ROOT / "native" / "moy_net" / name).read_text()

@@ -2,6 +2,10 @@
 // pair and the memory (moy_tty.h). Shared by the board and the host
 // harnesses; what differs is behind ESP_PLATFORM.
 
+#include "moy_tasks.h"
+
+#include "moy_kmem.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +24,7 @@
 #include "lwip/sockets.h"
 
 uint32_t moy_tty_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+    return (uint32_t)moy_now_ms();
 }
 
 uintptr_t moy_tty_self(void) {
@@ -46,15 +50,14 @@ void moy_tty_console_nap(int ms) {
 // Priority 1 on core 0, the stack and the record PSRAM.
 uintptr_t moy_tty_spawn(void (*fn)(void *arg), const char *name, uint32_t stack, void *arg) {
     TaskHandle_t h = NULL;
-    if (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, 1, &h, 0,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    if (!moy_task_spawn_as(MOY_TASK_TTY, name, stack, 0, 0, fn, arg, &h)) {
         return 0;
     }
     return (uintptr_t)h;
 }
 
 void *moy_tty_calloc(size_t n, size_t size) {
-    return heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return moy_kalloc(n * size, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 void moy_tty_free(void *p) {
@@ -100,9 +103,7 @@ int moy_tty_pair(int fds[2]) {
 #include <time.h>
 
 uint32_t moy_tty_ms(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
+    return (uint32_t)moy_now_ms();
 }
 
 uintptr_t moy_tty_self(void) {
@@ -133,7 +134,7 @@ uintptr_t moy_tty_spawn(void (*fn)(void *arg), const char *name, uint32_t stack,
 }
 
 void *moy_tty_calloc(size_t n, size_t size) {
-    return calloc(n, size);
+    return moy_kalloc(n * size, MOY_KMEM_ZERO);
 }
 
 void moy_tty_free(void *p) {

@@ -1,20 +1,9 @@
 // moy_sh_job: a shell line run with no face. moy_sh_job.h has the contract.
 
+#include "moy_platform.h"
+
 #include <stdint.h>
 #include <string.h>
-
-#if __has_include("esp_timer.h")
-#include "esp_timer.h"
-#define NOW_MS() ((uint32_t)(esp_timer_get_time() / 1000))
-#else
-#include <time.h>
-static uint32_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-#define NOW_MS() now_ms()
-#endif
 
 #include "moy_log.h"
 #include "moy_sh_board.h"
@@ -67,7 +56,7 @@ static int job_poll(void *ctx) {
         j->stop = 0;
         return 1;
     }
-    uint32_t now = NOW_MS();
+    uint32_t now = (uint32_t)moy_now_ms();
     if (now - j->yielded >= YIELD_MS) {
         j->yielded = now;
         moy_sh_board_yield();
@@ -153,7 +142,7 @@ int moy_sh_job_run(moy_sh_job_t *j, const char *text, size_t n) {
     memcpy(j->text, text, n);
     j->text[n] = '\0';
     j->ended = 0;
-    j->yielded = NOW_MS();
+    j->yielded = (uint32_t)moy_now_ms();
     int r = moy_sh_board_run(j->s, j->text, n);
     if (r == MOY_SH_BUSY) {
         return MOY_SH_JOB_PARKED;

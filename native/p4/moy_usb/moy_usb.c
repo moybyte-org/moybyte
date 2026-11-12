@@ -9,7 +9,7 @@
 #include "moy_input.h"
 #include "moy_midi.h"
 
-#if defined(MOY_INPUT_BOARD)
+#if defined(MOY_ON_BOARD)
 #include "esp_heap_caps.h"
 static moy_drv_lock_t s_lock = portMUX_INITIALIZER_UNLOCKED;
 #else
@@ -72,7 +72,7 @@ static int find(uint8_t addr) {
 
 static int alloc(void) {
     if (U == NULL) {
-        #if defined(MOY_INPUT_BOARD)
+        #if defined(MOY_ON_BOARD)
         U = heap_caps_calloc(1, sizeof(*U), MALLOC_CAP_SPIRAM);
         #else
         U = calloc(1, sizeof(*U));
@@ -135,8 +135,9 @@ static int close_(uint32_t owner) {
 // kernel's table has one task at the holder), so the face on the VM's task
 // and a compiled program's handle on its own (moy_usb_dev.c) share the one
 // holder.
-void moy_lease_lock(void) __attribute__((weak));
-void moy_lease_unlock(void) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_lock
+#pragma weak moy_lease_unlock
 
 int moy_usb_open(uint32_t owner) {
     if (moy_lease_lock != NULL) {
@@ -357,7 +358,7 @@ void moy_usb_on_sent(uint8_t addr, int err) {
 // Devices a test declares: what the console sends one is kept, and a line's
 // baud; each op completes before it returns.
 
-#if !defined(MOY_INPUT_BOARD)
+#if !defined(MOY_ON_BOARD)
 
 #define SIM_OUT 512
 static struct {
@@ -494,7 +495,7 @@ int moy_usb_sim_out(uint8_t addr, uint8_t *out, size_t cap, uint32_t *baud) {
 
 void moy_usb_reset(void) {
     s_owner = 0;
-    #if !defined(MOY_INPUT_BOARD)
+    #if !defined(MOY_ON_BOARD)
     memset(s_sim, 0, sizeof(s_sim));
     #endif
     if (U != NULL) {

@@ -1,5 +1,11 @@
 // moy_lora: the `lora` device API's driver (moy_lora.h).
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
+
 #include "moy_lora.h"
 
 #include <stdlib.h>
@@ -14,14 +20,9 @@
 #define LORA_EVENTS 1
 #include "moy_input.h"
 #endif
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if __has_include("esp_heap_caps.h")
-#define LORA_ON_BOARD 1
-#endif
 #endif
 
-#if defined(LORA_ON_BOARD) && defined(MOY_API_LORA) && defined(MOY_HW_LORA_RST)
+#if defined(MOY_ON_BOARD) && defined(MOY_API_LORA) && defined(MOY_HW_LORA_RST)
 #define LORA_BOARD 1
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -92,11 +93,7 @@ static lora_t *R;
 // never drive the SX1262 or its queue at once. The first verb makes the state.
 static int radio_lock(void) {
     if (R == NULL) {
-        #ifdef LORA_BOARD
-        R = heap_caps_calloc(1, sizeof(*R), MALLOC_CAP_SPIRAM);
-        #else
-        R = calloc(1, sizeof(*R));
-        #endif
+        R = moy_kalloc(sizeof(*R), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
         if (R == NULL) {
             return -1;
         }
@@ -121,9 +118,9 @@ static void radio_unlock(void) {
 
 // The holder's event queue (native/moy_kernel/moy_evq.h): weak, for an image
 // without it.
-bool moy_evq_hears(uint32_t pid, const char *name) __attribute__((weak));
-int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args, size_t n)
-    __attribute__((weak));
+#include "moy_evq.h"
+#pragma weak moy_evq_hears
+#pragma weak moy_evq_post
 
 static void post(uint8_t ev, uint16_t a, int16_t rssi, int8_t snr) {
     uint32_t to = R->owner;
@@ -242,8 +239,8 @@ static void rx_path(int on) {
 
 
 static void wait_busy(void) {
-    int64_t t0 = esp_timer_get_time();
-    while (gpio_get_level(PIN_BUSY) && esp_timer_get_time() - t0 < 20000) {
+    int64_t t0 = moy_now_us();
+    while (gpio_get_level(PIN_BUSY) && moy_now_us() - t0 < 20000) {
     }
 }
 
@@ -252,9 +249,9 @@ static void wait_busy(void) {
 // on the radio.
 static int xfer(size_t n) {
     wait_busy();
-    int64_t t0 = esp_timer_get_time();
+    int64_t t0 = moy_now_us();
     gate_take();
-    uint32_t w = (uint32_t)(esp_timer_get_time() - t0);
+    uint32_t w = (uint32_t)(moy_now_us() - t0);
     spi_transaction_t t = { .length = n * 8, .tx_buffer = R->tx, .rx_buffer = R->rx };
     esp_err_t e = spi_device_polling_transmit(R->spi, &t);
     gate_give();
@@ -317,9 +314,6 @@ static void dio1_isr(void *arg) {
     }
 }
 
-static uint32_t now_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
-}
 
 static uint32_t step_(uint32_t now);
 
@@ -330,11 +324,11 @@ static void task_fn(void *arg) {
         if (xSemaphoreTake(R->mx, pdMS_TO_TICKS(10)) != pdTRUE) {
             continue;
         }
-        uint32_t due = R->run ? step_(now_ms()) : 0;
+        uint32_t due = R->run ? step_((uint32_t)moy_now_ms()) : 0;
         xSemaphoreGive(R->mx);
         TickType_t wait = portMAX_DELAY;
         if (due != 0) {
-            int32_t ms = (int32_t)(due - now_ms());
+            int32_t ms = (int32_t)(due - (uint32_t)moy_now_ms());
             wait = ms <= 0 ? 0 : pdMS_TO_TICKS((uint32_t)ms) ? pdMS_TO_TICKS((uint32_t)ms) : 1;
         }
         ulTaskNotifyTake(pdTRUE, wait);
@@ -420,7 +414,7 @@ static int radio_up(void) {
         return -MOY_LORA_EIO;
     }
     R->run = 1;
-    if (xTaskCreatePinnedToCore(task_fn, "moy_lora", 4096, NULL, 10, &R->task, 0) != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_LORA, task_fn, NULL, &R->task)) {
         R->run = 0;
         R->task = NULL;
         return -MOY_LORA_ENOMEM;
@@ -692,7 +686,7 @@ static int radio_event(uint8_t *buf, size_t *n, int16_t *rssi, int8_t *snr) {
 
 void moy_lora_sim(int on) {
     if (on && S == NULL) {
-        S = calloc(1, sizeof(*S));
+        S = moy_kalloc(sizeof(*S), MOY_KMEM_LIBC | MOY_KMEM_ZERO);
     }
     s_sim_on = on && S != NULL;
     if (S != NULL) {
@@ -920,11 +914,7 @@ static int open_(uint32_t owner) {
         return 0;
     }
     if (R->q == NULL) {
-        #ifdef LORA_BOARD
-        R->q = heap_caps_malloc(sizeof(pkt_t) * MOY_LORA_QUEUE, MALLOC_CAP_SPIRAM);
-        #else
-        R->q = malloc(sizeof(pkt_t) * MOY_LORA_QUEUE);
-        #endif
+        R->q = moy_kalloc(sizeof(pkt_t) * MOY_LORA_QUEUE, MOY_KMEM_PSRAM);
         if (R->q == NULL) {
             moy_lease_let(owner, MOY_LEASE_LORA);
             return -MOY_LORA_ENOMEM;

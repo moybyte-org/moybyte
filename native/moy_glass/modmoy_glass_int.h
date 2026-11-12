@@ -7,6 +7,8 @@
 #ifndef MODMOY_GLASS_INT_H
 #define MODMOY_GLASS_INT_H
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "py/binary.h"
@@ -19,8 +21,7 @@
 
 #include "moy_light.h"
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_GLASS_BOARD 1
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #else
 #include <stdlib.h>
@@ -72,7 +73,7 @@ extern int MOY_KERNEL_PANEL(ship)(int n);
 
 // The banded compositor is built on a banded board and on the desktop
 // MicroPython (a test's panel module double); a DSI board has none.
-#if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+#if MOY_GLASS_BANDED || !defined(MOY_ON_BOARD)
 #define MOY_GLASS_BANDED_TYPE 1
 
 // The compositors' objects, which the kernel's frame reads too.

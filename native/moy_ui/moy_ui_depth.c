@@ -3,15 +3,14 @@
 // frame, its shadow and its outline's fringe and a card's shadow drawn with
 // them through moy_shape (native/moy_gfx/moy_shape.h).
 
+#include "moy_platform.h"
+
 #include <stdlib.h>
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define MARKS_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#define MARKS_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define MARKS_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 #include "moy_canvas.h"
 #include "moy_shape.h"
@@ -220,7 +219,7 @@ static void moy_ui_depth_use_w(const char *name, size_t n, int light) {
         name = moy_theme_seed_names[0];
         n = strlen(name);
     }
-    moy_theme_look_t *look = malloc(sizeof(moy_theme_look_t));
+    moy_theme_look_t *look = moy_kalloc(sizeof(moy_theme_look_t), MOY_KMEM_LIBC);
     if (look != NULL) {
         depth_of(d, look, name, n, light);
         free(look);

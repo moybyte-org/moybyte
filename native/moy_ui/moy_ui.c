@@ -1,27 +1,23 @@
 // moy_ui's style resolution (moy_ui.h).
 
+#include "moy_platform.h"
+
 #include <stdlib.h>
 #include <string.h>
 
 #include "moy_ui.h"
 #include "moy_theme.h"
 
-#if __has_include("freertos/FreeRTOS.h")
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#ifdef MOY_ON_BOARD
 #define READERS_WAIT() vTaskDelay(1)
 #else
 #define READERS_WAIT() ((void)0)
 #endif
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define UI_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
-#define REC_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#define UI_ALLOC(n) malloc(n)
-#define REC_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define UI_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM)
+#define REC_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 typedef struct {
     int32_t tok[MOY_UI_TOKENS];

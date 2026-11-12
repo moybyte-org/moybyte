@@ -2,6 +2,8 @@
 // the port compiles a usermod into the elf and into main, and a file whose
 // content is a board define must define nothing else.
 
+#include "moy_kmem.h"
+
 #include <string.h>
 
 #include "moy_net.h"
@@ -149,7 +151,7 @@ int moy_clock_state(int64_t *at) {
     if (ok) {
         return MOY_CLOCK_SYNCED;
     }
-    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t ms = (uint32_t)(moy_now_us() / 1000);
     return s_ntp && s_st.connected && ms - s_ntp_ms < CLOCK_ASK_MS ? MOY_CLOCK_ASKING
                                                                   : MOY_CLOCK_UNSYNCED;
 }
@@ -166,7 +168,7 @@ int moy_clock_server(const char *name) {
         return 0;
     }
     if (s_server == NULL) {
-        s_server = heap_caps_malloc(MOY_CLOCK_SERVER_MAX + 1, MALLOC_CAP_SPIRAM);
+        s_server = moy_kalloc(MOY_CLOCK_SERVER_MAX + 1, MOY_KMEM_PSRAM);
         if (s_server == NULL) {
             return -1;
         }
@@ -177,7 +179,8 @@ int moy_clock_server(const char *name) {
 
 // The kernel's alarms keep their wall time across a step (moy_evq.h, TIMERS),
 // where the image takes moy_kernel.
-void moy_evq_clock(int64_t step_ms) __attribute__((weak));
+#include "moy_evq.h"
+#pragma weak moy_evq_clock
 
 // lwIP's SNTP client sets the clock through this (ESP-IDF's is weak): the
 // answer, Unix time, on the board's epoch, and the mark; the step told to the
@@ -204,7 +207,7 @@ static void ntp_start(void) {
         s_server != NULL && s_server[0] ? s_server : MOY_CLOCK_SERVER);
     c.wait_for_sync = false;
     if (esp_netif_sntp_init(&c) == ESP_OK) {
-        s_ntp_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        s_ntp_ms = (uint32_t)(moy_now_us() / 1000);
         s_ntp = 1;
     }
 }
@@ -608,7 +611,7 @@ int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max) {
         s_scan = SCAN_IDLE;
         return -1;
     }
-    uint32_t ms = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t ms = (uint32_t)(moy_now_us() / 1000);
     if (s_scan == SCAN_IDLE) {
         s_scan = SCAN_ASKING;
         s_scan_ms = ms;
@@ -638,8 +641,7 @@ int moy_wifi_scan_poll(moy_wifi_ap_t *out, int max) {
     }
     s_scan = SCAN_IDLE;
     uint16_t n = (uint16_t)max;
-    wifi_ap_record_t *recs = heap_caps_malloc(sizeof(*recs) * (size_t)max,
-                                              MALLOC_CAP_SPIRAM);
+    wifi_ap_record_t *recs = moy_kalloc(sizeof(*recs) * (size_t)max, MOY_KMEM_PSRAM);
     if (recs == NULL) {
         esp_wifi_clear_ap_list();
         return -1;

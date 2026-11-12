@@ -27,6 +27,10 @@
 // (modmoy_glass_banded.c, modmoy_glass_dsi.c, modmoy_glass_rot.c), sharing
 // modmoy_glass_int.h with this one.
 
+#include "moy_glass_loop.h"
+
+#include "moy_kmem.h"
+
 #include "modmoy_glass_int.h"
 
 #ifndef MOY_GLASS_POOL_BYTES
@@ -38,34 +42,18 @@
 
 // -- the allocators -------------------------------------------------------------
 
-#ifdef MOY_GLASS_BOARD
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-
+// The kernel's small-block pool first (moy_kernel.h), then PSRAM.
 static void *tab_alloc(size_t n) {
-    n = n ? n : 1u;
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
+    return moy_kalloc(n ? n : 1u,
+                      MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 static void tab_release(void *p, size_t n) {
     (void)n;
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
+    moy_kfree(p);
 }
 
+#ifdef MOY_ON_BOARD
 static void *px_alloc(size_t n) {
     return heap_caps_aligned_calloc(64, 1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
 }
@@ -83,28 +71,19 @@ static size_t px_largest(void) {
     return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
 }
 #else
-static void *tab_alloc(size_t n) {
-    return calloc(1, n ? n : 1u);
-}
-
-static void tab_release(void *p, size_t n) {
-    (void)n;
-    free(p);
-}
-
 static void *px_alloc(size_t n) {
-    return calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_ZERO);
 }
 
 static void px_release(void *p, size_t n) {
     (void)n;
-    free(p);
+    moy_kfree(p);
 }
 
 #endif
 
 static const moy_htab_mem_t glass_mem = { tab_alloc, tab_release };
-#ifdef MOY_GLASS_BOARD
+#ifdef MOY_ON_BOARD
 static const moy_glass_px_t glass_px = { px_alloc, px_release, px_free_total,
                                          px_largest };
 #else
@@ -724,13 +703,18 @@ void glass_copy_into(mp_obj_t ppa, mp_obj_t src, mp_int_t W, mp_int_t H,
 
 // -- the VM's teardown (moy_kernel.c's soft-reset exit) -----------------------------
 
-#ifdef MOY_GLASS_BOARD
+#ifdef MOY_ON_BOARD
 #if MOY_GLASS_BANDED
 #include "moy_fold.h"
 #endif
 
 bool moy_gfx_k_copy_wait(void);
-__attribute__((weak)) void moy_ppa_k_sync(void);    // the P4s' PPA
+#if __has_include("moy_ppa.h")
+#include "moy_ppa.h"         // the P4s' PPA
+#else
+void moy_ppa_k_sync(void);
+#endif
+#pragma weak moy_ppa_k_sync
 
 // Before the sweep: the feeder drained, the fold's snapshot landed and its
 // latches cleared, the async layer copy waited out -- nothing the kernel's
@@ -922,6 +906,7 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
 // its canvas, and the Player keeps a compiled run in the console's frame.
 // front(None) withdraws.
 
+#if !__has_include("moy_play.h")
 typedef struct {
     uint16_t *(*canvas)(void *ctx, int *w, int *h);
     void (*present)(void *ctx, bool drew);
@@ -929,22 +914,33 @@ typedef struct {
     void *ctx;
     bool (*frame)(void *ctx, const uint8_t *px, const uint16_t *lut, const uint8_t **kept);
     void (*frame_fence)(void *ctx);
-} glass_front_ops_t;                    // moy_play.h's moy_front_ops_t, field for field
+} moy_front_ops_t;                      // moy_play.h's, field for field
+#endif
 
-void moy_play_front_ops(const glass_front_ops_t *ops) __attribute__((weak));
-int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src,
-                    int sw, int sh, int scale) __attribute__((weak));
-int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src,
-                       int sw, int sh, int scale) __attribute__((weak));
-long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n)
-    __attribute__((weak));
-void moy_ppa_k_sync(void) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+void moy_play_front_ops(const moy_front_ops_t *ops);
+#endif
+#pragma weak moy_play_front_ops
+#if __has_include("moy_ppa.h")
+#include "moy_ppa.h"
+#else
+int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src, int sw, int sh, int scale);
+int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src, int sw, int sh, int scale);
+long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n);
+void moy_ppa_k_sync(void);
+#endif
+#pragma weak moy_ppa_k_scale
+#pragma weak moy_ppa_k_scale_nb
+#pragma weak moy_ppa_k_snap
+#pragma weak moy_ppa_k_sync
 // moy_gfx_kernels.h's nearest-neighbour upscale (moy_gfx is in every console).
 void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
                       const uint16_t *src, size_t scap, int sw, int sh, int scale);
 
 static struct {
-    glass_front_ops_t ops;
+    moy_front_ops_t ops;
     void *comp;                         // the compositor object (rooted below)
     bool dsi;
     uint16_t *game;
@@ -1126,7 +1122,12 @@ static void front_dsi_frame_fence(void *ctx) {
 // which the game is scaled into first (`paint`). The snapshot is read by the
 // queued op, never the cart's memory, so the fence before the cart's next
 // hook is the snapshot's alone.
-void moy_ppa_k_snap_wait(void) __attribute__((weak));
+#if __has_include("moy_ppa.h")
+#include "moy_ppa.h"
+#else
+void moy_ppa_k_snap_wait(void);
+#endif
+#pragma weak moy_ppa_k_snap_wait
 static mp_obj_array_t front_rot_kept;   // the snapshot, as the queued op's source
 
 static mp_obj_t front_rot_quiet(void) {

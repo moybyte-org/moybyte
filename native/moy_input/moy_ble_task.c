@@ -21,13 +21,15 @@
 // and the machine's settings -- enabled, the picked keyboard's address and
 // name -- are namespace "moy_ble".
 
+#include "moy_kmem.h"
+
 #include "py/mpconfig.h"
 
 #include "moy_ble.h"
 #include "moy_gatt.h"
 #include "moy_scan.h"
 
-#if defined(MOY_INPUT_BOARD) && defined(MOY_INPUT_BLE)
+#if defined(MOY_ON_BOARD) && defined(MOY_INPUT_BLE)
 
 // NimBLE's headers find their configuration (esp_nimble_cfg.h) under
 // ESP_PLATFORM, which a usermod's sources are not compiled with on this port.
@@ -147,13 +149,10 @@ static void addr_from_ble(const ble_addr_t *b, moy_hid_addr_t *a) {
     memcpy(a->a, b->val, 6);
 }
 
-static uint32_t now_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
-}
 
 // The next scan's end, armed after every change to the master.
 static void arm(void) {
-    int32_t due = moy_scan_due(&B->scan, now_ms());
+    int32_t due = moy_scan_due(&B->scan, (uint32_t)moy_now_ms());
     if (due < 0) {
         ble_npl_callout_stop(&B->scan_due);
     } else {
@@ -163,7 +162,7 @@ static void arm(void) {
 
 static void scan_due_run(struct ble_npl_event *ev) {
     (void)ev;
-    moy_scan_tick(&B->scan, now_ms());
+    moy_scan_tick(&B->scan, (uint32_t)moy_now_ms());
     arm();
 }
 
@@ -209,7 +208,7 @@ static int op_scan(void *ctx, bool picker) {
     (void)ctx;
     int rc = moy_scan_start(&B->scan, MOY_SCAN_KBD,
                             picker ? MOY_SCAN_ACTIVE | MOY_SCAN_DENSE : 0, MOY_HID_SCAN_MS,
-                            now_ms());
+                            (uint32_t)moy_now_ms());
     arm();
     return rc == 0 ? 0 : -1;
 }
@@ -391,7 +390,7 @@ static void load(moy_hid_t *h) {
 
 static uint32_t op_ms(void *ctx) {
     (void)ctx;
-    return (uint32_t)(esp_timer_get_time() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
+    return (uint32_t)(moy_now_us() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
 }
 
 static const moy_hid_ops_t s_ops = {
@@ -455,7 +454,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
             if (io.action == BLE_SM_IOACT_NUMCMP) {
                 io.numcmp_accept = 1;
             } else if (io.action == BLE_SM_IOACT_DISP) {
-                io.passkey = (uint32_t)(esp_timer_get_time() % 1000000);
+                io.passkey = (uint32_t)(moy_now_us() % 1000000);
             } else {
                 return 0;
             }
@@ -512,7 +511,7 @@ static void app_run(struct ble_npl_event *ev) {
     }
     if (req & REQ_SCAN) {
         int rc = moy_scan_start(&B->scan, MOY_SCAN_APP, MOY_SCAN_ACTIVE | MOY_SCAN_DENSE, ms,
-                                now_ms());
+                                (uint32_t)moy_now_ms());
         if (rc != 0) {
             moy_gatt_on_scan_done(gatt_err(rc));
         }
@@ -610,10 +609,7 @@ moy_hid_t *moy_ble_hid(void) {
     if (!s_inited) {
         moy_input_t *t = moy_input_kernel();
         if (s_h == NULL) {
-            s_h = heap_caps_calloc(1, sizeof(ble_t), MALLOC_CAP_SPIRAM);
-            if (s_h == NULL) {
-                s_h = heap_caps_calloc(1, sizeof(ble_t), MALLOC_CAP_8BIT);
-            }
+            s_h = moy_kalloc(sizeof(ble_t), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
             if (s_h == NULL) {
                 return NULL;
             }

@@ -68,7 +68,8 @@ static int32_t dsi_refreshes(void *ctx) {
 }
 
 // The kernel's first light (native/moy_kernel/moy_boot.h); none off a board.
-extern bool moy_boot_lit(void) __attribute__((weak));
+#include "moy_boot.h"
+#pragma weak moy_boot_lit
 
 bool glass_kernel_lit(void) {
     return moy_boot_lit != NULL && moy_boot_lit();

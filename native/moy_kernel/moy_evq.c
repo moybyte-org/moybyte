@@ -1,9 +1,7 @@
 // moy_evq: every process's event queue and the one wait (moy_evq.h has the
 // design).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
-#endif
+#include "moy_platform.h"
 
 #include "moy_evq.h"
 
@@ -15,16 +13,12 @@
 #include "moy_super.h"
 #include "moy_sync.h"
 
-#ifdef MOY_SYNC_RTOS
-#include "esp_heap_caps.h"
-#include "esp_timer.h"
-#endif
-
 // The kernel's frame (moy_loop.h's jobs): weak, for an image or a harness
 // without the loop, where whoever stands in for the frame runs the timers.
-bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_job
 
-#ifdef MOY_SYNC_THREADS
+#ifdef MOY_THREADS
 pthread_mutex_t moy_sync_mu = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t moy_sync_cv = PTHREAD_COND_INITIALIZER;
 #endif
@@ -84,11 +78,7 @@ static uint32_t s_term_n;
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
 static void *mem(size_t n) {
-    #ifdef MOY_SYNC_RTOS
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 static bool system_pid(uint32_t pid) {
@@ -307,7 +297,8 @@ static uint32_t held_timers(const q_t *q) {
 }
 
 // A process's device handles (moy_dev.h): weak, for an image without them.
-uint32_t moy_dev_sweep(uint32_t pid) __attribute__((weak));
+#include "moy_dev.h"
+#pragma weak moy_dev_sweep
 
 int moy_evq_close(uint32_t pid) {
     MOY_SYNC_LOCK(&s_lock);
@@ -752,15 +743,6 @@ void moy_evq_reset(void) {
 
 // -- the timers --------------------------------------------------------------------
 
-static uint64_t now_ms(void) {
-    #ifdef MOY_SYNC_RTOS
-    return (uint64_t)(esp_timer_get_time() / 1000);
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
-    #endif
-}
 
 static bool timers_job(void *arg) {
     (void)arg;
@@ -790,7 +772,7 @@ static int timer_add(uint32_t pid, uint32_t ms, uint32_t every, bool alarm, uint
                     s_timer_n = 1u;
                 }
                 t->id = MOY_EVQ_TIMER_ID | s_timer_n;
-                t->due = now_ms() + ms;
+                t->due = moy_now_ms() + ms;
                 t->every = alarm ? 0u : every;
                 t->alarm = alarm;
                 *id = t->id;
@@ -894,7 +876,7 @@ uint32_t moy_evq_timers_run(void) {
     }
     for (;;) {
         uint32_t n = 0;
-        uint64_t now = now_ms();
+        uint64_t now = moy_now_ms();
         next = UINT32_MAX;
         MOY_SYNC_LOCK(&s_lock);
         for (uint32_t i = 0; i < MOY_EVQ_PROCS; i++) {

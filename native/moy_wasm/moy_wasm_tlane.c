@@ -54,6 +54,7 @@ int moy_wasm_tlane_here(void) {
 
 #include "py/mphal.h"                   // MP_TASK_COREID
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"   // pxTaskGetStackStart
@@ -77,8 +78,14 @@ int moy_wasm_tlane_here(void) {
 // THE SHARES' LANES row (native/moy_play/moy_play.h's MOY_SHARE_LANES;
 // tests/test_audio_ring.py holds the two equal), its ledger weak.
 #define TL_SHARE_LANES 4
-int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
-void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+int moy_share_take(uint8_t row, uint32_t n);
+void moy_share_give(uint8_t row, uint32_t n);
+#endif
+#pragma weak moy_share_take
+#pragma weak moy_share_give
 
 static const char *const EXPORTS[MOY_WASM_TLANES] = {"moy_audio", "moy_timer"};
 
@@ -125,11 +132,11 @@ static void strike(lane_t *l, const char *why) {
 // the monitor reads around it. False when it trapped (the lane is struck).
 static bool lane_call(lane_t *l, uint32_t sp, uint32_t argc, uint32_t *argv) {
     memcpy(l->sp, &sp, 4);
-    int64_t t0 = esp_timer_get_time();
+    int64_t t0 = moy_now_us();
     __atomic_store_n(&l->t_call, t0, __ATOMIC_RELEASE);
     bool ok = wasm_runtime_call_wasm(l->env, l->fn, argc, argv);
     __atomic_store_n(&l->t_call, 0, __ATOMIC_RELEASE);
-    uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
+    uint32_t us = (uint32_t)(moy_now_us() - t0);
     moy_wasm_tlane_stats_t *st = &g_stats[l->kind];
     st->calls++;
     if (us > st->max_us) {
@@ -170,7 +177,7 @@ static void lane_audio(lane_t *l) {
 }
 
 static void lane_timer(lane_t *l) {
-    uint32_t argv[1] = {(uint32_t)esp_timer_get_time()};
+    uint32_t argv[1] = {(uint32_t)moy_now_us()};
     if (!lane_call(l, l->top & ~15u, 1, argv)) {
         return;
     }
@@ -211,7 +218,7 @@ static void *lane_thread(void *arg) {
 // lane; the audio lane is woken.
 static void on_tick(void *arg) {
     tls_t *t = arg;
-    int64_t now = esp_timer_get_time();
+    int64_t now = moy_now_us();
     for (int k = 0; k < MOY_WASM_TLANES; k++) {
         lane_t *l = &t->lane[k];
         int64_t t0 = __atomic_load_n(&l->t_call, __ATOMIC_ACQUIRE);
@@ -334,7 +341,7 @@ void moy_wasm_tlanes_stop(void) {
         moy_share_give(TL_SHARE_LANES, t->taken);
     }
     g_tl = NULL;
-    heap_caps_free(t);
+    moy_kfree(t);
 }
 
 int moy_wasm_tlanes_start(moy_wasm_env env, const moy_wasm_tlane_sink_t *sink,
@@ -343,7 +350,7 @@ int moy_wasm_tlanes_start(moy_wasm_env env, const moy_wasm_tlane_sink_t *sink,
     if (g_tl != NULL) {
         moy_wasm_tlanes_stop();
     }
-    tls_t *t = heap_caps_calloc(1, sizeof(tls_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    tls_t *t = moy_kalloc(sizeof(tls_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (t == NULL) {
         snprintf(err, errlen, "out of memory: no PSRAM for the lanes");
         return -1;

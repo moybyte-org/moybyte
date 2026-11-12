@@ -73,6 +73,7 @@ def harness(tmp_path_factory):
     exe = d / "seal_gcm"
     args = [cc, "-O1", "-o", str(exe), str(src), os.path.join(NET, "moy_seal.c"),
             "-I", NET, "-I", os.path.join(NET, "mbedtls", "include"),
+            "-I", os.path.join(os.path.dirname(NET), "moy_kernel"),
             "-DMBEDTLS_CONFIG_FILE=\"moy_seal_mbedtls.h\"",
             "-Wl,--wrap=mbedtls_gcm_crypt_and_tag", "-Wl,--wrap=mbedtls_gcm_auth_decrypt"]
     args += sorted(os.path.join(lib, f) for f in os.listdir(lib) if f.endswith(".c"))

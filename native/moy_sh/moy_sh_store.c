@@ -3,15 +3,14 @@
 // (runtime/shell/sh_roles.py) over the same C the console calls, so the two
 // faces of a command cannot read a file two ways.
 
+#include "moy_platform.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define ON_BOARD 1
-#endif
+#include "moy_kmem.h"
 
 #include "moy_cat.h"
 #include "moy_fs.h"
@@ -27,24 +26,12 @@
 
 // Zeroed and 8-aligned, as the rows' allocator promises: PSRAM on a board.
 static void *m_alloc(size_t n) {
-#ifdef ON_BOARD
-    void *p = heap_caps_calloc(1, n ? n : 1u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n ? n : 1u, MALLOC_CAP_8BIT);
-    }
-    return p;
-#else
-    return calloc(1, n ? n : 1u);
-#endif
+    return moy_kalloc(n ? n : 1u, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 static void m_release(void *p, size_t n) {
     (void)n;
-#ifdef ON_BOARD
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    moy_kfree(p);
 }
 
 static const moy_htab_mem_t MEM = { m_alloc, m_release };

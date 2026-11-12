@@ -6,6 +6,8 @@
 #pragma GCC optimize("O3")
 #endif
 
+#include "moy_platform.h"
+
 #include "moy_shape.h"
 
 #include <stdlib.h>
@@ -18,12 +20,9 @@
 // the boards' SPIRAM_MALLOC_ALWAYSINTERNAL, so a plain malloc would put it in
 // internal SRAM, and the desk draws corners and shadows from its first frame:
 // the idle desk would hold them there for good.
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define SHAPE_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#define SHAPE_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define SHAPE_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 static uint32_t s_st[MOY_SHAPE_STATS];
 

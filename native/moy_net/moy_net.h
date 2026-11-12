@@ -14,6 +14,8 @@
 #ifndef MOY_NET_H
 #define MOY_NET_H
 
+#include "moy_platform.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -106,10 +108,8 @@ void moy_net_sha256(const void *p, size_t n, uint8_t out[32]);
 // time. A board's system clock counts from 2000, MicroPython's epoch on the
 // esp32 port (machine.RTC sets it so, and the WiFi driver sets NTP's answer
 // MOY_NET_CLOCK_EPOCH back, moy_wifi.c), so its time() takes the epoch back;
-// the unix port, the browser and the host count from 1970. A board is told by
-// the header it has: ESP_PLATFORM is not defined for a usermod's sources on
-// the esp32 port (the executable compiles them too, and its copy is linked).
-#if __has_include("esp_heap_caps.h")
+// the unix port, the browser and the host count from 1970.
+#ifdef MOY_ON_BOARD
 #define MOY_NET_CLOCK_EPOCH 946684800       // 1970-01-01 to 2000-01-01
 #else
 #define MOY_NET_CLOCK_EPOCH 0
@@ -478,12 +478,12 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
 // The board's pins (moy_net_port.c where mpconfigboard.h names
 // MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).
-int moy_gpio_pins(const uint8_t **pins) __attribute__((weak));
-int moy_gpio_drive(int pin, int level) __attribute__((weak));
-int moy_gpio_sense(int pin) __attribute__((weak));
+int moy_gpio_pins(const uint8_t **pins);
+int moy_gpio_drive(int pin, int level);
+int moy_gpio_sense(int pin);
 // The pin's next touch configures it afresh (its lease is new: one dropped
 // since left it safe).
-void moy_gpio_reset(int pin) __attribute__((weak));
+void moy_gpio_reset(int pin);
 // Every pin lease the page holds dropped (the webhost's stop).
 void moy_gpio_release(void);
 
@@ -542,11 +542,9 @@ static inline int moy_wifi_remember(int ok, const char *password,
 
 // -- the WiFi driver (a board that defines MOY_NET_WIFI) -------------------------
 
-#ifdef ESP_PLATFORM
+#if defined(MOY_ON_BOARD) && __has_include("py/mpconfig.h")
 #include "py/mpconfig.h"            // the board's MOY_NET_WIFI (mpconfigboard.h)
 #endif
-
-#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
 
 typedef struct {
     uint8_t driver;         // initialised this boot (one-way: its RAM stays)
@@ -617,7 +615,5 @@ int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);
 // The power-save mode, set first when `set` is 0 or more; -1 before the driver.
 int moy_wifi_ps(int set);
-
-#endif
 
 #endif // MOY_NET_H

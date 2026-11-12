@@ -1,5 +1,7 @@
 // The one UI text path (moy_text.h).
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "moy_text.h"
@@ -7,15 +9,10 @@
 #include "moy_gfx_kernels.h"
 #include "moy.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define FONT_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
-#define FONT_FREE(p) heap_caps_free(p)
-#else
-#include <stdlib.h>
-#define FONT_ALLOC(n) malloc(n)
-#define FONT_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define FONT_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM)
+#define FONT_FREE(p) moy_kfree(p)
 
 #define FONT_GLYPHS 96
 #define FONT_FIRST 32

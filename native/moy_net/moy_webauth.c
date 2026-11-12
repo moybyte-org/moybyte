@@ -38,6 +38,10 @@
 // A PAKE counts as a wrong password from its start, and its confirm clears
 // it, so a run left unconfirmed spends a guess.
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,31 +53,37 @@
 #include "moy_vol.h"
 #include "moy_webauth.h"
 
-// A board, told by the header it has: ESP_PLATFORM is not defined for a
-// usermod's sources on the esp32 port (moy_net.h, MOY_NET_CLOCK_EPOCH).
-#if __has_include("esp_heap_caps.h")
-#define WA_BOARD 1
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #else
-#define WA_BOARD 0
 #include <pthread.h>
 #endif
 
-extern bool moy_flush_drain(void) __attribute__((weak));
+#if __has_include("moy_flush.h")
+#include "moy_flush.h"
+#else
+bool moy_flush_drain(void);
+#endif
+#pragma weak moy_flush_drain
 // The web terminal's bridge (native/moy_tty/moy_tty_ws.c): end its session,
 // and how long ago its page last sent a frame.
-extern void moy_web_term_cut(void) __attribute__((weak));
-extern uint32_t moy_web_term_idle_ms(void) __attribute__((weak));
+#if __has_include("moy_tty.h")
+#include "moy_tty.h"
+#else
+void moy_web_term_cut(void);
+uint32_t moy_web_term_idle_ms(void);
+#endif
+#pragma weak moy_web_term_cut
+#pragma weak moy_web_term_idle_ms
 
 #define KEYS_FILE "/webkeys"
 #define PW_FILE "/password"
 #define FILE_MAX 4096
 #define SEEN_EVERY_S 3600
 #define SALT_MAX 64
-#define JOB_STACK 8192
 
 typedef struct {
     uint8_t used;
@@ -468,7 +478,7 @@ int moy_wa_config(const char *system_dir) {
 }
 
 int moy_wa_open(void) {
-    #if WA_BOARD
+    #if MOY_ON_BOARD
     return 0;
     #else
     return A == NULL || !A->on;
@@ -809,7 +819,7 @@ static int refuse(char *doc, size_t cap, int status, const char *why) {
     return status;
 }
 
-#if WA_BOARD
+#if MOY_ON_BOARD
 static void job_task(void *arg);
 #else
 static void *job_thread(void *arg);
@@ -829,7 +839,7 @@ static void run_job(void) {
     __atomic_store_n(&j->state, JOB_DONE, __ATOMIC_RELEASE);
 }
 
-#if WA_BOARD
+#if MOY_ON_BOARD
 static void job_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -843,8 +853,7 @@ static void job_task(void *arg) {
 static int job_start(void) {
     if (A->worker == 0) {
         TaskHandle_t h = NULL;
-        if (xTaskCreatePinnedToCoreWithCaps(job_task, "moy_pake", JOB_STACK, NULL, 1, &h, 0,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+        if (!moy_task_spawn(MOY_TASK_PAKE, job_task, NULL, &h)) {
             return -1;
         }
         A->worker = (uintptr_t)h;
@@ -936,7 +945,7 @@ static int nonce_gone(char *doc, size_t cap) {
 
 int moy_wa_auth(uint32_t peer, const char *body, size_t n, char *doc, size_t cap) {
     if (A == NULL || !A->on) {
-        #if WA_BOARD
+        #if MOY_ON_BOARD
         return refuse(doc, cap, 503, "auth");
         #else
         snprintf(doc, cap, "{\"v\":1,\"open\":true}");

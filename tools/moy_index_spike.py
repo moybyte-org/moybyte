@@ -96,6 +96,8 @@ sys.path.insert(0, ROOT)
 NATIVE = os.path.join(ROOT, "native", "moy_index")
 NATIVE_SPINE = os.path.join(ROOT, "native", "moy_spine")
 NATIVE_APP = os.path.join(ROOT, "native", "moy_app")
+# The platform layer every component includes (moy_platform.h, moy_kmem.h).
+NATIVE_KERNEL = os.path.join(ROOT, "native", "moy_kernel")
 NATIVE_INPUT = os.path.join(ROOT, "native", "moy_input")
 # The crypto rows' C (moy_crypto.h): the door calls it; it compiles with
 # moy_seal.c over mbedTLS (runtime/host/seal_binding.py).
@@ -150,7 +152,7 @@ class Component:
 
 
 INDEX = Component(
-    "index", [NATIVE, NATIVE_SPINE], "moy_index_host.c",
+    "index", [NATIVE, NATIVE_SPINE, NATIVE_KERNEL], "moy_index_host.c",
     ["moy_index.h", "moy_index.c", "moy_htab.h", "moy_htab.c"],
     ("fuzz_index.c", ["moy_index.c", "moy_htab.c"]),
     r"\((mod)?moy_index\.c\.obj\)$|/(mod)?moy_index\.c\.obj$",
@@ -164,7 +166,8 @@ INDEX = Component(
 # part: only its headers are read here.
 NATIVE_STORE = os.path.join(ROOT, "native", "moy_store")
 SPINE = Component(
-    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE, NATIVE_NET], "moy_spine_host.c",
+    "spine", [NATIVE_SPINE, NATIVE_APP, NATIVE_INPUT, NATIVE_STORE, NATIVE_NET,
+              NATIVE_KERNEL], "moy_spine_host.c",
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
      "moy_json.h", "moy_json.c", "moy_app.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_run.h", "moy_app_wasm.h",
@@ -184,7 +187,8 @@ MPY = os.path.join(ROOT, ".build", "unix_micropython", "micropython")
 FS = Component(
     "fs", [NATIVE_STORE, os.path.join(NATIVE_STORE, "host"), NATIVE_SPINE, MPY,
            os.path.join(MPY, "lib", "oofatfs"), os.path.join(MPY, "lib", "littlefs"),
-           os.path.join(MPY, "lib", "uzlib"), os.path.join(ROOT, "native", "moy_png")],
+           os.path.join(MPY, "lib", "uzlib"), os.path.join(ROOT, "native", "moy_png"),
+           NATIVE_KERNEL],
     "moy_store_host.c", ["moy_vol.h", "moy_vol.c", "moy_fs.h", "moy_fs.c",
                          "moy_arena.h", "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_json.h",
                          "moy_json.c", "moy_shelf.h", "moy_shelf.c", "moy_files.h",
@@ -206,7 +210,7 @@ NATIVE_UI = os.path.join(ROOT, "native", "moy_ui")
 THEME = Component(
     "theme", [NATIVE_UI, NATIVE_SPINE, os.path.join(ROOT, "native", "moy_gfx"),
               os.path.join(ROOT, "native", "moy_gfx", "libmoy"),
-              os.path.join(ROOT, "native", "moy_glass")],
+              os.path.join(ROOT, "native", "moy_glass"), NATIVE_KERNEL],
     None, [],
     ("fuzz_theme.c", ["moy_theme.c", "moy_json.c", "moy_ui_tables.c"]),
     r"\((mod)?moy_theme\.c\.obj\)$|/(mod)?moy_theme\.c\.obj$",

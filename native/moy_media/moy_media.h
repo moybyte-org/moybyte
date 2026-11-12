@@ -120,11 +120,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "moy_tasks.h"    // the task's stack and priority (MOY_TASK_MEDIA)
+
 #define MOY_MEDIA_IN_BYTES (32u * 1024u)    // the stream buffer, compressed bytes
 #define MOY_MEDIA_WIN_BYTES (16u * 1024u)   // the decoder's window
 #define MOY_MEDIA_WIN_MIN (8u * 1024u)      // a frame is decoded with this much ahead
 #define MOY_MEDIA_PCM_FRAMES 16384u         // decoded, in the output's rate and channels
-#define MOY_MEDIA_STACK (20u * 1024u)       // the task's stack: a frame's decode takes 16.7 KB of it
 #define MOY_MEDIA_SRAM_FLOOR (16u * 1024u)  // internal SRAM open() leaves free beside the stack and state
 #define MOY_MEDIA_METER_FRAMES 256u         // the decode meter's window, frames
 #define MOY_MEDIA_CONN (20u * 1024u)        // a URL's client: its head and URL buffers
@@ -135,7 +136,6 @@
 #define MOY_MEDIA_RETRIES 2
 #define MOY_MEDIA_DUCK_Q15 8192             // the stream under a sounding focused session
 #define MOY_MEDIA_VOLUME 70                 // a new stream's, 0..100
-#define MOY_MEDIA_PRIO 3
 #define MOY_MEDIA_WAIT_MS 50                // one wait for the connection's bytes
 #define MOY_MEDIA_AGENT "moybyte-media"
 #define MOY_MEDIA_READ_MIN (4u * 1024u)    // a file is read once this much is free

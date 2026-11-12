@@ -3,7 +3,7 @@
 // and the same stages on the desktop MicroPython, which drives a staged
 // console's frames through them (tests/test_frame_alloc.py). What only a
 // board has -- the stdin ring, the OTA slot, the watchdog, PSRAM, the
-// webhost's state -- is behind `__has_include("esp_ota_ops.h")`.
+// webhost's state -- is behind MOY_ON_BOARD (moy_platform.h).
 //
 // Every stage is a C call into the module that owns it: the input stage is
 // moy_input's (over the pointer and drivers the console bound with
@@ -19,6 +19,8 @@
 // back on the same task; a pending exception that surfaces outside an upcall
 // (a Ctrl-C reaching the pacing sleep) is caught here.
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -28,39 +30,69 @@
 #include "py/mphal.h"
 #include "py/runtime.h"
 
-#if __has_include("esp_ota_ops.h")
-#define MOY_LOOP_ESP 1
+#ifdef MOY_ON_BOARD
 #include "py/ringbuf.h"
 #include "shared/runtime/interrupt_char.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "moy_kernel.h"
-#else
-#define MOY_LOOP_ESP 0
 #endif
+#include "moy_kmem.h"
+#include "moy_tasks.h"
 
 #include "moy_devch.h"
 #include "moy_evq.h"
 #include "moy_loop.h"
 
 // The modules' loop entries (weak: an image without the module has none).
-void moy_input_loop_inputs(uint32_t now, bool *click, bool *active) __attribute__((weak));
-void moy_input_loop_pointer(uint32_t now, bool click, bool swallow) __attribute__((weak));
-void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge) __attribute__((weak));
-void moy_input_loop_tail(void) __attribute__((weak));
-void moy_match_kernel_poll(uint32_t now) __attribute__((weak));
-void moy_tty_tail(void) __attribute__((weak));
-void moy_glass_loop_present(void) __attribute__((weak));
-void moy_glass_loop_fence(void) __attribute__((weak));
-void moy_glass_loop_idle(void) __attribute__((weak));
-bool moy_glass_loop_light(int level) __attribute__((weak));
-bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) __attribute__((weak));
-void moy_glass_kernel_bump(void) __attribute__((weak));
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#else
+void moy_input_loop_inputs(uint32_t now, bool *click, bool *active);
+void moy_input_loop_pointer(uint32_t now, bool click, bool swallow);
+void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge);
+void moy_input_loop_tail(void);
+#endif
+#pragma weak moy_input_loop_inputs
+#pragma weak moy_input_loop_pointer
+#pragma weak moy_input_loop_point
+#pragma weak moy_input_loop_tail
+#if __has_include("moy_match.h")
+#include "moy_match.h"
+#else
+void moy_match_kernel_poll(uint32_t now);
+#endif
+#pragma weak moy_match_kernel_poll
+#if __has_include("moy_tty.h")
+#include "moy_tty.h"
+#else
+void moy_tty_tail(void);
+#endif
+#pragma weak moy_tty_tail
+#if __has_include("moy_glass_loop.h")
+#include "moy_glass_loop.h"
+#else
+void moy_glass_loop_present(void);
+void moy_glass_loop_fence(void);
+void moy_glass_loop_idle(void);
+bool moy_glass_loop_light(int level);
+bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has);
+#endif
+#pragma weak moy_glass_loop_present
+#pragma weak moy_glass_loop_fence
+#pragma weak moy_glass_loop_idle
+#pragma weak moy_glass_loop_light
+#pragma weak moy_glass_loop_overlap
+#if __has_include("moy_buf.h")
+#include "moy_buf.h"
+#else
+void moy_glass_kernel_bump(void);
+#endif
+#pragma weak moy_glass_kernel_bump
 extern uint32_t moybyte_gc_pause[3] __attribute__((weak));
 
-#if MOY_LOOP_ESP && defined(MOY_NET_WIFI) && MOY_NET_WIFI
+#if MOY_ON_BOARD && defined(MOY_NET_WIFI) && MOY_NET_WIFI
 #include "moy_net.h"
 #endif
 
@@ -72,10 +104,15 @@ static uint32_t b_us(void) {
     return (uint32_t)mp_hal_ticks_us();
 }
 
-bool moy_play_front_live(void) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_live(void);
+#endif
+#pragma weak moy_play_front_live
 
 static void b_sleep(uint32_t ms) {
-    #if MOY_LOOP_ESP
+    #if MOY_ON_BOARD
     // A run in the kernel's front runs no Python while it paces: the port's
     // delay would run the scheduler's callbacks and raise a pending Ctrl-C
     // from inside the sleep, where the front's next frame takes it instead.
@@ -105,14 +142,14 @@ static void b_inputs(uint32_t now, bool *click, bool *active) {
 // stays the allocator's: below that mark nothing is collected early. A cart
 // that draws every frame is never quiet, and a screen nobody touches is
 // read once.
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 #define QUIET_MS 1000u
 #define QUIET_RUN (16u * 1024u)
 static uint32_t s_drew_at, s_checked_at;
 #endif
 
 static void quiet_collect(uint32_t now, bool drew) {
-    #if MOY_LOOP_ESP
+    #if MOY_ON_BOARD
     if (drew) {
         s_drew_at = now;
         return;
@@ -135,7 +172,7 @@ static void quiet_collect(uint32_t now, bool drew) {
     #endif
 }
 
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 #if MICROPY_HW_ESP_USB_SERIAL_JTAG
 #include "usb_serial_jtag.h"
 #endif
@@ -204,7 +241,7 @@ static void b_tail(uint32_t now, bool drew) {
     quiet_collect(now, drew);
 }
 
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 // The OTA confirm: the image proved itself (painted, and kept looping).
 static void b_healthy(void) {
     if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
@@ -247,29 +284,17 @@ static void b_point(int32_t x, int32_t y, bool down, bool edge) {
     }
 }
 
-// The kernel's small-block pool (moy_kernel.h): the loop's tables live for
-// the board's life, made whenever they are first wanted.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-
+// The kernel's small-block pool first (moy_kernel.h): the loop's tables live
+// for the board's life, made whenever they are first wanted.
 static void *b_alloc(size_t n) {
-    #if MOY_LOOP_ESP
-    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
-    if (q != NULL) {
-        return q;
-    }
-    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
-    return p != NULL ? p : heap_caps_malloc(n, MALLOC_CAP_8BIT);
-    #else
-    return malloc(n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK);
 }
 
 // The webhost wants its Python half while it joins, serves or says goodbye,
 // and the scheduler its `woken` while a service's task wants the VM.
 static uint32_t b_services(void) {
     uint32_t bits = moy_evq_wants() != 0u ? MOY_SVC_TASKS : 0u;
-    #if MOY_LOOP_ESP && defined(MOY_NET_WIFI) && MOY_NET_WIFI
+    #if MOY_ON_BOARD && defined(MOY_NET_WIFI) && MOY_NET_WIFI
     moy_wc_state_t wc;
     moy_wc_state(&wc);
     moy_web_state_t web;
@@ -281,14 +306,19 @@ static uint32_t b_services(void) {
     return bits;
 }
 
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 // -- the board's words (docs/history/kernel_survival_2026-10.md §7.3) -----
 //
 // The words that read or act on kernel state, answered in C before any
 // console word. The host and the browser keep runtime/boot/dev_channel.py's
 // copies, which say `-` for what a host cannot read.
 
-void moy_aud_hush(void) __attribute__((weak));
+#if __has_include("moy_aud.h")
+#include "moy_aud.h"
+#else
+void moy_aud_hush(void);
+#endif
+#pragma weak moy_aud_hush
 
 static const uint32_t HEAP_CAPS[3] = {
     MALLOC_CAP_SPIRAM, MALLOC_CAP_INTERNAL, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA,
@@ -378,8 +408,14 @@ static bool w_kstop(int argc, char **argv, const char *line) {
 // failing (native/moy_play/moy_play_stop.c), so a board where a cart fits can
 // still be made to stop the VM for it; `need` is the policy as it ships. Bare:
 // which is in force.
-void moy_play_stop_force(bool on) __attribute__((weak));
-bool moy_play_stop_forced(void) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+void moy_play_stop_force(bool on);
+bool moy_play_stop_forced(void);
+#endif
+#pragma weak moy_play_stop_force
+#pragma weak moy_play_stop_forced
 
 static bool w_vmstop(int argc, char **argv, const char *line) {
     (void)line;
@@ -436,12 +472,12 @@ static const moy_devch_word_t BOARD_WORDS[] = {
 static moy_loop_ops_t s_ops;
 
 // A fresh VM is up: the loop's stages are the board's again.
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 static void window_end(void);
 #endif
 
 void moy_loop_board_vm_start(void) {
-    #if MOY_LOOP_ESP
+    #if MOY_ON_BOARD
     window_end();
     #endif
     memset(&s_ops, 0, sizeof(s_ops));
@@ -449,7 +485,7 @@ void moy_loop_board_vm_start(void) {
     s_ops.ticks_us = b_us;
     s_ops.sleep_ms = b_sleep;
     s_ops.inputs = moy_input_loop_inputs != NULL ? b_inputs : NULL;
-    #if MOY_LOOP_ESP
+    #if MOY_ON_BOARD
     s_ops.getc = b_getc;
     s_ops.healthy = b_healthy;
     s_ops.feed = b_feed;
@@ -467,7 +503,7 @@ void moy_loop_board_vm_start(void) {
     s_ops.alloc = b_alloc;
     s_ops.services = b_services;
     moy_loop_init(&s_ops, 60);
-    #if MOY_LOOP_ESP
+    #if MOY_ON_BOARD
     moy_devch_words(BOARD_WORDS, (int)(sizeof(BOARD_WORDS) / sizeof(BOARD_WORDS[0])));
     #endif
     moy_idle_t *d = moy_loop_idle();
@@ -477,7 +513,12 @@ void moy_loop_board_vm_start(void) {
 
 // The VM is going: no upcall from here on, and none of its objects held.
 void moy_loop_vm_clear(void);
-void moy_glass_loop_clear(void) __attribute__((weak));
+#if __has_include("moy_glass_loop.h")
+#include "moy_glass_loop.h"
+#else
+void moy_glass_loop_clear(void);
+#endif
+#pragma weak moy_glass_loop_clear
 
 void moy_loop_board_vm_stop(void) {
     moy_loop_set_vm(false);
@@ -494,7 +535,7 @@ void moy_loop_board_vm_stop(void) {
 // takes a 0x03 as a scheduled KeyboardInterrupt (a run in the kernel's front
 // ends with why SERIAL first), and `recv` disarms it for its payload.
 int moy_loop_board_run(void) {
-    #if MOY_LOOP_ESP && MICROPY_KBD_EXCEPTION
+    #if MOY_ON_BOARD && MICROPY_KBD_EXCEPTION
     mp_hal_set_interrupt_char(3);       // Ctrl-C
     #endif
     for (;;) {
@@ -514,7 +555,7 @@ int moy_loop_board_run(void) {
                 continue;
             }
         }
-        #if MOY_LOOP_ESP
+        #if MOY_ON_BOARD
         #if MICROPY_KBD_EXCEPTION
         mp_hal_set_interrupt_char(-1);
         #endif
@@ -524,7 +565,7 @@ int moy_loop_board_run(void) {
     }
 }
 
-#if MOY_LOOP_ESP
+#if MOY_ON_BOARD
 // THE LOOP TASK (native/moy_kernel/moy_loop.h): while no VM runs --
 // the soft reset's window today, sprint 4's stops tomorrow -- a small kernel
 // task drives the kernel's own frame, pinned to the VM's core at the VM's
@@ -538,7 +579,6 @@ int moy_loop_board_run(void) {
 #include "freertos/idf_additions.h"
 #include "esp_task.h"
 
-#define MOY_LOOP_TASK_STACK 4096
 #define MOY_LOOP_TASK_PERIOD_MS 16
 
 bool moy_kernel_plain_web(void);
@@ -569,9 +609,7 @@ void moy_loop_board_window(void) {
     }
     s_window = true;
     s_task_up = true;
-    if (xTaskCreatePinnedToCore(loop_task, "moy_loop", MOY_LOOP_TASK_STACK / sizeof(StackType_t),
-                                NULL, ESP_TASK_PRIO_MIN + 1, NULL,
-                                xPortGetCoreID()) != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_LOOP, loop_task, NULL, NULL)) {
         s_task_up = false;
         s_window = false;
     }
@@ -598,7 +636,12 @@ uint32_t moy_loop_board_window_frames(void) {
 // the run in front with why SERIAL, which starts the next VM. No present: the
 // run in front presents its own frames.
 
-bool moy_play_front_end(int why) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_end(int why);
+#endif
+#pragma weak moy_play_front_end
 
 static bool s_serial;               // a Ctrl-C came while the VM was down
 

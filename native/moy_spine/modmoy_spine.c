@@ -36,14 +36,7 @@
 #include "py/objmodule.h"
 #include "py/runtime.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if __has_include("esp_heap_caps.h")
-#define MOY_SPINE_BOARD 1
-#include "esp_heap_caps.h"
-#else
-#include <stdlib.h>
-#endif
+#include "moy_kmem.h"
 
 #include "moy_htab.h"
 #include "moy_ledger.h"
@@ -52,45 +45,18 @@
 
 // -- the allocator -------------------------------------------------------------
 
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-
-#ifdef MOY_SPINE_BOARD
-// PSRAM, zeroed. A board with no PSRAM at all takes the default heap; one whose
-// PSRAM is merely full refuses, rather than spend internal SRAM.
+// The kernel's small-block pool first (moy_kernel.h), then PSRAM, zeroed. A
+// board with no PSRAM at all takes the default heap; one whose PSRAM is
+// merely full refuses, rather than spend internal SRAM.
 static void *spine_alloc(size_t n) {
-    n = n ? n : 1u;
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
+    return moy_kalloc(n ? n : 1u,
+                      MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 static void spine_release(void *p, size_t n) {
     (void)n;
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
+    moy_kfree(p);
 }
-#else
-static void *spine_alloc(size_t n) {
-    return calloc(1, n ? n : 1u);
-}
-
-static void spine_release(void *p, size_t n) {
-    (void)n;
-    free(p);
-}
-#endif
 
 static const moy_htab_mem_t spine_mem = { spine_alloc, spine_release };
 

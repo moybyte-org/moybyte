@@ -551,34 +551,35 @@ ALLOC_CALLS = re.compile(r"\b(malloc|calloc|realloc|free|heap_caps_\w+|m_malloc"
 
 
 def test_kernel_data_is_allocated_from_psram():
-    """native/moy_kernel/moy_kernel.h: kernel data is
-    heap_caps(MALLOC_CAP_SPIRAM) unless it is latency-bound. The components
-    allocate only through the table's allocator; the binding's allocator asks
-    for PSRAM first and falls to the default heap only on a board with none;
-    and the one thing the binding keeps on the VM's heap is a Table's row
-    objects, which the collector must see."""
+    """native/moy_kernel/moy_kernel.h: kernel data is PSRAM unless it is
+    latency-bound. The components allocate only through the table's
+    allocator; the binding's allocator is one moy_kalloc (moy_kmem.h) asking
+    for PSRAM first and the default heap only on a board with none; and the
+    one thing the binding keeps on the VM's heap is a Table's row objects,
+    which the collector must see."""
     for name in ("moy_htab.c", "moy_route.c", "moy_settings.c", "moy_ledger.c",
                  "moy_json.c"):
         hits = ALLOC_CALLS.findall(_code(os.path.join(SPINE_DIR, name)))
         assert not hits, "%s allocates by itself: %s" % (name, hits)
     binding = _code(os.path.join(SPINE_DIR, "modmoy_spine.c"))
-    m = re.search(r"#ifdef MOY_SPINE_BOARD\s+static void \*spine_alloc.*?#else",
-                  binding, re.S)
-    assert m, "no board allocator in modmoy_spine.c"
-    # ESP_PLATFORM is not defined for a usermod's sources, so the board is
-    # recognised by its header; an #ifdef ESP_PLATFORM here would build calloc
-    # into every board and spend internal SRAM.
-    raw = open(os.path.join(SPINE_DIR, "modmoy_spine.c")).read()
-    assert '#if __has_include("esp_heap_caps.h")\n#define MOY_SPINE_BOARD' in raw
-    assert "#ifdef ESP_PLATFORM" not in raw and "#if ESP_PLATFORM" not in raw
+    m = re.search(r"static void \*spine_alloc\(size_t n\) \{.*?\n\}", binding, re.S)
+    assert m, "no allocator in modmoy_spine.c"
     alloc = m.group(0)
-    first = alloc.index("heap_caps_calloc")
-    assert "MALLOC_CAP_SPIRAM" in alloc[first:alloc.index(";", first)]
-    assert alloc.count("heap_caps_calloc") == 2
-    assert "heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0" in alloc
+    assert "moy_kalloc(" in alloc
+    for flag in ("MOY_KMEM_PSRAM", "MOY_KMEM_INTERNAL_IF_NONE", "MOY_KMEM_ZERO"):
+        assert flag in alloc, flag
+    assert "MOY_KMEM_INTERNAL_OK" not in alloc
+    # The flag's meaning is the allocator's: internal SRAM only where the
+    # board has no PSRAM at all.
+    kmem = _code(os.path.join(os.path.dirname(SPINE_DIR), "moy_kernel", "moy_kmem.c"))
+    assert re.search(r"MOY_KMEM_INTERNAL_IF_NONE\)\s*&&\s*heap_caps_get_total_size\("
+                     r"MALLOC_CAP_SPIRAM\) == 0", kmem)
+    # One platform header decides the board (an #ifdef ESP_PLATFORM here would
+    # build calloc into every board and spend internal SRAM).
+    raw = open(os.path.join(SPINE_DIR, "modmoy_spine.c")).read()
+    assert "esp_heap_caps.h" not in raw and "ESP_PLATFORM" not in raw
     outside = ALLOC_CALLS.findall(binding.replace(alloc, " "))
-    # spine_alloc / spine_release off the board (calloc, free), the rows array
-    assert sorted(outside) == ["calloc", "free", "m_new0"], outside
+    assert sorted(outside) == ["m_new0"], outside
 
 
 def test_the_shares_rows_hold_what_the_kernel_places_in_psram():
@@ -602,7 +603,7 @@ def test_the_shares_rows_hold_what_the_kernel_places_in_psram():
     assert "!g->internal && moy_share_give" in drop
     # every ring the input table frees goes through the give
     outside = code.replace(new, " ").replace(drop, " ")
-    assert re.findall(r"\bring_free\(", outside) == ["ring_free("] * 2   # the two definitions
+    assert re.findall(r"\bring_free\(", outside) == ["ring_free("]   # the definition
 
 
 def test_the_cpython_host_runs_the_c_spine():

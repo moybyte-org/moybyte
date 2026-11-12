@@ -16,6 +16,7 @@
 #include "moy_webauth.h"
 #include "moy_seal.h"
 #include "moy_ota.h"
+#pragma weak moy_c6_version
 
 // The board's network halves: the HTTP server's parser and its responses, the
 // webhost, the web console, DNS, the GPIO route, the updater and its HTTP

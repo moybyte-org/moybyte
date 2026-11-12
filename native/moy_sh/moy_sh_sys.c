@@ -1016,7 +1016,7 @@ static int mount_ent(void *arg, const char *name) {
 }
 
 // Taken weak: a host whose one volume holds the whole tree has no mounts.
-int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg) __attribute__((weak));
+#pragma weak moy_vol_mounts
 
 typedef struct {
     const char *path;

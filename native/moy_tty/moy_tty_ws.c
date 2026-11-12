@@ -65,7 +65,12 @@
 extern const moy_tty_shell_t moy_tty_moy_sh;
 // The webhost's clock (native/moy_net), which the page's idle time is read
 // against, where the image has it.
-uint32_t moy_net_ms(void) __attribute__((weak));
+#if __has_include("moy_net.h")
+#include "moy_net.h"
+#else
+uint32_t moy_net_ms(void);
+#endif
+#pragma weak moy_net_ms
 
 static uint32_t now_ms(void) {
     return moy_net_ms != NULL ? moy_net_ms() : moy_tty_ms();

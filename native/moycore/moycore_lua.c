@@ -1,6 +1,10 @@
 // A Lua cart's VM over the console, with no MicroPython in it (moycore_lua.h
 // has the contract; native/moycore/README.md the allocator's design).
 
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,13 +30,12 @@
 
 #define HOOK(name, ...) moycore_lua_hooks.name(__VA_ARGS__)
 
-// The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
-// build, absent on the host/unix/wasm ones, which then use plain realloc.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+// The board allocator, on a board (moy_platform.h); the host/unix/wasm
+// builds use plain realloc.
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
-#define MOYCORE_PSRAM 1
 #endif
+#if defined(__has_include)
 // Which REGION a pointer is in, for the allocator census. Its own probe and
 // its own INCLUDE: the S3 gets esp_ptr_internal transitively through
 // esp_heap_caps.h and the P4 does not, so a probe that tests for the header
@@ -89,7 +92,7 @@ static uint32_t g_sram_denied;
 // never allocated big is not a run with zero headroom.
 static size_t g_sram_free_min = SIZE_MAX;
 static uint8_t g_psram_fallback;
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
 // Off-board there is ONE region, so the split above cannot happen and the
 // report is None. `sram_sim(bytes)` supplies the free figure the boards read
 // from the heap, which is what makes the floor arithmetic and the fallback
@@ -157,7 +160,7 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
     // is not readable from an indeterminate value (see census_sub_region).
     int oregion = (ptr != NULL) ? mc_region(ptr) : 0;
     void *np;
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     int tried_sram = 0;
     np = NULL;
     size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -268,7 +271,7 @@ static const uint16_t POOL_SZ[POOL_CLASSES] = {16, 32, 48, 64, 96, 128, 192, 256
 #endif
 #define MOYCORE_POOL_CHUNK_MIN (4 * 1024)
 
-#if !defined(MOYCORE_PSRAM) && \
+#if !defined(MOY_ON_BOARD) && \
     (defined(__unix__) || defined(__APPLE__) || defined(__EMSCRIPTEN__))
 // Declared here rather than reached through a feature macro: which of
 // _POSIX_C_SOURCE / _DEFAULT_SOURCE stdlib.h wants depends on the port's -std,
@@ -316,7 +319,7 @@ static inline int pool_class(size_t n)
 static mc_chunk *chunk_new(size_t sz)
 {
     void *raw, *base;
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     raw = heap_caps_aligned_alloc(sz, sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (raw == NULL) return NULL;
     base = raw;
@@ -334,7 +337,7 @@ static mc_chunk *chunk_new(size_t sz)
 
 static void chunk_free(mc_chunk *c)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     heap_caps_free(c->raw);           // aligned or not: TLSF blocks are the same
 #else
     free(c->raw);
@@ -774,7 +777,7 @@ void moycore_lua_meters_reset(void)
 
 size_t moycore_lua_set_sram_floor(size_t bytes)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     if (bytes < 16 * 1024) bytes = 16 * 1024;
     if (bytes > 256 * 1024) bytes = 256 * 1024;
     g_sram_floor = bytes;
@@ -787,7 +790,7 @@ size_t moycore_lua_set_sram_floor(size_t bytes)
 
 int moycore_lua_two_regions(void)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     return 1;
 #else
     return g_sram_sim != 0;
@@ -796,7 +799,7 @@ int moycore_lua_two_regions(void)
 
 size_t moycore_lua_sram_sim(size_t bytes)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     (void)bytes;
     return 0;
 #else
@@ -870,16 +873,12 @@ typedef struct {
 
 static void *media_alloc(size_t n)
 {
-#ifdef MOYCORE_PSRAM
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p) return p;
-#endif
-    return calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void media_free(void *p)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     heap_caps_free(p);
 #else
     free(p);
@@ -909,10 +908,8 @@ static uint32_t g_owner_next;
 // on the S3s), held only while its run is, so the idle desk pays nothing.
 static void *row_alloc(void)
 {
-#ifdef MOYCORE_PSRAM
-    void *p = heap_caps_calloc(1, sizeof(moycore_run), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    void *p = moy_kalloc(sizeof(moycore_run), MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
     if (p) return p;
-#endif
     return media_alloc(sizeof(moycore_run));
 }
 
@@ -1252,7 +1249,12 @@ static void media_open(lua_State *L)
 // The app ABI's Lua face (native/moy_app/moy_app_lua.h): the role names of
 // the app's run, opened before the cart can capture a global. Weak: an image
 // without native/moy_app opens none.
-int moy_app_lua_open(lua_State *L, const struct moy_app_run *app) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
+#endif
+#pragma weak moy_app_lua_open
 
 int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
 {

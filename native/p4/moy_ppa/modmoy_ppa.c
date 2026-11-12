@@ -16,6 +16,8 @@
 // SRM = Scale-Rotate-Mirror. blit_scale() is the integer-upscale composite that
 // mirrors moy_gfx.blit565_scale so run_ppa_smoke can A/B them on glass.
 
+#include "moy_ppa.h"
+
 #include <string.h>
 #include "py/obj.h"
 #include "py/runtime.h"

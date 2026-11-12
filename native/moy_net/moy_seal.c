@@ -1,12 +1,7 @@
 // moy_seal: moy_seal.h is the authority (the protocol, its labels and nonces).
 
-// A board is told by the header it has: ESP_PLATFORM is not defined for a
-// usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
-#if defined(ESP_PLATFORM) || __has_include("esp_random.h")
-#define SEAL_BOARD 1
-#elif !defined(_DEFAULT_SOURCE)
-#define _DEFAULT_SOURCE                 // getentropy
-#endif
+#include "moy_platform.h"        // first: a host's getentropy is POSIX's
+#include "moy_kmem.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +9,7 @@
 
 #include "moy_seal.h"
 
-#ifdef SEAL_BOARD
+#ifdef MOY_ON_BOARD
 #include "bootloader_random.h"
 #include "esp_heap_caps.h"
 #include "esp_random.h"
@@ -54,7 +49,7 @@ static const uint8_t SPAKE_N[MOY_SEAL_POINT] = {
 // The hardware's bytes: a board's RNG register, the host's and the browser's
 // getentropy.
 static void hw_random(uint8_t *b, size_t n) {
-    #ifdef SEAL_BOARD
+    #ifdef MOY_ON_BOARD
     esp_fill_random(b, n);
     #else
     while (n > 0) {
@@ -85,10 +80,9 @@ static int hw_entropy(void *ctx, unsigned char *p, size_t n) {
 static uint8_t *s_seed;
 static mbedtls_hmac_drbg_context *s_drbg;
 
-#ifdef SEAL_BOARD
+#ifdef MOY_ON_BOARD
 static void *seal_alloc(size_t n) {
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return p != NULL ? p : calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void seal_free(void *p) {
@@ -129,7 +123,7 @@ static void rng_lock(void) {
 #define RNG_UNLOCK() xSemaphoreGive(s_lock)
 #else
 static void *seal_alloc(size_t n) {
-    return calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_ZERO);
 }
 
 static void seal_free(void *p) {
@@ -145,7 +139,7 @@ void moy_seal_random(void *p, size_t n) {
     uint8_t *b = p, add[ADD_BYTES];
     RNG_LOCK();
     if (s_drbg == NULL) {
-        #ifndef SEAL_BOARD
+        #ifndef MOY_ON_BOARD
         s_seed = seal_alloc(SEED_WORDS * 4);
         if (s_seed != NULL) {
             hw_random(s_seed, SEED_WORDS * 4);

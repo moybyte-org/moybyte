@@ -1,9 +1,7 @@
 // moy_vmq: the one queue of calls into the VM's task (moy_vmq.h has the
 // design).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
-#endif
+#include "moy_platform.h"
 
 #include "moy_vmq.h"
 
@@ -14,13 +12,6 @@
 #include "moy_evq.h"
 #include "moy_screen_slot.h"
 #include "moy_sync.h"
-
-#ifdef MOY_SYNC_RTOS
-#include "esp_heap_caps.h"
-#include "esp_timer.h"
-#else
-#include <time.h>
-#endif
 
 enum { FREE, HOP, HOP_DONE, CALL, ANSWERED };
 
@@ -50,24 +41,12 @@ static bool s_defer;                    // the hop being served asked to wait fo
 
 // The kernel's frame (moy_loop.h's jobs): weak, for an image or a harness
 // without the loop, where whoever stands in for the frame serves.
-bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_job
 
-static int64_t now_us(void) {
-    #ifdef MOY_SYNC_RTOS
-    return esp_timer_get_time();
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-    #endif
-}
 
 static char *copy(const char *p, size_t n) {
-    #ifdef MOY_SYNC_RTOS
-    char *c = heap_caps_malloc(n + 1u, MALLOC_CAP_SPIRAM);
-    #else
-    char *c = malloc(n + 1u);
-    #endif
+    char *c = moy_kalloc(n + 1u, MOY_KMEM_PSRAM);
     if (c != NULL) {
         if (n) {
             memcpy(c, p, n);
@@ -106,7 +85,7 @@ static int slot_of(uint32_t ticket) {
 }
 
 int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us) {
-    int64_t t = now_us();
+    int64_t t = moy_now_us();
     MOY_SYNC_LOCK(&s_lock);
     int i = claim(HOP, pid);
     uint32_t seen = 0;
@@ -131,7 +110,7 @@ int moy_vmq_hop(uint32_t pid, void (*fn)(void *), void *arg, uint32_t *waited_us
     s_who[i] = NULL;
     MOY_SYNC_UNLOCK(&s_lock);
     if (waited_us != NULL) {
-        *waited_us = (uint32_t)(now_us() - t);
+        *waited_us = (uint32_t)(moy_now_us() - t);
     }
     // A kick the wait took is its event queue's again.
     moy_evq_kick(pid);

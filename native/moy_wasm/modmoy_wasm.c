@@ -42,6 +42,7 @@
 
 #include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
 #include "esp_task.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
@@ -76,7 +77,7 @@ void mem_allocator_free(mem_allocator_t allocator, void *ptr);
 
 // A VM runs (native/moy_kernel's loop): weak, so an image without the kernel
 // always has one.
-bool moy_loop_vm(void) __attribute__((weak));
+#pragma weak moy_loop_vm
 
 // -- per-board settings (mpconfigboard.h) -------------------------------------
 
@@ -154,8 +155,7 @@ typedef struct {
 static run_t *g_run;
 // Every open cart session (below), which a run is never started beside.
 static struct sess *g_sessions;
-static SemaphoreHandle_t g_lock;
-static StaticSemaphore_t g_lock_buf;
+static moy_mutex_t g_lock = MOY_MUTEX_INIT;
 
 #define SRAM_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
 #define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
@@ -260,9 +260,9 @@ static size_t pool_bytes(uint32_t module_len)
 
 static void set_live(run_t *r, wasm_module_inst_t inst)
 {
-    xSemaphoreTake(g_lock, portMAX_DELAY);
+    moy_mutex_lock(&g_lock);
     r->live = inst;
-    xSemaphoreGive(g_lock);
+    moy_mutex_unlock(&g_lock);
 }
 
 // One load, check, instantiate, call, teardown. False ends the run.
@@ -279,9 +279,9 @@ static bool one_pass(run_t *r, uint32_t pass)
     memset(&la, 0, sizeof(la));
     la.name = "";
     la.wasm_binary_freeable = true;
-    int64_t t0 = esp_timer_get_time();
+    int64_t t0 = moy_now_us();
     wasm_module_t module = wasm_runtime_load_ex(r->file, r->file_len, &la, err, sizeof(err));
-    int64_t dt = esp_timer_get_time() - t0;
+    int64_t dt = moy_now_us() - t0;
     if (!module) {
         fail(r, alloc_failed(err) ? OUT_OF_MEMORY : "load", err);
         return false;
@@ -296,7 +296,7 @@ static bool one_pass(run_t *r, uint32_t pass)
         goto out;
     }
 
-    t0 = esp_timer_get_time();
+    t0 = moy_now_us();
     inst = wasm_runtime_instantiate(module, MOY_WASM_EXEC_STACK, 0, err, sizeof(err));
     if (!inst) {
         fail(r, alloc_failed(err) ? OUT_OF_MEMORY : "instantiate", err);
@@ -308,7 +308,7 @@ static bool one_pass(run_t *r, uint32_t pass)
         goto out;
     }
     if (pass == 0) {
-        r->inst_us = esp_timer_get_time() - t0;
+        r->inst_us = moy_now_us() - t0;
     }
     // The boundary the AOT code's stack check compares against: this thread's
     // own stack, less the guard the runtime and its natives need.
@@ -350,9 +350,9 @@ static bool one_pass(run_t *r, uint32_t pass)
     uint32_t argv[MOY_WASM_MAX_ARGS];
     memcpy(argv, r->argv, sizeof(argv));
     set_live(r, inst);
-    t0 = esp_timer_get_time();
+    t0 = moy_now_us();
     bool called = wasm_runtime_call_wasm(env, fn, r->argc, argv);
-    dt = esp_timer_get_time() - t0;
+    dt = moy_now_us() - t0;
     set_live(r, NULL);
     if (!called) {
         const char *ex = wasm_runtime_get_exception(inst);
@@ -393,7 +393,7 @@ out:
 static void run_passes(run_t *r)
 {
     r->pool = r->pool_asked ? r->pool_asked : pool_bytes(r->file_len);
-    uint8_t *pool = heap_caps_malloc(r->pool, PSRAM_CAPS);
+    uint8_t *pool = moy_kalloc(r->pool, MOY_KMEM_PSRAM);
     if (!pool) {
         fail(r, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         return;
@@ -405,7 +405,7 @@ static void run_passes(run_t *r)
     init.mem_alloc_option.pool.heap_size = r->pool;
     if (!wasm_runtime_full_init(&init)) {
         fail(r, "runtime init", NULL);
-        heap_caps_free(pool);
+        moy_kfree(pool);
         return;
     }
     r->ok = true;
@@ -423,7 +423,7 @@ static void run_passes(run_t *r)
         r->pool_peak = info.highmark_size;
     }
     wasm_runtime_destroy();
-    heap_caps_free(pool);
+    moy_kfree(pool);
 }
 
 static void *run_thread(void *arg)
@@ -431,7 +431,7 @@ static void *run_thread(void *arg)
     run_t *r = arg;
     run_passes(r);
     r->stack_free_min = uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
-    r->t_end = esp_timer_get_time();
+    r->t_end = moy_now_us();
     r->finished = true;
     return NULL;
 }
@@ -441,7 +441,7 @@ static void *run_thread(void *arg)
 static void release(run_t *r)
 {
     if (r->file) {
-        heap_caps_free(r->file);
+        moy_kfree(r->file);
         r->file = NULL;
     }
 }
@@ -477,9 +477,9 @@ static int read_module_c(const char *path, uint32_t hold, uint8_t **out, uint32_
         e = MOY_EFBIG;
     }
     if (e == 0) {
-        buf = heap_caps_malloc((size_t)moy_wasm_file_block(hold, (uint64_t)size), PSRAM_CAPS);
+        buf = moy_kalloc((size_t)moy_wasm_file_block(hold, (uint64_t)size), MOY_KMEM_PSRAM);
         if (!buf) {
-            buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
+            buf = moy_kalloc((size_t)size, MOY_KMEM_PSRAM);
         }
         e = buf ? 0 : MOY_ENOMEM;
     }
@@ -497,7 +497,7 @@ static int read_module_c(const char *path, uint32_t hold, uint8_t **out, uint32_
     }
     moy_vol_gate_leave(gated);
     if (e != 0) {
-        heap_caps_free(buf);
+        moy_kfree(buf);
         return e;
     }
     *out = buf;
@@ -518,10 +518,9 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
         mp_stream_close(f);
         mp_raise_ValueError(MP_ERROR_TEXT("module file is empty, unreadable or too big"));
     }
-    uint8_t *buf = heap_caps_malloc((size_t)moy_wasm_file_block(hold, (uint64_t)size),
-                                    PSRAM_CAPS);
+    uint8_t *buf = moy_kalloc((size_t)moy_wasm_file_block(hold, (uint64_t)size), MOY_KMEM_PSRAM);
     if (!buf) {
-        buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
+        buf = moy_kalloc((size_t)size, MOY_KMEM_PSRAM);
     }
     if (!buf) {
         mp_stream_close(f);
@@ -530,7 +529,7 @@ static void read_module(mp_obj_t path, uint32_t hold, uint8_t **out, uint32_t *o
     mp_uint_t got = mp_stream_rw(f, buf, (mp_uint_t)size, &e, MP_STREAM_RW_READ);
     mp_stream_close(f);
     if (e != 0 || got != (mp_uint_t)size) {
-        heap_caps_free(buf);
+        moy_kfree(buf);
         mp_raise_OSError(e ? e : MP_EIO);
     }
     *out = buf;
@@ -587,7 +586,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed), allowed, a);
 
     if (g_run == NULL) {
-        g_run = heap_caps_calloc(1, sizeof(run_t), PSRAM_CAPS);
+        g_run = moy_kalloc(sizeof(run_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
         if (g_run == NULL) {
             mp_raise_type(&mp_type_MemoryError);
         }
@@ -598,9 +597,6 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     }
     if (g_sessions != NULL) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("a cart's session is live"));
-    }
-    if (!g_lock) {
-        g_lock = xSemaphoreCreateMutexStatic(&g_lock_buf);
     }
     size_t argc;
     mp_obj_t *items;
@@ -651,7 +647,7 @@ static mp_obj_t mod_start(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     // control block included, so the monitor starts before the thread exists.
     heap_caps_monitor_local_minimum_free_size_start();
     r->sram_before = heap_caps_get_free_size(SRAM_CAPS);
-    r->t_start = esp_timer_get_time();
+    r->t_start = moy_now_us();
 
     int pe = moy_wasm_spawn(&r->tid, run_thread, r, r->stack_bytes, r->stack_psram,
                             MOY_WASM_CORE, MOY_WASM_PRIO);
@@ -679,14 +675,14 @@ static mp_obj_t mod_terminate(void)
 {
     run_t *r = g_run;
     bool told = false;
-    if (r != NULL && r->started && g_lock) {
-        xSemaphoreTake(g_lock, portMAX_DELAY);
+    if (r != NULL && r->started) {
+        moy_mutex_lock(&g_lock);
         if (r->live) {
             wasm_runtime_terminate(r->live);
             told = true;
         }
         r->terminated = true;
-        xSemaphoreGive(g_lock);
+        moy_mutex_unlock(&g_lock);
     }
     return mp_obj_new_bool(told);
 }
@@ -805,7 +801,7 @@ static void *rt_malloc(unsigned int n)
     if (s != NULL && s->alloc != NULL && !s->rt_heap) {
         return mem_allocator_malloc(s->alloc, n);
     }
-    return heap_caps_malloc(n, PSRAM_CAPS);
+    return moy_kalloc(n, MOY_KMEM_PSRAM);
 }
 
 static void *rt_realloc(void *p, unsigned int n)
@@ -814,7 +810,7 @@ static void *rt_realloc(void *p, unsigned int n)
         return rt_malloc(n);
     }
     sess_t *s = pool_of(p);
-    return s != NULL ? mem_allocator_realloc(s->alloc, p, n) : heap_caps_realloc(p, n, PSRAM_CAPS);
+    return s != NULL ? mem_allocator_realloc(s->alloc, p, n) : moy_krealloc(p, n, MOY_KMEM_PSRAM);
 }
 
 static void rt_free(void *p)
@@ -826,7 +822,7 @@ static void rt_free(void *p)
     if (s != NULL) {
         mem_allocator_free(s->alloc, p);
     } else {
-        heap_caps_free(p);
+        moy_kfree(p);
     }
 }
 
@@ -886,9 +882,9 @@ static void *lane_thread(void *arg)
         if (l->quit) {
             break;
         }
-        int64_t t0 = esp_timer_get_time();
+        int64_t t0 = moy_now_us();
         l->fn(l->arg);
-        int64_t t1 = esp_timer_get_time();
+        int64_t t1 = moy_now_us();
         st->wait_us += (uint64_t)(t0 - l->t_go);
         st->run_us += (uint64_t)(t1 - t0);
         xSemaphoreGive(l->done);
@@ -935,7 +931,7 @@ int moy_wasm_session_lane_go(int lane, void (*fn)(void *arg), void *arg)
     }
     l->fn = fn;
     l->arg = arg;
-    l->t_go = esp_timer_get_time();
+    l->t_go = moy_now_us();
     g_lane_stats[lane].jobs++;
     xSemaphoreGive(l->go);
     return 0;
@@ -1031,7 +1027,7 @@ static void *sess_thread(void *arg)
     // session never builds.
     size_t pool_size = s->interp ? (size_t)moy_wasm_interp_pool_bytes(s->file_len)
                                  : pool_bytes(s->file_len);
-    uint8_t *pool = heap_caps_malloc(pool_size, PSRAM_CAPS);
+    uint8_t *pool = moy_kalloc(pool_size, MOY_KMEM_PSRAM);
     if (!pool) {
         rc = sess_fail(s, OUT_OF_MEMORY, "no PSRAM for the runtime pool");
         goto opened;
@@ -1098,7 +1094,7 @@ static void *sess_thread(void *arg)
     // "Exception: unreachable" on every interpreted run. An interpreted
     // session keeps the file until teardown instead.
     if (!s->interp) {
-        heap_caps_free(s->file);
+        moy_kfree(s->file);
         s->file = NULL;
     }
     err[0] = 0;
@@ -1164,7 +1160,7 @@ opened:
         s->alloc = NULL;
     }
     if (pool) {
-        heap_caps_free(pool);
+        moy_kfree(pool);
     }
     xSemaphoreGive(s->back);               // closed
     return NULL;
@@ -1186,7 +1182,7 @@ int moy_wasm_session_live(void)
 static void sess_free(sess_t *s)
 {
     if (s->file) {
-        heap_caps_free(s->file);
+        moy_kfree(s->file);
     }
     if (s->go) {
         vSemaphoreDelete(s->go);
@@ -1206,7 +1202,7 @@ static void sess_free(sess_t *s)
     if (g_sess == s) {
         g_sess = NULL;
     }
-    heap_caps_free(s);
+    moy_kfree(s);
 }
 
 void *moy_wasm_session_current(void)
@@ -1244,7 +1240,7 @@ static int sess_open(const char *path, const char *want_sha, uint32_t memory,
         snprintf(err, errlen, "a wasm run is already live");
         return 1;
     }
-    sess_t *s = heap_caps_calloc(1, sizeof(sess_t), PSRAM_CAPS);
+    sess_t *s = moy_kalloc(sizeof(sess_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (!s) {
         snprintf(err, errlen, OUT_OF_MEMORY ": no PSRAM for the cart's session");
         return 1;
@@ -1631,7 +1627,7 @@ static mp_obj_t cmd_end(void)
     snprintf(err, sizeof(err), "%s", c->err);
     g_cmd = NULL;
     moy_wasi_free(c->w);
-    heap_caps_free(c);
+    moy_kfree(c);
     return cmd_answer(status, err);
 }
 
@@ -1676,7 +1672,7 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
     for (size_t i = 0; i < argc; i++) {
         argv[i] = mp_obj_str_get_str(items[i]);
     }
-    cmd_t *c = heap_caps_calloc(1, sizeof(cmd_t), PSRAM_CAPS);
+    cmd_t *c = moy_kalloc(sizeof(cmd_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (c == NULL) {
         mp_raise_type(&mp_type_MemoryError);
     }
@@ -1684,7 +1680,7 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
     c->w = moy_wasi_new(s, (int)argc, argv, roots, bg_pid, budget, moy_wasm_on_vm);
     m_del(const char *, argv, argc ? argc : 1);
     if (c->w == NULL) {
-        heap_caps_free(c);
+        moy_kfree(c);
         mp_raise_type(&mp_type_MemoryError);
     }
     moy_wasi_set_run(c->w, run);
@@ -1706,14 +1702,14 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
         g_cmd = NULL;
         moy_wasm_session_use(was);
         moy_wasi_free(c->w);
-        heap_caps_free(c);
+        moy_kfree(c);
         nlr_jump(nlr.ret_val);
     }
     if (opened != 0) {
         g_cmd = NULL;
         moy_wasm_session_use(was);
         moy_wasi_free(c->w);
-        heap_caps_free(c);
+        moy_kfree(c);
         return cmd_answer(-3, err);
     }
     sess_t *ss = moy_wasm_session_current();
@@ -1868,7 +1864,7 @@ static int svc_end(wsvc_t *v)
         }
     }
     moy_wasi_free(v->w);
-    heap_caps_free(v);
+    moy_kfree(v);
     return code;
 }
 
@@ -1878,8 +1874,8 @@ static int svc_end(wsvc_t *v)
 // service reaches its poll and its end.
 static bool svc_wait(wsvc_t *v, int64_t us)
 {
-    int64_t end = esp_timer_get_time() + us;
-    while (!v->returned && esp_timer_get_time() < end) {
+    int64_t end = moy_now_us() + us;
+    while (!v->returned && moy_now_us() < end) {
         moy_vmq_serve();
         vTaskDelay(1);
         if (esp_task_wdt_status(NULL) == ESP_OK) {
@@ -1904,7 +1900,7 @@ static void svc_watch(wsvc_t *v)
 // The loop's job (moy_loop.h) while a service lives: the watchdog once a
 // frame on the console's task, where no VM wake is due. A kill ends `_start`,
 // whose return wants the VM for the reap (svc_call).
-bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+#pragma weak moy_loop_job
 
 static bool svc_watch_job(void *arg)
 {
@@ -1932,14 +1928,14 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
     if (moy_loop_job != NULL && !moy_loop_job(svc_watch_job, NULL)) {
         return mp_obj_new_str("no room for its watchdog", 24);
     }
-    wsvc_t *v = heap_caps_calloc(1, sizeof(wsvc_t), PSRAM_CAPS);
+    wsvc_t *v = moy_kalloc(sizeof(wsvc_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (v == NULL) {
         mp_raise_type(&mp_type_MemoryError);
     }
     v->pid = pid;
     v->w = moy_wasi_service(pid, id);
     if (v->w == NULL) {
-        heap_caps_free(v);
+        moy_kfree(v);
         mp_raise_type(&mp_type_MemoryError);
     }
     moy_wasi_set_run(v->w, n_args > 6 ? run_arg(args[6]) : NULL);
@@ -1959,13 +1955,13 @@ static mp_obj_t mod_service_start(size_t n_args, const mp_obj_t *args)
     } else {
         moy_wasm_session_use(was);
         moy_wasi_free(v->w);
-        heap_caps_free(v);
+        moy_kfree(v);
         nlr_jump(nlr.ret_val);
     }
     if (opened != 0) {
         moy_wasm_session_use(was);
         moy_wasi_free(v->w);
-        heap_caps_free(v);
+        moy_kfree(v);
         return mp_obj_new_str(err, strlen(err));
     }
     sess_t *ss = moy_wasm_session_current();

@@ -24,6 +24,9 @@ add_library(usermod_moy_kernel INTERFACE)
 
 target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_kernel.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_kmem.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_platform.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_tasks.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_kernel.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_crash.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_recovery.c

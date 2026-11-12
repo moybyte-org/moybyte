@@ -9,6 +9,8 @@
 // compositors (device/banded_panel.py + native/moy_flush) for packing bands into
 // the DMA bounce slots. docs/surface_model_v1.md is the presentation contract.
 
+#include "moy_platform.h"
+
 #include <string.h>
 #include <math.h>
 #include "py/obj.h"
@@ -2255,8 +2257,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_native_code_free_all_obj, moy_gfx_nativ
 // fail on the S3 -- that failure is the point of the 8-bit candidate):
 //   (fill16_sram, fill16_psram, fill8_sram, fill8_psram,
 //    blit16_sram, blit16_psram, blit8_sram, blit8_psram, resolve, bounce)
-#ifdef MOY_GFX_HAS_ASYNC_COPY   // proxy for "an ESP-IDF build with heap_caps"
-#include "esp_heap_caps.h"
+#ifdef MOY_ON_BOARD
+#include "moy_kmem.h"
 #define MOY_GFX_HAS_MEMBENCH 1
 
 #define MB_W 320
@@ -2347,14 +2349,14 @@ static uint32_t mb_bounce(const uint16_t *s16, uint16_t *chunk) {
     } while (0)
 
 static mp_obj_t moy_gfx_membench(void) {
-    uint16_t *d16s = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    uint16_t *d16p = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *d8s = heap_caps_malloc(MB_PX, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    uint8_t *d8p = heap_caps_malloc(MB_PX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *d16s = moy_kalloc(MB_PX * 2, MOY_KMEM_INTERNAL);
+    uint16_t *d16p = moy_kalloc(MB_PX * 2, MOY_KMEM_PSRAM);
+    uint8_t *d8s = moy_kalloc(MB_PX, MOY_KMEM_INTERNAL);
+    uint8_t *d8p = moy_kalloc(MB_PX, MOY_KMEM_PSRAM);
     size_t src_px = 64 * 1024;               /* sprite caches live in PSRAM */
-    uint16_t *src16 = heap_caps_malloc(src_px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *src8 = heap_caps_malloc(src_px, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint16_t *chunk = heap_caps_malloc(MB_CHUNK_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint16_t *src16 = moy_kalloc(src_px * 2, MOY_KMEM_PSRAM);
+    uint8_t *src8 = moy_kalloc(src_px, MOY_KMEM_PSRAM);
+    uint16_t *chunk = moy_kalloc(MB_CHUNK_PX * 2, MOY_KMEM_INTERNAL);
     mp_int_t r[10];
     for (int i = 0; i < 10; i++) r[i] = -1;
     if (src16 != NULL) {

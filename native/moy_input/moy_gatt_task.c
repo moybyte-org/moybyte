@@ -13,7 +13,7 @@
 #include "moy_gatt.h"
 #include "moy_input.h"
 
-#if defined(MOY_INPUT_BOARD) && defined(MOY_INPUT_BLE)
+#if defined(MOY_ON_BOARD) && defined(MOY_INPUT_BLE)
 
 #ifndef ESP_PLATFORM
 #define ESP_PLATFORM 1

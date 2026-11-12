@@ -32,19 +32,11 @@
 #ifndef MOY_AUD_H
 #define MOY_AUD_H
 
+#include "moy_platform.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define MOY_AUD_BOARD 1
-#endif
-#endif
-#ifndef MOY_AUD_BOARD
-#define MOY_AUD_BOARD 0
-#endif
 
 #define MOY_AUD_SESSIONS 4u     // sessions at once: cart runs, the editor, the wallpaper
 #define MOY_AUD_CLIPS 32u       // sample clips loaded at once

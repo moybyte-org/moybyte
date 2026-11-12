@@ -21,11 +21,15 @@
 // The VM's soft reset sweeps only the pins a Python handler holds
 // (moy_kernel.c), so these survive it, and so does the task.
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include "py/mpconfig.h"
 
 #include "moy_drivers.h"
 
-#if defined(MOY_INPUT_BOARD) && (defined(MOY_INPUT_KBD_TDECK) || defined(MOY_INPUT_TOUCH_KIND) \
+#if defined(MOY_ON_BOARD) && (defined(MOY_INPUT_KBD_TDECK) || defined(MOY_INPUT_TOUCH_KIND) \
     || defined(MOY_INPUT_BALL_UP))
 
 #include <string.h>
@@ -70,12 +74,12 @@ static int bus_write_read(void *ctx, uint8_t addr, const uint8_t *src, size_t ns
 
 static uint32_t bus_ms(void *ctx) {
     (void)ctx;
-    return (uint32_t)(esp_timer_get_time() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
+    return (uint32_t)(moy_now_us() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
 }
 
 static uint32_t bus_us(void *ctx) {
     (void)ctx;
-    return (uint32_t)esp_timer_get_time();
+    return (uint32_t)moy_now_us();
 }
 
 static void bus_sleep(void *ctx, uint32_t ms) {
@@ -168,9 +172,6 @@ static void one_pass(void) {
 }
 
 #ifdef MOY_INPUT_TASK
-#ifndef MOY_INPUT_TASK_STACK
-#define MOY_INPUT_TASK_STACK 3072
-#endif
 static TaskHandle_t s_task;
 
 static void input_task(void *arg) {
@@ -183,8 +184,7 @@ static void input_task(void *arg) {
 
 static void task_up(void) {
     if (s_task == NULL) {
-        xTaskCreatePinnedToCore(input_task, "moy_input", MOY_INPUT_TASK_STACK, NULL,
-                                ESP_TASK_PRIO_MIN + 2, &s_task, 0);
+        moy_task_spawn(MOY_TASK_INPUT, input_task, NULL, &s_task);
     }
 }
 

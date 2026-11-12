@@ -17,6 +17,8 @@
 // TX FIFO has drained so a line printed just before the switch leaves whole at
 // the old rate. Present only where the build has a UART REPL.
 
+#include "moy_kmem.h"
+
 #include "py/runtime.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
@@ -57,7 +59,7 @@ static void moy_serial_grow(void) {
     if (stdin_ringbuf.size >= MOY_SERIAL_RING_BYTES) {
         return;
     }
-    uint8_t *ring = heap_caps_malloc(MOY_SERIAL_RING_BYTES, MALLOC_CAP_SPIRAM);
+    uint8_t *ring = moy_kalloc(MOY_SERIAL_RING_BYTES, MOY_KMEM_PSRAM);
     if (ring == NULL) {
         return;
     }
@@ -149,8 +151,8 @@ static mp_obj_t moy_serial_baud(size_t n_args, const mp_obj_t *args) {
         if (rate < 1200 || rate > 5000000) {
             mp_raise_ValueError(MP_ERROR_TEXT("moy_serial: rate out of range"));
         }
-        int64_t give_up = esp_timer_get_time() + 200000;
-        while (!uart_hal_is_tx_idle(&hal) && esp_timer_get_time() < give_up) {
+        int64_t give_up = moy_now_us() + 200000;
+        while (!uart_hal_is_tx_idle(&hal) && moy_now_us() < give_up) {
         }
         uart_hal_set_baudrate(&hal, (uint32_t)rate, sclk_freq);
     }

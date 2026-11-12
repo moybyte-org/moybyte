@@ -269,11 +269,11 @@ void moy_slot_abort(void);
 
 // The companion radio's sink and its version, where the image has one
 // (native/p4/moy_c6): 0, or an ESP error.
-int moy_c6_ota_begin(void) __attribute__((weak));
-int moy_c6_ota_write(const void *p, size_t n) __attribute__((weak));
-int moy_c6_ota_end(void) __attribute__((weak));
-int moy_c6_ota_activate(void) __attribute__((weak));
-int moy_c6_version(void) __attribute__((weak));     // -1 when it says nothing
+int moy_c6_ota_begin(void);
+int moy_c6_ota_write(const void *p, size_t n);
+int moy_c6_ota_end(void);
+int moy_c6_ota_activate(void);
+int moy_c6_version(void);     // -1 when it says nothing
 
 // The VM stopped: close the client's connections and drop an update that was
 // streaming (the kernel's teardown calls it).

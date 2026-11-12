@@ -139,14 +139,14 @@ enum {
     MOYCORE_SVC_EXITED = 4,
 };
 
+#include "moy_tasks.h"            // the task's stack and priority (MOY_TASK_SVC)
+
 #define MOYCORE_SVCS 4u                 // services at once
 #define MOYCORE_SVC_TIMERS 16u          // timers a service holds
 #define MOYCORE_SVC_ONS 4u              // message wakes a service holds
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
 #define MOYCORE_SVC_HEAP_MAX (1024u * 1024u)
 #define MOYCORE_SVC_WHY 96u
-#define MOYCORE_SVC_PRIO 2
-#define MOYCORE_SVC_STACK 12288u
 
 // A crash's exit status; a kill's is the process table's MOY_PROC_KILLED
 // (moy_proc_exit.h).

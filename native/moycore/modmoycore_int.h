@@ -8,6 +8,8 @@
 #ifndef MODMOYCORE_INT_H
 #define MODMOYCORE_INT_H
 
+#include "moy_platform.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,11 +43,8 @@
 // The board allocator, for a compiled cart's memory (the VM's allocator is
 // moycore_lua.c's): present on an ESP-IDF build, absent on the host/unix/wasm
 // ones, which then use plain calloc.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
-#define MOYCORE_PSRAM 1
-#endif
 #endif
 
 #define RUN moycore_RUN

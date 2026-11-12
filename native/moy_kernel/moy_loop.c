@@ -1,8 +1,8 @@
 // moy_loop: the console's frame. moy_loop.h has the contract and the order.
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_kmem.h"
+
+#include "moy_platform.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -116,7 +116,7 @@ void *moy_loop_alloc(size_t n) {
     if (L.ops != NULL && L.ops->alloc != NULL) {
         return L.ops->alloc(n);
     }
-    return malloc(n);
+    return moy_kalloc(n, MOY_KMEM_LIBC);
 }
 
 void moy_loop_say(const char *fmt, ...) {
@@ -750,8 +750,18 @@ bool moy_loop_perf_due(void) {
 
 // A kernel run in front plays the kernel's match with no console frame to
 // push its PERF fields: weak, so an image without the link has none.
-bool moy_play_front_live(void) __attribute__((weak));
-void moy_match_kernel_perf(void *v, uint32_t now) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_live(void);
+#endif
+#pragma weak moy_play_front_live
+#if __has_include("moy_match.h")
+#include "moy_match.h"
+#else
+void moy_match_kernel_perf(void *v, uint32_t now);
+#endif
+#pragma weak moy_match_kernel_perf
 
 static void account(uint32_t elapsed) {
     if (L.heavy == NULL) {
@@ -796,8 +806,14 @@ static void account(uint32_t elapsed) {
 
 // The kernel's run in front (native/moy_play's moy_play.h): weak, so an image
 // without the Player (the Zero) has none, and the frame is always the console's.
-bool moy_play_front_live(void) __attribute__((weak));
-int moy_play_front_frame(uint32_t now, uint32_t dt_us) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_live(void);
+int moy_play_front_frame(uint32_t now, uint32_t dt_us);
+#endif
+#pragma weak moy_play_front_live
+#pragma weak moy_play_front_frame
 
 int moy_loop_step(void) {
     const moy_loop_ops_t *ops = L.ops;

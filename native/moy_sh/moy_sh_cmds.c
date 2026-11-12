@@ -1011,7 +1011,12 @@ static int clearcmd(int argc, char **argv) {
 // The console's palette, its first sixteen the base colours (native/moy_ui's
 // generated tables): weak, NULL in an image without the toolkit (the Zero),
 // where neofetch draws plain.
-extern const uint32_t moy_theme_moy64[64] __attribute__((weak));
+#if __has_include("moy_ui_tables.h")
+#include "moy_ui_tables.h"
+#else
+extern const uint32_t moy_theme_moy64[64];
+#endif
+#pragma weak moy_theme_moy64
 
 #define FETCH_ROWS 16
 #define FETCH_VALUE 64

@@ -1,5 +1,7 @@
 // moy_theme: the theme loader (moy_theme.h).
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,13 +9,9 @@
 #include "moy_json.h"
 #include "moy_theme.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define THEME_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
-#else
-#include <stdlib.h>
-#define THEME_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define THEME_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM)
 
 #define JSON_DEPTH 8          // the deepest nesting the reader follows
 #define UNSET_ROW INT32_MIN

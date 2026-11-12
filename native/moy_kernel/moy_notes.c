@@ -1,9 +1,7 @@
 // The queue in front of the console's notifications and the achievements
 // process (moy_notes.h has the contract).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_platform.h"
 
 #include "moy_notes.h"
 
@@ -13,15 +11,10 @@
 #include "moy_evq.h"
 #include "moy_sync.h"
 
-#ifdef MOY_SYNC_RTOS
-#include "esp_timer.h"
-#else
-#include <time.h>
-#endif
-
 // The kernel's frame (moy_loop.h's jobs): weak, for a harness without it,
 // whose scheduler runs moy_notes_run itself.
-bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_job
 
 enum { WANT_NONE, WANT_AWARD, WANT_VALUE };
 
@@ -47,15 +40,6 @@ static uint32_t s_next_id = 1;
 static uint32_t s_serial;
 static bool s_job;
 
-static uint64_t now_ms(void) {
-    #ifdef MOY_SYNC_RTOS
-    return (uint64_t)(esp_timer_get_time() / 1000);
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
-    #endif
-}
 
 // -- notifications ----------------------------------------------------------------
 
@@ -258,7 +242,7 @@ int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) {
     if (bad_id(id, n)) {
         return 0;
     }
-    uint64_t now = now_ms();
+    uint64_t now = moy_now_ms();
     (void)MOY_SYNC_TABLE(s_t);         // without it, row() answers NULL
     MOY_SYNC_LOCK(&s_lock);
     badge_t *b = row(pid, id, n, true);
@@ -286,7 +270,7 @@ int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value
     if (bad_id(id, n)) {
         return 0;
     }
-    uint64_t now = now_ms();
+    uint64_t now = moy_now_ms();
     (void)MOY_SYNC_TABLE(s_t);         // without it, row() answers NULL
     MOY_SYNC_LOCK(&s_lock);
     badge_t *b = row(pid, id, n, true);
@@ -317,7 +301,7 @@ int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value
 // What waits sent: of process `pid` alone and whatever its turn (pid not 0),
 // else every process's whose turn came. The ms to the next turn.
 static uint32_t flush(uint32_t pid) {
-    uint64_t now = now_ms();
+    uint64_t now = moy_now_ms();
     uint32_t next = UINT32_MAX;
     MOY_SYNC_LOCK(&s_lock);
     for (uint32_t i = 0; s_t != NULL && i < MOY_NOTES_BADGES; i++) {

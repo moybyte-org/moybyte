@@ -1,6 +1,8 @@
 // A compiled program's device handles, the kernel's (moy_dev.h has the
 // contract).
 
+#include "moy_kmem.h"
+
 #include "moy_dev.h"
 
 #include <stdlib.h>
@@ -16,21 +18,15 @@
 #if __has_include("moy_input.h")
 #include "moy_input.h"
 #define MOY_DEV_EDGES 1
-moy_input_t *moy_input_kernel(void) __attribute__((weak));
-int moy_input_reader_kept(moy_input_t *t, uint32_t kinds, int *r) __attribute__((weak));
-int moy_input_reader_only(moy_input_t *t, int r, uint32_t h) __attribute__((weak));
-int moy_input_reader_free(moy_input_t *t, int r) __attribute__((weak));
-size_t moy_input_events(moy_input_t *t, int r, moy_event_t *out, size_t n)
-    __attribute__((weak));
+#pragma weak moy_input_kernel
+#pragma weak moy_input_reader_kept
+#pragma weak moy_input_reader_only
+#pragma weak moy_input_reader_free
+#pragma weak moy_input_events
 #else
 #define MOY_DEV_EDGES 0
 #endif
 
-// A board is known by the header it has (moy_lease.c does the same).
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define DEV_PSRAM 1
-#endif
 
 enum { K_GPIO = 1, K_PINS, K_UART, K_SPI, K_I2C, K_PWM, K_ADC, K_API };
 enum { EDGE_RISING = 1, EDGE_FALLING = 2 };
@@ -226,10 +222,9 @@ static int32_t handle_of(const dev_row_t *d) {
 
 static dev_row_t *row_new(uint32_t pid, uint8_t kind) {
     if (s_dev == NULL) {
-        #ifdef DEV_PSRAM
-        s_dev = heap_caps_calloc(MOY_DEV_HANDLES, sizeof *s_dev, MALLOC_CAP_SPIRAM);
-        #endif
-        if (s_dev == NULL && (s_dev = calloc(MOY_DEV_HANDLES, sizeof *s_dev)) == NULL) {
+        s_dev = moy_kalloc(MOY_DEV_HANDLES * sizeof *s_dev,
+                           MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
+        if (s_dev == NULL) {
             return NULL;
         }
     }

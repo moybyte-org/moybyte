@@ -1,5 +1,7 @@
 // moy_lease: the lease table. moy_lease.h has the contract.
 
+#include "moy_kmem.h"
+
 #include "moy_lease.h"
 
 #include <stdlib.h>
@@ -8,12 +10,8 @@
 #include "moy_htab.h"
 #include "moy_ledc.h"
 
-// A board is known by the header it has (moy_input.h says why); a board that
-// stages no moy_input (the Zero) leases pins with no edges.
+// A board that stages no moy_input (the Zero) leases pins with no edges.
 #if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define LEASE_BOARD 1
-#endif
 #if __has_include("moy_input.h")
 #define LEASE_EDGES 1
 #endif
@@ -23,8 +21,7 @@
 #include "moy_input.h"
 #endif
 
-#ifdef LEASE_BOARD
-#include "esp_heap_caps.h"
+#ifdef MOY_ON_BOARD
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_rom_gpio.h"
@@ -36,12 +33,7 @@
 
 // PSRAM on a board: the table and the offers keep out of internal RAM.
 static void *mem_alloc(size_t n) {
-    #ifdef LEASE_BOARD
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    return p != NULL ? p : calloc(1, n);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void mem_release(void *p, size_t n) {
@@ -223,7 +215,7 @@ static const moy_lease_offer_t *offer_of(uint8_t cls, uint8_t unit) {
 
 // -- the pins, safe ------------------------------------------------------------
 
-#ifdef LEASE_BOARD
+#ifdef MOY_ON_BOARD
 
 static void pin_safe(int pin) {
     gpio_set_intr_type(pin, GPIO_INTR_DISABLE);
@@ -369,13 +361,13 @@ int moy_lease_pin_level(int pin) {
 // -- edges -----------------------------------------------------------------------
 
 static int edge_open(int pin, uint32_t depth, bool loop, uint32_t *src) {
-    #if defined(LEASE_BOARD) && !defined(LEASE_EDGES)
+    #if defined(MOY_ON_BOARD) && !defined(LEASE_EDGES)
     (void)pin;
     (void)depth;
     (void)loop;
     (void)src;
     return MOY_LEASE_BAD;
-    #elif defined(LEASE_BOARD)
+    #elif defined(MOY_ON_BOARD)
     int rc = moy_edge_open(pin, depth, loop, src);
     return rc == MOY_INPUT_OK ? MOY_LEASE_OK : rc == MOY_INPUT_FULL ? MOY_LEASE_FULL
            : rc == MOY_INPUT_NOMEM ? MOY_LEASE_NOMEM : MOY_LEASE_BAD;
@@ -397,7 +389,7 @@ static int edge_open(int pin, uint32_t depth, bool loop, uint32_t *src) {
 }
 
 static void edge_close(int pin, uint32_t src) {
-    #ifdef LEASE_BOARD
+    #ifdef MOY_ON_BOARD
     (void)pin;
     #ifdef LEASE_EDGES
     moy_edge_close(src);
@@ -467,10 +459,30 @@ static bool is_device(uint8_t cls) {
 }
 
 // The drivers' ends of a device lease dropped from outside them.
-void moy_mic_lease_end(uint32_t owner) __attribute__((weak));
-void moy_lora_lease_end(uint32_t owner) __attribute__((weak));
-void moy_gatt_lease_end(uint32_t owner) __attribute__((weak));
-void moy_media_lease_end(uint32_t owner) __attribute__((weak));
+#if __has_include("moy_mic.h")
+#include "moy_mic.h"
+#else
+void moy_mic_lease_end(uint32_t owner);
+#endif
+#pragma weak moy_mic_lease_end
+#if __has_include("moy_lora.h")
+#include "moy_lora.h"
+#else
+void moy_lora_lease_end(uint32_t owner);
+#endif
+#pragma weak moy_lora_lease_end
+#if __has_include("moy_gatt.h")
+#include "moy_gatt.h"
+#else
+void moy_gatt_lease_end(uint32_t owner);
+#endif
+#pragma weak moy_gatt_lease_end
+#if __has_include("moy_media.h")
+#include "moy_media.h"
+#else
+void moy_media_lease_end(uint32_t owner);
+#endif
+#pragma weak moy_media_lease_end
 
 static void device_end(uint8_t cls, uint32_t owner) {
     void (*end)(uint32_t) = cls == MOY_LEASE_MIC ? moy_mic_lease_end
@@ -599,7 +611,12 @@ uint32_t moy_lease_wifi_mask(void) {
 
 // The station's power, the WiFi driver's (native/moy_net/moy_net.h's THE
 // BOOK): told the mask after each change. Weak: an image without the driver.
-void moy_wifi_book(uint32_t mask) __attribute__((weak));
+#if __has_include("moy_net.h")
+#include "moy_net.h"
+#else
+void moy_wifi_book(uint32_t mask);
+#endif
+#pragma weak moy_wifi_book
 
 static void book_u(void) {
     if (moy_wifi_book != NULL) {
@@ -718,7 +735,8 @@ static uint32_t sweep_u(uint32_t owner) {
 }
 
 // A device a compiled program holds by handle (moy_dev.h): not the VM's.
-bool moy_dev_holds(uint32_t pid, uint8_t cls) __attribute__((weak));
+#include "moy_dev.h"
+#pragma weak moy_dev_holds
 
 static uint32_t vm_stop_u(void) {
     uint32_t n = 0;
@@ -832,7 +850,7 @@ void moy_lease_reset(void) {
     }
     s_offers = 0;
     s_offered = true;
-    #ifndef LEASE_BOARD
+    #ifndef MOY_ON_BOARD
     memset(s_state, 0, sizeof(s_state));
     memset(s_level, 0, sizeof(s_level));
     #endif
@@ -845,55 +863,15 @@ void moy_lease_reset(void) {
 // across a whole call, a drop's driver work included, so a call the drop
 // makes back into the table (a driver's lease end) runs under it; never in
 // an ISR. The browser has one thread and no lock.
-#if defined(LEASE_BOARD)
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-static StaticSemaphore_t s_mu_buf;
-static SemaphoreHandle_t volatile s_mu;
-static portMUX_TYPE s_mu_once = portMUX_INITIALIZER_UNLOCKED;
+static moy_mutex_t s_mu = MOY_RMUTEX_INIT;
 
 static void lock(void) {
-    if (s_mu == NULL) {
-        portENTER_CRITICAL(&s_mu_once);
-        if (s_mu == NULL) {
-            s_mu = xSemaphoreCreateRecursiveMutexStatic(&s_mu_buf);
-        }
-        portEXIT_CRITICAL(&s_mu_once);
-    }
-    xSemaphoreTakeRecursive(s_mu, portMAX_DELAY);
+    moy_mutex_lock(&s_mu);
 }
 
 static void unlock(void) {
-    xSemaphoreGiveRecursive(s_mu);
+    moy_mutex_unlock(&s_mu);
 }
-#elif !defined(__EMSCRIPTEN__) && defined(__has_include) && __has_include(<pthread.h>)
-#include <pthread.h>
-static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t s_owner;
-static int s_depth;             // the owner's nesting, 0 while none holds it
-
-static void lock(void) {
-    if (__atomic_load_n(&s_depth, __ATOMIC_ACQUIRE) > 0 && pthread_equal(s_owner, pthread_self())) {
-        s_depth++;
-        return;
-    }
-    pthread_mutex_lock(&s_mu);
-    s_owner = pthread_self();
-    __atomic_store_n(&s_depth, 1, __ATOMIC_RELEASE);
-}
-
-static void unlock(void) {
-    if (__atomic_sub_fetch(&s_depth, 1, __ATOMIC_RELEASE) == 0) {
-        pthread_mutex_unlock(&s_mu);
-    }
-}
-#else
-static void lock(void) {
-}
-
-static void unlock(void) {
-}
-#endif
 
 int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
                    uint8_t flags, uint32_t *h) {

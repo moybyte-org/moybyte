@@ -1,6 +1,8 @@
 // A text view (moy_ui_text.h): a text area in visual rows, its record and its
 // rows drawn.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "moy_canvas.h"
@@ -10,13 +12,9 @@
 #include "moy_ui_api.h"
 #include "moy_ui_text.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define TEXT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#include <stdlib.h>
-#define TEXT_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define TEXT_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 // -- the words a syntax colours ----------------------------------------------------
 //

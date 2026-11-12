@@ -48,6 +48,8 @@
 // Disarmed this module costs the image its code size and nothing else: no
 // timer exists, no ISR is installed, and nothing in a frame tests a flag.
 
+#include "moy_kmem.h"
+
 #include "py/obj.h"
 #include "py/runtime.h"
 
@@ -147,7 +149,7 @@ static mp_obj_t moy_prof_start(size_t n_args, const mp_obj_t *args) {
     // trying to measure, and on the Guition this allocation is a fifth of the
     // free internal region -- which is why it is freed on stop().
     size_t bytes = (size_t)cap * sizeof(moy_prof_sample_t);
-    s_ring = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    s_ring = moy_kalloc(bytes, MOY_KMEM_INTERNAL);
     if (s_ring == NULL) {
         mp_raise_msg(&mp_type_MemoryError,
                      MP_ERROR_TEXT("no internal SRAM for the sample ring"));

@@ -1,8 +1,6 @@
 // moy_log: the OS log's ring (moy_log.h has the design).
 
-#if !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
-#endif
+#include "moy_platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,15 +9,7 @@
 #include "moy_log.h"
 #include "moy_proc_exit.h"
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_LOG_ESP 1
-#include "freertos/FreeRTOS.h"
-#include "esp_heap_caps.h"
-#include "esp_timer.h"
-#else
-#define MOY_LOG_ESP 0
-#include <time.h>
-#endif
+#include "moy_kmem.h"
 
 #define HDR ((uint32_t)sizeof(moy_log_rec_t))
 
@@ -39,7 +29,7 @@ static struct {
     char *scratch;                  // MOY_LOG_TEXT_MAX: the dump's text
 } G = { .first = 1, .next = 1, .next_pid = 2, .current = MOY_LOG_SHELL };
 
-#if MOY_LOG_ESP
+#ifdef MOY_ON_BOARD
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 #define LOCK() portENTER_CRITICAL(&s_mux)
 #define UNLOCK() portEXIT_CRITICAL(&s_mux)
@@ -54,33 +44,18 @@ static const char *const LEVELS[MOY_LOG_LEVELS] = {
 };
 
 static void *log_psram(size_t n) {
-    #if MOY_LOG_ESP
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    return p != NULL ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void log_free(void *p) {
-    #if MOY_LOG_ESP
-    heap_caps_free(p);
-    #else
-    free(p);
-    #endif
+    moy_kfree(p);
 }
 
 static uint64_t now_us(void) {
     if (G.pinned_us) {
         return G.pinned_us;
     }
-    #if MOY_LOG_ESP
-    return (uint64_t)esp_timer_get_time();
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
-    #endif
+    return (uint64_t)moy_now_us();
 }
 
 const uint8_t moy_log_exits[4] = {

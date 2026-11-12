@@ -18,13 +18,26 @@ static const char *const WHY[MOY_PLAY_WHY_COUNT] = {
 // are read through it (moy_app_wasm.h). Weak: the Zero, which runs no apps,
 // and the host's moy_play library have none, and there an app keeps the VM
 // (rule 2).
-int moy_app_role_of(const char *perm, size_t n) __attribute__((weak));
-int moy_app_wasm_imports(const uint8_t *head, size_t n,
-                         int (*fn)(void *ctx, const uint8_t *mod, size_t mn,
-                                   const uint8_t *name, size_t nn),
-                         void *ctx) __attribute__((weak));
-int moy_app_wasm_row_named(const char *name, size_t n) __attribute__((weak));
-int moy_app_table_c_row(uint32_t row) __attribute__((weak));
+#if __has_include("moy_app.h")
+#include "moy_app.h"
+#else
+int moy_app_role_of(const char *perm, size_t n);
+#endif
+#pragma weak moy_app_role_of
+#if __has_include("moy_app_wasm.h")
+#include "moy_app_wasm.h"
+#else
+int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, void *ctx);
+int moy_app_wasm_row_named(const char *name, size_t n);
+#endif
+#pragma weak moy_app_wasm_imports
+#pragma weak moy_app_wasm_row_named
+#if __has_include("moy_app.h")
+#include "moy_app.h"
+#else
+int moy_app_table_c_row(uint32_t row);
+#endif
+#pragma weak moy_app_table_c_row
 
 #define APP_EXT "moybyte.app"
 // The most of main.wasm read for its imports: the type and import sections

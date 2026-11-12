@@ -26,7 +26,7 @@ NET = os.path.join(native_build.ROOT, "native", "moy_net")
 MBEDTLS = os.path.join(NET, "mbedtls")
 MONOCYPHER = os.path.join(NET, "monocypher")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
-FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", os.path.join(MBEDTLS, "include"),
+FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", native_build.PLATFORM_DIR, "-I", os.path.join(MBEDTLS, "include"),
          "-I", os.path.join(MBEDTLS, "library"), "-I", MONOCYPHER,
          "-DMBEDTLS_CONFIG_FILE=\"moy_seal_mbedtls.h\""]
 

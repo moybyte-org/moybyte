@@ -61,6 +61,7 @@
 #endif
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
 #include "multi_heap.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
@@ -124,20 +125,44 @@
 
 // The kernel's own route tables (moy_route.h), where the image has the spine:
 // the Zero, which routes nothing, has none.
-extern __typeof__(moy_spine_kernel) moy_spine_kernel __attribute__((weak));
-extern __typeof__(moy_returns_run) moy_returns_run __attribute__((weak));
-extern __typeof__(moy_returns_caller) moy_returns_caller __attribute__((weak));
+#pragma weak moy_spine_kernel
+#pragma weak moy_returns_run
+#pragma weak moy_returns_caller
 // The run a stop was for, with no VM (native/moy_play's moy_play_stop.c).
-void moy_play_stopped_run(void) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+void moy_play_stopped_run(void);
+#endif
+#pragma weak moy_play_stopped_run
 // The app ABI's live grants (native/moy_app), where the image has it, and
-// its letting go of what the ending VM's heap held.
-uint32_t moy_app_kernel_grants(void) __attribute__((weak));
-void moy_app_vm_stop(void) __attribute__((weak));
-void moy_wasm_services_end(void) __attribute__((weak));
-uint32_t moy_os_services_end(void) __attribute__((weak));
+// its letting go of what the ending VM's heap held. Declared here as
+// moy_app.h has them: its role names (moy_app_rows.h) and moy_crash.h's share
+// MOY_ROLE_WALLPAPER, so the two headers do not meet in one file.
+uint32_t moy_app_kernel_grants(void);
+void moy_app_vm_stop(void);
+#pragma weak moy_app_kernel_grants
+#pragma weak moy_app_vm_stop
+#if __has_include("moy_wasi.h") && __has_include("wasm_export.h")
+#include "moy_wasi.h"
+#else
+void moy_wasm_services_end(void);
+#endif
+#pragma weak moy_wasm_services_end
+#if __has_include("moy_os.h")
+#include "moy_os.h"
+#else
+uint32_t moy_os_services_end(void);
+#endif
+#pragma weak moy_os_services_end
 // The input table's readers, which the ending VM's processes held
 // (native/moy_input), where the image has it.
-void moy_input_vm_stop(void) __attribute__((weak));
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#else
+void moy_input_vm_stop(void);
+#endif
+#pragma weak moy_input_vm_stop
 
 void moy_loop_board_vm_start(void);
 void moy_loop_board_vm_stop(void);
@@ -273,7 +298,7 @@ IRAM_ATTR void __wrap_esp_panic_handler(panic_info_t *info) {
     }
     r->build = s_build;
     if (cache) {
-        r->uptime_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        r->uptime_ms = (uint32_t)(moy_now_us() / 1000);
         TaskHandle_t t = xTaskGetCurrentTaskHandleForCore(info->core);
         moy_kernel_copy_text(r->task, MOY_CRASH_TASK_LEN, t ? pcTaskGetName(t) : NULL);
         const char *what = g_panic_abort ? g_panic_abort_details : info->reason;
@@ -305,7 +330,7 @@ static void moy_kernel_record_vm(const char *what) {
     r->kind = MOY_CRASH_VM;
     r->core = (uint8_t)esp_cpu_get_core_id();
     r->boot = s_kst.boot;
-    r->uptime_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    r->uptime_ms = (uint32_t)(moy_now_us() / 1000);
     r->build = s_build;
     r->role = (uint8_t)moy_kstate_open_id(&s_kst, &id);
     r->pid = moy_kstate_open_pid(&s_kst, r->role);
@@ -350,7 +375,7 @@ static bool moy_kernel_unclean(esp_reset_reason_t rr) {
 
 static moy_crash_rec_t *moy_kernel_rec_buf(void) {
     if (s_last == NULL) {
-        s_last = heap_caps_malloc(sizeof(moy_crash_rec_t), MALLOC_CAP_SPIRAM);
+        s_last = moy_kalloc(sizeof(moy_crash_rec_t), MOY_KMEM_PSRAM);
     }
     return s_last;
 }
@@ -525,7 +550,7 @@ void moy_kernel_test_crash(bool abort_not_fault) {
 // A call from another task once it is armed (a worker's network wait, which
 // feeds through the client's tick) is not the VM's frame and changes nothing.
 void moy_kernel_feed(void) {
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t now = (uint32_t)(moy_now_us() / 1000);
     if (s_wd_armed && esp_task_wdt_status(NULL) != ESP_OK) {
         return;
     }
@@ -650,7 +675,7 @@ static uint8_t *s_scr_mem;
 
 static void k_scr_reserve(void) {
     if (s_scr_mem == NULL) {
-        s_scr_mem = heap_caps_malloc(K_SCRATCH + K_BAND, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_scr_mem = moy_kalloc(K_SCRATCH + K_BAND, MOY_KMEM_PSRAM);
     }
 }
 
@@ -903,11 +928,11 @@ static void k_update(const char *args) {
             k_printf("KERNEL update wifi err=0x%x (no kept network)\r\n", e);
             return;
         }
-        int64_t t0 = esp_timer_get_time();
+        int64_t t0 = moy_now_us();
         do {
             vTaskDelay(pdMS_TO_TICKS(250));
             moy_wifi_state(&st);
-        } while (!st.connected && esp_timer_get_time() - t0 < K_UPDATE_WAIT_MS * 1000LL);
+        } while (!st.connected && moy_now_us() - t0 < K_UPDATE_WAIT_MS * 1000LL);
         if (!st.connected) {
             k_printf("KERNEL update wifi offline reason=%u\r\n", (unsigned)st.reason);
             return;
@@ -1013,8 +1038,18 @@ static void k_act(int choice) {
 // theirs on a boot no VM has run in. On a board whose card rides the panel's
 // bus (the T-Deck's SPI2) only once the panel came up. Weak, so an image
 // without the shell or the card links.
-bool moy_sh_board_line(const char *text) __attribute__((weak));
-int moy_store_card_up(const char **what) __attribute__((weak));
+#if __has_include("moy_sh_board.h")
+#include "moy_sh_board.h"
+#else
+bool moy_sh_board_line(const char *text);
+#endif
+#pragma weak moy_sh_board_line
+#if __has_include("moy_vol.h")
+#include "moy_vol.h"
+#else
+int moy_store_card_up(const char **what);
+#endif
+#pragma weak moy_store_card_up
 
 static void k_card(k_floor_t *k) {
     #if defined(MOY_HW_SPI2_SD_CS)
@@ -1211,10 +1246,7 @@ static void moy_kernel_recovery(int why) {
     // PSRAM, which no VM has taken on a floor's boot: the view and the
     // screen's state are kilobytes that internal SRAM would hold from boot on
     // every console.
-    k_floor_t *k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (k == NULL) {
-        k = heap_caps_calloc(1, sizeof(*k), MALLOC_CAP_8BIT);
-    }
+    k_floor_t *k = moy_kalloc(sizeof(*k), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
     if (k == NULL) {
         k_out("KERNEL recovery no memory\r\n");
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1248,10 +1280,10 @@ static void moy_kernel_recovery(int why) {
     char line[208];
     size_t n = 0;
     bool sh_ready = false, report = true;
-    int64_t t0 = esp_timer_get_time(), last_report = t0, last_input = t0, last_frame = t0;
+    int64_t t0 = moy_now_us(), last_report = t0, last_input = t0, last_frame = t0;
     int shown_left = -1;
     for (;;) {
-        int64_t now = esp_timer_get_time();
+        int64_t now = moy_now_us();
         int c;
         while ((c = k_getc()) >= 0) {
             last_input = now;
@@ -1264,7 +1296,7 @@ static void moy_kernel_recovery(int why) {
                     k_state(k);
                 } else if (strncmp(line, "sh", 2) == 0 && (line[2] == '\0' || line[2] == ' ')) {
                     k_sh(k, line[2] ? line + 3 : line + 2, &sh_ready);
-                    now = last_input = esp_timer_get_time();
+                    now = last_input = moy_now_us();
                 #if K_FLOOR
                 } else if (strncmp(line, "type ", 5) == 0) {
                     k_inject(k, line + 5, n - 5);
@@ -1283,7 +1315,7 @@ static void moy_kernel_recovery(int why) {
                 } else if (strncmp(line, "update", 6) == 0
                            && (line[6] == '\0' || line[6] == ' ')) {
                     k_update(line + 6);
-                    last_input = esp_timer_get_time();
+                    last_input = moy_now_us();
                 #endif
                 } else if (n > 0) {
                     report = true;
@@ -1304,7 +1336,7 @@ static void moy_kernel_recovery(int why) {
             int choice;
             if (moy_sh_floor_frame(k->fl, &in, &choice)) {
                 k_draw(k);
-                k->frame_ms = (uint32_t)((esp_timer_get_time() - now) / 1000);
+                k->frame_ms = (uint32_t)((moy_now_us() - now) / 1000);
                 if (report) {
                     report = false;
                     last_report = now;
@@ -1314,7 +1346,7 @@ static void moy_kernel_recovery(int why) {
             if (choice != MOY_SH_FLOOR_NONE) {
                 k_act(choice);
             }
-            now = esp_timer_get_time();
+            now = moy_now_us();
         }
         #endif
         #if defined(MOY_KERNEL_IDLE_SAFE_MS)
@@ -1493,14 +1525,19 @@ static void moy_kernel_first_light(void) {
     }
     MOY_KERNEL_PANEL(backlight)(255);
     s_lit = true;
-    s_lit_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    s_lit_ms = (uint32_t)(moy_now_us() / 1000);
     k_printf("KERNEL first light at %u ms\r\n", (unsigned)s_lit_ms);
     #endif
 }
 
-extern bool moy_kvol_vm_mount(void) __attribute__((weak));
+#pragma weak moy_kvol_vm_mount
 // moy_alloc's registry: the buffers the swept VM's views named.
-extern void moy_alloc_vm_swept(void) __attribute__((weak));
+#if __has_include("moy_alloc.h")
+#include "moy_alloc.h"
+#else
+void moy_alloc_vm_swept(void);
+#endif
+#pragma weak moy_alloc_vm_swept
 
 // kstop N (native/moy_kernel/moy_kernel.h): the VM service's soft reset,
 // N times with the kernel's drivers alive, each one's heaps printed before the
@@ -1551,7 +1588,7 @@ void moy_kernel_stamp(int part) {
     if (part < 0 || part >= MOY_STAMPS) {
         return;
     }
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t now = (uint32_t)(moy_now_us() / 1000);
     if (part == MOY_STAMP_EXIT) {
         memset(s_stamps, 0, sizeof(s_stamps));
     } else if (part == MOY_STAMP_FRAME && s_stamps[MOY_STAMP_FRAME] != 0u) {
@@ -1565,7 +1602,7 @@ const uint32_t *moy_kernel_stamps(void) {
 }
 
 static void *kernel_psram(size_t n) {
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 // The small-block pool (moy_kernel.h).
@@ -1610,7 +1647,7 @@ static void moy_kernel_reserve(void) {
         s_resume = kernel_psram(sizeof(resume_t));
     }
     if (s_kpool == NULL) {
-        s_kpool = heap_caps_malloc(MOY_KPOOL_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_kpool = moy_kalloc(MOY_KPOOL_BYTES, MOY_KMEM_PSRAM);
         s_kpool_heap = s_kpool != NULL ? multi_heap_register(s_kpool, MOY_KPOOL_BYTES) : NULL;
         if (s_kpool_heap != NULL) {
             multi_heap_set_lock(s_kpool_heap, &s_kpool_mux);
@@ -1764,7 +1801,7 @@ static bool walk_block(walker_heap_into_t heap, walker_block_info_t blk, void *u
 
 void moy_kernel_heapwalk(const char *tag) {
     if (s_walk == NULL) {
-        s_walk = heap_caps_malloc(sizeof(walk_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_walk = moy_kalloc(sizeof(walk_t), MOY_KMEM_INTERNAL);
         if (s_walk == NULL) {
             printf("HEAPWALK %s: no memory\n", tag);
             return;
@@ -1810,7 +1847,12 @@ static void moy_kernel_heaps_line(const char *tag, int i, int n, const char *whe
 
 // A kernel module that caches a VM object in a root pointer forgets it at
 // every VM start; one an image does not take resolves to no call.
-void moy_input_vm_fresh(void) __attribute__((weak));
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#else
+void moy_input_vm_fresh(void);
+#endif
+#pragma weak moy_input_vm_fresh
 
 static void moy_kernel_vm_fresh(void) {
     if (moy_input_vm_fresh != NULL) {
@@ -1839,7 +1881,12 @@ static void moy_kernel_pins_deinit(void) {
 // an image without moy_audio. The media service is the system's and plays on
 // (moy_media.h, A RUN, ON DEMAND). The VM's
 // leases (moy_lease.h's THE VM'S END) are the kernel's own table.
-int moy_aud_close_vm(void) __attribute__((weak));
+#if __has_include("moy_aud.h")
+#include "moy_aud.h"
+#else
+int moy_aud_close_vm(void);
+#endif
+#pragma weak moy_aud_close_vm
 
 static void moy_kernel_vm_down(void **heap) {
     // Whatever the VM opened in the mixer ends with it, before any walk of

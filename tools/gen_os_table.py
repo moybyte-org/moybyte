@@ -831,8 +831,7 @@ def _call_body(r):
 
 def gen_kernel_c(table):
     rows = table["rows"]
-    o = [HEAD, '#if !__has_include("esp_heap_caps.h")    // a host (moy_os.c)', "#define _POSIX_C_SOURCE 200809L", "#define _DEFAULT_SOURCE",
-         "#endif", "", "#include <errno.h>", "#include <stddef.h>", "",
+    o = [HEAD, '#include "moy_platform.h"', "", "#include <errno.h>", "#include <stddef.h>", "",
          '#include "moy_os_table.h"', '#include "moy_os_rows.h"', ""]
     for r in rows:
         if r["door"] is not None and not r.get("retired"):

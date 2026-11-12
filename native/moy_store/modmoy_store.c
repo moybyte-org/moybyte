@@ -15,6 +15,8 @@
 // call opened, frees its scratch and lets go of the lock before it goes on. Scratch and the marker cache are PSRAM on a board,
 // malloc elsewhere, never the gc heap.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -40,13 +42,7 @@
 #include "extmod/vfs_posix.h"
 #endif
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_STORE_PSRAM 1
-#include "esp_heap_caps.h"
-#else
-#define MOY_STORE_PSRAM 0
-#include <stdlib.h>
-#endif
+#include "moy_kmem.h"
 
 #include "moy_cat.h"
 #include "moy_fs.h"
@@ -73,28 +69,9 @@ typedef struct blk {
 static blk_t *scratch;
 static size_t mem_now, mem_high;
 
-#if MOY_STORE_PSRAM
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-#endif
-
+// The kernel's small-block pool first (moy_kernel.h).
 static void *raw_alloc(size_t n) {
-    #if MOY_STORE_PSRAM
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 // A block outside the gc heap that is never freed: the owned card volume's.
@@ -103,14 +80,7 @@ void *moy_store_raw_alloc(size_t n) {
 }
 
 static void raw_free(void *p) {
-    #if MOY_STORE_PSRAM
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
-    #else
-    free(p);
-    #endif
+    moy_kfree(p);
 }
 
 static void *alloc_blk(size_t n, int keep) {
@@ -144,14 +114,14 @@ void *moy_store_alloc(size_t n) {
 // The kernel's task watchdog (native/moy_kernel), on a board that takes it:
 // fed while the frame loop has it armed, at most every half second, so a long
 // store call never reads as a hang. Weak, since not every image links it.
-#if MOY_STORE_PSRAM
-extern bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms,
-                                uint32_t *frames, bool reset) __attribute__((weak));
-extern void moy_kernel_feed(void) __attribute__((weak));
+#if MOY_ON_BOARD
+#include "moy_kernel.h"
+#pragma weak moy_kernel_watchdog
+#pragma weak moy_kernel_feed
 #endif
 
 void moy_store_tick(void) {
-    #if MOY_STORE_PSRAM
+    #if MOY_ON_BOARD
     if (!moy_store_on_vm()) {
         return;
     }
@@ -242,9 +212,9 @@ extern const mp_obj_type_t mp_type_vfs_lfs2;
 #endif
 
 // The kernel's internal volume (moy_kvfs.c), where the image has one.
-extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
-extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
-                           uint32_t *bsize) __attribute__((weak));
+#include "moy_vol.h"
+#pragma weak moy_kvfs_lfs
+#pragma weak moy_kvol_state
 
 // The card's FATFS while it is mounted over its native driver, or NULL
 // (moy_card.c); a task other than the VM's never reaches any other FAT.
@@ -1615,20 +1585,14 @@ static int task_round(task_t *k, int i) {
     return rc;
 }
 
-static int64_t task_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
 static void task_walk(task_t *k, int ms) {
     int g = moy_vol_gate_enter(k->dir);
     if (g < 0) {
         k->refused++;
         return;
     }
-    int64_t end = task_now_ms() + ms;
-    while (task_now_ms() < end) {
+    int64_t end = (int64_t)moy_now_ms() + ms;
+    while ((int64_t)moy_now_ms() < end) {
         moy_store_yield();
         moy_vol_stat_t st;
         if (moy_fs_stat(k->dir, &st) == 0) {

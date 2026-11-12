@@ -34,17 +34,22 @@
 
 #include "moy_json.h"
 #include "moy_net.h"
+#pragma weak moy_gpio_pins
+#pragma weak moy_gpio_drive
+#pragma weak moy_gpio_sense
+#pragma weak moy_gpio_reset
 
 #define GPIO_V 1
 #define ERR_MAX 8
 
 // The lease table's calls (moy_lease.h), weak: an image without the kernel
 // leases nothing.
-int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
-                   uint8_t flags, uint32_t *h) __attribute__((weak));
-uint32_t moy_lease_of_pin(int pin) __attribute__((weak));
-uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
-uint32_t moy_log_spawn(const char *name) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_take
+#pragma weak moy_lease_of_pin
+#pragma weak moy_lease_sweep
+#include "moy_log.h"
+#pragma weak moy_log_spawn
 #define LEASE_OK 0
 #define LEASE_BAD 4
 #define LEASE_GPIO 1

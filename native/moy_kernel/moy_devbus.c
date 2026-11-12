@@ -1,5 +1,7 @@
 // moy_devbus: the buses a device handle drives. moy_devbus.h has the contract.
 
+#include "moy_platform.h"
+
 #include "moy_devbus.h"
 
 #include <string.h>
@@ -8,14 +10,8 @@
 #include "moy_lease.h"
 #include "moy_ledc.h"
 
-// A board is known by the header it has (moy_lease.c does the same).
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define DEVBUS_BOARD 1
-#endif
-#endif
 
-#ifdef DEVBUS_BOARD
+#ifdef MOY_ON_BOARD
 
 #include "py/mpconfig.h"        // the board's MOY_BUS_I2C_PORT (mpconfigboard.h)
 #include "driver/i2c.h"

@@ -33,6 +33,7 @@ target_include_directories(moy_ssh_core PRIVATE
     ${MOY_SSH}/../moy_tty
     ${MOY_SSH}/../moy_store
     ${MOY_SSH}/../moy_net
+    ${MOY_SSH}/../moy_kernel
     ${_moy_ssh_cfg}
     "${_moy_ssh_inc}")
 target_compile_definitions(moy_ssh_core PRIVATE "${_moy_ssh_defs}"

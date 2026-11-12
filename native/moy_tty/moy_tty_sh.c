@@ -14,6 +14,8 @@
 // a full-screen one is shown on the alternate screen, its grid's changed rows
 // sent as VT100 with its cursor, and the shell's screen comes back after.
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -311,16 +313,11 @@ static void sh_show(void *sh, int whole) {
     moy_tty_free(row);
 }
 
-static uint32_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u);
-}
 
 static void sh_tick(void *sh) {
     sh_t *h = sh;
     if (h->app != NULL) {
-        moy_sh_app_tick(h->app, now_ms());
+        moy_sh_app_tick(h->app, (uint32_t)moy_now_ms());
     }
 }
 

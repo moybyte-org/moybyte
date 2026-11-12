@@ -23,6 +23,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
     build = subprocess.run(
         [cc, "-std=c99", "-g", "-O1", "-fsanitize=address,undefined",
          "-fno-sanitize-recover=all", "-I", INPUT, "-I", SPINE,
+         "-I", os.path.join(ROOT, "native", "moy_kernel"),
          os.path.join(INPUT, "fuzz_input.c"), os.path.join(INPUT, "moy_input.c"),
          os.path.join(INPUT, "moy_hid.c"),
          "-o", exe],

@@ -9,6 +9,8 @@
 
 #if MOY_APP_LUA
 
+#include "moy_kmem.h"
+
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -151,7 +153,8 @@ typedef struct {
 
 // The VM's queue (native/moy_kernel/moy_vmq.h): weak, for an image whose
 // Lua runs on the VM's task alone.
-bool moy_vmq_defer(void) __attribute__((weak));
+#include "moy_vmq.h"
+#pragma weak moy_vmq_defer
 
 // On the VM's task: the row called through the ROLE door, its errno kept. A
 // row the door serves, hopped while no VM runs, waits for the VM.
@@ -1204,7 +1207,7 @@ static int file_reserve(file_t *f, size_t need) {
     while (c < need) {
         c *= 2u;
     }
-    char *q = realloc(f->p, c);
+    char *q = moy_krealloc(f->p, c, MOY_KMEM_LIBC);
     if (q == NULL) {
         return 0;
     }

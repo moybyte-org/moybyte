@@ -4,11 +4,7 @@
 // that grows by doubling. Lookup is a linear scan: system/settings has dozens of
 // keys, and the scan touches the lengths first.
 
-// The lock's clock and recursive mutex are POSIX's, which a strict C99
-// build on Linux leaves out unless asked.
-#if defined(__linux__) && !defined(_GNU_SOURCE) && !defined(_XOPEN_SOURCE)
-#define _XOPEN_SOURCE 700
-#endif
+#include "moy_platform.h"
 
 #include <string.h>
 
@@ -36,57 +32,15 @@ struct moy_settings {
 
 // -- the lock (moy_settings.h, THE SETTINGS LOCK) -----------------------------
 
-#if defined(__has_include) && __has_include("esp_heap_caps.h")
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-
-static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static StaticSemaphore_t s_mu_buf;
-static SemaphoreHandle_t s_mu;
+static moy_mutex_t s_mu = MOY_RMUTEX_INIT;
 
 void moy_settings_lock(void) {
-    if (s_mu == NULL) {
-        portENTER_CRITICAL(&s_mux);
-        if (s_mu == NULL) {
-            s_mu = xSemaphoreCreateRecursiveMutexStatic(&s_mu_buf);
-        }
-        portEXIT_CRITICAL(&s_mux);
-    }
-    xSemaphoreTakeRecursive(s_mu, portMAX_DELAY);
+    moy_mutex_lock(&s_mu);
 }
 
 void moy_settings_unlock(void) {
-    xSemaphoreGiveRecursive(s_mu);
+    moy_mutex_unlock(&s_mu);
 }
-#elif !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
-#include <pthread.h>
-
-static pthread_mutex_t s_mu;
-static pthread_once_t s_once = PTHREAD_ONCE_INIT;
-
-static void mu_init(void) {
-    pthread_mutexattr_t at;
-    pthread_mutexattr_init(&at);
-    pthread_mutexattr_settype(&at, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&s_mu, &at);
-    pthread_mutexattr_destroy(&at);
-}
-
-void moy_settings_lock(void) {
-    pthread_once(&s_once, mu_init);
-    pthread_mutex_lock(&s_mu);
-}
-
-void moy_settings_unlock(void) {
-    pthread_mutex_unlock(&s_mu);
-}
-#else
-void moy_settings_lock(void) {
-}
-
-void moy_settings_unlock(void) {
-}
-#endif
 
 // The scanner is moy_json's: a row holds one value, a file one object.
 

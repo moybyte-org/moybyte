@@ -20,20 +20,21 @@
 //   browser: the frame's job runs it)
 //   icy_title(meta) -> str | None   list_kind(ctype, path, text) -> int
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "py/runtime.h"
 
 #include "moy_media.h"
 
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+// Whether the service runs on a task of its own.
+#ifdef MOY_ON_BOARD
 #define MEDIA_TASK 1
-#endif
-#endif
-#ifndef MEDIA_TASK
+#else
 #define MEDIA_TASK 0
 #endif
+
 
 static uint32_t u32(mp_obj_t o) {
     return (uint32_t)mp_obj_get_int_truncated(o);

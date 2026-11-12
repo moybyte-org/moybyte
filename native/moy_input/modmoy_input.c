@@ -650,7 +650,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ring_ring_obj, ring_ring);
 static mp_obj_t ring_close(mp_obj_t self_in) {
     input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
     moy_input_isr_detach(&o->w);
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     if (o->edge) {
         check(moy_edge_close(o->h));
         return mp_const_none;
@@ -661,7 +661,7 @@ static mp_obj_t ring_close(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ring_close_obj, ring_close);
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 // drive(n, period_us): an edge loop pin's n level changes (moy_edge_drive).
 static mp_obj_t ring_drive(mp_obj_t self_in, mp_obj_t n, mp_obj_t period_us) {
     input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
@@ -693,7 +693,7 @@ static const mp_rom_map_elem_t ring_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_post), MP_ROM_PTR(&ring_post_obj) },
     { MP_ROM_QSTR(MP_QSTR_ring), MP_ROM_PTR(&ring_ring_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&ring_close_obj) },
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&ring_drive_obj) },
     { MP_ROM_QSTR(MP_QSTR_driving), MP_ROM_PTR(&ring_driving_obj) },
     #endif
@@ -889,7 +889,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_kernel_obj, input_kernel);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_kernel_obj);
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 // edge(pin, depth=EV_DEPTH, loop=False) -> the pin's edges as a RingSource of
 // the kernel table (moy_edge.h), stamped ISR; its close() frees the pin.
 static mp_obj_t input_edge(size_t n_args, const mp_obj_t *args) {
@@ -1950,7 +1950,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_ball_coast_obj, input_ball_coast);
 // loop's objects went with it: the kernel's table alone, its board drivers
 // kicked and its frame begun, which is every source a stopped run reads (the
 // keys and the buttons the board's input task writes into it).
-bool moy_loop_vm(void) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_vm
 
 static void loop_inputs_down(uint32_t now, bool *active) {
     moy_input_t *t = moy_input_kernel();
@@ -2106,7 +2107,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_InputSource), MP_ROM_PTR(&input_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Pointer), MP_ROM_PTR(&input_pointer_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&input_kernel_obj) },
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_edge), MP_ROM_PTR(&input_edge_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_pointer_state), MP_ROM_PTR(&input_pointer_state_obj) },

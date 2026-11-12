@@ -17,47 +17,34 @@
 #define MOY_NET_POSIX 0
 #endif
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_kmem.h"
 #include "moy_net.h"
 #include "moy_ota.h"
 
 // -- the platform -----------------------------------------------------------------
 
 #if defined(ESP_PLATFORM)
-#include "esp_heap_caps.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 uint64_t moy_net_ms64(void) {
-    return (uint64_t)(esp_timer_get_time() / 1000);
+    return moy_now_ms();
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
     vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
 }
 
-// The kernel's small-block pool (moy_kernel.h), where the image has it: the
-// decoded keys live for the board's life, made at the first check.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-
+// The kernel's small-block pool first (moy_kernel.h): the decoded keys live
+// for the board's life, made at the first check.
 void *moy_net_alloc(size_t n) {
-    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
-    if (q != NULL) {
-        return q;
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    return p != NULL ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 void moy_net_free(void *p) {
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
+    moy_kfree(p);
 }
 
 #include "mbedtls/sha256.h"
@@ -74,9 +61,7 @@ void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
 uint64_t moy_net_ms_skew;
 
 uint64_t moy_net_ms64(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint64_t)t.tv_sec * 1000u + (uint64_t)t.tv_nsec / 1000000u + moy_net_ms_skew;
+    return moy_now_ms() + moy_net_ms_skew;
 }
 
 void moy_net_sleep_ms(uint32_t ms) {
@@ -85,11 +70,11 @@ void moy_net_sleep_ms(uint32_t ms) {
 }
 
 void *moy_net_alloc(size_t n) {
-    return calloc(1, n ? n : 1);
+    return moy_kalloc(n ? n : 1, MOY_KMEM_ZERO);
 }
 
 void moy_net_free(void *p) {
-    free(p);
+    moy_kfree(p);
 }
 
 void moy_net_sha256(const void *p, size_t n, uint8_t out[32]) {
@@ -122,7 +107,7 @@ uint32_t moy_net_ms(void) {
 }
 
 // THE NETWORK'S GATE (moy_net.h): the station's where the image has one.
-int moy_net_online(void) __attribute__((weak));
+#pragma weak moy_net_online
 
 static int offline(void) {
     return moy_net_online != NULL && !moy_net_online();
@@ -427,9 +412,9 @@ extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth,
 
 // The kernel's task watchdog, fed while the frame loop has it armed: a
 // connect or a read that waits is the console waiting on purpose.
-extern bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms,
-                                uint32_t *frames, bool reset) __attribute__((weak));
-extern void moy_kernel_feed(void) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_watchdog
+#pragma weak moy_kernel_feed
 
 static void tick(void) {
     static uint32_t last;
@@ -478,7 +463,7 @@ int moy_conn_verifies(void) {
 // NVS. A CA signed that date, so the time was past it when the board saw it,
 // and the floor follows the real time to within a certificate's age; NVS is
 // written only when SEEN rises by a day or more.
-extern int moy_clock_state(int64_t *at) __attribute__((weak));
+#pragma weak moy_clock_state
 
 #define CLOCK_WAIT_MS 3000          // a first answer a handshake waits for
 #define SEEN_NS "moy_net"
@@ -993,7 +978,7 @@ static int s_open, s_closed;
 int moy_slot_open(uint32_t size, uint32_t *cap) {
     *cap = moy_slot_host_cap;
     free(moy_slot_host_data);
-    moy_slot_host_data = malloc(moy_slot_host_cap ? moy_slot_host_cap : 1);
+    moy_slot_host_data = moy_kalloc(moy_slot_host_cap ? moy_slot_host_cap : 1, MOY_KMEM_LIBC);
     moy_slot_host_n = 0;
     s_open = 1;
     s_closed = 0;

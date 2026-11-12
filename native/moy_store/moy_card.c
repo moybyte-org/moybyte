@@ -15,6 +15,8 @@
 // The cache is the T-Deck's (dev 638661e), in C under every board's card:
 // moy_cache.h, with its zero runs over the mounted volume's clusters.
 
+#include "moy_kmem.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,7 +35,7 @@
 #include "moy_vol.h"
 
 #if MOY_VOL_FAT_WEAK
-extern __typeof__(f_mount) f_mount __attribute__((weak));
+#pragma weak f_mount
 #endif
 
 #define SECTOR MOY_CACHE_SECTOR
@@ -42,9 +44,14 @@ extern __typeof__(f_mount) f_mount __attribute__((weak));
 // The card driver on a board, where the image takes one (native/moy_sd/
 // moy_sd.h): its bring-up and its sectors, over SPI on the S3s and the SDMMC
 // host on the P4s.
-extern int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write)
-    __attribute__((weak));
-extern int moy_sd_card_up(uint32_t *sectors, const char **what) __attribute__((weak));
+#if __has_include("moy_sd.h")
+#include "moy_sd.h"
+#else
+int moy_sd_card_io(uint32_t start, uint8_t *buf, uint32_t count, int write);
+int moy_sd_card_up(uint32_t *sectors, const char **what);
+#endif
+#pragma weak moy_sd_card_io
+#pragma weak moy_sd_card_up
 
 typedef struct {
     fs_user_mount_t *vfs;
@@ -133,7 +140,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(card_count_obj, card_count);
 
 // How the running VM started (native/moy_kernel): weak, so an image without
 // the kernel (the host, the unix port) never returns.
-extern int moy_kernel_start(void) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_start
 
 // The card's FATFS while it is mounted, or NULL: what the store resolves
 // "/sd" to while no VM runs (modmoy_store.c's moy_vol_at), and what the next
@@ -316,7 +324,7 @@ static mp_obj_t mod_card_ram(mp_obj_t sectors_in) {
     }
     if (s_ram == NULL || s_ram_sectors != sectors) {
         free(s_ram);
-        s_ram = calloc(sectors, SECTOR);
+        s_ram = moy_kalloc(sectors * SECTOR, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
         s_ram_sectors = s_ram != NULL ? sectors : 0;
         if (s_ram == NULL) {
             mp_raise_type(&mp_type_MemoryError);

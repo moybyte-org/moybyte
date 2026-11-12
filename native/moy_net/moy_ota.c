@@ -9,6 +9,10 @@
 #include "moy_json.h"
 #include "moy_net.h"
 #include "moy_ota.h"
+#pragma weak moy_c6_ota_begin
+#pragma weak moy_c6_ota_write
+#pragma weak moy_c6_ota_end
+#pragma weak moy_c6_ota_activate
 
 // -- a URL and a response head ----------------------------------------------------------
 

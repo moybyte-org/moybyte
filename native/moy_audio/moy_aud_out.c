@@ -33,16 +33,20 @@
 //   MOY_AUDIO_DAC_MONO                  the codec reads one slot: both carry the mean
 //   MOY_AUDIO_CORE                      the feeder's core, 1 (the VM's) unless named
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
 #include "moy_aud.h"
 
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_* (mpconfigboard.h)
 #endif
 
-#if MOY_AUD_BOARD && defined(MOY_AUDIO_I2S_BCK)
+#if MOY_ON_BOARD && defined(MOY_AUDIO_I2S_BCK)
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -59,17 +63,6 @@
 
 #ifndef MOY_AUDIO_RATE
 #define MOY_AUDIO_RATE 22050
-#endif
-#ifndef MOY_AUDIO_CORE
-#define MOY_AUDIO_CORE 1
-#endif
-// Near the top, but under the esp_timer task where the two share a core: at
-// its priority a block's render held every timer callback for its length.
-#if (MOY_AUDIO_CORE == 0 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU0)) \
-    || (MOY_AUDIO_CORE == 1 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU1))
-#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)
-#else
-#define FEEDER_PRIO (configMAX_PRIORITIES - 3)
 #endif
 #ifndef MOY_AUDIO_I2S_MCLK
 #define MOY_AUDIO_I2S_MCLK (-1)
@@ -134,7 +127,7 @@ void moy_aud_unlock(void) {
 }
 
 uint64_t moy_aud_now_us(void) {
-    return (uint64_t)esp_timer_get_time();
+    return (uint64_t)moy_now_us();
 }
 
 int moy_aud_out_plays(void) {
@@ -405,8 +398,7 @@ int moy_aud_out_start(void) {
         return s_state;
     }
     s_running = 1;
-    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + OUT_SAMPLES * 2, NULL,
-                                FEEDER_PRIO, &s_task, MOY_AUDIO_CORE) != pdPASS) {
+    if (!moy_task_spawn_as(MOY_TASK_AUDIO, NULL, 4096 + OUT_SAMPLES * 2, 0, 0, feeder, NULL, &s_task)) {
         s_running = 0;
         s_task = NULL;
         s_why = "no memory for the feeder task";
@@ -441,21 +433,13 @@ int moy_aud_trylock(void) {
 void moy_aud_unlock(void) {
 }
 
-#if MOY_AUD_BOARD
-#include "esp_timer.h"
-uint64_t moy_aud_now_us(void) {
-    return (uint64_t)esp_timer_get_time();
-}
-#elif defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
 uint64_t moy_aud_now_us(void) {
     return 0;
 }
 #else
-#include <time.h>
 uint64_t moy_aud_now_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    return (uint64_t)moy_now_us();
 }
 #endif
 
@@ -463,7 +447,7 @@ uint64_t moy_aud_now_us(void) {
 // which plays a compiled cart's stream as it mixes it; a board without pins
 // has nothing that would.
 int moy_aud_out_plays(void) {
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
     return 0;
 #else
     return 1;
@@ -492,7 +476,7 @@ int moy_aud_out_start(void) {
 }
 
 int moy_aud_out_rate(void) {
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
     return moy_aud_rate();
 #else
     return moy_aud_out_rate_get();

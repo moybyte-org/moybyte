@@ -14,6 +14,8 @@
 // section 9), malloc elsewhere, and none of it is the gc heap's: an Index frees
 // its table in __del__.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "py/mperrno.h"
@@ -21,15 +23,7 @@
 #include "py/objstr.h"
 #include "py/runtime.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources in every build, so the
-// board is told by its header, as native/moy_alloc's siblings tell it.
-#if __has_include("esp_heap_caps.h")
-#define MOY_INDEX_PSRAM 1
-#include "esp_heap_caps.h"
-#else
-#define MOY_INDEX_PSRAM 0
-#include <stdlib.h>
-#endif
+#include "moy_kmem.h"
 
 #include "moy_index.h"
 
@@ -39,14 +33,7 @@ static size_t mem_now, mem_high;
 // PSRAM is merely full refuses, rather than spend internal SRAM.
 void *moy_index_host_alloc(size_t n) {
     n = n ? n : 1u;
-    #if MOY_INDEX_PSRAM
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    #else
-    void *p = calloc(1, n);
-    #endif
+    void *p = moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
     if (p != NULL) {
         mem_now += n;
         if (mem_now > mem_high) {
@@ -59,11 +46,7 @@ void *moy_index_host_alloc(size_t n) {
 void moy_index_host_free(void *p, size_t n) {
     if (p != NULL) {
         mem_now -= n ? n : 1u;
-        #if MOY_INDEX_PSRAM
-        heap_caps_free(p);
-        #else
-        free(p);
-        #endif
+        moy_kfree(p);
     }
 }
 

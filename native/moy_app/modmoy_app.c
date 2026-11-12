@@ -392,7 +392,12 @@ static mp_obj_t app_surface_write(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_surface_write_obj, 8, 10, app_surface_write);
 
 // The cursor of a moy_input.Pointer, where the image has native/moy_input.
-moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o) __attribute__((weak));
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#else
+moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o);
+#endif
+#pragma weak moy_input_pointer_ptr
 
 static mp_obj_t app_bind_pointer(mp_obj_t self_in, mp_obj_t p) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);

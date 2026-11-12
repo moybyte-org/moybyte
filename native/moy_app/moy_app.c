@@ -11,52 +11,49 @@
 // The kernel's timers, messages and log (native/moy_kernel/moy_evq.h,
 // TIMERS and THE RULE; moy_log.h): weak, for a build of the layer alone,
 // where a timer, message or log row answers STALE.
-int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id)
-    __attribute__((weak));
-bool moy_evq_timer_cancel(uint32_t pid, uint32_t id) __attribute__((weak));
-int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
-                 uint32_t *denied) __attribute__((weak));
-int moy_evq_read(uint32_t pid, void *buf, size_t cap, size_t *len) __attribute__((weak));
-int moy_evq_listen(uint32_t pid, const char *name, bool on) __attribute__((weak));
-int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id) __attribute__((weak));
+#include "moy_evq.h"
+#pragma weak moy_evq_timer
+#pragma weak moy_evq_timer_cancel
+#pragma weak moy_evq_send
+#pragma weak moy_evq_read
+#pragma weak moy_evq_listen
+#pragma weak moy_evq_at
 
 // The bar's status items (native/moy_kernel/moy_status.h; its codes are this
 // layer's, FULL, BAD and ABSENT): weak, for a build of the layer alone, where
 // a status row answers STALE.
-int moy_status_add(uint32_t pid, const char *icon, size_t n, int32_t order, bool compiled)
-    __attribute__((weak));
-int moy_status_show(uint32_t pid, int h, int state) __attribute__((weak));
-int moy_status_remove(uint32_t pid, int h) __attribute__((weak));
+#include "moy_status.h"
+#pragma weak moy_status_add
+#pragma weak moy_status_show
+#pragma weak moy_status_remove
 
 // The queue in front of the notifications and the achievements process
 // (native/moy_kernel/moy_notes.h; its codes are moy_evq's, this layer's
 // STALE, FULL and DENIED): weak, for a build of the layer alone, where a
 // notify, award or progress row answers STALE.
-int32_t moy_notes_post(uint32_t pid, const char *summary, size_t sn, const char *body,
-                       size_t bn) __attribute__((weak));
-int32_t moy_notes_award(uint32_t pid, const char *id, size_t n) __attribute__((weak));
-int32_t moy_notes_progress(uint32_t pid, const char *id, size_t n, int32_t value)
-    __attribute__((weak));
+#include "moy_notes.h"
+#pragma weak moy_notes_post
+#pragma weak moy_notes_award
+#pragma weak moy_notes_progress
 
 // The items handed to processes (native/moy_kernel/moy_items.h): weak, for a
 // build of the layer alone, where an item row is the door's.
-bool moy_items_get(uint32_t pid, int32_t h, char *kind, size_t kcap, char *name, size_t ncap,
-                   bool *rw) __attribute__((weak));
-void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+#include "moy_items.h"
+#pragma weak moy_items_get
+#include "moy_log.h"
+#pragma weak moy_log_write
 
 // A compiled program's device handles (native/moy_kernel/moy_dev.h): weak,
 // for a build of the layer alone, where every one is the door's Python half's.
-int32_t moy_dev_open(uint32_t pid, uint32_t perms, const char *name, size_t n,
-                     const char *cfg, size_t cn) __attribute__((weak));
-int32_t moy_dev_close(uint32_t pid, int32_t h) __attribute__((weak));
-int32_t moy_dev_read(uint32_t pid, int32_t h, uint8_t *out, size_t cap) __attribute__((weak));
-int32_t moy_dev_write(uint32_t pid, int32_t h, const uint8_t *data, size_t n)
-    __attribute__((weak));
-int32_t moy_dev_xfer(uint32_t pid, int32_t h, const uint8_t *data, size_t n, uint8_t *out,
-                     size_t cap) __attribute__((weak));
-int32_t moy_dev_set(uint32_t pid, int32_t h, const char *cfg, size_t n) __attribute__((weak));
-int32_t moy_dev_get(uint32_t pid, int32_t h, const char *what, size_t n) __attribute__((weak));
-uint32_t moy_dev_perm_bit(const char *perm, size_t n) __attribute__((weak));
+#include "moy_dev.h"
+#pragma weak moy_dev_open
+#pragma weak moy_dev_close
+#pragma weak moy_dev_read
+#pragma weak moy_dev_write
+#pragma weak moy_dev_xfer
+#pragma weak moy_dev_set
+#pragma weak moy_dev_get
+#pragma weak moy_dev_perm_bit
 #define DEV_PASS (-1000)            // moy_dev.h's MOY_DEV_PASS
 
 // moy_evq.h's and moy_log.h's numbers, which this layer does not include.
@@ -98,8 +95,9 @@ struct moy_app {
 
 // The kernel's writer lock (native/moy_kernel/moy_lock.h): weak, for a build
 // of the layer alone, whose one task needs none.
-void moy_lock_take(void) __attribute__((weak));
-void moy_lock_give(void) __attribute__((weak));
+#include "moy_lock.h"
+#pragma weak moy_lock_take
+#pragma weak moy_lock_give
 
 // The seqlock's writer half, around every write of the look and the
 // clipboard: one writer at a time under the kernel's writer lock, the shell's
@@ -127,8 +125,14 @@ static _Thread_local int t_why;
 // The VM's task (native/moy_store's binding says, where the image has it;
 // else the task that bound the door, the host's console): a prefs write
 // made there is saved at once, through the rows' saver, which is Python's.
-int moy_store_on_vm(void) __attribute__((weak));
-uintptr_t moy_store_me(void) __attribute__((weak));
+#if __has_include("moy_vol.h")
+#include "moy_vol.h"
+#else
+int moy_store_on_vm(void);
+uintptr_t moy_store_me(void);
+#endif
+#pragma weak moy_store_on_vm
+#pragma weak moy_store_me
 static uintptr_t s_door_who;
 static int on_vm(void);
 
@@ -2161,13 +2165,43 @@ static int32_t dev_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
 // that declares none, the service asking of itself), NEEDS_VM where the call
 // runs where it was made, so the tier hops it, and handed to the door on the
 // VM's task.
-uint32_t moycore_svc_of(const char *id, size_t n) __attribute__((weak));
-uint32_t moy_os_service_of(const char *id, size_t n) __attribute__((weak));
-uint32_t moy_wasi_service_of(const char *id, size_t n) __attribute__((weak));
-uint32_t moycore_svc_term(const char *id, size_t n) __attribute__((weak));
-uint32_t moy_os_service_term(const char *id, size_t n) __attribute__((weak));
-uint32_t moy_wasi_service_term(const char *id, size_t n) __attribute__((weak));
-void moy_evq_term(uint32_t pid) __attribute__((weak));
+#if __has_include("moycore_svc.h")
+#include "moycore_svc.h"
+#else
+uint32_t moycore_svc_of(const char *id, size_t n);
+#endif
+#pragma weak moycore_svc_of
+#if __has_include("moy_os.h")
+#include "moy_os.h"
+#else
+uint32_t moy_os_service_of(const char *id, size_t n);
+#endif
+#pragma weak moy_os_service_of
+#if __has_include("moy_wasi.h") && __has_include("wasm_export.h")
+#include "moy_wasi.h"
+#else
+uint32_t moy_wasi_service_of(const char *id, size_t n);
+#endif
+#pragma weak moy_wasi_service_of
+#if __has_include("moycore_svc.h")
+#include "moycore_svc.h"
+#else
+uint32_t moycore_svc_term(const char *id, size_t n);
+#endif
+#pragma weak moycore_svc_term
+#if __has_include("moy_os.h")
+#include "moy_os.h"
+#else
+uint32_t moy_os_service_term(const char *id, size_t n);
+#endif
+#pragma weak moy_os_service_term
+#if __has_include("moy_wasi.h") && __has_include("wasm_export.h")
+#include "moy_wasi.h"
+#else
+uint32_t moy_wasi_service_term(const char *id, size_t n);
+#endif
+#pragma weak moy_wasi_service_term
+#pragma weak moy_evq_term
 
 static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
                        size_t cap) {

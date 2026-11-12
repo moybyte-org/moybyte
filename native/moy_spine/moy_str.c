@@ -1,19 +1,16 @@
 // moy_str: the string table and its language pack (moy_str.h).
 
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
 #include "moy_str.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define STR_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
-#define STR_FREE(p) heap_caps_free(p)
-#else
-#include <stdlib.h>
-#define STR_ALLOC(n) malloc(n)
-#define STR_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define STR_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM)
+#define STR_FREE(p) moy_kfree(p)
 
 // The pack's entries, NULL where English reads; the array itself is
 // allocated at the first entry, so an image that installs none holds nothing.

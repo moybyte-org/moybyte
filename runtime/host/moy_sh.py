@@ -30,6 +30,7 @@ _DASH = os.path.join(SH, "dash")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
+_NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _UI = [os.path.join(native_build.ROOT, "native", n) for n in ("moy_ui", "moy_gfx", "moy_glass")]
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 
@@ -42,7 +43,7 @@ _COLS_BYTES = 12                        # a line's bytes a column (moy_term.h, M
 def _sources():
     """[(source, own flags)]: dash's under its shim, the board's side plain."""
     shim = ["-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", _DASH, "-I", _STORE]
-    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE, "-I", _SPINE]
+    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE, "-I", _SPINE, "-I", _NET]
     for d in _UI:
         plain += ["-I", d]
     dash = sorted(glob.glob(os.path.join(_DASH, "*.c")))

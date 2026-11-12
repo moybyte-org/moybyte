@@ -1,9 +1,6 @@
 // moy_elf: the verdict on a native module's file (moy_elf.h).
 
-// A host build (a board is told by its heap header, as moy_os.c is).
-#if !__has_include("esp_heap_caps.h")
-#define _POSIX_C_SOURCE 200809L
-#endif
+#include "moy_platform.h"
 
 #include <stdio.h>
 #include <string.h>

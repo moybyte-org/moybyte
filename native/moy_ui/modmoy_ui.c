@@ -2,15 +2,13 @@
 // ids out once; after that the face passes ints, and caches what it gets
 // back, so a widget draw reaches here only on a cache miss.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define JOINED_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#include <stdlib.h>
-#define JOINED_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define JOINED_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 #include "py/obj.h"
 #include "py/runtime.h"

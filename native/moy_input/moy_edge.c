@@ -1,8 +1,10 @@
 // moy_edge: GPIO edges as a ring source. moy_edge.h has the contract.
 
+#include "moy_kmem.h"
+
 #include "moy_input.h"
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 
 #include "moy_edge.h"
 
@@ -69,8 +71,7 @@ int moy_edge_open(int pin, uint32_t depth, bool loop, uint32_t *h) {
         return MOY_INPUT_BAD;
     }
     if (s_edge == NULL) {
-        s_edge = heap_caps_calloc(MOY_EDGE_PINS, sizeof(edge_t),
-                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_edge = moy_kalloc(MOY_EDGE_PINS * sizeof(edge_t), MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
         if (s_edge == NULL) {
             return MOY_INPUT_NOMEM;
         }
@@ -182,4 +183,4 @@ uint32_t moy_edge_driving(uint32_t h) {
     return e == NULL ? 0 : e->left;
 }
 
-#endif // MOY_INPUT_BOARD
+#endif // MOY_ON_BOARD

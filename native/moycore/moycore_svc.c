@@ -1,11 +1,8 @@
 // moycore_svc: the Lua tier's services. moycore_svc.h has the contract.
 
-// The host's clock_gettime under a strict C standard.
-#if defined(__has_include) && !defined(_POSIX_C_SOURCE)
-#if !__has_include("esp_heap_caps.h")
-#define _POSIX_C_SOURCE 200809L
-#endif
-#endif
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
 
 #include "moycore_svc.h"
 
@@ -31,13 +28,8 @@
 #define MOY_APP_LUA_CALLS(X)
 #endif
 
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define SVC_BOARD 1
-#endif
-#endif
 
-#ifdef SVC_BOARD
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -45,28 +37,31 @@
 #include "freertos/idf_additions.h"
 #include "sdkconfig.h"
 #define SVC_TASKS 1
-#if CONFIG_IDF_TARGET_ESP32P4
-#define SVC_CORE 0
-#else
-// The S3s: core 1, the VM's (core 0 has the flush feed and fold, input and
-// the radios), and the task's stack in PSRAM, so a service holds no internal
-// SRAM past its task's control block (the shares' internal cap, moy_play.h).
-// The task never touches flash itself: its file rows hop to the VM's task.
-#define SVC_CORE 1
-#define SVC_STACK_PSRAM 1
-#endif
+#include "moy_tasks.h"              // the task's core and stack (MOY_TASK_SVC)
 #endif
 
 // The OS log (native/moy_kernel/moy_log.h), where the image has it.
-void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+#include "moy_log.h"
+#pragma weak moy_log_write
 enum { LOG_ERR = 3, LOG_WARNING = 4, LOG_INFO = 6 };
 
 // The prefs names' JSON (native/moy_app/moy_app_lua.h), where the image has
 // the app ABI: a message's arguments, the console's names and its answers.
-int moy_app_lua_json_push(lua_State *L, const char *text, size_t n) __attribute__((weak));
-const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_json_push(lua_State *L, const char *text, size_t n);
+const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n);
+#endif
+#pragma weak moy_app_lua_json_push
+#pragma weak moy_app_lua_json_dump
 // The crypto rows (moy_app_lua.h), which need no grant.
-int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open_crypto(lua_State *L);
+#endif
+#pragma weak moy_app_lua_open_crypto
 
 // The role names of its app's run (moy_app_lua.h), where the image has the
 // app ABI.
@@ -74,9 +69,12 @@ int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
 #if __has_include("moy_app_run.h")
 #include "moy_app_run.h"
 #define SVC_APP 1
-int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
-                         int (*hop)(lua_State *L, void (*fn)(void *), void *arg, int here))
-    __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run, moy_app_lua_hop_fn hop);
+#endif
+#pragma weak moy_app_lua_open_hop
 #endif
 #endif
 
@@ -161,8 +159,9 @@ static uint16_t s_gen;
 // (native/moy_kernel/moy_lock.h; weak, for a build without it, whose one task
 // needs none), so moycore_svc_of may walk it from any task; every other walk
 // is the VM's task's, which alone writes it.
-void moy_lock_take(void) __attribute__((weak));
-void moy_lock_give(void) __attribute__((weak));
+#include "moy_lock.h"
+#pragma weak moy_lock_take
+#pragma weak moy_lock_give
 
 static void row_put(uint32_t slot, svc_t *s) {
     if (moy_lock_take != NULL) {
@@ -176,30 +175,12 @@ static void row_put(uint32_t slot, svc_t *s) {
 
 // -- the clock, the memory -------------------------------------------------------
 
-static int64_t now_us(void) {
-    #ifdef SVC_BOARD
-    return esp_timer_get_time();
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-    #endif
-}
-
 static void *mem_realloc(void *p, size_t n) {
-    #ifdef SVC_BOARD
-    return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM);
-    #else
-    return realloc(p, n);
-    #endif
+    return moy_krealloc(p, n, MOY_KMEM_PSRAM);
 }
 
 static void *mem_calloc(size_t n) {
-    #ifdef SVC_BOARD
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 static char *mem_copy(const char *p, size_t n) {
@@ -243,7 +224,7 @@ static svc_t *of_state(lua_State *L) {
 static void hook(lua_State *L, lua_Debug *ar) {
     (void)ar;
     svc_t *s = of_state(L);
-    if (!s->aborted && !s->exiting && (uint32_t)(now_us() - s->t0) <= s->budget) {
+    if (!s->aborted && !s->exiting && (uint32_t)(moy_now_us() - s->t0) <= s->budget) {
         return;
     }
     s->aborted = s->aborted || !s->exiting;
@@ -258,11 +239,11 @@ static void hook(lua_State *L, lua_Debug *ar) {
 // stopped. A call that waits on a console call keeps its coroutine.
 static int resume(svc_t *s, int nargs) {
     lua_State *co = s->co;
-    s->seg = now_us();
+    s->seg = moy_now_us();
     s->t0 = s->seg - s->spent;
     int nres = 0;
     int rc = lua_resume(co, s->L, nargs, &nres);
-    int64_t t = now_us();
+    int64_t t = moy_now_us();
     s->cpu_us += (uint32_t)(t - s->seg);
     s->spent = t - s->t0;
     int out;
@@ -471,7 +452,7 @@ static int l_time(lua_State *L) {
 
 static int l_clock(lua_State *L) {
     svc_t *s = of_state(L);
-    lua_pushnumber(L, (lua_Number)(s->cpu_us + (uint32_t)(now_us() - s->seg)) / 1e6f);
+    lua_pushnumber(L, (lua_Number)(s->cpu_us + (uint32_t)(moy_now_us() - s->seg)) / 1e6f);
     return 1;
 }
 
@@ -729,9 +710,9 @@ static int vm_hop(lua_State *L, void (*fn)(void *), void *arg, int here) {
     #ifdef SVC_TASKS
     svc_t *s = of_state(L);
     if (here && xTaskGetCurrentTaskHandle() == s->task) {
-        int64_t t0 = now_us();
+        int64_t t0 = moy_now_us();
         fn(arg);
-        uint32_t took = (uint32_t)(now_us() - t0);
+        uint32_t took = (uint32_t)(moy_now_us() - t0);
         s->t0 += took;
         s->seg += took;
         return 0;
@@ -1179,7 +1160,7 @@ static uint32_t run(svc_t *s, uint32_t now) {
 static void svc_task(void *arg) {
     svc_t *s = arg;
     for (;;) {
-        uint32_t wait = run(s, (uint32_t)(now_us() / 1000));
+        uint32_t wait = run(s, (uint32_t)(moy_now_us() / 1000));
         if (s->state == MOYCORE_SVC_EXITED) {
             break;
         }
@@ -1189,7 +1170,7 @@ static void svc_task(void *arg) {
         moy_evq_wait(s->pid, wait > 0 ? wait : 1u);     // the one kernel wait
     }
     moy_evq_unwait(s->pid);             // the queue may outlive this task
-    #ifdef SVC_STACK_PSRAM
+    #if MOY_TASK_SVC_PSRAM
     // A task made with its caps is deleted by another (row_free): its own
     // delete would make a helper task, in internal SRAM, to free its stack.
     s->done = 1;
@@ -1223,7 +1204,7 @@ static svc_t *row_of(uint32_t h) {
 static void row_free(uint32_t slot) {
     svc_t *s = s_row[slot];
     row_put(slot, NULL);
-    #ifdef SVC_STACK_PSRAM
+    #if MOY_TASK_SVC_PSRAM
     if (s->task != NULL) {
         vTaskDeleteWithCaps(s->task);
     }
@@ -1301,15 +1282,7 @@ int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *c
     }
     row_put(slot, s);
     #ifdef SVC_TASKS
-    #ifdef SVC_STACK_PSRAM
-    BaseType_t made = xTaskCreatePinnedToCoreWithCaps(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
-                                                      MOYCORE_SVC_PRIO, &s->task, SVC_CORE,
-                                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    #else
-    BaseType_t made = xTaskCreatePinnedToCore(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
-                                              MOYCORE_SVC_PRIO, &s->task, SVC_CORE);
-    #endif
-    if (made != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_SVC, svc_task, s, &s->task)) {
         row_put(slot, NULL);
         if (s->own_q) {
             moy_evq_close(pid);
@@ -1465,7 +1438,7 @@ void moycore_svc_vm_stop(bool keep) {
     // A fresh start follows: each service ends now. No console answers a
     // call any more, so each is refused, and the hops its role rows wait on
     // are served here, on the VM's task while the VM still stands.
-    int64_t until = now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
+    int64_t until = moy_now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
     for (;;) {
         bool live = false;
         for (uint32_t i = 0; i < MOYCORE_SVCS; i++) {
@@ -1477,7 +1450,7 @@ void moycore_svc_vm_stop(bool keep) {
                 live = true;
             }
         }
-        if (!live || now_us() >= until) {
+        if (!live || moy_now_us() >= until) {
             break;
         }
         moy_vmq_serve();

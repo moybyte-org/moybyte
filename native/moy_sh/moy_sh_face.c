@@ -1,22 +1,11 @@
 // moy_sh_face: the Terminal's face. moy_sh_face.h has the contract.
 
+#include "moy_platform.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if __has_include("esp_timer.h")
-#include "esp_timer.h"
-#define NOW_MS() ((uint32_t)(esp_timer_get_time() / 1000))
-#else
-#include <time.h>
-static uint32_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-#define NOW_MS() now_ms()
-#endif
 
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
@@ -36,8 +25,12 @@ static uint32_t now_ms(void) {
 
 // The T-Deck's keyboard: whether its matrix types `c`, plain or with Sym
 // (native/moy_input/moy_kbd.c). Weak, so a build without the driver links.
-int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym)
-    __attribute__((weak));
+#if __has_include("moy_drivers.h")
+#include "moy_drivers.h"
+#else
+int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym);
+#endif
+#pragma weak moy_kbd_raw_key
 
 struct moy_sh_face {
     moy_sh_screen_t *scr;
@@ -687,7 +680,7 @@ int moy_sh_face_input(moy_sh_face_t *f, int desk, int32_t key, int32_t repeats,
         f->in_row = 0;
     }
     int hit = 0, enter = 0;
-    if (app_of(f) != NULL && moy_sh_app_tick(app_of(f), NOW_MS())) {
+    if (app_of(f) != NULL && moy_sh_app_tick(app_of(f), (uint32_t)moy_now_ms())) {
         hit = 1;
     }
     if (full_app(f) != NULL) {

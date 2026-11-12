@@ -6,6 +6,8 @@
 #pragma GCC optimize("O3")
 #endif
 
+#include "moy_platform.h"
+
 #include "moy_path.h"
 #include "moy_gfx_base.h"
 
@@ -16,14 +18,10 @@
 
 // The scratch (a row's coverage and a glyph's edges) is PSRAM where the
 // board has it, as moy_shape's caches are: kept, grown on need.
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define PATH_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#define PATH_FREE(p) heap_caps_free(p)
-#else
-#define PATH_ALLOC(n) malloc(n)
-#define PATH_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define PATH_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
+#define PATH_FREE(p) moy_kfree(p)
 
 #define ONE 64                  // 26.6: a pixel
 #define FULL (2 * ONE * ONE)    // a covered pixel's area, doubled (the half is kept whole)

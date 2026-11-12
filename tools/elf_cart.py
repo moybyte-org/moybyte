@@ -67,7 +67,8 @@ LIBMOY_SOURCES = ("moy_canvas.c", "moy_sprite.c", "moy_data.c")
 # RGB565, behind the SDK's front (sdk/src/moyui_link.c). An app's module
 # takes it before libmoyos, so its libmoy is this RGB565 one.
 NATIVE = os.path.join(ROOT, "native")
-UI_DIRS = [os.path.join(NATIVE, d) for d in ("moy_ui", "moy_gfx", "moy_glass", "moy_spine")]
+UI_DIRS = [os.path.join(NATIVE, d) for d in (
+    "moy_ui", "moy_gfx", "moy_glass", "moy_spine", "moy_kernel")]
 UI_SOURCES = (
     [os.path.join(NATIVE, "moy_ui", n) for n in (
         "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",

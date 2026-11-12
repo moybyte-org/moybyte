@@ -1,14 +1,18 @@
 // moy_sh_board: the board's host table and the serial face. moy_sh_board.h
 // has the contract.
 
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
+#include "moy_tasks.h"
+
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_SH_ON_BOARD 1
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -35,12 +39,18 @@
 
 // The Player's run in front (native/moy_play: weak, so an image without it
 // links).
-bool moy_play_front_live(void) __attribute__((weak));
-bool moy_play_front_end(int why) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_live(void);
+bool moy_play_front_end(int why);
+#endif
+#pragma weak moy_play_front_live
+#pragma weak moy_play_front_end
 // The loop's jobs (native/moy_kernel/moy_loop.h): weak, so a harness
 // without the loop links, and its faces' runs are then the caller's.
-bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
-void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+#pragma weak moy_loop_job
+#pragma weak moy_loop_job_drop
 
 #define DOOR_ABSENT (-8)
 #define DOOR_NEEDS_VM MOY_SH_DOOR_NEEDS_VM
@@ -51,7 +61,6 @@ void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 #define POLL_BYTES 64
 #define YIELD_MS 200u
 #define ROLE_POLL_MS 10                 // a waiting role command's step, at most this often
-#define RUN_STACK (24u * 1024u)         // a runner's stack (the SSH face's task's)
 #define ABORT_TURNS 256                 // a parked run's turns to end at its session's end
 #define MEDIA_SRC_MAX 512               // moy_media.h's MOY_MEDIA_SRC_MAX
 
@@ -61,24 +70,12 @@ void moy_loop_job_drop(moy_loop_job_fn fn, void *arg) __attribute__((weak));
 // full refuses rather than spend internal SRAM.
 static void *b_alloc(void *ctx, size_t n) {
     (void)ctx;
-#ifdef MOY_SH_ON_BOARD
-    void *p = heap_caps_malloc(n ? n : 1u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_malloc(n ? n : 1u, MALLOC_CAP_8BIT);
-    }
-    return p;
-#else
-    return malloc(n ? n : 1u);
-#endif
+    return moy_kalloc(n ? n : 1u, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE);
 }
 
 static void b_free(void *ctx, void *p) {
     (void)ctx;
-#ifdef MOY_SH_ON_BOARD
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    moy_kfree(p);
 }
 
 // -- the door ---------------------------------------------------------------------
@@ -341,7 +338,7 @@ static const char *const C_ROLES[] = { "mic", "lora", "ble", NULL };
 
 // The files tree's root, as moy_sh_board_host gives it.
 static const char *files_root(void) {
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     return "";
 #else
     return getenv("MOY_SH_ROOT") != NULL ? getenv("MOY_SH_ROOT") : "";
@@ -364,17 +361,26 @@ static void store_role_here(void *arg) {
 
 // -- the role commands served in C ------------------------------------------------
 
-static uint32_t run_ms(void);
-
 // The microphone's driver (native/moy_audio/moy_mic.h): weak, so an image
 // without it has none.
-int moy_mic_open(uint32_t owner) __attribute__((weak));
-int moy_mic_close(uint32_t owner) __attribute__((weak));
-int moy_mic_read(uint32_t owner, int16_t *out, uint32_t n) __attribute__((weak));
-uint32_t moy_mic_rate(void) __attribute__((weak));
-uint32_t moy_mic_owner(void) __attribute__((weak));
-uint32_t moy_mic_drops(void) __attribute__((weak));
-int moy_mic_present(void) __attribute__((weak));
+#if __has_include("moy_mic.h")
+#include "moy_mic.h"
+#else
+int moy_mic_open(uint32_t owner);
+int moy_mic_close(uint32_t owner);
+int moy_mic_read(uint32_t owner, int16_t *out, uint32_t n);
+uint32_t moy_mic_rate(void);
+uint32_t moy_mic_owner(void);
+uint32_t moy_mic_drops(void);
+int moy_mic_present(void);
+#endif
+#pragma weak moy_mic_open
+#pragma weak moy_mic_close
+#pragma weak moy_mic_read
+#pragma weak moy_mic_rate
+#pragma weak moy_mic_owner
+#pragma weak moy_mic_drops
+#pragma weak moy_mic_present
 
 #define MIC_MS 10000                    // a mic read, at most
 #define POLL_MS 10                      // a served command's wait between looks
@@ -436,9 +442,9 @@ static int b_mic(moy_sh_t *s, int argc, char **argv) {
     }
     uint32_t want = (uint32_t)((uint64_t)moy_mic_rate() * (uint64_t)ms / 1000u);
     int16_t buf[256];
-    uint32_t t0 = run_ms();
+    uint32_t t0 = (uint32_t)moy_now_ms();
     int code = 0;
-    while (want > 0 && run_ms() - t0 < (uint32_t)ms + 1000u) {
+    while (want > 0 && (uint32_t)moy_now_ms() - t0 < (uint32_t)ms + 1000u) {
         if (moy_sh_interrupted(s)) {
             code = MOY_PROC_INTERRUPTED;
             break;
@@ -458,13 +464,22 @@ static int b_mic(moy_sh_t *s, int argc, char **argv) {
 }
 
 // The LoRa radio's driver (native/moy_net/moy_lora.h): weak, as the mic's.
-int moy_lora_open(uint32_t owner) __attribute__((weak));
-int moy_lora_close(uint32_t owner) __attribute__((weak));
-int moy_lora_listen(uint32_t owner, int on) __attribute__((weak));
-int moy_lora_send(uint32_t owner, const uint8_t *data, size_t n) __attribute__((weak));
-int moy_lora_recv(uint32_t owner, uint8_t *out, size_t cap, int16_t *rssi, int8_t *snr,
-                  uint8_t *port) __attribute__((weak));
-int moy_lora_present(void) __attribute__((weak));
+#if __has_include("moy_lora.h")
+#include "moy_lora.h"
+#else
+int moy_lora_open(uint32_t owner);
+int moy_lora_close(uint32_t owner);
+int moy_lora_listen(uint32_t owner, int on);
+int moy_lora_send(uint32_t owner, const uint8_t *data, size_t n);
+int moy_lora_recv(uint32_t owner, uint8_t *out, size_t cap, int16_t *rssi, int8_t *snr, uint8_t *port);
+int moy_lora_present(void);
+#endif
+#pragma weak moy_lora_open
+#pragma weak moy_lora_close
+#pragma weak moy_lora_listen
+#pragma weak moy_lora_send
+#pragma weak moy_lora_recv
+#pragma weak moy_lora_present
 
 #define LORA_MS 5000                    // a recv's wait, by default
 #define LORA_PKT 256
@@ -535,9 +550,9 @@ static int b_lora(moy_sh_t *s, int argc, char **argv) {
             ms = LORA_MS;
         }
         moy_lora_listen(SHELL_PID, 1);
-        uint32_t t0 = run_ms();
+        uint32_t t0 = (uint32_t)moy_now_ms();
         code = 1;
-        while (run_ms() - t0 < (uint32_t)ms) {
+        while ((uint32_t)moy_now_ms() - t0 < (uint32_t)ms) {
             int16_t rssi = 0;
             int8_t snr = 0;
             uint8_t port = 0;
@@ -567,11 +582,11 @@ static int b_lora(moy_sh_t *s, int argc, char **argv) {
 
 #ifdef MOY_SH_BLE
 // The BLE central's driver (native/moy_input/moy_gatt.h): weak, as the mic's.
-int moy_gatt_present(void) __attribute__((weak));
-int moy_gatt_open(uint32_t owner) __attribute__((weak));
-int moy_gatt_close(uint32_t owner) __attribute__((weak));
-int moy_gatt_scan(uint32_t owner, uint32_t ms) __attribute__((weak));
-int moy_gatt_seen(uint32_t i, moy_gatt_seen_t *out) __attribute__((weak));
+#pragma weak moy_gatt_present
+#pragma weak moy_gatt_open
+#pragma weak moy_gatt_close
+#pragma weak moy_gatt_scan
+#pragma weak moy_gatt_seen
 
 #define SCAN_MS 3000                    // a scan, by default
 #define SCAN_MAX_MS 60000
@@ -622,8 +637,8 @@ static int b_ble(moy_sh_t *s, int argc, char **argv) {
         say(s, 2, line);
         return 1;
     }
-    uint32_t t0 = run_ms();
-    while (run_ms() - t0 < c.ms) {
+    uint32_t t0 = (uint32_t)moy_now_ms();
+    while ((uint32_t)moy_now_ms() - t0 < c.ms) {
         if (moy_sh_interrupted(s)) {
             moy_sh_hop(s, ble_close_here, NULL);
             return MOY_PROC_INTERRUPTED;
@@ -996,7 +1011,7 @@ static int two_figures(const char *verb, const char *path, uint64_t *a, uint64_t
 static int b_mem(void *ctx, uint32_t out[6]) {
     (void)ctx;
     memset(out, 0, 6 * sizeof out[0]);
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     out[0] = (uint32_t)heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
     out[1] = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     out[2] = (uint32_t)heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -1017,13 +1032,13 @@ static int b_df(void *ctx, const char *path, uint64_t *total, uint64_t *free) {
 
 static void b_reboot(void *ctx) {
     (void)ctx;
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     esp_restart();
 #endif
 }
 
 static void nap(int ms) {
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     vTaskDelay(pdMS_TO_TICKS(ms > 0 ? ms : 0));
 #else
     struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
@@ -1090,7 +1105,7 @@ struct moy_sh_runner {
     int (*poll)(void *ctx);             // the face's poll
     int live;                           // the task runs
     int inline_runs;                    // every run the caller's
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     TaskHandle_t task;
     SemaphoreHandle_t go, back;
 #else
@@ -1101,17 +1116,7 @@ struct moy_sh_runner {
 #endif
 };
 
-static uint32_t run_ms(void) {
-#ifdef MOY_SH_ON_BOARD
-    return (uint32_t)(esp_timer_get_time() / 1000);
-#else
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)(t.tv_sec * 1000 + t.tv_nsec / 1000000);
-#endif
-}
-
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
 static int on_run_task(const moy_sh_runner_t *r) {
     return r->live && xTaskGetCurrentTaskHandle() == r->task;
 }
@@ -1157,7 +1162,7 @@ static void run_main(moy_sh_runner_t *r) {
     }
 }
 
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
 static void run_task(void *arg) {
     moy_sh_runner_t *r = arg;
     xSemaphoreTake(r->go, portMAX_DELAY);
@@ -1190,14 +1195,11 @@ static int run_start(moy_sh_runner_t *r) {
     if (r->live) {
         return 0;
     }
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
     r->go = xSemaphoreCreateBinary();
     r->back = xSemaphoreCreateBinary();
     if (r->go == NULL || r->back == NULL
-            || xTaskCreatePinnedToCoreWithCaps(run_task, "moy_sh", RUN_STACK, r,
-                                               uxTaskPriorityGet(NULL), &r->task,
-                                               xPortGetCoreID(),
-                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+            || !moy_task_spawn(MOY_TASK_SH, run_task, r, &r->task)) {
         if (r->go != NULL) {
             vSemaphoreDelete(r->go);
         }
@@ -1232,7 +1234,7 @@ static void park(moy_sh_runner_t *r, int ms) {
     if (r->abort) {
         return;
     }
-    r->until = run_ms() + (uint32_t)(ms > 0 ? ms : 0);
+    r->until = (uint32_t)moy_now_ms() + (uint32_t)(ms > 0 ? ms : 0);
     r->state = R_PARKED;
     to_caller(r);
 }
@@ -1278,7 +1280,7 @@ static bool resume(void *arg) {
     if (r->state != R_PARKED) {
         return false;
     }
-    if (!r->abort && (int32_t)(run_ms() - r->until) < 0) {
+    if (!r->abort && (int32_t)((uint32_t)moy_now_ms() - r->until) < 0) {
         return true;
     }
     int k = turn(r);
@@ -1324,7 +1326,7 @@ int moy_sh_board_run(moy_sh_t *s, const char *text, size_t n) {
     int k = turn(r);
     if (k == MOY_SH_BUSY && !moy_loop_job(resume, r)) {
         while ((k = turn(r)) == MOY_SH_BUSY) {
-            int32_t left = (int32_t)(r->until - run_ms());
+            int32_t left = (int32_t)(r->until - (uint32_t)moy_now_ms());
             nap(left > 0 ? (int)left : 0);
         }
     }
@@ -1357,7 +1359,7 @@ void moy_sh_board_runner_end(moy_sh_runner_t *r) {
     }
     if (r->live && r->state != R_PARKED) {
         r->quit = 1;
-#ifdef MOY_SH_ON_BOARD
+#ifdef MOY_ON_BOARD
         to_run(r);
         vTaskDeleteWithCaps(r->task);
         vSemaphoreDelete(r->go);
@@ -1736,7 +1738,7 @@ size_t moy_sh_board_idle_bytes(void) {
     }
     const moy_sh_runner_t *r = f->runner;
     return sizeof *f + moy_sh_held(f->s)
-           + (r != NULL ? sizeof *r + (r->live ? RUN_STACK : 0u) : 0u);
+           + (r != NULL ? sizeof *r + (r->live ? MOY_SH_RUN_STACK : 0u) : 0u);
 }
 
 bool moy_sh_board_release(char *cwd, size_t cap) {

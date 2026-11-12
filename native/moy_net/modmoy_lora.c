@@ -14,12 +14,14 @@
 //   sim(on)   sim_sent() -> (bytes, freq, sf, bw, sync, iq, preamble) | None
 //   sim_air(buf, freq, sf, bw, sync, rssi, snr) -> bool   reset()
 
+#include "moy_platform.h"
+
 #include "py/runtime.h"
 
 #include "moy_lora.h"
 
 #if defined(__has_include)
-#if __has_include("moy_flush.h") && __has_include("esp_heap_caps.h")
+#if __has_include("moy_flush.h") && defined(MOY_ON_BOARD)
 #define LORA_GATE 1
 #include "moy_flush.h"
 #endif

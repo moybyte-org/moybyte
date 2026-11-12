@@ -1,15 +1,9 @@
 // moy_os: a native module's process and the OS table's rows (moy_os.h).
 
-// A board is told by its heap header: the esp32 port does not define
-// ESP_PLATFORM for a usermod's sources.
-#if __has_include("esp_heap_caps.h")
-#define MOY_OS_BOARD 1
-#endif
+#include "moy_platform.h"
 
-#ifndef MOY_OS_BOARD
-#define _POSIX_C_SOURCE 200809L
-#define _DEFAULT_SOURCE
-#endif
+#include "moy_kmem.h"
+#include "moy_tasks.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -35,7 +29,7 @@
 #include <netdb.h>
 #endif
 
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -68,48 +62,37 @@
 #endif
 
 // The sockets' stack: lwIP's calls on a board, the host's own.
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
 #define SK(f) lwip_##f
-int moy_net_link(uint32_t *ip) __attribute__((weak));
+#if __has_include("moy_net.h")
+#include "moy_net.h"
+#else
+int moy_net_link(uint32_t *ip);
+#endif
+#pragma weak moy_net_link
 #else
 #define SK(f) f
 #endif
 
 // The lease table's sweep, where the image has it.
-uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_sweep
 
 #define MAGIC 0x6d6f796fu
 
 // -- the platform: memory, clocks, semaphores, tasks, timers -------------------------
 
 static void *os_alloc(size_t n) {
-#ifdef MOY_OS_BOARD
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#else
-    return calloc(1, n);
-#endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 static void os_free(void *p) {
-#ifdef MOY_OS_BOARD
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    moy_kfree(p);
 }
 
-static int64_t mono_us(void) {
-#ifdef MOY_OS_BOARD
-    return esp_timer_get_time();
-#else
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
-#endif
-}
 
 typedef struct {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     SemaphoreHandle_t h;
     StaticSemaphore_t buf;
 #else
@@ -121,7 +104,7 @@ typedef struct {
 } sem_t_;
 
 static void sem_init(sem_t_ *s, bool mutex) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     s->h = mutex ? xSemaphoreCreateMutexStatic(&s->buf) : xSemaphoreCreateBinaryStatic(&s->buf);
 #else
     pthread_mutex_init(&s->m, NULL);
@@ -132,7 +115,7 @@ static void sem_init(sem_t_ *s, bool mutex) {
 }
 
 static void sem_fini(sem_t_ *s) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     vSemaphoreDelete(s->h);
 #else
     pthread_cond_destroy(&s->c);
@@ -141,7 +124,7 @@ static void sem_fini(sem_t_ *s) {
 }
 
 static void sem_give(sem_t_ *s) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     xSemaphoreGive(s->h);
 #else
     pthread_mutex_lock(&s->m);
@@ -153,7 +136,7 @@ static void sem_give(sem_t_ *s) {
 
 // Taken within `us` (<0: forever): true.
 static bool sem_take(sem_t_ *s, int64_t us) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     TickType_t t = us < 0 ? portMAX_DELAY : (TickType_t)((us + 999) / 1000 / portTICK_PERIOD_MS + 1);
     return xSemaphoreTake(s->h, t) == pdTRUE;
 #else
@@ -194,14 +177,14 @@ static void unlock(void) {
     sem_give(&g_lock);
 }
 
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
 typedef TaskHandle_t task_t;
 #else
 typedef pthread_t task_t;
 #endif
 
 static task_t task_self(void) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     return xTaskGetCurrentTaskHandle();
 #else
     return pthread_self();
@@ -211,7 +194,7 @@ static task_t task_self(void) {
 // The task watchdog fed for a task that waits on a module (a background
 // command's door): a no-op where the task is not watched.
 static void task_feed(void) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     if (esp_task_wdt_status(NULL) == ESP_OK) {
         esp_task_wdt_reset();
     }
@@ -219,7 +202,7 @@ static void task_feed(void) {
 }
 
 static bool task_is(task_t a, task_t b) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     return a == b;
 #else
     return pthread_equal(a, b);
@@ -250,7 +233,7 @@ typedef struct {
     void *arg;
     void *out;
     sem_t_ done;
-#ifndef MOY_OS_BOARD
+#ifndef MOY_ON_BOARD
     jmp_buf home;               // thr_main's frame, where an ending thread returns to
 #endif
 } thr_t;
@@ -450,7 +433,7 @@ static void thr_done(thr_t *t) {
 // Never pthread_exit: its unwinding walks the module's frames, whose code
 // and unwind tables the module's unload takes away.
 static void thr_end(thr_t *t) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     thr_done(t);
     for (;;) {
         vTaskSuspend(NULL);
@@ -515,7 +498,7 @@ static int mod_call(thr_t *t, int op, int argc, char **argv) {
     return p->mod.entry(&moy_os_table, op, argc, argv, NULL);
 }
 
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
 static void thr_main(void *arg)
 #else
 static void *thr_main(void *arg)
@@ -528,7 +511,7 @@ static void *thr_main(void *arg)
     lock();
     self_set(t);
     unlock();
-#ifndef MOY_OS_BOARD
+#ifndef MOY_ON_BOARD
     if (setjmp(t->home) != 0) {
         thr_done(t);
         return NULL;
@@ -577,7 +560,7 @@ static void *thr_main(void *arg)
         t->in_row = 1;
     }
     thr_end(t);
-#ifndef MOY_OS_BOARD
+#ifndef MOY_ON_BOARD
     return NULL;
 #endif
 }
@@ -716,13 +699,12 @@ static int thr_spawn(thr_t *t) {
     sem_init(&t->done, false);
     t->in_row = 1;              // thr_main's own code until the module's runs
     t->state = T_LIVE;
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     TaskHandle_t h = NULL;
     BaseType_t core = p->caps.core < 0 ? tskNO_AFFINITY : (BaseType_t)p->caps.core;
     // The record is LIVE before the task can run, so its first row finds it.
-    if (xTaskCreatePinnedToCoreWithCaps(thr_main, "moy_elf", p->caps.stack, t,
-                                        (UBaseType_t)p->caps.prio, &h, core,
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    if (!moy_task_spawn_as(MOY_TASK_ELF, NULL, p->caps.stack, (int)p->caps.prio, (int)core,
+                           thr_main, t, &h)) {
         t->state = T_FREE;
         sem_fini(&t->done);
 #ifdef MOY_OS_UMODE
@@ -753,7 +735,7 @@ static int thr_spawn(thr_t *t) {
 // A DONE thread's task deleted (a board) and its record freed.
 static void thr_reap(thr_t *t) {
     self_clear(t);
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     vTaskDeleteWithCaps(t->task);
 #endif
 #ifdef MOY_OS_UMODE
@@ -912,9 +894,9 @@ static void here_role(moy_os_proc_t *p, role_call_t *c) {
     lock();
     p->here++;
     unlock();
-    int64_t t0 = mono_us();
+    int64_t t0 = moy_now_us();
     c->r = moy_app_role_here(c->run->a, c->run->g, c->row, c->arg, c->n, c->out, c->cap);
-    int64_t took = mono_us() - t0;
+    int64_t took = moy_now_us() - t0;
     lock();
     p->here--;
     if (p->woke_us != 0) {
@@ -1121,7 +1103,7 @@ static void f_body(void *arg) {
     moy_sh_t *s = p->s;
     char abs[MOY_SH_PROG_PATH], abs2[MOY_SH_PROG_PATH];
     int e;
-    if (!moy_sh_prog_poll(&p->prog, mono_us())) {
+    if (!moy_sh_prog_poll(&p->prog, moy_now_us())) {
         p->ending = 1;
         c->r = -EINTR;
         return;
@@ -1680,13 +1662,13 @@ int moy_os_gettimeofday(struct timeval *tv, void *tz) {
 
 // Sleep `us` in slices, leaving early when the process ends: 0, or EINTR.
 static int doze(thr_t *t, int64_t us) {
-    int64_t end = mono_us() + us;
-    for (int64_t left = us; left > 0; left = end - mono_us()) {
+    int64_t end = moy_now_us() + us;
+    for (int64_t left = us; left > 0; left = end - moy_now_us()) {
         if (ending(t)) {
             return EINTR;
         }
         int64_t d = left < MOY_OS_SLICE_US ? left : MOY_OS_SLICE_US;
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
         vTaskDelay((TickType_t)((d + 999) / 1000 / portTICK_PERIOD_MS + 1));
 #else
         struct timespec ts = { (time_t)(d / 1000000), (long)(d % 1000000) * 1000 };
@@ -2063,7 +2045,12 @@ int moy_os_moy_present(const void *px, size_t n) {
 // The toolkit's theme as a block (moy_ui.h's moy_ui_theme_pull), which a copy
 // of the toolkit a module links installs; weak, so an image without the
 // toolkit answers none.
-uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) __attribute__((weak));
+#if __has_include("moy_ui.h")
+#include "moy_ui.h"
+#else
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap);
+#endif
+#pragma weak moy_ui_theme_pull
 
 uint32_t moy_os_moy_ui_pull(uint32_t have, void *buf, size_t cap) {
     thr_t *t = enter();
@@ -2074,8 +2061,12 @@ uint32_t moy_os_moy_ui_pull(uint32_t have, void *buf, size_t cap) {
 
 // A font the toolkit's theme names (moy_ui.h's moy_ui_theme_font): the bytes
 // a copy loads as its own.
-uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap)
-    __attribute__((weak));
+#if __has_include("moy_ui.h")
+#include "moy_ui.h"
+#else
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap);
+#endif
+#pragma weak moy_ui_theme_font
 
 uint32_t moy_os_moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap) {
     thr_t *t = enter();
@@ -2353,14 +2344,14 @@ static int net_need(thr_t *t) {
 
 // The network's link up, waited for MOY_OS_LINK_US at most: 0, or an errno.
 static int link_wait(thr_t *t) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     if (moy_net_link == NULL) {
         return 0;
     }
-    int64_t end = mono_us() + MOY_OS_LINK_US;
+    int64_t end = moy_now_us() + MOY_OS_LINK_US;
     uint32_t ip;
     while (!moy_net_link(&ip)) {
-        if (mono_us() >= end) {
+        if (moy_now_us() >= end) {
             return ENETUNREACH;
         }
         if (doze(t, MOY_OS_SLICE_US) != 0) {
@@ -2376,7 +2367,7 @@ static int link_wait(thr_t *t) {
 // For each of `n` stack sockets lfd[i], what of POLLIN and POLLOUT in want[i]
 // is ready, and POLLERR, after waiting `us` at most for any: how many are.
 static int sk_ready(const int *lfd, const short *want, short *got, int n, int64_t us) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     fd_set rs, ws, es;
     FD_ZERO(&rs);
     FD_ZERO(&ws);
@@ -2425,7 +2416,7 @@ static int sk_ready(const int *lfd, const short *want, short *got, int n, int64_
 // Wait for socket `slot` to be readable (or writable): 0, EAGAIN at `ms`
 // (0: no limit), EINTR when the process ends.
 static int sk_block(thr_t *t, const handle_t *h, bool wr, uint32_t ms) {
-    int64_t end = ms ? mono_us() + (int64_t)ms * 1000 : 0;
+    int64_t end = ms ? moy_now_us() + (int64_t)ms * 1000 : 0;
     int lfd = h->fd;
     for (;;) {
         if (ending(t)) {
@@ -2436,7 +2427,7 @@ static int sk_block(thr_t *t, const handle_t *h, bool wr, uint32_t ms) {
         }
         int64_t slice = MOY_OS_SLICE_US;
         if (end) {
-            int64_t left = end - mono_us();
+            int64_t left = end - moy_now_us();
             if (left <= 0) {
                 return EAGAIN;
             }
@@ -2455,7 +2446,7 @@ static bool would_block(int e) {
 
 // A stack socket made non-blocking and given a handle: its descriptor, or -1.
 static int sock_adopt(thr_t *t, int lfd, uint32_t flags) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     lwip_fcntl(lfd, F_SETFL, O_NONBLOCK);
 #else
     fcntl(lfd, F_SETFL, fcntl(lfd, F_GETFL, 0) | O_NONBLOCK);
@@ -2937,7 +2928,7 @@ void moy_os_freeaddrinfo(struct addrinfo *ai) {
 // file or stream of the session at once (its reads and writes never wait).
 static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
     moy_os_proc_t *p = t->p;
-    int64_t end = timeout_ms < 0 ? 0 : mono_us() + (int64_t)timeout_ms * 1000;
+    int64_t end = timeout_ms < 0 ? 0 : moy_now_us() + (int64_t)timeout_ms * 1000;
     int lfd[MOY_OS_HANDLES];
     short want[MOY_OS_HANDLES], got[MOY_OS_HANDLES];
     nfds_t at[MOY_OS_HANDLES];
@@ -2979,7 +2970,7 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
         if (ready == 0) {
             slice = MOY_OS_SLICE_US;
             if (end) {
-                int64_t left = end - mono_us();
+                int64_t left = end - moy_now_us();
                 slice = left <= 0 ? 0 : left < slice ? left : slice;
             }
         }
@@ -2997,7 +2988,7 @@ static int poll_in(thr_t *t, struct pollfd *fds, nfds_t n, int timeout_ms) {
         } else if (m == 0 && slice > 0 && doze(t, slice) != 0) {
             return -EINTR;
         }
-        if (ready > 0 || (end && mono_us() >= end) || timeout_ms == 0) {
+        if (ready > 0 || (end && moy_now_us() >= end) || timeout_ms == 0) {
             return ready;
         }
         if (ending(t)) {
@@ -3014,7 +3005,7 @@ static int wake_end(thr_t *t) {
     moy_os_proc_t *p = t->p;
     lock();
     p->polling = 1;
-    int64_t now = mono_us();
+    int64_t now = moy_now_us();
     int64_t cost = p->woke_us != 0 ? now - p->woke_us : 0;
     bool struck = p->struck != 0;
     p->struck = 0;
@@ -3060,7 +3051,7 @@ int moy_os_poll(struct pollfd *fds, nfds_t n, int timeout) {
         if (evq) {
             lock();
             t->p->wakes += r >= 0;
-            t->p->woke_us = mono_us();
+            t->p->woke_us = moy_now_us();
             t->p->polling = 0;
             unlock();
         }
@@ -3163,7 +3154,7 @@ void moy_os_default_caps(moy_os_caps_t *caps) {
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     caps->core = 1;
     caps->prio = 1;
-#elif defined(MOY_OS_BOARD)
+#elif defined(MOY_ON_BOARD)
     caps->core = 0;
     caps->prio = 2;
 #else
@@ -3289,14 +3280,14 @@ static bool proc_end(moy_os_proc_t *p) {
         moy_screen_slot_close(p->pid);  // a present waiting answers EINTR
     }
     sem_give(&p->hop_done);
-    int64_t end = mono_us() + MOY_OS_REAP_US;
+    int64_t end = moy_now_us() + MOY_OS_REAP_US;
     while (live_threads(p) > 0) {
         bool inside = false;
         for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
             inside |= p->thr[k].state == T_LIVE && p->thr[k].in_row > 0;
         }
         if (!inside) {
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
             // Every live thread is in the module's code: deleted there. Each
             // is held first and looked at again, held: one that has gone into
             // kernel code since is let go to leave at its row's end.
@@ -3327,7 +3318,7 @@ static bool proc_end(moy_os_proc_t *p) {
             continue;
 #endif
         }
-        if (mono_us() >= end) {
+        if (moy_now_us() >= end) {
             g_stats.leaked++;
             log_line(p, MOY_LOG_ERR, "a native thread would not end; its process is left running");
             return false;
@@ -3373,7 +3364,7 @@ static bool proc_end(moy_os_proc_t *p) {
         maps = m->next;
 #ifdef MOY_OS_UMODE
         u_scrub_free(m->mem);
-#elif defined(MOY_OS_BOARD)
+#elif defined(MOY_ON_BOARD)
         heap_caps_free(m->mem);
 #endif
         os_free(m);
@@ -3472,7 +3463,7 @@ int moy_os_command_start(moy_sh_t *s, const moy_os_module_t *m, const moy_os_cap
     }
     p->argv = os_alloc((size_t)(argc + 1) * sizeof(char *) + args_n);
     bool ok = p->argv != NULL
-              && moy_sh_prog_init(&p->prog, s, roots, bg_pid, budget_ms, mono_us(), os_alloc) == 0
+              && moy_sh_prog_init(&p->prog, s, roots, bg_pid, budget_ms, moy_now_us(), os_alloc) == 0
               && moy_sh_environ(s, env_add, p) == 0;
     if (ok && !(p->hooks & MOY_ELF_H_MAIN)) {
         snprintf(err, errlen, "not a command: it defines no main");
@@ -3537,7 +3528,7 @@ int moy_os_command_step(uint32_t pid, uint32_t max_us) {
     if (p == NULL || p->service) {
         return MOY_OS_REFUSED;
     }
-    if (moy_sh_prog_step(&p->prog, max_us, mono_us, command_done, command_serve, p)
+    if (moy_sh_prog_step(&p->prog, max_us, moy_now_us, command_done, command_serve, p)
         == MOY_SH_PROG_RUNNING) {
         return MOY_OS_RUNNING;
     }
@@ -3629,7 +3620,7 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
     }
     p->thr[0].p = p;
     p->thr[0].gen = 1;
-    p->started_us = mono_us();
+    p->started_us = moy_now_us();
     if (thr_spawn(&p->thr[0]) != 0) {
         snprintf(err, errlen, "no task for it");
         proc_end(p);
@@ -3790,7 +3781,7 @@ static bool watched(moy_os_proc_t *p, int64_t now) {
 
 bool moy_os_watch(void) {
     bool live = false;
-    int64_t now = mono_us();
+    int64_t now = moy_now_us();
     moy_os_proc_t *svc[MOY_OS_PROCS];
     uint32_t n = services(svc);
     for (uint32_t i = 0; i < n; i++) {
@@ -3808,7 +3799,7 @@ bool moy_os_watch(void) {
 
 uint32_t moy_os_reap(uint32_t *ended, int32_t *codes, uint32_t n) {
     uint32_t got = 0;
-    int64_t now = mono_us();
+    int64_t now = moy_now_us();
     moy_os_proc_t *svc[MOY_OS_PROCS];
     uint32_t m = services(svc);
     for (uint32_t i = 0; i < m; i++) {
@@ -3863,8 +3854,8 @@ static int loop_stop(moy_os_proc_t *p) {
         moy_screen_slot_close(pid);     // a present waiting answers EINTR
     }
     moy_evq_kick(pid);
-    int64_t end = mono_us() + MOY_OS_STOP_US;
-    while (!p->main_done && mono_us() < end) {
+    int64_t end = moy_now_us() + MOY_OS_STOP_US;
+    while (!p->main_done && moy_now_us() < end) {
         if (p->hopping) {
             moy_vmq_serve();            // its hop is this task's to run
         }
@@ -4091,7 +4082,7 @@ void moy_os_stats(moy_os_stats_t *out) {
 
 uint32_t moy_os_stack_low(void) {
     uint32_t low = UINT32_MAX;
-#ifdef MOY_OS_BOARD
+#ifdef MOY_ON_BOARD
     lock();
     for (uint32_t i = 0; i < MOY_OS_PROCS; i++) {
         moy_os_proc_t *p = g_proc[i];

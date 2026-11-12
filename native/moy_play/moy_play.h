@@ -260,7 +260,7 @@ uint8_t moy_play_stop_fit(uint64_t total, uint64_t block, uint64_t free_, uint64
 // keeps the VM (KEEP_LEVER). `fit` gets the fit check's reading with the VM
 // up when the verdict reached it (moy_play_info_t's `fit`).
 uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32_t flags,
-                              uint32_t fit[5]) __attribute__((weak));
+                              uint32_t fit[5]);
 // The live run's folder and launch flags (the stopped run's load reads them).
 const char *moy_play_path(void);
 uint32_t moy_play_flags(void);
@@ -457,7 +457,7 @@ bool moy_play_panel_up(void);
 // "null" with neither. The bytes written.
 size_t moy_play_state_json(char *out, size_t n);
 // A Ctrl-C is waiting for the VM (the board's: weak, none elsewhere).
-bool moy_play_interrupt_pending(void) __attribute__((weak));
+bool moy_play_interrupt_pending(void);
 // The map's rows this image has: lua and wasm where moycore and its engine
 // are built, python where a VM registers it.
 void moy_play_rows(bool lua, bool wasm, bool python);
@@ -472,5 +472,11 @@ int moy_play_census_line(const moy_cat_entry_t *e, char *out, size_t n);
 // by an import reads "<runtime> vm import moybyte.app.<name>".
 int moy_play_census_line_at(const char *path, const moy_cat_entry_t *e, char *out,
                             size_t n);
+
+// The kernel's VM stop (moy_play_stop.c): the run a stop was for, ended with
+// no VM; a stop forced for every run (the dev channel's), and whether it is.
+void moy_play_stopped_run(void);
+void moy_play_stop_force(bool on);
+bool moy_play_stop_forced(void);
 
 #endif // MOY_PLAY_H

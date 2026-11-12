@@ -17,6 +17,7 @@ from runtime import net_binding as moy_net
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NET = os.path.join(ROOT, "native", "moy_net")
 SPINE = os.path.join(ROOT, "native", "moy_spine")
+KERNEL = os.path.join(os.path.dirname(NET), "moy_kernel")
 
 
 def test_an_empty_password_resolves_to_the_stored_one():
@@ -80,7 +81,7 @@ def test_the_fuzz_walk_holds_under_the_sanitizers(tmp_path):
     exe = str(tmp_path / "fuzz_net")
     build = subprocess.run(
         [cc, "-std=c99", "-g", "-O1", "-fsanitize=address,undefined",
-         "-fno-sanitize-recover=all", "-I", NET, "-I", SPINE,
+         "-fno-sanitize-recover=all", "-I", NET, "-I", SPINE, "-I", KERNEL,
          os.path.join(NET, "fuzz_net.c"), os.path.join(NET, "moy_http.c"),
          os.path.join(NET, "moy_sync.c"),
          os.path.join(NET, "moy_link.c"), os.path.join(NET, "moy_ota.c"),

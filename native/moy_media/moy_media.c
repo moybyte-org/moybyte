@@ -1,5 +1,7 @@
 // moy_media: the media service (moy_media.h has the contract).
 
+#include "moy_kmem.h"
+
 #include "moy_media.h"
 #include "moy_lease.h"
 
@@ -17,19 +19,12 @@
 
 // The frame's jobs (native/moy_kernel/moy_loop.h); weak, for an image or a
 // harness without the loop: open() then refuses (-ENODEV).
-bool moy_loop_job(bool (*fn)(void *), void *arg) __attribute__((weak));
-void moy_loop_job_drop(bool (*fn)(void *), void *arg) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_job
+#pragma weak moy_loop_job_drop
 // The kernel's notification queue (moy_notes.h); weak, for an image without it.
-int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_t bn)
-    __attribute__((weak));
+#pragma weak moy_notes_system
 
-#if defined(__has_include)
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if __has_include("esp_heap_caps.h")
-#define MEDIA_BOARD 1
-#endif
-#endif
 
 // MOY_MEDIA_CLIENT 0: the image has no HTTP client (the browser's), so a
 // URL's bytes are fed as a file's are, by the face from the page's fetch.
@@ -38,7 +33,7 @@ int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_
 #ifndef MOY_MEDIA_CLIENT
 #define MOY_MEDIA_CLIENT 1
 #endif
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
 #undef MOY_MEDIA_MIX
 #define MOY_MEDIA_MIX 1
 #endif
@@ -53,7 +48,7 @@ int32_t moy_notes_system(const char *summary, size_t sn, const char *body, size_
 #if MOY_MEDIA_MIX
 #include "moy_aud.h"
 #endif
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -179,14 +174,11 @@ typedef struct {
     char meta[META_MAX + 1];
     char url[MOY_MEDIA_SRC_MAX];
 
-#ifdef MEDIA_BOARD
-    StaticSemaphore_t mtx_buf;
-    SemaphoreHandle_t mtx;
+    moy_mutex_t mtx;                    // a client's task beside the frame's job
+#ifdef MOY_ON_BOARD
     TaskHandle_t task;
     StaticTask_t *tcb;                  // internal, as a TCB must be
     StackType_t *stack;                 // MOY_MEDIA_STACK, internal SRAM where open() could take it
-#elif !defined(__EMSCRIPTEN__)
-    pthread_mutex_t mtx;                // a client's task beside the frame's job
 #endif
 } media_t;
 
@@ -196,69 +188,41 @@ static moy_media_end_t s_end;           // the last run's end
 static int copy_text(const char *s, char *out, size_t cap);
 static moy_input_t *s_keys_t;           // the table the media keys come on; NULL the kernel's
 
-#ifdef MEDIA_BOARD
-#define LOCK(m) xSemaphoreTake((m)->mtx, portMAX_DELAY)
-#define UNLOCK(m) xSemaphoreGive((m)->mtx)
+#define LOCK(m) moy_mutex_lock(&(m)->mtx)
+#define UNLOCK(m) moy_mutex_unlock(&(m)->mtx)
+#ifdef MOY_ON_BOARD
 #define WAKE(m) xTaskNotifyGive((m)->task)
-#elif !defined(__EMSCRIPTEN__)
-#define LOCK(m) pthread_mutex_lock(&(m)->mtx)
-#define UNLOCK(m) pthread_mutex_unlock(&(m)->mtx)
-#define WAKE(m) ((void)(m))
 #else
-#define LOCK(m) ((void)(m))
-#define UNLOCK(m) ((void)(m))
 #define WAKE(m) ((void)(m))
 #endif
 
 // The service's life: a teardown (close) and
 // the frame's job run one at a time, so a teardown on any task frees nothing
-// the job reads. The gate is made by the first open and never freed: with no
-// gate there has been no service.
-#ifdef MEDIA_BOARD
-static StaticSemaphore_t s_life_buf;
-static SemaphoreHandle_t s_life;
-#define LIFE_LOCK() ((void)(s_life != NULL && xSemaphoreTake(s_life, portMAX_DELAY)))
-#define LIFE_UNLOCK() ((void)(s_life != NULL && xSemaphoreGive(s_life)))
-#define LIFE_MAKE() ((void)(s_life == NULL && (s_life = xSemaphoreCreateMutexStatic(&s_life_buf)) != NULL))
-#elif !defined(__EMSCRIPTEN__)
-static pthread_mutex_t s_life = PTHREAD_MUTEX_INITIALIZER;
-#define LIFE_LOCK() pthread_mutex_lock(&s_life)
-#define LIFE_UNLOCK() pthread_mutex_unlock(&s_life)
-#define LIFE_MAKE() ((void)0)
-#else
-#define LIFE_LOCK() ((void)0)
-#define LIFE_UNLOCK() ((void)0)
-#define LIFE_MAKE() ((void)0)
-#endif
+// the job reads.
+static moy_mutex_t s_life = MOY_MUTEX_INIT;
+#define LIFE_LOCK() moy_mutex_lock(&s_life)
+#define LIFE_UNLOCK() moy_mutex_unlock(&s_life)
 
 #define LOAD(p) __atomic_load_n((p), __ATOMIC_ACQUIRE)
 #define STORE(p, v) __atomic_store_n((p), (v), __ATOMIC_RELEASE)
 
 static void *block_alloc(size_t n) {
-#ifdef MEDIA_BOARD
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#else
-    return calloc(1, n);
-#endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 static void block_free(void *p) {
-#ifdef MEDIA_BOARD
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    moy_kfree(p);
 }
 
 // `n` zeroed bytes of internal SRAM, counted in the run's `sram`, where the heap
 // keeps MOY_MEDIA_SRAM_FLOOR free beside them; NULL where it cannot (the
 // caller takes PSRAM) and on a build with no board heap.
 static void *sram_take(media_t *m, size_t n) {
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < n + MOY_MEDIA_SRAM_FLOOR) {
         return NULL;
     }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    void *p = moy_kalloc(n, MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
     if (p != NULL) {
         m->sram += (uint32_t)n;
     }
@@ -280,7 +244,7 @@ uint32_t moy_media_share(void) {
     if (m != NULL) {
         return m->share;
     }
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
     return share_of(moy_aud_out_channels());
 #else
     return share_of(1);
@@ -288,7 +252,7 @@ uint32_t moy_media_share(void) {
 }
 
 int moy_media_present(void) {
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
     int st = moy_aud_out_state(NULL);
     return st != MOY_AUD_OUT_FAILED && st != MOY_AUD_OUT_ABSENT;
 #else
@@ -980,7 +944,12 @@ int moy_media_stat(const char *path) {
 }
 
 #if MOY_MEDIA_CLIENT
-int moy_fetch_tls(void) __attribute__((weak));
+#if __has_include("moy_fetch.h")
+#include "moy_fetch.h"
+#else
+int moy_fetch_tls(void);
+#endif
+#pragma weak moy_fetch_tls
 #endif
 
 int moy_media_tls(void) {
@@ -1793,13 +1762,13 @@ static int decode_one(media_t *m) {
         return 0;
     }
     mp3dec_frame_info_t info;
-#ifdef MEDIA_BOARD
-    int64_t t0 = esp_timer_get_time();
+#ifdef MOY_ON_BOARD
+    int64_t t0 = moy_now_us();
 #endif
     int s = mp3dec_decode_frame(m->dec, w, (int)m->win_n, m->pcm, &info);
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
     if (s > 0) {
-        m->dec_sum += (uint32_t)(esp_timer_get_time() - t0);
+        m->dec_sum += (uint32_t)(moy_now_us() - t0);
         if (++m->dec_n == MOY_MEDIA_METER_FRAMES) {
             STORE(&m->dec_us, m->dec_sum / MOY_MEDIA_METER_FRAMES);
             m->dec_n = 0;
@@ -2096,7 +2065,7 @@ static bool pump_gated(void) {
     }
     keys_answer(m);
     file_pump(m);
-#ifndef MEDIA_BOARD
+#ifndef MOY_ON_BOARD
     for (int i = 0; i < 4 && moy_media_run(); i++) {
         file_pump(m);
     }
@@ -2186,7 +2155,7 @@ int moy_media_probe(const char *path, moy_media_probe_t *out) {
     return -rc;
 }
 
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
 static void task(void *arg) {
     media_t *m = arg;
     for (;;) {
@@ -2266,10 +2235,11 @@ static int media_open(uint32_t pid, int rate, int channels) {
     m->state = MOY_MEDIA_IDLE;
     m->seek_req = NO_SEEK;
     m->keys_r = -1;
-#ifdef MEDIA_BOARD
+    moy_mutex_init(&m->mtx, false);
+#ifdef MOY_ON_BOARD
     m->stack = sram_take(m, MOY_MEDIA_STACK);
     if (m->stack == NULL) {
-        m->stack = heap_caps_malloc(MOY_MEDIA_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        m->stack = moy_kalloc(MOY_MEDIA_STACK, MOY_KMEM_PSRAM);
     }
 #endif
     m->dec = sram_take(m, sizeof(mp3dec_t));
@@ -2277,44 +2247,39 @@ static int media_open(uint32_t pid, int rate, int channels) {
         m->dec = block_alloc(sizeof(mp3dec_t));
     }
     if (m->dec == NULL) {
-#ifdef MEDIA_BOARD
-        heap_caps_free(m->stack);
+#ifdef MOY_ON_BOARD
+        moy_kfree(m->stack);
 #endif
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
     mp3dec_init(m->dec);
-    LIFE_MAKE();
     if (moy_loop_job == NULL || !moy_loop_job(media_job, NULL)) {
-#ifdef MEDIA_BOARD
-        heap_caps_free(m->stack);
+#ifdef MOY_ON_BOARD
+        moy_kfree(m->stack);
 #endif
         block_free(m->dec);
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
         return moy_loop_job == NULL ? -MOY_MEDIA_ENODEV : -MOY_MEDIA_EBUSY;
     }
-#ifdef MEDIA_BOARD
-    m->mtx = xSemaphoreCreateMutexStatic(&m->mtx_buf);
-    m->tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#ifdef MOY_ON_BOARD
+    m->tcb = moy_kalloc(sizeof(StaticTask_t), MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
     if (m->tcb != NULL && m->stack != NULL) {
-        m->task = xTaskCreateStaticPinnedToCore(task, "moy_media", MOY_MEDIA_STACK / sizeof(StackType_t),
-                                                m, MOY_MEDIA_PRIO, m->stack, m->tcb, 0);
+        m->task = moy_task_spawn_static(MOY_TASK_MEDIA, task, m, m->stack, m->tcb);
     }
-    if (m->mtx == NULL || m->task == NULL) {
+    if (m->task == NULL) {
         if (moy_loop_job_drop != NULL) {
             moy_loop_job_drop(media_job, NULL);
         }
-        heap_caps_free(m->tcb);
-        heap_caps_free(m->stack);
+        moy_kfree(m->tcb);
+        moy_kfree(m->stack);
         block_free(m->dec);
         block_free(m);
         moy_share_give(MOY_SHARE_MEDIA, share);
         return -MOY_MEDIA_ENOMEM;
     }
-#elif !defined(__EMSCRIPTEN__)
-    pthread_mutex_init(&m->mtx, NULL);
 #endif
     // the row counts PSRAM: what internal SRAM holds goes back to it
     moy_share_give(MOY_SHARE_MEDIA, m->sram);
@@ -2331,7 +2296,7 @@ static int media_open(uint32_t pid, int rate, int channels) {
     return 0;
 }
 
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
 // The task ended and its memory freed. Suspended first, and deleted once core 0
 // has switched away from it, so the delete is immediate and nothing defers a
 // touch of the TCB to the idle task (vTaskDeleteWithCaps does the same with
@@ -2372,12 +2337,10 @@ static bool unlink_run(media_t *m) {
 // MEDIA row, the lease and the radio's "media" row. The station itself is
 // powered down by the console at its next release (moy_lease.h, THE RADIO).
 static void reap(media_t *m) {
-#ifdef MEDIA_BOARD
+#ifdef MOY_ON_BOARD
     task_end(m);                        // idle: it waits on its notification and holds nothing
-    vSemaphoreDelete(m->mtx);
-#elif !defined(__EMSCRIPTEN__)
-    pthread_mutex_destroy(&m->mtx);
 #endif
+    moy_mutex_destroy(&m->mtx);
     uint32_t share = m->share, pid = m->pid;
     s_end.runs++;
     s_end.pid = pid;
@@ -2482,7 +2445,7 @@ static bool end_check(media_t *m) {
             return false;
         }
     }
-#ifndef MEDIA_BOARD
+#ifndef MOY_ON_BOARD
     if (!m->idle) {
         moy_media_run();
     }

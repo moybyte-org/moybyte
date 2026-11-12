@@ -122,19 +122,14 @@
 #ifndef MOY_INPUT_H
 #define MOY_INPUT_H
 
+#include "moy_platform.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "moy_event.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define MOY_INPUT_BOARD 1
-#endif
-#endif
 
 #define MOY_INPUT_BUTTONS 16u
 #define MOY_INPUT_HOST_BUTTONS 8u
@@ -174,7 +169,7 @@
 #ifndef MOY_INPUT_ISR_IRAM
 #define MOY_INPUT_ISR_IRAM 0
 #endif
-#if defined(MOY_INPUT_BOARD) && MOY_INPUT_ISR_IRAM
+#if defined(MOY_ON_BOARD) && MOY_INPUT_ISR_IRAM
 #include "esp_attr.h"
 #define MOY_INPUT_ISR_TEXT IRAM_ATTR
 #else
@@ -458,5 +453,20 @@ void moy_input_ptr_tick(moy_input_ptr_t *p, uint32_t now);
 // down. Returns MOY_INPUT_P_HELD while down, with MOY_INPUT_P_CLICK on its
 // press edge; 0, and the pointer untouched, when no source has a sample.
 int moy_input_ptr_apply(const moy_input_t *t, moy_input_ptr_t *p, uint32_t now);
+
+// The loop's input stages (modmoy_input.c, over what moy_input.loop_bind
+// bound; moy_loop_board.c calls them): the inputs a frame merges, the
+// pointer's, a tap fed in, the tail after present; and the kernel's table
+// made fresh for a new VM.
+void moy_input_loop_inputs(uint32_t now, bool *click, bool *active);
+void moy_input_loop_pointer(uint32_t now, bool click, bool swallow);
+void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge);
+void moy_input_loop_tail(void);
+void moy_input_vm_fresh(void);
+
+#ifdef MICROPY_INCLUDED_PY_OBJ_H
+// The cursor a Pointer holds, or NULL for another object (modmoy_input.c).
+moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o);
+#endif
 
 #endif // MOY_INPUT_H

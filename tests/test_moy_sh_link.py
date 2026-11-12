@@ -24,7 +24,8 @@ def test_the_remote_app_s_grid_and_messages(tmp_path):
                                           "host/link_main.c")] + [os.path.join(ROOT, "native", "moy_ui", "moy_ui_tables.c")]
     subprocess.run([shutil.which("cc"), "-std=gnu99", "-g", "-O1", "-Wall", "-Werror",
                     "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
-                    "-DMOY_SH_LINK=1", "-I", SH, "-o", exe] + srcs, check=True)
+                    "-DMOY_SH_LINK=1", "-I", SH, "-I", os.path.join(ROOT, "native", "moy_kernel"),
+                    "-o", exe] + srcs, check=True)
     out = subprocess.run([exe], check=True, capture_output=True, text=True,
                          env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1")).stdout
     if os.environ.get("MOYBYTE_UPDATE_GOLDENS"):

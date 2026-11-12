@@ -59,7 +59,12 @@
 // -- helpers -----------------------------------------------------------------
 
 // The kernel's Player, where the image has it (weak: moycore stands alone).
-bool moy_play_lock_seed(uint32_t *seed) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_lock_seed(uint32_t *seed);
+#endif
+#pragma weak moy_play_lock_seed
 
 void *moycore_buf_w(mp_obj_t o, size_t *len)
 {
@@ -924,7 +929,8 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
 
 // The kernel's stop (native/moy_kernel): nonzero while the VM goes for a VM
 // stop rather than a soft reset. Weak, for an image without the stop.
-int moy_kernel_stop_pending(void) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_stop_pending
 
 // The VM is going (native/moy_kernel's soft reset, a VM stop's included): a
 // run still open closes with it, while its objects are still the VM's; the
@@ -1125,7 +1131,7 @@ static mp_obj_t mod_sram_report(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_sram_report_obj, mod_sram_report);
 
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
 // sram_sim(bytes) -- arm the host's simulated internal-SRAM region, 0 to
 // disarm; returns what is armed. The board reads that figure from the heap and
 // this file is the only place the floor arithmetic lives, so this is how the
@@ -1309,7 +1315,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_sram_sim),    MP_ROM_PTR(&mod_sram_sim_obj) },
 #endif
     { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },

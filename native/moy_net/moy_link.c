@@ -1,5 +1,7 @@
 // The radio link's owner (moy_link.h).
 
+#include "moy_kmem.h"
+
 #include "moy_link.h"
 
 // The radio half; the ring is moy_link.h's, inline, so a build that compiles
@@ -36,7 +38,7 @@ int moy_link_start(uint32_t rxbuf) {
         return ESP_OK;
     }
     if (s_ring.buf == NULL || s_ring.cap != rxbuf) {
-        uint8_t *buf = heap_caps_malloc(rxbuf, MALLOC_CAP_SPIRAM);
+        uint8_t *buf = moy_kalloc(rxbuf, MOY_KMEM_PSRAM);
         if (buf == NULL) {
             return ESP_ERR_NO_MEM;
         }

@@ -12,6 +12,7 @@
 #include "gened25519.h"
 #include "dbmalloc.h"
 
+#include "moy_kmem.h"
 #include "moy_seal.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
@@ -63,9 +64,9 @@ typedef union {
 
 static void *raw_alloc(size_t n) {
 #ifdef ESP_PLATFORM
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 #else
-    return calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_ZERO);
 #endif
 }
 

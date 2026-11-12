@@ -1,14 +1,13 @@
 // The RUN face of the public UI API and its wasm rows (moy_ui_wasm.h).
 
+#include "moy_platform.h"
+
 #include <stdlib.h>
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define CTX_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#define CTX_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define CTX_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 #include "moy.h"
 #include "moy_canvas.h"
@@ -28,7 +27,7 @@ static uint32_t s_gen, s_gen_serial;
 
 // A compiled run's draw target: the module that drives a compiled run's (a
 // library with no compiled run answers none).
-void *moycore_ui_target(void) __attribute__((weak));
+#pragma weak moycore_ui_target
 
 static void *wasm_target(void) {
     return moycore_ui_target != NULL ? moycore_ui_target() : NULL;
@@ -37,8 +36,12 @@ static void *wasm_target(void) {
 // The live theme's token row and its name, copied when the generation differs
 // from `have`: native/moy_app/moy_app_wasm.c's. Answers the generation, 0
 // while no run is bound; weak, so an image without the app ABI draws no rows.
-uint32_t moy_app_wasm_theme(int32_t out[MOY_UI_TOKENS], uint32_t have, char *name,
-                            uint32_t cap) __attribute__((weak));
+#if __has_include("moy_app_wasm.h")
+#include "moy_app_wasm.h"
+#else
+uint32_t moy_app_wasm_theme(int32_t *out, uint32_t have, char *name, uint32_t cap);
+#endif
+#pragma weak moy_app_wasm_theme
 
 // What every drawing row opens with: the RUN sink over the run's target, lent
 // as `row`, the look current, the run's draw state saved in `saved` and reset.

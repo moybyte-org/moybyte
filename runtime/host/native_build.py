@@ -62,6 +62,24 @@ ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 # T-Deck's native tree, which is its canonical home for the boards too.
 LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
 
+# The platform layer every native module includes (native/moy_kernel/
+# moy_platform.h) and the kernel's headers, whose optional symbols a module
+# names weakly: beside every build's sources, whichever parts it has.
+PLATFORM = tuple(os.path.join(ROOT, "native", "moy_kernel", n) for n in (
+    "moy_platform.h", "moy_kmem.h", "moy_tasks.h", "moy_kernel.h", "moy_crash.h"))
+PLATFORM_DIR = os.path.join(ROOT, "native", "moy_kernel")
+
+
+def with_platform(sources):
+    """{filename: text}: `sources` and the platform headers."""
+    out = dict(sources)
+    for path in PLATFORM:
+        name = os.path.basename(path)
+        if name not in out:
+            with open(path) as fh:
+                out[name] = fh.read()
+    return out
+
 # -O2, and NOT -O3: these have to agree with the conformance goldens pixel for
 # pixel, and the raster is integer throughout, so there is nothing a more
 # aggressive optimizer could win that would be worth re-arguing conformance
@@ -313,6 +331,7 @@ def _compile(compiler, name, sources, units, cache_dir, cflags, link_flags, verb
     """The cached library for `sources`: each unit compiled to an object on
     its own thread, then one link. A library of a hundred units (the host's
     one library) builds in the time of its slowest few, not their sum."""
+    sources = with_platform(sources)
     so_path = os.path.join(
         cache_dir,
         "%s-%s.so" % (name, cache_key(compiler, sources, cflags + link_flags)))

@@ -6,17 +6,14 @@
 #ifndef MOY_UI_API_INT_H
 #define MOY_UI_API_INT_H
 
+#include "moy_platform.h"
+
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define KEPT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#define KEPT_FREE(p) heap_caps_free(p)
-#else
-#include <stdlib.h>
-#define KEPT_ALLOC(n) malloc(n)
-#define KEPT_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define KEPT_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
+#define KEPT_FREE(p) moy_kfree(p)
 
 #include "moy_ui_api.h"
 #include "moy_canvas.h"

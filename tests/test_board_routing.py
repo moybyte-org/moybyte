@@ -863,11 +863,14 @@ def test_the_feeder_task_is_pinned_lazy_and_chunked():
     out = (NATIVE / "moy_audio" / "moy_aud_out.c").read_text(encoding="utf-8")
     aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
-    assert "xTaskCreatePinnedToCore(feeder" in out
-    assert "&s_task, MOY_AUDIO_CORE)" in out    # the core, the last argument
-    assert "#define MOY_AUDIO_CORE 1\n" in out
+    tasks = (NATIVE / "moy_kernel" / "moy_tasks.h").read_text(encoding="utf-8")
+
+    assert "moy_task_spawn_as(MOY_TASK_AUDIO, NULL, 4096 + OUT_SAMPLES * 2" in out
+    # The table's row: its priority and the core, unless the board names one.
+    assert 'X(AUDIO, "moy_audio", MOY_TASK_GIVEN, MOY_AUDIO_PRIO, MOY_AUDIO_CORE, 0)' in tasks
+    assert "#define MOY_AUDIO_CORE 1 " in tasks
     # Under the esp_timer task where the two share a core.
-    assert "#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)" in out
+    assert "#define MOY_AUDIO_PRIO (ESP_TASK_TIMER_PRIO - 1)" in tasks
     for board in ("esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
                   "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
         h = (Path("firmware") / board / "mpconfigboard.h").read_text(encoding="utf-8")

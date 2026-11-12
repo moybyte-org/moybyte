@@ -17,8 +17,8 @@
 #include "moy_net.h"
 #include "moy_seal.h"
 
-extern int moy_net_link(uint32_t *ip) __attribute__((weak));
-extern int moy_wifi_connect_kept(void) __attribute__((weak));
+#pragma weak moy_net_link
+#pragma weak moy_wifi_connect_kept
 
 typedef struct {
     moy_wc_state_t st;

@@ -1,13 +1,8 @@
 // The app ABI's wasm import adapter (moy_app_wasm.h has the contract).
 
-#if defined(__has_include)
-#if __has_include("esp_timer.h")
-#define MOY_APP_WASM_ESP 1
-#endif
-#endif
-#if !defined(MOY_APP_WASM_ESP) && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200112L
-#endif
+#include "moy_kmem.h"
+
+#include "moy_platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,24 +10,12 @@
 
 #include "moy_app_wasm.h"
 
-#if defined(MOY_APP_WASM_ESP)
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-static uint32_t now_us(void) {
-    return (uint32_t)esp_timer_get_time();
-}
+#ifdef MOY_ON_BOARD
 static void yield(void) {
     vTaskDelay(1);
 }
 #else
 #include <sched.h>
-#include <time.h>
-static uint32_t now_us(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)((uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u);
-}
 static void yield(void) {
     sched_yield();
 }
@@ -40,7 +23,12 @@ static void yield(void) {
 
 // The engine's hop to the VM's task (native/moy_wasm/moy_wasm_session.h):
 // weak, so an image or a host with no session thread calls the row in place.
-int moy_wasm_on_vm(void (*fn)(void *arg), void *arg) __attribute__((weak));
+#if __has_include("moy_wasm_session.h") && __has_include("wasm_export.h")
+#include "moy_wasm_session.h"
+#else
+int moy_wasm_on_vm(void (*fn)(void *arg), void *arg);
+#endif
+#pragma weak moy_wasm_on_vm
 
 // How a native's row runs: hopped to the VM's task, read in place under the
 // seqlock, or run in place over state that locks itself (a row that answers
@@ -63,15 +51,14 @@ void moy_app_wasm_forget(const moy_appabi_t *a) {
 }
 
 // The run the engine's handle on a call is for: the engine glue's.
-const moy_app_run_t *moy_app_wasm_run_of(void *e) __attribute__((weak));
+#pragma weak moy_app_wasm_run_of
 
 static const moy_app_run_t *run_of(void *e) {
     const moy_app_run_t *r = moy_app_wasm_run_of != NULL ? moy_app_wasm_run_of(e) : NULL;
     return moy_app_run_live(r) ? r : NULL;
 }
 
-uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
-                            uint32_t cap) {
+uint32_t moy_app_wasm_theme(int32_t *out, uint32_t have, char *name, uint32_t cap) {
     moy_appabi_t *a = s_live;
     if (a == NULL) {
         return 0u;
@@ -121,9 +108,9 @@ typedef struct {
 
 static void hop_fn(void *p) {
     hop_t *h = p;
-    uint32_t t0 = now_us();
+    uint32_t t0 = (uint32_t)moy_now_us();
     h->r = moy_app_role(h->a, h->g, h->row, h->arg, h->n, h->ans, h->cap);
-    h->work_us = now_us() - t0;
+    h->work_us = (uint32_t)moy_now_us() - t0;
 }
 
 static void le32(uint8_t *q, uint32_t v) {
@@ -151,7 +138,7 @@ static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *
     for (int i = 0; i < nf; i++) {
         n += 4u + f[i].n;
     }
-    uint8_t *buf = n <= sizeof stack ? stack : malloc(n);
+    uint8_t *buf = n <= sizeof stack ? stack : moy_kalloc(n, MOY_KMEM_LIBC);
     if (buf == NULL) {
         return -MOY_APP_NOMEM;
     }
@@ -186,11 +173,11 @@ static int32_t run(void *e, int how, int row, const span_t *f, int nf, uint8_t *
         r = moy_app_role(a, g, (uint32_t)row, buf, n, ans, cap);
     } else {
         hop_t h = { a, g, (uint32_t)row, buf, n, ans, cap, -MOY_APP_NEEDS_VM, 0u };
-        uint32_t t0 = now_us();
+        uint32_t t0 = (uint32_t)moy_now_us();
         if (moy_wasm_on_vm(hop_fn, &h) != 0) {
             h.r = -MOY_APP_NEEDS_VM;
         }
-        s_hop_us += now_us() - t0;
+        s_hop_us += (uint32_t)moy_now_us() - t0;
         s_hop_work_us += h.work_us;
         s_hops++;
         r = h.r;

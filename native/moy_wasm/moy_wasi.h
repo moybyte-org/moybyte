@@ -210,4 +210,7 @@ int moy_wasi_service_status(const moy_wasi_t *w, int main, const char *err);
 // wrapping).
 void moy_wasi_figures(const moy_wasi_t *w, uint32_t *mapped, uint32_t *cost_us);
 
+// Every compiled service ended with the VM (modmoy_wasm.c).
+void moy_wasm_services_end(void);
+
 #endif // MOY_WASI_H

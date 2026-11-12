@@ -2,15 +2,15 @@
 // native/moy_net's ESP-NOW ring where the image has the link (MOY_NET_LINK),
 // and none anywhere else. This file defines only that.
 
+#include "moy_platform.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
 #include "moy_match.h"
 
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+#ifdef MOY_ON_BOARD
 #include "py/mpconfig.h"
-#endif
 #endif
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK

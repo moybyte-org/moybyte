@@ -1,8 +1,6 @@
 // The bar's status items (moy_status.h has the contract).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_platform.h"
 
 #include "moy_status.h"
 

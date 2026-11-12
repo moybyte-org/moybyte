@@ -97,6 +97,7 @@
 #include "moy_fs.h"
 #include "moy_json.h"
 #include "moy_net.h"
+#pragma weak moy_gpio_pins
 #include "moy_vol.h"
 #include "moy_webauth.h"
 
@@ -105,19 +106,28 @@
 #if __has_include("moy_web_blob.h")
 #include "moy_web_blob.h"
 #define HAVE_BUNDLE 1
-extern const moy_web_asset_t moy_web_assets[] __attribute__((weak));
-extern const unsigned int moy_web_asset_count __attribute__((weak));
-extern const char moy_web_stamp[] __attribute__((weak));
+#pragma weak moy_web_assets
+#pragma weak moy_web_asset_count
+#pragma weak moy_web_stamp
 #else
 #define HAVE_BUNDLE 0
 #endif
-extern bool moy_flush_drain(void) __attribute__((weak));
+#if __has_include("moy_flush.h")
+#include "moy_flush.h"
+#else
+bool moy_flush_drain(void);
+#endif
+#pragma weak moy_flush_drain
 // The web terminal's bridge (native/moy_tty/moy_tty_ws.c), where the image
 // takes it: 0 when it took the upgraded socket, else nonzero (busy, memory).
 // `seal` is the session's (its keys and the upgrade's sequence number), or
 // NULL on the open host.
-extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
-    __attribute__((weak));
+#if __has_include("moy_tty.h")
+#include "moy_tty.h"
+#else
+int moy_web_term(int fd, int cols, int rows, const struct moy_wa_seal *seal);
+#endif
+#pragma weak moy_web_term
 
 #define CHUNK_MIN 8192
 #define CHUNK_HEAD 8

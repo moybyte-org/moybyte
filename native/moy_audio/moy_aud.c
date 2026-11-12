@@ -7,6 +7,8 @@
 // the lock. What the feeder reads -- the focused row's synth and sample voices,
 // the console level, the stream -- changes only under the lock.
 
+#include "moy_kmem.h"
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +18,7 @@
 #include "moy_audio_snd.h"
 #include "moy_htab.h"
 
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_STEREO (mpconfigboard.h)
 #endif
@@ -24,11 +26,11 @@
 #if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
 #define AUD_STEREO 1
 #endif
-#if defined(AUD_STEREO) || !MOY_AUD_BOARD
+#if defined(AUD_STEREO) || !MOY_ON_BOARD
 #define AUD_UP2 1
 #endif
 
-#if !MOY_AUD_BOARD
+#if !MOY_ON_BOARD
 #define OUT_PIECE 64            // the output-rate render's upsampled source, frames
 // The output-rate render (moy_aud_render_out): the sessions' mix upsampled
 // 2x, then carried linearly to the output's rate, `pos` the place between
@@ -86,7 +88,7 @@ typedef struct {
 #ifdef AUD_STEREO
     moy_aud_up_t up;            // the stereo output's upsampler
 #endif
-#if !MOY_AUD_BOARD
+#if !MOY_ON_BOARD
     aud_out_t out;
 #endif
 } aud_t;
@@ -96,40 +98,14 @@ static aud_t A = {.rate = 22050, .console = 7};
 
 // -- memory: PSRAM on a board, the C heap elsewhere ----------------------------
 
-#if MOY_AUD_BOARD
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-#endif
-
+// The kernel's small-block pool first (moy_kernel.h).
 static void *aud_alloc(size_t n) {
-#if MOY_AUD_BOARD
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
-#else
-    return calloc(1, n);
-#endif
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void aud_release(void *p, size_t n) {
     (void)n;
-#if MOY_AUD_BOARD
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
-#else
-    free(p);
-#endif
+    moy_kfree(p);
 }
 
 static const moy_htab_mem_t aud_mem = {aud_alloc, aud_release};
@@ -781,7 +757,7 @@ void moy_aud_render_st(int16_t *out, int n) {
 
 #endif
 
-#if !MOY_AUD_BOARD
+#if !MOY_ON_BOARD
 
 void moy_aud_out_rate_set(int rate) {
     moy_aud_lock();
@@ -910,16 +886,18 @@ void moy_aud_reserve(void) {
 // tests/test_audio_ring.py holds the two equal). The ledger is weak: a build
 // without native/moy_play (the host's library, the browser) counts nothing.
 #define AUD_SHARE_RINGS 2
-int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
-void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+int moy_share_take(uint8_t row, uint32_t n);
+void moy_share_give(uint8_t row, uint32_t n);
+#endif
+#pragma weak moy_share_take
+#pragma weak moy_share_give
 
 // A ring deeper than the reserved one: PSRAM alone on a board.
 static int16_t *deep_alloc(size_t bytes) {
-#if MOY_AUD_BOARD
-    return heap_caps_calloc(1, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-#else
-    return calloc(1, bytes);
-#endif
+    return moy_kalloc(bytes, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 // The open's own ring, if it took one, freed and its row given back. With the
@@ -928,7 +906,7 @@ static void deep_free(void) {
     if (A.pcm.ring == NULL || A.pcm.ring == A.pcm_ring) {
         return;
     }
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
     heap_caps_free(A.pcm.ring);
 #else
     free(A.pcm.ring);

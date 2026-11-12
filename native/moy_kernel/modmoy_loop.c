@@ -55,16 +55,17 @@ static bool s_driving;
 
 // The trace tier (moy_loop_host.c) is the desktop MicroPython's alone: a board
 // image carries none of it, and its trace_* words raise there.
-void moy_loop_host_init(int fps_cap, bool can_dim, uint32_t clock_ms) __attribute__((weak));
-void moy_loop_host_clock(uint32_t ms) __attribute__((weak));
-void moy_loop_host_advance(uint32_t us) __attribute__((weak));
-void moy_loop_host_cost(int stage, uint32_t us) __attribute__((weak));
-void moy_loop_host_input(bool click, bool active) __attribute__((weak));
-void moy_loop_host_feed(const uint8_t *bytes, size_t n) __attribute__((weak));
-const char *moy_loop_host_log(void) __attribute__((weak));
-void moy_loop_host_clear(void) __attribute__((weak));
-void moy_loop_host_note(const char *token) __attribute__((weak));
-int moy_loop_driver_step(uint32_t dt_us) __attribute__((weak));
+#include "moy_loop_host.h"
+#pragma weak moy_loop_host_init
+#pragma weak moy_loop_host_clock
+#pragma weak moy_loop_host_advance
+#pragma weak moy_loop_host_cost
+#pragma weak moy_loop_host_input
+#pragma weak moy_loop_host_feed
+#pragma weak moy_loop_host_log
+#pragma weak moy_loop_host_clear
+#pragma weak moy_loop_host_note
+#pragma weak moy_loop_driver_step
 
 static void need_trace(void) {
     if (moy_loop_host_init == NULL) {
@@ -77,18 +78,12 @@ static void need_trace(void) {
 // stages given yet takes them at registration.
 void moy_loop_board_vm_start(void);
 
-// The board's frame-error report beside the message; weak: absent elsewhere.
-void moy_loop_board_frame_error(void) __attribute__((weak));
-
 static void report(mp_obj_t exc, int which) {
     mp_printf(&mp_plat_print, "Moybyte %s error: ",
               which == MOY_UP_WORD ? "REMOTE" : which == MOY_UP_SERVICE ? "service" : "frame");
     mp_obj_print_helper(&mp_plat_print, exc, PRINT_STR);
     mp_printf(&mp_plat_print, "\n");
     mp_obj_print_exception(&mp_plat_print, exc);
-    if (moy_loop_board_frame_error != NULL) {
-        moy_loop_board_frame_error();
-    }
     gc_collect();
 }
 

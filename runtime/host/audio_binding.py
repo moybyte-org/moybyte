@@ -70,7 +70,7 @@ def _sources():
         with open(os.path.join(d, name)) as fh:
             text = fh.read()
         out[name] = _widen_to_double(text) if widen else text
-    return out
+    return native_build.with_platform(out)
 
 
 def _key(cc, sources):

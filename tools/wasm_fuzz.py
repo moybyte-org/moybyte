@@ -131,7 +131,7 @@ def _target_args(target, core, out_dir):
     net = os.path.join(ROOT, "native")
     return (base + chip + srcs + aot + [reloc, classic,
             "-I" + os.path.join(net, "moy_net"), "-I" + os.path.join(net, "moy_spine"),
-            "-I" + os.path.join(net, "moy_store"),
+            "-I" + os.path.join(net, "moy_store"), "-I" + os.path.join(net, "moy_kernel"),
             os.path.join(net, "moy_net", "moy_ota.c"), os.path.join(net, "moy_spine", "moy_json.c"),
             os.path.join(HERE, "aot_stubs.c"), os.path.join(HERE, "never.c"),
             os.path.join(HERE, "fuzz_aot.c")]), True
