@@ -281,7 +281,7 @@ other Python phase is open.
 already flat, and `inspect.getsource` feeds it); one board build whose frozen
 module set is byte-for-byte the list it was. Goldens unchanged.
 
-**Guard.** `+tests/test_one_namespace.py`: after importing every runtime
+**Guard.** `tests/test_one_namespace.py`: after importing every runtime
 module, each flat name and its `runtime.` name are one object; no runtime
 file holds the two-arm form.
 

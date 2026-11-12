@@ -26,7 +26,11 @@ The root holds the package (`__init__.py`) and this file.
 **Folders.** runtime/ is ONE flat module namespace kept in folders: a board
 stages every module flat into `modules/` (`tools/board_config.py`), so `import
 console` names one module wherever its file sits, and `runtime/__init__.py`
-spans the package path over every subfolder, so `runtime.<name>` does too. A
+spans the package path over every subfolder, so `runtime.<name>` does too. On
+the host the bare name IS that module object (`runtime.FlatFinder`, first on
+`sys.meta_path`), so a module imports a sibling by its device name alone, and
+`tests/test_one_namespace.py` fails a file that adds a `from runtime import`
+fallback behind it. A
 basename exists once in the tree, `device/` included; the stager refuses a
 second. **`host/`** holds the modules no board stages, by where they live: the
 ctypes bindings to the native kernels (`*_binding.py`, `moy_input`,

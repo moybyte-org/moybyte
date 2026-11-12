@@ -30,10 +30,12 @@ derived from what a FRESH build produces -- every target's `board.toml`
 from `modules/` on disk, which is precisely where the staleness hides.
 
 The rule is deliberately weak enough not to be noisy: for each import site, at
-least ONE branch of its try/except-ImportError ladder must resolve. That accepts
-both ladder orderings -- most shared modules put the bare device name in `try`
-and `from runtime import ...` in `except`, `moy_webserver.py` does the opposite
--- while still failing when no branch can possibly work.
+least ONE branch of its try/except-ImportError ladder must resolve, so an
+optional module a board lacks may fall back to something it has, while an
+import with no branch that can possibly work still fails. A shared module
+imports a sibling by its device name alone (`runtime.FlatFinder` makes that
+name the runtime module on the host), so a `from runtime import ...` branch
+never resolves here and never needs to.
 
 What it CANNOT see is a ladder whose branches all resolve on the tier running
 the test and none of them on device, which is how the wallpaper preview stayed
