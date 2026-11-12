@@ -948,9 +948,20 @@ def test_the_log_keeps_its_budget_and_every_thread(mesh):
     ws, pl, drv, svc = mesh
     _sent(drv)
     me = _me(pl)
-    _hear(drv, _node_packet(b"a direct one", THEM, 7, to=me))
+    def logged(packet, text):
+        # Each packet once the service has logged it: the lease queues a few,
+        # and under load the service's time-budgeted slice can fall behind.
+        _hear(drv, packet)
+        for _ in range(50):
+            log = _prefs(pl, "log") or ()
+            if log and log[-1]["text"] == text:
+                return
+            _frames(drv)
+        raise AssertionError("the service never logged %r" % text)
+
+    logged(_node_packet(b"a direct one", THEM, 7, to=me), "a direct one")
     for i in range(40):
-        _hear(drv, _node_packet(b"chatter %d" % i, 0x0BADCAFE, 100 + i))
+        logged(_node_packet(b"chatter %d" % i, 0x0BADCAFE, 100 + i), "chatter %d" % i)
     log = _prefs(pl, "log")
     assert len(log) == 30 and log[0]["text"] == "a direct one"
     assert log[-1]["text"] == "chatter 39"
