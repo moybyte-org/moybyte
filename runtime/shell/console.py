@@ -66,10 +66,7 @@ _LAZY_MODULES = {
 
 
 def _lazy_module(name):
-    try:
-        return __import__(name)
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        return getattr(__import__("runtime." + name), name)
+    return __import__(name)
 
 
 def __getattr__(name):

@@ -84,10 +84,7 @@ def _cron():
 
 
 def _module(name):
-    try:
-        return __import__(name)
-    except ImportError:  # host: the runtime package
-        return getattr(__import__("runtime." + name), name)
+    return __import__(name)
 
 
 def console_text(ws):

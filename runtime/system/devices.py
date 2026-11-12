@@ -83,11 +83,8 @@ def _face(name):
             return None
         try:
             f = __import__("dev_" + name)
-        except ImportError:  # host: the runtime package
-            try:
-                f = getattr(__import__("runtime.dev_" + name), "dev_" + name)
-            except ImportError:  # an image without the face
-                return None
+        except ImportError:  # an image without the face
+            return None
         _FACES[name] = f
         if getattr(f, "SWEEP_FIRST", False):
             _moybyte.ENDS.insert(0, f.sweep)     # ahead of the leases it ends with

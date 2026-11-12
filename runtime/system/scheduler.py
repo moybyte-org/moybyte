@@ -219,12 +219,7 @@ except ImportError:  # CPython
     def _sleep_ms(ms):
         _time.sleep(ms / 1000)
 
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package, `import moybyte` for a service
-    import sys as _sys
-    from runtime import moybyte as _moybyte
-    _sys.modules.setdefault("moybyte", _moybyte)
+import moybyte as _moybyte
 
 # The console calls every Lua service holds (native/moycore/moycore_svc.c's
 # `moybyte` table), answered by the console's own verbs.

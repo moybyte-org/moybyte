@@ -36,19 +36,11 @@ _SHELL = 1
 
 
 def _resolve_app_entry(entry):
-    """Resolve an app declaration's "module:Class" to the class itself.
-
-    Two namespaces, as everywhere in this tree: the boards and the wasm head
-    freeze `runtime/` FLAT (`import files_app`), the host imports the package
-    (`runtime.files_app`). Same ladder every module header here writes by
-    hand -- resolved from data instead of once per app.
-    """
+    """Resolve an app declaration's "module:Class" to the class itself, by
+    the module's flat name (`import files_app`), which is `runtime.files_app`
+    on the host."""
     mod_name, _, cls_name = entry.partition(":")
-    try:
-        mod = __import__(mod_name, None, None, (cls_name,))
-    except ImportError:
-        mod = __import__("runtime." + mod_name, None, None, (cls_name,))
-    return getattr(mod, cls_name)
+    return getattr(__import__(mod_name, None, None, (cls_name,)), cls_name)
 
 
 class SpineVerbs:
