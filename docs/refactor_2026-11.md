@@ -295,8 +295,8 @@ Closes N8, N11, G5, N7, N13.
 
 **Changes**
 
-- `+native/moy_spine/moy_sb.h` (one growable builder with a failed flag and
-  an allocator parameter) and `+native/moy_spine/moy_codec.h` (base64,
+- `native/moy_spine/moy_sb.h` (one growable builder with a failed flag and
+  an allocator parameter) and `native/moy_spine/moy_codec.h` (base64,
   base64url, hex, UTF-8: valid, next, put, whole prefix). The copies become
   uses. `moy_http_resp_parse` moves beside the request parser.
 - One UTF-8 decoder, the strict one. `moy_path.c` calls it and keeps, on
@@ -304,11 +304,11 @@ Closes N8, N11, G5, N7, N13.
   overlong lead is taken, a control draws as `?`). The two files' rules stay
   two; merging them is in §7.
 - `moy_kernel.c`: the recovery floor moves to
-  `+native/moy_kernel/moy_recovery_floor.c` and the watchdog to
-  `+native/moy_kernel/moy_wd.c`. The pinned `mp_task` copy does not move
+  `native/moy_kernel/moy_recovery_floor.c` and the watchdog to
+  `native/moy_kernel/moy_wd.c`. The pinned `mp_task` copy does not move
   (`native/moy_kernel/mp_task_calls.txt`).
 - `moy_os.c` splits by concern into files, sockets and processes over a
-  private header (`+native/moy_elf/moy_os_int.h`).
+  private header (`native/moy_elf/moy_os_int.h`).
 - N7: each board's `board.toml` gains the `os` rows its hand defines stand
   for, the drivers read `MOY_HW_*`, and the Zero's `/gpio` allowlist comes
   from the lease rows `tools/board_config.py` already emits. The hand pin
@@ -323,7 +323,7 @@ Closes N8, N11, G5, N7, N13.
 boot, with touch, keys and audio smoke (a wrong pin is a dead peripheral on
 one board). The recovery floor on glass and the P4's ELF suite.
 
-**Guards.** `+tests/test_native_codecs.py`: no private builder, base64, hex
+**Guards.** `tests/test_native_codecs.py`: no private builder, base64, hex
 or UTF-8 helper outside `native/moy_spine`. `tests/test_board_toml.py`: no
 `mpconfigboard.h` defines a pin-shaped `MOY_*` name. `tests/test_mp_task_calls.py`
 as it is.

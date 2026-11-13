@@ -1,9 +1,11 @@
 # moy_kernel — the kernel below the app verb table
 
 The native kernel (#224, closed 2026-11-01; its leftovers are #245): the
-board's entry and the VM service (`moy_kernel.c`), the frame loop
+board's entry and the VM service (`moy_kernel.c`, over `moy_kernel_int.h`), the frame loop
 (`moy_loop.h`), the crash record and the boot decision (`moy_crash.h`), the
-recovery floor and first light (`moy_recovery.h`, `moy_boot.h`), the idle
+recovery floor (`moy_recovery.h`, its serial words and screen in
+`moy_recovery_floor.c`) and first light (`moy_boot.h`), the task watchdog the
+frame feeds (`moy_wd.c`), the idle
 ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
 (`moy_devch.h`), the OS log (`moy_log.h`, the ring every writer shares and
 the dev channel's `log` word reads), the scheduler's callback guard

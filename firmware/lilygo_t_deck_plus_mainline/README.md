@@ -250,7 +250,7 @@ would be a teardown after the attach.
 #### `MODE = "audio"` (stage 5)
 
 The speaker is a MAX98357 class-D amp on I2S: BCK GPIO 7, WS GPIO 5, DOUT
-GPIO 6 (`MOY_AUDIO_I2S_*` in `mpconfigboard.h`, from LilyGO's `I2SPlay`
+GPIO 6 (board.toml's `speaker` row, `MOY_HW_SPEAKER_*`, from LilyGO's `I2SPlay`
 example). I2S is its own peripheral, not the SPI host the panel and the card
 share, so audio takes no part in the bus rules below. The amp sits behind the
 board power rail with the panel (`BOARD_POWERON`, GPIO 10, driven high at

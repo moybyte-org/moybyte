@@ -422,8 +422,10 @@ radio's SPI, with `38–42` behind the board-to-board connector: see LoRa
 below), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
-one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
+one *exposed* pad held back, on the strict reading; the allowlist's comment in
 `boards/MOYBYTE_ZERO/mpconfigboard.h` carries the argument for re-admitting it).
+The list itself is board.toml's `gpio` lease row, which the build emits as
+`MOY_LEASE_GPIO_PINS`.
 
 Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
@@ -681,7 +683,7 @@ a cart that calls `pin_write(21, 0)` (step 5's `Pin Light` does).
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
 *Fail:* the opposite, in which case this board differs from the one this was
-measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
+measured on and the allowlist's note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 
