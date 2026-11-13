@@ -56,13 +56,7 @@ WASI_ERRNO = {2: {"DENIED", "STALE"}, 68: {"FULL"}, 48: {"NOMEM"}, 44: {"ABSENT"
 VARIES = {"moybyte.random", "moybyte.aes_gcm_seal", "moybyte.clock", "clipboard.seq", "theme.gen",
           "moybyte.notify", "moybyte.on", "moybyte.every", "moybyte.after", "moybyte.at",
           "moybyte.key_make", "moybyte.key_public", "moybyte.status_show"}
-# Rows that hand the app's front to the shell (a chooser, a sheet, another
-# app): every tier calls them last, in this order.
-LAST = ("nav.open_app", "theme.edit_file", "moybyte.pick", "moybyte.open_with",
-        "moybyte.share")
-
-ROWS = sorted((r for r in G.door_rows(SRC) if "example" in r and G.role_of(r) != "ui"),
-              key=lambda r: LAST.index(r["name"]) + 1 if r["name"] in LAST else 0)
+ROWS = [r for r in G.door_rows(SRC) if "example" in r and G.role_of(r) != "ui"]
 
 # The rows whose tiers disagree today, each with what differs. Emptied by
 # the phase that owns the row (phase 6 the faces, phase 10 the app rows).
