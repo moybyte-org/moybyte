@@ -1204,8 +1204,8 @@ const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
 // The host's back (the bar's chevron, a window's, Esc, B and the T-Deck's
 // K) over the frame drawn last: 1 where the app takes it -- a field's edit
-// is cancelled (moy_ui_api_cancel), else a popover it drew is dismissed next
-// frame (ui.popover answers false), else the bar it lent with
+// is cancelled or a popover it drew dismissed (moy_ui_api_cancel), else the
+// bar it lent with
 // MOY_UI_BAR_BACK answers MOY_UI_BAR_UP -- and 0 where it has no view to
 // step out of, so the host leaves the app. `take` 0 only asks.
 int moy_ui_api_back(moy_ui_ctx_t *c, int take);
@@ -1213,8 +1213,10 @@ int moy_ui_api_back(moy_ui_ctx_t *c, int take);
 // drawn last: 1 where the focused field has an edit in progress -- its text
 // other than it was when focus came onto it, or Enter last left it -- and
 // then, with `take`, the next pass gives the field that text back (the
-// app's ui.field answers it) and focus steps up off it as Up would, where
-// a stop lies above; 0 where none is, so the key keeps its own meaning.
+// app's ui.field answers it) and focus steps off it, up as Up would where
+// a stop lies above, else down; else 1 where a popover is open, which the
+// next frame dismisses (ui.popover answers false); 0 where neither is, so
+// the key keeps its own meaning.
 int moy_ui_api_cancel(moy_ui_ctx_t *c, int take);
 // Whether the frame drawn last owes the next though no input comes: a
 // dialog or a popover laid out from a stale measure, or a reveal its pass

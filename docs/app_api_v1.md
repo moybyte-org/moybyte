@@ -1556,7 +1556,8 @@ it paints the strip after `draw()` and routes a tap in its band before
   where the app types outside a `ui.field`, as the Terminal does; by
   default a field in focus on its `ctx.ui` page), `cancel()` (the T-Deck's
   Mic inside an open field; by default its `ctx.ui` context's,
-  `ui_draw.app_cancel`, so a `ui.field` it draws gives its draft back),
+  `ui_draw.app_cancel`, so a `ui.field` it draws gives its draft back and
+  a `ui.popover` it draws is dismissed),
   `DESK_TILE` (False: off the desk's column). `layers.AppLayer` defaults
   each; the console asks them through its input policy and nowhere else.
 

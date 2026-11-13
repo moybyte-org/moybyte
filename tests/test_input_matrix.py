@@ -39,6 +39,7 @@ import shutil
 import pytest
 
 from runtime import moy_input as mi
+from runtime.layers import AppLayer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DT = 1.0 / 30.0
@@ -75,20 +76,21 @@ CELLS = [(layer, row, col) for layer in LAYERS for row in ROWS for col in COLUMN
 # here is a strict xfail: when it passes, take it out.
 FAILING = {
     "phase 5": {
-        # Mic is the console's key on every layer: it opens the system menu
-        # where it should cancel the field's edit or dismiss the popover
-        # ("Mic reverts and opens no menu").
-        *[(layer, row, "mic") for layer in LAYERS for row in ("field", "popover")],
-        # The shell page and the linked toolkits (wasm, ELF) take no typing
-        # from what is focused: a focused field leaves the keyboard in move
-        # mode, and Esc reaches neither its edit nor a popover (typing,
-        # cancel and back from one owner).
-        *[(layer, "field", col) for layer in ("py_shell", "wasm_app", "elf_app")
+        # A compiled (WASI) or ELF app's page draws through a toolkit linked
+        # into the module, whose focus, popover and edit the console cannot
+        # see or reach: the input owner asks the run's context
+        # (`ui_draw.run_typing`, `run_cancel`, `run_back`), which such an app
+        # leaves closed (native/moy_ui/moy_ui_wasm.c). So a focused field
+        # leaves the keyboard in move mode, Esc, B and Mic reach neither its
+        # edit nor its popover, and the trackball steps no list of it -- until
+        # the module's ABI carries the toolkit's answers out and the host's
+        # cancel and back in (moy-spec's proposals/wasm-runtime.md).
+        *[(layer, row, "mic") for layer in ("wasm_app", "elf_app")
+          for row in ("field", "popover")],
+        *[(layer, "field", col) for layer in ("wasm_app", "elf_app")
           for col in ("kbd_move", "esc")],
-        *[(layer, "popover", col) for layer in ("py_shell", "wasm_app", "elf_app")
+        *[(layer, "popover", col) for layer in ("wasm_app", "elf_app")
           for col in ("esc", "gamepad")],
-        ("py_shell", "popover", "ble_kbd"),
-        # The trackball steps no linked toolkit's page (ball_steps).
         ("wasm_app", "list", "trackball"),
         ("elf_app", "list", "trackball"),
     },
@@ -232,7 +234,7 @@ def c_app(row):
 
 # -- the shell page: a system app's content layer --------------------------------
 
-class MatrixShellPage:
+class MatrixShellPage(AppLayer):
     """A system app drawing the row's page through its AppContext's toolkit
     host, as Calc does (runtime/apps/calc_app.py)."""
 
@@ -245,6 +247,7 @@ class MatrixShellPage:
 
     def __init__(self, ctx, names=None):
         self.ctx = ctx
+        self._ui = ctx.ui
         self.S = {"t": "", "c": 0, "n": 0, "open": 1, "first": 0}
 
     @staticmethod
@@ -342,6 +345,11 @@ class Rig:
             _write(root, "matrix_shell.moy", {"runtime": "python", "main": "main.py"},
                    {"main.py": "def _draw():\n    pass\n"}, title="Matrix Shell")
         self.ws = ws = host_app.build_workstation(root)
+        # A board's inputs as the hints know them, the T-Deck's and the
+        # host's: the Mic key's tap is a field's Cancel where the T-Deck
+        # keyboard is the input in use.
+        ws.use_inputs((("kbd", "tdeck"), ("ball", "tdeck"), ("ble", "keys"),
+                       ("local", "keys"), ("touch", "touch")))
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
         ws.bar_layer._clock_text = lambda: "10:30"

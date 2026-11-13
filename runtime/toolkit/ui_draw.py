@@ -1981,7 +1981,8 @@ def app_cancel(ctx, take=True):
     """The host's cancel -- the T-Deck's Mic -- over the frame `ctx` drew
     last: True where its focused field has an edit in progress (its text
     other than when focus came onto it), which the next frame gives back,
-    focus stepping off the field (up, else down); False where none is, and
+    focus stepping off the field (up, else down), or else where a popover
+    is open, which the next frame dismisses; False where neither is, and
     the key keeps its own meaning. `take` False only asks."""
     return _C.api_cancel(ctx, take)
 

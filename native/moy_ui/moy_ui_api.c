@@ -4113,14 +4113,20 @@ int moy_ui_api_typing(const moy_ui_ctx_t *c) {
 }
 
 int moy_ui_api_cancel(moy_ui_ctx_t *c, int take) {
-    if (!c->fe_live || c->fe_id == 0 || c->fe_id != c->focus || c->inst->fe_ctx != c
-        || !moy_ui_api_typing(c)) {
-        return 0;
+    if (c->fe_live && c->fe_id != 0 && c->fe_id == c->focus && c->inst->fe_ctx == c
+        && moy_ui_api_typing(c)) {
+        if (take) {
+            c->fe_cancel = 1;
+        }
+        return 1;
     }
-    if (take) {
-        c->fe_cancel = 1;
+    if (c->pop_card.w > 0) {
+        if (take) {
+            c->pop_back = 1;
+        }
+        return 1;
     }
-    return 1;
+    return 0;
 }
 
 void moy_ui_api_keys_back(moy_ui_ctx_t *c) {
