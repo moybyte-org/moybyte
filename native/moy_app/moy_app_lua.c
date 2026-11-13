@@ -338,7 +338,7 @@ static int l_files_save(lua_State *L) {
 }
 
 static int l_files_delete(lua_State *L) {
-    return named(L, MOY_T_FILES_DELETE, 1, 0);
+    return named(L, MOY_T_FILES_DELETE, 1, 1);
 }
 
 static int l_files_duplicate(lua_State *L) {

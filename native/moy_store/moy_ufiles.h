@@ -144,6 +144,7 @@ int moy_uf_rename(const char *root, const char *kind, const char *name,
                   const char *title, char *name_out);
 int moy_uf_duplicate(const char *root, const char *kind, const char *name,
                      char *name_out);
+// delete: NONE where `name` names nothing.
 int moy_uf_delete(const char *root, const char *kind, const char *name,
                   char *name_out);
 int moy_uf_restore(const char *root, const char *kind, const char *name,

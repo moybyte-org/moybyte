@@ -1244,13 +1244,20 @@ int moy_uf_delete(const char *root, const char *kind, const char *name,
         return rc;
     }
     rc = mkdirs(root, 0, TRASH_DIR, KINDS[k].name, NULL);
+    char *src = rc == 0 ? file_path(root, k, name) : NULL;
+    if (rc == 0 && src == NULL) {
+        rc = MOY_ENOMEM;
+    } else if (rc == 0 && !exists(src)) {
+        rc = MOY_UF_NONE;
+    }
     if (rc == 0) {
         rc = unique_name(root, k, name, trash_path, name_out);
     }
     if (rc != 0) {
+        str_free(src);
         return rc;
     }
-    char *src = file_path(root, k, name), *dst = trash_path(root, k, name_out);
+    char *dst = trash_path(root, k, name_out);
     if ((rc = path_pair(&src, &dst)) != 0) {
         return rc;
     }

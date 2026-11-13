@@ -1359,7 +1359,9 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(files_save_obj, 4, 4, files_save);
 
 typedef int (*name_row_fn)(moy_appabi_t *, uint32_t, const char *, const char *, char *);
 
-static mp_obj_t name_row(mp_obj_t self, mp_obj_t kind, mp_obj_t name, name_row_fn fn) {
+// `absent_none`: a row that found nothing answers (None, None), as load does.
+static mp_obj_t name_row(mp_obj_t self, mp_obj_t kind, mp_obj_t name, name_row_fn fn,
+                         int absent_none) {
     store_t st;
     store_of(self, &st);
     const char *k = cstr(kind), *nm = cstr(name);
@@ -1368,21 +1370,24 @@ static mp_obj_t name_row(mp_obj_t self, mp_obj_t kind, mp_obj_t name, name_row_f
     STORE_BEGIN(st)
     rc = fn(st.a, st.g, k, nm, out);
     STORE_END(st)
+    if (absent_none && rc == MOY_APP_ABSENT) {
+        return pair(mp_const_none, mp_const_none);
+    }
     return named_answer(&st, rc, out);
 }
 
 static mp_obj_t files_delete(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
-    return name_row(self, kind, name, moy_app_files_delete);
+    return name_row(self, kind, name, moy_app_files_delete, 1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(files_delete_obj, files_delete);
 
 static mp_obj_t files_duplicate(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
-    return name_row(self, kind, name, moy_app_files_duplicate);
+    return name_row(self, kind, name, moy_app_files_duplicate, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(files_duplicate_obj, files_duplicate);
 
 static mp_obj_t files_restore(mp_obj_t self, mp_obj_t kind, mp_obj_t name) {
-    return name_row(self, kind, name, moy_app_files_restore);
+    return name_row(self, kind, name, moy_app_files_restore, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(files_restore_obj, files_restore);
 

@@ -891,9 +891,13 @@ def binding(sanitize=False):
                 return (None, self._app._err(rc))
             return (self._app._take(buf, not binary.value), None)
 
-        def _named(self, fn, *args):
+        def _named(self, fn, *args, absent_none=False):
+            """`absent_none`: a row that found nothing answers (None, None),
+            as load does."""
             out = c.create_string_buffer(UF_NAME_MAX + 1)
             rc = fn(self._a(), self._g, *args, out)
+            if absent_none and rc == ABSENT:
+                return (None, None)
             if rc != OK:
                 return (None, self._app._err(rc))
             return (out.value.decode("utf-8", "surrogateescape"), None)
@@ -903,7 +907,8 @@ def binding(sanitize=False):
             return self._named(lib.moy_app_files_save, _str(kind), _str(name), b, len(b))
 
         def delete(self, kind, name):
-            return self._named(lib.moy_app_files_delete, _str(kind), _str(name))
+            return self._named(lib.moy_app_files_delete, _str(kind), _str(name),
+                               absent_none=True)
 
         def duplicate(self, kind, name):
             return self._named(lib.moy_app_files_duplicate, _str(kind), _str(name))

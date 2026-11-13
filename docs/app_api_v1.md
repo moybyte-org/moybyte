@@ -547,7 +547,8 @@ the ones the Files app shows: `files:documents` (the default),
 `files:pictures`, `files:music`, `files:recordings`; asking for two is a
 manifest error, and one the console has none of refuses the launch. The
 verbs are `files.list`, `load_text`/`save_text`, `load`/`save`, `rename`,
-`delete` (to the trash), `duplicate`, `new_name(title)` (what a typed name
+`delete` (to the trash; `(None, None)`, as `load`, where the name names
+nothing), `duplicate`, `new_name(title)` (what a typed name
 may be stored as) and `badge(name)` (the row's short label, `MD`, `TXT`,
 `JSON`, `PY`, `LUA`). Storage answers `(value, err)` and never raises (Lua:
 two results), `err` being `None` or why. In Lua the standard `io` and `os`
