@@ -829,15 +829,17 @@ Every one of these was learned by hanging or bricking a board.
   system button, the seven tabs, undo, redo, Play, the battery and the
   clock) stays on it (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
   the keyboard's keys until another keyboard is used
-  (`docs/ui_api_2026-10.md`, Hints). A menu over a text surface takes the
-  keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
-  matrix starts, or when a surface turns to text, types nothing until it is
-  pressed again, and `_set_text_mode(True)` seeds every typed-key edge with
-  the byte already in `last_key`. `Workstation._set_text_mode` →
+  (`docs/ui_api_2026-10.md`, Hints). Which mode the keyboard is in is the
+  input policy's (`runtime/shell/input_policy.py`): derived each frame from
+  the surface holding the keys and applied on change, a menu over a text
+  surface taking the keys out of text mode while it shows. A key already
+  down when the matrix starts, or when a surface turns to text, types
+  nothing until it is pressed again: turning text on seeds every typed-key
+  edge with the byte already in `last_key`. The policy's
   `ws.keyboard.set_game_mode(on)` queues a request the input task's next
   pass applies; the driver boots in ASCII and never enables raw by itself,
   and the console asks for it as it attaches the keyboard
-  (`Workstation.sync_keyboard_mode`). Raw needs keyboard firmware
+  (`InputPolicy.attach_keyboard`). Raw needs keyboard firmware
   **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`): on older firmware the raw
   read sees the stray ASCII byte and keeps the session on the 1-byte + latch
   path (`raw_unsupported`), as `RAW_GAME_MODE = False` on the driver does;

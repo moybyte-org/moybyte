@@ -280,7 +280,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   ignores `0x03` (or raw turned off), where the `0x04` revert drains — the
   README has the mechanism. **Mic is the console's key** (`start`,
   2026-10-18), seen only in the matrix (ASCII sends the idle byte for a bare
-  Mic), and a text field's Cancel while one is typed into. Backspace is a
+  Mic), and a text field's Cancel while one has an edit in progress
+  (`InputPolicy.cancel`); which mode the keyboard is in is the input
+  policy's, derived from the focused surface (`runtime/shell/input_policy.py`). Backspace is a
   plain key.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens

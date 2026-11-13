@@ -312,7 +312,10 @@ touch alone (#242, #239). The `ui` engine gives you all three: arrows (the
 T-Deck's WASD and trackball, a pad's d-pad) move focus between stops,
 Enter, A or a tap activates, a drag scrolls. A `ui.field` in focus takes
 the keyboard as text: on the T-Deck its WASD type there, and the trackball
-steps focus off it. So: every action is a stop
+steps focus off it. Nothing sets the keyboard's mode by hand: the console's
+input policy (`runtime/shell/input_policy.py`) derives it from what the
+surface holding the keys has focused, and a menu over it is game mode. So:
+every action is a stop
 (a button, a list row, a menu item), and a key shortcut only ever doubles
 one.
 
@@ -330,6 +333,11 @@ views before it leaves the app, on every tier:
    the chevron meanwhile, in a desk window's title strip too;
 4. else the chevron leaves the app, and Esc and B reach your `keyp` and
    `btnp` (Notes calls `quit()` on Esc there).
+
+Esc is the same key everywhere, the host's included: a board's keyboard
+sends it as `stop` (the console's back) and, on a text surface, as the byte
+27, which over a view of the app's own (a field's edit, a dialog) is that
+same back and anywhere else the surface's own byte.
 
 A second page, a dialog, a picker: lend the way back while it shows. A
 page's title is the bar's: `ui.page("Radio")` draws no head in the page
@@ -357,8 +365,9 @@ end
 ```
 
 A shell app built into the console answers the same back through its
-`back()` and `has_page()` (`Workstation.app_back`); a running app cart's are
-the Player's, over its `ui` context. The console's own key (the T-Deck's
+AppHost, then its `back()` and `has_page()` (`InputPolicy.back`, one cascade
+for Esc, B and both chevrons); a running app cart's are the Player's, over
+its `ui` context. The console's own key (the T-Deck's
 Mic) opens the system menu and is never yours.
 
 **Tabs switch themselves.** `ui.tabs` takes Q and E (the `tabs` hint's
@@ -1445,14 +1454,14 @@ user cart with its own grant key (`tests/test_user_apps.py`):
 
 ```json
 "moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
-                      "text_mode": false, "order": 80 } }
+                      "order": 80 } }
 ```
 
 then `python tools/gen_device_carts.py --app-decls` regenerates the frozen
 copy. The Layer:
 
 ```python
-class MyAppLayer:
+class MyAppLayer(AppLayer):      # from layers import AppLayer
     id = "myapp"          # process kind: router, back-stack, window key
     domain = "system"     # draws on the responsive system canvas
     TITLE = "MY APP"      # the windowed WM's title strip
@@ -1471,7 +1480,8 @@ class MyAppLayer:
 That is the whole list: the console registers it from the declaration
 (`ws.register_app`), and the launcher's claim, the router, the back-stack,
 the window and its chip, the resize floor (`min_size`, or the layout's
-`MIN_W`/`MIN_H`), text mode and the exitable bar all follow; a new `runtime/`
+`MIN_W`/`MIN_H`), text mode (what its page has focused) and the exitable
+bar all follow; a new `runtime/`
 module reaches every board unless a `board.toml` denies it (#161).
 `tests/test_app_registry.py` fails a hand-written app name anywhere else, and
 `tests/test_app_api.py` holds the Calc set.
@@ -1534,18 +1544,21 @@ it paints the strip after `draw()` and routes a tap in its band before
 - `commit()`: just before the bar's back or the window's X, for an app that
   persists on an idle debounce (#111).
 - `back()`: one page back, answering True, or False on the first page, when
-  the host leaves the app.
+  the host leaves the app; the AppHost's step (a field's edit, a popover)
+  comes first.
 - `idle_step()` while `idle_owed`: work that must not land in a draw (a
   file read, a decode), run once on a frame with nothing to paint.
 - `page_title()`: the open page's name, after the back chevron or as the
   window's title.
 - `glass` (true while it holds the whole glass: no strip, its own back),
   `leave_asked` (its own way out, taken as the bar's back), `BACK_MINIMISES`
-  (a back on the first page minimises on the desk), `cancel_field()` (the
-  T-Deck's Mic inside an open field; an app without one has Mic asked of
-  its `ctx.ui` context, `ui_draw.app_cancel`, so a `ui.field` it draws
-  gives its draft back), `DESK_TILE` (False: off the desk's
-  column).
+  (a back on the first page minimises on the desk), `typing()` (True
+  where the app types outside a `ui.field`, as the Terminal does; by
+  default a field in focus on its `ctx.ui` page), `cancel()` (the T-Deck's
+  Mic inside an open field; by default its `ctx.ui` context's,
+  `ui_draw.app_cancel`, so a `ui.field` it draws gives its draft back),
+  `DESK_TILE` (False: off the desk's column). `layers.AppLayer` defaults
+  each; the console asks them through its input policy and nowhere else.
 
 **Between apps.** `ctx.nav.open_app(id)` opens another app by its registered
 id (a build without it degrades to a status line); the Files router's verbs
