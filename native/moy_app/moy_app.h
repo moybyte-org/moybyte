@@ -42,20 +42,9 @@
 #include "moy_settings.h"
 #include "moy_ufiles.h"
 
-enum {
-    MOY_APP_OK = 0,
-    MOY_APP_STALE = 1,      // the grant ended
-    MOY_APP_FULL = 2,
-    MOY_APP_NOMEM = 3,
-    MOY_APP_DENIED = 4,     // the grant does not hold this role
-    MOY_APP_NOSTORE = 5,    // no writable store: NO_STORE
-    MOY_APP_IO = 6,         // the store failed
-    MOY_APP_BAD = 7,        // a refused argument: an unknown kind or token, a name too long
-    MOY_APP_ABSENT = 8,     // no such cart, app, key or document, or a build without it
-    MOY_APP_NEEDS_VM = 9,   // a shell-served verb while no VM runs
-    MOY_APP_FORGED = 10,    // sealed bytes that do not open (moy_crypto.h's aes_gcm_open)
-    MOY_APP_BUSY = 11,      // a lease or a device another process holds
-};
+// The answer codes (MOY_APP_*) and what each face makes of one, generated
+// from native/os_calls.json's errors.
+#include "moy_app_err.h"
 
 // The roles (MOY_ROLE_*, a grant's mask 1 << role), the rows served in C
 // (MOY_ROW_*), the role table (MOY_T_*, MOY_APP_TABLE_N) and the permission

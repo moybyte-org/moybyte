@@ -28,6 +28,8 @@ APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
+ERR_H = os.path.join(ROOT, "native", "moy_app", "moy_app_err.h")
+FACE_ERRORS = os.path.join(ROOT, "runtime", "host", "face_errors.py")
 WASI_OS_H = os.path.join(ROOT, "native", "moy_wasm", "moy_wasi_os_rows.h")
 # The module a WASI program imports a "wasi" row from.
 WASI_OS = "moybyte.os"
@@ -95,12 +97,13 @@ def dump(src):
     """The source's text as it is kept: one row a line."""
     o = ["{", '  "about": %s,' % json.dumps(src["about"]),
          '  "version": %d,' % src["version"]]
-    for key in ("roles", "rows", "permissions"):
+    keys = [k for k in ("roles", "rows", "permissions", "errors") if k in src]
+    for key in keys:
         items = src[key]
         o.append('  "%s": [' % key)
         o += ["    %s%s" % (json.dumps(x), "," if i < len(items) - 1 else "")
               for i, x in enumerate(items)]
-        o.append("  ]" + ("," if key != "permissions" else ""))
+        o.append("  ]" + ("," if key != keys[-1] else ""))
     o += ["}", ""]
     return "\n".join(o)
 

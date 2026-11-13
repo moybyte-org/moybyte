@@ -325,7 +325,7 @@ class App:
                 self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
-        raise OSError(_ENOSPC, "the grant table is full")
+        raise OSError(_ENOSPC, "no room")
 
     def regrant(self, app_id, roles, svc, kind=None):
         mask, smask = set(), set()

@@ -28,6 +28,7 @@ import json
 import os
 import types
 
+import face_errors
 import native_parts
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +41,7 @@ _PU32 = c.POINTER(c.c_uint32)
 _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
-OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM, FORGED, BUSY = range(12)
+from face_errors import ABSENT, BAD, IO, NOSTORE, OK
 KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
@@ -50,7 +51,6 @@ TOKEN_ABSENT = -(1 << 31)
 CLIP_MAX = 4096
 SLOTS = 32
 ID_MAX = 63
-_ENOSPC = 28
 
 
 # The role table (native/os_calls.json's rows the ROLE door names, in order:
@@ -222,15 +222,7 @@ _SIGS = (
 
 
 def _raise(rc):
-    if rc == NOMEM:
-        raise MemoryError("moy_app")
-    if rc == FULL:
-        raise OSError(_ENOSPC, "the grant table is full")
-    if rc == STALE:
-        raise ValueError("a grant that ended")
-    if rc == DENIED:
-        raise ValueError("a role the grant does not hold")
-    raise ValueError("an argument the role refuses")
+    raise face_errors.exception(rc)
 
 
 def _check(rc):
@@ -607,11 +599,9 @@ def binding(sanitize=False):
                 return self._no_store
             if rc == IO:
                 e = lib.moy_app_why(self._p)
-                return str(OSError(e, os.strerror(e)))
-            if rc == BAD:
-                return "a refused argument"
-            if rc == NOMEM:
-                return "memory allocation failed"
+                return face_errors.ERR[IO] % (e, os.strerror(e))
+            if rc in face_errors.ERR:
+                return face_errors.ERR[rc]
             _raise(rc)
 
         def _take(self, buf, text=True):
@@ -965,7 +955,7 @@ def binding(sanitize=False):
             if err.value == 0:
                 return (None, None)
             if err.value == BAD_UF:
-                return ("a refused argument", None)
+                return (face_errors.ERR[BAD], None)
             return (str(OSError(err.value, os.strerror(err.value))), None)
 
         # -- the codecs: their value, or None

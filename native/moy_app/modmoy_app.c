@@ -54,9 +54,9 @@
 // What a verb answers in the ABI's codes becomes what the Python roles
 // answered: prefs.get the caller's default for ABSENT, clipboard.kind "text"
 // or None, clipboard.put_text False for text over CLIP_MAX (the old text
-// kept), a storage row `(value, err)`. A refused call raises: ValueError for
-// STALE, DENIED and BAD, MemoryError for NOMEM, OSError(ENOSPC) for a full
-// grant table; a storage row answers its store's failures as `err`.
+// kept), a storage row `(value, err)`. A refused call raises what
+// moy_app_err.h's MOY_APP_ERRORS names for its code; a storage row answers its
+// store's failures as `err`.
 
 #include <string.h>
 
@@ -79,20 +79,18 @@ void moy_spine_settings_raise(void);
 
 // -- errors -------------------------------------------------------------------------
 
+#define RAISE_ValueError(eno, msg) mp_raise_ValueError(MP_ERROR_TEXT(msg))
+#define RAISE_OSError(eno, msg) mp_raise_OSError(eno)
+#define RAISE_MemoryError(eno, msg) mp_raise_type(&mp_type_MemoryError)
+
 static MP_NORETURN void raise_rc(int rc) {
-    if (rc == MOY_APP_NOMEM) {
-        mp_raise_type(&mp_type_MemoryError);
+    switch (rc) {
+#define X(code, exc, eno, msg, lua) case MOY_APP_##code: RAISE_##exc(MP_##eno, msg);
+        MOY_APP_ERRORS(X)
+#undef X
+        default:
+            raise_rc(MOY_APP_FALLBACK);
     }
-    if (rc == MOY_APP_FULL) {
-        mp_raise_OSError(MP_ENOSPC);
-    }
-    if (rc == MOY_APP_STALE) {
-        mp_raise_ValueError(MP_ERROR_TEXT("a grant that ended"));
-    }
-    if (rc == MOY_APP_DENIED) {
-        mp_raise_ValueError(MP_ERROR_TEXT("a role the grant does not hold"));
-    }
-    mp_raise_ValueError(MP_ERROR_TEXT("an argument the role refuses"));
 }
 
 static void check(int rc) {
@@ -1187,9 +1185,9 @@ static mp_obj_t err_of(store_t *st, int rc) {
             return mp_obj_str_make_new(&mp_type_str, 1, 0, &e);
         }
         case MOY_APP_BAD:
-            return mp_obj_new_str("a refused argument", 18);
+            return mp_obj_new_str(MOY_APP_ERR_BAD, sizeof(MOY_APP_ERR_BAD) - 1);
         case MOY_APP_NOMEM:
-            return mp_obj_new_str("memory allocation failed", 24);
+            return mp_obj_new_str(MOY_APP_ERR_NOMEM, sizeof(MOY_APP_ERR_NOMEM) - 1);
         default:
             raise_rc(rc);
     }
@@ -1512,7 +1510,7 @@ static mp_obj_t files_history_commit(size_t n_args, const mp_obj_t *args, mp_map
         return pair(mp_const_none, mp_const_none);
     }
     if (prune_err == MOY_UF_BAD) {
-        return pair(mp_obj_new_str("a refused argument", 18), mp_const_none);
+        return pair(mp_obj_new_str(MOY_APP_ERR_BAD, sizeof(MOY_APP_ERR_BAD) - 1), mp_const_none);
     }
     mp_obj_t e = mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(prune_err));
     return pair(mp_obj_str_make_new(&mp_type_str, 1, 0, &e), mp_const_none);
