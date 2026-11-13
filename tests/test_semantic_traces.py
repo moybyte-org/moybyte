@@ -2359,7 +2359,8 @@ def roles_trace(ws):
 def roles_rows():
     """The role table's (role, verb) rows, in table order, of the roles an
     AppContext serves: not the toolkit's, a compiled app's alone
-    (tests/test_ui_wasm.py drives each), nor the console calls'."""
+    (tests/test_app_ui.py compares the tiers' pictures), nor the console
+    calls' (tests/test_every_row.py calls those on every tier)."""
     from tools import gen_os_table
     from runtime import app_context
     return [(r["role"], r["verb"]) for r in gen_os_table.role_table()

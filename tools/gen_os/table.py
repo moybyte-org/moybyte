@@ -57,7 +57,7 @@ SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
               "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
-              "u"}
+              "u", "example"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 # The Python faces a row's Lua names stand beside where Python holds its
 # service as objects, not the row's verbs (a row's py_face): the device faces
@@ -540,6 +540,8 @@ def check(src):
         for p in perms_of(r, src):
             if p not in perm_names:
                 raise TableError("%s's perm %r is no permission" % (name, p))
+        if "example" in r and len(r["example"]) != sum(1 for _n, t in params(r) if t != "out"):
+            raise TableError("%s: an example is one argument a parameter that is no out" % name)
     for p in src["permissions"]:
         if set(p) - PERM_FIELDS:
             raise TableError("%s's fields: %s" % (p["perm"], sorted(p)))
