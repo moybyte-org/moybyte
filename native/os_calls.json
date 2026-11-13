@@ -153,7 +153,6 @@
     {"name": "nav.edit_file", "server": "shell", "in": ["cart:cart", "name:str", "mode:str?"], "door": true, "perm": "front"},
     {"name": "nav.play", "server": "shell", "in": ["cart:cart"], "door": true, "perm": "front"},
     {"name": "nav.run_script", "server": "shell", "in": ["kind:str", "name:str"], "door": true, "perm": "front"},
-    {"name": "nav.text_mode", "server": "shell", "in": ["on:int"], "door": true},
     {"name": "nav.cover", "server": "shell"},
     {"name": "nav.cover_gen", "server": "shell"},
     {"name": "prefs.get", "server": "c", "in": ["key:str", "json:out"], "ret": "len", "how": "here", "wasm": true, "elf": 70, "lua": ["prefs.get"], "py": ["prefs.get"], "wasi": true, "example": ["k"]},

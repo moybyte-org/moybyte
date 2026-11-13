@@ -2248,10 +2248,6 @@ def roles_trace(ws):
     ws.go_home()
     say("run_script", _n(nv.run_script("docs", "nope.py")))
     ws.go_home()
-    nv.text_mode(True)
-    t1 = ws.input.text_mode
-    nv.text_mode(False)
-    say("text_mode", t1, ws.input.text_mode)
     say("cover", nv.cover({"title": "Nowhere"}))
     say("cover_gen", isinstance(nv.cover_gen(), int))
     nv.play(cart)
@@ -2508,7 +2504,6 @@ edit_file True desktop
 open_image True artwork
 open_text True desktop
 run_script [False,"CAN'T READ IT"]
-text_mode False False
 cover None
 cover_gen True
 play desktop

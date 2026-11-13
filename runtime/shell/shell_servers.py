@@ -362,10 +362,6 @@ class NavServer:
         return self._go(g, "Wants to run " + str(name),
                         lambda: ws.run_script(kind, name), (True, None))
 
-    def text_mode(self, g, on):
-        """Nothing: the keyboard's mode is what the app's page answers
-        (runtime/shell/input_policy.py)."""
-
     def cover(self, g, cart):
         """`cart`'s cover decoded at its half (64x64), what a list row draws
         scaled to its picture (Files' projects): None for a cart with no
@@ -807,7 +803,6 @@ DOOR_ARGS = {
     "nav.edit_file": "cso",
     "nav.play": "c",
     "nav.run_script": "ss",
-    "nav.text_mode": "i",
     "wallpaper.current": "",
     "wallpaper.carts": "",
     "wallpaper.id_for": "c",
