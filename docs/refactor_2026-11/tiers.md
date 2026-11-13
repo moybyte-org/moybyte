@@ -218,7 +218,7 @@ So the console demonstrably runs off-board on MicroPython.
   - `tests/test_roles.py:183` checks only that the `py` names are callable on `moybyte`.
   - Nothing references `LUA_RUN_CALLS`/`RUN_VERBS`/`LUA_OWN` in `tests/`.
   - `tests/test_app_ui.py` compares tiers' pixels for three features (clip, tabs, back), not per row.
-- **Do:** `+tests/test_every_row.py`, table-driven:
+- **Do:** `tests/test_every_row.py`, table-driven:
   - for each row with a tier projection, a probe built from its `example` (§2.2);
   - the probe apps are generated, never hand-kept:
     - a Python app calling `ctx.<role>.<verb>`/`moybyte.<verb>`;
@@ -265,7 +265,7 @@ So the console demonstrably runs off-board on MicroPython.
   - Per-module `_check`/`check` copies: 4 in `runtime/host`, 5 in `native/*/modmoy_*.c`, each with its own errno table (for example `moy_lease.py:98`).
 - **Do:**
   - One `errors` section in the table: code → (Python exception, errno, message, Lua message).
-  - Generate `moy_app_err.h` (C plus Lua) and `+runtime/host/face_errors.py`.
+  - Generate `moy_app_err.h` (C plus Lua) and `runtime/host/face_errors.py`.
   - Decide FULL's meaning once: it means two different things today.
 - **Lines:** about −150.
 - **Risk:** low. Make the FULL decision explicit in the commit.
@@ -396,7 +396,7 @@ So the console demonstrably runs off-board on MicroPython.
 ### T12. A "spike" tool is load-bearing for the host runtime
 
 - **Evidence:**
-  - `tools/moy_index_spike.py` (1,178 lines; "Sprint 1a's harness") holds:
+  - `moy_index_spike.py` (1,178 lines; "Sprint 1a's harness", removed by T12) held:
     - the host library `Component`s for index, spine and fs (`:150-200`);
     - `host_library()`;
     - `moy_index`'s ctypes `_SIGS` (`:245`).
@@ -407,8 +407,8 @@ So the console demonstrably runs off-board on MicroPython.
   - `tools/board_config.py:677` and `tools/esp32_build_lib.sh:883` cite it for `MOY_INDEX_IMPL`.
   - Its bench, sizes and ci-time commands are one-off measurement history (#224).
 - **Do:**
-  - Move the `Component`/Part definitions and the index `_SIGS` into `+runtime/host/native_parts.py` (beside `native_build.py`). The host faces import that, with no `tools/` on `sys.path`.
-  - Keep the fuzz, sanitize and host commands as `+tools/native_check.py`.
+  - Move the `Component`/Part definitions and the index `_SIGS` into `runtime/host/native_parts.py` (beside `native_build.py`). The host faces import that, with no `tools/` on `sys.path`.
+  - Keep the fuzz, sanitize and host commands as `tools/native_check.py`.
   - Delete or archive `bench`, `sizes` and `ci-time` if #224's numbers live in the issue (they should).
 - **Lines:** about −400 from `tools/`, and the runtime stops depending on `tools/`.
 - **Risk:** low.
@@ -443,7 +443,7 @@ So the console demonstrably runs off-board on MicroPython.
 
 ### T15. Dead and stale
 
-- `tools/bench_unix_mp.py` (161 lines):
+- `bench_unix_mp.py` (161 lines, deleted by T15):
   - nothing references it;
   - its header tells you to build inside `firmware/lilygo_t_deck_plus_mainline/.build/micropython`, which `.claude/rules/rendering.md` forbids;
   - it benchmarks `spr_gate`, which `.claude/rules/shell.md` records as deleted.
@@ -451,7 +451,7 @@ So the console demonstrably runs off-board on MicroPython.
   Delete it. `make unix-micropython` plus `tests/test_frame_alloc.py` is its replacement.
 - `tests/test_semantic_traces.py:2357` docstring cites tests/test_ui_wasm.py, which does not exist. Point it at T3's test when T3 lands, or at what drives the ui imports today.
 - `api_floor` (`runtime/host/moy_ui_api_binding.py:443`) is a host-only name that only `tests/test_shift_frames.py` uses. Either give the board face the name (it is a read of engine state) or move it to a test helper. T1's parity test will flag it.
-- `tools/music_mockups.py` (1,688 lines) is referenced only by `docs/media/music_2026-11/README.md`. A one-off mockup generator for a shipped design: move it to `experiments/` with its README, or delete it once its PNGs are committed.
+- The music mockup generator (1,688 lines) is referenced only by `docs/media/music_2026-11/README.md`. A one-off mockup generator for a shipped design: it moves to `experiments/music_mockups/music_mockups.py`.
 - **Risk:** low.
 - **Guard:** a `tools/` reference ratchet. `tests/test_tools_smoke.py` already holds the board tools; extend it to fail a `tools/*.py` that nothing (Makefile, tests, skills, docs, other tools) names.
 - **Board:** no.

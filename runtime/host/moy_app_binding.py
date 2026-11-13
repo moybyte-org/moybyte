@@ -54,7 +54,7 @@ ID_MAX = 63
 
 
 # The role table (native/os_calls.json's rows the ROLE door names, in order:
-# tools/gen_os_table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# tools/gen_os/table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
 # its roles and C rows size the C's.
 with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
     _SRC = json.load(_f)

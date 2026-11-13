@@ -95,7 +95,7 @@ board).
 | T8, L2 | The theme reader is fuzzed by a seeded Python corpus. It is outside the native fuzz targets. The fix is unchanged. |
 | T9 | 104 mirrored structures, not about 40. |
 | T11 | 96 functions, not 120. |
-| T15 | `tools/bench_unix_mp.py` is named by one C comment, which goes with it. |
+| T15 | The deleted `bench_unix_mp.py` was named by one C comment, which went with it. |
 | X4 | The "after" picture exists (`tools/golden_png.py`). The "before", the diff and a failure that offers them are missing. |
 | X6 | About 61k lines of tracked Markdown; `docs/` outside the archive holds 18.6k. |
 | K1 | Worth doing, and for more than the issue says. The two compositors share four trivial methods, but the host's has since gained the three last-frame verbs the WM probes for and the web's has not, so the browser's desk takes a different path from the host's and the boards'. |
@@ -344,23 +344,23 @@ Closes T11, T12, T15, T5, T3, and writes I1's matrix.
   `tools/gen_os/` (the table and its rules, the C prototype parser, one
   emitter per tier). Its outputs do not change by a byte.
 - T12: the host library's parts and the index's signatures move from
-  `tools/moy_index_spike.py` into `+runtime/host/native_parts.py`. The fuzz,
-  sanitize and host commands stay as `+tools/native_check.py`; the one-off
+  the removed `moy_index_spike.py` into `runtime/host/native_parts.py`. The fuzz,
+  sanitize and host commands stay as `tools/native_check.py`; the one-off
   bench, sizes and ci-time commands go (#224 holds their numbers).
-- T15: `tools/bench_unix_mp.py` and the comment that names it are deleted;
-  `tools/music_mockups.py` moves under `experiments/`; the two docstrings
+- T15: `bench_unix_mp.py` and the comment that named it are deleted;
+  the music mockup generator moves to `experiments/music_mockups/music_mockups.py`; the two docstrings
   that cite a test that does not exist point at T3's; `api_floor` moves to a
   test helper.
 - T5: one `errors` section in `native/os_calls.json`: code, Python
   exception, errno, message, Lua message. It generates the C and Lua header
   and the host's table. `MOY_APP_FULL` gets one meaning.
-- T3: `+tests/test_every_row.py`. Each row gains an `example`. Generated
+- T3: `tests/test_every_row.py`. Each row gains an `example`. Generated
   probes (a Python app, a Lua app, a wasm module and a WASI command assembled
   by `tools/wat.py`) call every row a tier projects and print one normalised
   line each; every tier's trace is compared with Python's, on CPython and on
   the board model.
 
-- I1: `+tests/test_input_matrix.py`, the input conformance matrix.
+- I1: `tests/test_input_matrix.py`, the input conformance matrix.
   - Rows: every widget kind (field, list, button, popover, dialog, text
     view).
   - Columns: every input as its driver delivers it, through the drivers'

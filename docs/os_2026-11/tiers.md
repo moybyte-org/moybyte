@@ -94,15 +94,23 @@ costs are #227's.
   compiled app imports it from `moybyte.app` (its WAMR signature from the
   types) and whether a WASI program imports it from `moybyte.os`, its Lua and
   Python names (Lua's are Python's, verbatim), and whether the door's Python
-  half decodes it. `tools/gen_os_table.py` writes
+  half decodes it, and the `example` its every-row probes call it with. Its
+  `errors` are the app ABI's answer codes and what each face makes of one
+  (the exception, errno and message a Python face raises, the error a Lua
+  call raises, the err text a storage row answers). `tools/gen_os_table.py`,
+  the entry point over `tools/gen_os/` (the source and its rules, the C
+  prototype parser, one emitter per tier), writes
   every tier's table from it: this table and the SDK's header and stubs; the
   app ABI's roles, C rows, role table and allowlist
   (`native/moy_app/moy_app_rows.h`); the `moybyte.app` natives
   (`moy_app_wasm_rows.h`) and the toolkit's (`native/moy_ui/moy_ui_wasm_rows.h`);
   the names a Lua run and a Lua service hold (`moy_app_lua_rows.h`); the
+  answer codes and their texts (`moy_app_err.h`, and
+  `runtime/host/face_errors.py` for the host's faces); the
   Python console's `ROLES`, `TABLE`, `DOOR_ARGS` and console calls; and
   `docs/app_api_v1.md`'s role and call tables. `tests/test_os_table.py`
-  fails on a stale copy. moy-spec's game verbs are not in it (they are the
+  fails on a stale copy, and `tests/test_every_row.py` calls every row with
+  an example on every tier that projects it and compares the answers. moy-spec's game verbs are not in it (they are the
   `moy` module's and libmoy's); spec verbs, if ever exported here, would sit
   under a Moybyte-owned ordinal layer frozen separately from the spec, which
   is not append-only by index. WASI's imports (§3) keep WASI's names and are

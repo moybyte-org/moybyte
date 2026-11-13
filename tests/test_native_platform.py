@@ -96,7 +96,7 @@ ALLOWED = {
     ("moy_kernel/moy_kernel.c", "task"):
         "mp_task: the esp32 port's own task, pinned as the port starts it",
     ("moy_app/moy_app_wasm.c", "weak"):
-        "the toolkit's wasm rows, which tools/gen_os_table.py declares weak (UI_WEAK) "
+        "the toolkit's wasm rows, which tools/gen_os/app.py declares weak (UI_WEAK) "
         "in moy_app_wasm_rows.h",
     ("moy_gfx/modmoy_gfx.c", "weak"): "esp_native_code_free_all is MicroPython's, no header of ours",
     ("moy_kernel/modmoy_guard.c", "weak"):
