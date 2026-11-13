@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_kmem.h"
 #include "moy_seal.h"
@@ -77,7 +78,7 @@ static int hex_of(const char *o, const char *oe, const char *key, uint8_t *out, 
     if (!moy_json_get(o, oe, key, &v, &ve) || moy_json_kind(v, ve) != MOY_JSON_STR) {
         return 0;
     }
-    return moy_seal_unhex(v + 1, (size_t)(ve - v) - 2u, out, want);
+    return moy_hex_decode(v + 1, (size_t)(ve - v) - 2u, out, want);
 }
 
 // The hello's answer: the board's id and nonce, and this page's nonce.
@@ -104,7 +105,7 @@ KEEP int moy_sw_hello(size_t n) {
 }
 
 KEEP const char *moy_sw_board(void) {
-    moy_seal_hex(C.hs.id, MOY_SEAL_RAND, C.out);
+    moy_hex_encode(C.hs.id, MOY_SEAL_RAND, C.out);
     return C.out;
 }
 
@@ -114,8 +115,8 @@ KEEP int moy_sw_has_password(void) {
 
 static int put(const char *fmt, const char *a, const char *b, const char *c, const char *d) {
     char nb[2 * MOY_SEAL_RAND + 1], nc[2 * MOY_SEAL_RAND + 1];
-    moy_seal_hex(C.hs.nb, MOY_SEAL_RAND, nb);
-    moy_seal_hex(C.hs.nc, MOY_SEAL_RAND, nc);
+    moy_hex_encode(C.hs.nb, MOY_SEAL_RAND, nb);
+    moy_hex_encode(C.hs.nc, MOY_SEAL_RAND, nc);
     size_t need = strlen(fmt) + 64 + strlen(a) + strlen(b) + strlen(c) + strlen(d);
     if (moy_sw_buf(need) == NULL) {
         return -1;
@@ -147,15 +148,15 @@ static const char *quoted(char *out, size_t cap) {
 
 // A paired browser's sign-in: {"op":"key",...}.
 KEEP int moy_sw_key(const char *kid_hex, const char *key_hex) {
-    if (!moy_seal_unhex(kid_hex, strlen(kid_hex), C.kid, MOY_SEAL_KID)
-        || !moy_seal_unhex(key_hex, strlen(key_hex), C.key, MOY_SEAL_KEY)) {
+    if (!moy_hex_decode(kid_hex, strlen(kid_hex), C.kid, MOY_SEAL_KID)
+        || !moy_hex_decode(key_hex, strlen(key_hex), C.key, MOY_SEAL_KEY)) {
         return -1;
     }
     uint8_t mac[MOY_SEAL_MAC];
     char mh[2 * MOY_SEAL_MAC + 1], kh[2 * MOY_SEAL_KID + 1];
     moy_seal_key_mac(&C.hs, C.kid, C.key, mac);
-    moy_seal_hex(mac, MOY_SEAL_MAC, mh);
-    moy_seal_hex(C.kid, MOY_SEAL_KID, kh);
+    moy_hex_encode(mac, MOY_SEAL_MAC, mh);
+    moy_hex_encode(C.kid, MOY_SEAL_KID, kh);
     C.pairing = 0;
     return put("{\"op\":\"key\",\"nb\":\"%s\",\"nc\":\"%s\",\"kid\":\"%s\",\"mac\":\"%s\"%s%s}",
                kh, mh, "", "");
@@ -164,7 +165,7 @@ KEEP int moy_sw_key(const char *kid_hex, const char *key_hex) {
 // The QR's token pairs this browser: {"op":"token",...}.
 KEEP int moy_sw_token(const char *token_hex, const char *name) {
     uint8_t t[MOY_SEAL_RAND], mac[MOY_SEAL_MAC];
-    if (!moy_seal_unhex(token_hex, strlen(token_hex), t, MOY_SEAL_RAND)) {
+    if (!moy_hex_decode(token_hex, strlen(token_hex), t, MOY_SEAL_RAND)) {
         return -1;
     }
     set_name(name);
@@ -173,7 +174,7 @@ KEEP int moy_sw_token(const char *token_hex, const char *name) {
     moy_seal_wipe(t, sizeof t);
     C.pairing = 1;
     char mh[2 * MOY_SEAL_MAC + 1], q[2 * NAME_MAX_BYTES * 6 + 8];
-    moy_seal_hex(mac, MOY_SEAL_MAC, mh);
+    moy_hex_encode(mac, MOY_SEAL_MAC, mh);
     return put("{\"op\":\"token\",\"nb\":\"%s\",\"nc\":\"%s\",\"mac\":\"%s\",\"name\":%s%s%s}",
                mh, quoted(q, sizeof q), "", "");
 }
@@ -204,7 +205,7 @@ KEEP int moy_sw_pake(const char *password, const char *name) {
     }
     set_name(name);
     char x[2 * MOY_SEAL_POINT + 1], q[2 * NAME_MAX_BYTES * 6 + 8];
-    moy_seal_hex(C.sp.mine, MOY_SEAL_POINT, x);
+    moy_hex_encode(C.sp.mine, MOY_SEAL_POINT, x);
     return put("{\"op\":\"pake\",\"nb\":\"%s\",\"nc\":\"%s\",\"X\":\"%s\",\"name\":%s%s%s}", x,
                quoted(q, sizeof q), "", "");
 }
@@ -224,8 +225,8 @@ KEEP int moy_sw_confirm(size_t n) {
     moy_seal_wipe(&C.sp, sizeof C.sp);
     C.pairing = 1;
     char nb[2 * MOY_SEAL_RAND + 1], ca[2 * MOY_SEAL_MAC + 1];
-    moy_seal_hex(C.hs.nb, MOY_SEAL_RAND, nb);
-    moy_seal_hex(C.ca, MOY_SEAL_MAC, ca);
+    moy_hex_encode(C.hs.nb, MOY_SEAL_RAND, nb);
+    moy_hex_encode(C.ca, MOY_SEAL_MAC, ca);
     moy_seal_wipe(C.ca, sizeof C.ca);
     if (moy_sw_buf(256) == NULL) {
         return -1;
@@ -263,12 +264,12 @@ KEEP int moy_sw_done(size_t n) {
 }
 
 KEEP const char *moy_sw_kid(void) {
-    moy_seal_hex(C.kid, MOY_SEAL_KID, C.out);
+    moy_hex_encode(C.kid, MOY_SEAL_KID, C.out);
     return C.out;
 }
 
 KEEP const char *moy_sw_device_key(void) {
-    moy_seal_hex(C.key, MOY_SEAL_KEY, C.out);
+    moy_hex_encode(C.key, MOY_SEAL_KEY, C.out);
     return C.out;
 }
 
@@ -287,7 +288,7 @@ KEEP int moy_sw_seal(const char *method, const char *path, size_t n) {
         return -1;
     }
     char sid[2 * MOY_SEAL_SID + 1];
-    moy_seal_hex(C.sid, MOY_SEAL_SID, sid);
+    moy_hex_encode(C.sid, MOY_SEAL_SID, sid);
     C.seq++;
     int tn = snprintf(C.target, sizeof C.target, "%s%cs=%s&n=%llu", path,
                       strchr(path, '?') ? '&' : '?', sid, (unsigned long long)C.seq);
@@ -301,7 +302,7 @@ KEEP int moy_sw_seal(const char *method, const char *path, size_t n) {
     }
     if (get) {
         memcpy(C.target + tn, "&t=", 3);
-        moy_seal_hex(tag, MOY_SEAL_TAG, C.target + tn + 3);
+        moy_hex_encode(tag, MOY_SEAL_TAG, C.target + tn + 3);
         return 0;
     }
     memcpy(C.buf + n, tag, MOY_SEAL_TAG);

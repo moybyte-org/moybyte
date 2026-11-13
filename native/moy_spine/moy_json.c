@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_json.h"
 
 // -- scanning ------------------------------------------------------------------
@@ -16,19 +18,6 @@ const char *moy_json_ws(const char *p, const char *end) {
     return p;
 }
 
-static int hex_val(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
 // The code unit of the \uXXXX escape at `p` (which points at the 'u'), or -1.
 static int32_t u_escape(const char *p, const char *end) {
     if (end - p < 5) {
@@ -36,36 +25,13 @@ static int32_t u_escape(const char *p, const char *end) {
     }
     int32_t v = 0;
     for (int i = 1; i <= 4; i++) {
-        int d = hex_val(p[i]);
+        int d = moy_hex_value((unsigned char)p[i]);
         if (d < 0) {
             return -1;
         }
         v = v * 16 + d;
     }
     return v;
-}
-
-static size_t utf8_put(uint32_t cp, char *b) {
-    if (cp < 0x80u) {
-        b[0] = (char)cp;
-        return 1;
-    }
-    if (cp < 0x800u) {
-        b[0] = (char)(0xc0u | (cp >> 6));
-        b[1] = (char)(0x80u | (cp & 0x3fu));
-        return 2;
-    }
-    if (cp < 0x10000u) {
-        b[0] = (char)(0xe0u | (cp >> 12));
-        b[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-        b[2] = (char)(0x80u | (cp & 0x3fu));
-        return 3;
-    }
-    b[0] = (char)(0xf0u | (cp >> 18));
-    b[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
-    b[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-    b[3] = (char)(0x80u | (cp & 0x3fu));
-    return 4;
 }
 
 const char *moy_json_string(const char *p, const char *end, int decode,
@@ -140,7 +106,7 @@ const char *moy_json_string(const char *p, const char *end, int decode,
                 cp = 0x10000u + ((cp - 0xd800u) << 10) + ((uint32_t)lo - 0xdc00u);
             }
             char b[4];
-            size_t k = utf8_put(cp, b);
+            size_t k = moy_utf8_put(cp, b);
             if (out != NULL) {
                 memcpy(out + w, b, k);
             }
@@ -403,7 +369,7 @@ int moy_json_kind(const char *v, const char *v_end) {
 
 // The next code point of a string span's body (`*p` past the opening quote and
 // short of the closing one): an escape, a surrogate pair, a UTF-8 sequence, or
-// a byte that starts none (as itself, 0xDC80 + byte would be CPython's
+// a byte the strict rule refuses (as itself, 0xDC80 + byte would be CPython's
 // surrogateescape; the scanner's callers never hold one). A lone surrogate
 // escape comes back as itself.
 static uint32_t next_cp(const char **pp, const char *end) {
@@ -436,37 +402,10 @@ static uint32_t next_cp(const char **pp, const char *end) {
         *pp = (const char *)p + 2;
         return cp;
     }
-    unsigned c = *p;
-    size_t k = 0;
-    if (c < 0x80u) {
-        cp = c;
-        k = 1;
-    } else if ((c & 0xe0u) == 0xc0u) {
-        cp = c & 0x1fu;
-        k = 2;
-    } else if ((c & 0xf0u) == 0xe0u) {
-        cp = c & 0x0fu;
-        k = 3;
-    } else if ((c & 0xf8u) == 0xf0u) {
-        cp = c & 0x07u;
-        k = 4;
-    } else {
-        *pp = (const char *)p + 1;
-        return c;
-    }
-    if ((const char *)p + k > end) {
-        *pp = (const char *)p + 1;
-        return c;
-    }
-    for (size_t i = 1; i < k; i++) {
-        if ((p[i] & 0xc0u) != 0x80u) {
-            *pp = (const char *)p + 1;
-            return c;
-        }
-        cp = (cp << 6) | (p[i] & 0x3fu);
-    }
-    *pp = (const char *)p + k;
-    return cp;
+    size_t i = 0;
+    int32_t u = moy_utf8_next(p, (size_t)(end - (const char *)p), &i);
+    *pp = (const char *)p + i;
+    return u < 0 ? *p : (uint32_t)u;
 }
 
 size_t moy_json_strlen(const char *s, const char *s_end) {
@@ -483,7 +422,7 @@ size_t moy_json_strlen(const char *s, const char *s_end) {
         if (cp >= 0xd800u && cp <= 0xdfffu) {
             cp = 0xfffdu;
         }
-        n += utf8_put(cp, b);
+        n += moy_utf8_put(cp, b);
     }
     return n;
 }
@@ -504,7 +443,7 @@ size_t moy_json_strcut(const char *s, const char *s_end, char *out, size_t cap) 
         if (cp >= 0xd800u && cp <= 0xdfffu) {
             cp = 0xfffdu;
         }
-        size_t k = utf8_put(cp, b);
+        size_t k = moy_utf8_put(cp, b);
         if (k > cap - n) {
             break;
         }
@@ -688,39 +627,26 @@ int moy_json_int(const char *v, const char *v_end, int64_t *out) {
 
 // -- writing as CPython's json.dumps does ------------------------------------------------
 
-typedef struct {
-    char *out;
-    size_t cap, n;
-} sink_t;
-
-static void put(sink_t *k, const char *p, size_t n) {
-    if (k->n < k->cap) {
-        size_t room = k->cap - k->n;
-        memcpy(k->out + k->n, p, n < room ? n : room);
-    }
-    k->n += n;
-}
-
-static void put_u(sink_t *k, uint32_t u) {
+static void put_u(moy_sb_t *k, uint32_t u) {
     char b[12];
     snprintf(b, sizeof b, "\\u%04x", (unsigned)u);
-    put(k, b, 6);
+    moy_sb_put(k, b, 6);
 }
 
-static void put_cp(sink_t *k, uint32_t cp) {
+static void put_cp(moy_sb_t *k, uint32_t cp) {
     switch (cp) {
-        case '"': put(k, "\\\"", 2); return;
-        case '\\': put(k, "\\\\", 2); return;
-        case '\n': put(k, "\\n", 2); return;
-        case '\r': put(k, "\\r", 2); return;
-        case '\t': put(k, "\\t", 2); return;
-        case '\b': put(k, "\\b", 2); return;
-        case '\f': put(k, "\\f", 2); return;
+        case '"': moy_sb_put(k, "\\\"", 2); return;
+        case '\\': moy_sb_put(k, "\\\\", 2); return;
+        case '\n': moy_sb_put(k, "\\n", 2); return;
+        case '\r': moy_sb_put(k, "\\r", 2); return;
+        case '\t': moy_sb_put(k, "\\t", 2); return;
+        case '\b': moy_sb_put(k, "\\b", 2); return;
+        case '\f': moy_sb_put(k, "\\f", 2); return;
         default: break;
     }
     if (cp >= 0x20u && cp <= 0x7eu) {
         char c = (char)cp;
-        put(k, &c, 1);
+        moy_sb_put(k, &c, 1);
     } else if (cp < 0x10000u) {
         put_u(k, cp);
     } else {
@@ -730,39 +656,39 @@ static void put_cp(sink_t *k, uint32_t cp) {
     }
 }
 
-static void put_string(sink_t *k, const char *s, const char *s_end) {
+static void put_string(moy_sb_t *k, const char *s, const char *s_end) {
     const char *p = s + 1, *end = s_end - 1;
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
     while (p < end) {
         put_cp(k, next_cp(&p, end));
     }
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
 }
 
 size_t moy_json_quote(const char *s, size_t n, char *out, size_t cap) {
-    sink_t k = { out, cap, 0 };
+    moy_sb_t k = moy_sb_fixed(out, cap);
     const char *p = s, *end = s + n;
-    put(&k, "\"", 1);
+    moy_sb_put(&k, "\"", 1);
     while (p < end) {
         put_cp(&k, next_cp(&p, end));
     }
-    put(&k, "\"", 1);
+    moy_sb_put(&k, "\"", 1);
     return k.n;
 }
 
 // repr() of a double, as CPython writes it: the shortest digits that read back
 // the same, positional for exponents -4 to 15 (with ".0" when whole), else
 // d[.ddd]e[+-]XX.
-static void put_float(sink_t *k, double d) {
+static void put_float(moy_sb_t *k, double d) {
     if (isnan(d)) {
-        put(k, "NaN", 3);
+        moy_sb_put(k, "NaN", 3);
         return;
     }
     if (isinf(d)) {
         if (d < 0) {
-            put(k, "-Infinity", 9);
+            moy_sb_put(k, "-Infinity", 9);
         } else {
-            put(k, "Infinity", 8);
+            moy_sb_put(k, "Infinity", 8);
         }
         return;
     }
@@ -832,12 +758,12 @@ static void put_float(sink_t *k, double d) {
         n += snprintf(o + n, sizeof o - (size_t)n, "e%c%02d", exp < 0 ? '-' : '+',
                       exp < 0 ? -exp : exp);
     }
-    put(k, o, (size_t)n);
+    moy_sb_put(k, o, (size_t)n);
 }
 
 // A scalar as json.dumps writes it. Kept out of canon's frame: the number's
 // text is copied to hold the NUL strtod needs.
-static __attribute__((noinline)) void put_scalar(sink_t *k, const char *v,
+static __attribute__((noinline)) void put_scalar(moy_sb_t *k, const char *v,
                                                  const char *v_end) {
     switch (moy_json_kind(v, v_end)) {
         case MOY_JSON_STR:
@@ -845,9 +771,9 @@ static __attribute__((noinline)) void put_scalar(sink_t *k, const char *v,
             return;
         case MOY_JSON_INT:
             if (v_end - v == 2 && v[0] == '-' && v[1] == '0') {
-                put(k, "0", 1);
+                moy_sb_put(k, "0", 1);
             } else {
-                put(k, v, (size_t)(v_end - v));
+                moy_sb_put(k, v, (size_t)(v_end - v));
             }
             return;
         case MOY_JSON_FLOAT: {
@@ -872,13 +798,13 @@ static __attribute__((noinline)) void put_scalar(sink_t *k, const char *v,
             return;
         }
         case MOY_JSON_TRUE:
-            put(k, "true", 4);
+            moy_sb_put(k, "true", 4);
             return;
         case MOY_JSON_FALSE:
-            put(k, "false", 5);
+            moy_sb_put(k, "false", 5);
             return;
         default:
-            put(k, "null", 4);
+            moy_sb_put(k, "null", 4);
             return;
     }
 }
@@ -929,7 +855,7 @@ typedef struct {
 // containers sit in a fixed array, so the stack it takes does not grow with
 // the nesting. 0 when the span nests deeper than MOY_JSON_DEPTH or does not
 // scan.
-static int canon(sink_t *k, const char *v, const char *v_end) {
+static int canon(moy_sb_t *k, const char *v, const char *v_end) {
     canon_frame_t st[MOY_JSON_DEPTH];
     uint32_t n = 0;
     for (;;) {
@@ -938,7 +864,7 @@ static int canon(sink_t *k, const char *v, const char *v_end) {
                 return 0;
             }
             canon_frame_t *f = &st[n++];
-            put(k, v, 1);
+            moy_sb_put(k, v, 1);
             moy_json_iter(&f->it, v, v_end);
             f->v = v;
             f->first = 1;
@@ -956,37 +882,37 @@ static int canon(sink_t *k, const char *v, const char *v_end) {
                        : moy_json_next(&f->it, NULL, NULL, &v, &v_end);
             if (more) {
                 if (!f->first) {
-                    put(k, ", ", 2);
+                    moy_sb_put(k, ", ", 2);
                 }
                 f->first = 0;
                 if (f->it.obj) {
                     put_string(k, key, ke);
-                    put(k, ": ", 2);
+                    moy_sb_put(k, ": ", 2);
                 }
                 break;
             }
             if (f->it.bad) {
                 return 0;
             }
-            put(k, f->it.obj ? "}" : "]", 1);
+            moy_sb_put(k, f->it.obj ? "}" : "]", 1);
             n--;
         }
     }
 }
 
 size_t moy_json_canon(const char *v, const char *v_end, char *out, size_t cap) {
-    sink_t k = { out, cap, 0 };
+    moy_sb_t k = moy_sb_fixed(out, cap);
     return canon(&k, v, v_end) ? k.n : MOY_JSON_DEEP;
 }
 
 size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
                           const char *val, char *out, size_t cap) {
-    sink_t k = { out, cap, 0 };
+    moy_sb_t k = moy_sb_fixed(out, cap);
     moy_json_iter_t it;
     const char *mk, *mke, *e, *ee;
     size_t kn = strlen(key);
     int first = 1, done = 0;
-    put(&k, "{", 1);
+    moy_sb_put(&k, "{", 1);
     moy_json_iter(&it, obj, obj_end);
     while (next_member(&it, obj, &mk, &mke, &e, &ee)) {
         int ours = moy_json_str_is(mk, mke, key, kn);
@@ -994,13 +920,13 @@ size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
             continue;                   // removed
         }
         if (!first) {
-            put(&k, ", ", 2);
+            moy_sb_put(&k, ", ", 2);
         }
         first = 0;
         put_string(&k, mk, mke);
-        put(&k, ": ", 2);
+        moy_sb_put(&k, ": ", 2);
         if (ours) {
-            put(&k, val, strlen(val));
+            moy_sb_put(&k, val, strlen(val));
             done = 1;
         } else if (!canon(&k, e, ee)) {
             return MOY_JSON_DEEP;
@@ -1011,13 +937,13 @@ size_t moy_json_canon_set(const char *obj, const char *obj_end, const char *key,
     }
     if (!done && val != NULL) {
         if (!first) {
-            put(&k, ", ", 2);
+            moy_sb_put(&k, ", ", 2);
         }
         k.n += moy_json_quote(key, kn, k.n < cap ? out + k.n : NULL,
                               k.n < cap ? cap - k.n : 0);
-        put(&k, ": ", 2);
-        put(&k, val, strlen(val));
+        moy_sb_put(&k, ": ", 2);
+        moy_sb_put(&k, val, strlen(val));
     }
-    put(&k, "}", 1);
+    moy_sb_put(&k, "}", 1);
     return k.n;
 }

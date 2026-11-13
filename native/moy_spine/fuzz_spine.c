@@ -23,9 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_htab.h"
 #include "moy_ledger.h"
 #include "moy_route.h"
+#include "moy_sb.h"
 #include "moy_settings.h"
 
 #define CHECK(c) do { \
@@ -1014,9 +1016,94 @@ static void verify_all(void) {
     st_verify();
 }
 
+// -- the codecs (moy_codec.h) and the builder (moy_sb.h) over the raw input ----------
+
+static void codec_check(const uint8_t *data, size_t size) {
+    // UTF-8: the strict reader and the validator agree, a valid run
+    // re-encodes to itself and counts its codepoints, and the whole prefix
+    // cuts at most a sequence's three leading bytes.
+    int valid = 1;
+    size_t cps = 0;
+    char *re = malloc(size + 4u);
+    size_t rn = 0;
+    for (size_t i = 0; i < size;) {
+        size_t at = i;
+        int32_t cp = moy_utf8_next(data, size, &i);
+        CHECK(i > at && i <= size);
+        if (cp < 0) {
+            valid = 0;
+            CHECK(i == at + 1u);
+        } else {
+            CHECK(cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF));
+            size_t k = moy_utf8_put((uint32_t)cp, re + rn);
+            CHECK(k == i - at && memcmp(re + rn, data + at, k) == 0);
+            rn += k;
+        }
+        cps++;
+    }
+    CHECK(moy_utf8_valid(data, size) == valid);
+    CHECK(!valid || moy_utf8_count(data, size) == cps);
+    size_t whole = moy_utf8_whole(data, size);
+    CHECK(whole <= size && whole + 3u >= size);
+    free(re);
+    // base64: both alphabets round-trip; any text decodes inside its bound.
+    size_t en = (size + 2u) / 3u * 4u;
+    char *enc = malloc(en + 1u);
+    uint8_t *dec = malloc(size / 4u * 3u + 3u);
+    uint8_t *back = malloc(en / 4u * 3u + 3u);
+    CHECK(moy_b64_encode(data, size, enc, 0) == en);
+    CHECK(moy_b64_decode(enc, en, back) == (long)size && memcmp(back, data, size) == 0);
+    size_t un = moy_b64_encode(data, size, enc, 1);
+    CHECK(un <= en && un + 2u >= en && memchr(enc, '=', un) == NULL);
+    long dn = moy_b64_decode((const char *)data, size, dec);
+    CHECK(dn >= -1 && dn <= (long)(size / 4u * 3u + 3u));
+    for (size_t i = 0; i < size; i++) {
+        int v = moy_b64_value(data[i]);
+        CHECK(v < 64 && (v < 0) == (strchr("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                                           "0123456789+/", data[i]) == NULL || data[i] == 0));
+    }
+    free(enc);
+    free(dec);
+    free(back);
+    // hex: bytes round-trip; arbitrary text decodes only at twice the length.
+    size_t hn = size < 512u ? size : 512u;
+    char *hex = malloc(2u * hn + 1u);
+    uint8_t *hb = malloc(hn + 1u);
+    moy_hex_encode(data, hn, hex);
+    CHECK(hex[2u * hn] == '\0' && moy_hex_decode(hex, 2u * hn, hb, hn) == 1
+          && memcmp(hb, data, hn) == 0);
+    CHECK(moy_hex_decode((const char *)data, size, hb, hn) == 0 || size == 2u * hn);
+    free(hex);
+    free(hb);
+    // The builder: a grown one holds every piece put (or failed, its bytes so
+    // far kept), a fixed one the prefix that fits and the count of all.
+    moy_sb_t g = moy_sb_grown(&mem);
+    char fixed[37];
+    moy_sb_t f = moy_sb_fixed(fixed, sizeof fixed);
+    for (size_t i = 0; i < size;) {
+        size_t k = 1u + data[i] % 61u;
+        k = k < size - i ? k : size - i;
+        fail_in = (data[i] & 0xC0u) == 0xC0u ? 1 : 0;
+        size_t before = g.n;
+        moy_sb_put(&g, data + i, k);
+        moy_sb_put(&f, data + i, k);
+        CHECK(g.failed ? g.n == before || g.n == before + k : g.n == before + k);
+        CHECK(g.p == NULL || g.p[g.n] == 0);
+        i += k;
+    }
+    fail_in = 0;
+    CHECK(f.n == size && memcmp(fixed, data, size < sizeof fixed ? size : sizeof fixed) == 0);
+    CHECK(moy_sb_end(&f) == (size < sizeof fixed ? size : sizeof fixed - 1u));
+    CHECK(g.failed || g.n == size);
+    CHECK(g.failed || g.n == 0 || memcmp(g.p, data, size) == 0);
+    moy_sb_free(&g);
+    CHECK(live_bytes == 0);
+}
+
 static void run(const uint8_t *data, size_t size) {
     fail_in = 0;
     live_bytes = 0;
+    codec_check(data, size);
     memset(&tm, 0, sizeof tm);
     input_t in = { data, size, 0 };
     make_all();

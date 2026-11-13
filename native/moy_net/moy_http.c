@@ -270,39 +270,3 @@ size_t moy_http_head(char *out, size_t cap, int status, const char *ctype,
                      (unsigned long)body_n);
     return k < 0 ? 0 : (size_t)k;
 }
-
-int moy_utf8_valid(const char *s, size_t n) {
-    const unsigned char *p = (const unsigned char *)s;
-    const unsigned char *end = p + n;
-    while (p < end) {
-        unsigned c = *p++;
-        if (c < 0x80) {
-            continue;
-        }
-        unsigned need, min;
-        uint32_t cp;
-        if (c >= 0xC2 && c <= 0xDF) {
-            need = 1; min = 0x80; cp = c & 0x1F;
-        } else if (c >= 0xE0 && c <= 0xEF) {
-            need = 2; min = 0x800; cp = c & 0x0F;
-        } else if (c >= 0xF0 && c <= 0xF4) {
-            need = 3; min = 0x10000; cp = c & 0x07;
-        } else {
-            return 0;
-        }
-        if ((size_t)(end - p) < need) {
-            return 0;
-        }
-        for (unsigned i = 0; i < need; i++) {
-            if ((p[i] & 0xC0) != 0x80) {
-                return 0;
-            }
-            cp = (cp << 6) | (p[i] & 0x3F);
-        }
-        p += need;
-        if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-            return 0;
-        }
-    }
-    return 1;
-}

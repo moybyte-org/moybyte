@@ -48,6 +48,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_net.h"
 #include "moy_vol.h"
@@ -262,7 +263,7 @@ static int write_text(size_t n) {
 
 static void save(void) {
     char id[2 * MOY_SEAL_RAND + 1];
-    moy_seal_hex(A->id, MOY_SEAL_RAND, id);
+    moy_hex_encode(A->id, MOY_SEAL_RAND, id);
     size_t n = (size_t)snprintf(A->text, FILE_MAX, "moy-webkeys 1 %s\n", id);
     for (int i = 0; i < MOY_WA_KEYS && n < FILE_MAX; i++) {
         wkey_t *k = &A->keys[i];
@@ -270,8 +271,8 @@ static void save(void) {
             continue;
         }
         char kid[2 * MOY_SEAL_KID + 1], key[2 * MOY_SEAL_KEY + 1];
-        moy_seal_hex(k->kid, MOY_SEAL_KID, kid);
-        moy_seal_hex(k->key, MOY_SEAL_KEY, key);
+        moy_hex_encode(k->kid, MOY_SEAL_KID, kid);
+        moy_hex_encode(k->key, MOY_SEAL_KEY, key);
         char cr[24], se[24];
         n += (size_t)snprintf(A->text + n, FILE_MAX - n, "%s %s %s %s %s\n", kid, key,
                               dec64(k->created, cr, sizeof cr), dec64(k->seen, se, sizeof se),
@@ -296,7 +297,7 @@ static void load(void) {
         size_t ln = (size_t)(e - p);
         if (!have_id) {
             have_id = ln == 14 + 2 * MOY_SEAL_RAND && memcmp(p, "moy-webkeys 1 ", 14) == 0
-                      && moy_seal_unhex(p + 14, 2 * MOY_SEAL_RAND, A->id, MOY_SEAL_RAND);
+                      && moy_hex_decode(p + 14, 2 * MOY_SEAL_RAND, A->id, MOY_SEAL_RAND);
             if (!have_id) {
                 break;                  // not ours: a fresh id, and nothing paired
             }
@@ -312,8 +313,8 @@ static void load(void) {
             const char *name = "";
             if (sscanf(line, "%20s %36s%n", kid, key, &at) == 2 && at > 0
                 && moy_wa_scan_times(line + at, &cr, &se, &name)
-                && moy_seal_unhex(kid, strlen(kid), w->kid, MOY_SEAL_KID)
-                && moy_seal_unhex(key, strlen(key), w->key, MOY_SEAL_KEY)) {
+                && moy_hex_decode(kid, strlen(kid), w->kid, MOY_SEAL_KID)
+                && moy_hex_decode(key, strlen(key), w->key, MOY_SEAL_KEY)) {
                 w->used = 1;
                 w->created = cr;
                 w->seen = se;
@@ -490,7 +491,7 @@ void moy_wa_board_id(char out[2 * MOY_SEAL_RAND + 1]) {
         out[0] = '\0';
         return;
     }
-    moy_seal_hex(A->id, MOY_SEAL_RAND, out);
+    moy_hex_encode(A->id, MOY_SEAL_RAND, out);
 }
 
 void moy_wa_token(char out[2 * MOY_SEAL_RAND + 1]) {
@@ -501,7 +502,7 @@ void moy_wa_token(char out[2 * MOY_SEAL_RAND + 1]) {
     moy_seal_random(A->token, MOY_SEAL_RAND);
     A->token_at = moy_net_ms64();
     A->token_on = 1;
-    moy_seal_hex(A->token, MOY_SEAL_RAND, out);
+    moy_hex_encode(A->token, MOY_SEAL_RAND, out);
 }
 
 int moy_wa_paired(void) {
@@ -526,7 +527,7 @@ size_t moy_wa_keys(char *out, size_t cap) {
             continue;
         }
         char kid[2 * MOY_SEAL_KID + 1];
-        moy_seal_hex(k->kid, MOY_SEAL_KID, kid);
+        moy_hex_encode(k->kid, MOY_SEAL_KID, kid);
         char cr[24], se[24];
         int w = snprintf(out + n, cap - n, "%s %s %s %s\n", kid, dec64(k->created, cr, sizeof cr),
                          dec64(k->seen, se, sizeof se), k->name);
@@ -611,7 +612,7 @@ int moy_wa_drop(const char *kid) {
     }
     int all = strcmp(kid, "all") == 0, gone = 0;
     uint8_t want[MOY_SEAL_KID];
-    if (!all && !moy_seal_unhex(kid, strlen(kid), want, MOY_SEAL_KID)) {
+    if (!all && !moy_hex_decode(kid, strlen(kid), want, MOY_SEAL_KID)) {
         return 0;
     }
     for (int i = 0; i < MOY_WA_KEYS; i++) {
@@ -751,8 +752,8 @@ static int signed_in(wkey_t *k, const moy_seal_hs_t *h, char *doc, size_t cap,
     uint8_t proof[MOY_SEAL_MAC];
     moy_seal_proof(h, k->kid, k->key, s->sid, proof);
     char sid[2 * MOY_SEAL_SID + 1], ph[2 * MOY_SEAL_MAC + 1];
-    moy_seal_hex(s->sid, MOY_SEAL_SID, sid);
-    moy_seal_hex(proof, MOY_SEAL_MAC, ph);
+    moy_hex_encode(s->sid, MOY_SEAL_SID, sid);
+    moy_hex_encode(proof, MOY_SEAL_MAC, ph);
     snprintf(doc, cap, "{\"sid\":\"%s\",\"proof\":\"%s\"%s}", sid, ph, extra ? extra : "");
     int64_t t = now_s();
     if (t - k->seen >= SEEN_EVERY_S) {
@@ -772,8 +773,8 @@ static int paired(const moy_seal_hs_t *h, const uint8_t *secret, size_t sn, cons
     memcpy(wrapped, k->key, MOY_SEAL_KEY);
     moy_seal_wrap(h, secret, sn, wrapped);
     char kid[2 * MOY_SEAL_KID + 1], key[2 * MOY_SEAL_KEY + 1], extra[96];
-    moy_seal_hex(k->kid, MOY_SEAL_KID, kid);
-    moy_seal_hex(wrapped, MOY_SEAL_KEY, key);
+    moy_hex_encode(k->kid, MOY_SEAL_KID, kid);
+    moy_hex_encode(wrapped, MOY_SEAL_KEY, key);
     snprintf(extra, sizeof extra, ",\"kid\":\"%s\",\"key\":\"%s\"", kid, key);
     return signed_in(k, h, doc, cap, extra);
 }
@@ -793,7 +794,7 @@ static int str_of(const char *o, const char *oe, const char *key, char *out, siz
 static int hex_of(const char *o, const char *oe, const char *key, uint8_t *out, size_t want) {
     char buf[2 * MOY_SEAL_POINT + 2];
     int n = str_of(o, oe, key, buf, sizeof buf);
-    return n >= 0 && moy_seal_unhex(buf, (size_t)n, out, want);
+    return n >= 0 && moy_hex_decode(buf, (size_t)n, out, want);
 }
 
 // A browser's name as the keys file keeps it: printable ASCII, cut short.
@@ -898,8 +899,8 @@ int moy_wa_later(char *doc, size_t cap) {
         memcpy(c->ke, j->ke, MOY_SEAL_KEY);
         memcpy(c->ca, j->ca, MOY_SEAL_MAC);
         char y[2 * MOY_SEAL_POINT + 1], cb[2 * MOY_SEAL_MAC + 1];
-        moy_seal_hex(j->y, MOY_SEAL_POINT, y);
-        moy_seal_hex(j->cb, MOY_SEAL_MAC, cb);
+        moy_hex_encode(j->y, MOY_SEAL_POINT, y);
+        moy_hex_encode(j->cb, MOY_SEAL_MAC, cb);
         snprintf(doc, cap, "{\"Y\":\"%s\",\"cB\":\"%s\"}", y, cb);
         status = 200;
     }
@@ -922,8 +923,8 @@ static int hello(uint32_t peer, char *doc, size_t cap) {
     uint32_t iter = 0;
     int pw = password(&iter, salt, w0, l);
     moy_seal_wipe(w0, sizeof w0);
-    moy_seal_hex(A->id, MOY_SEAL_RAND, id);
-    moy_seal_hex(c->nb, MOY_SEAL_RAND, nb);
+    moy_hex_encode(A->id, MOY_SEAL_RAND, id);
+    moy_hex_encode(c->nb, MOY_SEAL_RAND, nb);
     snprintf(doc, cap,
              "{\"v\":1,\"id\":\"%s\",\"nb\":\"%s\",\"pw\":%s,\"salt\":\"%s\",\"iter\":%u}", id,
              nb, pw ? "true" : "false", pw ? salt : "", pw ? (unsigned)iter : 0u);
@@ -1109,7 +1110,7 @@ int moy_wa_check(const char *method, size_t mn, const char *target, size_t tn, c
     size_t vn;
     uint8_t sid[MOY_SEAL_SID];
     moy_http_query(target, tn, "s", 1, &v, &vn);
-    if (!moy_seal_unhex(v, vn, sid, MOY_SEAL_SID)) {
+    if (!moy_hex_decode(v, vn, sid, MOY_SEAL_SID)) {
         return MOY_WA_NONE;
     }
     sweep_sessions();
@@ -1135,7 +1136,7 @@ int moy_wa_check(const char *method, size_t mn, const char *target, size_t tn, c
     size_t an = tn, pn = *bn;
     if (tn > 3 + 2 * MOY_SEAL_TAG && memcmp(target + tn - 3 - 2 * MOY_SEAL_TAG, "&t=", 3) == 0) {
         an = tn - 3 - 2 * MOY_SEAL_TAG;
-        if (pn != 0 || !moy_seal_unhex(target + an + 3, 2 * MOY_SEAL_TAG, tag, MOY_SEAL_TAG)) {
+        if (pn != 0 || !moy_hex_decode(target + an + 3, 2 * MOY_SEAL_TAG, tag, MOY_SEAL_TAG)) {
             return MOY_WA_BAD;
         }
     } else {

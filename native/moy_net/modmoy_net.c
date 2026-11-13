@@ -11,6 +11,7 @@
 #include "py/objmodule.h"
 #include "py/runtime.h"
 
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_net.h"
 #include "moy_webauth.h"

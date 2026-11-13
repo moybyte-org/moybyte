@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_net.h"
 #include "moy_ota.h"
@@ -204,14 +205,6 @@ static const char *const KEYS_HEX[] = {
 };
 #define NKEYS ((int)(sizeof(KEYS_HEX) / sizeof(KEYS_HEX[0])))
 
-static int hexval(int c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    c = lower(c);
-    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
-}
-
 // `n` hex digits, right-aligned into `out` (`cap` bytes, big-endian): 0, or -1
 // for a digit that is not one or a number wider than `cap`.
 static int hex_to(const char *s, size_t n, uint8_t *out, size_t cap) {
@@ -224,7 +217,7 @@ static int hex_to(const char *s, size_t n, uint8_t *out, size_t cap) {
     }
     memset(out, 0, cap);
     for (size_t i = 0; i < n; i++) {
-        int v = hexval((unsigned char)s[n - 1u - i]);
+        int v = moy_hex_value((unsigned char)s[n - 1u - i]);
         if (v < 0) {
             return -1;
         }
@@ -1125,7 +1118,7 @@ int moy_ota_dl_begin(const char *url, uint32_t size, const char *sha_hex,
     }
     size_t sn = sha_hex != NULL ? strlen(sha_hex) : 0;
     s_u.check_sha = sn > 0;
-    if (sn > 0 && (sn != 64 || hex_to(sha_hex, sn, s_u.want, 32) != 0)) {
+    if (sn > 0 && !moy_hex_decode(sha_hex, sn, s_u.want, 32)) {
         return fail("bad sha256");
     }
     if (!ensure_buf()) {

@@ -130,7 +130,6 @@ _SIGS = (
     ("moy_http_query", [ctypes.c_void_p, _Z, _P, _Z,
                         ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_http_head", [ctypes.c_void_p, _Z, _I, _P, _Z], _Z),
-    ("moy_utf8_valid", [ctypes.c_void_p, _Z], _I),
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),

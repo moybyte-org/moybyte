@@ -62,7 +62,7 @@ def _objects(cc, out):
                            "-I", SH, "-I", DASH, "-I", STORE]
     jobs = [(src, dash_flags) for src in shell_sources()]
     jobs.append((os.path.join(SH, "moy_sh_arena.c"), CFLAGS + ["-I", SH]))
-    jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
+    jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH, "-I", SPINE]))
     jobs.append((os.path.join(SH, "moy_sh_cands.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
     board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]

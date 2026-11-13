@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_devch.h"
 #include "moy_log.h"
 #include "moy_loop.h"
@@ -480,25 +481,6 @@ bool moy_devch_line(const char *line, bool *quit) {
     return dispatch(tmp, quit);
 }
 
-// Well-formed UTF-8 (a line the console's words can decode).
-static bool utf8(const char *s) {
-    const unsigned char *p = (const unsigned char *)s;
-    while (*p) {
-        unsigned char c = *p++;
-        int more = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2
-                   : (c & 0xF8) == 0xF0 ? 3 : -1;
-        if (more < 0 || (more == 1 && c < 0xC2)) {
-            return false;
-        }
-        while (more--) {
-            if ((*p++ & 0xC0) != 0x80) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 bool moy_devch_poll(bool *quit) {
     bool ran = false;
     const moy_loop_ops_t *ops = moy_loop_ops();
@@ -530,7 +512,7 @@ bool moy_devch_poll(bool *quit) {
                     continue;
                 }
                 // Bytes that are not text cost the line they land in.
-                if (!utf8(D.buf)) {
+                if (!moy_utf8_valid(D.buf, strlen(D.buf))) {
                     D.dropped++;
                     continue;
                 }

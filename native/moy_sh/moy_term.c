@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_term.h"
 
 // The console's palette, its first sixteen the base colours (native/moy_ui's
@@ -585,29 +586,6 @@ void moy_term_cursor(const moy_term_t *t, int out[3]) {
     out[2] = t->shown;
 }
 
-static size_t utf8(uint32_t cp, char *o) {
-    if (cp < 0x80) {
-        o[0] = (char)cp;
-        return 1;
-    }
-    if (cp < 0x800) {
-        o[0] = (char)(0xC0 | (cp >> 6));
-        o[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    }
-    if (cp < 0x10000) {
-        o[0] = (char)(0xE0 | (cp >> 12));
-        o[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        o[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    o[0] = (char)(0xF0 | (cp >> 18));
-    o[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    o[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    o[3] = (char)(0x80 | (cp & 0x3F));
-    return 4;
-}
-
 static size_t rgb_sgr(char *o, int ground, int i) {
     if (moy_theme_moy64 == NULL) {
         return (size_t)snprintf(o, 24, "\x1b[%d;5;%dm", ground ? 48 : 38, i);
@@ -669,7 +647,7 @@ size_t moy_term_line(const moy_term_t *t, int i, char *out, size_t cap) {
                                     : (size_t)snprintf(b + m, 8, "\x1b[49m");
                 was = (was & ~ground) | (c & ground);
             }
-            m += utf8(MOY_TERM_CP(c), b + m);
+            m += moy_utf8_put(MOY_TERM_CP(c), b + m);
             if (k + m + 5 > cap) {
                 break;
             }

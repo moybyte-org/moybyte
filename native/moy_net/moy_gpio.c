@@ -32,6 +32,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_json.h"
 #include "moy_net.h"
 #pragma weak moy_gpio_pins
@@ -112,27 +113,22 @@ void moy_gpio_release(void) {
     }
 }
 
-typedef struct {
-    char *p;
-    size_t n, cap;
-} buf_t;
+static void put(moy_sb_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
-static void put(buf_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-
-static void put(buf_t *b, const char *fmt, ...) {
-    if (b->n >= b->cap) {
-        return;
-    }
+// One printf piece onto the answer, which stays NUL-terminated.
+static void put(moy_sb_t *b, const char *fmt, ...) {
+    char t[160];
     va_list ap;
     va_start(ap, fmt);
-    int k = vsnprintf(b->p + b->n, b->cap - b->n, fmt, ap);
+    int k = vsnprintf(t, sizeof(t), fmt, ap);
     va_end(ap);
     if (k > 0) {
-        b->n += (size_t)k < b->cap - b->n ? (size_t)k : b->cap - b->n - 1u;
+        moy_sb_put(b, t, (size_t)k < sizeof(t) ? (size_t)k : sizeof(t) - 1u);
     }
+    moy_sb_end(b);
 }
 
-static void pin_list(buf_t *b, const uint8_t *pins, int count) {
+static void pin_list(moy_sb_t *b, const uint8_t *pins, int count) {
     put(b, "[");
     for (int i = 0; i < count; i++) {
         put(b, "%s%u", i ? ", " : "", (unsigned)pins[i]);
@@ -191,8 +187,8 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, char *out, size_t cap) {
     const uint8_t *pins = NULL;
     int count = moy_gpio_pins != NULL ? moy_gpio_pins(&pins) : 0;
-    buf_t b = {out, 0, cap};
-    out[0] = '\0';
+    moy_sb_t b = moy_sb_fixed(out, cap);
+    moy_sb_end(&b);
     (void)target;
     (void)tn;
     if (!post) {

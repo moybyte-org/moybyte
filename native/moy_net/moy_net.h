@@ -170,10 +170,6 @@ const char *moy_http_reason(int status);
 size_t moy_http_head(char *out, size_t cap, int status, const char *ctype,
                      size_t body_n);
 
-// Whether the `n` bytes at `s` are well-formed UTF-8 (no overlong form, no
-// surrogate, nothing past U+10FFFF): what a strict decode accepts.
-int moy_utf8_valid(const char *s, size_t n);
-
 // -- the sync batch's envelope -----------------------------------------------
 
 // The three fields a batch carries, each a span of the body's JSON (NULL when

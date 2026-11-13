@@ -21,24 +21,14 @@
 #include "py/runtime.h"
 #include "py/objstr.h"
 
+#include "moy_sb.h"
 #include "moy_log.h"
 #include "moy_proc_exit.h"
 
 #define JOIN_MAX 384
 
-typedef struct {
-    char *buf;
-    size_t n, cap;
-} join_t;
-
 static void join_strn(void *env, const char *s, size_t n) {
-    join_t *j = env;
-    size_t room = j->cap - j->n;
-    if (n > room) {
-        n = room;
-    }
-    memcpy(j->buf + j->n, s, n);
-    j->n += n;
+    moy_sb_put(env, s, n);
 }
 
 static uint32_t pid_of(mp_obj_t o) {
@@ -55,7 +45,7 @@ static mp_obj_t log_write(size_t n_args, const mp_obj_t *args) {
         return mp_const_none;
     }
     char buf[JOIN_MAX];
-    join_t j = { buf, 0, sizeof(buf) };
+    moy_sb_t j = moy_sb_fixed(buf, sizeof(buf));
     mp_print_t p = { &j, join_strn };
     for (size_t i = 2; i < n_args; i++) {
         if (i > 2) {
@@ -63,7 +53,7 @@ static mp_obj_t log_write(size_t n_args, const mp_obj_t *args) {
         }
         mp_obj_print_helper(&p, args[i], PRINT_STR);
     }
-    moy_log_write(level, pid, buf, j.n);
+    moy_log_write(level, pid, buf, j.n < sizeof(buf) ? j.n : sizeof(buf));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(log_write_obj, 2, MP_OBJ_FUN_ARGS_MAX, log_write);
