@@ -20,8 +20,9 @@ type, and where none was chosen yet, the "open with" menu asks. There is no
 per-type "always": the menu changes the choice (`open_with(..., choose=True)`
 opens it whatever was chosen), and the console keeps one choice a type in
 `system/settings`' `open_with` row. Both answer True where the item went to
-an app, the menu is up to choose one or the request waits in a
-notification, False where no app opens it.
+an app, the menu is up to choose one or the request waits for the frame's
+end or in a notification (runtime/system/front.py), False where no app
+opens it.
 
 THE FRONT. Opening an item takes the screen, and so does the picker: each
 passes runtime/system/front.py's gate (owner, 2026-11-08) for the asking

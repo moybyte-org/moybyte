@@ -204,6 +204,7 @@ from history_router import HistoryRouter
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 from notifications import NOTES as _NOTES
+from front import FRONT as _FRONT
 # The media service's face once the console has booted its services: each
 # frame starts with its check for a run a compiled program's handle started.
 _MEDIA = [None]
@@ -3293,6 +3294,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.boot_services()
         sched = _scheduler.SCHED
         _NOTES.drain()                # what compiled programs posted on their own tasks
+        if _FRONT.due:
+            _FRONT.run_due()          # an app a process opened, outside its own call
         media = _MEDIA[0]
         if media is not None:
             media.frame()             # a stream a compiled program's handle started

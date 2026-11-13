@@ -595,7 +595,10 @@ routing.
 and `open_app` ask first: the player gets a notification ("Wants to open
 todo.md in Notes") that does it when opened, and the call answers `True` as
 though it went. The `front` permission lets them straight through
-(`runtime/system/front.py`).
+(`runtime/system/front.py`). A request that goes through is carried out at
+the start of the console's next frame, after your call returns, so one made
+from your load or `_init` is safe; the call answers `True` for it, and your
+run ends there when the app opened takes its place.
 
 **The clipboard** is the `clipboard` permission: the console's own, at most
 4 KiB of text, the global `clipboard` (`put_text(text)`, False for a text

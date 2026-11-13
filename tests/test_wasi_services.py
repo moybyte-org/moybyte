@@ -370,7 +370,8 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, mon
     picked reaches the service as "moy_open" (moybyte.hand_item), its handle
     what `item_read` and `item_write` take, read and written on its own
     task (native/moy_kernel/moy_items.h: no console call), and a handle it
-    was never given NOENT, the console's answer. In the background without `front`, the share and the pick wait
+    was never given NOENT, the console's answer. What goes through runs at the
+    console's next frame start. In the background without `front`, the share and the pick wait
     as the process's notification (its latest request), the picker not up."""
     from runtime import intents as I
     from runtime import notifications
@@ -390,6 +391,7 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, mon
     assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["front"]')[0] == 1)
     assert _polled(s, lambda: any(t.startswith("pick ") for t in _texts(since, pid))), \
         _texts(since, pid)
+    ws.frame(1 / 30)        # what the front let through runs at the frame's start
     docs = ws.carts_store.list_files("docs", ws.carts_root)
     if perms:
         assert _texts(since, pid)[-3:] == [

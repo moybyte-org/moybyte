@@ -253,12 +253,13 @@ class Notices:
         choices are kept in, and the picker: its listing, its question and
         the running app it hands a pick to. The front's gate
         (runtime/system/front.py) reads the run on screen and brings a
-        process's run forward as acting on a notification does."""
+        process's run forward as acting on a notification does, and what a
+        process asked of it runs at the start of this console's frame."""
         _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
                       self._intent_ask, self._intent_read, self._intent_write,
                       self.system, self._intent_list, self._intent_ask_pick,
                       self._intent_hand)
-        _FRONT.bind(self._front_pid, self._bring)
+        _FRONT.bind(self._front_pid, self._bring, True)
 
     def _front_pid(self):
         """The pid of the run the user is in: the front run while its
