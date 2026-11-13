@@ -1031,3 +1031,14 @@ def test_each_p4_board_says_what_its_layers_in_place_shift_costs():
         src = (_REPO / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert re.search(r"^LAYER_SHIFT_COST = \d+$", src, re.M), board
         assert "layer_shift_cost=LAYER_SHIFT_COST" in src, board
+
+
+def test_the_vm_going_closes_an_open_lua_run():
+    """A soft reset ends the Player's runs and closes moycore's open runtime
+    first: without the call, a Lua run a Ctrl-C left open outlives its VM,
+    keeps its internal SRAM and refuses the next VM's first run. Executed on
+    glass by `on_glass.a_ctrl_c_ends_a_front_run`."""
+    src = (NATIVE / "moy_play" / "modmoy_play.c").read_text()
+    body = src.split("void moy_play_vm_stop(void) {", 1)[1].split("\n}\n", 1)[0]
+    assert "moycore_vm_stop();" in body
+    assert "void moycore_vm_stop(void)" in (NATIVE / "moycore" / "modmoycore.c").read_text()
