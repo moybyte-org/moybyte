@@ -59,6 +59,19 @@ int moy_http_parse(const char *buf, size_t n, moy_http_req_t *r);
 int moy_http_query(const char *target, size_t n, const char *name,
                    size_t name_n, const char **val, size_t *val_n);
 
+typedef struct {
+    int status;             // 0 when the status line does not parse
+    uint32_t clen;          // Content-Length, 0 when absent or unreadable
+    const char *loc;        // Location's value, trimmed; NULL when none
+    size_t loc_n;
+    size_t head_end;        // the byte past the blank line
+} moy_http_resp_t;
+
+// A response head off the first `n` bytes of `buf`: MOY_HTTP_OK with `r`
+// filled, or MOY_HTTP_PARTIAL until the "\r\n\r\n" arrives. Header names
+// match without regard to ASCII case.
+int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r);
+
 // -- the listener and the platform (moy_net_port.c) -----------------------------
 
 #define MOY_HTTP_REQ_MAX 65536      // a request past this is cut there

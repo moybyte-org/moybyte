@@ -85,68 +85,6 @@ static int is_ws(char c) {
     return c == ' ' || c == '\t';
 }
 
-int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r) {
-    memset(r, 0, sizeof(*r));
-    size_t end = 0;
-    for (size_t i = 3; i < n; i++) {
-        if (buf[i - 3] == '\r' && buf[i - 2] == '\n' && buf[i - 1] == '\r' && buf[i] == '\n') {
-            end = i + 1u;
-            break;
-        }
-    }
-    if (end == 0) {
-        return MOY_HTTP_PARTIAL;
-    }
-    r->head_end = end;
-    const char *p = buf, *stop = buf + end - 2u;
-    int first = 1;
-    while (p < stop) {
-        const char *eol = p;
-        while (eol + 1 < stop + 2 && !(eol[0] == '\r' && eol[1] == '\n')) {
-            eol++;
-        }
-        if (first) {
-            first = 0;
-            const char *sp = memchr(p, ' ', (size_t)(eol - p));
-            if (sp != NULL) {
-                int v = 0, digits = 0;
-                for (const char *d = sp + 1; d < eol && *d >= '0' && *d <= '9' && digits < 4; d++) {
-                    v = v * 10 + (*d - '0');
-                    digits++;
-                }
-                r->status = digits == 3 ? v : 0;
-            }
-        } else {
-            const char *colon = memchr(p, ':', (size_t)(eol - p));
-            if (colon != NULL) {
-                const char *v = colon + 1, *ve = eol;
-                while (v < ve && is_ws(*v)) {
-                    v++;
-                }
-                while (ve > v && is_ws(ve[-1])) {
-                    ve--;
-                }
-                if (name_is(p, (size_t)(colon - p), "content-length")) {
-                    uint64_t x = 0;
-                    const char *d = v;
-                    for (; d < ve && *d >= '0' && *d <= '9'; d++) {
-                        x = x * 10u + (uint64_t)(*d - '0');
-                        if (x > 0xffffffffu) {
-                            break;
-                        }
-                    }
-                    r->clen = (d == ve && d > v && x <= 0xffffffffu) ? (uint32_t)x : 0;
-                } else if (name_is(p, (size_t)(colon - p), "location")) {
-                    r->loc = v;
-                    r->loc_n = (size_t)(ve - v);
-                }
-            }
-        }
-        p = eol + 2;
-    }
-    return MOY_HTTP_OK;
-}
-
 // -- SHA-256 (FIPS 180-4) ------------------------------------------------------------------
 
 static const uint32_t K256[64] = {
