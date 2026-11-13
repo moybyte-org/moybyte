@@ -7,10 +7,11 @@
 //                        -> {"ok": n, "reads": {"2": 1}, "err": [[i, why], ...]}
 //
 // THE ALLOWLIST IS THE SECURITY MODEL: the pins a kid may drive are the board's
-// table (MOY_NET_GPIO_PINS in its mpconfigboard.h, whose comment says what each
-// excluded pin would break), and a pin outside it is refused and never
-// touched. A bad op is skipped and reported; it never aborts the batch, whose
-// neighbours may be the write that turns a motor off. An empty batch is the
+// `gpio` lease row in its board.toml, which the build emits as
+// MOY_LEASE_GPIO_PINS (the Zero's mpconfigboard.h says what each excluded pin
+// would break), and a pin outside it is refused and never touched. A bad op
+// is skipped and reported; it never aborts the batch, whose neighbours may be
+// the write that turns a motor off. An empty batch is the
 // page's probe and answers with the allowlist. Both methods are sealed routes
 // of the webhost (moy_webhost.c's header): what reaches here is a signed-in
 // page's.

@@ -411,6 +411,23 @@ def lease_spec(board_dir):
     return "/".join(out) or None
 
 
+def lease_defines(board_dir):
+    """Each `lease` row that lists its pins as `MOY_LEASE_<ROW>_PINS`, the pins
+    comma-separated (`{ MOY_LEASE_GPIO_PINS }` is a C array): the Zero's
+    `/gpio` allowlist is its `gpio` row. Empty for a target with no table."""
+    hw = hardware(board_dir)
+    if hw is None:
+        return []
+    named = load(board_dir)["hardware"]["resource"]
+    out = []
+    for r in hw[2]:
+        row = [x for x in named if x.get("name") == r["name"]][0]
+        if r["class"] == "lease" and isinstance(row.get("pins"), list):
+            out.append(("MOY_LEASE_%s_PINS" % r["name"].upper(),
+                        ",".join(str(p) for p in row["pins"])))
+    return out
+
+
 def hw_defines(board_dir):
     """The `[hardware]` table as C defines, for the drivers a `class` row's
     device API names: `MOY_API_<API>` 1 for each API a class row names, and
@@ -940,6 +957,8 @@ def stage_native(board_dir, root=ROOT, quiet=False):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
     for define, v in hw_defines(board_dir):
         lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
+    for define, v in lease_defines(board_dir):
+        lines.append('target_compile_definitions(usermod INTERFACE "%s=%s")' % (define, v))
     spec = lease_spec(board_dir)
     if spec is not None:
         lines.append('target_compile_definitions(usermod INTERFACE "MOY_LEASE_ROWS=\\"%s\\"")'

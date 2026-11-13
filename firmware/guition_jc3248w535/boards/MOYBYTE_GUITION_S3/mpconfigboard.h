@@ -125,10 +125,9 @@
 // for every run.
 #define MOY_VM_STOP                         (1)
 
-// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the AXS15231 touch.
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0 (its pins are
+// board.toml's `i2c0` row, MOY_HW_I2C0_SDA/_SCL), the AXS15231 touch.
 #define MOY_BUS_I2C_PORT                    (0)
-#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
-#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
 
 // Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's

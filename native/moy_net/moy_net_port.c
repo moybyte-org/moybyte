@@ -322,12 +322,12 @@ int moy_udp_send(int fd, const void *buf, size_t n, const uint8_t to[MOY_UDP_ADD
 }
 #endif
 
-// -- the board's pins (the Zero: MOY_NET_GPIO_PINS in its mpconfigboard.h) ----------
+// -- the board's pins (the Zero: MOY_NET_GPIO_ROUTE over its gpio lease row) -------
 
-#if defined(ESP_PLATFORM) && defined(MOY_NET_GPIO_PINS)
+#if defined(ESP_PLATFORM) && defined(MOY_NET_GPIO_ROUTE) && defined(MOY_LEASE_GPIO_PINS)
 #include "driver/gpio.h"
 
-static const uint8_t s_gpio_pins[] = MOY_NET_GPIO_PINS;
+static const uint8_t s_gpio_pins[] = { MOY_LEASE_GPIO_PINS };
 #define GPIO_N ((int)sizeof(s_gpio_pins))
 static uint8_t s_gpio_mode[GPIO_N];     // 0 untouched, 1 input, 2 output
 

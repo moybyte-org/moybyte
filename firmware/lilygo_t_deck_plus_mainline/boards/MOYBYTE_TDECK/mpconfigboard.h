@@ -158,11 +158,10 @@
 // without it keeps the VM for every run.
 #define MOY_VM_STOP                         (1)
 
-// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the keyboard (0x55)
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0 (its pins are
+// board.toml's `i2c0` row, MOY_HW_I2C0_SDA/_SCL), the keyboard (0x55)
 // and the GT911 touch.
 #define MOY_BUS_I2C_PORT                    (0)
-#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
-#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
 // The C3 keyboard clock-stretches for tens of milliseconds (#69): a stretch
 // past this many microseconds fails the read, which the keyboard's driver holds
@@ -175,20 +174,15 @@
 #define MICROPY_PY_BLUETOOTH                (0)
 
 // Input's drivers (native/moy_input/moy_input_task.c): the C3 keyboard, the
-// trackball's four pulse pins and its click, and the GT911 (y then x, its INT
-// line gating the reads, #74), all passed on the input task (#69), whose
+// trackball's four pulse pins and its click (board.toml's `trackball` row),
+// and the GT911 (y then x, its INT line, the `i2c0` row's touch_int, gating
+// the reads, #74), all passed on the input task (#69), whose
 // stack is the measured high water plus a margin.
 #define MOY_INPUT_KBD_TDECK                 (1)
 #define MOY_INPUT_TASK                      (1)
 #define MOY_INPUT_TASK_STACK                (2560)
-#define MOY_INPUT_BALL_UP                   (3)
-#define MOY_INPUT_BALL_DOWN                 (15)
-#define MOY_INPUT_BALL_LEFT                 (1)
-#define MOY_INPUT_BALL_RIGHT                (2)
-#define MOY_INPUT_BALL_CLICK                (0)
 #define MOY_INPUT_TOUCH_KIND                (1)     // MOY_TOUCH_GT911
 #define MOY_INPUT_TOUCH_YX                  (1)
-#define MOY_INPUT_TOUCH_INT                 (16)
 #define MOY_INPUT_TOUCH_SWAP                (0)
 #define MOY_INPUT_TOUCH_FLIP_X              (0)
 #define MOY_INPUT_TOUCH_FLIP_Y              (1)     // the GT911's Y runs opposite the screen
@@ -196,10 +190,8 @@
 #define MOY_INPUT_TOUCH_RAW_H               (240)
 
 // The speaker (native/moy_audio/moy_aud_out.c): the MAX98357 amp on its own
-// I2S pins, behind the board power gate (GPIO 10, driven at boot).
-#define MOY_AUDIO_I2S_BCK                   (7)
-#define MOY_AUDIO_I2S_WS                    (5)
-#define MOY_AUDIO_I2S_DOUT                  (6)
+// I2S pins (board.toml's `speaker` row), behind the board power gate (GPIO 10,
+// driven at boot).
 
 // The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
 // released layer buffers it keeps for the next run, inside the kernel's 1 MiB

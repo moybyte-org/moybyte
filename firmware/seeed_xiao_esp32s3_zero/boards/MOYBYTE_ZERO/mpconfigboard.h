@@ -75,8 +75,8 @@
 #define MICROPY_PY_FRAMEBUF                 (0)
 
 // UART0 REPL stays ON (the generic S3 board's default): D6/D7 are GPIO43/44,
-// they are broken out on this board's header, and MOY_NET_GPIO_PINS holds them
-// back from the GPIO allowlist precisely BECAUSE they are the recovery console
+// they are broken out on this board's header, and the GPIO allowlist leaves
+// them out precisely BECAUSE they are the recovery console
 // for an image whose USB has wedged. Turning it off would delete that path.
 #define MICROPY_HW_ENABLE_UART_REPL         (1)
 
@@ -84,7 +84,7 @@
 // prints SDA/SCL. Nothing on this board is on I2C -- there is no panel, no
 // touch controller and no keyboard -- so this only decides where a bare
 // `machine.I2C(0)` lands if a kid wires a sensor to the labelled pads. (Both
-// pins are also in MOY_NET_GPIO_PINS, the digital allowlist; defining a default bus
+// pins are also in the digital allowlist; defining a default bus
 // claims nothing until something constructs one.)
 #define MICROPY_HW_I2C0_SDA                 (5)
 #define MICROPY_HW_I2C0_SCL                 (6)
@@ -125,9 +125,10 @@
 #define MOY_NET_MDNS                        (1)
 
 // THE /gpio ALLOWLIST (native/moy_net/moy_gpio.c): the pins a browser's cart may
-// drive or read, by GPIO number. It is the security model -- a pin outside it
-// is refused and never touched -- because the failure modes are not
-// survivable the way a 400 is.
+// drive or read, by GPIO number: board.toml's `gpio` lease row, which the
+// build emits as MOY_LEASE_GPIO_PINS; this board serves the route over it. It
+// is the security model -- a pin outside it is refused and never touched --
+// because the failure modes are not survivable the way a 400 is.
 //     D0=1   D1=2   D2=3*  D3=4   D4=5(SDA)  D5=6(SCL)
 //     D6=43* D7=44* D8=7*  D9=8*  D10=9*                  * excluded, below
 // 21 is not on a pad: it is the board's user LED (active LOW), the one
@@ -142,4 +143,4 @@
 //   0, 45, 46      boot-mode and VDD_SPI strapping (0 low at reset is the ROM
 //                  loader);
 //   26..37         SPI flash and the octal PSRAM: driving one stops the machine.
-#define MOY_NET_GPIO_PINS                   {1, 2, 4, 5, 6, 21}
+#define MOY_NET_GPIO_ROUTE                  (1)

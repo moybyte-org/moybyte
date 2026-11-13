@@ -358,12 +358,12 @@ baud = 115200
 # ---------------------------------------------------------------------------
 # THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
 # in exactly one row -- `os`, `class`, `lease`, `never` -- or in `unused`.
-# The `lease` row is the pin allowlist (`MOY_NET_GPIO_PINS` in
-# boards/MOYBYTE_ZERO/mpconfigboard.h, README.md's "Pins"), which
-# tests/test_board_toml.py holds equal to it; `unused` is the pads the XIAO
-# does not bring out. The `lora` row is the Wio-SX1262 on the XIAO's
-# board-to-board connector (the XIAO ESP32-S3 & Wio-SX1262 kit), which takes
-# the D8-D10 SPI pads with it.
+# The `lease` row is the pin allowlist: the build emits it as
+# MOY_LEASE_GPIO_PINS, the /gpio route serves it (MOY_NET_GPIO_ROUTE in
+# boards/MOYBYTE_ZERO/mpconfigboard.h), and README.md's "Pins" says why each
+# pad is in or out; `unused` is the pads the XIAO does not bring out. The
+# `lora` row is the Wio-SX1262 on the XIAO's board-to-board connector (the
+# XIAO ESP32-S3 & Wio-SX1262 kit), which takes the D8-D10 SPI pads with it.
 
 [hardware]
 chip_gpio = "esp32s3"

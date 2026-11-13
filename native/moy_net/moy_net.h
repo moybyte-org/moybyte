@@ -485,7 +485,8 @@ int moy_net_await(uint32_t *since);
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
-// MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
+// MOY_NET_GPIO_ROUTE: its board.toml `gpio` lease row, MOY_LEASE_GPIO_PINS):
+// the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).
 int moy_gpio_pins(const uint8_t **pins);
 int moy_gpio_drive(int pin, int level);

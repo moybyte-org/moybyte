@@ -27,8 +27,8 @@ built with and changes only when it is reflashed.
 `POST /gpio` is the second half of the same idea: the cart in the browser
 calls `pin_write`, the page batches it here, and this board -- which has the
 pins -- does the driving. The route is the kernel webhost's
-(native/moy_net/moy_gpio.c) over this board's allowlist table
-(MOY_NET_GPIO_PINS in its mpconfigboard.h).
+(native/moy_net/moy_gpio.c) over this board's allowlist table (the `gpio`
+lease row of its board.toml).
 
 `GET/POST /update` is the third (ZeroUpdate, below). The ROUTES are
 `moy_webhost`'s now, on every board (2026-08-29); what is this board's own is
