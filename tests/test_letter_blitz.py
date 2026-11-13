@@ -456,6 +456,7 @@ def test_letter_blitz_exit_button_quits_to_launcher(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Letter Blitz")
     assert ws.screen == "desktop"
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True              # the typing game asked for text input
 
     ex, ey, ew, eh = ws.ns["_exit_rect"]()         # the X's rect (top-right corner)

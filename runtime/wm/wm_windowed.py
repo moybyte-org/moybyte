@@ -42,10 +42,9 @@ Picotron-style (owner direction, 2026-07-08):
     click-stripped so the background cart never eats the editor's taps. Only an
     explicit exit ends a run: the strip X, the pause menu's Quit while focused, or an
     app verb. Chips: click to focus, click the focused chip to minimize, click
-    a minimized chip to restore. The keyboard's TEXT MODE follows focus: a
-    window keeps the mode it had when focus left it and gets it back when
-    focus returns (or a pop reveals it), so typing in one window never leaves
-    another -- a game's -- in text mode.
+    a minimized chip to restore. The keyboard's TEXT MODE follows focus: it
+    is what the focused window's surface answers (runtime/shell/input_policy.py),
+    so typing in one window never leaves another -- a game's -- in text mode.
 
   ONE cart still runs at a time -- true multi-cart execution (N games ticking
   concurrently) stays out of scope per #73 (per-cart VM state / canvases / audio
@@ -182,13 +181,6 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # beside it is being typed in; only its X / the pause menu's Quit (when
         # focused) / an exit verb ends it. None = the desktop root has focus.
         self._focus = None
-        # TEXT MODE follows _focus: the keyboard is in text mode only while
-        # the focused window wants it. `_text_wish` keeps, per window key (None
-        # the desk), the mode the window had when focus left it, and focus
-        # coming back restores it; `_text_left` is set once a pending stack
-        # change has recorded the window it takes focus from.
-        self._text_wish = {}
-        self._text_left = False
         # PLAY INTENT (#178): the same run() verb serves two jobs on a desktop --
         # playing a game (open it as big as fits) and PLAYTESTING the cart you are
         # editing (open it small, so the editor beside it stays readable). The
@@ -581,7 +573,6 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if self.stack.has("desktop"):
             ws._exit_to_caller()
         self._sync_windows()
-        self._text_wish[self._focus] = bool(ws.input.text_mode)
         st = self.stack.kinds()
         at = self.stack.index("desk")
         self._parked = _Parked(st[at + 1:] if at >= 0 else [], self._order,
@@ -637,7 +628,6 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self.mode = "desktop"
         self._on_nav()
         self._sync_windows()
-        self._apply_text(self._focus)
         for g in self._order:
             win = self._wins[g]
             win._stamp_streak = 0
@@ -734,15 +724,11 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if keys != self._kinds:
             alive = set(keys)
             old = self._focus
-            if not self._text_left and (old is None or old in alive):
-                self._text_wish[old] = bool(self.ws.input.text_mode)
             for g in list(self._wins):
                 if g not in alive:
                     self._drop_win(self._wins.pop(g))
-                    self._text_wish.pop(g, None)
                     self.ws.procs.dropped(g)    # a running set's game ends with it
             pushed = keys[-1] if keys and keys[-1] not in self._wins else None
-            had = set(self._wins)
             for depth, g in enumerate(keys):
                 if g not in self._wins:
                     self._wins[g] = self._make_window(g, g, depth)
@@ -762,8 +748,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # The focus after a stack change: the kind a navigation brought
             # forward (a spawn, or a return to a window below), else a window
             # just opened; a close leaves it where it was, or on the window
-            # now in front. Click moves it after that. A window opened set its
-            # own text mode; one a pop revealed gets back the mode it had.
+            # now in front. Click moves it after that.
             if front in alive:
                 new = front
             elif pushed is not None:
@@ -774,11 +759,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 new = order[-1] if order else None
             self._focus = new
             self._raise(new)
-            if new in had and new != old:
-                self._apply_text(new)
         elif front is not None and front in self._wins and self.mode == "desktop":
             self._bring_forward(front)
-        self._text_left = False
 
     def set_play_intent(self, intent):
         """Record WHY the next cart run is starting -- "dev" (a playtest launched
@@ -1478,22 +1460,29 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return self.stack.top()
         return self._focus
 
+    def input_kind(self):
+        """The kind of the surface the keyboard reaches: the focused window's
+        on the desk (None: the desk itself; "" for a minimised one), the
+        stack top in console mode."""
+        if self.mode == "console":
+            return self.stack.top()
+        win = self._focus_win()
+        if win is None:
+            return None
+        return "" if win.minimized else win.kind
+
     def _move_focus(self, key):
         """Focus moves to window `key` (None: the desk) with no stack change,
-        and the window comes to the front, as on every desktop: the window it
-        leaves keeps its text mode, and `key` gets back its own."""
+        and the window comes to the front, as on every desktop."""
         old = self._focus
         if key == old:
             self._raise(key)
             return
-        self._text_wish[old] = bool(self.ws.input.text_mode)
         self._focus = key
         self._raise(key)
         p = self.ws.procs.by_key.get(key)
         if p is not None:
             self.ws.procs.promote(p)    # the focused game is the front one
-            key = self._focus
-        self._apply_text(key)
 
     def _raise(self, key):
         """Window `key` to the top of the z-order (None, or one on top: no-op)."""
@@ -1552,8 +1541,6 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             order[order.index(old)] = new
         if self._focus == old:
             self._focus = new
-        if old in self._text_wish:
-            self._text_wish[new] = self._text_wish.pop(old)
         st = self.stack.kinds()
         if old in st:
             st[st.index(old)] = new
@@ -1639,24 +1626,6 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._bring_forward(kind)
         self.ws._dirty = True
         return True
-
-    def _apply_text(self, key):
-        """Put the keyboard in the text mode window `key` had (button mode
-        for one that never set it)."""
-        ws = self.ws
-        on = self._text_wish.get(key, False)
-        if on != bool(ws.input.text_mode):
-            ws._set_text_mode(on)
-
-    def note_text_mode(self, prev):
-        """Console hook, before `ws._set_text_mode` applies a mode: while a
-        stack change is not yet mirrored into windows the mode is the window
-        about to take focus, so the focused one keeps `prev`, its own."""
-        if self.mode == "console" or self._text_left:
-            return
-        if self._slots() != self._kinds:
-            self._text_wish[self._focus] = bool(prev)
-            self._text_left = True
 
     def player_has_pointer(self):
         """Console hook: whether the game-space pointer publication should carry
@@ -2089,22 +2058,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         edit."""
         ws = self.ws
         ws._dirty = True
-        if kind == "storybook":
-            ws.storybook_app.commit()         # same rule for an open story
-        if kind == "artwork":
-            ws.artwork_app._save()            # same rule for the open drawing
-        if kind == "appearance":
-            ws.look.commit()                  # and for a change still settling
-        if kind == "settings":
-            ws.settings_layer.commit_name()   # and for a Name still being typed
-        if kind == "menu":
-            # The "menu" WM kind is shared by the Editor AND the icon-theme editor
-            # (Settings -> EDIT ICONS, paint_layer.ThemeLayer -- it spawns on the
-            # same back-stack slot); each has its own commit verb.
-            if ws._editing_icons:
-                ws.look.save_icons()
-            else:
-                ws.editor_app.save_current()      # the Editor's active tab
+        ws.leave_surface(kind)
         if kind == "menu" and not ws._editing_icons:
             self._end_playtest()              # its playtest goes with it
         if kind == "desktop":

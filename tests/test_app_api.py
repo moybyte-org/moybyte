@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from runtime.layers import AppLayer
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -36,7 +38,7 @@ def _select(ws, title):
 
 def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
-    kinds = [app.id for app, _t in ws._apps]
+    kinds = [app.id for app in ws._apps]
     assert kinds == ["artwork", "myart", "appearance", "storybook",
                      "files", "calc", "getcarts", "jukebox", "terminal"]
     for kind in kinds:
@@ -49,7 +51,7 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
     """A third-party app: one register_app call makes a launcher tap open it."""
     ws = _ws(tmp_path)
 
-    class Demo:
+    class Demo(AppLayer):
         id = "demo"
         domain = "system"
         TITLE = "BATTLE DEMO"
@@ -70,7 +72,7 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
         def handle_pointer(self, px, py, click):
             return True
 
-    demo = Demo()
+    demo = Demo(ws)
     ws.register_app(demo, min_size=(200, 100))
     assert ws._content_layers["demo"] is demo
     assert ws.app_min_size("demo") == (200, 100)
@@ -89,7 +91,7 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
         MIN_W = 210
         MIN_H = 130
 
-    class Demo:
+    class Demo(AppLayer):
         id = "story_editor"
         domain = "system"
         TITLE = "Story Editor"
@@ -114,8 +116,13 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
     assert ws.screen == "files"
     assert not ws.input.text_mode
     ws.files_app.dialog = "rename"
+    ws.frame(1 / 30)                  # the dialog draws, its field focused
+    ws.frame(1 / 30)
+    ws.input_policy.sync()            # and the input policy reads it
     assert ws.input.text_mode
     ws.files_app.dialog = None
+    ws.frame(1 / 30)
+    ws.input_policy.sync()
     assert not ws.input.text_mode
 
 
@@ -373,7 +380,7 @@ _SHIPPED_APPS = ("artwork", "myart", "appearance", "storybook",
                  "files", "calc", "getcarts", "jukebox")
 
 
-class _NakedApp:
+class _NakedApp(AppLayer):
     """An app written by someone who never read the bar paragraph: no strip
     draw, no bar-tap route, no layout of its own (so the host also has to
     supply the band height). It paints one flat colour, so any pixel the
@@ -448,7 +455,7 @@ def _settle(ws):
     # ...and so is what a content's context vouches its last frame left there
     # (a verbs page's next frame would move those pixels, docs/surface_model_v1.md
     # §14.7): its next frame draws whole
-    for app, _t in ws._apps:
+    for app in ws._apps:
         host = getattr(getattr(app, "_inst", app), "_ui", None)
         if host is not None and hasattr(host, "whole"):
             host.whole()

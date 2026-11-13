@@ -244,7 +244,7 @@ static struct {
     uint8_t idlen[APPS];
     char title[APPS][TITLE_MAX];
     uint8_t tlen[APPS];
-    uint8_t text[APPS], has_min[APPS];
+    uint8_t has_min[APPS];
     int32_t w[APPS], h[APPS];
 } ap;
 
@@ -287,7 +287,7 @@ static void ap_verify(void) {
         CHECK(app->title_len == ap.tlen[s]
               && memcmp(app->title, ap.title[s], ap.tlen[s]) == 0
               && app->title[app->title_len] == '\0');
-        CHECK(app->text_mode == ap.text[s] && app->has_min == ap.has_min[s]);
+        CHECK(app->has_min == ap.has_min[s]);
         CHECK(app->min_w == ap.w[s] && app->min_h == ap.h[s]);
     }
     CHECK(moy_apps_at(ap.a, ap.n) == 0u);
@@ -300,11 +300,11 @@ static void ap_register(input_t *in) {
     for (size_t k = 0; k < tn; k++) {
         title[k] = (char)next(in);
     }
-    int text = next(in) & 1, has_min = next(in) & 1;
+    int has_min = next(in) & 1;
     int32_t w = (int32_t)(next(in) * 7919u) - 100, h = (int32_t)next(in) - 100;
     uint32_t handle = 0;
     failed = 0;
-    int rc = moy_apps_register(ap.a, id, n, title, tn, text, has_min, w, h,
+    int rc = moy_apps_register(ap.a, id, n, title, tn, has_min, w, h,
                                &handle);
     if (n < 1u || n > MOY_ID_MAX) {
         CHECK(rc == MOY_ROUTE_BAD);
@@ -321,7 +321,6 @@ static void ap_register(input_t *in) {
         ap.idlen[s] = (uint8_t)n;
         memcpy(ap.title[s], title, tn);
         ap.tlen[s] = (uint8_t)tn;
-        ap.text[s] = text != 0;
         ap.has_min[s] = has_min != 0;
         ap.w[s] = has_min ? w : 0;
         ap.h[s] = has_min ? h : 0;

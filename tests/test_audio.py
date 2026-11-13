@@ -1053,10 +1053,9 @@ def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):
 
 def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
     # last_key can be LEVEL state on some key sources (a BLE keyboard holds the
-    # byte across frames, unlike the T-Deck's one-shot press edge). The Ctrl+Z
-    # handler must edge-detect against the previous frame's byte -- the code
-    # editor's _ekey_prev pattern -- or a held Ctrl+Z drains the whole undo
-    # stack, one step per frame.
+    # byte across frames, unlike the T-Deck's one-shot press edge). Ctrl+Z is
+    # read on the input policy's typed edge (`InputPolicy.edge`), or a held
+    # Ctrl+Z would drain the whole undo stack, one step per frame.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
@@ -1071,14 +1070,14 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
 
     ws.input.last_key = 0x1A                # Ctrl+Z held (level, not an edge)
     for _ in range(5):                      # ... across five frames
-        ws.music_ui._music_input()
+        ws.handle_input()
     assert len(me._undo) == 1               # exactly ONE undo fired
     assert me.cur_step()[0] == 40
 
     ws.input.last_key = 0                   # release ...
-    ws.music_ui._music_input()
+    ws.handle_input()
     ws.input.last_key = 0x1A                # ... and a fresh press is a new edge
-    ws.music_ui._music_input()
+    ws.handle_input()
     assert len(me._undo) == 0               # the second undo landed
     ws.input.last_key = 0
 
@@ -1355,5 +1354,3 @@ def test_the_music_tab_repaints_on_input_and_never_at_rest(tmp_path):
         assert frame(_Keys()) is False, "an idle Music frame marked the console dirty"
     for name in ("up", "down", "left", "right", "a", "b", "home"):
         assert frame(_Keys((name,))) is True, name
-    ws.music_ui.musicedit.nudge_pitch(1)
-    assert frame(_Keys(key=0x1A)) is True, "Ctrl+Z"

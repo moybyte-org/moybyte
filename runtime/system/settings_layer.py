@@ -52,6 +52,7 @@ from about_ui import LicencesPage, version_words, board_words
 from log_ui import LogPage
 from perms_ui import PermsPage
 from editors_base import TextEntry
+from layers import Layer
 from audio_session import console_volume
 import wallclock as _wc
 
@@ -276,7 +277,7 @@ def _wrap(text, n):
     return out
 
 
-class SettingsLayer:
+class SettingsLayer(Layer):
     """The Settings content Layer (system domain): the rows page, or the
     page of a panel it opened, drawn with the public UI API's verbs. Reads
     ws config/system state and dispatches every mutation to ws setters.
@@ -285,6 +286,8 @@ class SettingsLayer:
     places no X (runtime/shell/bar_layer.py draws it from `back_title`): a tap on
     the chevron is `back`, as Esc and B are, one on the title knocks on the
     secret door (#21)."""
+
+    B_BACK = True
 
     id = "settings"
     domain = "system"
@@ -402,7 +405,6 @@ class SettingsLayer:
         self.syslog = LogPage()
         self.permits = PermsPage(ws.app_context("permissions", PermsPage.NEEDS))
         self.back_title = "Settings"
-        self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
         # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
         # `_poll` when a value it shows moves: the override table the page is
@@ -434,7 +436,6 @@ class SettingsLayer:
         self.usb_view = self._usb_on()
         self.page = None
         self._name_bar("Settings")
-        self._typing = False
         self._about = self._read_about()
         self._read_paired()
 
@@ -707,7 +708,6 @@ class SettingsLayer:
         is let go with it (a join the station finishes stays joined)."""
         ws = self.ws
         self.wifi_pick = None
-        ws._set_text_mode(False)
         pop = ws.sysmenu
         if not self.wifi_view and not (pop.open and pop.widget == "wifi"):
             self.wifi_scanning = False
@@ -832,7 +832,6 @@ class SettingsLayer:
         # the byte that opened the prompt is held: its field never types it
         self._wifi_seed = getattr(ws.input, "last_key", 0) or 0
         self.wifi_msg = ""
-        ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
         ws._dirty = True
 
     def _wifi_connect(self, ssid, pw, locked=False):
@@ -840,7 +839,6 @@ class SettingsLayer:
         the join's to give (`_wifi_settle`), now or when the poll sees it."""
         ws = self.ws
         self.wifi_pick = None
-        ws._set_text_mode(False)
         w = ws.wifi
         try:
             join = getattr(w, "join", None) if w is not None else None
@@ -893,7 +891,6 @@ class SettingsLayer:
 
     def _wifi_cancel(self):
         self.wifi_pick = None
-        self.ws._set_text_mode(False)
         self.ws._dirty = True
 
     def wifi_input(self, i, host, popover=False):
@@ -1466,18 +1463,12 @@ class SettingsLayer:
             self.ws.system.set("name", got)
             _ssh.rename(self.ws)
 
-    def leave(self):
-        """Settings stopped holding the keyboard (the console's frame saw input
-        focus move): the Name being typed is stored, and a text mode Settings
-        set is handed back. On the desk the window manager has already put
-        the focused window's own in place; elsewhere it goes to button mode
-        unless another surface set it since."""
+    def close(self):
+        """Leaving Settings, by any route: the Name being typed is stored and
+        the Wi-Fi panel's radio lease ends with the visit."""
         self.commit_name()
-        if self._typing:
-            self._typing = False
-            ws = self.ws
-            if not ws.wm.desk_open() and ws._text_by == "settings":
-                ws._set_text_mode(False)
+        if self.wifi_view:
+            self.close_wifi()
 
     def level(self, key):
         """A level row's (value, lowest, highest): the stored value, else the
@@ -1770,25 +1761,28 @@ class SettingsLayer:
                 self.commit_name()
                 self._leave_field()
 
-    def editing_field(self):
-        """Whether a field on Settings is being typed into: the Name row
-        focused, or the Wi-Fi password prompt."""
+    def ui_host(self):
+        """The page's AppHost, whose step the console's back takes first;
+        none under the Wi-Fi password prompt, a dialog `back` closes whole."""
+        return None if self.wifi_pick is not None else self._input_host()
+
+    def typing(self):
+        """A field on Settings has focus: the Name row, or the Wi-Fi password
+        prompt."""
         if self._page_of() == "wifi":
             return self.wifi_pick is not None
         return self._page_of() is None and self._kinds.get(self._focused) == "field"
 
-    def cancel_field(self):
-        """Cancel the field being typed into (Esc, B, the T-Deck's Mic): the
-        Name gets back the text it had when typing began and focus leaves
-        it; the password prompt closes. False where no field is."""
-        if not self.editing_field():
-            return False
+    def cancel(self):
+        """Mic in a field: the password prompt closes; the Name gets back the
+        text it had when typing began and focus steps up off it (the
+        toolkit's cancel)."""
         if self._page_of() == "wifi":
+            if self.wifi_pick is None:
+                return False
             self._wifi_cancel()
             return True
-        self._name = None                 # nothing typed is kept
-        self._leave_field()
-        return True
+        return Layer.cancel(self)
 
     def _leave_field(self):
         """Focus leaves the field for the row above it: typing ends."""
@@ -1869,7 +1863,7 @@ class SettingsLayer:
             ws.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
-            self.back()
+            ws.input_policy.back(leave=True)
             return True
         if view == "licences" and self.licences.keys(i):
             return True
@@ -1883,13 +1877,12 @@ class SettingsLayer:
         return self._page_of() is not None
 
     def back(self):
-        """Back one level -- B, Esc and the bar's chevron: a page open over
-        Settings closes, else Settings does (resuming the cart it was opened
-        from). True: Settings took it either way."""
+        """Back one page -- B, Esc and the bar's chevron, after the toolkit's
+        step (`InputPolicy.step`): a page open over Settings closes. False on
+        the rows: the host leaves Settings (resuming what it was opened
+        over)."""
         view = self._page_of()
-        if view is None and self.cancel_field():
-            pass                          # the first back cancels the field
-        elif view == "bt":
+        if view == "bt":
             self.close_bluetooth()
         elif view == "crash":
             self.close_crash()
@@ -1915,7 +1908,7 @@ class SettingsLayer:
             else:
                 self._wifi_back()
         else:
-            self.ws._exit_settings()
+            return False
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1983,15 +1976,8 @@ class SettingsLayer:
                 ws.request_frame()    # ... and the next scrolls to it
             self._rows_page()
             self._focused = _ui.focus()
-            field = self._kinds.get(self._focused) == "field"
-            if not field:
+            if self._kinds.get(self._focused) != "field":
                 self.commit_name()        # focus left the field
-            # typed letters are the field's, never a button's alias -- while
-            # Settings holds the keyboard (on the desk, its window has focus)
-            typing = field and ws.wm.input_holder() == "settings"
-            if typing != self._typing:
-                self._typing = typing
-                ws._set_text_mode(typing)
         else:
             self.commit_name()
             if view == "wifi":

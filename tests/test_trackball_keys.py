@@ -44,7 +44,7 @@ def test_a_roll_over_the_power_popover_steps_and_changes_the_volume(tmp_path):
     ws, drv = _drv(tmp_path)
     ws.toggle_popover("battery")
     drv.frame(1 / 30)
-    assert ws.sysmenu.open and ws.ball_steps()
+    assert ws.sysmenu.open and ws.input_policy.ball_steps()
     sl = ws.settings_layer
     before = sl.level("volume")[0]
     _roll(drv, -1, 0, 2)                      # one step left: quieter
@@ -108,7 +108,7 @@ def _home(tmp_path):
 
 def test_a_roll_on_the_home_moves_its_selection(tmp_path):
     ws, drv = _home(tmp_path)
-    assert ws.screen == "launcher" and ws.ball_steps()
+    assert ws.screen == "launcher" and ws.input_policy.ball_steps()
     first = ws.launcher.selected()
     x = ws.pointer.x
     _roll(drv, 1, 0, 2)
@@ -133,7 +133,7 @@ def test_a_running_cart_keeps_the_pointer(tmp_path):
     drv.ball_click()
     for _ in range(3):
         drv.frame(1 / 30)
-    assert ws.screen == "desktop" and not ws.ball_steps()
+    assert ws.screen == "desktop" and not ws.input_policy.ball_steps()
     x = ws.pointer.x
     drv.pan(1, 0)
     drv.frame(1 / 30)
@@ -159,7 +159,7 @@ def _code_tab(tmp_path):
 
 def test_a_caret_takes_the_roll(tmp_path):
     ws, drv = _code_tab(tmp_path)
-    assert not ws.ball_steps()
+    assert not ws.input_policy.ball_steps()
     x, row = ws.pointer.x, ws.editor.row
     _roll(drv, 0, 1, 1)
     assert ws.editor.row == row + 1, "a pulse is a caret step"

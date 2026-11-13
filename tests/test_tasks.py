@@ -295,7 +295,7 @@ def test_the_task_manager_goes_back_to_the_game_it_held_and_home_keeps_it(tmp_pa
     ws.open_tasks()
     drv.frame(_DT)
     assert ws.run.player.paused
-    ws.tasks_layer.back()
+    ws.input_policy.back()
     drv.frame(_DT)
     assert ws.screen == "desktop" and not ws.run.player.paused
     ws.open_tasks()
@@ -318,7 +318,7 @@ def test_closing_the_front_run_keeps_the_task_manager(tmp_path):
     drv.frame(_DT)
     assert ws.screen == "tasks" and _rows(ws) == []
     assert not ws.wm.stack.has("desktop")
-    ws.tasks_layer.back()
+    ws.input_policy.back()
     assert ws.screen == "launcher"
 
 
@@ -382,7 +382,7 @@ def test_holding_it_in_a_text_field_opens_the_task_manager_and_keeps_the_field(
     ws, drv = _hand(tmp_path)
     monkeypatch.setattr(ui_draw, "input_kind", lambda *a: "tdeck")
     cancelled = []
-    ws.cancel_field = lambda: cancelled.append(1) or True
+    ws.input_policy.cancel = lambda: cancelled.append(1) or True
     _start_frames(ws, monkeypatch, 600)
     assert ws.screen == "tasks" and cancelled == []
     _start_frames(ws, monkeypatch, 0)

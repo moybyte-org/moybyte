@@ -23,6 +23,7 @@ kid-friendly). The keyboard types the same digits and operators. State and
 tape persist while the app stays open, and reset on a fresh open.
 """
 
+from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 from moy_store_base import builtin_name
 import ui
@@ -110,7 +111,7 @@ class CalcLayout:
                 self.keys.append((kx, ky, kw, kh))
 
 
-class CalcAppLayer:
+class CalcAppLayer(AppLayer):
     """The Calc content Layer + app protocol (see the module docstring)."""
 
     id = "calc"

@@ -739,6 +739,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     if ws.menu_view == "cards":
         ws.set_menu_view("code")
     assert ws.menu_view == "code" and ws.editor is not None
+    drv.frame(1 / 30)                                   # the tab's first frame
     ws.editor.row, ws.editor.col = 0, 0
     for ch in "Z=9":
         drv.type_char(ord(ch))

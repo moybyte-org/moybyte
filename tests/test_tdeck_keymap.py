@@ -480,7 +480,7 @@ def test_the_console_puts_the_keyboard_on_the_matrix_at_boot(tmp_path):
     table, kbd, fake = _keyboard(bytes(5))
     assert not kbd.raw_mode
     ws.keyboard = kbd
-    ws.sync_keyboard_mode()
+    ws.input_policy.attach_keyboard()
     _frame(kbd, table)
     assert kbd.raw_mode and b"\x03" in fake.writes
 

@@ -1981,14 +1981,25 @@ def app_cancel(ctx, take=True):
     """The host's cancel -- the T-Deck's Mic -- over the frame `ctx` drew
     last: True where its focused field has an edit in progress (its text
     other than when focus came onto it), which the next frame gives back,
-    focus stepping up off the field; False where none is, and the key keeps
-    its own meaning. `take` False only asks."""
+    focus stepping off the field (up, else down); False where none is, and
+    the key keeps its own meaning. `take` False only asks."""
     return _C.api_cancel(ctx, take)
 
 
 def run_cancel(take=True):
     """`app_cancel` over the running cart's own context."""
     return _C.api_run_cancel(take)
+
+
+def app_typing(ctx):
+    """Whether the frame `ctx` drew last has a field in focus: its surface
+    takes typed bytes, the keyboard in text mode (runtime/shell/input_policy.py)."""
+    return bool(_C.api_typing(ctx))
+
+
+def run_typing():
+    """`app_typing` over the running cart's own context."""
+    return bool(_C.api_run_typing())
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")

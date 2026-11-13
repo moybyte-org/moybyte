@@ -1331,11 +1331,12 @@ def _game_and_settings(tmp_path):
 
 
 def _click_window(ws, drv, key):
-    """Click a point of window `key`'s title strip that no other window covers."""
+    """Click a point of window `key`'s title strip that no other window covers
+    and no strip button sits on."""
     win = ws.wm._wins[key]
     for x in range(win.x + 2, win.x + win.w - 2, 4):
         y = win.y + 3
-        if ws.wm._win_at(x, y) == key:
+        if ws.wm._win_at(x, y) == key and ws.wm._strip_button_hit(win, x, y) is None:
             drv.touch(x, y)
             drv.frame(1 / 30)
             drv.touch_up()
@@ -1368,8 +1369,10 @@ def test_text_mode_follows_the_focused_window(tmp_path):
     assert ws.settings_layer._focused == "Name"
     assert ws.input.text_mode, "Settings' field has focus again: text mode"
     ws.wm._chip_tap("desktop")                 # a chip moves focus the same way
+    drv.frame(1 / 30)
     assert ws.wm._focus == "desktop" and not ws.input.text_mode
     ws.wm._chip_tap("settings")
+    drv.frame(1 / 30)
     assert ws.wm._focus == "settings" and ws.input.text_mode
 
 
@@ -1382,7 +1385,7 @@ def test_a_cart_keeps_its_own_text_mode_across_focus(tmp_path):
     ws.open()
     ws.wm.play_in_window()
     drv.frame(1 / 30)
-    ws.input.text_mode = True                  # what the cart's textmode(True) writes
+    ws.run.textmode = True                     # what the cart's textmode(True) writes
     ws.open_settings()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
@@ -2526,7 +2529,7 @@ def test_every_app_and_a_cascade_open_whole_on_the_glass(tmp_path, config):
     drv = _drv(ws)
     ws.open_desk()
     drv.frame(1 / 30)
-    apps = [a for a, _t in ws._apps]
+    apps = [a for a in ws._apps]
     icons = [k for k, _l, _c in ws.wm._backdrop_layer._icon_catalog()]
     assert [a.id for a in apps if a.id not in ws.wm.HIDDEN_APPS
             and getattr(a, "DESK_TILE", True) and a.id not in icons] == []   # the whole icon set
@@ -3660,7 +3663,7 @@ def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
     desk = ws.wm._backdrop_layer
     rows = desk._icon_catalog()
     shown = {id(c) for _k, _l, c in rows if c is not None}
-    off = [a for a, _t in ws._apps if not getattr(a, "DESK_TILE", True)]
+    off = [a for a in ws._apps if not getattr(a, "DESK_TILE", True)]
     assert off == []                    # every shipped app has its tile
     apps = [c for c in ws._launcher_items(ws.carts.all, "apps")
             if not any(a.is_app(c) for a in off)]

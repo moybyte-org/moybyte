@@ -9,12 +9,12 @@ which walks the layer stack top-down and hands the keys to the first layer
 that claims them), the pointer router (`handle_pointer`, which publishes the
 game-space pointer and routes taps through the same stack, and its staleness
 clock `_tick_pointer_dt`), directional input (`nav`), the trackball as
-W A S D (`ball_steps`/`ball` and the roll/coast steppers under them), the
-bar's key routing (`bar_where`/`_bar_keys`/`bar_open_x`), the caret step,
-the per-frame keyboard mode (`_menu_keys`, a menu over a text surface taking
-the keys as a list does; `_sync_cart_text_mode`, a running cart's text mode
-on the keyboard) and `focused_cart_editor`. A mixin of `Workstation`; the state it reads is
-created in console.py's `_init_state`.
+W A S D (`ball_frame`/`ball` and the roll/coast steppers under them), the
+bar's key routing (`bar_where`/`_bar_keys`/`bar_open_x`), the caret step and
+`focused_cart_editor`. What the keys mean on the surface holding them -- text
+mode, cancel, back, the trackball's steps -- is the input policy's
+(runtime/shell/input_policy.py), which the router asks. A mixin of
+`Workstation`; the state it reads is created in console.py's `_init_state`.
 """
 
 from moy_input import SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
@@ -32,6 +32,18 @@ class InputVerbs:
     _start_down = 0               # when the console's key went down; 0: not armed
 
     def handle_input(self):
+        """The frame's keys, routed (`_route_keys`), between two looks at the
+        keyboard's mode (`InputPolicy.sync`, a change applied, nothing done
+        otherwise): before, for what the last frame's draw moved (a field
+        focused, a cart's `textmode()`), so the surface reads its keys in its
+        mode; after, for what the keys moved, so the key that took a text
+        surface is swallowed by the switch."""
+        policy = self.input_policy
+        policy.begin(self.input)
+        self._route_keys()
+        policy.sync()
+
+    def _route_keys(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
         # top -> bottom and hand the frame's keys to the first layer that claims them.
         # A modal overlay (About / system menu, #52) sits above the content, so it eats
@@ -65,14 +77,13 @@ class InputVerbs:
         if ck != self._cart_keys:
             self._cart_keys = ck
             i.cart_keys = ck
-        if self._menu_over or self.pause.open or self.confirm.open or self.sysmenu.open:
-            self._menu_keys()
         # Super (the `start` button) is the console's from every surface, before
         # any layer, and acts when it comes up: a tap is the system menu, or
         # the pause menu over a fullscreen game (a T-Deck text field's Cancel);
         # held START_HOLD_MS it opens the task manager, and its release is
         # spent. Another key going down while it is held spends it too (a
-        # chord), as the host's Super does.
+        # chord), as the host's Super does. On a T-Deck a tap inside a field
+        # is its cancel (`InputPolicy.cancel`).
         if i.pressed("start"):
             desk = self._editor_desk
             if desk is not None and i.held("select") and desk.select_start():
@@ -89,9 +100,10 @@ class InputVerbs:
                     return
             else:
                 self._start_down = 0
-                if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
+                if not (_ui_draw.input_kind() == "tdeck" and self.input_policy.cancel()):
                     self.system_key()
                 return
+        policy = self.input_policy
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every
@@ -143,6 +155,18 @@ class InputVerbs:
                 and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
                 and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
+        # Ctrl+Z and Ctrl+Y are the bar's UNDO and REDO on every Editor tab:
+        # its own steps, then the journal's (`history_router`).
+        k = policy.edge
+        if ((k == 0x1A or k == 0x19) and self.wm.input_kind() == "menu"
+                and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
+                and self._modal_layer() is None):
+            if k == 0x1A:
+                self.history.undo()
+            else:
+                self.history.redo()
+            self._dirty = True
+            return
         bl = self.bar_layer
         edge = _ui_draw.edge_take()
         if ((bl.focus is not None or edge or (pressed and i.steps("up")))
@@ -151,23 +175,28 @@ class InputVerbs:
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
-        # B and Esc on a registered app's fullscreen surface are the bar's
-        # back chevron (`app_back`): a page of the app, else out of it; on a
-        # running app's, while it has a view of its own open (`has_page`).
-        _apps = (self._apps_by_id if pressed and not self.windowed_chrome
-                 and (i.pressed("b") or i.pressed("stop")) else None)
+        # Esc (`stop`) is the host's back on a fullscreen surface, and B on
+        # one whose B is its back (`InputPolicy.takes_b`): one cascade
+        # (`InputPolicy.back`), whatever the surface. A game's B is its own;
+        # its Esc pauses it.
+        back = None
+        if pressed and not self.windowed_chrome:
+            if i.pressed("stop"):
+                back = True
+            elif i.pressed("b"):
+                back = policy.holder()
+        if policy.typed_escape(i):
+            return
         for layer in self.wm.visible_stack_rev():
-            if _apps is not None and layer.id in _apps:
-                self.app_back(layer)
-                return
-            if (_apps is not None and layer.id == "desktop"
-                    and self.run.player.has_page()):
-                self.app_back(self.run.player)
-                return
+            if back is not None and layer is self._content_layer():
+                if (policy.takes_stop(policy.holder()) if back is True
+                        else policy.takes_b(back)):
+                    policy.back()
+                    return
             if layer.handle_input(i):
                 if getattr(layer, "leave_asked", False):
                     layer.leave_asked = False         # the app's own way out (a page's button)
-                    self.app_back(layer)
+                    policy.back()
                 return
 
     # (The "desktop" content layer routes the running cart's frame to
@@ -176,6 +205,13 @@ class InputVerbs:
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
     def handle_pointer(self):
+        """The frame's pointer, routed (`_route_taps`), then a look at the
+        keyboard's mode for what a tap moved (a field tapped, a surface
+        left), so it holds from the next key on."""
+        self._route_taps()
+        self.input_policy.sync()
+
+    def _route_taps(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): publish the game-space pointer
         # (so a cart's touch()/mouse() reads the 320x240 viewport, not the panel, #39),
         # then walk the z-ordered stack top -> bottom and let the first layer that
@@ -414,27 +450,21 @@ class InputVerbs:
     # below MOY_UI_STOP_VEL (moy_ui.h, 0.02 a ms), a step a second here.
     COAST_UNIT = 20
 
-    def ball_steps(self):
-        """Whether the trackball is the W A S D of the surface that holds
-        the keys: every popover and menu, About, and every fullscreen
-        surface -- the home, the apps (a cart's page too), the Editor's tabs --
-        but one whose `ball_steps` says otherwise: a running game, a canvas whose cursor
-        it moves (the sprite tab and Paint until a popover opens, the map,
-        the scene) and a caret, which takes it as arrows (`nav`). The desk's
-        windows are pointed at."""
-        if self._modal_layer() is not None or self._about:
-            return True
-        if self.windowed_chrome:
-            return False
-        if self.bar_layer.focus is not None:
-            return True
-        steps = getattr(self._content_layer(), "ball_steps", True)
-        return bool(steps() if callable(steps) else steps)
+    def ball_frame(self, dx, dy, click, pointer, cursor):
+        """The trackball's frame, one face for the host's driver and a
+        board's spine: its roll and click spent (`ball`), and a roll nothing
+        took nudges `pointer` by `cursor` of each axis. Answers `ball`'s
+        bits."""
+        took = self.ball(dx, dy, click)
+        if (dx or dy) and not took & 1:
+            pointer.move(cursor(dx), cursor(dy))
+        return took
 
     def ball(self, dx, dy, click=False):
         """The trackball this frame -- the T-Deck's, and the host's arrows
         standing in for it: (dx, dy) pulses and its click's press. Where
-        the surface that holds the keys steps a selection (`ball_steps`),
+        the surface that holds the keys steps a selection
+        (`InputPolicy.ball_steps`),
         every BALL_STEP pulses on the roll's stronger axis are a step of the
         direction W A S D make there, added to the input table's counts
         this frame (`add_steps`: a surface reads them as `steps`, never as a
@@ -445,7 +475,7 @@ class InputVerbs:
         bit 1 when the roll was taken, bit 2 when the click was (the pointer
         then sees no click)."""
         took = 0
-        steps = (dx or dy or click) and self.ball_steps()
+        steps = (dx or dy or click) and self.input_policy.ball_steps()
         if dx or dy:
             if steps:
                 self._ball_roll(dx, dy)
@@ -473,7 +503,7 @@ class InputVerbs:
             self._ball_down = "run"
         r = self._coast_r
         if r.flinging:
-            self._ball_coast_tick(self.ball_steps())
+            self._ball_coast_tick(self.input_policy.ball_steps())
         self.ball_owed = self._ball_down is not None or r.flinging
         return took
 
@@ -607,8 +637,7 @@ class InputVerbs:
         layer = self.pause if where == "pause" else self._content_layer()
         if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
-            steps = getattr(layer, "ball_steps", True)
-            if not (steps() if callable(steps) else steps):
+            if not layer.ball_steps():
                 return False
         else:
             top = getattr(layer, "at_top", None)
@@ -655,46 +684,6 @@ class InputVerbs:
         self.nav(dx, dy)
         i.spend_edges()
         return True
-
-    def _menu_keys(self):
-        """A menu over a text surface takes the keys as a list does: while
-        the pause menu, the delete confirm or the system menu shows on the
-        handheld, the keyboard is out of text mode, so the T-Deck's W A S D
-        step its rows (moy_kbd.c, THE MOVE KEYS) and K is its back. The
-        surface's text mode comes back as the menu closes, unless what the
-        menu did set a mode of its own (a row that opened another surface).
-        `handle_input` calls it only while one of the three shows or
-        `_menu_over` says one did."""
-        over = not self.windowed_chrome and self._modal_layer() is not None
-        if over == self._menu_over:
-            return
-        self._menu_over = over
-        if over:
-            self._text_back = None
-            if self.input.text_mode:
-                self._set_text_mode(False)
-                self._text_back = self._text_sets
-        elif self._text_back is not None:
-            if self._text_back == self._text_sets:
-                self._set_text_mode(True)
-            self._text_back = None
-
-    def _sync_cart_text_mode(self):
-        # Cart text input (#38/#42): a RUNNING cart opts into text-keyboard mode by
-        # calling textmode(True) (make_api), which sets input.text_mode. Games leave it
-        # off (the default) and keep the raw/game keyboard so a held direction keeps
-        # firing btn(). When a cart asks for text mode we flip the keyboard to clean
-        # 1-byte ASCII (set_game_mode(False)) so key()/keyp() yield typeable bytes;
-        # when it turns text mode back off we restore game mode. Idempotent (the
-        # keyboard's set_game_mode only talks to the HW on a real transition), called
-        # each running-cart frame so a mid-cart textmode() toggle takes effect. No-op
-        # on the host (no keyboard) -- there the same flag gates type_char routing in
-        # ConsoleDriver. On older keyboard firmware set_game_mode(True) is a no-op
-        # (stays ASCII) and the hold-latch fallback applies, so this is safe.
-        want_text = bool(getattr(self.input, "text_mode", False))
-        kb = self.keyboard
-        if kb is not None:
-            kb.set_game_mode(not want_text)
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""

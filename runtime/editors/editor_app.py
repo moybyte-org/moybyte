@@ -32,7 +32,7 @@ these shims deliberately -- the future OS-arch capability track is the removal l
 
 Boundary (Section 1.2): this app switches the tabs' DATA access onto the injected
 `Project`, NOT the draw toolkit. The shared UI plumbing (`_glyph`, layouts, pointer,
-`_set_text_mode`, the achievements tracker, the editor layer instances) stays reached
+the achievements tracker, the editor layer instances) stays reached
 through the `ws` back-reference the plan keeps for Stages 2-6; only the tabs' data
 reach-through moves to `Project`. The tab layer INSTANCES (code_layer/paint_layer/
 map_ui/block_ui/music_ui/cards_layer) still live on `ws` and stay the router's
@@ -352,7 +352,6 @@ class EditorApp:
             desk.follow()
         else:
             self._relayout_tab(tab)
-        ws._set_text_mode(tab == "theme_config")
         ws.bar_layer.invalidate()
 
     def close_theme(self):
@@ -381,7 +380,6 @@ class EditorApp:
         if ws.editor is doc.ed:
             ws.editor = None
         ws.history.drop_code_history()
-        ws._set_text_mode(False)
         desk = getattr(ws, "_editor_desk", None)
         if desk is not None:
             desk.theme_shown(False)
@@ -433,7 +431,9 @@ class EditorApp:
         desk = self._desk()
         if desk is None:
             self._relayout_tab(view)
-        ws._set_text_mode(view == "code")
+        if view == "code":
+            # the key that entered the tab types nothing, a re-entry too
+            ws.code_layer.seed_key(getattr(ws.input, "last_key", 0) or 0)
         ws.ach.used(view)               # Toolbox Master counts code, paint and map
 
     def focus_tab(self, view):
@@ -444,7 +444,9 @@ class EditorApp:
         ws = self.ws
         self.tab = view
         self.build_tab(view)
-        ws._set_text_mode(view == "code" or view == "theme_config")
+        if view == "code":
+            # the key that entered the tab types nothing, a re-entry too
+            ws.code_layer.seed_key(getattr(ws.input, "last_key", 0) or 0)
         ws.ach.used(view)
 
     def _desk(self):
@@ -548,7 +550,6 @@ class EditorApp:
             return                   # the theme mode runs nothing
         ws = self.ws
         ws._dirty = True             # back to the desktop repaints (#44)
-        ws._set_text_mode(False)
         if self.tab == "music":
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
         # (#111) PLAY is a hard-commit trigger too -- autosave is the only model now
@@ -1410,6 +1411,14 @@ class EditorApp:
                 wrote = True
         if wrote:
             self.ws._dirty = True      # a commit may move what the Editor shows
+
+    def close(self):
+        """Leaving the Editor, by any route (`Workstation.leave_surface`): the
+        theme mode's icons, else the open tab, written."""
+        if self.theme is not None:
+            self.ws.look.save_icons()
+        else:
+            self.save_current()
 
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --

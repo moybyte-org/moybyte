@@ -33,6 +33,7 @@ ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import Layer
 import layout_base as _layout_base
 import text_modes as _modes
 from layout_base import LayoutBase
@@ -149,7 +150,7 @@ class CardsLayout(LayoutBase):
     font scale, the T-Deck's 320x240 by the same formulas as every canvas."""
 
 
-class CardsLayer:
+class CardsLayer(Layer):
     """The Config tab's content Layer (SYSTEM domain): its page fills the
     content rect under the bar on the reflowed system canvas, and
     handle_input/handle_pointer hand the frame's input to the page on show,
@@ -194,10 +195,7 @@ class CardsLayer:
         """Close the file list and any dialog (called by ws.open on a fresh
         cart)."""
         self.files = None
-        if self.prompt is not None:
-            # never leak an open dialog across a cart switch
-            self.prompt = None
-            self.ws._set_text_mode(False)
+        self.prompt = None            # never leak an open dialog across a cart switch
 
     # -- Layer facets --------------------------------------------------------
 
@@ -689,10 +687,10 @@ class CardsLayer:
     # that is one file should stay one file unless somebody went looking.
     #
     # Both are `ui.dialog` with captioned `ui.field`s (GAPS 52) over the page
-    # dimmed (D-01), on their own UI context: the keys type (text mode, which
-    # `widgets.arm_prompt` takes), up/down, Tab or the trackball move between
+    # dimmed (D-01), on their own UI context: the keys type (text mode, the
+    # layer's `typing` while a dialog shows), up/down, Tab or the trackball move between
     # fields, Enter is the last button and Esc or the T-Deck's Mic (a
-    # field's cancel, `Workstation.cancel_field`) closes it. The T-Deck's
+    # field's cancel, `CardsLayer.cancel`) closes it. The T-Deck's
     # dialog has no row of Cancel and OK -- its keys are the hint strip's --
     # where a touch glass and the desk add them.
 
@@ -722,8 +720,20 @@ class CardsLayer:
 
     def _close_prompt(self):
         self.prompt = None
-        self.ws._set_text_mode(False)
         self.ws._dirty = True
+
+    def typing(self):
+        """A dialog's fields type (Cart info, New script)."""
+        return self.prompt is not None
+
+    def cancel(self):
+        """Mic, Esc or B in a dialog: it closes, as its Cancel does."""
+        if self.prompt is None:
+            return False
+        self._close_prompt()
+        return True
+
+    back = cancel
 
     def _commit_prompt(self):
         p = self.prompt

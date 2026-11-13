@@ -650,12 +650,7 @@ class FilesAppLayer(ListShellApp):
 
     @dialog.setter
     def dialog(self, d):
-        # Rename's field types, so the keyboard is in text mode while it
-        # shows, and only then: on the T-Deck W A S D step the rows.
-        was = getattr(self, "_up", None) == "rename"
         self._up = d
-        if (d == "rename") != was:
-            self._nav.text_mode(d == "rename")
 
     def _close_dialog(self):
         self.dialog = None

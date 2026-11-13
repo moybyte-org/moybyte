@@ -199,9 +199,10 @@ _RING = 3
 # here, after those are bound.
 from paint_viewer import Viewer
 from paint_draw import PaintDraw
+from layers import AppLayer
 
 
-class PaintAppLayer(PaintDraw):
+class PaintAppLayer(PaintDraw, AppLayer):
     """The Paint app: the canvas, its tools and colours, More's verbs, and a
     desk's drawing viewed on a handheld."""
 
@@ -644,7 +645,7 @@ class PaintAppLayer(PaintDraw):
 
     def ball_steps(self):
         """The trackball steps an open popover (colours, brush, more) and
-        points at the drawing otherwise (Workstation.ball_steps)."""
+        points at the drawing otherwise (InputPolicy.ball_steps)."""
         return self.pop is not None
 
     def handle_input(self, inp):

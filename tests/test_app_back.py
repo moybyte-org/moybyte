@@ -251,9 +251,9 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
 
 def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
     ws, drv, app, win = _desk_app(tmp_path, "storybook")
-    assert not drv.takes_escape()
+    assert not ws.app_has_page("storybook")
     app.page = "deck"
-    assert drv.takes_escape()
+    assert ws.app_has_page("storybook")
     drv.escape()
     assert app.page == "stories" and "storybook" in ws.wm._wins
 

@@ -42,6 +42,7 @@ from array import array as _array
 
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import Layer
 import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 # the text view's syntaxes by the highlighter's language (ui.text_options's)
@@ -248,7 +249,7 @@ for _lang, _kw in (("python", _HL_KEYWORDS), ("lua", _HL_LUA_KEYWORDS)):
 _POP_PAD = 32
 
 
-class CodeLayer:
+class CodeLayer(Layer):
     """The code editor content Layer (system domain, responsive #39): a full-screen
     text editor on the SYSTEM canvas. Owns the drawing + the code-UI state (keyboard
     edge / drag origin / highlight memo); reads ws.editor + ws.code_layout + the code-
@@ -256,7 +257,25 @@ class CodeLayer:
 
     id = "code"
     domain = "system"
-    ball_steps = False              # the trackball is the caret's arrows (`nav`)
+    def ball_steps(self):
+        """The trackball is the caret's arrows (`nav`)."""
+        return False
+
+    def typing(self):
+        """The code editor types, always."""
+        return True
+
+    def cancel(self):
+        """Mic, Esc or B over the editor: See why's popover closes, else an
+        open overlay (`close_overlay`)."""
+        ws = self.ws
+        if ws.crash_popup is not None:
+            ws.crash_popup = None
+            ws._dirty = True
+            return True
+        return self.close_overlay()
+
+    back = cancel
 
     # The tool palette (#89): a tappable row (opened by the always-visible TLS
     # toggle) that reaches every range op the T-Deck keyboard has no key/combo for.
@@ -333,11 +352,12 @@ class CodeLayer:
 
     def seed_key(self, k):
         """The byte that was live when this surface took the keyboard is NOT a
-        keystroke of its own. Called by ws._set_text_mode on the switch into
-        text mode -- the key that entered the Code tab is still in last_key when
-        the editor's first frame reads it, and a zeroed edge tracker types it.
-        Seeding, not resetting: an already-down byte has to look like the
-        PREVIOUS one, so releasing and pressing it again still types."""
+        keystroke of its own. Called by the input policy on the switch into
+        text mode (`InputPolicy.apply`) -- the key that entered the Code tab is
+        still in last_key when the editor's first frame reads it, and a zeroed
+        edge tracker types it. Seeding, not resetting: an already-down byte
+        has to look like the PREVIOUS one, so releasing and pressing it again
+        still types."""
         self._ekey.prev = k
 
     def reset(self):
@@ -345,10 +365,10 @@ class CodeLayer:
         is (re)built) so the first key press after opening registers. Also drops the
         transient #89 modes so a freshly-opened editor is in a clean state.
 
-        set_tab runs this BEFORE ws._set_text_mode, whose seed_key then supplies
-        the live byte -- so a fresh editor still starts clean and still does not
-        type the key that opened it."""
-        self._ekey.reset()
+        The tracker is seeded with the live byte, so a fresh editor does not
+        type the key that opened it, even where the keyboard was already in
+        text mode (re-entering the Code tab)."""
+        self._ekey.seed(getattr(self.ws.input, "last_key", 0) or 0)
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
@@ -647,10 +667,6 @@ class CodeLayer:
             self.close_overlay()
         elif self._find_open:
             self._find_key(k)              # find field owns the keyboard while open
-        elif k == 0x1A:
-            ws.history.undo()
-        elif k == 0x19:
-            ws.history.redo()
         elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
             ed.select_all()
         elif k == 0x03:
@@ -925,7 +941,7 @@ class CodeLayer:
 
     def close_overlay(self):
         """Close whichever overlay is open (the find strip, completion, Go to,
-        the scripts): Esc, the T-Deck's Mic (`Workstation.cancel_field`) or a
+        the scripts): Esc, the T-Deck's Mic (`CodeLayer.cancel`) or a
         press outside it. True where one was open."""
         was = self._find_open or self._cmp_open or self._jump_open or self._files_open
         self._find_open = self._cmp_open = self._jump_open = self._files_open = False

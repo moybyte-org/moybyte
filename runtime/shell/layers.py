@@ -5,7 +5,8 @@ from Workstation (runtime/shell/console.py) -- docs/history/shell_layers_refacto
 module holds the shell-side building blocks that are NOT the router itself:
 
   * `Layer`      -- the uniform surface interface (id / domain / draw / handle_input
-                    / handle_pointer / lifecycle).
+                    / handle_pointer) and the input protocol the console's input
+                    policy asks of whatever holds the keys (runtime/shell/input_policy.py).
   * `_LegacyLayer` -- a Layer whose facets call injected callables: the permanent
                     home of the four draw-only overlays (splash / toast / notice /
                     cursor), which have no state worth a class of their own.
@@ -18,10 +19,13 @@ module holds the shell-side building blocks that are NOT the router itself:
 
 Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer`,
 injected callables) -- no console module-level constants or
-NAMES -- so this file is a dependency-free leaf: console.py imports it, it imports
-nothing back (no circular import), and both the host and the device freeze the
-identical source (build.sh stages it into modules/ like the editor cores).
+NAMES -- so this file is a leaf over the toolkit's engine: console.py imports
+it, it imports nothing back (no circular import), and both the host and the
+device freeze the identical source (build.sh stages it into modules/ like the
+editor cores).
 """
+
+import ui_draw as _ui_draw
 
 
 class Layer:
@@ -37,10 +41,22 @@ class Layer:
                  canvas as one viewport, #39). The router owns the single composite.
 
     handle_input / handle_pointer return a *handled* bool so the router can stop at
-    the top-most layer that claims the event (overlay > content > chrome)."""
+    the top-most layer that claims the event (overlay > content > chrome).
+
+    The INPUT PROTOCOL is what the console's input policy asks of the surface
+    that holds the keys (runtime/shell/input_policy.py), each verb defaulted
+    here: `ui_host` (the AppHost its pages draw through, which answers the
+    toolkit's half: a focused field types, Mic and back cancel its edit, back
+    dismisses a popover), `typing`, `cancel`, `back` and `has_page` (its own
+    page step, after the toolkit's), `close` (leaving it, by any route),
+    `page_title` and `ball_steps`. `B_BACK`: its B is the host's back, as
+    every app's is; a surface whose B is a button of its own leaves it
+    False. `ESC_LEAVES`: Esc on its first page leaves it."""
 
     id = "layer"
     domain = "system"
+    B_BACK = False
+    ESC_LEAVES = True
 
     def __init__(self, ws):
         self.ws = ws
@@ -57,11 +73,60 @@ class Layer:
     def handle_pointer(self, px, py, click):
         return False
 
-    def on_enter(self):
-        pass
+    def ui_host(self):
+        """The AppHost the surface's page draws through, or None."""
+        return None
 
-    def on_leave(self):
-        pass
+    def typing(self):
+        """Whether the surface takes typed bytes: by default, a field focused
+        on its page (`ui_draw.app_typing`)."""
+        h = self.ui_host()
+        return h is not None and _ui_draw.app_typing(h.ctx)
+
+    def cancel(self):
+        """The host's cancel (the T-Deck's Mic) inside the surface: True where
+        it took it. By default a focused field's edit gives its draft back."""
+        h = self.ui_host()
+        if h is not None and _ui_draw.app_cancel(h.ctx, True):
+            h.owed = True
+            return True
+        return False
+
+    def back(self):
+        """One page of the surface back, after the toolkit's step (a field's
+        edit, a popover): True where it took it, False on its first page,
+        where the host leaves it."""
+        return False
+
+    def has_page(self):
+        """Whether a page of its own is open, which `back` steps out of."""
+        return False
+
+    def close(self):
+        """Leaving the surface, by any route: what it holds is written.
+        Change-gated and cheap (#154)."""
+
+    def page_title(self):
+        """The open page's name, after the back chevron; None: the surface's."""
+        return None
+
+    def ball_steps(self):
+        """Whether the trackball steps the surface as W A S D do."""
+        return True
+
+
+class AppLayer(Layer):
+    """A registered app's surface (docs/app_api_v1.md): its pages draw through
+    the AppHost its context lends (`ctx.ui`, held as `_ui`), and B is its
+    back. `BACK_MINIMISES`: a back on its first page minimises it on the
+    desk."""
+
+    B_BACK = True
+    BACK_MINIMISES = False
+    _ui = None
+
+    def ui_host(self):
+        return self._ui
 
 
 class _LegacyLayer(Layer):
@@ -112,11 +177,31 @@ class _PlayerLayer(Layer):
 
     id = "desktop"
     domain = "game"
+    ESC_LEAVES = False
 
     def ball_steps(self):
         """An app's page takes the trackball as its W A S D (`Player.ball_steps`);
         a game's trackball is its pointer."""
         return self.ws.run.player.ball_steps()
+
+    def typing(self):
+        return self.ws.run.player.typing()
+
+    def cancel(self):
+        """Mic in a script's prompt is its Stop; in an app's field, the
+        field's edit given back (`Player.cancel`)."""
+        ws = self.ws
+        if (ws.cart is not None and ws.cart.get("type") == "script"
+                and ws.script_console.reading()):
+            ws._exit_to_caller()
+            return True
+        return ws.run.player.cancel()
+
+    def back(self):
+        return self.ws.run.player.back()
+
+    def has_page(self):
+        return self.ws.run.player.has_page()
 
     def draw(self, dt):
         self.ws.run.player.tick(dt)
@@ -148,6 +233,19 @@ class _BlocksLayer(Layer):
     def handle_input(self, i):
         self.ws.block_ui._blocks_input()   # cursor nav + insert menu (#29)
         return True
+
+    def typing(self):
+        """An entry prompt's keypad types."""
+        return self.ws.block_ui.blk_kbd is not None
+
+    def cancel(self):
+        """Mic, Esc or B in an entry prompt: it closes, as its Cancel does."""
+        if not self.ws.block_ui.cancel_prompt():
+            return False
+        self.ws._dirty = True
+        return True
+
+    back = cancel
 
     def handle_pointer(self, px, py, click):
         self.ws.block_ui._blocks_pointer(px, py, click)   # outline + insert menu
@@ -210,7 +308,9 @@ class _MapLayer(Layer):
 
     id = "map"
     domain = "system"
-    ball_steps = False              # the trackball moves the map's cursor
+    def ball_steps(self):
+        """The trackball moves the map's cursor."""
+        return False
 
     def draw(self, dt):
         ws = self.ws
@@ -258,7 +358,22 @@ class _SceneLayer(Layer):
 
     id = "scene"
     domain = "system"
-    ball_steps = False              # the trackball points at the placements
+    def ball_steps(self):
+        """The trackball points at the placements."""
+        return False
+
+    def ui_host(self):
+        """The handheld page's context, where its tag popover's field types."""
+        page = self.ws.scene_ui._page
+        return page.host if page is not None else None
+
+    def back(self):
+        """The tag popover closes."""
+        page = self.ws.scene_ui._page
+        if page is None or page.pop is None:
+            return False
+        page.close()
+        return True
 
     def draw(self, dt):
         ws = self.ws

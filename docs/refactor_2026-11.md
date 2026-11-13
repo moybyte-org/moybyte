@@ -410,7 +410,7 @@ I2, and turns I1's matrix green for everything but phase 8's cells.
   it: each registered app, Settings, Tasks, each tab layer of the Editor, and
   the layer the Player draws in.
   The `getattr` duck typing and `page_app`'s special cases go.
-- **`+runtime/shell/input_policy.py`, the owner.**
+- **`runtime/shell/input_policy.py`, the owner.**
   - *Typing* is derived once a frame from the surface that holds the keys and
     applied only when it changes, with the seed rule intact. The 45 setter
     calls, the 8 `nav.text_mode` calls (and that row of the call table), the
@@ -457,7 +457,7 @@ in each; W A S D moving; the trackball. P4: two desk windows, one typing and one
 keyboard's held key.
 
 **Guards.** Phase 4's matrix, with no failing cell left that names this
-phase. And `+tests/test_input_policy.py`:
+phase. And `tests/test_input_policy.py`:
 - a table over every surface in `APPS`, Settings, the Editor's tabs and a
   cart app: focusing a field types; Mic reverts and opens no menu; Esc, B and
   both chevrons end in one state; a menu over a field is game mode and typing

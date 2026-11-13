@@ -886,7 +886,7 @@ def _remote_state(ws):
                 "is_app": bool(app.is_app(cart)) if app is not None else None,
             }
         claims = {}
-        for _app, _text in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "_apps", ()):
             claims[_app.id] = sum(1 for c in ws.carts.all if _app.is_app(c))
         st["app_claims"] = claims
     except Exception as exc:  # noqa: BLE001

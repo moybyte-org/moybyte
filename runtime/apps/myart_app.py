@@ -26,6 +26,7 @@ import ui
 
 from array import array
 
+from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 from moy_store_base import builtin_name
 from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
@@ -98,7 +99,7 @@ class MyArtLayout:
                        "foot": 30 if self.desk else 26, "top": 4}
 
 
-class MyArtAppLayer:
+class MyArtAppLayer(AppLayer):
     """The My Art app: the drawings as cards and their verbs."""
 
     id = "myart"

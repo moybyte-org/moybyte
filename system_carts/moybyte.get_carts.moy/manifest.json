@@ -18,7 +18,6 @@
     "app": {
       "id": "getcarts",
       "entry": "getcarts_app:GetCartsAppLayer",
-      "text_mode": false,
       "order": 80
     },
     "permissions": [

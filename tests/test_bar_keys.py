@@ -92,7 +92,7 @@ def test_the_trackball_walks_the_bar(tmp_path):
     bl = ws.bar_layer
     _press(drv, "up")
     _walk_to(ws, drv, "cluster")
-    assert ws.ball_steps()
+    assert ws.input_policy.ball_steps()
     k = bl.focus
     drv.pan(1, 0)
     for _ in range(2):

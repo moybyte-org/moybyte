@@ -165,6 +165,7 @@ def test_cart_info_survives_the_keypress_that_opened_it(tmp_path):
     ws.input.begin_frame()
     ws.input.last_key = 0x0D
     cl._open_meta()                               # opened while Enter/A are down
+    ws.input_policy.sync()                        # the frame's look at the mode
     assert cl.prompt is not None and ws.input.text_mode
     assert not ws.input.held("a")                 # arm_prompt: everybody let go
     _latched_frame(ws)
@@ -197,6 +198,7 @@ def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     ws.input.begin_frame()
     ws.input.last_key = 0x0D
     bu._blk_open_kbd("text", "", block={"t": "x", "p": {}}, slot="s")
+    ws.input_policy.sync()
     assert bu.blk_kbd is not None and ws.input.text_mode
     _latched_frame(ws)
     ws.frame(1 / 30)
@@ -205,6 +207,7 @@ def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     _typed_frame(ws, ord("h"))
     assert bu.blk_kbd["entry"].text == "h"
     bu._blk_kbd_cancel()
+    ws.input_policy.sync()
     assert bu.blk_kbd is None and not ws.input.text_mode
 
 
@@ -244,6 +247,7 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     drv.frame(1 / 30)
     ws.input.last_key = 0x0D                      # the Enter that picked the row
     sl._wifi_activate()
+    ws.input_policy.sync()
     assert sl.wifi_pick == "Locked" and ws.input.text_mode
     sl.wifi_input(ws.input, sl._sub)                      # the byte is still held
     sl._draw_page()
@@ -265,6 +269,7 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     key(8)
     assert sl.wifi_pw.text == "p"
     key(27)
+    ws.input_policy.sync()
     assert sl.wifi_pick is None and not ws.input.text_mode
 
 
@@ -319,6 +324,7 @@ def test_new_script_is_closed_by_a_cart_switch(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)                               # draws the dialog
     cl.reset()
+    ws.input_policy.sync()
     assert cl.prompt is None and not ws.input.text_mode
 
 

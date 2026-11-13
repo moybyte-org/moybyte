@@ -54,6 +54,7 @@ def _frame(ws, n=2):
         ws.input.begin_frame()
         ws._dirty = True
         ws.frame(1 / 30)
+        ws.input_policy.sync()          # the next key pass's mode (handle_input's)
 
 
 def _open(ws):

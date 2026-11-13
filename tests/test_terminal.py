@@ -625,11 +625,11 @@ def test_mic_enters_the_app_key_row_on_the_tdeck(term):
     ui_draw.input_kind("tdeck")
     ui_draw.hint_kind("tdeck")
     try:
-        assert not app.cancel_field()
+        assert not app.cancel()
         run(app, "top")
         _frame(ws)
-        assert app.cancel_field() and app.face.in_row()
-        assert app.cancel_field() and not app.face.in_row()
+        assert app.cancel() and app.face.in_row()
+        assert app.cancel() and not app.face.in_row()
         app.face.press("Quit")
         assert app.face.app() is None
     finally:

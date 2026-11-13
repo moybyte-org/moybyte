@@ -29,8 +29,8 @@ Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
                                is derived from this, not from a list in its
                                build.sh.
     "app": {...}            -- optional; a SYSTEM APP (docs/app_api_v1.md):
-                               id / entry ("module:Class") / text_mode /
-                               order (registration precedence) / min_size.
+                               id / entry ("module:Class") / order
+                               (registration precedence) / min_size.
 
 Five hand-maintained lists used to hold that same information -- `CART_ORDER`
 here, the title->folder map in tests/test_device_seed_parity.py, the web
@@ -208,7 +208,6 @@ def app_decls(system_carts_dir=None):
         decl = {
             "id": app["id"],
             "entry": app["entry"],
-            "text_mode": bool(app.get("text_mode", False)),
             "order": int(app.get("order", 0)),
             "folder": folder,
             "title": man["title"],
@@ -463,7 +462,6 @@ APP_DECLS_HEADER = (
     "\n"
     "  id         the process kind (router / back-stack / window key)\n"
     "  entry      \"module:Class\" -- a runtime/ module staged to every target\n"
-    "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
     "  title      that cart's title\n"

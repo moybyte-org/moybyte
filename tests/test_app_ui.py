@@ -224,12 +224,7 @@ def _back(ws, drv, how):
         _press(drv, "b")
         return
     if how == "esc":
-        if drv.takes_escape():
-            drv.escape()
-        else:
-            drv.key_down(27)
-            _frame(drv)
-            drv.key_up(27)
+        drv.escape()
     elif ws.windowed_chrome:
         win = ws.wm._wins["desktop"]
         rect = dict(ws.wm._strip_buttons(win)).get("back")

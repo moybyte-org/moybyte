@@ -39,6 +39,7 @@ from ws_helpers import build_ws as _ws, use_theme
 from tools.board_config import runtime_file
 
 from runtime import app_context as _ac
+from runtime.layers import AppLayer
 from runtime import chrome as _chrome
 from runtime import moy_carts as _store
 from runtime import system_api as _api
@@ -152,7 +153,7 @@ def test_an_app_declares_nothing_it_does_not_use(mod, cls):
 def test_the_context_carries_only_the_declared_roles(tmp_path):
     ws = _ws(tmp_path)
     for _mod, cls in APP_TARGETS:
-        app = next(a for a, _t in ws._apps if type(a).__name__ == cls)
+        app = next(a for a in ws._apps if type(a).__name__ == cls)
         ctx = app.ctx
         declared = set(_declared(_mod, cls))
         for role in _ac.ROLES:
@@ -168,7 +169,7 @@ def test_an_app_on_the_verbs_gets_a_host_that_reads_its_pointer(tmp_path):
     `handle_pointer` that names no `down` still drags its pages and tables
     (the Music lists once took every drag as a tap)."""
     ws = _ws(tmp_path)
-    apps = [a for a, _t in ws._apps if getattr(type(a), "UI", False)]
+    apps = [a for a in ws._apps if getattr(type(a), "UI", False)]
     assert len(apps) >= 9
     for app in apps:
         host = app.ctx.ui
@@ -946,7 +947,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
     is BEHAVIOURAL, over a stub app the shell has never heard of."""
     ws = _ws(tmp_path)
 
-    class Demo:
+    class Demo(AppLayer):
         id = "leaver"
         domain = "system"
         TITLE = "LEAVER"
@@ -973,7 +974,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
         def close(self):
             Demo.closed += 1
 
-    demo = Demo()
+    demo = Demo(ws)
     ws.register_app(demo)
     ws.open_app(demo, cart=ws.carts.all[0])
     assert ws.screen == "leaver"

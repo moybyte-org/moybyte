@@ -1241,9 +1241,9 @@ def test_undo_redo_buttons_ui(tmp_path):
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert _select_type(be, "cls")
-    bu._blk_undo()
+    ws.history.undo()                                     # the bar's UNDO
     assert not _select_type(be, "cls")                   # the insert was reverted
-    bu._blk_redo()
+    ws.history.redo()
     assert _select_type(be, "cls")                       # and re-applied
     ws.frame(1 / 30)
     assert ws.cart_error is None

@@ -275,7 +275,7 @@ class Notices:
 
     def _intent_app(self, cart):
         """The registered app whose identity `cart` is, else None."""
-        for app, _text in self._apps:
+        for app in self._apps:
             if app.is_app(cart):
                 return app
         return None

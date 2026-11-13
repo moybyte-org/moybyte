@@ -91,6 +91,7 @@ def _settle(ws, n=4):
     for _ in range(n):
         ws._dirty = True
         ws.frame(1 / 30)
+        ws.input_policy.sync()          # the next key pass's mode (handle_input's)
 
 
 def test_music_is_a_registered_app_its_cart_claims(tmp_path):
@@ -237,6 +238,7 @@ def test_add_a_station_refuses_https_and_keeps_an_http_one(tmp_path, face):
     assert app.page == "add" and app.err == M.ERR_ADDRESS
     app.url, app.name, app.err = "http://ice1.somafm.com/lush-128-mp3", "Lush", None
     app._submit()
+    _settle(ws, 2)
     assert app.page == "list" and not ws.input.text_mode
     assert M.STREAM.stations[-1] == ("Lush", "Added", "http://ice1.somafm.com/lush-128-mp3")
     assert face.played[-1] == "http://ice1.somafm.com/lush-128-mp3"
@@ -282,7 +284,7 @@ def test_mic_cancels_add_a_station(tmp_path, face):
     app = _app(ws)
     ws.open_app(app)
     app._go("add")
-    assert ws.cancel_field() and app.page == "list"
+    assert ws.input_policy.cancel() and app.page == "list"
 
 
 def test_back_leaves_and_the_stream_plays_on(tmp_path, face):
@@ -291,9 +293,9 @@ def test_back_leaves_and_the_stream_plays_on(tmp_path, face):
     ws.open_app(app)
     M.STREAM.play("radio", GROOVE[0], GROOVE[2])
     app._go("now")
-    ws.app_back()
+    ws.input_policy.back()
     assert app.page == "list" and ws.wm.top_kind() == "jukebox"
-    ws.app_back()
+    ws.input_policy.back()
     assert ws.wm.top_kind() != "jukebox"
     assert face.n is not None and ITEMS.count() == 1
 
@@ -305,7 +307,7 @@ def test_back_on_the_desk_minimises_the_window(tmp_path, face):
     ws.open_app(app)
     _settle(ws)
     assert "jukebox" in ws.wm._wins and not ws.wm._wins["jukebox"].minimized
-    ws.app_back(app)
+    ws.input_policy.back(leave=True)
     assert ws.wm._wins["jukebox"].minimized and ws.wm._focus != "jukebox"
     assert ws.open_app(app) and not ws.wm._wins["jukebox"].minimized
 

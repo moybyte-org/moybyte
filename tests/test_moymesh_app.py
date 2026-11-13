@@ -1583,10 +1583,10 @@ def test_mic_gives_a_channel_name_back(window):
     window.run("__R = setup().channels[1].name")
     name = window.get("__R")
     window.type("xy")
-    assert window.ws.cancel_field(), "an edit in progress: Mic cancels it"
+    assert window.ws.input_policy.cancel(), "an edit in progress: Mic cancels it"
     window.frames()
     window.run("__R = stack[#stack].name or setup().channels[1].name")
     assert window.get("__R") == name
     window.run("__R = setup().channels[1].name")
     assert window.get("__R") == name, "nothing was saved"
-    assert not window.ws.cancel_field(), "no edit now: Mic is the console's key"
+    assert not window.ws.input_policy.cancel(), "no edit now: Mic is the console's key"

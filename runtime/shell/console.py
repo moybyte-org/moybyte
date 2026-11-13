@@ -199,6 +199,7 @@ from system_store import (StoreHandle, SystemStore)
 # through to, and the idle-typing autosave the frame loop ticks. Takes the same
 # StoreHandle -- the walk re-derived that guard by hand until this landing.
 from history_router import HistoryRouter
+from input_policy import InputPolicy
 
 # The ≡ system menu's rows and actions (#52); its drawing is the kernel's chrome
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
@@ -568,9 +569,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     battery = None
     _news = None
     _cart_keys = False              # what the input table was told last
-    _menu_over = False              # a menu holds the keys over the surface (`_menu_keys`)
-    _text_back = None               # `_text_sets` when that menu took text mode away
-    _text_sets = 0                  # `_set_text_mode` calls, counted
     _pf_home = None                 # the home frame's split, under perf_capture (home_band)
     # A soft keyboard the board offers beside its inputs (the browser page's).
     soft_keyboard = False
@@ -858,8 +856,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # mirror: a re-scan REBINDS the list, so an alias could not stay honest.
         self.carts = CartManager(self, self.store, carts)
         # Launcher search (#105): plain-text substring filter over the run-grid,
-        # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
-        # idiom -- _set_text_mode swaps the keyboard to clean ASCII while typing).
+        # entered via the sysmenu SEARCH item (the keyboard is in clean ASCII
+        # while a query is typed: the home's `typing`, runtime/shell/input_policy.py).
         # search_query persists once typing stops (so the filtered grid stays up
         # for d-pad/trackball browsing); search_typing is just the keystroke-
         # capture sub-state. See _launcher_view_items/open_search/close_search.
@@ -965,6 +963,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # stores the keystroke tick straight onto it (doc 3e -- an attribute
         # store per keypress, never a call).
         self.history = HistoryRouter(self, self.store)
+        self.input_policy = InputPolicy(self)
         # (cart/config/sheet/tilemap/images/pmem live on self.run.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
         # self.run.player now -- Stage 2; both exposed as forwarding properties, so
@@ -997,7 +996,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def _init_state(self):
         """Store/settings/wallpaper/cache/status fields (the mutable shell state)."""
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
-        # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
+        # (The code editor's keyboard-edge tracker + drag-scroll origin
         # (_drag) + its text view (_tv) live on self.code_layer now.)
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's cursor-hover state (_lhover) lives on self.launcher_layer.)
@@ -1140,9 +1139,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
         # The process the keyboard reaches (`wm.input_holder`), as the frame
-        # last saw it, and the one that last set the keyboard's text mode.
+        # last saw it.
         self._holder = None
-        self._text_by = None
         # The cart each registered app was opened on last (`open_app`): its
         # bar's title, whatever project the console holds open.
         self.app_carts = {}
@@ -1419,12 +1417,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         """A cart's editor handle takes (`handle`) or releases (None) the
         keyboard -- `editor_handle.EditorHandle.focus`.
 
-        The flip is the shell's and not the cart's because `_set_text_mode`
-        does two things no cart can: it puts the T-Deck keyboard into clean
-        ASCII, and it seeds the typed-key edge with the byte already down, so
-        the key that opened the note is not typed into it (`b2ff7de`)."""
+        The keyboard's text mode follows it (`Player.typing`): the input
+        policy puts the T-Deck keyboard into clean ASCII and seeds the
+        typed-key edge with the byte already down, so the key that opened the
+        note is not typed into it (`b2ff7de`)."""
         self.run.player.set_editor_focus(handle)
-        self._set_text_mode(handle is not None)
 
     def take_text_request(self):
         """POP the `(kind, name, mode)` document the console was asked to open,
@@ -1586,7 +1583,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         _obj = getattr(self, "cards_layer", None)
         if _obj is not None:
             _obj.relayout(w, h, fs, cs)
-        for _app, _t in getattr(self, "_apps", ()):   # registered system apps
+        for _app in getattr(self, "_apps", ()):   # registered system apps
             _relay = getattr(_app, "relayout", None)
             if _relay is not None:
                 _relay(w, h, fs, cs)
@@ -1730,7 +1727,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
         self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
-        self._set_text_mode(False)
 
     def open_log(self, pid=None):
         """Settings' System log page (runtime/system/log_ui.py), on one
@@ -1773,7 +1769,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                     pl.pause()
                     layer.held = True
             self.wm.activate("tasks")
-        self._set_text_mode(False)
 
     def close_tasks(self, home=False):
         """The task manager goes: back where it was opened from (a held
@@ -2537,12 +2532,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
         self._cart_key_prev = 0       # fresh cart: no stale key edge
-        self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);
-                                      # it opts into text input via textmode(True)
+        self.run.textmode = False     # a fresh cart is a game until textmode(True)
         self.input.cart_quit = False  # clear any prior cart's quit() flag so it can't
                                       # immediately pop the freshly opened cart (make_api)
         self.menu_view = "cards"
-        self._set_text_mode(False)
         self._start()
         # First Steps, and Cart Explorer's distinct carts: keyed by the
         # cart's path or title, the identity the launcher uses.
@@ -2601,54 +2594,39 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         the app's layout."""
         if not self.bar_layer.bar_at("app", px, py):
             return None
-        # The back in that band is an EXIT path, so hard-commit first: an
-        # app that persists on an idle debounce (#111) would otherwise lose the
-        # last edit. Optional -- forgetting it costs an autosave, never the exit.
-        commit = getattr(app, "commit", None)
-        if commit is not None:
-            commit()
         return bool(self.bar_layer.handle_bar_tap("app", px, py))
 
-    def page_app(self, kind):
-        """The app behind process `kind` whose pages its back steps through:
-        a registered app, Settings, or the running app cart (the Player,
-        whose `has_page` and `back` are its app's views); None for any other
-        kind."""
-        app = self._apps_by_id.get(kind)
-        if app is None and kind == "settings":
-            app = self.settings_layer
-        if app is None and kind == "desktop" and self.run.player._is_tool:
-            app = self.run.player
-        return app
+    def surface_of(self, kind):
+        """The surface process `kind` presents, which its keys reach: the
+        Editor's layer for "menu", the home for None (the desk itself), the
+        content layer registered under it otherwise (None for none)."""
+        if kind == "menu":
+            return self.editor_layer()
+        if kind is None:
+            return self._content_layers["launcher"]
+        return self.layer_of(kind)
 
     def app_has_page(self, kind):
-        """Whether app `kind` (`page_app`) has a page of it open (its
-        `has_page`), which its back steps out of: a desk window shows the
-        back chevron in its title strip then. False for any other kind."""
-        app = self.page_app(kind)
-        has = getattr(app, "has_page", None) if app is not None else None
-        return bool(has is not None and has())
+        """Whether surface `kind` has a view of its own open, which its back
+        steps out of (`InputPolicy.has_page`): a desk window shows the back
+        chevron in its title strip then."""
+        s = self.surface_of(kind)
+        return s is not None and self.input_policy.has_page(s)
 
-    def app_back(self, app=None):
-        """Back one level on registered `app` (None: the one on top) -- the
-        bar's chevron, Esc and B (docs/history/look_2026-10.md step 27a): the app's
-        own `back()` steps back a page of it and answers True; on its first
-        page (False, or an app with no pages) the app is left for whoever
-        opened it, committed first as the bar's exit always was."""
-        if app is None:
-            app = self._apps_by_id.get(self.wm.top_kind())
-            if app is None:
-                return
-        self._dirty = True
-        back = getattr(app, "back", None)
-        if back is not None and back():
-            return
-        commit = getattr(app, "commit", None)
-        if commit is not None:
-            commit()
-        if getattr(app, "BACK_MINIMISES", False) and self.wm.minimise_kind(app.id):
-            return
-        self._exit_to_caller()
+    def leave_surface(self, kind):
+        """Surface `kind` is being left, by any route -- home, back, the
+        window's X, a jump to another app, the hand-off to an update: its
+        `close()` writes what it holds (docs/app_api_v1.md), change-gated.
+        The Editor's is `EditorApp.close` (its tab, or the theme mode's
+        icons). A change to the look still settling (Appearance's, a theme
+        mode's) is written with it."""
+        if kind == "menu":
+            self.editor_app.close()
+        else:
+            s = self.surface_of(kind)
+            if s is not None:
+                s.close()
+        self.look.commit()
 
     def open(self, cart=None):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
@@ -2666,7 +2644,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
         # responsive system process. Deliberately NOT the Player: the Player is
         # the fixed 320x240 contract, while an app reflows to a P4/web window.
-        for _app, _text in self._apps:
+        for _app in self._apps:
             if _app.is_app(selected):
                 self.open_app(_app, selected)
                 return
@@ -2764,7 +2742,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             player.crash_line = None
         player._draw = con.draw
         player._update = con.driver(player._update)
-        self._set_text_mode(True)      # a script TYPES; this is the surface taking
+        self.run.textmode = True       # a script TYPES (`Player.typing`)
         con.seed_key(getattr(self.input, "last_key", 0) or 0)
         self.play(caller)
         return (True, "")
@@ -3359,13 +3337,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                               or (self._notice is not None and self.notice_active(now))
                               or (_NOTES.banner is not None and _NOTES.up(now) is not None))
         # Input focus moved (a window clicked, a screen left): Settings stores
-        # a Name still being typed and hands back the keyboard's text mode.
+        # a Name still being typed.
         h = self.wm.input_holder()
         if h != self._holder:
             was = self._holder
             self._holder = h
             if was == "settings":
-                self.settings_layer.leave()
+                self.settings_layer.commit_name()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.
@@ -3452,7 +3430,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                     desk = self._editor_desk
                     if desk is not None:
                         desk.warm_step()        # the desk Editor's next workspace
-                    for app, _t in self._apps:  # ... and an app's owed work (My Art's pictures)
+                    for app in self._apps:  # ... and an app's owed work (My Art's pictures)
                         if getattr(app, "idle_owed", False):
                             app.idle_step()
                             break
@@ -3705,6 +3683,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # Last thing in the frame so the stall sits outside every timing
             # bracket (the DEFER diag line names its cost instead).
             self._run_deferred()
+        # What the draw moved (a field focused, a popover gone) sets the
+        # keyboard's mode before the next key is read in it.
+        self.input_policy.sync()
 
     # -- boot logo ------------------------------------------------------------
 
@@ -3950,8 +3931,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     if inp is not None and getattr(inp, "players", None) is None:
         inp.players = PlayerRouter(inp)
     if keyboard is not None:
-        ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
-        ws.sync_keyboard_mode()
+        ws.keyboard = keyboard      # the input policy switches it to text (ASCII) mode
+        ws.input_policy.attach_keyboard()
     if first_variant in THEME_VARIANTS:
         ws.look.theme_variant = first_variant   # load_system's absent-row default
     ws.load_system()            # #28: system/settings, the theme and its wallpaper

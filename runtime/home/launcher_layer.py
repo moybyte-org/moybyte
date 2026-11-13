@@ -75,6 +75,7 @@ from home_hints import HomeHints, modal_keys
 from home_zone import HomeZone
 from home_details import HomeDetails
 from home_search import HomeSearch
+from layers import Layer
 from home_icons import IconHome
 from home_carousel import Carousel
 from home_grid import (HOME_SCALE_HH, HOME_TABS, PSEUDO_TILE_TYPES)
@@ -89,7 +90,7 @@ LONG_PRESS_MS = 500
 BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
 
 
-class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
+class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
     """The "launcher" content Layer (system domain): the home, console mode's root.
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching

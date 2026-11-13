@@ -147,6 +147,7 @@ class _NoRun:
     namespace): its own view and a clock from 0."""
     view = None
     cart_start_ms = None
+    textmode = False
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
@@ -426,10 +427,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # btn() (true hold-to-move) but the keyboard yields no clean typeable ASCII.
         # textmode(True) switches to text mode so key()/keyp() return clean 1-byte
         # ASCII for typing (a password, a name); textmode(False) restores game mode.
-        # The Workstation applies it: on the host it gates char routing to the
+        # The flag is the run's; the console's input policy applies it while
+        # the run holds the keys: on the host it gates char routing to the
         # cart's key(); on the device it flips the T-Deck keyboard ASCII<->raw.
-        # Resets to game mode automatically when the cart exits.
-        input.text_mode = bool(on)
+        # A fresh cart starts in game mode.
+        run.textmode = bool(on)
 
     def view(w=0, h=0):
         # view(w, h) -> declare the cart's LOGICAL viewport: the composite scales

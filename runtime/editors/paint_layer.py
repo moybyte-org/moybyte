@@ -39,6 +39,7 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 
 import ui as _ui              # frozen on device
 import ui_draw as _ui_draw
+from layers import Layer
 from editor_map import checker as _checker, checker_quads as _checker_quads
 from editors_paint_map import PaintEditor, _pe_line
 from editors_base import KeyEdge
@@ -328,7 +329,7 @@ class PaintLayout(LayoutBase):
         self.more_btn = self.tool_btns[-1]
 
 
-class PaintLayer:
+class PaintLayer(Layer):
     """The paint editor content Layer (SYSTEM domain, responsive #39 step 3): a
     full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
     gone -- the panel always covered every pixel of it anyway). draw = the paint UI
@@ -404,7 +405,7 @@ class PaintLayer:
 
     def ball_steps(self):
         """The trackball steps an open popover's rows (the more menu, a
-        picker) and points at the grid otherwise (Workstation.ball_steps)."""
+        picker) and points at the grid otherwise (InputPolicy.ball_steps)."""
         return bool(self._pop)
 
     def at_top(self):
@@ -474,12 +475,6 @@ class PaintLayer:
             self._ekey.hit(k)          # keep the edge in sync even with no editor
             return
         if not self._ekey.hit(k):
-            return
-        if k == 0x1A:
-            pe.undo()
-            return
-        if k == 0x19:
-            pe.redo()
             return
         if k in (0x71, 0x51, 0x77, 0x57, 0x65, 0x45):   # Q, and W or E: the sprite before, after
             pe.select(-1 if k in (0x71, 0x51) else 1)

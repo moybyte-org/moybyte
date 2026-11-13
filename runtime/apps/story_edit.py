@@ -168,14 +168,12 @@ class Editor:
         st = self.app.story
         st.record(self.app.cur)
         self.writing = True
-        self.app._nav.text_mode(True)
         self.app._damage.all()
 
     def stop_writing(self):
         if not self.writing:
             return
         self.writing = False
-        self.app._nav.text_mode(False)
         st = self.app.story
         if st is not None and self._new and self.app.cur == 0:
             objs = st.objects(0)

@@ -19,7 +19,7 @@ Two layers, the same split as the console's other sub-editors:
 
 One instance lives on Workstation (`ws.block_ui`), with a back-reference to
 it for the primitives it shares with the rest of the console (canvas, input,
-cart, carts_store, _with_sd, set_menu_view, _set_text_mode, _leave_or_home,
+cart, carts_store, _with_sd, set_menu_view, _leave_or_home,
 _btn, editor, pointer, sys_canvas). `NAMES` / `_err_text` are injected at
 construction instead of imported back from console.py, which would be a
 circular import.
@@ -31,7 +31,7 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 from editors_block import BlockEditor, _clone_tree
-from editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
+from editors_base import (TextEntry, TE_COMMIT, TE_CANCEL,
                           text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
@@ -219,7 +219,6 @@ class BlockEditorUI:
         self.blk_protect = False      # block editor opened on a hand-written-code cart
         self.blk_graduated = False    # cart has GRADUATED (Stage 8): blocks read-only
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
-        self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
         self._hold = _ui_draw.Hold()      # the page under blk_kbd (`_draw_blk_kbd`)
@@ -484,30 +483,6 @@ class BlockEditorUI:
             if be.start_move():
                 self.blk_status = "TAP A + SPOT"
 
-    def _blk_undo(self):
-        be = self.blocks_ed
-        if be is None:
-            return
-        be.cancel_move()
-        self.blk_menu = None
-        if be.undo():
-            self.blk_slot = 0
-            self.blk_status = "UNDO"
-        else:
-            self.blk_status = "NOTHING TO UNDO"
-
-    def _blk_redo(self):
-        be = self.blocks_ed
-        if be is None:
-            return
-        be.cancel_move()
-        self.blk_menu = None
-        if be.redo():
-            self.blk_slot = 0
-            self.blk_status = "REDO"
-        else:
-            self.blk_status = "NOTHING TO REDO"
-
     def _blk_open_blocks(self, category):
         ids = _blocks_mod.blocks_in_category(category)
         # Events are the lifecycle hats -- they live at the top level and the empty
@@ -754,7 +729,7 @@ class BlockEditorUI:
 
     def cancel_prompt(self):
         """Close the open entry prompt as its Cancel does (the T-Deck's Mic,
-        `Workstation.cancel_field`); False where none is open."""
+        `InputPolicy.cancel`); False where none is open."""
         if self.blk_kbd is None:
             return False
         self._blk_kbd_cancel()
@@ -856,7 +831,6 @@ class BlockEditorUI:
         k = self.blk_kbd
         if be is None or k is None:
             self.blk_kbd = None
-            self.ws._set_text_mode(False)
             return
         kind = k.get("kind", "var")
         if kind == "num":
@@ -893,7 +867,6 @@ class BlockEditorUI:
                 be.set_slot(bt[1], final, bt[0])
             self.blk_status = "VAR: " + final[:12]
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
 
     def _blk_kbd_cancel(self):
         """Cancel a prompt: a number/text prompt just discards the edit (the slot keeps
@@ -906,7 +879,6 @@ class BlockEditorUI:
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], k["var"], bt[0])
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
 
     def _blk_kbd_key(self, ch):
         """One typed byte into the open prompt (editors_base.text_key: trim,
@@ -1058,7 +1030,7 @@ class BlockEditorUI:
         if self.blk_kbd is not None:
             # The entry prompt owns input: its dialog's engine takes the typed
             # bytes, the moves between its stops and Enter; Esc cancels (the
-            # T-Deck's Mic does through Workstation.cancel_field). The key that
+            # T-Deck's Mic does through `InputPolicy.cancel`). The key that
             # opened it types nothing (its host's seed, #29).
             host = self.blk_kbd["host"]
             if host.keys(i):
@@ -1092,11 +1064,7 @@ class BlockEditorUI:
                 be.cancel_move()
                 self.blk_status = "MOVE OFF"
             return
-        # Host convenience (#93): Ctrl+Z / Ctrl+Y walk the in-session outline undo,
-        # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
-        # on-screen UNDO/REDO buttons are the touch/device affordance.
-        k = getattr(i, "last_key", 0) or 0
-        moved = self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
+        moved = False
         if i.steps("up"):
             self._blk_move_cursor(-1)
             moved = True
@@ -1191,7 +1159,6 @@ class BlockEditorUI:
             return
         block, name = k["block"], k["slot"]
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
         self._blk_open_expr_menu(block, name)
 
     # -- block editor drawing (#29 Part 2) -----------------------------------

@@ -113,8 +113,7 @@ class Desktop:
                 if n or ws.ball_owed:
                     dx = (n >> 12 & 4095) - 2048 if n else 0
                     dy = (n & 4095) - 2048 if n else 0
-                    if not ws.ball(dx, dy, n >> 24) & 1 and (dx or dy):
-                        pointer.move(cursor(dx), cursor(dy))
+                    ws.ball_frame(dx, dy, n >> 24, pointer, cursor)
             ws.handle_input()
 
         drawn = [0]

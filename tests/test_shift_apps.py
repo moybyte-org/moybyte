@@ -180,7 +180,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
 
 def _owes(ws):
     """Whether an app of the console has idle work owed."""
-    for app, _t in ws._apps:
+    for app in ws._apps:
         if getattr(app, "idle_owed", False):
             return True
     return False

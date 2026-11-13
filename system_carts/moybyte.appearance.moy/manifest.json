@@ -13,7 +13,6 @@
     "app": {
       "id": "appearance",
       "entry": "appearance_app:AppearanceAppLayer",
-      "text_mode": false,
       "order": 20
     },
     "permissions": [

@@ -160,11 +160,12 @@ def test_micropython_touch_and_idle_cursor():
 
 
 def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
-    """The per-frame CALL that derives the keyboard mode from the cart's
-    textmode request lives in Player.tick; the mode flip itself is executed in
-    tests/test_cart_textmode.py and tests/test_tdeck_input.py."""
-    player = runtime_file("player.py").read_text(encoding="utf-8")
-    assert "ws._sync_cart_text_mode()" in player
+    """The keyboard's mode is derived around every key pass and tap
+    (`InputPolicy.sync`), the cart's textmode request among what it reads;
+    the mode flip itself is executed in tests/test_cart_textmode.py and
+    tests/test_tdeck_input.py."""
+    src = runtime_file("console_input.py").read_text(encoding="utf-8")
+    assert "policy.begin(self.input)" in src and src.count("input_policy.sync()") >= 1
 
 
 def test_kid_mode_gates_diag_frame_eaters():

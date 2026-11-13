@@ -14,6 +14,7 @@ from array import array as _array
 
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import AppLayer
 import layout_base as _lb
 
 try:
@@ -52,7 +53,7 @@ class TerminalLayout:
             self.w, self.h, 0 if windowed else _lb.bar_rows(self.cs))
 
 
-class TerminalAppLayer:
+class TerminalAppLayer(AppLayer):
     """The Terminal: the C shell's screen face (see the section above)."""
 
     id = "terminal"
@@ -128,7 +129,11 @@ class TerminalAppLayer:
 
     # -- input --------------------------------------------------------------------
 
-    def cancel_field(self):
+    def typing(self):
+        """The Terminal types, always."""
+        return True
+
+    def cancel(self):
         """The board's cancel key (the T-Deck's Mic) for the text app in
         front (`edit`, `top`, `python`): True when it took it; with none in
         front Mic stays the console's key."""

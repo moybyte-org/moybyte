@@ -48,6 +48,7 @@ import json as _json
 import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import Layer
 import text_modes as _modes
 import layout_base as _lb
 from code_layer import CodeLayer, _status_line
@@ -947,12 +948,14 @@ class SpritesLayout:
         return (x0 + (k % self.cols) * self.pitch, y0 + (k // self.cols) * self.pitch_y)
 
 
-class SpritesLayer:
+class SpritesLayer(Layer):
     """The Sprites tab's content layer (system domain, as the sprite tab's)."""
 
     id = TAB_SPRITES
     domain = "system"
-    ball_steps = False              # the trackball points at the icon and its colours
+    def ball_steps(self):
+        """The trackball points at the icon and its colours."""
+        return False
 
     def __init__(self, ws, names):
         self.ws = ws

@@ -34,6 +34,7 @@ A console with no media service (the Guition S3) shows the no-audio page.
 
 import ui
 import ui_draw as _ui_draw
+from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, DESK
 from moy_store_base import builtin_name, files_root
 import moybyte as _moybyte
@@ -930,7 +931,7 @@ def _scan(folder):
 
 # -- the app ------------------------------------------------------------------------
 
-class MusicAppLayer:
+class MusicAppLayer(AppLayer):
     """The Music content Layer and app protocol (see the module docstring)."""
 
     id = "jukebox"            # "music" is the Editor's Music tab
@@ -1008,8 +1009,6 @@ class MusicAppLayer:
 
     def close(self):
         self.shown = False
-        if self.page == "add":
-            self._nav.text_mode(False)
 
     def page_title(self):
         return {"now": "Now playing", "add": "Add a station"}.get(self.page)
@@ -1022,14 +1021,12 @@ class MusicAppLayer:
         playing step back to the list. False on the list: the host leaves."""
         if self.page == "list":
             return False
-        if self.page == "add":
-            self._nav.text_mode(False)
         self.page = "list"
         self._first = True
         self._damage.all()
         return True
 
-    def cancel_field(self):
+    def cancel(self):
         """The T-Deck's Mic in a field: Add a station cancelled."""
         if self.page != "add":
             return False
@@ -1163,7 +1160,6 @@ class MusicAppLayer:
     def _go(self, page):
         self.page = page
         self._first = True
-        self._nav.text_mode(page == "add")
         if page == "add":
             self.url, self.name, self.err = "", "", None
         self._damage.all()

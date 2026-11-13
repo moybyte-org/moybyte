@@ -444,7 +444,7 @@ def _bl(dx, dy, click=False):
         ws.pointer.move(_cd(ix), _cd(iy))
     if ib.on:
         k = ws.ball_stepped - was
-        if not k and r & 1 and (dx or dy) and not ws.ball_steps():
+        if not k and r & 1 and (dx or dy) and not ws.input_policy.ball_steps():
             k = 1
         t = _D(_T(), ib.t0) // 1000
         for _ in range(k):

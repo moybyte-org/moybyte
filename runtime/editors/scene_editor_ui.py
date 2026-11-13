@@ -34,7 +34,6 @@ import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 from editors_scene import SceneEditor
-from editors_base import KeyEdge
 from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 
 # The handheld page (editor_scene.py): the right column's width and the
@@ -95,7 +94,6 @@ class SceneEditorUI:
         self.scene_name = None         # the DEFAULT scene this editor manages
         self.scene_page = 0            # first tile id shown in the palette
         self.scene_zoom = 0            # index into layout.zooms (0 = 1x)
-        self._skey = KeyEdge()         # Ctrl+Z/Y edge tracker
         self._press = None             # gesture origin (px, py); None outside one
         self._mode = None              # open gesture: "move" (an actor) or "pan"
         self._panning = False          # the pan gesture crossed the tap threshold
@@ -168,7 +166,6 @@ class SceneEditorUI:
         self._mode = None
         self._panning = False
         self._drag = None
-        self._skey.reset()
 
     # -- live sync + persistence ---------------------------------------------
 
@@ -321,25 +318,11 @@ class SceneEditorUI:
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()
-            self._skey.undo_redo(getattr(i, "last_key", 0),
-                                 self._undo, self._redo)
         ws._leave_or_home(ws.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit
         if se is not None and se.nudge_sel(dx, dy):
-            self._sync_live()
-            self._clamp_cam()
-
-    def _undo(self):
-        se = self.sceneedit
-        if se is not None and se.undo():
-            self._sync_live()
-            self._clamp_cam()
-
-    def _redo(self):
-        se = self.sceneedit
-        if se is not None and se.redo():
             self._sync_live()
             self._clamp_cam()
 

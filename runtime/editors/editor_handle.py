@@ -28,8 +28,8 @@ cart's own `key()`/`keyp()` read nothing while a handle holds focus. That is
 not symmetry for its own sake: taking the keyboard for a text surface is a
 screen change, and the byte that caused it is still live on the next frame
 (`b2ff7de`) -- so the seed that swallows it has to happen in the one place
-that flips the T-Deck's keyboard, `Workstation._set_text_mode`, which no cart
-can call. Taps have no mode switch and no stray edge, and only the cart knows
+that flips the T-Deck's keyboard, the input policy's `apply`
+(runtime/shell/input_policy.py), which no cart can call. Taps have no mode switch and no stray edge, and only the cart knows
 which rect it drew the editor into, so they stay the cart's to forward.
 
 DIRECTIONAL input follows the keyboard for the same reason (`nav`): on the

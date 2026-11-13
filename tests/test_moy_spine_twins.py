@@ -121,7 +121,7 @@ def round_():
     s.load(TEXT)
     reg = sp.AppRegistry()
     for i in range(8):
-        reg.register("app%d" % i, "App %d" % i, False, (i, i))
+        reg.register("app%d" % i, "App %d" % i, (i, i))
     rt = sp.Returns(reg)
     rt.run("app1")
     t = sp.Table(1, "x", 256)
@@ -295,8 +295,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 title = rnd.choice(["T%d" % i, "é", "", 42, None])
                 size = rnd.choice([None, (i, i + 1), [3, 4], (-2, 1 << 31),
                                    (1 << 31, 0)])
-                got = both(apps, "register", aid, title, rnd.random() < 0.5,
-                           size)
+                got = both(apps, "register", aid, title, size)
                 if got[0][0] == "ok":
                     assert got[0] == got[1], (step, got)
             elif op == "find":
@@ -306,7 +305,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 hs = apps[0].handles()
                 h = (rnd.choice(hs) if hs and rnd.random() < 0.7
                      else rnd.choice(seen))
-                for meth in ("app_id", "title", "text_mode", "min_size",
+                for meth in ("app_id", "title", "min_size",
                              "valid"):
                     agree(both(apps, meth, h), (step, meth))
                 continue

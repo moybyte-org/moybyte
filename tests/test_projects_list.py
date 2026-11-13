@@ -58,7 +58,7 @@ def test_make_lists_the_new_card_then_every_editable_cart(tmp_path):
     # ...MINUS the carts a shell APP claims as its identity (Files/Paint/...):
     # TEMPORARY until #181 makes the apps real carts.
     claimed = [c for c in ws.carts.all
-               if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]
+               if any(app.is_app(c) for app in getattr(ws, "_apps", ()))]
     # ...and the achievements process's, the console's own (processes.md §8).
     claimed += [c for c in ws.carts.all if c.get("id") == "moybyte.achievements"]
     assert claimed, "fixture has no app carts -- the exclusion is untested"

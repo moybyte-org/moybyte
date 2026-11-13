@@ -1202,20 +1202,12 @@ class BarLayer:
 
     def go_back(self, where):
         """The chevron's tap: back one level from `where` -- what Esc and B
-        do there."""
+        do there (`InputPolicy.back`); the home's goes to the desk."""
         ws = self.ws
         if where == "home":
             ws.open_desk()
-        elif where == "app":
-            ws.app_back()
-        elif where == "tool":
-            ws.app_back(ws.run.player)  # the app's own view first, then out of it
-        elif where == "settings":
-            ws.settings_layer.back()
-        elif where == "tasks":
-            ws.close_tasks()
         else:
-            ws.exit()
+            ws.input_policy.back()
         ws._dirty = True
 
     def _paint_back_title(self, cv, r, title, bar, game=False):
@@ -1648,8 +1640,7 @@ class BarLayer:
         if where == "app":
             kind = ws.wm.top_kind()
             app = ws._apps_by_id.get(kind)
-            pt = getattr(app, "page_title", None)
-            t = pt() if pt is not None else None
+            t = app.page_title() if app is not None else None
             if t:
                 return t                    # a page of the app names its own
             c = ws.app_carts.get(kind)

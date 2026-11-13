@@ -363,9 +363,8 @@ class NavServer:
                         lambda: ws.run_script(kind, name), (True, None))
 
     def text_mode(self, g, on):
-        """Flip the keyboard between typing and game mode, for an app that
-        changes mode mid-session (Storybook's page editor)."""
-        self.__ws._set_text_mode(bool(on))
+        """Nothing: the keyboard's mode is what the app's page answers
+        (runtime/shell/input_policy.py)."""
 
     def cover(self, g, cart):
         """`cart`'s cover decoded at its half (64x64), what a list row draws

@@ -74,7 +74,7 @@ def test_make_hides_claimed_system_apps(tmp_path):
     titles = [c.get("title") for c in ws.projects_grid.items if c.get("path")]
     claimed = []
     for cart in ws.carts.all:
-        for app, _t in getattr(ws, "_apps", ()):
+        for app in getattr(ws, "_apps", ()):
             if app.is_app(cart):
                 claimed.append(cart.get("title"))
                 break
@@ -94,10 +94,10 @@ def test_desk_still_offers_system_apps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
     claimed = [c for c in ws.carts.all
-               if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]
+               if any(app.is_app(c) for app in getattr(ws, "_apps", ()))]
     assert claimed
     ids = [row[0] for row in ws.wm._backdrop_layer._icon_catalog()]
-    for app, _t in getattr(ws, "_apps", ()):
+    for app in getattr(ws, "_apps", ()):
         if app.id in ws.wm._backdrop_layer.HIDDEN_APPS:
             continue
         if not getattr(app, "DESK_TILE", True):

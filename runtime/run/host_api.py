@@ -43,6 +43,11 @@ def _fold(code):
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 
+def _pan_px(d):
+    """The cursor's nudge for `d` pulses of the arrows-as-trackball."""
+    return d * PAN_SPEED
+
+
 # --- WiFi (#38): host fake backend ------------------------------------------
 # The device wraps network.WLAN; on the PC there is no radio, so this fake gives
 # the Settings WIFI panel and a "network" cart something to drive in the
@@ -411,9 +416,6 @@ class ConsoleDriver:
     def menu_view(self):
         return self.ws.menu_view
 
-    def in_code_editor(self):
-        return self.ws.screen == "menu" and self.ws.menu_view == "code"
-
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
         # The pygame loop routes typed unicode to the cart's key() when this is true
@@ -432,59 +434,20 @@ class ConsoleDriver:
         (`Workstation.full_key`)."""
         self.ws.full_key()
 
-    def menu_open(self):
-        """The pause menu, the delete confirm or the system menu shows: Esc
-        is theirs."""
-        return self.ws.pause.open or self.ws.confirm.open or self.ws.sysmenu.open
-
-    def takes_escape(self):
-        """Esc is the console's: a menu shows, a game plays fullscreen (its
-        Esc is the console's key), Settings or a registered app is the
-        fullscreen surface (its Esc is the bar's back), or the focused desk
-        window shows its back chevron, or a running app has a view of its
-        own open (`Player.has_page`)."""
-        ws = self.ws
-        return (self.menu_open() or ws.plays_fullscreen()
-                or ws.screen in ("settings", "tasks")
-                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
-                or (not ws.windowed_chrome and ws.screen == "desktop"
-                    and ws.run.player.has_page())
-                or (ws.windowed_chrome and ws.wm.focus_has_back()))
-
     def escape(self):
-        """Esc: the pause menu steps back (Options to its menu, the menu to
-        the game), the system menu closes; over a fullscreen game it is the
-        console's key (docs/shell_ux_v1.md §9a), the pause menu, whatever the
-        cart declared and whoever ran it; Settings and a registered app go
-        back one level, as the bar's chevron and B do, and so does a desk
-        window's app with a page open (its title strip's chevron); the
-        Editor steps back (its one bar has no chevron), and on a desk a
-        grown pane goes back instead."""
-        ws = self.ws
-        if ws.pause.open:
-            ws.pause.back()
-        elif ws.confirm.open:
-            ws.confirm.cancel()
-        elif ws.sysmenu.open:
-            ws.sysmenu.close()
-            ws.popover_touch()
-        elif ws.plays_fullscreen():
-            ws.system_key()
-        elif ws.screen == "settings":
-            ws.settings_layer.back()
-        elif ws.screen == "tasks" and not ws.windowed_chrome:
-            ws.tasks_layer.back()
-        elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
-            ws.app_back()
-        elif (not ws.windowed_chrome and ws.screen == "desktop"
-              and ws.run.player.has_page()):
-            ws.app_back(ws.run.player)  # the running app's own view steps back
-        elif ws.windowed_chrome and ws.wm.focus_back():
-            pass
-        elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):
-            ws.editor_layer().escape()  # the desk Editor: a grown pane back
-        elif ws.screen == "menu":
-            ws.exit()                   # the Editor's one bar: Esc steps back
+        """Esc, as a board's keyboard sends it (native/moy_input/moy_hid.c):
+        on a text surface the typed byte 27, which its field takes; anywhere
+        else the `stop` button, which is the console's back
+        (`InputPolicy.back`): a menu steps back or closes, a fullscreen game
+        pauses, a surface steps back a page or is left. The host's buttons
+        are the first eight and carry no `stop`, so it calls the back the
+        router gives a board's."""
+        policy = self.ws.input_policy
+        if self.input.text_mode:
+            self.type_char(0x1B)
+        elif (policy.takes_stop(policy.holder()) or self.ws._modal_layer() is not None
+              or self.ws._about):
+            policy.back()
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
@@ -501,9 +464,7 @@ class ConsoleDriver:
         bc = self._ball_click
         self._ball_click = False
         if dx or dy or bc or self.ws.ball_owed:
-            took = self.ws.ball(dx, dy, bc)
-            if (dx or dy) and not took & 1:
-                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)
+            took = self.ws.ball_frame(dx, dy, bc, self.pointer, _pan_px)
             if bc and not took & 2:
                 self._click = True
         # One queued byte per frame -- and in TEXT MODE, never the same byte in

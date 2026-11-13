@@ -7,6 +7,7 @@ targets."""
 from array import array
 
 from runtime import ui, ui_draw
+from runtime.layers import AppLayer
 
 SWATCHES = {"light": (0x4f46e5, 0xd45f00, 0xd13f2a, 0xc2306f, 0x0a72bd, 0x0d8160,
                       0x4c8417, 0x15161d),
@@ -14,7 +15,7 @@ SWATCHES = {"light": (0x4f46e5, 0xd45f00, 0xd13f2a, 0xc2306f, 0x0a72bd, 0x0d8160
                      0x9fd36a, 0xeef0ff)}
 
 
-class PartsApp:
+class PartsApp(AppLayer):
     id = "parts"
     domain = "system"
     TITLE = "Parts"

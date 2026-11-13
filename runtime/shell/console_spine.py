@@ -26,6 +26,7 @@ from chrome import DEFAULT_VARIANT, NAMES
 from settings_layer import SETTINGS_TOGGLES
 from moy_spine import (EDITOR, ROUTE_APP, ROUTE_EDITOR, ROUTE_WINDOW)
 from ui_draw import AppHost
+from layers import Layer
 from achievements import is_proc as _is_ach_proc
 import moy_app as _moy_app
 
@@ -274,12 +275,6 @@ class SpineVerbs:
         if route == ROUTE_EDITOR:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
-            # #80: returning DIRECTLY to the code tab is not a tab CHANGE, so
-            # set_menu_view's text-mode flip never fires here -- the keyboard
-            # stayed in the cart's raw-matrix mode, where plain letters still
-            # map but the sym layer doesn't exist (sym+digit typed NOTHING in
-            # the code editor after a PLAY). Restore the returned-to tab's mode.
-            self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
             return
         if route == ROUTE_APP and self._return_to_app(caller):
             return
@@ -295,9 +290,6 @@ class SpineVerbs:
             return False
         self._dirty = True
         self.wm.goto(app_id)
-        h = self.apps.find(app_id)
-        if h:
-            self._set_text_mode(self.apps.text_mode(h))
         return True
 
     def _go_home_or_back(self):
@@ -372,20 +364,19 @@ class SpineVerbs:
             if service is not None:
                 self.artwork = service
             ms = d.get("min_size")
-            self.register_app(app, text_mode=bool(d.get("text_mode")),
-                              min_size=(tuple(ms) if ms else None))
+            self.register_app(app, min_size=(tuple(ms) if ms else None))
 
-    def register_app(self, app, text_mode=False, min_size=None):
+    def register_app(self, app, min_size=None):
         """Register a SYSTEM APP (docs/app_api_v1.md). `app` is a content Layer
-        exposing:
+        `layers.AppLayer`, exposing:
 
           id            -- the process kind (router / back-stack / window key)
           is_app(cart)  -- claim a launcher cart as this app's identity
           open()        -- (re)enter the app on every launch
           relayout(w, h, fs)  -- adopt a new canvas size / font scale
 
-        `text_mode=True` marks a TYPING app (clean ASCII keyboard);
-        `min_size=(w, h)` is the windowed-WM resize minimum in fs-scaled
+        and the input protocol `layers.Layer` defaults (its text mode is what
+        its `typing` answers); `min_size=(w, h)` is the windowed-WM resize minimum in fs-scaled
         units (the ui.py convention). When omitted, MIN_W/MIN_H on
         the app's layout are adopted. TITLE supplies window/taskbar text. A
         launcher tap on the claimed cart opens the app instead of the Player;
@@ -396,9 +387,10 @@ class SpineVerbs:
             min_h = getattr(layout, "MIN_H", None)
             if min_w is not None and min_h is not None:
                 min_size = (int(min_w), int(min_h))
-        h = self.apps.register(app.id, getattr(app, "TITLE", app.id.upper()),
-                               text_mode, min_size)
-        self._apps.append((app, self.apps.text_mode(h)))
+        if not isinstance(app, Layer):
+            raise TypeError("an app is a layers.AppLayer: " + str(app.id))
+        self.apps.register(app.id, getattr(app, "TITLE", app.id.upper()), min_size)
+        self._apps.append(app)
         self._apps_by_id[app.id] = app
         self._content_layers[app.id] = app
         hook = getattr(self.wm, "on_app_registered", None)
@@ -429,10 +421,8 @@ class SpineVerbs:
     def open_app(self, app, cart=None):
         """Spawn a registered system app on `cart` (default: the cart its
         is_app claims) -- the ONE app-launch dispatch, used by the launcher
-        tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A
-        TYPING app (register_app text_mode=True) gets the clean ASCII
-        keyboard after it opens; the rest are set to button mode BOTH ways, so
-        a jump out of a typing app restores the raw keyboard. On the desk an
+        tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A jump
+        in console mode leaves the surface on top (`leave_surface`). On the desk an
         app whose window is open and no cart named comes forward as it was
         (`wm.bring_forward`); one opened on a cart opens it in that window,
         the windows above left open (`wm.activate`). Returns False
@@ -449,19 +439,15 @@ class SpineVerbs:
                     break
             if cart is None:
                 return False
-        h = self.apps.find(app.id)
-        text = self.apps.text_mode(h) if h else False
-        self.look.commit()             # an app switch is an exit: `custom` is written
-        self.settings_layer.commit_name()  # ... and a Name still being typed
+        if not self.windowed_chrome:
+            self.leave_surface(self.wm.top_kind())   # an app switch is an exit
         self._note_app_caller()        # a jump OUT of an app comes back to it
         self.app_carts[app.id] = cart
         if not self._project_held():
             self.cart = cart
-        self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
         self.wm.activate(app.id)
-        self._set_text_mode(bool(text))
         self.ach.played(cart.get("path") or cart.get("title"))
         return True
 
@@ -491,7 +477,7 @@ class SpineVerbs:
         lists and App permissions)."""
         if _is_ach_proc(cart):
             return True
-        for app, _text in getattr(self, "_apps", ()):
+        for app in getattr(self, "_apps", ()):
             if app.is_app(cart):
                 return True
         return False

@@ -504,14 +504,14 @@ def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
     try:
         board.pyexec("ws.open_settings(); ws.settings_layer.show_row('name')", strict=True)
         board.drain(0.8)
-        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is True
+        assert board.pyval("ws.settings_layer.typing()", strict=True) is True
         assert board.pyval("ws.input.text_mode", strict=True) is True
         assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
             "a text surface reads the matrix"
         _glass_key(board, ord("q"))
         _glass_start(board)
         assert board.pyval("ws.system.get('name', '')", strict=True) == was
-        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is False
+        assert board.pyval("ws.settings_layer.typing()", strict=True) is False
         assert board.pyval("ws.sysmenu.open", strict=True) is False
         board.pyexec("ws.settings_layer.show_row('name')", strict=True)
         board.drain(0.5)

@@ -265,7 +265,7 @@ class TextConsole:
     def seed_key(self, code):
         """Swallow the byte that opened this surface. Taking the keyboard is a
         screen change and the key that caused it is still in `last_key` when
-        the first frame runs -- the code editor's rule (`_set_text_mode`),
+        the first frame runs -- the code editor's rule (`InputPolicy.apply`),
         which the prompt needs for exactly the same reason."""
         self._ekey.prev = code or 0
 

@@ -34,6 +34,7 @@ from array import array
 
 import ui
 from app_shell import ListShellApp
+from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 from ticks import _ticks_ms, _ticks_diff
 import story_doc as D
@@ -408,6 +409,12 @@ class StorybookAppLayer(ListShellApp):
         if self.story is not None and self.page != "stories":
             return self.story.title() or "Untitled"
         return None
+
+    def typing(self):
+        """A field in focus types (a dialog's name), and so do a slide's
+        words while the desk's editor writes them."""
+        ed = self.ed
+        return (ed is not None and ed.writing) or AppLayer.typing(self)
 
     def has_page(self):
         return self.page != "stories" or self.asking is not None or self.menu is not None \

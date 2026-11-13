@@ -21,6 +21,17 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 class HomeSearch:
     """The search line, its tap and its typing of `LauncherHomeLayer`."""
 
+    def typing(self):
+        """A query being typed takes the keyboard."""
+        return self.ws.search_typing
+
+    def cancel(self):
+        """Mic while a query is typed: the box closes, cleared."""
+        if not self.ws.search_typing:
+            return False
+        self.ws.close_search(clear=True)
+        return True
+
     def _search_label(self, query, typing):
         """The search box's words: "Search: " and the query (a bar caret
         follows it while typed, `_draw_search`), or, where the input in use

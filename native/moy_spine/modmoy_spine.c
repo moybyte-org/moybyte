@@ -341,11 +341,10 @@ static int32_t int32_arg(mp_obj_t o) {
 
 static mp_obj_t apps_register(size_t n_args, const mp_obj_t *pos_args,
                               mp_map_t *kw_args) {
-    enum { ARG_app_id, ARG_title, ARG_text_mode, ARG_min_size };
+    enum { ARG_app_id, ARG_title, ARG_min_size };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_app_id, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
         { MP_QSTR_title, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
-        { MP_QSTR_text_mode, MP_ARG_OBJ, { .u_obj = mp_const_false } },
         { MP_QSTR_min_size, MP_ARG_OBJ, { .u_obj = mp_const_none } },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
@@ -375,9 +374,7 @@ static mp_obj_t apps_register(size_t n_args, const mp_obj_t *pos_args,
     size_t title_len;
     const char *t = mp_obj_str_get_data(title, &title_len);
     uint32_t handle;
-    int rc = moy_apps_register(a, id, id_len, t, title_len,
-                               mp_obj_is_true(args[ARG_text_mode].u_obj), has_min,
-                               w, h, &handle);
+    int rc = moy_apps_register(a, id, id_len, t, title_len, has_min, w, h, &handle);
     if (rc != MOY_ROUTE_OK) {
         raise_alloc(rc);
     }
@@ -403,11 +400,6 @@ static mp_obj_t apps_title(mp_obj_t self, mp_obj_t h) {
                                app->title_len);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(apps_title_obj, apps_title);
-
-static mp_obj_t apps_text_mode(mp_obj_t self, mp_obj_t h) {
-    return bool_obj(app_row(self, h)->text_mode);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(apps_text_mode_obj, apps_text_mode);
 
 static mp_obj_t apps_min_size(mp_obj_t self, mp_obj_t h) {
     const moy_app_t *app = app_row(self, h);
@@ -460,7 +452,6 @@ static const mp_rom_map_elem_t apps_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_find), MP_ROM_PTR(&apps_find_obj) },
     { MP_ROM_QSTR(MP_QSTR_app_id), MP_ROM_PTR(&apps_app_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_title), MP_ROM_PTR(&apps_title_obj) },
-    { MP_ROM_QSTR(MP_QSTR_text_mode), MP_ROM_PTR(&apps_text_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_min_size), MP_ROM_PTR(&apps_min_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_valid), MP_ROM_PTR(&apps_valid_obj) },
     { MP_ROM_QSTR(MP_QSTR_handles), MP_ROM_PTR(&apps_handles_obj) },
