@@ -153,7 +153,7 @@ def test_every_key_a_spec_reads_is_in_the_token_vocabulary():
 # --- the strings C draws -------------------------------------------------------
 
 C_DRAWS = ("native/moy_play/moy_chrome.c", "native/moy_kernel/moy_recovery.c",
-           "native/moy_kernel/moy_kernel.c")
+           "native/moy_kernel/moy_kernel.c", "native/moy_kernel/moy_recovery_floor.c")
 CONVERSION = re.compile(r"%(?:\d*l*[sdux]|08x|%)")
 
 

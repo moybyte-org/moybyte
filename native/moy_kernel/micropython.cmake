@@ -1,5 +1,6 @@
-# moy_kernel: the kernel's entry, its crash record and its recovery floor
-# (moy_kernel.c), its first light (moy_boot.c), the board's I2C bus (moy_bus.c), and the frame: the loop,
+# moy_kernel: the kernel's entry and its crash record (moy_kernel.c), its
+# recovery floor (moy_recovery_floor.c) and task watchdog (moy_wd.c), its
+# first light (moy_boot.c), the board's I2C bus (moy_bus.c), and the frame: the loop,
 # the idle ladder, PERF and the dev channel (moy_loop.c, moy_idle.c,
 # moy_perf.c, moy_devch.c, the module `moy_loop`), and the OS log (moy_log.c,
 # the module `moy_log`), and the scheduler's callback guard (modmoy_guard.c,
@@ -24,6 +25,8 @@ add_library(usermod_moy_kernel INTERFACE)
 
 target_sources(usermod_moy_kernel INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_kernel.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_recovery_floor.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_wd.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_kmem.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_platform.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_tasks.c

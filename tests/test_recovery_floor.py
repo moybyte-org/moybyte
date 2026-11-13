@@ -156,7 +156,7 @@ def test_a_tap_on_a_button_is_its_choice(built, board):
 
 def test_the_floors_words_are_the_kernels():
     """The prompt's words and the serial line's are one list in two files."""
-    src = open(os.path.join(ROOT, "native", "moy_kernel", "moy_kernel.c")).read()
+    src = open(os.path.join(ROOT, "native", "moy_kernel", "moy_recovery_floor.c")).read()
     floor = open(os.path.join(ROOT, "native", "moy_sh", "moy_sh_floor.c")).read()
     words = '{"retry", "safe", "reboot", "repl"}'
     assert "K_WORDS[] = %s;" % words in src and "WORDS[] = %s;" % words in floor
