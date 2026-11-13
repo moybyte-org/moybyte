@@ -2,7 +2,7 @@
 
 // The kernel's side of each row: moy_os_<name>, at the prototype the module's
 // C library declares (a varargs row takes its one optional argument in the
-// place of the ...). native/moy_elf/moy_os.c defines them, but a row the role
+// place of the ...). native/moy_elf/moy_os*.c define them, but a row the role
 // door serves, whose body moy_os_table.c has: moy_os_call over its fields.
 
 #ifndef MOY_OS_ROWS_H

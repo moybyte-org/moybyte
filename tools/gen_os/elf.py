@@ -54,7 +54,7 @@ def gen_rows_h(table):
     o = [HEAD,
          "// The kernel's side of each row: moy_os_<name>, at the prototype the module's\n"
          "// C library declares (a varargs row takes its one optional argument in the\n"
-         "// place of the ...). native/moy_elf/moy_os.c defines them, but a row the role\n"
+         "// place of the ...). native/moy_elf/moy_os*.c define them, but a row the role\n"
          "// door serves, whose body moy_os_table.c has: moy_os_call over its fields.\n",
          "#ifndef MOY_OS_ROWS_H", "#define MOY_OS_ROWS_H", "",
          "#include <stddef.h>", "#include <stdint.h>", "#include <sys/types.h>", "",

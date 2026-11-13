@@ -77,7 +77,7 @@ SPINE = Component(
     ["moy_htab.h", "moy_htab.c", "moy_route.h", "moy_route.c",
      "moy_settings.h", "moy_settings.c", "moy_ledger.h", "moy_ledger.c",
      "moy_json.h", "moy_json.c", "moy_app.h", "moy_app_err.h", "moy_app_rows.h", "moy_app_wasm_rows.h", "moy_app_lua_rows.h", "moy_app.c", "moy_app_run.h", "moy_app_wasm.h",
-     "moy_app_wasm.c", "moy_app_lua.h", "moy_app_lua.c", "moy_input.h", "moy_crypto.h",
+     "moy_app_wasm.c", "moy_app_lua.h", "moy_app_lua.c", "moy_input.h", "moy_event.h", "moy_crypto.h",
      "moy_ufiles.h", "moy_fs.h", "moy_vol.h"],
     ("fuzz_spine.c", ["moy_htab.c", "moy_route.c", "moy_settings.c",
                       "moy_ledger.c", "moy_json.c"]),
@@ -128,12 +128,19 @@ COMPONENTS = {"index": INDEX, "spine": SPINE, "fs": FS, "theme": THEME}
 def host_library(impl="c", sanitize=False, comp=INDEX):
     """The host shared library for the C twin: the host's one library
     (runtime/host/host_native.py), which carries every component; a sanitizer
-    build is the component's alone, cached under .build/host_<component>.
+    build is the component's alone, cached under .build/host_<component>
+    (the spine's is the one library under ASan).
     None where there is no C compiler."""
     import host_native
     if impl != "c":
         raise ValueError("a host library is the C twin's, not %r" % impl)
     if not sanitize:
+        return host_native.build()
+    if comp is SPINE:
+        # The spine's C calls the crypto rows' mbedTLS and the store's bodies,
+        # which only the host's one library links: it is that library under
+        # ASan (MOYHOST_ASAN, tools/asan_pytest.sh's build).
+        os.environ["MOYHOST_ASAN"] = "1"
         return host_native.build()
     return native_build.build_parts(
         "%s_%s_san" % (comp.lib, impl), [part(comp)], comp.cache,

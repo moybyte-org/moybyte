@@ -691,7 +691,7 @@ def staged_modules(board_dir, root=ROOT):
                            (dev_dir / name).relative_to(root), name))
                 put(name, dev_dir / name)
     # The store index is native (native/moy_index) unless a build sets
-    # MOY_INDEX_IMPL=py (tools/moy_index_spike.py): no Python one is frozen, so
+    # MOY_INDEX_IMPL=py (runtime/carts/moy_index.py): no Python one is frozen, so
     # `import moy_index` reaches the extensible builtin the module registers.
     if os.environ.get("MOY_INDEX_IMPL", "c") == "c":
         out.pop("moy_index.py", None)
