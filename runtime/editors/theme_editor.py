@@ -54,6 +54,7 @@ import layout_base as _lb
 from code_layer import CodeLayer, _status_line
 from chrome import CodeLayout
 from editors_code import CodeEditor
+from op_history import History, OpCodec
 from editors_paint_map import PaintEditor
 from editor_map import checker as _checker
 from moy_input import CTRL as _CTRL
@@ -97,54 +98,25 @@ def _dot():
 # -- the package ------------------------------------------------------------------
 
 
-class _SlotOps:
-    """The Sprites tab's undo: each step one slot's tile before and after
-    and whether it drew from the sheet (a smooth slot painted is pixels
-    after, smooth before). History's face (`can_undo`, `undo`, ...) so the
-    bar's pair walks it as it walks a cart tab's."""
+class _SlotOps(OpCodec):
+    """The Sprites tab's undo codec: an op is one slot's tile before and
+    after and whether it drew from the sheet (a smooth slot painted is
+    pixels after, smooth before)."""
 
-    DEPTH = 32
+    def apply(self, doc, op):
+        doc._put(op[0], op[2], op[4])
 
-    def __init__(self, doc):
-        self.doc = doc
-        self._undo = []
-        self._redo = []
+    def invert(self, doc, op):
+        doc._put(op[0], op[1], op[3])
 
-    def record(self, op):
-        self._undo.append(op)
-        if len(self._undo) > self.DEPTH:
-            self._undo.pop(0)
-        self._redo = []
 
-    def can_undo(self):
-        return bool(self._undo)
-
-    def can_redo(self):
-        return bool(self._redo)
-
-    def undo(self):
-        if not self._undo:
-            return None
-        op = self._undo.pop()
-        self._redo.append(op)
-        self.doc._put(op[0], op[1], op[3])
-        return op
-
-    def redo(self):
-        if not self._redo:
-            return None
-        op = self._redo.pop()
-        self._undo.append(op)
-        self.doc._put(op[0], op[2], op[4])
-        return op
-
-    def brings_back(self, slot):
-        """Whether undo brings slot `slot`'s smooth icon back: a step on
-        the stack turned it to pixels."""
-        for op in self._undo:
-            if op[0] == slot and not op[3] and op[4]:
-                return True
-        return False
+def _brings_back(hist, slot):
+    """Whether undo brings slot `slot`'s smooth icon back: a step on the
+    stack turned it to pixels."""
+    for op in hist._undo:
+        if op[0] == slot and not op[3] and op[4]:
+            return True
+    return False
 
 
 class ThemeDoc:
@@ -184,7 +156,7 @@ class ThemeDoc:
         self.slot = FIRST_SLOT
         self.pe.n = self.slot
         self.cur = [0, 0]
-        self.hist = _SlotOps(self)
+        self.hist = History(self, _SlotOps(), max_undo=32, persisted=False)
         self.sprites_dirty = False
         self._pre = None               # the open edit's (slot, tile, flag)
         self._look_gen = look.look_gen
@@ -293,7 +265,7 @@ class ThemeDoc:
         s = self.slot
         if not self.flags[s]:
             return slot_name(s) + _dot() + "smooth"
-        if self.hist.brings_back(s):
+        if _brings_back(self.hist, s):
             return slot_name(s) + _dot() + "pixels" + _dot() + "Undo brings it back"
         return slot_name(s) + _dot() + "pixels"
 

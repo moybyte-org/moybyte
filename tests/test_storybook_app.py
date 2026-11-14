@@ -282,7 +282,7 @@ def test_a_drag_moves_and_snaps_to_the_slides_middle(tmp_path):
     ed.handle_pointer(to, py, False, True)
     assert o["x"] == 512 and ed.guides and ed.guides[0] == ("v", 512)
     ed.handle_pointer(to, py, False, False)
-    assert ed.guides == () and len(st.undos) == 1
+    assert ed.guides == () and len(st.hist._undo) == 1
     st.undo()
     assert st.slides[1]["objects"][1]["x"] == 608
 

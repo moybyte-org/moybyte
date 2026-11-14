@@ -176,6 +176,19 @@ class TextEditCodec(OpCodec):
         return doc.text()
 
 
+class SwapCodec(OpCodec):
+    """Undo by snapshot: an op is a mutable list whose last item is a copy of
+    the part of the doc an edit changes, taken before the edit. Undo and redo
+    both swap it with what the doc holds there (`doc.swap(op)` puts op[-1]
+    back and answers what it replaced), so the op always holds the other side
+    of the step (a story's slides)."""
+
+    def apply(self, doc, op):
+        op[-1] = doc.swap(op)
+
+    invert = apply
+
+
 class History(object):
     """One per open document. In-RAM undo/redo over the ops a surface records,
     plus the pending batch a persistence adapter drains at commit time.
@@ -185,9 +198,12 @@ class History(object):
     previous keyframe + replay its segment), exactly as the journal already
     documents ("finer, in-session undo stays in the editor's RAM")."""
 
-    def __init__(self, doc, codec, max_ops=MAX_OPS_PER_SEGMENT, max_undo=None):
+    def __init__(self, doc, codec, max_ops=MAX_OPS_PER_SEGMENT, max_undo=None,
+                 persisted=True):
         self.doc = doc
         self.codec = codec
+        # False: no adapter drains flush(), so no op queues for it.
+        self.persisted = persisted
         self.max_ops = int(max_ops) if max_ops else MAX_OPS_PER_SEGMENT
         # An OPTIONAL hard bound on the in-RAM undo stack DEPTH (device RAM is
         # scarce -- the paint/map editors keep a bounded ring, #90/#91): once more
@@ -225,8 +241,9 @@ class History(object):
         self._cap_undo()
         if self._redo:
             self._redo = []
-        self._pending.append(op)
-        self._since_keyframe += 1
+        if self.persisted:
+            self._pending.append(op)
+            self._since_keyframe += 1
         return op
 
     def _cap_undo(self):
@@ -281,8 +298,9 @@ class History(object):
         self.codec.apply(self.doc, op)
         self._undo.append(op)
         self._cap_undo()
-        self._pending.append(op)
-        self._since_keyframe += 1
+        if self.persisted:
+            self._pending.append(op)
+            self._since_keyframe += 1
         return op
 
     # -- persistence seam (drained by the adapter at commit time) --------------

@@ -42,6 +42,8 @@ edit of the list; objects carry no ids, so z is the list's order.
 
 import json
 
+from op_history import History as _History, SwapCodec as _SwapCodec
+
 FORMAT = "moystory-2"
 STORIES = "stories"             # the user files' kind a story is an item of
 DOC_NAME = "story.json"
@@ -312,8 +314,7 @@ class Story:
     def __init__(self, name, doc):
         self.name = name
         self.doc = doc
-        self.undos = []
-        self.redos = []
+        self.hist = _History(self, _SwapCodec(), max_undo=UNDO_MAX, persisted=False)
         self.dirty = False
         self.gen = 0                    # moves with every change (the renderer's caches)
         self._open = None               # the undo entry a drag holds open
@@ -324,27 +325,24 @@ class Story:
 
     # -- undo -----------------------------------------------------------------
 
-    def _snap(self, i):
-        if i is None:
-            return ("deck", copy(self.slides))
-        return ("slide", i, copy(self.slides[i]))
-
-    def _restore(self, e):
-        if e[0] == "deck":
-            was = ("deck", copy(self.slides))
-            self.doc["slides"] = self.slides = e[1]
+    def swap(self, op):
+        """`_SwapCodec`'s step: op's copy goes back into the story, and what
+        it replaced comes out."""
+        if op[0] == "deck":
+            was = copy(self.slides)
+            self.doc["slides"] = self.slides = op[1]
             return was
-        was = ("slide", e[1], copy(self.slides[e[1]]))
-        self.slides[e[1]] = e[2]
+        was = copy(self.slides[op[1]])
+        self.slides[op[1]] = op[2]
         return was
 
     def record(self, i=None):
         """Keep what an edit of slide `i` (None: the list of slides) is about
         to change."""
-        self.undos.append(self._snap(i))
-        if len(self.undos) > UNDO_MAX:
-            self.undos.pop(0)
-        self.redos = []
+        if i is None:
+            self.hist.record(["deck", copy(self.slides)])
+        else:
+            self.hist.record(["slide", i, copy(self.slides[i])])
 
     def begin(self, i):
         """Hold one undo entry open across a drag of slide `i`'s objects."""
@@ -360,29 +358,25 @@ class Story:
         self.gen += 1
 
     def can_undo(self):
-        return bool(self.undos)
+        return self.hist.can_undo()
 
     def can_redo(self):
-        return bool(self.redos)
+        return self.hist.can_redo()
+
+    def _step(self, op):
+        if op is None:
+            return False
+        self._changed()
+        return op[1] if op[0] == "slide" else None
 
     def undo(self):
         """Undo the last edit: the slide it touched (None: the list), or False."""
         self._open = None
-        if not self.undos:
-            return False
-        e = self.undos.pop()
-        self.redos.append(self._restore(e))
-        self._changed()
-        return e[1] if e[0] == "slide" else None
+        return self._step(self.hist.undo())
 
     def redo(self):
         self._open = None
-        if not self.redos:
-            return False
-        e = self.redos.pop()
-        self.undos.append(self._restore(e))
-        self._changed()
-        return e[1] if e[0] == "slide" else None
+        return self._step(self.hist.redo())
 
     # -- the story ------------------------------------------------------------
 
