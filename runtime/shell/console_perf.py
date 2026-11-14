@@ -123,16 +123,6 @@ class PerfMeters:
         # (arming the entry after the flush), then runs it at the next frame's
         # top -- so the pressed state is ON GLASS during the load stall.
         self._deferred = []
-        # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
-        # EMAs above hide which phase a single 150ms hitch frame spent its time
-        # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
-        # The hitch logger prints these instead.
-        self._raw_upd = 0.0
-        self._raw_cart = 0.0
-        self._raw_audio = 0.0
-        self._raw_chrome = 0.0
-        self._raw_flush = 0.0
-        self._raw_draw = 0.0
         self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
 
@@ -199,17 +189,10 @@ class PerfMeters:
         _chrome = _draw - _upd - _cart - _audio
         if _chrome < 0:
             _chrome = 0
-        # raw per-frame copies for the hitch logger (#66 HITCH v3), in ms
-        self._raw_upd = _upd / 1000.0
-        self._raw_cart = _cart / 1000.0
-        self._raw_audio = _audio / 1000.0
-        self._raw_chrome = _chrome / 1000.0
-        self._raw_flush = _flush / 1000.0
-        self._raw_draw = _draw / 1000.0
-        self._upd_ms = _ema(self._upd_ms, self._raw_upd)
-        self._cart_ms = _ema(self._cart_ms, self._raw_cart)
-        self._audio_ms = _ema(self._audio_ms, self._raw_audio)
-        self._chrome_ms = _ema(self._chrome_ms, self._raw_chrome)
+        self._upd_ms = _ema(self._upd_ms, _upd / 1000.0)
+        self._cart_ms = _ema(self._cart_ms, _cart / 1000.0)
+        self._audio_ms = _ema(self._audio_ms, _audio / 1000.0)
+        self._chrome_ms = _ema(self._chrome_ms, _chrome / 1000.0)
         # #172: the declared-backdrop restore. NOT a fourth peer of the split --
         # it is already inside _cart_ms (Player.tick charges it to render, where
         # the cart's own cls would have landed). Tracked separately only so
@@ -325,14 +308,6 @@ class PerfMeters:
         logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
         perf_capture/perf_hud on."""
         return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
-
-    def perf_breakdown_raw(self):
-        """(upd, cart, audio, chrome, flush, draw) of the LAST drawn frame,
-        un-smoothed (#66 HITCH v3). The EMA split (perf_breakdown) hides which
-        phase a single hitch frame spent its time in; the hitch logger prints
-        this instead. Only meaningful with perf_capture/perf_hud on."""
-        return (self._raw_upd, self._raw_cart, self._raw_audio,
-                self._raw_chrome, self._raw_flush, self._raw_draw)
 
     def perf_backdrop(self):
         """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s

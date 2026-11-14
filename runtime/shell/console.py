@@ -3707,14 +3707,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # ui.game_btn; this stays the tested ws entry point.
         _ui_draw.game_btn(cv if cv is not None else self.run.canvas, rect, label, fill)
 
-    def _icon_btn(self, kind, label, rect, fill, cv=None):
-        """A button that leads with an icon glyph (pre-literate) and keeps the
-        word as a small secondary cue beside it -- so a reader still gets the
-        label and a kid who can't read still gets the picture. Implementation:
-        ui.game_icon_btn."""
-        _ui_draw.game_icon_btn(cv if cv is not None else self.run.canvas, rect,
-                             kind, label, fill, _ui_draw.glyph_draw)
-
     def _draw_cursor(self):
         # The pointer lives in SYSTEM-canvas space (it ranges over the panel size),
         # so the cursor draws on the system canvas, on TOP of the composited viewport

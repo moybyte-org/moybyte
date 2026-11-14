@@ -458,15 +458,6 @@ class Layout(LayoutBase):
             return None
         return (x, gy + row * (ch + gap), cw, hh)
 
-    def grid_content_w(self, n, featured=True):
-        """Total scrollable content width for n grid items (at least the tall
-        slot 0's own column)."""
-        if n <= 0:
-            return 0
-        cw, gap = self.lib_card_w, self.lib_gap
-        _row, last_col = self.tile_cell(n - 1, featured)
-        return last_col * (cw + gap) + cw
-
     def _cell(self, name):
         got = _shell_layout.cell_of(self.bars, name)
         return got[1] if got is not None else None

@@ -29,10 +29,8 @@ import moybyte as _moybyte
 
 EPERM, EBADF, ENODEV, EBUSY, EINVAL = 1, 9, 19, 16, 22
 SHELL = 1
+# The device APIs; each face checks the permission of its own name.
 NAMES = ("http", "mic", "lora", "ble", "usb", "midi", "camera", "media")
-# The permission each face checks.
-PERM = {"http": "http", "mic": "mic", "lora": "lora", "ble": "ble", "usb": "usb",
-        "midi": "midi", "camera": "camera", "media": "media"}
 
 # fn(pid) -> the granted permissions, None for an ungated process: the
 # console's Procs.granted. None: nothing is gated (a bare host).
@@ -70,9 +68,8 @@ def need(name):
     """The calling process's pid, or OSError(EPERM) without `name`'s
     permission."""
     p = pid()
-    perm = PERM[name]
-    if not may(p, perm):
-        raise OSError(EPERM, 'needs "%s"' % perm)
+    if not may(p, name):
+        raise OSError(EPERM, 'needs "%s"' % name)
     return p
 
 
@@ -86,10 +83,8 @@ def _face(name):
         except ImportError:  # an image without the face
             return None
         _FACES[name] = f
-        if getattr(f, "SWEEP_FIRST", False):
-            _moybyte.ENDS.insert(0, f.sweep)     # ahead of the leases it ends with
-        else:
-            _moybyte.ENDS.append(f.sweep)
+        _moybyte.on_end("devices_first" if getattr(f, "SWEEP_FIRST", False)
+                        else "devices", f.sweep)
     return f
 
 

@@ -362,4 +362,4 @@ def sweep(pid):
     return len(held or ())
 
 
-_moybyte.ENDS.insert(0, sweep)
+_moybyte.on_end("handles", sweep)

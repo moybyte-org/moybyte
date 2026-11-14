@@ -463,8 +463,7 @@ def install(sched):
         lp.patch()
         lp.patched = True
     sched.wakes.holds = count
-    if _end not in _moybyte.ENDS:
-        _moybyte.ENDS.append(_end)
+    _moybyte.on_end("tasks", _end)
     if TASKS or lp.pending():
         lp.nudge()
     return True

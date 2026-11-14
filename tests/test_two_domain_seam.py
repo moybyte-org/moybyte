@@ -102,7 +102,6 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     # RESOLUTION-driven (cards target ~w/5, the mockup's proportions) -- a
     # bigger canvas buys bigger cards and crisper 1x text, not magnification.
     assert ws.layout.cols >= 4 and ws.layout.rows >= 2
-    assert ws.layout.grid_content_w(len(ws.launcher.items)) > 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     buf = drv.rgb888()
