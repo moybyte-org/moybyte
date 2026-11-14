@@ -696,10 +696,13 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
             gesture(rig, col, what)
             after = rig.shot()
             assert ref[2], "the Python app's own cell fails: so does this layer's"
-            assert ref[1] != ref[0] and after == ref[1], (
-                "%s: the %s's %s by %s does not draw what the Python app's does"
-                % (layer, row, what, col))
-            assert before == ref[0], "the page at rest differs from the Python app's"
+            # Booleans, not the shots: a failed == over two frames' bytes
+            # makes pytest diff them, which runs for hours.
+            drew = ref[1] != ref[0] and after == ref[1]
+            assert drew, ("%s: the %s's %s by %s does not draw what the Python app's does"
+                          % (layer, row, what, col))
+            rests = before == ref[0]
+            assert rests, "the page at rest differs from the Python app's"
             return
         before = rig.state()
         gesture(rig, col, what)
