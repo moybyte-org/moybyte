@@ -932,7 +932,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return
         self._install(win.ctx, win)
         try:
-            content.draw(0)
+            self.ws.bar_layer.draw_surface(content, 0)
             self._row_over(win, win.buf)
             win._buf_stale = False
             win._look_gen = self.ws.look.look_gen

@@ -258,8 +258,9 @@ class _RepeatLayer(Layer):
         # A lead copy (a quiet frame paying a buffer's debt, the quiet
         # stack's layers after it): refused, the layers after it stand down.
         wm._lead_refused = self.lead
+        bar = wm.ws.bar_layer
         for layer in wm._cache_draw:
-            layer.draw(dt)
+            bar.draw_surface(layer, dt)
 
 
 class _PlayerWindowLayer(Layer):

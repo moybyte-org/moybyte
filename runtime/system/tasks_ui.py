@@ -225,8 +225,6 @@ class TasksLayer(Layer):
         if x + w < cv.w:
             cv.rect(x + w, y, cv.w - x - w, h, g)
         self._page()
-        if not ws.windowed_chrome:
-            ws.bar_layer._draw_status_strip("tasks")
 
     def _page(self):
         ws = self.ws

@@ -1833,8 +1833,8 @@ class SettingsLayer(Layer):
         return True
 
     def draw(self, dt):
-        """The Settings app: its page, the ground around it (the bar's band,
-        wherever the bar sits), then the bar."""
+        """The Settings app: its page and the ground around it (the bar's
+        band, wherever the bar sits); the frame draws the bar over them."""
         ws = self.ws
         cv = ws.sys_canvas
         g = ws.theme_colors["panel"]
@@ -1848,7 +1848,6 @@ class SettingsLayer(Layer):
         if x + w < cv.w:
             cv.rect(x + w, y, cv.w - x - w, h, g)
         self._draw_page()
-        ws.bar_layer._draw_status_strip("settings")
 
     def _content(self):
         """The rect the page fills: the layout's content rect."""

@@ -901,7 +901,7 @@ class WindowPaint:
         try:
             if held:
                 content.retained(known, u[0], u[1], u[2], u[3])
-            content.draw(dt)
+            ws.bar_layer.draw_surface(content, dt)
         finally:
             self._direct_root = False
             if self._scale_owed:
@@ -1422,7 +1422,7 @@ class WindowPaint:
                             content.retained(1, 0, 0, 0, 0)
                         else:
                             content.retained(lag[4], lag[0], lag[1], lag[2], lag[3])
-                    content.draw(dt)
+                    self.ws.bar_layer.draw_surface(content, dt)
                 finally:
                     _ui_draw.window_frame(0)
                     self._install(self._root_ctx)

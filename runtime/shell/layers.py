@@ -287,7 +287,6 @@ class _WebConsoleLayer(Layer):
         ws = self.ws
         lay = ws.layout
         ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch))
-        ws.bar_layer._draw_status_strip("webconsole")
 
     def handle_input(self, i):
         return self.ws.web.ui.handle_input(i)
@@ -301,10 +300,10 @@ class _MapLayer(Layer):
     handheld's Map page, or a desk pane's view (`map_editor_ui.py`). Tap = paint
     one cell, drag = pan (#37); the d-pad pans the window.
 
-    Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu")
-    LAST (chrome over content) so the Editor's lent top-bar zone (the tab ladder +
-    PLAY) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map click/pan."""
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY); handle_pointer routes a
+    tap through ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map
+    click/pan."""
 
     id = "map"
     domain = "system"
@@ -316,7 +315,6 @@ class _MapLayer(Layer):
         ws = self.ws
         ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
-        ws.bar_layer._draw_status_strip("menu")
 
     def at_top(self):
         """Up goes on to the bar from the map's top row (Workstation._bar_keys)."""
@@ -350,9 +348,8 @@ class _SceneLayer(Layer):
     (scene_editor_ui.SceneEditorUI). Tap = place/select, drag = move an actor or
     pan the world (the map editor's gesture grammar).
 
-    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer.
-    _draw_status_strip("menu") LAST (chrome over content) so the Editor's lent
-    top-bar zone (the tab ladder + PLAY, no SAVE -- #111) shows on this tab;
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY, no SAVE -- #111);
     handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
     FIRST, before the placement click/pan -- the exact _MapLayer shape."""
 
@@ -379,7 +376,6 @@ class _SceneLayer(Layer):
         ws = self.ws
         ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.scene_ui._draw_scene()
-        ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         self.ws.scene_ui._scene_input()
@@ -408,10 +404,10 @@ class _MusicLayer(Layer):
     handheld's Music page (`editor_music.py`). The live mixer is ticked so a
     preview keeps sounding, then the preview flag auto-clears when it ends.
 
-    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
-    ("menu") LAST (chrome over the page) so the Editor's lent top-bar zone (the tab
-    ladder + PLAY + X, no SAVE -- #111) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the page's verbs."""
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY + X, no SAVE -- #111);
+    handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
+    FIRST, before the page's verbs."""
 
     id = "music"
     domain = "system"
@@ -425,7 +421,6 @@ class _MusicLayer(Layer):
         if mu.music_preview is not None and not mu._music_preview_active():
             mu.music_preview = None
         mu._draw_music()
-        ws.bar_layer._draw_status_strip("menu")
 
     def at_top(self):
         """Up goes on to the bar from the first step (Workstation._bar_keys)."""

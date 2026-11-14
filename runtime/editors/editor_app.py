@@ -609,11 +609,10 @@ class EditorApp:
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
     #
-    # The Editor's tab ladder + UNDO/REDO + PLAY, shown on EVERY tab now (Stage-4
-    # rollout): cards_layer.py, paint_layer.py, layers.py's _MapLayer/_MusicLayer,
-    # code_layer.py and block_editor_ui.py each call ws.bar_layer._draw_status_strip
-    # ("menu") from their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from
-    # handle_pointer), so the bar is identical across all six Editor tabs and each
+    # The Editor's tab ladder + UNDO/REDO + PLAY, shown on EVERY tab: the "menu"
+    # strip over each tab's page (the frame's `bar_layer.STRIP_OF`, or the tab's
+    # own call where `STRIP_SELF` names it), + ws.bar_layer.handle_bar_tap("menu",
+    # ...) from handle_pointer, so the bar is identical across the Editor tabs and each
     # tab's own RUN/SAVE/CLOSE chrome was dissolved into it -- SAVE itself is GONE
     # now (#111): every hard exit calls save_current() automatically and a tab
     # switch owes its commit to the next frame (see set_tab/leave above), so

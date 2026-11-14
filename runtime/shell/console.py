@@ -3539,17 +3539,17 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # only then. One compare per post-composite layer; None everywhere the
         # comp has no fold (host/P4/web).
         _fold_live = False
-        # THE APP BAR CONTRACT, draw half (docs/app_api_v1.md): a REGISTERED
-        # system app gets the minimal exitable "app" strip drawn over its
-        # content by the router -- the app draws no bar of its own. Resolved
-        # ONCE per frame (the walk cannot change either term): `_apps_by_id`
-        # while the fullscreen chrome rules apply, None in the windowed desk
-        # world, where the WM's title strip carries the close instead. See
-        # `_app_bar_route` for the input half and the scope note there. An
-        # app whose `glass` is true holds the whole glass for now (Storybook
-        # presenting): no strip, and the band's taps are the app's; its back
-        # is Esc and B, and the console's key opens the system menu as ever.
-        _appbar = self._apps_by_id if not self.wm.desk_open() else None
+        # The strip over the content (`BarLayer.draw_surface`): its
+        # surface's, and THE APP BAR CONTRACT's draw half (docs/app_api_v1.md):
+        # a REGISTERED system app gets the minimal exitable "app" strip drawn
+        # over its content by the router -- the app draws no bar of its own --
+        # while the fullscreen chrome rules apply; in the windowed desk world
+        # the WM's title strip carries the close instead. See `_app_bar_route`
+        # for the input half and the scope note there. An app whose `glass` is
+        # true holds the whole glass for now (Storybook presenting): no strip,
+        # and the band's taps are the app's; its back is Esc and B, and the
+        # console's key opens the system menu as ever.
+        _bar = self.bar_layer
         # One focus mark a screen: while the pause menu or the system menu
         # holds the keys, what draws under it shows its current, not its
         # focus (ui.marks); the menu's own layer and those above it mark.
@@ -3602,10 +3602,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             if _lb is not None and layer.domain == "game" and not _lb_done:
                 _lb()
                 _lb_done = True
-            layer.draw(dt)
-            if _appbar is not None and layer.id in _appbar \
-                    and not getattr(_appbar[layer.id], "glass", False):
-                self.bar_layer._draw_status_strip("app")    # host guarantee
+            _bar.draw_surface(layer, dt, True)
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer
             _view()

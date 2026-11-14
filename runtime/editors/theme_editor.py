@@ -980,7 +980,6 @@ class SpritesLayer(Layer):
             self._side(cv, th, lay, doc)
             self._palette(cv, th, lay, doc)
             self._foot(cv, th, lay, doc)
-        ws.bar_layer._draw_status_strip("menu")
 
     def _greys(self):
         return self.ws.look.live.fixed[:2]

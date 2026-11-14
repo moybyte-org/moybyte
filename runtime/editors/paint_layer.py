@@ -26,8 +26,7 @@ console.py imports them back so tests + tools resolve console._PG_X0 / _PG_SPAN 
 `NAMES` (palette) is injected (the circular-import dodge); the rect hit-test is
 `ui.rect_in`, imported directly.
 
-Stage 4 (#46 zoned bar): PaintLayer.draw() calls ws.bar_layer._draw_status_strip("menu")
-LAST (chrome over content).
+The frame draws the "menu" strip over PaintLayer's page (`bar_layer.STRIP_OF`).
 
 Responsive (#39 step 3): the paint editor is SYSTEM-domain now -- it draws on the
 reflowed system canvas at the panel's native size via `PaintLayout`, whose
@@ -397,9 +396,6 @@ class PaintLayer(Layer):
         self.ws._reset_canvas_state()
         self._dt = dt
         self._draw_paint()
-        # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
-        # PLAY.
-        self.ws.bar_layer._draw_status_strip("menu")
 
     def ball_steps(self):
         """The trackball steps an open popover's rows (the more menu, a
