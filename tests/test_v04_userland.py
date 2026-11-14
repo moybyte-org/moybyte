@@ -519,7 +519,7 @@ def test_console_runs_wallpaper_and_config_drives_content(tmp_path):
     assert ws.screen == "desktop" and ws.ns is not None
     for _ in range(10):
         ws.frame(1 / 30)
-    assert len(ws.ns["stars"]) == ws.config.get("star_count", 80)  # config drove it
+    assert len(ws.ns["stars"]) == ws.run.project.config.get("star_count", 80)  # config drove it
     assert probe.drew_something(ws.run.canvas)                         # drew something
 
 
@@ -528,7 +528,7 @@ def test_console_runs_game_cart_and_scores(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Star Catcher")
     assert ws.cart["type"] == "game"
-    ws.config["autoplay"] = 1               # opt into attract mode, then re-run
+    ws.run.project.config["autoplay"] = 1               # opt into attract mode, then re-run
     ws.apply()
     for _ in range(240):                    # attract-mode auto-play
         ws.frame(1 / 30)
@@ -560,13 +560,13 @@ def test_enter_in_config_plays_the_cart(tmp_path):
 
     # Tweak a Config card, then press RUN (== the host's Enter): the cart PLAYS and the
     # tuned value is committed (leave()'s cards branch = GO's old job), NOT the code editor.
-    before = dict(ws.config)
+    before = dict(ws.run.project.config)
     step_card(ws, 1)
-    assert dict(ws.config) != before                 # a card value changed
+    assert dict(ws.run.project.config) != before                 # a card value changed
     drv.press("run"); drv.frame(1 / 30); drv.frame(1 / 30)
     assert ws.screen == "desktop"                    # PLAYED the cart...
     assert ws.menu_view != "code"                    # ...did NOT open the code editor
-    assert ws.cart["cfg"] == ws.config               # ...and the tuned config was saved
+    assert ws.cart["cfg"] == ws.run.project.config               # ...and the tuned config was saved
 
     # The device delivers Enter as the "a" button (0x0D -> "a"): it must ALSO play, which
     # is the exact bug the owner hit (Enter -> "a" -> code editor).
@@ -616,10 +616,10 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Hop Quest")
     assert ws.cart["type"] == "game"
-    assert ws.cart.get("map") and not ws.tilemap.is_blank()    # the level is a tilemap
+    assert ws.cart.get("map") and not ws.run.project.tilemap.is_blank()    # the level is a tilemap
     ground_row = ws.ns["MH"] - 1                               # ground is the bottom row
     assert ws.ns["_solid"](0, ground_row) and not ws.ns["_solid"](0, 0)  # mget collision works
-    ws.config["autoplay"] = 1
+    ws.run.project.config["autoplay"] = 1
     ws.apply()
     coins = len(ws.ns["coins"])
     most, won = 0, False
@@ -643,15 +643,15 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
     _open_cart(ws, "Brick Siege")
     assert ws.cart["type"] == "game"
     assert ws.cart_error is None
-    assert ws.cart.get("map") and not ws.tilemap.is_blank()     # the field is a tilemap
+    assert ws.cart.get("map") and not ws.run.project.tilemap.is_blank()     # the field is a tilemap
     # brick + steel are both present in the field (the two wall kinds)
-    field = [ws.tilemap.mget(x, y) for y in range(ws.tilemap.h) for x in range(ws.tilemap.w)]
+    field = [ws.run.project.tilemap.mget(x, y) for y in range(ws.run.project.tilemap.h) for x in range(ws.run.project.tilemap.w)]
     assert 8 in field and 9 in field                            # brick (8) + steel (9)
     import random
     random.seed(1234)                       # deterministic attract run (spawns + auto-pilot use rnd())
-    ws.config["autoplay"] = 1
+    ws.run.project.config["autoplay"] = 1
     ws.apply()
-    assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.config["enemies"]
+    assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.run.project.config["enemies"]
     best_score, states = 0, set()
     for _ in range(2400):                   # attract-mode auto-play hunts enemies (headroom to end a round)
         ws.frame(1 / 30)
@@ -705,9 +705,9 @@ def test_console_cards_make_it_mine_edit_and_run(tmp_path):
     _open_cart(ws, "Space Desktop")
     ws._open_menu()                         # Space has an edit schema -> cards
     assert ws.menu_view == "cards"
-    before = ws.config.get("star_count", 80)
+    before = ws.run.project.config.get("star_count", 80)
     step_card(ws, 1)                        # +step on the first field (star_count, +10)
-    assert ws.config["star_count"] == before + 10
+    assert ws.run.project.config["star_count"] == before + 10
     ws.apply()                              # re-run with the new config
     assert ws.screen == "desktop"
     assert len(ws.ns["stars"]) == before + 10
@@ -978,10 +978,10 @@ def test_pmem_persists_through_workstation_open(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     _open_cart(ws, "Counter")
     assert ws.screen == "desktop" and ws.cart_error is None
-    assert ws.pmem.cell(0) == 1                  # _init bumped it once
+    assert ws.run.project.pmem.cell(0) == 1                  # _init bumped it once
     # It persisted to pmem.json: reopening loads the saved value and bumps again.
     ws.open()                                    # re-open the same selected cart
-    assert ws.pmem.cell(0) == 2
+    assert ws.run.project.pmem.cell(0) == 2
 
 
 def test_key_keyp_plumbed_through_console_driver(tmp_path):
@@ -1361,15 +1361,15 @@ def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     cx, cy = me.cam_x, me.cam_y
     drv.click(mx + 2, my + 2)                # tap the top-left visible cell
     drv.frame(1 / 30)
-    assert ws.tilemap.mget(cx, cy) == 5 and ws.tilemap.mget(cx + 1, cy) == 6
-    assert ws.tilemap.mget(cx, cy + 1) == 5 + cols
-    assert ws.tilemap.mget(cx + 1, cy + 1) == 6 + cols
+    assert ws.run.project.tilemap.mget(cx, cy) == 5 and ws.run.project.tilemap.mget(cx + 1, cy) == 6
+    assert ws.run.project.tilemap.mget(cx, cy + 1) == 5 + cols
+    assert ws.run.project.tilemap.mget(cx + 1, cy + 1) == 6 + cols
     _map_tap(ws, drv, "Tool Erase")
     drv.click(mx + 2, my + 2)                # the eraser clears the whole block
     drv.frame(1 / 30)
     for dy in range(2):
         for dx in range(2):
-            assert ws.tilemap.mget(cx + dx, cy + dy) == TileMap.EMPTY
+            assert ws.run.project.tilemap.mget(cx + dx, cy + dy) == TileMap.EMPTY
 
 
 def test_host_console_map_open_place_and_render(tmp_path):
@@ -1397,7 +1397,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     drv.frame(1 / 30)
     cx = ws.map_ui.mapedit.cam_x
     cy = ws.map_ui.mapedit.cam_y
-    assert ws.tilemap.mget(cx, cy) == ws.map_ui.mapedit.n
+    assert ws.run.project.tilemap.mget(cx, cy) == ws.map_ui.mapedit.n
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                    # the map view rendered
 
 
@@ -1412,16 +1412,16 @@ def test_host_console_map_erase_and_pan(tmp_path):
     ws.map_ui.mapedit.n = 3
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 3 at (0,0)
-    assert ws.tilemap.mget(0, 0) == 3
+    assert ws.run.project.tilemap.mget(0, 0) == 3
     _map_tap(ws, drv, "Tool Erase")                            # ERASE on
     assert ws.map_ui.map_erase
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # now a tap erases
-    assert ws.tilemap.mget(0, 0) == TileMap.EMPTY
+    assert ws.run.project.tilemap.mget(0, 0) == TileMap.EMPTY
     # Zoom IN so the map is bigger than the view, then pan right (the fit-both default
     # shows the whole map -> the camera is pinned at 0 with nothing to scroll).
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1
     x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
-    assert ws.tilemap.w > cols                                 # room to pan at this zoom
+    assert ws.run.project.tilemap.w > cols                                 # room to pan at this zoom
     drv.press("right"); drv.frame(1 / 30)                      # the d-pad pans right
     assert ws.map_ui.mapedit.cam_x == 1
 
@@ -1457,13 +1457,13 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     before = tm.gen
     ws._open_map()                                       # the Editor's MAP, over the run
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
-    assert tm is ws.tilemap                               # same object the cart's api holds
+    assert tm is ws.run.project.tilemap                               # same object the cart's api holds
 
 
 # -- map editor zoom levels (#37 follow-up) --------------------------------
@@ -1506,7 +1506,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     fitted = 0
     for name in ("brick_siege", "bench", "letter_blitz", "hop_quest", "sky_run"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
-        w, h = ws.tilemap.w, ws.tilemap.h
+        w, h = ws.run.project.tilemap.w, ws.run.project.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default
         assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)   # cam pinned to origin
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
@@ -1568,13 +1568,13 @@ def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
     px = x0 + 2 * cell + cell // 2
     py = y0 + 1 * cell + cell // 2
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
-    assert ws.tilemap.mget(2, 1) == 5
+    assert ws.run.project.tilemap.mget(2, 1) == 5
     # The eraser, then a tap on the same cell -> it clears to EMPTY (the right cell,
     # at zoom).
     _map_tap(ws, drv, "Tool Erase")
     assert ws.map_ui.map_erase
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
-    assert ws.tilemap.mget(2, 1) == ws.tilemap.EMPTY
+    assert ws.run.project.tilemap.mget(2, 1) == ws.run.project.tilemap.EMPTY
 
 
 def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
@@ -1584,7 +1584,7 @@ def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
     _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1                   # most zoomed-in
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-    assert ws.tilemap.w > cols and ws.tilemap.h > rows   # room to pan
+    assert ws.run.project.tilemap.w > cols and ws.run.project.tilemap.h > rows   # room to pan
     drv.press("right"); drv.frame(1 / 30)
     assert ws.map_ui.mapedit.cam_x == 1
     drv.press("down"); drv.frame(1 / 30)
@@ -1592,8 +1592,8 @@ def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
     # Pan hard right past the edge: clamps so the last column stays visible.
     for _ in range(40):
         drv.press("right"); drv.frame(1 / 30); drv.frame(1 / 30)
-    assert ws.map_ui.mapedit.cam_x == ws.tilemap.w - cols       # clamped to the right edge
-    assert ws.map_ui.mapedit.cam_x + cols == ws.tilemap.w
+    assert ws.map_ui.mapedit.cam_x == ws.run.project.tilemap.w - cols       # clamped to the right edge
+    assert ws.map_ui.mapedit.cam_x + cols == ws.run.project.tilemap.w
 
 
 # -- TIC-80 draw verbs cluster 2 (#11): clip / camera / spr-flip / pal / palt -

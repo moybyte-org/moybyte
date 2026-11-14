@@ -264,7 +264,7 @@ def test_running_cart_reads_scene_into_init(tmp_path):
     assert ns["named2"] == 1                             # scene('level2') peeked
     assert ns["switched"] == 1                           # load_scene switched + returned
     assert ws.run.project.play_scenes.active == "level2"     # the switch stuck for this run
-    assert ws.scenes.active == "main"                    # the Editor's are not the run's
+    assert ws.run.project.scenes.active == "main"                    # the Editor's are not the run's
 
 
 # A cart that does NOT switch -- it just records how many actors the ACTIVE scene has.

@@ -696,14 +696,14 @@ def test_backspace_reaches_the_cart_as_a_plain_key_and_never_exits(tmp_path):
     assert ws.screen == "desktop"
     calls = [0]
     keys = []
-    orig_upd = ws._update
+    orig_upd = ws.run.player._update
 
     def counting(dt):
         calls[0] += 1
         keys.append(ws.input.last_key)
         if orig_upd:
             orig_upd(dt)
-    ws._update = counting
+    ws.run.player._update = counting
 
     drv.frame(1 / 30)
     assert calls[0] == 1               # playing: the cart ticks
@@ -749,13 +749,13 @@ def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     ws.open()
     assert ws.screen == "desktop"
     calls = [0]
-    orig_upd = ws._update
+    orig_upd = ws.run.player._update
 
     def counting(dt):
         calls[0] += 1
         if orig_upd:
             orig_upd(dt)
-    ws._update = counting
+    ws.run.player._update = counting
     for _ in range(3):                 # three quick BACKSPACE taps in a row...
         drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
     assert ws.screen == "desktop"      # ...does NOT exit (triple-tap gesture is gone)

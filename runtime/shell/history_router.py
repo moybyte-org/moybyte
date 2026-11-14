@@ -491,14 +491,14 @@ class HistoryRouter:
         if not fresh:
             return
         ws.cart = fresh
-        ws.config = dict(fresh.get("cfg", {}))
+        ws.run.project.config = dict(fresh.get("cfg", {}))
         ws.run.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
         ws.sheet = ws._build_sheet()
-        ws.tilemap = ws._build_tilemap()
-        ws.images = fresh.get("images") or {}
-        ws.scenes = ws._build_scenes()   # a scene undo must reach the live rows (#85)
+        ws.run.project.tilemap = ws._build_tilemap()
+        ws.run.project.images = fresh.get("images") or {}
+        ws.run.project.scenes = ws._build_scenes()   # a scene undo must reach the live rows (#85)
         ws.cart_error = None
-        ws.crash_line = None
+        ws.run.player.crash_line = None
         ws.crash_popup = None        # the popup is transient -- any walk ends it
         # Keep the kid's place in the code: the rebuild below resets the fresh
         # CodeEditor's caret to the top, which read as "undo threw me to the

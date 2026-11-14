@@ -602,7 +602,7 @@ def _map_rect(desk, r, u):
 def _map_view_at(desk, cols, rows):
     """The picked cell, and the view's corner kept round it."""
     ws = desk.ws
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     st = desk.part_state
     if "ref cell" not in st:
         st["ref cell"] = _first_cell(tm)
@@ -632,7 +632,7 @@ def map_view(desk, cv, th, r, u):
     """The Reference's Map: the cart's map at 1x from the view's corner, the
     picked cell under the cursor."""
     ws = desk.ws
-    tm, sh = ws.tilemap, ws.sheet
+    tm, sh = ws.run.project.tilemap, ws.sheet
     if tm is None or sh is None:
         return
     (mx, my, mw, mh), cols, rows, tw = _map_rect(desk, r, u)
@@ -652,7 +652,7 @@ def map_view(desk, cv, th, r, u):
 
 def map_foot(desk, r, u):
     ws = desk.ws
-    if ws.tilemap is None:
+    if ws.run.project.tilemap is None:
         ui.at(*r)
         ui.empty("map", "No map", ("This cart has no map yet",))
         return
@@ -665,7 +665,7 @@ def log_rows(desk):
     line, the code's own error."""
     ws = desk.ws
     out = []
-    err, line = ws.cart_error, ws.crash_line
+    err, line = ws.cart_error, ws.run.player.crash_line
     if err:
         f = ws.run.player.crash_file or ws.code_file_name()
         if line:
@@ -712,7 +712,7 @@ def goto(desk, name, row):
 def pointer(desk, c, r, u, px, py, click, down):
     """A press a part takes itself: a cell of the Reference's map. True
     where it took it."""
-    if c != "maps" or desk.ws.tilemap is None or not (click or down):
+    if c != "maps" or desk.ws.run.project.tilemap is None or not (click or down):
         return False
     (mx, my, mw, mh), cols, rows, tw = _map_rect(desk, r, u)
     if not (mx <= px < mx + mw and my <= py < my + mh):
@@ -727,7 +727,7 @@ def pointer(desk, c, r, u, px, py, click, down):
 def keys(desk, c, i):
     """The arrows over the Reference's map move its cell. True where they
     acted."""
-    if c != "maps" or desk.ws.tilemap is None:
+    if c != "maps" or desk.ws.run.project.tilemap is None:
         return False
     dx = i.steps("right") - i.steps("left")
     dy = i.steps("down") - i.steps("up")

@@ -506,7 +506,7 @@ def cmd_perf(b, a):
 
 
 PMEM = ("(lambda p: (getattr(getattr(p, '_lua', None), 'flush_pmem', "
-        "lambda: 0)(), list(ws.pmem.cells) if getattr(ws, 'pmem', None) "
+        "lambda: 0)(), list(ws.run.project.pmem.cells) if getattr(ws.run.project, 'pmem', None) "
         "is not None else None)[1])(getattr(ws.run, 'player', None))")
 
 

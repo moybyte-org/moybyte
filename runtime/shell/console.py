@@ -238,8 +238,8 @@ from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
 from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
 # The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
-# STATE stays on Workstation: ws.config / ws.apply; the tab's page mutates
-# ws.config in place.
+# STATE stays on Workstation: ws.run.project.config / ws.apply; the tab's page mutates
+# ws.run.project.config in place.
 from cards_layer import CardsLayer
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
@@ -894,7 +894,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # cart_error/crash_line, _cart_start_ms + the Stage-5 exit-gesture
         # state -- live on it now and the cart-run ones are exposed back as forwarding
         # properties (below), so every surface file + test reading ws.cart_error/
-        # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
+        # ws.run.player._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
         self.run.player = Player(self, NAMES, self.run)
         # The running set beyond the front run: the games stepped beside it
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
@@ -1066,7 +1066,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # context, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         # (cart_error + crash_line live on self.run.player now -- Stage 2; forwarding
-        # properties below, so ws.cart_error / ws.crash_line are unchanged.)
+        # properties below, so ws.cart_error / ws.run.player.crash_line are unchanged.)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
         self.crash_popup = None       # full error text of the popup the code
@@ -2133,13 +2133,10 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     # -- open-cart workspace forwards (Stage 1, project.py) -------------------
     #
-    # The open cart's six live-data fields live on self.run.project now; these forwarding
-    # properties delegate reads AND writes to it, so every surface file + test that
-    # reads/writes ws.cart/ws.config/ws.sheet/ws.tilemap/ws.images/ws.pmem is byte-for-
-    # byte unchanged. A getter that returns the live object covers in-place mutation
-    # (ws.cart["src"] = ...); the setter covers assignment (ws.cart = ..., ws.sheet =
-    # self._build_sheet()). The plan's §1.2 seam: Project keeps a ws back-reference for
-    # the toolkit/deps; only its DATA moves off ws here.
+    # The open cart lives on self.run.project; `cart` and `sheet` are read and
+    # written through these two projections by outside callers and tests (a
+    # getter returning the live object covers in-place mutation, the setter
+    # assignment). Everything else on the Project is reached as `ws.run.project`.
     @property
     def cart(self):
         return self.run.project.cart
@@ -2149,14 +2146,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.run.project.cart = value
 
     @property
-    def config(self):
-        return self.run.project.config
-
-    @config.setter
-    def config(self, value):
-        self.run.project.config = value
-
-    @property
     def sheet(self):
         return self.run.project.sheet
 
@@ -2164,43 +2153,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def sheet(self, value):
         self.run.project.sheet = value
 
-    @property
-    def tilemap(self):
-        return self.run.project.tilemap
-
-    @tilemap.setter
-    def tilemap(self, value):
-        self.run.project.tilemap = value
-
-    @property
-    def images(self):
-        return self.run.project.images
-
-    @images.setter
-    def images(self, value):
-        self.run.project.images = value
-
-    @property
-    def pmem(self):
-        return self.run.project.pmem
-
-    @pmem.setter
-    def pmem(self, value):
-        self.run.project.pmem = value
-
-    @property
-    def scenes(self):                     # #85: the open cart's placed-actor scenes
-        return self.run.project.scenes
-
-    @scenes.setter
-    def scenes(self, value):
-        self.run.project.scenes = value
-
     # -- cart-run forwards (Stage 2, player.py) ------------------------------
     #
     # The Player owns the running cart's live state now; these forwarding properties
     # delegate reads AND writes to it, so every surface file + test that touches
-    # ws.cart_error / ws.crash_line / ws.ns / ws._update / ws._draw
+    # ws.cart_error / ws.run.player.crash_line / ws.ns / ws.run.player._update / ws.run.player._draw
     # is byte-for-byte unchanged (the exact mirror of the Stage-1 project.* forwards
     # above). (_cart_start_ms + the Stage-5 exit-gesture state have no external reader --
     # they stay private on the Player, no forward. cart_paused was retired in Stage 5.)
@@ -2213,36 +2170,12 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.run.player.cart_error = value
 
     @property
-    def crash_line(self):
-        return self.run.player.crash_line
-
-    @crash_line.setter
-    def crash_line(self, value):
-        self.run.player.crash_line = value
-
-    @property
     def ns(self):
         return self.run.player.ns
 
     @ns.setter
     def ns(self, value):
         self.run.player.ns = value
-
-    @property
-    def _update(self):
-        return self.run.player._update
-
-    @_update.setter
-    def _update(self, value):
-        self.run.player._update = value
-
-    @property
-    def _draw(self):
-        return self.run.player._draw
-
-    @_draw.setter
-    def _draw(self, value):
-        self.run.player._draw = value
 
     # -- active-tab forward (Stage 3, editor_app.py) --------------------------
     #
@@ -2354,7 +2287,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # of the doors it funnels).
         if self.web.parked:
             self.cart_error = None
-            self.crash_line = None
+            self.run.player.crash_line = None
             self.go_home()
             return True
         # A compiled cart has no source to open: its trap stays on the stop
@@ -2362,7 +2295,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self.cart.get("runtime") == "wasm":
             return False
         err = self.cart_error or "crashed"
-        line = self.crash_line
+        line = self.run.player.crash_line
         # THE FILE THAT RAISED, not the file the tab was left on (SPEC.md 4,
         # #89). On a ported cart the raise is as likely to be in p8.lua or one
         # of the PICO-8 tabs as in main.lua, and throwing the kid at main.lua's
@@ -2495,11 +2428,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                                            # and this is the heap that had no room
             self.cart_error = ("Couldn't open %.24s. Try again."
                                % ((cart or {}).get("title") or "that cart"))
-            self.crash_line = None
+            self.run.player.crash_line = None
             return False
         self.run.fat_cart = cart
         self.cart = cart
-        self.config = dict(self.cart["cfg"])
+        self.run.project.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # no file list or dialog carried to the new cart
         self.editor = None
         self.code_file = None         # a new cart opens on ITS main file, never on
@@ -2511,14 +2444,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 _ui.reset()
         self.cart_error = None
         self.sheet = self._build_sheet()
-        self.tilemap = self._build_tilemap()
+        self.run.project.tilemap = self._build_tilemap()
         # No ws.flags projection: the legacy property-forward set can only
         # shrink (tests/test_console_facade.py), so the one reader -- the
         # Player, building the cart namespace -- goes through self.run.project.
         self.run.project.flags = self._build_flags()
-        self.images = self.cart.get("images") or {}   # paint-image assets (#63)
-        self.pmem = self._build_pmem()
-        self.scenes = self._build_scenes()             # placed-actor scenes (#85)
+        self.run.project.images = self.cart.get("images") or {}   # paint-image assets (#63)
+        self.run.project.pmem = self._build_pmem()
+        self.run.project.scenes = self._build_scenes()             # placed-actor scenes (#85)
         self.run.textmode = False     # a fresh cart is a game until textmode(True)
         self.input.cart_quit = False  # clear any prior cart's quit() flag so it can't
                                       # immediately pop the freshly opened cart (make_api)
@@ -3086,7 +3019,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Editor's paused Run slot). An app on the verbs, drawn on change,
         # changes its own content alone, as a verbs page does (`pages`).
         player = self.run.player
-        # (The Player's own fields: ws._update/_draw are property forwards to
+        # (The Player's own fields: ws.run.player._update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
         if kind == "desktop" and player.cart_error is None and not self.pause.open \
                 and not player.paused and (

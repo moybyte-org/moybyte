@@ -105,7 +105,7 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert ws.runtimes.get("lua") is not None
     ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
-                     ws.tilemap, ws.pmem, None, {})
+                     ws.run.project.tilemap, ws.run.project.pmem, None, {})
     src = ("local n = 0\n"
            "function _update(dt) n = n + 1 end\n"
            "function _draw() cls(0) rect(0, 0, n * 3, 5, 8) end\n")

@@ -21,7 +21,7 @@ def test_a_declared_view_reaches_the_console(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
-                     ws.tilemap, ws.pmem, None, {})
+                     ws.run.project.tilemap, ws.run.project.pmem, None, {})
     run = ws.runtimes["lua"](ns, "function _init() view(128, 120) end\n"
                              "function _update(dt) end\n"
                              "function _draw() cls(0) end\n")
@@ -46,7 +46,7 @@ def test_a_view_changed_mid_run_follows(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ns = ws.make_api(ws.run.canvas, ws.input, {}, ws.sheet, ws.run.audio,
-                     ws.tilemap, ws.pmem, None, {})
+                     ws.run.project.tilemap, ws.run.project.pmem, None, {})
     run = ws.runtimes["lua"](ns, "n = 0\n"
                              "function _update(dt)\n"
                              "  n = n + 1\n"

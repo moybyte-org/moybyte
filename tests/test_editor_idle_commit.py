@@ -189,10 +189,10 @@ def test_the_whole_ladder_commits_on_the_debounce(tmp_path):
     _editable(ws)
 
     ws._open_map()
-    ws.tilemap.mset(0, 0, 4)
-    assert ws.tilemap.dirty is True
+    ws.run.project.tilemap.mset(0, 0, 4)
+    assert ws.run.project.tilemap.dirty is True
     _go_idle(ws)
-    assert ws.tilemap.dirty is False
+    assert ws.run.project.tilemap.dirty is False
 
     ws._open_scene()
     se = ws.scene_ui.sceneedit

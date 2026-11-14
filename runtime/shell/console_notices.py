@@ -1115,7 +1115,7 @@ class PauseMenu:
         else:
             _ui.info(title, "Stopped")
             _ui.rule()
-            _ui.label(_ch.crash_title(ws.cart_error, ws.crash_line), _STOP_SENTENCE)
+            _ui.label(_ch.crash_title(ws.cart_error, ws.run.player.crash_line), _STOP_SENTENCE)
             _ui.label(str(ws.cart_error or "").strip() or _ui_draw.s("chrome.no_text"),
                       _STOP_ERROR)
         _ui.menu("", self.rows, self.icons)

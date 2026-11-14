@@ -283,7 +283,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     # Scenes (the _reload_after_walk rebuild), so the next run spawns 3 again.
     assert ws.history._journal_walk(redo=False)
     assert len(json.loads(live.read_text())) == 3
-    assert len(ws.scenes.scene("main")) == 3
+    assert len(ws.run.project.scenes.scene("main")) == 3
     # The rebuilt scene TAB reopens on the restored rows.
     assert len(ws.scene_ui.sceneedit.rows) == 3
 
@@ -325,7 +325,7 @@ def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
     ws.save_scene()
     man = json.loads((Path(ws.cart["path"]) / "manifest.json").read_text())
     assert man["moybyte"]["assets"]["scenes"] == ["main"]
-    assert len(ws.scenes.scene("main")) == 1          # live object gained it too
+    assert len(ws.run.project.scenes.scene("main")) == 1          # live object gained it too
 
 
 def test_zoom_cycles_and_camera_clamps(tmp_path):
@@ -337,7 +337,7 @@ def test_zoom_cycles_and_camera_clamps(tmp_path):
     assert ui._sv_metrics()[2] == 2
     ui._pan(10000, 10000)                             # clamped to the world extents
     se = ui.sceneedit
-    ww, wh = se.world_size(ws.tilemap)
+    ww, wh = se.world_size(ws.run.project.tilemap)
     x0, y0, scale, vw, vh = ui._sv_metrics()
     assert se.cam_x == ww - vw and se.cam_y == wh - vh
     ui._cycle_zoom()

@@ -33,7 +33,7 @@ def _running_cart(tmp_path):
                            if it.get("path") and it.get("type") == "game")
     ws.open()
     assert ws.screen == "desktop"
-    assert ws._update is not None or ws._draw is not None
+    assert ws.run.player._update is not None or ws.run.player._draw is not None
     return ws, drv
 
 

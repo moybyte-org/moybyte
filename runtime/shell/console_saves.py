@@ -43,7 +43,7 @@ class SaveVerbs:
         else:
             self.code_err = None             # parses now -> clear the inline marker
             self.code_err_row = None
-            self.crash_line = None           # a re-run will re-detect any crash
+            self.run.player.crash_line = None           # a re-run will re-detect any crash
         if not (self.cart.get("path") and self.can_manage):
             if ok:
                 self.ach.award("first_code")   # Code Wizard: valid code saved

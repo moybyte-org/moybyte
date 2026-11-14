@@ -59,7 +59,7 @@ def test_all_new_carts_open_and_run_headless(tmp_path):
     for title in NEW_CARTS:
         _open_cart(ws, title)
         assert ws.screen == "desktop", title  # _start succeeded (else still launcher)
-        assert ws.ns is not None and ws._update and ws._draw
+        assert ws.ns is not None and ws.run.player._update and ws.run.player._draw
         _run(ws, 90)                            # attract-mode auto-play, no crash
         assert probe.drew_something(ws.run.canvas), title + " drew nothing"
         ws.go_home()
@@ -74,7 +74,7 @@ def test_carts_are_lively_in_attract_mode(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for title in NEW_CARTS:
         _open_cart(ws, title)
-        ws.config["autoplay"] = 1
+        ws.run.project.config["autoplay"] = 1
         ws.apply()
         snaps = set()
         for _ in range(120):
@@ -182,7 +182,7 @@ def test_platformer_attract_collects_coins_and_completes(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Hop Quest")
-    ws.config["autoplay"] = 1                             # opt into the auto-pilot
+    ws.run.project.config["autoplay"] = 1                             # opt into the auto-pilot
     ws.apply()
     ncoins = len(ws.ns["coins"])
     assert ncoins > 0
@@ -338,7 +338,7 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     ws.pointer.place(cx, cy)
     ws.pointer.click = True
     ws.handle_pointer()
-    assert ws.config["pet"] == 2
+    assert ws.run.project.config["pet"] == 2
     ws.apply()
     assert ws.cart_error is None
     assert ws.ns["pet"] == 2                             # the running cart uses the picked tile
@@ -414,7 +414,7 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     ws.pointer.place(cx, cy)
     ws.pointer.click = True
     ws.handle_pointer()
-    assert ws.config["pet"] == 1
+    assert ws.run.project.config["pet"] == 1
     ws.apply()
     assert ws.cart_error is None
     assert ws.ns["pet"] == 1                             # the running cart uses the picked tile
@@ -428,7 +428,7 @@ def test_harpoon_pop_opens_and_is_lively(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Harpoon Pop")
     assert ws.screen == "desktop"                        # _start succeeded
-    ws.config["autoplay"] = 1
+    ws.run.project.config["autoplay"] = 1
     ws.apply()
     snaps = set()
     for _ in range(150):
@@ -543,7 +543,7 @@ def test_harpoon_pop_runs_long_without_error(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Harpoon Pop")
-    ws.config["autoplay"] = 1
+    ws.run.project.config["autoplay"] = 1
     ws.apply()
     for _ in range(360):
         ws.input.begin_frame()
@@ -567,7 +567,7 @@ def test_harpoon_pop_is_deterministic_from_a_seed(tmp_path):
         random.seed(12345)
         ws = host_app.build_workstation(str(tmp_path / ("carts_" + tag)))
         _open_cart(ws, "Harpoon Pop")
-        ws.config["autoplay"] = 1
+        ws.run.project.config["autoplay"] = 1
         ws.apply()
         for _ in range(frames):
             ws.input.begin_frame()

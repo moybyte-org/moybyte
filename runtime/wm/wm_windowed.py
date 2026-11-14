@@ -1659,7 +1659,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         any key (the P4 keyboard slowdown). An editor focused beside a playtest
         keeps repainting on typing exactly as before."""
         ws = self.ws
-        if ws.cart_error is not None or (ws._update is None and ws._draw is None):
+        if ws.cart_error is not None or (ws.run.player._update is None and ws.run.player._draw is None):
             return False
         if self.mode == "console":             # the fullscreen shape
             return FullscreenStackWM.keys_to_cart(self)
@@ -1714,7 +1714,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True                 # the task manager's rows moved
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.run.player.paused
-                and (ws._update is not None or ws._draw is not None)
+                and (ws.run.player._update is not None or ws.run.player._draw is not None)
                 and (pages or not ws.run.player._on_change)
                 and ws.run.player.animates())
 

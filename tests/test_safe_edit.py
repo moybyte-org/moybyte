@@ -251,7 +251,7 @@ def test_evil_str_cart_does_not_escape_frame(tmp_path):
     assert ws.cart_error is not None      # panel text was still produced via _err_text
     assert "Evil" in ws.cart_error        # the type name survives even when __str__ dies
     # The broken cart was stopped so it isn't re-run every frame.
-    assert ws._update is None and ws._draw is None
+    assert ws.run.player._update is None and ws.run.player._draw is None
 
 
 def test_evil_str_cart_at_start_does_not_escape(tmp_path):
@@ -368,7 +368,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     path = ws.cart["path"]
 
     ws.frame(1 / 30)                      # crash -> panel set, cart stopped
-    assert ws.cart_error is not None and ws._draw is None
+    assert ws.cart_error is not None and ws.run.player._draw is None
 
     # Open the code editor, fix the source, and hit SAVE (not RUN).
     ws.set_menu_view("code")
@@ -383,7 +383,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     ws._leave_menu()
     assert ws.screen == "desktop"
     assert ws.cart_error is None
-    assert ws._draw is not None           # re-_start() rebound the (now valid) cart
+    assert ws.run.player._draw is not None           # re-_start() rebound the (now valid) cart
     for _ in range(3):
         ws.frame(1 / 30)                  # runs clean, no panel
     assert ws.cart_error is None

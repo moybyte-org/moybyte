@@ -299,10 +299,8 @@ def test_no_property_forwards_to_a_collaborator():
 # OS-arch capability track removes them. Pinned here so the ban's SCOPE is
 # honest and this set can only ever shrink.
 LEGACY_PROPERTY_FORWARDS = {
-    "project": {"cart", "config", "images", "pmem", "scenes",
-                "sheet", "tilemap"},
-    "player": {"_draw", "_update",
-               "cart_error", "crash_line", "ns"},
+    "project": {"cart", "sheet"},
+    "player": {"cart_error", "ns"},
     "editor_app": {"menu_view"},
     "wm": {"screen"},
 }

@@ -145,7 +145,7 @@ def test_running_cart_redraws_every_frame(tmp_path):
     ws.launcher.sel = 0
     ws.open()                       # -> screen == "desktop", cart running
     assert ws.screen == "desktop"
-    assert ws._update is not None or ws._draw is not None
+    assert ws.run.player._update is not None or ws.run.player._draw is not None
     base = _settle(ws, drv)
     for _ in range(60):
         drv.frame(DT)

@@ -83,11 +83,13 @@ class FakeWS:
         self.wifi = None
         self.carts = _FakeCarts()
         self._apps = ()
-        self._dirty = False
         self._psave_ms = 300000
         self._psave_asleep = False
         self.input = moy_input.HostInputTable()
         self.frame_state = FrameState()
+
+    def mark_dirty(self):
+        self.frame_state.dirty = True
 
 
 def make(ws=None, **kw):

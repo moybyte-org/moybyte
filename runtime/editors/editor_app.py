@@ -479,10 +479,10 @@ class EditorApp:
                 # of whichever file happens to be open would put a red line on
                 # somebody else's code -- and on a port the file that raises is
                 # very often not the one the tab opens on.
-                if ws.crash_line is not None \
+                if ws.run.player.crash_line is not None \
                         and (ws.run.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
-                    ws._mark_code_error(ws.crash_line - 1,
+                    ws._mark_code_error(ws.run.player.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])
                 else:
                     ws.code_err = None
@@ -584,7 +584,7 @@ class EditorApp:
             # Scenes are consumed ONCE at _init (#85 Variant A) -- a resumed cart
             # would never re-read scene(), so PLAY from the scene tab re-starts:
             # the fresh _init spawns the placement the kid just made (the editor
-            # live-syncs each gesture into ws.scenes; Player.start copies them
+            # live-syncs each gesture into ws.run.project.scenes; Player.start copies them
             # for the run). Mirrors the blocks tab's re-run-on-leave.
             if ws.cart is not None:
                 ws._start()
@@ -1345,7 +1345,7 @@ class EditorApp:
             return (sh is not None and not getattr(sh, "dirty", True)
                     and _quiet(proj._paint_history() if proj is not None else None))
         if tab == "map":
-            tm = getattr(ws, "tilemap", None)
+            tm = getattr(ws.run.project, "tilemap", None)
             return (tm is not None and not getattr(tm, "dirty", True)
                     and _quiet(proj._map_history() if proj is not None else None))
         if tab == "blocks":

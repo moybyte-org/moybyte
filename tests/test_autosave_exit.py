@@ -224,7 +224,7 @@ def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
     assert "save_sprites" in hits, hits
 
     # map: one tile
-    ws.tilemap.mset(0, 0, 1)
+    ws.run.project.tilemap.mset(0, 0, 1)
     hits = _writes_during(ws, lambda: _switch(ws, "scene"))
     assert "save_map" in hits, hits
 

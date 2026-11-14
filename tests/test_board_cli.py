@@ -231,7 +231,7 @@ class Lua:
     def flush_pmem(self):
         self.flushed += 1
         for i, v in enumerate(self.cells):
-            self.ws.pmem.cells[i] = v
+            self.ws.run.project.pmem.cells[i] = v
 
 
 class Player:
@@ -273,13 +273,13 @@ class WS:
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False
-        self.frame_state = types.SimpleNamespace(frames_drawn=5)
+        self.frame_state = types.SimpleNamespace(frames_drawn=5, dirty=False)
         self._apps = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
         self.run = types.SimpleNamespace(player=Player(), canvas=Canvas(8, 4),
-                                         cart_frame=None, view=None)
-        self.pmem = None
+                                         cart_frame=None, view=None,
+                                         project=types.SimpleNamespace(pmem=None))
         self.homes = 0
         self.net_tps = None           # a lockstep rate, when a test sets one
 
@@ -300,6 +300,9 @@ class WS:
                 self.wm._stack.append("player")
                 return c["title"]
         return None
+
+    def mark_dirty(self):
+        self.frame_state.dirty = True
 
     def exit(self):
         if self.cart:
@@ -616,7 +619,7 @@ def test_the_counter_is_the_one_PERF_is_taken_from(tmp_path, monkeypatch,
 
 def test_pmem_flushes_the_cart_before_reading(clock):
     ws, wire, b = console(clock)
-    ws.pmem = types.SimpleNamespace(cells=[0] * 256)
+    ws.run.project.pmem = types.SimpleNamespace(cells=[0] * 256)
     text = b"zone 1 failed\0"
     cells = [int.from_bytes(text[i:i + 4].ljust(4, b"\0"), "little")
              for i in range(0, len(text), 4)]

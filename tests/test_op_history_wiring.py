@@ -152,7 +152,7 @@ def _open_map(ws):
 def test_map_paste_bar_undo_reverts_the_paste(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     me = _open_map(ws)
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     for i in range(len(tm.cells)):       # blank slate
         tm.cells[i] = 0
     # Stamp a 2x2 block, copy it, paste elsewhere -- the paste is ONE undo step.
@@ -177,7 +177,7 @@ def test_map_commit_embeds_ops_in_journal(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     path = ws.cart["path"]
     me = _open_map(ws)
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     me.n = 3
     me.begin_edit()
     me.place(2, 2)
@@ -351,7 +351,7 @@ def test_blocks_dimmed_state_is_truthful(tmp_path):
 
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})   # an un-sealed edit still dims-in undo
-# -- scene: a placement is one undo step; undo re-syncs ws.scenes (#111 phase 4) --
+# -- scene: a placement is one undo step; undo re-syncs ws.run.project.scenes (#111 phase 4) --
 
 def _open_scene(ws):
     ws._open_scene()
@@ -366,17 +366,17 @@ def test_scene_place_bar_undo_removes_it_and_syncs_live(tmp_path):
     se.place(40, 40)
     ws.scene_ui._sync_live()             # the same call every committed gesture makes
     assert len(se.rows) == 1
-    assert len(ws.scenes.scene(name)) == 1
+    assert len(ws.run.project.scenes.scene(name)) == 1
 
     assert ws.history.undo() is True             # the bar UNDO reverts the placement...
     assert len(se.rows) == 0
-    assert len(ws.scenes.scene(name)) == 0     # ...and the LIVE scene() sees it too
+    assert len(ws.run.project.scenes.scene(name)) == 0     # ...and the LIVE scene() sees it too
     # (undo() drives console._after_local_history -> scene_ui._sync_live(), the
     # scene-specific tail every other tab's generic "mutated in place" path doesn't need)
 
     assert ws.history.redo() is True
     assert len(se.rows) == 1
-    assert len(ws.scenes.scene(name)) == 1
+    assert len(ws.run.project.scenes.scene(name)) == 1
 
 
 def test_scene_dimmed_state_is_truthful(tmp_path):
@@ -511,16 +511,16 @@ def _make_ws_with_config_cart(tmp_path, title="Cfg"):
 
 def test_config_adjust_bar_undo_reverts_field(tmp_path):
     ws = _make_ws_with_config_cart(tmp_path)
-    assert ws.config.get("spd", 3) == 3
+    assert ws.run.project.config.get("spd", 3) == 3
 
     step_card(ws, 1)
-    assert ws.config["spd"] == 4
+    assert ws.run.project.config["spd"] == 4
 
     assert ws.history.undo() is True             # the bar UNDO reverts the field
-    assert ws.config["spd"] == 3
+    assert ws.run.project.config["spd"] == 3
 
     assert ws.history.redo() is True
-    assert ws.config["spd"] == 4
+    assert ws.run.project.config["spd"] == 4
 
 
 def test_config_dimmed_state_is_truthful(tmp_path):
@@ -612,7 +612,7 @@ def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
     _type(ws, "# c2\n"); ws.save_code()          # main.py commit 2
 
     me = _open_map(ws)                           # (tab switch hard-commits code -- deduped)
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     me.n = 5
     me.begin_edit(); me.place(6, 6); me.end_edit()
     ws.save_map()                                # map.moymap commit (the NEWEST commit)
@@ -623,7 +623,7 @@ def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
     assert ws.history.undo() is True
     assert "# c2" not in ws.editor.text()        # code stepped c2 -> c1
     assert "# c1" in ws.editor.text()
-    assert ws.tilemap.mget(6, 6) == 5            # the MAP is untouched
+    assert ws.run.project.tilemap.mget(6, 6) == 5            # the MAP is untouched
 
     # Redo dim is per-tab: the code tab can redo (it was just rewound); after switching
     # to the map tab, REDO is dimmed (the map has nothing ahead).

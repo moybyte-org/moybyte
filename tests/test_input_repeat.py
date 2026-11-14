@@ -405,7 +405,7 @@ def _cart_reads(tmp_path, runtime, repeat, text):
         img = array("i", [0] * 256)
         moycore.pmem_image(img)
         return img[0], img[1]
-    return ws.pmem.cell(0), ws.pmem.cell(1)
+    return ws.run.project.pmem.cell(0), ws.run.project.pmem.cell(1)
 
 
 @pytest.mark.parametrize("runtime", ["python", "lua"])

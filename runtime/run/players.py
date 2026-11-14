@@ -1027,7 +1027,8 @@ class EspNowLink:
         so does its tick: the lower of the two consoles' (`announce`)."""
         if not self.active:
             return False
-        cfg = getattr(ws, "config", None) if ws is not None else None
+        proj = getattr(getattr(ws, "run", None), "project", None)
+        cfg = getattr(proj, "config", None)
         try:
             self._m.set_config(json.dumps(cfg) if cfg else None)
         except Exception:  # noqa: BLE001

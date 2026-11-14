@@ -231,7 +231,7 @@ class MoycoreRun:
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
 
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         if pmem is not None:
             cells = getattr(pmem, "cells", None)
             if cells is not None:
@@ -587,7 +587,7 @@ class MoycoreRun:
             return False
         if not _moycore.pmem_image(self.pmem_img):
             return False
-        pmem = getattr(self.ws, "pmem", None)
+        pmem = getattr(self.ws.run.project, "pmem", None)
         if pmem is None:
             return False
         cell = getattr(pmem, "cell", None)
@@ -1102,7 +1102,7 @@ class WasmRun(MoycoreRun):
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
         if cells is not None:
             for i in range(min(256, len(cells))):

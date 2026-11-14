@@ -532,7 +532,9 @@ class FakeWs:
                            project, start)
         self.input = inp if inp is not None else FakeInput()
         if pmem is not None:
-            self.pmem = pmem
+            if self.run.project is None:
+                self.run.project = types.SimpleNamespace()
+            self.run.project.pmem = pmem
 
 
 class NsSession:
@@ -1734,7 +1736,7 @@ def test_a_failing_pmem_write_still_closes_the_vm(w):
             raise KeyboardInterrupt
 
     run = w.run(ws=FakeWs(pmem=FakePmem()))
-    run.ws.pmem = Exploding()
+    run.ws.run.project.pmem = Exploding()
     with pytest.raises(KeyboardInterrupt):
         run.close()
     assert w.core.closes == 1

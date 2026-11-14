@@ -522,7 +522,7 @@ def run_side(kind):
         proj.tilemap = tilemap
         ws.run.project = proj
         ws.input = inp
-        ws.pmem = pmem
+        ws.run.project.pmem = pmem
         ws.run.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)

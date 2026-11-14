@@ -60,7 +60,7 @@ def test_commit_config_journals(tmp_path):
         tmp_path, "def _draw():\n    cls(cfg('bg', 1))\n",
         edit=[{"key": "bg", "type": "int", "min": 0, "max": 15}])
     path = ws.cart["path"]
-    ws.config["bg"] = 7
+    ws.run.project.config["bg"] = 7
     ws._save_config()
 
     ents = [e for e in _entries(path) if e["file"] == "config.json"]

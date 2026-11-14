@@ -447,7 +447,7 @@ def scene_tap(r):
 
     def _other_pet():
         f = next(x for x in r.ws.cart["edit"] if x["key"] == "pet")
-        cur = r.ws.config.get("pet", 0)
+        cur = r.ws.run.project.config.get("pet", 0)
         for box, k in r.ws.cards_layer.page()._tiles.get("pet", ()):
             if f["choices"][k] != cur:
                 return box

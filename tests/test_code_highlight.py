@@ -156,7 +156,7 @@ def test_runtime_crash_marks_offending_line_when_editor_opens(tmp_path):
     ws = _make_ws_with_cart(tmp_path, src)
     ws.frame(1 / 30)                       # crash is captured, must not raise
     assert ws.cart_error and "boom" in ws.cart_error
-    assert ws.crash_line == 3
+    assert ws.run.player.crash_line == 3
     ws.set_menu_view("code")               # tap CODE -> editor opens on the bad line
     ws.screen = "menu"
     assert ws.code_err_row == 2            # 0-based -> source line 3
@@ -166,7 +166,7 @@ def test_runtime_crash_marks_offending_line_when_editor_opens(tmp_path):
 def test_clean_cart_has_no_crash_line(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(3)\n")
     ws.frame(1 / 30)
-    assert ws.crash_line is None
+    assert ws.run.player.crash_line is None
     ws.set_menu_view("code")
     ws.screen = "menu"
     assert ws.code_err_row is None

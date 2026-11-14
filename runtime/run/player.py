@@ -216,7 +216,7 @@ class Player(PlayerDiag):
     injected NAMES like the other surfaces. The cart-run fields it owns
     (ns/_update/_draw/cart_error/crash_line/_cart_start_ms) are exposed
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
-    ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
+    ws.run.player._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
     _play = None                      # the run's frame in C: _bind_play
     stack_pre = None                  # the task's stack mark before the open: start
@@ -643,7 +643,7 @@ class Player(PlayerDiag):
         # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
         # (self.run.project still points at this run's Project here -- both exit call
         # sites run release_world ahead of replacing/slimming it).
-        pm = getattr(self.ws, "pmem", None)
+        pm = getattr(self.ws.run.project, "pmem", None)
         if pm is not None:
             try:
                 pm.flush()
@@ -2567,7 +2567,7 @@ class Player(PlayerDiag):
         # Deferred pmem (#66): the crash must not eat saved progress --
         # the cart stops ticking now, so this is its last chance to
         # persist. Guarded: the panel must paint even if SD is gone.
-        pm = getattr(ws, "pmem", None)
+        pm = getattr(ws.run.project, "pmem", None)
         if pm is not None:
             try:
                 pm.flush()
@@ -2591,7 +2591,7 @@ class Player(PlayerDiag):
         if self.cart_error is None:
             if _ticks_diff(_ticks_ms(), self._pmem_last) >= PMEM_FLUSH_MS:
                 self._pmem_last = _ticks_ms()
-                pm = getattr(ws, "pmem", None)
+                pm = getattr(ws.run.project, "pmem", None)
                 if pm is not None:
                     pm.flush()
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.

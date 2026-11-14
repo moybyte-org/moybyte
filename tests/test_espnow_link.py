@@ -14,6 +14,8 @@ inside a guarded method), which is what lets the whole handshake and a full
 two-console match run here instead of only on glass.
 """
 
+import types
+
 from runtime import players as moy_espnow, players as netplay, players as players_mod
 
 BROADCAST = moy_espnow.BROADCAST
@@ -147,6 +149,7 @@ class _Ws:
         self.input.players = players_mod.PlayerRouter(self.input)
         self.netplay = None
         self.launched = []
+        self.run = types.SimpleNamespace(project=types.SimpleNamespace(config=None))
 
 
 def _link(air, clock, mac, board="tdeck", name="A", launch=None):
@@ -605,8 +608,8 @@ def test_the_host_config_wins_so_two_tunings_cannot_desync_the_sims():
     air, clock, a, b = _pair(lambda ws, title: True)
     _see_each_other(a, b, clock)
     wsa, wsb = _Ws(), _Ws()
-    wsa.config = {"enemies": 9}
-    wsb.config = {"enemies": 3}
+    wsa.run.project.config = {"enemies": 9}
+    wsb.run.project.config = {"enemies": 3}
     a.offer(wsa, "Brick Siege")
     b.poll(wsb)
     assert wsa.netplay.config == {"enemies": 9}
@@ -617,7 +620,7 @@ def test_an_oversized_config_is_dropped_rather_than_half_applied():
     air, clock, a, b = _pair(lambda ws, title: True)
     _see_each_other(a, b, clock)
     wsa, wsb = _Ws(), _Ws()
-    wsa.config = {("k%d" % i): i for i in range(40)}
+    wsa.run.project.config = {("k%d" % i): i for i in range(40)}
     a.offer(wsa, "Brick Siege")
     b.poll(wsb)
     assert wsa.netplay.config is None and wsb.netplay.config is None, (

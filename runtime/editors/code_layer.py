@@ -690,7 +690,7 @@ class CodeLayer(Layer):
         ws = self.ws
         ws.code_err = None
         ws.code_err_row = None
-        ws.crash_line = None
+        ws.run.player.crash_line = None
         ws.crash_popup = None
 
     def _recheck_err(self):
@@ -720,7 +720,7 @@ class CodeLayer(Layer):
         if ok:
             self._clear_err()
         else:
-            ws.crash_line = None       # superseded by the live syntax position
+            ws.run.player.crash_line = None       # superseded by the live syntax position
             ws._set_code_error(msg, move=False)
 
     def _feed_char(self, code):
