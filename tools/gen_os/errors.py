@@ -1,7 +1,7 @@
 """The app ABI's answer codes: the C enum and what each face makes of a code,
 for the C faces (MicroPython's and Lua's) and the CPython host's."""
 
-from . import TableError
+from . import TableError, header
 from .cproto import HEAD
 
 ERROR_FIELDS = {"code", "n", "doc", "py", "errno", "msg", "lua", "err"}
@@ -76,7 +76,7 @@ def gen_err_h(src):
 
 def gen_face_errors(src):
     rows = errors(src)
-    o = ["# " + HEAD[3:].rstrip("\n"),
+    o = [header("native/os_calls.json", "#"),
          '"""The app ABI\'s answer codes (native/moy_app/moy_app_err.h) and what the',
          "host's faces make of one: `exception(code)` is what a refused call raises,",
          "ERR[code] the text a storage row answers as its err instead of raising (IO's",

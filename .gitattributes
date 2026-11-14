@@ -1,0 +1,22 @@
+# The files tools/gen_os_table.py writes whole, from native/os_calls.json and
+# native/*/face.json: GitHub collapses them in a diff. A new output gets a
+# pattern here; tests/test_os_table.py fails one without.
+native/*/modmoy_*_face.c linguist-generated=true
+runtime/host/*_face.py linguist-generated=true
+runtime/host/faces.py linguist-generated=true
+runtime/host/face_errors.py linguist-generated=true
+native/moy_elf/moy_os_table.h linguist-generated=true
+native/moy_elf/moy_os_table.c linguist-generated=true
+native/moy_elf/moy_os_rows.h linguist-generated=true
+native/moy_elf/moy_os_check.c linguist-generated=true
+native/moy_app/moy_app_*rows.h linguist-generated=true
+native/moy_app/moy_app_err.h linguist-generated=true
+native/moy_ui/moy_ui_wasm_rows.h linguist-generated=true
+native/moy_wasm/moy_wasi_os_rows.h linguist-generated=true
+sdk/include/moybyte/os.h linguist-generated=true
+sdk/include/moybyte/app.h linguist-generated=true
+sdk/include/moybyte/ui.h linguist-generated=true
+sdk/src/moyos_stubs.c linguist-generated=true
+sdk/moybyte_sdk/os_table.py linguist-generated=true
+sdk/moybyte_sdk/stubs/* linguist-generated=true
+tests/fixtures/elf/elf_wild.moy/src/rows.h linguist-generated=true

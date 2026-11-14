@@ -45,6 +45,14 @@ def test_the_generated_files_are_the_source_s():
             assert f.read() == text, "%s is stale: run tools/gen_os_table.py" % path
 
 
+def test_every_whole_generated_file_is_marked_generated_for_github():
+    paths = [os.path.relpath(p, ROOT) for p in gen_os_table.whole(gen_os_table.outputs())]
+    got = subprocess.run(["git", "check-attr", "linguist-generated", "--"] + paths, cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout.splitlines()
+    unmarked = [line.split(":")[0] for line in got if not line.endswith(": true")]
+    assert unmarked == [], "give each a .gitattributes pattern: %s" % unmarked
+
+
 def test_the_http_prompt_says_it_reaches_the_local_network():
     """`http` reaches any host, the LAN's included, with no address filter
     (owner, 2026-11-09): its install prompt line, generated from the
