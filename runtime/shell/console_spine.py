@@ -66,20 +66,29 @@ class SpineVerbs:
         return (cart is not None and cart.get("type") == "app"
                 and not self.is_system_app(cart))
 
+    _broken = None                  # (the settings rows' gen, the guard's broken ids)
+
+    def broken_cart_ids(self):
+        """The ids the crash guard has turned off (`app_guard.broken_ids`),
+        read again only when the settings rows the guard keeps them in move:
+        the home's cards ask it a paint."""
+        g = self.system.gen()
+        b = self._broken
+        if b is None or b[0] != g:
+            b = self._broken = (g, tuple(self.app_guard.broken_ids()))
+        return b[1]
+
     def cart_broken(self, cart):
-        """True when the crash guard has turned this app cart OFF (#160).
+        """True when the crash guard has turned this app cart OFF (#160): the
+        home's Make tab marks its card (`home_grid._draw_broken_badge`).
 
         NOT what the Player reads -- it refuses through `app_guard.arm()`
         returning False, which is the same answer taken on the path that also
-        records the strike. This is the shell-vocabulary query (is_user_app +
-        the title-slug id in one call): `tests/test_user_apps.py` asserts
-        against it, and it is half of what the deferred Make-tab BADGE needs
-        (docs/history/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays on
-        the home's Make tab either way, because editing it is how it gets
-        fixed."""
+        records the strike. The cart stays on the home's Make tab either way,
+        because editing it is how it gets fixed."""
         if not self.is_user_app(cart):
             return False
-        return self.app_guard.disabled(self.app_cart_id(cart))
+        return self.app_cart_id(cart) in self.broken_cart_ids()
 
     def forgive_app(self, cart):
         """Clear `cart`'s crash strikes -- the kid changed its CODE (#160).

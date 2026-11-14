@@ -484,6 +484,9 @@ class HomeVerbs:
         g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
+        # The crash guard's mark on a Make card it turned off (#160).
+        g.broken_for = self.cart_broken
+        g.broken_ids = self.broken_cart_ids
         g.own_for = self.carts.is_own
         g.plays_for = self.carts.plays
         g.today_for = self._today_ymd
