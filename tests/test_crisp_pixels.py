@@ -2,7 +2,8 @@
 
 The P4's PPA scaler is fixed bilinear in silicon, so pixel-art carts composite
 smeared; the Settings row routes the game composite nearest-neighbour instead
-(moy_ppa.blit_crisp's SRAM-bounce band pipeline, CPU kernel fallback). The row
+(the game composite, native/moy_glass/moy_present_game.c: moy_ppa_k_crisp's
+SRAM-bounce band pipeline, CPU kernel fallback). The row
 shows ONLY where the system canvas exposes set_crisp_scale -- every other tier
 composites nearest already and keeps its frozen Settings pixels.
 """
@@ -63,12 +64,17 @@ def test_boot_apply_does_not_persist_but_reaches_the_canvas(tmp_path):
 
 
 def test_device_side_is_wired():
-    """Source ratchet for the halves host tests cannot execute: the P4 canvas
-    hook + its blit_crisp routing, and the native verb's registration."""
+    """Routing the host cannot execute: the P4 canvas hook sets the game
+    composite's mode, which takes the PPA's crisp entry, and the bands'
+    release stays a verb."""
     p4 = (ROOT / "device/p4_canvas.py").read_text()
     assert "def set_crisp_scale" in p4
-    assert "blit_crisp" in p4
+    assert "_glass_mod.game_crisp(on)" in p4
+    glass = (ROOT / "native/moy_glass/modmoy_glass.c").read_text()
+    assert "MP_QSTR_game_crisp" in glass
+    body = (ROOT / "native/moy_glass/moy_present_game.c").read_text()
+    assert "moy_ppa_k_crisp(dst" in body
     ppa = (ROOT / "native/p4/moy_ppa/modmoy_ppa.c").read_text()
-    assert "MP_QSTR_blit_crisp" in ppa
+    assert "int moy_ppa_k_crisp(" in ppa
     assert "MP_QSTR_crisp_release" in ppa
     assert "mg_blit565_scale" in ppa       # the ONE expand kernel, not a twin

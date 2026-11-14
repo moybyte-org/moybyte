@@ -9,8 +9,9 @@
 //
 // RotatedCompositor(dsi, ppa, angle=90): the Guition P4's landscape desk over
 // its portrait panel, the frame state machine in C, its transport the two
-// modules passed in. The canvas hands each frame's game composite in with
-// mark_game (its buffers and its paint()/quiet() callables) and the WM its
+// modules passed in. The canvas hands each frame's game in with mark_game
+// (its buffers and its quiet() callable; a compiled cart's frame, its
+// paint() too) and the WM its
 // damage with note_damage; the shell sets the bar strips with set_strips and
 // says which it repainted with strip_moved; the deferred window stamp is
 // `_stamp_pending`.
@@ -96,8 +97,18 @@ static int rot_bounce(void *ctx, int fb, int pw, int ph, int fx, int fy, int pai
     return (int)mp_obj_get_int(mp_call_function_n_kw(c->bounce, 14, 0, a));
 }
 
+// The game into the paint buffer: the game composite of the game canvas or
+// of the kernel's front's compiled frame (its snapshot), or the console's
+// compiled frame through the callable present_frame registered.
 static void rot_paint(void *ctx) {
-    mp_call_function_0(((glass_rot_obj_t *)ctx)->paint);
+    glass_rot_obj_t *c = ctx;
+    if (c->paint != mp_const_none) {
+        mp_call_function_0(c->paint);
+        return;
+    }
+    const moy_rot_game_t *g = &c->r.game;
+    glass_game(c->bufs[MOY_ROT_PAINT0 + c->r.pi], c->r.w, c->r.h, g->ox, g->oy,
+               c->bufs[MOY_ROT_GAME], g->sw, g->sh, g->scale, false, g->frame);
 }
 
 static bool rot_quiet(void *ctx) {
@@ -309,8 +320,12 @@ static mp_obj_t rot_set_angle(mp_obj_t self_in, mp_obj_t angle_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(rot_set_angle_obj, rot_set_angle);
 
-// mark_game(src, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None)
-// mark_game(game, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None)
+// mark_game(game, sw, sh, ox, oy, scale, None, quiet, None): the game canvas,
+// composited by the game composite (rot_paint) and scaled straight from the
+// canvas on a quiet frame where the PPA's bilinear scale takes it
+// (moy_game_direct).
+// mark_game(src, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None): a
+// compiled cart's frame, `paint` its composite into the paint buffer.
 static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a, mp_map_t *kw) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
     mp_obj_t frame = n_args > 10 ? a[10] : mp_const_none;
@@ -327,7 +342,9 @@ static mp_obj_t rot_mark_game(size_t n_args, const mp_obj_t *a, mp_map_t *kw) {
     g->scale = mp_obj_get_int(a[6]);
     c->paint = a[7];
     c->quiet = a[8];
-    g->direct = mp_obj_is_true(a[9]);
+    g->direct = a[7] == mp_const_none
+                ? moy_game_direct(c->r.w, c->r.h, g->ox, g->oy, g->sw, g->sh, g->scale)
+                : mp_obj_is_true(a[9]);
     c->bufs[MOY_ROT_GAME] = a[1];
     c->bufs[MOY_ROT_PIC] = mp_const_none;
     g->frame = frame != mp_const_none;

@@ -129,8 +129,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   the write-allocate read (cls, a big rect, an rrect's middle rows); sprite
   BATCHING on it is a dead end (~10× worse than `spr_batch`: per-op submit
   dwarfs a tiny blit); its scaler is fixed BILINEAR in silicon, so pixel art
-  goes through Settings → CRISP PIXELS (`moy_ppa.blit_crisp`, a banded SRAM
-  bounce byte-exact against the CPU kernel, #204). The triple framebuffer
+  goes through Settings → CRISP PIXELS (`moy_ppa_k_crisp`, a banded SRAM
+  bounce byte-exact against the CPU kernel, #204), one choice in one C body
+  for the canvas, the rotated paint route and the kernel's front
+  (`native/moy_glass/moy_present_game.c`). The triple framebuffer
   shipped; the double game canvas was built, measured and REVERTED (`26e1f9f` —
   the game fence was already ~free and the retention memcpy cost more); #159's
   L2 cache 128→256 KB closed the game chapter (512 KB does not boot — the

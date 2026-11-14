@@ -33,9 +33,10 @@ The console's own USB keyboard and mouse are #83's.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
-IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it, CPU fallback,
-and `present_frame` scales a compiled cart's direct-colour frame from the cart's
-memory).
+IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` and the kernel's front
+take it through the one game composite, `native/moy_glass/moy_present_game.c`,
+CPU fallback, and `present_frame` scales a compiled cart's direct-colour frame
+from the cart's memory).
 Colors verified pixel-identical via framebuffer readback. Two findings on
 record:
 - **The PPA only wins on UPSCALE composites.** The game→window scale is 2.6×
@@ -44,7 +45,7 @@ record:
   vs the DSI scan-out), and **sprite draws lose ~10× to `spr_batch`** even queued
   non-blocking (64× 16×16 = 4.57ms PPA vs 0.70ms CPU; per-op submit dwarfs a tiny
   blit). So both copies and sprites stay on the CPU — the PPA is scale-only.
-- **Async-composite overlap** (`blit_async` + `moy_ppa.sync` fence + a done-ISR
+- **Async-composite overlap** (a queued scale + `moy_ppa.sync` fence + a done-ISR
   counter): a quiet game frame defers the scan-out switch to the next loop
   (`P4Compositor.present_pending`), overlapping the PPA DMA with the input poll.
   +2–5fps; full paints stay blocking (`blit_game(defer=not full)`) so chrome

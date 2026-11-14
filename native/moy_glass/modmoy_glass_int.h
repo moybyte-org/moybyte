@@ -108,7 +108,7 @@ typedef struct {
     moy_rot_ops_t ops;
     mp_obj_t dsi, ppa, gfx;
     mp_obj_t bufs[10];          // by the engine's buffer ids
-    mp_obj_t paint, quiet;      // this frame's game callables
+    mp_obj_t paint, quiet;      // this frame's game callables (paint None: the game composite)
     mp_obj_t stamp;             // the deferred stamp's tuple, or None
     mp_obj_t held;              // the glass Bufs the paint buffers and scratch are
     mp_obj_t rotate, rotate_scale, bounce, refreshes;   // the transport's verbs
@@ -128,6 +128,9 @@ bool glass_shift(mp_obj_t ppa, mp_obj_t dst, mp_obj_t src, mp_int_t W, mp_int_t 
                  const mp_obj_t *a, bool *fly, int *b);
 void glass_copy_into(mp_obj_t ppa, mp_obj_t src, mp_int_t W, mp_int_t H,
                      size_t n_args, const mp_obj_t *a);
+// ...and the game composite (moy_present_game.c) over two pictures.
+int glass_game(mp_obj_t dst, int dw, int dh, int dx, int dy, mp_obj_t src, int sw, int sh,
+               int scale, bool defer, bool frame);
 
 // modmoy_glass_banded.c
 void glass_banded_light(mp_obj_t panel, bool on);
