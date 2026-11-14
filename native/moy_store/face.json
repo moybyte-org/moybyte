@@ -1,0 +1,7 @@
+{
+  "moy_ufiles": {
+    "about": "the user-files layer, native/moy_store/moy_ufiles.h",
+    "host": "moy_ufiles_binding",
+    "binding": true
+  }
+}

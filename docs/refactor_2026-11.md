@@ -512,7 +512,7 @@ no-allocation rows are there for that.
 **Check.** Host suite; T3 green in every column. T-Deck and P4 pass; the
 Zero's image builds with headroom above its floor. Goldens unchanged.
 
-**Guard.** `+tests/test_face_parity.py`: for every `face.json`, the
+**Guard.** `tests/test_face_parity.py`: for every `face.json`, the
 MicroPython globals, the ctypes names and the table's rows are one set less
 the declared absences, and one generated script gives equal answers on both
 runtimes. The generator's drift test.

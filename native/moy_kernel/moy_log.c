@@ -7,7 +7,6 @@
 #include <string.h>
 
 #include "moy_log.h"
-#include "moy_proc_exit.h"
 
 #include "moy_kmem.h"
 
@@ -57,10 +56,6 @@ static uint64_t now_us(void) {
     }
     return (uint64_t)moy_now_us();
 }
-
-const uint8_t moy_log_exits[4] = {
-    MOY_PROC_NOT_RUN, MOY_PROC_INTERRUPTED, MOY_PROC_TRAPPED, MOY_PROC_KILLED,
-};
 
 void moy_log_pin_clock(uint64_t us) {
     G.pinned_us = us;

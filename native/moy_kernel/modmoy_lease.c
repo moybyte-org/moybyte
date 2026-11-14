@@ -1,7 +1,8 @@
 // moy_lease's MicroPython binding: the lease table (moy_lease.h) as the module
-// `moy_lease`, the same names runtime/host/moy_lease.py gives CPython. A pin
-// set is a tuple of pin numbers; a refusal raises OSError (EBUSY, EINVAL for
-// what the board does not offer, EBADF for a stale handle, ENOSPC, ENOMEM).
+// `moy_lease`, its names those face.json lists: the rows here are the hand
+// ones, the rest are generated into modmoy_lease_face.c. A pin set is a tuple
+// of pin numbers; a refusal raises OSError (EBUSY, EINVAL for what the board
+// does not offer, EBADF for a stale handle, ENOSPC, ENOMEM).
 //
 //   offer(spec)          the offers made again from a spec ("gpio:0,1/uart1:4,5")
 //   offers()             [(name, cls, unit, named pins, every pin), ...]
@@ -33,12 +34,7 @@
 
 #include "moy_lease.h"
 
-static void check(int rc) {
-    static const int err[] = { 0, MP_EBADF, MP_ENOSPC, MP_ENOMEM, MP_EINVAL, MP_EBUSY };
-    if (rc != MOY_LEASE_OK) {
-        mp_raise_OSError(rc > 0 && rc < (int)(sizeof(err) / sizeof(err[0])) ? err[rc] : MP_EIO);
-    }
-}
+#include "modmoy_lease_face.c"
 
 static mp_obj_t pins_tuple(uint64_t pins) {
     mp_obj_t items[MOY_LEASE_PIN_MAX];
@@ -66,12 +62,6 @@ static uint64_t pins_of(mp_obj_t seq) {
     return pins;
 }
 
-static mp_obj_t lease_offer(mp_obj_t spec) {
-    check(moy_lease_offer(spec == mp_const_none ? NULL : mp_obj_str_get_str(spec)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_offer_obj, lease_offer);
-
 static mp_obj_t lease_offers(void) {
     mp_obj_t out = mp_obj_new_list(0, NULL);
     moy_lease_offer_t o;
@@ -92,33 +82,13 @@ static MP_DEFINE_CONST_FUN_OBJ_0(lease_offers_obj, lease_offers);
 
 static mp_obj_t lease_take(size_t n_args, const mp_obj_t *args) {
     uint32_t h;
-    check(moy_lease_take((uint32_t)mp_obj_get_int(args[0]), (uint8_t)mp_obj_get_int(args[1]),
-                         (uint8_t)mp_obj_get_int(args[2]), pins_of(args[3]),
-                         n_args > 4 ? (uint8_t)mp_obj_get_int(args[4]) : 0u, &h));
+    face_raise_lease(moy_lease_take((uint32_t)mp_obj_get_int(args[0]),
+                                    (uint8_t)mp_obj_get_int(args[1]),
+                                    (uint8_t)mp_obj_get_int(args[2]), pins_of(args[3]),
+                                    n_args > 4 ? (uint8_t)mp_obj_get_int(args[4]) : 0u, &h));
     return mp_obj_new_int_from_uint(h);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lease_take_obj, 4, 5, lease_take);
-
-static mp_obj_t lease_drop(mp_obj_t h) {
-    check(moy_lease_drop((uint32_t)mp_obj_get_int(h)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_drop_obj, lease_drop);
-
-static mp_obj_t lease_sweep(mp_obj_t owner) {
-    return MP_OBJ_NEW_SMALL_INT(moy_lease_sweep((uint32_t)mp_obj_get_int(owner)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_sweep_obj, lease_sweep);
-
-static mp_obj_t lease_vm_stop(void) {
-    return MP_OBJ_NEW_SMALL_INT(moy_lease_vm_stop());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(lease_vm_stop_obj, lease_vm_stop);
-
-static mp_obj_t lease_live(mp_obj_t h) {
-    return mp_obj_new_bool(moy_lease_live((uint32_t)mp_obj_get_int(h)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_live_obj, lease_live);
 
 static mp_obj_t lease_leases(void) {
     mp_obj_t out = mp_obj_new_list(0, NULL);
@@ -134,7 +104,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(lease_leases_obj, lease_leases);
 
 static mp_obj_t lease_get(mp_obj_t h) {
     moy_lease_row_t r;
-    check(moy_lease_get((uint32_t)mp_obj_get_int(h), &r));
+    face_raise_lease(moy_lease_get((uint32_t)mp_obj_get_int(h), &r));
     mp_obj_t edges[MOY_LEASE_EDGES];
     size_t ne = 0;
     for (uint32_t i = 0; i < MOY_LEASE_EDGES; i++) {
@@ -152,66 +122,6 @@ static mp_obj_t lease_get(mp_obj_t h) {
     return mp_obj_new_tuple(6, row);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(lease_get_obj, lease_get);
-
-static mp_obj_t lease_held(size_t n_args, const mp_obj_t *args) {
-    return MP_OBJ_NEW_SMALL_INT(moy_lease_held(n_args ? (uint8_t)mp_obj_get_int(args[0]) : 0u));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lease_held_obj, 0, 1, lease_held);
-
-static mp_obj_t lease_of_pin(mp_obj_t pin) {
-    return mp_obj_new_int_from_uint(moy_lease_of_pin(mp_obj_get_int(pin)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_of_pin_obj, lease_of_pin);
-
-static mp_obj_t lease_edge(size_t n_args, const mp_obj_t *args) {
-    uint32_t src;
-    check(moy_lease_edge((uint32_t)mp_obj_get_int(args[0]), mp_obj_get_int(args[1]),
-                         (uint32_t)mp_obj_get_int(args[2]),
-                         n_args > 3 && mp_obj_is_true(args[3]), &src));
-    return mp_obj_new_int_from_uint(src);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(lease_edge_obj, 3, 4, lease_edge);
-
-static mp_obj_t lease_edge_close(mp_obj_t h, mp_obj_t pin) {
-    check(moy_lease_edge_close((uint32_t)mp_obj_get_int(h), mp_obj_get_int(pin)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(lease_edge_close_obj, lease_edge_close);
-
-static mp_obj_t lease_pin_state(mp_obj_t pin) {
-    return MP_OBJ_NEW_SMALL_INT(moy_lease_pin_state(mp_obj_get_int(pin)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_pin_state_obj, lease_pin_state);
-
-// device_name(cls) -> "mic", "lora", "ble", "media" for a device class, else None.
-static mp_obj_t lease_device_name(mp_obj_t cls) {
-    const char *n = moy_lease_device_name((uint8_t)mp_obj_get_int(cls));
-    return n != NULL ? mp_obj_new_str(n, strlen(n)) : mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_device_name_obj, lease_device_name);
-
-static mp_obj_t lease_sim_pin(mp_obj_t pin, mp_obj_t state, mp_obj_t level) {
-    moy_lease_sim_pin(mp_obj_get_int(pin), (uint8_t)mp_obj_get_int(state), mp_obj_get_int(level));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(lease_sim_pin_obj, lease_sim_pin);
-
-static mp_obj_t lease_sim_level(mp_obj_t pin, mp_obj_t level) {
-    moy_lease_sim_level(mp_obj_get_int(pin), mp_obj_get_int(level));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(lease_sim_level_obj, lease_sim_level);
-
-static mp_obj_t lease_sim_get(mp_obj_t pin) {
-    return MP_OBJ_NEW_SMALL_INT(moy_lease_sim_get(mp_obj_get_int(pin)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(lease_sim_get_obj, lease_sim_get);
-
-static mp_obj_t lease_reset(void) {
-    moy_lease_reset();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(lease_reset_obj, lease_reset);
 
 // -- the radio -----------------------------------------------------------------
 
@@ -244,7 +154,7 @@ static mp_obj_t wifi_hold(size_t n_args, const mp_obj_t *args) {
     size_t n;
     const char *s = wifi_arg(args[1], &n);
     uint32_t mask;
-    check(moy_lease_wifi_hold(wifi_owner(n_args, args), s, n, &mask));
+    face_raise_lease(moy_lease_wifi_hold(wifi_owner(n_args, args), s, n, &mask));
     return MP_OBJ_NEW_SMALL_INT(mask);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(wifi_hold_obj, 2, 3, wifi_hold);
@@ -253,7 +163,7 @@ static mp_obj_t wifi_release(size_t n_args, const mp_obj_t *args) {
     size_t n;
     const char *s = wifi_arg(args[1], &n);
     uint32_t mask;
-    check(moy_lease_wifi_release(wifi_owner(n_args, args), s, n, &mask));
+    face_raise_lease(moy_lease_wifi_release(wifi_owner(n_args, args), s, n, &mask));
     return MP_OBJ_NEW_SMALL_INT(mask);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(wifi_release_obj, 2, 3, wifi_release);
@@ -325,42 +235,14 @@ static const mp_rom_obj_tuple_t wifi_tags_tuple = {
 
 static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_lease) },
-    { MP_ROM_QSTR(MP_QSTR_offer), MP_ROM_PTR(&lease_offer_obj) },
+    MOY_FACE_MOY_LEASE_ROWS
     { MP_ROM_QSTR(MP_QSTR_offers), MP_ROM_PTR(&lease_offers_obj) },
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&lease_take_obj) },
-    { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&lease_drop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sweep), MP_ROM_PTR(&lease_sweep_obj) },
-    { MP_ROM_QSTR(MP_QSTR_vm_stop), MP_ROM_PTR(&lease_vm_stop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_live), MP_ROM_PTR(&lease_live_obj) },
     { MP_ROM_QSTR(MP_QSTR_leases), MP_ROM_PTR(&lease_leases_obj) },
     { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&lease_get_obj) },
-    { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&lease_held_obj) },
-    { MP_ROM_QSTR(MP_QSTR_of_pin), MP_ROM_PTR(&lease_of_pin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_edge), MP_ROM_PTR(&lease_edge_obj) },
-    { MP_ROM_QSTR(MP_QSTR_edge_close), MP_ROM_PTR(&lease_edge_close_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pin_state), MP_ROM_PTR(&lease_pin_state_obj) },
-    { MP_ROM_QSTR(MP_QSTR_device_name), MP_ROM_PTR(&lease_device_name_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sim_pin), MP_ROM_PTR(&lease_sim_pin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sim_level), MP_ROM_PTR(&lease_sim_level_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sim_get), MP_ROM_PTR(&lease_sim_get_obj) },
-    { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&lease_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_Wifi), MP_ROM_PTR(&wifi_type) },
     { MP_ROM_QSTR(MP_QSTR_wifi_reset), MP_ROM_PTR(&lease_wifi_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_WIFI_TAGS), MP_ROM_PTR(&wifi_tags_tuple) },
-    { MP_ROM_QSTR(MP_QSTR_WIFI), MP_ROM_INT(MOY_LEASE_WIFI) },
-    { MP_ROM_QSTR(MP_QSTR_GPIO), MP_ROM_INT(MOY_LEASE_GPIO) },
-    { MP_ROM_QSTR(MP_QSTR_UART), MP_ROM_INT(MOY_LEASE_UART) },
-    { MP_ROM_QSTR(MP_QSTR_SPI), MP_ROM_INT(MOY_LEASE_SPI) },
-    { MP_ROM_QSTR(MP_QSTR_VM), MP_ROM_INT(MOY_LEASE_VM) },
-    { MP_ROM_QSTR(MP_QSTR_PINS), MP_ROM_INT(MOY_LEASE_PINS) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_IN), MP_ROM_INT(MOY_PIN_IN) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_OUT), MP_ROM_INT(MOY_PIN_OUT) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_PU), MP_ROM_INT(MOY_PIN_PU) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_PD), MP_ROM_INT(MOY_PIN_PD) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_PERIPH), MP_ROM_INT(MOY_PIN_PERIPH) },
-    { MP_ROM_QSTR(MP_QSTR_PIN_SAFE), MP_ROM_INT(MOY_PIN_SAFE) },
-    { MP_ROM_QSTR(MP_QSTR_ROWS_MAX), MP_ROM_INT(MOY_LEASE_ROWS_MAX) },
-    { MP_ROM_QSTR(MP_QSTR_SHELL), MP_ROM_INT(MOY_LEASE_SHELL) },
 };
 static MP_DEFINE_CONST_DICT(lease_globals, lease_globals_table);
 

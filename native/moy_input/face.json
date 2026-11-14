@@ -1,0 +1,33 @@
+{
+  "moy_midi": {
+    "about": "the midi device API's driver, native/moy_input/moy_midi.h",
+    "host": "moy_midi",
+    "headers": ["moy_midi.h"],
+    "consts": [
+      "MOY_MIDI_UART as UART", "MOY_MIDI_USB as USB", "MOY_MIDI_BLE as BLE",
+      "MOY_MIDI_BLE_CONNECTING as BLE_CONNECTING", "MOY_MIDI_BLE_FINDING as BLE_FINDING",
+      "MOY_MIDI_BLE_READY as BLE_READY", "MOY_MIDI_BLE_FAILED as BLE_FAILED",
+      "MOY_MIDI_BLE_GONE as BLE_GONE"
+    ],
+    "rows": [
+      {"py": "open(owner)", "c": "moy_midi_open", "example": [3]},
+      {"py": "close(owner)", "c": "moy_midi_close", "example": [4]},
+      {"py": "sweep(owner)", "c": "moy_midi_sweep", "example": [4]},
+      {"py": "owner()", "c": "moy_midi_owner", "example": []},
+      {"py": "source()", "c": "moy_midi_source", "example": []},
+      {"py": "port(owner, transport, unit)", "c": "moy_midi_port", "example": [3, 1, 0]},
+      {"py": "unport(owner, port)", "c": "moy_midi_unport", "example": [3, 7]},
+      {"py": "uart(owner, port)", "c": "moy_midi_uart", "example": [3, 0]},
+      {"py": "ports(owner)", "c": "moy_midi_ports", "example": [3]},
+      {"py": "feed(port, buf)", "c": "moy_midi_feed", "span": ["d"], "example": [0, {"bytes": [144, 60, 100]}]},
+      {"py": "usb_in(addr, buf)", "c": "moy_midi_usb_in", "span": ["d"], "absent": ["mp"]},
+      {"py": "ble_in(owner, port, buf)", "c": "moy_midi_ble_in", "span": ["d"], "example": [3, 0, {"bytes": [128, 128, 144, 60, 100]}]},
+      {"py": "ble(owner, port, addr, type)", "hand": true},
+      {"py": "ble_state(owner, port)", "c": "moy_midi_ble_state", "example": [3, 0]},
+      {"py": "ble_send(owner, port, msg, ms)", "c": "moy_midi_ble_send", "span": ["msg"], "example": [3, 0, {"bytes": [144, 60, 100]}, 5]},
+      {"py": "usb_pack(msg, out)", "c": "moy_midi_usb_pack", "span": ["msg"], "wbuf": ["out"], "example": [{"bytes": [144, 60, 100]}, {"bytearray": 8}]},
+      {"py": "ble_pack(msg, ms, out)", "c": "moy_midi_ble_pack", "span": ["msg"], "wbuf": ["out"], "example": [{"bytes": [144, 60, 100]}, 5, {"bytearray": 8}]},
+      {"py": "reset()", "c": "moy_midi_reset", "example": []}
+    ]
+  }
+}

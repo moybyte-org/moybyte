@@ -1,0 +1,7 @@
+{
+  "moy_ui": {
+    "about": "the toolkit's C, native/moy_ui",
+    "host": "moy_ui_binding",
+    "binding": true
+  }
+}

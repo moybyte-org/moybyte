@@ -1,0 +1,7 @@
+{
+  "moy_app": {
+    "about": "the app ABI's C rows, native/moy_app",
+    "host": "moy_app_binding",
+    "binding": true
+  }
+}

@@ -1,5 +1,6 @@
 // moy_log's MicroPython binding: the OS log (moy_log.h) as the module
-// `moy_log`, the same names runtime/host/moy_log.py gives CPython.
+// `moy_log`, its names those face.json lists: the rows here are the hand
+// ones, the rest are generated into modmoy_log_face.c.
 //
 //   write(level, pid, *parts)   one record: the parts' str() joined by spaces,
 //                      under `pid` (None: current). A single str part is
@@ -24,6 +25,8 @@
 #include "moy_sb.h"
 #include "moy_log.h"
 #include "moy_proc_exit.h"
+
+#include "modmoy_log_face.c"
 
 #define JOIN_MAX 384
 
@@ -57,16 +60,6 @@ static mp_obj_t log_write(size_t n_args, const mp_obj_t *args) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(log_write_obj, 2, MP_OBJ_FUN_ARGS_MAX, log_write);
-
-static mp_obj_t log_spawn(mp_obj_t name) {
-    return mp_obj_new_int_from_uint(moy_log_spawn(mp_obj_str_get_str(name)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_spawn_obj, log_spawn);
-
-static mp_obj_t log_name(mp_obj_t pid) {
-    return mp_obj_new_str_from_cstr(moy_log_name((uint32_t)mp_obj_get_int_truncated(pid)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_name_obj, log_name);
 
 static mp_obj_t log_current(size_t n_args, const mp_obj_t *args) {
     if (n_args) {
@@ -106,68 +99,13 @@ static mp_obj_t log_next(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(log_next_obj, log_next);
 
-static mp_obj_t log_stats(void) {
-    moy_log_stats_t s;
-    moy_log_stats(&s);
-    mp_obj_t t[4] = {
-        mp_obj_new_int_from_uint(s.first), mp_obj_new_int_from_uint(s.next),
-        mp_obj_new_int_from_uint(s.used), mp_obj_new_int_from_uint(s.cap),
-    };
-    return mp_obj_new_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(log_stats_obj, log_stats);
-
-static mp_obj_t log_level_name(mp_obj_t level) {
-    return mp_obj_new_str_from_cstr(moy_log_level_name(mp_obj_get_int(level)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_level_name_obj, log_level_name);
-
-static mp_obj_t log_level_of(mp_obj_t name) {
-    size_t n;
-    const char *s = mp_obj_str_get_data(name, &n);
-    return MP_OBJ_NEW_SMALL_INT(moy_log_level_of(s, n));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_level_of_obj, log_level_of);
-
-static mp_obj_t log_init(mp_obj_t bytes) {
-    return mp_obj_new_bool(moy_log_init((size_t)mp_obj_get_int(bytes)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_init_obj, log_init);
-
-static mp_obj_t log_pin_clock(mp_obj_t us) {
-    moy_log_pin_clock((uint64_t)mp_obj_get_int(us));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(log_pin_clock_obj, log_pin_clock);
-
 static const mp_rom_map_elem_t log_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_log) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&log_write_obj) },
-    { MP_ROM_QSTR(MP_QSTR_spawn), MP_ROM_PTR(&log_spawn_obj) },
-    { MP_ROM_QSTR(MP_QSTR_name), MP_ROM_PTR(&log_name_obj) },
+    MOY_FACE_MOY_LOG_ROWS
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&log_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&log_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_next), MP_ROM_PTR(&log_next_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&log_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_level_name), MP_ROM_PTR(&log_level_name_obj) },
-    { MP_ROM_QSTR(MP_QSTR_level_of), MP_ROM_PTR(&log_level_of_obj) },
-    { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&log_init_obj) },
-    { MP_ROM_QSTR(MP_QSTR_pin_clock), MP_ROM_PTR(&log_pin_clock_obj) },
-    { MP_ROM_QSTR(MP_QSTR_EMERG), MP_ROM_INT(MOY_LOG_EMERG) },
-    { MP_ROM_QSTR(MP_QSTR_ALERT), MP_ROM_INT(MOY_LOG_ALERT) },
-    { MP_ROM_QSTR(MP_QSTR_CRIT), MP_ROM_INT(MOY_LOG_CRIT) },
-    { MP_ROM_QSTR(MP_QSTR_ERR), MP_ROM_INT(MOY_LOG_ERR) },
-    { MP_ROM_QSTR(MP_QSTR_WARNING), MP_ROM_INT(MOY_LOG_WARNING) },
-    { MP_ROM_QSTR(MP_QSTR_NOTICE), MP_ROM_INT(MOY_LOG_NOTICE) },
-    { MP_ROM_QSTR(MP_QSTR_INFO), MP_ROM_INT(MOY_LOG_INFO) },
-    { MP_ROM_QSTR(MP_QSTR_DEBUG), MP_ROM_INT(MOY_LOG_DEBUG) },
-    { MP_ROM_QSTR(MP_QSTR_KERNEL), MP_ROM_INT(MOY_LOG_KERNEL) },
-    { MP_ROM_QSTR(MP_QSTR_SHELL), MP_ROM_INT(MOY_LOG_SHELL) },
-    { MP_ROM_QSTR(MP_QSTR_TEXT_MAX), MP_ROM_INT(MOY_LOG_TEXT_MAX) },
-    { MP_ROM_QSTR(MP_QSTR_NOT_RUN), MP_ROM_INT(MOY_PROC_NOT_RUN) },
-    { MP_ROM_QSTR(MP_QSTR_INTERRUPTED), MP_ROM_INT(MOY_PROC_INTERRUPTED) },
-    { MP_ROM_QSTR(MP_QSTR_TRAPPED), MP_ROM_INT(MOY_PROC_TRAPPED) },
-    { MP_ROM_QSTR(MP_QSTR_KILLED), MP_ROM_INT(MOY_PROC_KILLED) },
 };
 static MP_DEFINE_CONST_DICT(log_globals, log_globals_table);
 

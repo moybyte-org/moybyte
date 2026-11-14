@@ -1,0 +1,16 @@
+{
+  "moy_alloc": {
+    "about": "memory outside the gc heap: a board's heap_caps memory as memoryviews",
+    "host": null,
+    "rows": [
+      {"py": "malloc_dma(size, caps=0)", "hand": true},
+      {"py": "alloc(size, caps=0)", "hand": true},
+      {"py": "free(view)", "hand": true},
+      {"py": "stats()", "hand": true},
+      {"py": "live()", "hand": true},
+      {"py": "MEMORY_DMA", "hand": true},
+      {"py": "MEMORY_INTERNAL", "hand": true},
+      {"py": "MEMORY_SPIRAM", "hand": true}
+    ]
+  }
+}

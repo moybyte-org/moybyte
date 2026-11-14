@@ -34,6 +34,12 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
   runtime/host/face_errors.py       the host faces' answer codes, exceptions and err texts
   docs/app_api_v1.md                the permission table, the call table and
                                     the role table (three regions)
+  the binding faces, from each native/<dir>/face.json (tools/gen_os/face.py)
+    native/<dir>/modmoy_<m>_face.c  a module's generated MicroPython rows, which
+                                    its hand file's globals table expands
+    runtime/host/<m>_face.py        the same rows over ctypes, with the
+                                    structures and constants they name
+    runtime/host/faces.py           each host face, in registration order
   the moy-app plugin (sdk/moybyte_sdk, `moy app`)
     sdk/moybyte_sdk/os_table.py         what each tier's module or script reaches, with
                                     the permissions each answers under
@@ -42,7 +48,8 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
 
 The generator is the package tools/gen_os/: table.py (the source, its views
 and its rules), cproto.py (a row's C prototype, parsed), and one emitter per
-tier (elf.py, wasi.py, app.py, lua.py, py.py, docs.py, sdk.py). This file is
+tier (elf.py, wasi.py, app.py, lua.py, py.py, docs.py, sdk.py), and face.py,
+the binding faces from their own sources. This file is
 its entry point and outputs() its one list.
 
 The output is committed: no build runs this, and tests/test_os_table.py
@@ -70,6 +77,7 @@ from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
+from gen_os import face  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
@@ -93,7 +101,7 @@ def outputs(src=None):
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
             (UI_SDK_H, gen_sdk_ui_h(src)),
-            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
+            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src))) + face.outputs()
 
 
 def main(argv=None):

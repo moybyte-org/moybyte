@@ -1,0 +1,27 @@
+{
+  "moy_http": {
+    "about": "the http device API's fetches, native/moy_net/moy_fetch.h",
+    "host": "moy_http",
+    "headers": ["moy_fetch.h", "moy_ota.h"],
+    "consts": [
+      "MOY_FETCH_QUEUED as QUEUED", "MOY_FETCH_RUNNING as RUNNING", "MOY_FETCH_DONE as DONE",
+      "MOY_FETCH_FAILED as FAILED", "MOY_FETCH_STREAM as STREAM",
+      "MOY_FETCH_CAP_MAX as CAP_MAX", "MOY_HTTPC_ETLS as ETLS", "MOY_HTTPC_ECERT as ECERT"
+    ],
+    "rows": [
+      {"py": "open(owner, url, cap)", "c": "moy_fetch_open", "out": {"h": null}, "neg_out": true, "example": [3, "ftp://x", 1024]},
+      {"py": "state(h)", "hand": true},
+      {"py": "read(h, off, buf)", "c": "moy_fetch_read", "wbuf": ["buf"], "example": [77, 0, {"bytearray": 8}]},
+      {"py": "stream(owner, url, window)", "c": "moy_fetch_stream", "out": {"h": null}, "neg_out": true, "example": [3, "ftp://x", 1024]},
+      {"py": "take(h, buf)", "c": "moy_fetch_take", "wbuf": ["buf"], "example": [77, {"bytearray": 8}]},
+      {"py": "tls()", "c": "moy_fetch_tls", "example": []},
+      {"py": "close(h)", "c": "moy_fetch_close", "example": [77]},
+      {"py": "sweep(owner)", "c": "moy_fetch_sweep", "example": [3]},
+      {"py": "count(owner)", "c": "moy_fetch_count", "example": [3]},
+      {"py": "source()", "c": "moy_fetch_source", "example": []},
+      {"py": "run()", "c": "moy_fetch_run", "example": []},
+      {"py": "present()", "c": "moy_fetch_present", "ret": "bool", "example": []},
+      {"py": "reset()", "c": "moy_fetch_reset", "example": []}
+    ]
+  }
+}

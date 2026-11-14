@@ -35,6 +35,10 @@ basename exists once in the tree, `device/` included; the stager refuses a
 second. **`host/`** holds the modules no board stages, by where they live: the
 ctypes bindings to the native kernels (`*_binding.py`, `moy_input`,
 `moy_loop`, `moy_play`, `moycore`, with their C shims `moyhost_*.c`), the
+generated faces of the modules a `native/<dir>/face.json` describes
+(`<m>_face.py`, beside each module's hand rows in `<m>.py`, over
+`face_ctypes`, the converters and the one loader they share; `faces`, the
+table `runtime/__init__.py` registers every host face from), the
 host's one library and its compile body (`host_native`, `native_build`), the
 compiled-cart runner (`wasm_host`), the boards' canvas on CPython
 (`host_canvas`) and the simulator glue (`host_app`). The rows below name a
