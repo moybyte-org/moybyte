@@ -17,6 +17,8 @@
 #include "moy_webauth.h"
 #include "moy_seal.h"
 #include "moy_ota.h"
+
+#include "modmoy_net_face.c"
 #pragma weak moy_c6_version
 
 // The board's network halves: the HTTP server's parser and its responses, the
@@ -1227,6 +1229,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_pw_hash_obj, mod_pw_hash);
 
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
+    MOY_FACE_MOY_NET_ROWS
     {MP_ROM_QSTR(MP_QSTR_encode_batch), MP_ROM_PTR(&mod_encode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},

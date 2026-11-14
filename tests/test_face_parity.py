@@ -86,7 +86,12 @@ def test_every_hand_row_takes_its_signature_s_arguments(m):
 
 def host_names(m):
     import runtime  # noqa: F401  (registers the host faces)
-    mod = sys.modules[m]
+    face = FACES[m]
+    if face.get("registered", True):
+        mod = sys.modules[m]
+    else:
+        import importlib
+        mod = importlib.import_module(face["host"])
     out = set()
     for n in dir(mod):
         v = getattr(mod, n)
@@ -111,7 +116,8 @@ def answers(m, runtime):
     script = F.parity_script(m, FACES[m])
     if runtime == "cpython":
         head = ("import sys\nsys.path.insert(0, %r)\nimport runtime\nimport importlib\n"
-                "M = importlib.import_module(%r)\nMP = False\n" % (ROOT, m))
+                "M = importlib.import_module(%r)\nMP = False\n"
+                % (ROOT, m if FACES[m].get("registered", True) else FACES[m]["host"]))
         done = subprocess.run([sys.executable, "-c", head + script], cwd=ROOT,
                               capture_output=True, text=True, timeout=300)
     else:
@@ -131,7 +137,8 @@ def unix_mp_dirs():
     return set(m.group(1).replace("\\\n", " ").split())
 
 
-ON_BOTH = [m for m in GENERATED if FACES[m].get("host") and FACES[m]["dir"] in unix_mp_dirs()]
+ON_BOTH = [m for m in GENERATED if FACES[m].get("host") and F.generated(FACES[m])
+           and FACES[m]["dir"] in unix_mp_dirs()]
 
 
 @pytest.mark.parametrize("m", ON_BOTH)

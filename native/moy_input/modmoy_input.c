@@ -1,6 +1,6 @@
 // moy_input's MicroPython binding: the input table (moy_input.h) as the module
-// `moy_input`, the same names the host's ctypes binding (runtime/host/moy_input.py)
-// gives CPython.
+// `moy_input`, its names those face.json lists: the rows here are the hand
+// ones, the rest are generated into modmoy_input_face.c.
 //
 //   NAMES, HOST_NAMES             the buttons, libmoy's order then the console's
 //   InputTable(), HostInputTable() a table over all fifteen names, or the host's
@@ -29,6 +29,8 @@
 #include "moy_edge.h"
 #include "moy_hid.h"
 #include "moy_input.h"
+
+#include "modmoy_input_face.c"
 
 // The board's drivers: keyboard(), touch(), trackball() and ble(), and the
 // frame's stage over them. A build that has none -- the browser's, whose input
@@ -1273,7 +1275,6 @@ static mp_obj_t input_pointer_state(mp_obj_t inp, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(input_pointer_state_obj, input_pointer_state);
 
-
 // -- the board's drivers (moy_input_task.c) ------------------------------------------
 //
 // keyboard() -> Keyboard or None: the T-Deck's C3, writing the kernel table's
@@ -1575,7 +1576,6 @@ static mp_obj_t input_trackball(void) {
     return MP_OBJ_FROM_PTR(o);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_trackball_obj, input_trackball);
-
 
 // ble() -> the BLE HID keyboard, or None where the board takes no BLE: the
 //   kernel's central (moy_ble_task.c over moy_hid.c), writing the kernel
@@ -2079,30 +2079,12 @@ void moy_input_loop_tail(void) {
 
 // -- the module ----------------------------------------------------------------------
 
-// typed(event) -> the byte a key event types, 0 for none (moy_input_typed)
-static mp_obj_t input_typed(mp_obj_t ev) {
-    return MP_OBJ_NEW_SMALL_INT(moy_input_typed((int32_t)mp_obj_get_int(ev)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_typed_obj, input_typed);
-
 // event(code, mods=0) -> the key event of `code` typed with `mods` held
 static mp_obj_t input_event(size_t n_args, const mp_obj_t *a) {
     mp_int_t mods = n_args > 1 ? mp_obj_get_int(a[1]) : 0;
     return MP_OBJ_NEW_SMALL_INT(MOY_INPUT_EVENT(mp_obj_get_int(a[0]), mods));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(input_event_obj, 1, 2, input_event);
-
-// pin_clock(us): the records' clock held at `us` (0: the real one), for tests.
-static mp_obj_t input_pin_clock(mp_obj_t us) {
-    moy_input_pin_clock((uint32_t)mp_obj_get_int_truncated(us));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_pin_clock_obj, input_pin_clock);
-
-static mp_obj_t input_hid_usage(mp_obj_t ev) {
-    return MP_OBJ_NEW_SMALL_INT(moy_hid_usage(mp_obj_get_int(ev)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_hid_usage_obj, input_hid_usage);
 
 static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_input) },
@@ -2138,7 +2120,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_P_LIVE), MP_ROM_INT(MOY_INPUT_P_LIVE) },
     { MP_ROM_QSTR(MP_QSTR_P_HELD), MP_ROM_INT(MOY_INPUT_P_HELD) },
     { MP_ROM_QSTR(MP_QSTR_P_CLICK), MP_ROM_INT(MOY_INPUT_P_CLICK) },
-    { MP_ROM_QSTR(MP_QSTR_typed), MP_ROM_PTR(&input_typed_obj) },
+    MOY_FACE_MOY_INPUT_ROWS
     { MP_ROM_QSTR(MP_QSTR_event), MP_ROM_PTR(&input_event_obj) },
     { MP_ROM_QSTR(MP_QSTR_MODS_AT), MP_ROM_INT(MOY_INPUT_MODS_AT) },
     { MP_ROM_QSTR(MP_QSTR_CTRL), MP_ROM_INT(MOY_INPUT_MOD_CTRL) },
@@ -2155,8 +2137,6 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
     { MP_ROM_QSTR(MP_QSTR_KEY_PGUP), MP_ROM_INT(MOY_INPUT_KEY_PGUP) },
     { MP_ROM_QSTR(MP_QSTR_KEY_PGDN), MP_ROM_INT(MOY_INPUT_KEY_PGDN) },
-    { MP_ROM_QSTR(MP_QSTR_pin_clock), MP_ROM_PTR(&input_pin_clock_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hid_usage), MP_ROM_PTR(&input_hid_usage_obj) },
     { MP_ROM_QSTR(MP_QSTR_EV_VERSION), MP_ROM_INT(MOY_EVENT_VERSION) },
     { MP_ROM_QSTR(MP_QSTR_EV_FIELDS), MP_ROM_INT(EV_FIELDS) },
     { MP_ROM_QSTR(MP_QSTR_EV_T), MP_ROM_INT(EV_T) },

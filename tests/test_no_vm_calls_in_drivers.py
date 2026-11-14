@@ -104,7 +104,8 @@ def test_the_audio_feed_names_nothing_of_the_vm(path):
 # modmoy_gatt.c, which run on the VM's task.
 
 INPUT = os.path.join(ROOT, "native", "moy_input")
-INPUT_BINDING = {"modmoy_input.c", "modmoy_gatt.c", "modmoy_midi.c", "modmoy_midi_face.c",
+INPUT_BINDING = {"modmoy_input.c", "modmoy_input_face.c", "modmoy_gatt.c", "modmoy_midi.c",
+                 "modmoy_midi_face.c",
                  "fuzz_input.c"}
 INPUT_DRIVERS = ("moy_input.c", "moy_input.h", "moy_kbd.c", "moy_touchdev.c", "moy_touch.c",
                  "moy_touch.h", "moy_drivers.h", "moy_input_task.c", "moy_hid.c", "moy_hid.h",

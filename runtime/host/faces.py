@@ -9,6 +9,7 @@ FACES = (
     ("moy_app", "moy_app_binding", True),
     ("moy_evq", "moy_evq", False),
     ("moy_http", "moy_http", False),
+    ("moy_input", "moy_input", False),
     ("moy_lease", "moy_lease", False),
     ("moy_log", "moy_log", False),
     ("moy_mic", "moy_mic", False),

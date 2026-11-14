@@ -12,16 +12,15 @@
 #   map_point                    a raw point onto the glass
 #   HidMachine                   the BLE keyboard central's machine over a fake stack
 #   event                        a key event: its code and modifiers
-#   typed                        the byte a key event types
 #   InputTable.reader            the event rings' readers (moy_event.h): events, pending
 #   RingSource                   a source that is its ring alone: a lease's, a device API's
-#   pin_clock                    the records' clock, held for a test
-#   hid_usage                    a key event as its HID usage and modifiers
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/history/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
 native module (native/moy_input/modmoy_input.c), which always wins over this
-file; CPython has no such module, so this is what it finds.
+file; CPython has no such module, so this is what it finds. The names are
+those native/moy_input/face.json lists: the rows here are the hand ones, the
+rest are runtime/host/moy_input_face.py's, generated.
 
   NAMES            the buttons, in libmoy's moy_button order with the console's
                    own names after it; HOST_NAMES is the host's prefix of it
@@ -47,6 +46,7 @@ import os
 
 import host_native
 import native_build
+from moy_input_face import *  # noqa: F401,F403
 from ticks import _ticks_ms, _ticks_us
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
@@ -245,8 +245,6 @@ _EV_SIGS = (
     ("moy_input_events", [_P, _I, ctypes.POINTER(_Event), ctypes.c_size_t], ctypes.c_size_t),
     ("moy_input_pending", [_P, _I], ctypes.c_size_t),
     ("moy_input_now_us", [], _U32),
-    ("moy_input_pin_clock", [_U32], None),
-    ("moy_hid_usage", [_I32], ctypes.c_uint16),
 )
 
 _LIB = [None]
@@ -849,25 +847,9 @@ def pointer_state(inp, out):
 # None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
 # is the drivers' table, the one a board's console reads.
 
-def pin_clock(us):
-    """The records' clock held at `us` microseconds (0: the real one)."""
-    _lib().moy_input_pin_clock(us & 0xFFFFFFFF)
-
-
-def hid_usage(ev):
-    """The HID usage a key event's key is (low byte) and its modifiers (high
-    byte): a KEY record's `a`."""
-    return _lib().moy_hid_usage(ev)
-
-
 def event(code, mods=0):
     """The key event of `code` typed with `mods` held."""
     return code | (mods << MODS_AT)
-
-
-def typed(ev):
-    """The byte key event `ev` types, 0 for none."""
-    return _lib().moy_input_typed(ev)
 
 
 def keyboard():
