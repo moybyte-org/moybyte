@@ -900,7 +900,7 @@ suites (`make preflight-web`). P4 and Guition P4 passes, with #58's composite
 numbers read before and after; crisp and smooth each looked at on glass, and
 a forced PPA error demoting to the CPU kernel.
 
-**Guard.** `+tests/test_one_compositor.py`: one class defines the
+**Guard.** `tests/test_one_compositor.py`: one class defines the
 one-buffer compositor's verbs, and the web's and the host's compositors are
 it; `device/p4_canvas.py` holds no branch on crisp or smooth around a blit.
 
