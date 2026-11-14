@@ -13,6 +13,7 @@ import random
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
@@ -541,17 +542,17 @@ def test_a_full_table_refuses_the_radio_and_the_console_reads_it_offline():
     taken = [N.take(2, N.GPIO, 0, (p,)) for p in pins[:N.ROWS_MAX]]
     assert len(taken) == N.ROWS_MAX
     assert _errno(lambda: N.Wifi().hold("web")) == errno.ENOSPC
-    from runtime.console_spine import SpineVerbs
+    from runtime.console_spine import Spine
 
     class Radio:
         def radio_on(self):
             return True
 
-    ws = SpineVerbs.__new__(SpineVerbs)
-    ws.wifi, ws.leases = Radio(), N.Wifi()
-    assert ws.wifi_hold("web") is False
+    ws = types.SimpleNamespace(wifi=Radio(), leases=N.Wifi())
+    ws.spine = Spine(ws)
+    assert ws.spine.wifi_hold("web") is False
     N.drop(taken[0])
-    assert ws.wifi_hold("web") is True and ws.leases.holders() == ["web"]
+    assert ws.spine.wifi_hold("web") is True and ws.leases.holders() == ["web"]
 
 
 def test_a_random_walk_of_the_radio_agrees_with_its_mask():

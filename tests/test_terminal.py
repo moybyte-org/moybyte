@@ -454,7 +454,7 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
     from runtime.host_app import build_workstation, ConsoleDriver
     ws = build_workstation(str(tmp_path / "carts"))
     drv = ConsoleDriver(ws)
-    ws.open_app(ws._apps_by_id["terminal"])
+    ws.spine.open_app(ws._apps_by_id["terminal"])
     drv.frame(1 / 30)
     app = ws.terminal_app
     kinds = ui_draw.input_kind(), ui_draw.hint_kind()
@@ -521,7 +521,7 @@ def _frame(ws):
     from runtime.host_app import ConsoleDriver
     drv = ConsoleDriver(ws)
     if ws.wm.top_kind() != "terminal":
-        ws.open_app(ws.terminal_app)
+        ws.spine.open_app(ws.terminal_app)
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     return drv

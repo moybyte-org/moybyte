@@ -386,7 +386,7 @@ def measure(loop):
     ws = loop.ws
     for _ in range(30):
         loop.step()
-    title = ws.launch_named("Frame Probe")
+    title = ws.home.launch_named("Frame Probe")
     for _ in range(60):
         loop.step()
     info = {"title": title, "error": str(ws.cart_error),
@@ -627,10 +627,10 @@ def notes(loop, info):
     """Notes with a note open, idle and typed into: the app cart a desk
     runs every day, on the verbs."""
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
-    info["notes_title"] = ws.launch_named("Notes")
+    info["notes_title"] = ws.home.launch_named("Notes")
     for _ in range(30):
         loop.step()
     ns = ws.run.player.ns
@@ -703,17 +703,17 @@ def code(loop, info):
     which a moved caret makes again."""
     from gc import mem_alloc
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
     ed = None
     for cart in ws.carts.all:            # a cart whose code the Editor opens
         ws.open_in_editor(cart)
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
         ed = ws.editor
         if ed is not None:
             break
-        ws.exit()
+        ws.spine.exit()
     info["code_cart"] = cart.get("title")
     ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
                           for i in range(120)))
@@ -804,7 +804,7 @@ def code(loop, info):
     del cl._rows
     del cl._draw_code
     del cl._draw_status
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
 
@@ -852,7 +852,7 @@ def apps(loop, info):
     import ui
     from gc import mem_alloc
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
     ws.cart_net = _Net(json.load(open(ROOT + "/net/routes.json")))
@@ -867,7 +867,7 @@ def apps(loop, info):
     W, H = ws.sys_canvas.w, ws.sys_canvas.h
     for app in APPS:
         a = ws._apps_by_id[app]
-        info[app + "_open"] = ws.open_app(a)
+        info[app + "_open"] = ws.spine.open_app(a)
         for _ in range(60):
             loop.step()
         t0 = time.ticks_ms()
@@ -915,7 +915,7 @@ def apps(loop, info):
                              ws.frame_change == "shift"))
             gc.enable()
         info[app + "_drag"] = drag
-        ws.exit()
+        ws.spine.exit()
         for _ in range(30):
             loop.step()
     ui.card = card
@@ -933,7 +933,7 @@ def editor(loop, info):
     banner = ws._toast_until
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     for tab in ("blocks",):
-        ws.set_menu_view(tab)
+        ws.text.set_menu_view(tab)
         bu = ws.block_ui
         be = bu.blocks_ed
         while len(be.rows) < 40:
@@ -985,7 +985,7 @@ def editor(loop, info):
         page.draw = draw
         info[tab + "_drag"] = drag
         info[tab + "_banner"] = ws._toast_until != banner
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
 
@@ -1628,7 +1628,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
     dt = 1 / 30
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(dt)

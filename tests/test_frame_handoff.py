@@ -364,7 +364,7 @@ def _desk_playing(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(DT)
-    ws.open_desk()
+    ws.home.open_desk()
     open_cart(ws, "Star Catcher")
     settle_badges(ws)
     ws._toast_until = 0
@@ -464,7 +464,7 @@ def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(DT)
-    ws.open_library()
+    ws.home.open_library()
     open_cart(ws, "Star Catcher")
     settle_badges(ws)
     ws._toast_until = 0

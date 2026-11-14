@@ -252,7 +252,7 @@ class FullscreenStackWM:
         cache a failed fit check can have back -- here the home's retained
         frame, then the layer a dialog's page is held in. True when
         something was freed."""
-        return self.ws.launcher_layer.release_retained() or self.ws.release_held()
+        return self.ws.launcher_layer.release_retained() or self.ws.binding.release_held()
 
     def prealloc(self):
         """An idle frame's mint of what a WM's first modal frame would
@@ -375,7 +375,7 @@ class FullscreenStackWM:
             now = _ticks_ms()
             if tu and _ticks_diff(tu, now) > 0:
                 sig |= 32
-            if ws.notice_active(now):
+            if ws.notices.notice_active(now):
                 sig |= 256
             if _NOTES.banner is not None and _NOTES.up(now) is not None:
                 sig |= 2048

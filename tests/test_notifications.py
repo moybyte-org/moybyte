@@ -178,10 +178,10 @@ def test_a_drag_up_on_the_banner_dismisses_it(tmp_path):
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
     ws.pointer.down = True
-    assert ws._note_pointer(x + w // 2, y + h - 2, False)
-    assert ws._note_pointer(x + w // 2, y + 2, False)
+    assert ws.notices._note_pointer(x + w // 2, y + h - 2, False)
+    assert ws.notices._note_pointer(x + w // 2, y + 2, False)
     ws.pointer.down = False
-    assert ws._note_pointer(x + w // 2, y - 20, True)
+    assert ws.notices._note_pointer(x + w // 2, y - 20, True)
     assert N.NOTES.up() is None and len(N.NOTES.list) == 1
     assert ws.screen == "desktop" and not ws.run.player.paused
 
@@ -195,7 +195,7 @@ def _mesh_minimised(ws, drv):
     drv.frame(_DT)
     mesh = ws.run.player
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     open_cart(ws, "Star Catcher")
     for _ in range(3):
         drv.frame(_DT)
@@ -212,7 +212,7 @@ def test_acting_on_the_handheld_minimises_the_game_and_focuses_the_app(tmp_path)
     assert nid is not None and N.NOTES.up().app == "Mesh"
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
-    assert ws._note_pointer(x + w // 2, y + h // 2, True)        # a tap on it
+    assert ws.notices._note_pointer(x + w // 2, y + h // 2, True)        # a tap on it
     drv.frame(_DT)
     assert ws.run.player is mesh and ws.cart["title"] == "Mesh"
     assert mesh.ns["acted"] == [(nid, "default")]
@@ -227,7 +227,7 @@ def test_acting_on_the_desk_throttles_the_game(tmp_path):
     _poster_cart(carts, type="game")
     ws = no_unlock_banner(build_desktop_ws(tmp_path))
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     for t in ("Mesh", "Star Catcher"):
         open_cart(ws, t)

@@ -472,7 +472,7 @@ def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     HOME key shows the desktop and brings the windows back."""
     before = board.state().get("order")
     assert before, "no window open to park"
-    board.pyexec("ws.open_library()", strict=True)
+    board.pyexec("ws.home.open_library()", strict=True)
     st = board._settle(lambda s: s.get("desk") is False, 0.5)
     assert st.get("stack") == ["launcher"], st.get("stack")
     assert not st.get("order") and st.get("parked") == before, st
@@ -484,11 +484,11 @@ def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     # The HOME key on the desk minimises every window and closes none; HOME
     # again brings them back (owner, 2026-10-13).
     mins = "[ws.wm._wins[k].minimized for k in ws.wm._order]"
-    board.pyexec("ws.home_key()", strict=True)
+    board.pyexec("ws.home.home_key()", strict=True)
     board.drain(0.5)
     assert board.pyval(mins, strict=True) == [True] * len(before)
     assert board.state().get("order") == before
-    board.pyexec("ws.home_key()", strict=True)
+    board.pyexec("ws.home.home_key()", strict=True)
     board.drain(0.5)
     assert board.pyval(mins, strict=True) == [False] * len(before)
 
@@ -690,7 +690,7 @@ def test_the_wm_meters_answer_for_the_frame_they_measured(board):
 
 def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
     """The two invariants this board's UI perf now rests on, asserted on the real
-    console via ws.note_cost (reported in `state` as "costs").
+    console via ws.perf.note_cost (reported in `state` as "costs").
 
     Both were bugs found the slow way on 2026-07-26, each costing a day because
     neither produced any signal -- they just made two frames per gesture 5x
@@ -904,7 +904,7 @@ def test_a_lua_cart_runs_and_exits(board):
 
 
 def test_a_cart_runs_and_exits(board):
-    """The desk tier's door: ws.exit() out, not the cart-quit flag. A `run`
+    """The desk tier's door: ws.spine.exit() out, not the cart-quit flag. A `run`
     from the tour's projects arrangement opens the cart under it, where the
     first draft's cart-quit exit did not pop -- so this board pins the launch
     and the shell's own close, while the fullscreen tiers pin the kid-facing

@@ -149,7 +149,7 @@ def push_cart(board, cart_dir, name, log=print):
         "if _c:\n"
         "    ws.carts.all = [x for x in ws.carts.all"
         " if x.get('path') != _c['path']] + [_c]\n"
-        "    ws.launcher.items = ws._launcher_items(ws.carts.all)\n" % dst)
+        "    ws.launcher.items = ws.home._launcher_items(ws.carts.all)\n" % dst)
     if not ok:
         raise RuntimeError("could not refresh the cart list")
 

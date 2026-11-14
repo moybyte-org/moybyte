@@ -37,10 +37,10 @@ def _home(ws):
     # every frame a full paint: the retained-frame stamp would present the
     # last one without drawing a card
     ws.launcher_layer._lib_unsupported = True
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, "mode", None) is not None:
-        ws.open_library()
-    ws.set_home_tab("games")
+        ws.home.open_library()
+    ws.home.set_home_tab("games")
     titles = [it.get("title") for it in ws.launcher.items]
     if "Sky Run" in titles:
         ws.launcher.sel = titles.index("Sky Run")
@@ -215,9 +215,9 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
 def test_one_focus_mark_under_the_pause_menu(tmp_path):
     """...and under the pause menu."""
     ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
-    ws.go_home()
+    ws.home.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     _frame(ws, 3)
     ws.system_key()
     assert ws.pause.open
@@ -328,7 +328,7 @@ def test_the_new_tile_takes_a_covers_corners(tmp_path, monkeypatch, config):
     square among rounded neighbours (design review R4-21)."""
     ws = _ws(tmp_path, config, "moy", "dark")
     _home(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     _frame(ws, 2)
     calls = []
     for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
@@ -361,7 +361,7 @@ def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mod
     where a cover's corner is smallest (design review R5-10, F6-04)."""
     ws = _ws(tmp_path, HANDHELD, "contrast", mode)
     _home(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     if not hero:
         ws.launcher.sel = 1             # the + tile on the shelf beside it
     _frame(ws, 2)
@@ -434,7 +434,7 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     review R4-26)."""
     ws = _ws(tmp_path, HANDHELD, "moy", "dark")
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     _frame(ws, 2)
     app = ws.editor_app
     zone = ws.bar_layer._zone_rect("menu")
@@ -456,8 +456,8 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
     splits what it has (`_geom_desk_at`)."""
     ws = _ws(tmp_path, DESK, theme, mode)
     ui_draw.input_kind("keys")
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frame(ws)
     win = ws.wm._wins["projects"]
     gaps = []

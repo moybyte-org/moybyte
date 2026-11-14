@@ -227,7 +227,7 @@ def _joined(name, dirs):
     while the updater's polled dial runs out (DIAL_MS, 20 s), let go after."""
     b = _open(name, dirs)
     try:
-        b.pyval("ws.wifi_hold('update')", timeout=15.0)
+        b.pyval("ws.spine.wifi_hold('update')", timeout=15.0)
         up = None
         deadline = time.time() + 25.0
         while up is None and time.time() < deadline:
@@ -240,7 +240,7 @@ def _joined(name, dirs):
                                          timeout=15.0))
     finally:
         try:
-            b.pyval("ws.wifi_release('update')", timeout=15.0)
+            b.pyval("ws.spine.wifi_release('update')", timeout=15.0)
         finally:
             b.close()
 
@@ -368,7 +368,7 @@ def step_edit(name, dirs):
     mark_desk, mark_floor = "# edited-on-the-desk", "# edited-on-the-floor"
     cmd = "edit " + SETTINGS
     before = _first_line(name, dirs)
-    opened, = _vals(name, dirs, "(ws.open_app(ws.terminal_app), %s.set_line(%r), %s.submit(), "
+    opened, = _vals(name, dirs, "(ws.spine.open_app(ws.terminal_app), %s.set_line(%r), %s.submit(), "
                                 "%s.app())[3]" % (_FACE, cmd, _FACE, _FACE))
     if opened != "edit":
         raise GateError("%s: the desk's `%s` opened %r" % (name, cmd, opened))

@@ -355,7 +355,7 @@ PLAYERS** hands a paired Bluetooth keyboard the second slot, so two kids share
 one screen on two real keyboards. The mechanism is #26's source model — a source
 carries a player, two of them disagreeing IS multiplayer — so `players()`
 answers 2 with no transport, session or netcode. Capability-gated on
-`ws.second_keyboard()`, non-None only where the board owns a keyboard already
+`ws.toggles.second_keyboard()`, non-None only where the board owns a keyboard already
 (the T-Deck); on a touch-only board the Bluetooth keyboard IS `ws.keyboard`, so
 handing it to player two leaves player one with nothing. Two honesty rules, both
 pinned: the setting **refuses** where it cannot work rather than reporting ON,

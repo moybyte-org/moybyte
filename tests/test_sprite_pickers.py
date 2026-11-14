@@ -58,7 +58,7 @@ def _console(path, desk, ships):
     no_unlock_banner(ws)
     quiesce(ws)
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):

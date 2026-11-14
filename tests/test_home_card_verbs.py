@@ -34,9 +34,9 @@ def _ws(tmp_path, config=HANDHELD):
     moy_ui.theme_uninstall()
     cfg = dict(g.CONFIGS[config], variant="dark", theme="moy")
     ws = g._build(cfg, tmp_path / "carts")
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, "mode", None) is not None:
-        ws.open_library()
+        ws.home.open_library()
     return ws
 
 
@@ -53,7 +53,7 @@ def _select(ws, tab, which):
     if tab == "mine" or which == "own":
         _select(ws, "games", "cart")
         ws.carts.dup(ws.launcher.selected())
-    ws.set_home_tab(tab)
+    ws.home.set_home_tab(tab)
     items = ws.launcher.items
     for i, it in enumerate(items):
         if which == "own" and not (it.get("path") and builtin_name(it["path"]) is None):
@@ -205,7 +205,7 @@ def test_a_short_press_or_a_drag_opens_no_menu(tmp_path):
     held = launcher_layer.LONG_PRESS_MS * 30 // 1000
     _long_press(ws, drv, frames=held - 3)     # released before the hold
     assert not (ws.sysmenu.open and ws.sysmenu.widget == "card")
-    ws.go_home()
+    ws.home.go_home()
     _frames(drv)
     x, y = _card_centre(ws)
     drv.touch(x, y)
@@ -236,8 +236,8 @@ def test_the_projects_windows_card_menu_is_its_own_cards(tmp_path):
     from ws_helpers import build_desktop_ws
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frames(drv)
     g = ws.projects_grid
     real = [i for i, it in enumerate(g.items) if it.get("path")]
@@ -394,7 +394,7 @@ def test_make_offers_no_delete_on_a_built_in(tmp_path, monkeypatch, config, kind
     ws = _ws(tmp_path, config)
     drv = make_drv(ws)
     _frames(drv)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     home = ws.launcher_layer
     built = [i for i, it in enumerate(ws.launcher.items)
              if it.get("path") and builtin_name(it["path"]) is not None]
@@ -405,7 +405,7 @@ def test_make_offers_no_delete_on_a_built_in(tmp_path, monkeypatch, config, kind
     assert "copy" in home.zone_verbs()
     assert "delete" not in _reached(ws, drv, kind, monkeypatch)
     ws.carts.dup(ws.launcher.items[built[0]])
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     own = next(i for i, it in enumerate(ws.launcher.items)
                if it.get("path") and builtin_name(it["path"]) is None)
     ws.launcher.sel = own
@@ -421,9 +421,9 @@ def test_the_make_strip_keeps_its_tab_keys(tmp_path, kind):
     ws = _ws(tmp_path)
     drv = make_drv(ws)
     _frames(drv)
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and builtin_name(it["path"]) is None)
     ui_draw.input_kind(kind)

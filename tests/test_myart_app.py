@@ -39,7 +39,7 @@ def _idle(ws, n=40):
 
 def _open(ws):
     app = ws._apps_by_id["myart"]
-    assert ws.open_app(app)
+    assert ws.spine.open_app(app)
     _frames(ws)
     assert ws.wm.top_kind() == "myart"
     _idle(ws)
@@ -94,11 +94,11 @@ def test_a_reopen_decodes_only_the_drawings_that_changed(tmp_path, monkeypatch):
     monkeypatch.setattr(artwork, "read_cover", read_cover)
     app = _open(ws)
     assert len(decoded) == 2
-    ws.go_home()
+    ws.home.go_home()
     _frames(ws)
     _open(ws)
     assert len(decoded) == 2, "a drawing no app wrote was decoded again"
-    ws.go_home()
+    ws.home.go_home()
     path = moy_carts.file_path("drawings", "rocket", ws.carts_root)
     was = os.stat(path).st_mtime
     _draw(ws, "rocket", c=2)            # another app writes it meanwhile
@@ -133,7 +133,7 @@ def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
         return real(blob, pix, w, h)
     monkeypatch.setattr(artwork, "read_cover", read_cover)
     monkeypatch.setattr(app, "draw", drawing)
-    assert ws.open_app(app)
+    assert ws.spine.open_app(app)
     _frames(ws)
     assert made == [] and app.idle_owed, "the cards drew without their pictures"
     _idle(ws)

@@ -363,7 +363,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # or all of them and the badges where the board serves no /console.json.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
-    ws.launcher.items = ws._launcher_items(ws.carts.all)
+    ws.launcher.items = ws.home._launcher_items(ws.carts.all)
     # Get Carts (#124), by where this page's carts live (`_cart_seams`).
     seams = _cart_seams(ws, _S.get("store_mode"))
     ws.cart_net = seams[0]
@@ -380,7 +380,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     if cart:
         ws.ach.mute = True
         ws.ach.toast = None
-        ws._achievement_unlocked = lambda *a, **k: None
+        ws.notices._achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
     # idle timeout) -- in the browser that composited an arrow over the first
     # game frames (owner report: "a cursor flashes at open"). Start hidden; a
@@ -404,7 +404,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
         # worlds (#105): boot onto the desk.
         from wm_windowed import WindowedWM
         ws.wm = WindowedWM(ws)
-        ws.open_desk()
+        ws.home.open_desk()
     # HUD (perf_hud.PerfHud): the bottom-right FPS chip draws onto the GAME
     # canvas, so on the handheld tier -- where the system canvas IS the game
     # canvas -- it lands inside the cart's own 320x240 raster and ships in the
@@ -458,7 +458,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     _S["driver"] = driver
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
-    _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
+    _S["exit"] = ws.spine._exit_to_caller     # the real exit (reload_cart uses it)
     _site_carts_made(ws)
     if cart:
         open_cart(cart)
@@ -702,7 +702,7 @@ def kiosk(name):
     def _restart():
         real_exit()
         open_cart(name)
-    ws._exit_to_caller = _restart
+    ws.spine._exit_to_caller = _restart
 
 
 def _rescan():
@@ -753,7 +753,7 @@ def reload_cart(name=None):
     if name is None and cart is not None:
         name = (cart.get("path") or "").rsplit("/", 1)[-1]
     if cart is not None:
-        _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
+        _S["exit"]()          # the REAL exit (kiosk wraps ws.spine._exit_to_caller)
     _rescan()
     for w in _watchers():
         # The reload just re-pulled the served store over the VFS -- adopt it as
@@ -771,12 +771,12 @@ def _select_cart(name):
     want = str(name).lower()
     if want.endswith(".moy"):
         want = want[:-4]
-    for c in ws._runnable_items():
+    for c in ws.home._runnable_items():
         folder = c.get("path", "").rsplit("/", 1)[-1].lower()
         if folder.endswith(".moy"):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
-            return ws.select_cart(c)
+            return ws.home.select_cart(c)
     return False
 
 
@@ -815,7 +815,7 @@ def edit_cart(name, tab=None):
     # meant to show -- and the run's world would outlive the workspace the
     # Editor rebuilds. PLAY in the Editor is how it starts again.
     if getattr(ws, "cart", None) is not None:
-        _S["exit"]()              # the REAL exit (kiosk wraps ws._exit_to_caller)
+        _S["exit"]()              # the REAL exit (kiosk wraps ws.spine._exit_to_caller)
     ok = _select_cart(name)
     if ok:
         ws.open_in_editor()
@@ -823,7 +823,7 @@ def edit_cart(name, tab=None):
         if opener is not None:
             getattr(ws.editor_app, opener)()
         elif tab:
-            ws.set_menu_view(tab)         # a tab with no opener of its own (code)
+            ws.text.set_menu_view(tab)         # a tab with no opener of its own (code)
     return json.dumps({
         "ok": ok,
         "screen": getattr(ws, "screen", None),

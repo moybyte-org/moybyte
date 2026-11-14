@@ -367,7 +367,7 @@ build, and Remove forgets the record.
 **A cart that arrived as files is asked on its first run (owner,
 2026-11-09).** One copied onto the card, over SFTP or USB, or pushed by a
 paired browser has no record, and its first launch from the home shows the
-install prompt's lines, "Open <title>?" (`Workstation.ask_first`); a
+install prompt's lines, "Open <title>?" (`Notices.ask_first`); a
 command asks in its terminal (`sh_door`): where its session asks questions
 (`moy_sh_ask`), at the prompt, and the next line typed answers and runs its
 line again, so no run waits on the terminal. Open records the consent an
@@ -878,7 +878,7 @@ start runs it again.
   of the two names is bounded by §1's BACKPRESSURE alone.
 - **The sender is the OS's stamp.** The process asks the console for the
   sender's declaration (`game(app)`, handed at its start with `clock_day()`
-  and `row_stamp()` by `Workstation.service_env`; for `"system"` the
+  and `row_stamp()` by `Notices.service_env`; for `"system"` the
   console's own; kept per sender while the shelf's roster and titles
   stand), so a game
   reaches only the badges its own manifest declares, read strictly

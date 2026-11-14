@@ -51,7 +51,7 @@ def _frames(ws, n=3):
 
 
 def _open(ws, app):
-    ws.open_app(app)
+    ws.spine.open_app(app)
     for _ in range(40):
         _frames(ws, 1)
         if app.phase != "checking":
@@ -199,7 +199,7 @@ def test_the_desk_shows_the_focused_card_in_the_pane(tmp_path):
     repo, net = _shelf()
     ws, app = _ws(tmp_path, net, [repo.url("index.json")], sys_size=(1024, 600),
                   panel_diagonal_in=7.0, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     _open(ws, app)
     win = ws.wm._wins["getcarts"]
     win.x, win.y = 112, 52

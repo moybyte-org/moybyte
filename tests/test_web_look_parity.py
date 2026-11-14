@@ -187,8 +187,8 @@ _STEADY = ("_ws.bar_layer._clock_text = lambda: '12:00'\n"
            "_ws.ach.toast = None\n"
            "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
 _EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
-           "_ws.set_menu_view('cards')\n")
-_APP = "_ws.open_app(_ws._apps_by_id[%r])\n"
+           "_ws.text.set_menu_view('cards')\n")
+_APP = "_ws.spine.open_app(_ws._apps_by_id[%r])\n"
 # (arrangement, scene, theme, variant, what the scene does after the setup)
 SCENES = [("handheld", "home", "moy", "dark", ""),
           ("handheld", "editor_config", "moy", "dark", _EDITOR),

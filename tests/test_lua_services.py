@@ -350,7 +350,7 @@ def desk(tmp_path, monkeypatch):
     boot_on_fixture(monkeypatch)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     yield ws, drv
     S.SCHED.reset()

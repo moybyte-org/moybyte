@@ -249,7 +249,7 @@ class PauseMenu:
         ws.cart_error = None
         ws._reset_canvas_state()
         if ws.wm.top_is_player():
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
         if row == self.UPDATES:
             ws.open_settings()
             ws.settings_layer.show_row("ota_channel")
@@ -282,7 +282,7 @@ class PauseMenu:
         elif row == "Quit":
             self.close()
             ws._reset_canvas_state()
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
         ws.mark_dirty()
 
     def _unwash_strip(self, cv):
@@ -567,7 +567,7 @@ class DeleteConfirm:
     Cancel and Stop & play. Its line wraps, the card growing to fit.
 
     And the first run of a cart that arrived as files (`ask_lines`,
-    `Workstation.ask_first`): "Open <title>?" over the install prompt's
+    `Notices.ask_first`): "Open <title>?" over the install prompt's
     lines, as Get Carts draws them (`app_perms.show`), No and Open.
 
     And the intents' "open with" menu (`choose`, runtime/system/intents.py):
@@ -847,14 +847,14 @@ class SystemMenuUI:
         # T-Deck's Code tab types K), as the home key goes (`home_key`).
         ws = self.ws
         if not ws.windowed_chrome and not ws.wm.top_is("launcher"):
-            rows.append(_row("item", "menu.home", ws.home_key))
+            rows.append(_row("item", "menu.home", ws.home.home_key))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
         # is active/typing, so the same row both opens and dismisses it.
         if self.ws.screen == "launcher":
             sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
                    else "menu.search")
-            rows.append(_row("item", sid, self.ws.toggle_search))
+            rows.append(_row("item", sid, self.ws.home.toggle_search))
         if not ws.wm.top_is("tasks"):
             rows.append(_row("item", "menu.tasks", ws.open_tasks))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
@@ -928,7 +928,7 @@ class SystemMenuUI:
         # Ask before deleting the OPEN cart (None: carts.delete() targets
         # ws.cart, which need not be the home's selection); a delete that
         # removed it goes home. carts.delete() guards read-only / last-cart.
-        self.ws.confirm.ask(None, self.ws.go_home)
+        self.ws.confirm.ask(None, self.ws.home.go_home)
 
     def _menu_about(self):
         # About's card over the washed content (AboutCard).
@@ -954,7 +954,7 @@ class SystemMenuUI:
                 return
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte reboot failed:", exc)
-        self.ws.go_home()                 # safe stub when no reboot hook is wired
+        self.ws.home.go_home()                 # safe stub when no reboot hook is wired
 
     def _draw_sysmenu(self):
         """The popover: the menu's rows as the look's card (`_draw_look`), or
@@ -1344,7 +1344,7 @@ class AboutCard:
         self.host.reset()
         ws = self.ws
         u = ws.updater
-        v = _about_ui.version_words(u, ws._ota_channel() if u is not None else None)
+        v = _about_ui.version_words(u, ws.toggles._ota_channel() if u is not None else None)
         b = _about_ui.board_of()
         from settings_layer import BOARDS
         upd = None

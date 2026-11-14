@@ -720,7 +720,7 @@ def _remote_state(ws):
         st["psave"] = None if idle is None else [idle[0] >= 3, idle[3]]
         st["idle"] = None if idle is None else {
             "state": idle[0], "dim": idle[1], "saver": idle[2], "blank": idle[3]}
-        # Expensive-event counters (ws.note_cost): cache builds + storage
+        # Expensive-event counters (ws.perf.note_cost): cache builds + storage
         # reads. A cache that is silently missing shows up here as a count that
         # tracks the frame count.
         st["costs"] = dict(getattr(ws, "costs", {}) or {})
@@ -1411,7 +1411,7 @@ class DevChannel:
             return
         if not said:
             print("RECV ERR %s" % err)
-        say = getattr(ws, "notice", None)
+        say = getattr(getattr(ws, "notices", None), "notice", None)
         if err.startswith("store full") and say is not None:
             say("CAN'T ADD CART", "the store is full", "warn")
 
@@ -1624,7 +1624,7 @@ class DevChannel:
                 rescan()
         elif cmd == "moy-run":
             name = line.split(None, 1)[1] if len(parts) > 1 else ""
-            launch = getattr(ws, "launch_named", None)
+            launch = getattr(getattr(ws, "home", None), "launch_named", None)
             if launch is not None and launch(name):
                 print("moy-ok")
             else:
@@ -1782,7 +1782,7 @@ class DevChannel:
             except OSError:
                 pass
             print("moy-err %s: %s" % (rel, err))
-            say = getattr(ws, "notice", None)
+            say = getattr(getattr(ws, "notices", None), "notice", None)
             if err.startswith("store full") and say is not None:
                 say("CAN'T ADD CART", "the store is full", "warn")
             return
@@ -1829,12 +1829,12 @@ class DevChannel:
             print("STATE %s" % json.dumps(_remote_state(ws)))
             return
         if cmd == "run":
-            # The lookup is ws.launch_named -- the SAME body the browser's PLAY
+            # The lookup is ws.home.launch_named -- the SAME body the browser's PLAY
             # ON DEVICE goes through (moy_webhost POST /run), so a name that
             # works over serial works from the page and neither can grow its own
             # idea of what a cart is called.
             name = " ".join(parts[1:]) if len(parts) > 1 else ""
-            title = ws.launch_named(name)
+            title = ws.home.launch_named(name)
             if title:
                 print("REMOTE run %s" % title)
             else:
@@ -1847,7 +1847,7 @@ class DevChannel:
             # silently undone. persist=False -- a serial A/B must not rewrite the
             # kid's system/settings.
             try:
-                ws.set_diag_live(on, persist=False)
+                ws.toggles.set_diag_live(on, persist=False)
             except Exception:  # noqa: BLE001 -- older console: flag only
                 ws.diag_live = on
             ws.show_fps = on
@@ -1879,7 +1879,7 @@ class DevChannel:
                 print("REMOTE %s: not available on this board" % cmd)
                 return
             on = not (len(parts) == 2 and parts[1] == "0")
-            getattr(ws, setter)(on, persist=False)
+            getattr(getattr(ws, "toggles", None), setter)(on, persist=False)
             print("REMOTE %s %s"
                   % (cmd, "on" if getattr(ws, key, on) else "off"))
             return
@@ -1979,7 +1979,7 @@ class DevChannel:
             # harness needs to SEE; `open wifi` deep-links Settings -> wifi.
             what = parts[1] if len(parts) > 1 else ""
             if what == "appearance" and getattr(ws, "appearance_app", None) is not None:
-                ok = ws.open_app(ws.appearance_app)
+                ok = ws.spine.open_app(ws.appearance_app)
                 print("REMOTE open appearance -> %s" % ok)
                 return
             if what == "log" and hasattr(ws, "open_log"):
@@ -1992,7 +1992,7 @@ class DevChannel:
                 print("REMOTE open wifi")
                 return
             fn = {"settings": getattr(ws, "open_settings", None),
-                  "projects": getattr(ws, "open_projects", None)}.get(what)
+                  "projects": getattr(getattr(ws, "home", None), "open_projects", None)}.get(what)
             if fn is not None:
                 fn()
                 print("REMOTE open %s" % what)

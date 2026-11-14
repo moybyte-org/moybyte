@@ -14,6 +14,7 @@ import re
 
 from runtime import procs
 from tools.board_config import runtime_file
+from ws_services import classdef as ws_classdef, services
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIELDS = sorted(procs.Run().__dict__)
@@ -25,23 +26,13 @@ WS = r"(?<![\w.\]])(?:self\.su\.ws|self\._ws|self\.ws|su\.ws|ws)"
 
 
 def _console_classes():
-    """(path, ClassDef) for the Workstation and every mixin it is made of."""
-    path = str(runtime_file("console.py"))
-    tree = ast.parse(open(path).read())
-    ws_cls = next(n for n in tree.body
-                  if isinstance(n, ast.ClassDef) and n.name == "Workstation")
-    names = {b.id for b in ws_cls.bases if isinstance(b, ast.Name)} | {"Workstation"}
-    out = []
-    shell = os.path.dirname(path)
-    for fn in sorted(os.listdir(shell)):
-        if not (fn.startswith("console") and fn.endswith(".py")):
-            continue
-        p = os.path.join(shell, fn)
-        for n in ast.parse(open(p).read()).body:
-            if isinstance(n, ast.ClassDef) and n.name in names:
-                out.append((p, n))
-                names.discard(n.name)
-    assert not names, "Workstation bases not found: %s" % sorted(names)
+    """(path, ClassDef) for the Workstation and every service it builds
+    (tests/ws_services.py); a service reaches the console as `ws`, which the
+    test below this one reads."""
+    out = [(str(runtime_file("console.py")), ws_classdef(runtime_file("console.py"),
+                                                          "Workstation"))]
+    for _attr, _name, mod, cls in services():
+        out.append((str(runtime_file(mod + ".py")), cls))
     return out
 
 
@@ -168,7 +159,7 @@ def test_two_consoles_in_one_process_keep_their_own_runs(tmp_path):
     assert rb.player.ns is not None and rb.player.cart_error is None
     assert ra.player.ns is not None and ra.player.cart_error is None
     assert seen[-1] > seen[0], seen
-    a.exit()
+    a.spine.exit()
     for _ in range(3):
         b.frame(1 / 30)
     assert b.run is rb and rb.player.ns is not None

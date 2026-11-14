@@ -148,9 +148,9 @@ def main():
         _verdict(blits, reps)
 
         # -- fullscreen library ---------------------------------------------
-        b.pyexec("ws.go_home()")
+        b.pyexec("ws.home.go_home()")
         b.drain(1.5)
-        b.pyexec("ws.open_library()")
+        b.pyexec("ws.home.open_library()")
         b.drain(10.0)
         band = b.pyval("ws.launcher.band_rect()")
         bx, by, bw, bh = band

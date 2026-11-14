@@ -448,11 +448,11 @@ def cmd_desk(b, a):
         st = b.state()
     stack = st.get("stack") or []
     if stack and stack[-1] not in ("launcher", "desk"):
-        b.pyval("ws.go_home() or 1", timeout=20)
+        b.pyval("ws.home.go_home() or 1", timeout=20)
         b.drain(0.5)
         st = b.state()
     if st.get("desk") is False:
-        b.pyexec("ws.open_desk()")
+        b.pyexec("ws.home.open_desk()")
         b.drain(0.5)
         st = b.state()
     print("stack=%s desk=%s order=%s"
@@ -974,7 +974,7 @@ def c6_stream(b, url, size, sha):
     if not b.pyval("getattr(ws, 'c6_updater', None) is not None", timeout=10):
         raise BoardError("this board has no C6 updater")
     cu = "ws.c6_updater"
-    b.pyexec("ws.wifi_hold('update')\n"
+    b.pyexec("ws.spine.wifi_hold('update')\n"
              "__import__('device_wifi').autoconnect_wifi(ws.wifi)", timeout=30)
     try:
         end = time.time() + C6_LINK_S
@@ -1012,7 +1012,7 @@ def c6_stream(b, url, size, sha):
             return "swapped"
         raise BoardError("the radio did not take it: %s" % err)
     finally:
-        b.pyexec("ws.wifi_release('update')", timeout=30)
+        b.pyexec("ws.spine.wifi_release('update')", timeout=30)
 
 
 def cmd_c6(name, dirs, a):

@@ -11,6 +11,7 @@ a BLE keyboard IS `ws.keyboard`, the only one there is, so handing it to player
 two would leave player one with nothing to press.
 """
 
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -84,7 +85,6 @@ class _Ws:
     """The slice of the Workstation the setting touches."""
 
     two_player = False
-    _dirty = False
 
     def __init__(self, keyboard=None, ble=None):
         self.keyboard = keyboard
@@ -92,18 +92,16 @@ class _Ws:
         self.prefs = _Prefs()
         self.system = self.prefs.rows
 
-    second_keyboard = None      # bound below from the real Workstation
 
 
 def _ws(**kw):
-    from runtime.console import Workstation
+    from runtime.console_settings import SettingsToggles
     w = _Ws(**kw)
-    w.second_keyboard = Workstation.second_keyboard.__get__(w)
-    w.set_two_player = Workstation.set_two_player.__get__(w)
-    # The setter's tail (mirror + repaint mark + persisted copy) is the one
-    # body every SETTINGS_TOGGLES verb shares since #209 section 7; what stays
-    # this setter's own is the keyboard hand-over above it.
-    w._set_toggle = Workstation._set_toggle.__get__(w)
+    # The real service over the stand-in: the setter's tail (mirror, repaint
+    # mark, persisted copy) is the one body every SETTINGS_TOGGLES verb shares
+    # since #209 section 7, and the keyboard hand-over is this setter's own.
+    w.frame_state = types.SimpleNamespace(dirty=False)
+    w.toggles = SettingsToggles(w)
     return w
 
 
@@ -195,15 +193,15 @@ def test_only_a_board_with_a_second_keyboard_can_do_this():
 
     # The T-Deck: a physical keyboard, and a BLE one beside it.
     tdeck = _ws(keyboard=object(), ble=ble)
-    assert tdeck.second_keyboard() is ble
+    assert tdeck.toggles.second_keyboard() is ble
 
     # A touch-only board: the BLE keyboard IS the only keyboard.
     guition = _ws(keyboard=ble, ble=ble)
-    assert guition.second_keyboard() is None, (
+    assert guition.toggles.second_keyboard() is None, (
         "handing the only keyboard to player two leaves player one with nothing")
 
     # No BLE at all.
-    assert _ws(keyboard=object(), ble=None).second_keyboard() is None
+    assert _ws(keyboard=object(), ble=None).toggles.second_keyboard() is None
 
 
 def test_the_setting_refuses_where_it_cannot_work():
@@ -212,7 +210,7 @@ def test_the_setting_refuses_where_it_cannot_work():
     inp = _mi.InputTable()
     ble = _FakeBle(inp)
     guition = _ws(keyboard=ble, ble=ble)
-    guition.set_two_player(True, persist=False)
+    guition.toggles.set_two_player(True, persist=False)
     assert guition.two_player is False
     assert ble.src.player == 0
 
@@ -222,11 +220,11 @@ def test_the_setting_drives_the_keyboard_and_persists():
     ble = _FakeBle(inp)
     ws = _ws(keyboard=object(), ble=ble)
 
-    ws.set_two_player(True)
+    ws.toggles.set_two_player(True)
     assert ws.two_player is True and ble.src.player == 1
     assert ws.system.get("two_player") is True
 
-    ws.set_two_player(False)
+    ws.toggles.set_two_player(False)
     assert ws.two_player is False and ble.src.player == 0
     assert ws.system.get("two_player") is False
 

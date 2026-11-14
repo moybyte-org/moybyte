@@ -180,9 +180,9 @@ def test_under_touch_the_homes_keep_no_strip_band(tmp_path, config):
     try:
         ws = g._build(dict(g.CONFIGS[config], variant="dark", theme="moy"),
                       Path(tmp_path) / "carts")
-        ws.go_home()
+        ws.home.go_home()
         if getattr(ws.wm, "mode", None) is not None:
-            ws.open_library()
+            ws.home.open_library()
         grid, lay = ws.launcher, ws.layout
         foot = lay.cy + lay.ch
         ui_draw.input_kind("keys")
@@ -246,7 +246,7 @@ def test_a_touch_after_keys_keeps_the_hints_up(tmp_path):
     ws = build_ws(Path(tmp_path))
     drv = make_drv(ws)
     ws.use_inputs((("local", "tdeck"), ("touch", "touch")))
-    ws.go_home()
+    ws.home.go_home()
     drv.frame(1 / 30)
     band = ws.launcher.foot()[5][3]
     assert band > 0

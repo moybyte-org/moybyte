@@ -8,8 +8,8 @@ from ws_helpers import build_desktop_ws
 
 def _console_home(tmp_path):
     ws = build_desktop_ws(tmp_path)
-    ws.go_home()
-    ws.open_library()                     # console mode over the parked desk
+    ws.home.go_home()
+    ws.home.open_library()                     # console mode over the parked desk
     ws.frame(1 / 30)
     r = ws.bar_layer.back_rect("home")
     assert r is not None, "console mode over a desk draws the way back"

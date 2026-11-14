@@ -194,7 +194,7 @@ class Recorder:
         self.ws.carts.apply(items)
         cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)
-        self.ws.select_cart(cart)
+        self.ws.home.select_cart(cart)
         return cart
 
     def open_editor(self, cart):

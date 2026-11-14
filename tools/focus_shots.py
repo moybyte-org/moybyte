@@ -286,7 +286,7 @@ def _sheet_setup(page, focus, keys, press, apps=None):
         app = Sheet(ws, page)
         if apps is not None:
             apps.append(app)
-        ws.register_app(app)
+        ws.spine.register_app(app)
         app.open()
         ws.wm.goto(app.id)
         L._settle(g, ws, 2)
@@ -309,7 +309,7 @@ def _sheet_setup(page, focus, keys, press, apps=None):
 
 def _open(app_id, then=None):
     def setup(g, ws):
-        ws.open_app(ws._apps_by_id[app_id])
+        ws.spine.open_app(ws._apps_by_id[app_id])
         L._settle(g, ws, 2)
         if then is not None:
             then(g, ws)
@@ -343,7 +343,7 @@ def _bar_focus(name):
 
 
 def _desk_power(g, ws):
-    ws.open_desk()
+    ws.home.open_desk()
     L._settle(g, ws, 2)
     ws._golden_popover = True
     ws.widget_tap("battery")

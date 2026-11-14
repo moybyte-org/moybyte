@@ -86,7 +86,7 @@ def _editor(ws, tab):
     """The handheld Editor on Star Catcher's `tab`: its CodeLayout and the
     glass origin of its content (0, 0)."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     if tab == "code":
         ed = ws.editor
         ed.row, ed.col, ed.top = CODE_ROW, CODE_COL, CODE_TOP
@@ -147,8 +147,8 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, theme, mode):
 def _files(ws, cur=3):
     """The desk's Files window on Projects, file row `cur` current. (the
     app, its window)."""
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["files"])
     _frame(ws, 2)
     app = ws._apps_by_id["files"]
     app = getattr(app, "app", app)
@@ -244,7 +244,7 @@ def _sprites(ws):
     """The handheld Sprites tab, as the targets show it (tools/look_shots.py's
     `_sprites`): its PaintLayout."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view("paint")
+    ws.text.set_menu_view("paint")
     _frame(ws)
     return ws.paint_layer.layout
 
@@ -294,8 +294,8 @@ APPEARANCE_WIN = (226, 65, 680, 510)
 
 
 def _desk_appearance(ws):
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["appearance"])
     _frame(ws, 2)
     win = _place(ws, "appearance", APPEARANCE_WIN)
     _frame(ws)
@@ -346,7 +346,7 @@ def test_under_touch_a_handheld_app_keeps_no_hint_band(tmp_path, app_id, theme, 
     review R3-07); a key input brings the hints back."""
     ws = _ws(tmp_path, HANDHELD, theme, mode)
     ws.use_inputs([("local", "touch")])
-    ws.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws._apps_by_id[app_id])
     _frame(ws)
     lay = ws.layout
     px = _px(ws)
@@ -376,8 +376,8 @@ def test_the_desk_calcs_backspace_stands_as_tall_as_its_digits(tmp_path, theme, 
     """The desk Calc's ⌫ is as tall as the digits beside it, less a pixel
     (design review R3-09: a 12 px icon beside 15 px digits)."""
     ws = _ws(tmp_path, DESK, theme, mode)
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["calc"])
     _frame(ws)
     win = ws.wm._wins["calc"]
     lay = win.ctx.app_layouts["calc"]

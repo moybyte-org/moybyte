@@ -80,7 +80,7 @@ def test_a_par_item_reaches_no_app_row(tmp_path):
     ws.frame(1.0 / 30.0)
     lines = [t for _s, _t, _l, q, t in os_log.records(since, 256)
              if q == pid and not t.startswith("start ")]
-    ws.exit()
+    ws.spine.exit()
     assert lines == ["refused"], lines
 
 

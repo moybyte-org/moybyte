@@ -177,7 +177,7 @@ class TasksLayer(Layer):
         ws = self.ws
         if i.pressed("home"):
             ws.close_tasks()
-            ws.home_key()
+            ws.home.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
             ws.input_policy.back(leave=True)

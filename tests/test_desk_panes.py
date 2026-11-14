@@ -45,7 +45,7 @@ def _desk(path, cart, key, tab, ships, window=False):
     ws.bar_layer._clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == cart))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):

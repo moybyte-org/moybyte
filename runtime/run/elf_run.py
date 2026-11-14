@@ -263,15 +263,15 @@ class ElfRuntime:
         if hold:
             first = not self.netted
             self.netted.add(pid)
-            if getattr(ws, "wifi_hold", None) is not None:
-                ws.wifi_hold(NET_TAG, pid)
+            if getattr(getattr(ws, "spine", None), "wifi_hold", None) is not None:
+                ws.spine.wifi_hold(NET_TAG, pid)
                 dial = getattr(getattr(ws, "cart_net", None), "dial", None)
                 if first and dial is not None:
                     dial()
         elif pid in self.netted:
             self.netted.discard(pid)
-            if getattr(ws, "wifi_release", None) is not None:
-                ws.wifi_release(NET_TAG, pid)
+            if getattr(getattr(ws, "spine", None), "wifi_release", None) is not None:
+                ws.spine.wifi_release(NET_TAG, pid)
 
     def _flags(self, cart, net):
         import app_perms

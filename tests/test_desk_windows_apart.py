@@ -34,7 +34,7 @@ def _desk(tmp_path):
     ws.look.set_theme("moy", persist=False)
     ws.bar_layer._clock_text = lambda: "10:30"
     ws.carts_store.save_file("docs", NOTE[0], NOTE[1], ws.carts_root)
-    ws.open_desk()
+    ws.home.open_desk()
     drv = make_drv(ws)
     open_cart(ws, "Notes")
     for _ in range(3):
@@ -43,7 +43,7 @@ def _desk(tmp_path):
     for _ in range(3):
         _frame(drv)
     term = ws._apps_by_id["terminal"]
-    ws.open_app(term)
+    ws.spine.open_app(term)
     for _ in range(4):
         _frame(drv)
     assert ws.wm._focus == "terminal"
@@ -119,13 +119,13 @@ def test_typing_reaches_the_focused_window_alone(tmp_path):
 
 def test_opening_an_app_leaves_the_editors_project(tmp_path):
     ws = build_desktop_ws(tmp_path)
-    ws.open_desk()
+    ws.home.open_desk()
     drv = make_drv(ws)
     cart = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     ws.open_in_editor(cart)
     for _ in range(3):
         _frame(drv)
-    ws.open_app(ws._apps_by_id["terminal"])
+    ws.spine.open_app(ws._apps_by_id["terminal"])
     for _ in range(3):
         _frame(drv)
     assert ws.editor_app.project.cart.get("title") == "Star Catcher"
@@ -140,7 +140,7 @@ def test_q_and_e_step_the_tabs_of_the_focused_window_alone(tmp_path, tier):
         _frame(drv)
     assert _pmem(ws, 1) == [1]
     term = ws._apps_by_id["terminal"]
-    ws.open_app(term)
+    ws.spine.open_app(term)
     for _ in range(3):
         _frame(drv)
     _type(drv, "eeq")

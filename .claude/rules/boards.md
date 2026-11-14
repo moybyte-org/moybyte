@@ -178,7 +178,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (`native/moy_net/moy_net.h`, THE BOOK): the first holder powers the STA up
   and the last out powers it down (`esp_wifi_stop`), from whichever task
   changed the rows, which keeps the S3's WLAN-vs-LCD-DMA internal-RAM fight to
-  when the network is needed. Python's `Workstation.wifi_hold(tag, pid=None)`
+  when the network is needed. Python's `Spine.wifi_hold(tag, pid=None)`
   and `wifi_release(tag, pid=None)` take and drop rows of that table; a
   compiled program's http handle and the media service take theirs in C. The
   holders are `web` (released when the webhost's socket closes), `update` (taken before

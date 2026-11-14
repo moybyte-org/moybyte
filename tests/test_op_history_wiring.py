@@ -39,7 +39,7 @@ def _stroke(pe, x, y, color):
 
 def test_paint_stroke_bar_undo_reverts_one_stroke(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
-    ws._open_paint()
+    ws.text._open_paint()
     assert ws.menu_view == "paint"
     pe = ws.paint
     pe.n = 0
@@ -62,7 +62,7 @@ def test_paint_dimmed_state_is_truthful(tmp_path):
     # ws.history.can_undo()/can_redo() (the bar icons' enabled state) must track the active
     # paint History exactly -- a fresh sheet is dim both ways.
     ws = _make_ws_with_cart(tmp_path)
-    ws._open_paint()
+    ws.text._open_paint()
     pe = ws.paint
     pe.n = 0
     assert ws.history.can_undo() is False and ws.history.can_redo() is False
@@ -82,13 +82,13 @@ def test_paint_commit_embeds_ops_in_journal(tmp_path):
     from runtime import moy_journal
     ws = _make_ws_with_cart(tmp_path)
     path = ws.cart["path"]
-    ws._open_paint()
+    ws.text._open_paint()
     pe = ws.paint
     pe.n = 0
     _stroke(pe, 0, 0, 5)
     _stroke(pe, 3, 4, 6)
 
-    ws.save_sprites()                    # commit -> keyframe + the op batch
+    ws.saves.save_sprites()                    # commit -> keyframe + the op batch
 
     ents = _entries(path, "sprites.moygfx")
     assert ents, "a sprite commit must journal"
@@ -107,11 +107,11 @@ def test_paint_commit_rebaselines_the_history(tmp_path):
     # The clean boundary: a commit clears the in-RAM stack (in-RAM undo covers edits
     # SINCE the last commit only), so the journal owns commit-to-commit.
     ws = _make_ws_with_cart(tmp_path)
-    ws._open_paint()
+    ws.text._open_paint()
     pe = ws.paint
     pe.n = 0
     _stroke(pe, 0, 0, 5)
-    ws.save_sprites()
+    ws.saves.save_sprites()
     assert pe.can_undo() is False        # re-baselined -- the stroke is now a commit
 
 
@@ -119,15 +119,15 @@ def test_paint_repeated_undo_walks_into_the_previous_commit(tmp_path):
     # Two committed strokes + a third uncommitted: local undo reverts the live
     # stroke, then the SAME bar UNDO crosses into the journal and walks whole commits.
     ws = _make_ws_with_cart(tmp_path)
-    ws._open_paint()
+    ws.text._open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)
 
     _stroke(pe, 0, 0, 5)
-    ws.save_sprites()                    # commit V1: (0,0)=5
+    ws.saves.save_sprites()                    # commit V1: (0,0)=5
     _stroke(pe, 1, 1, 7)
-    ws.save_sprites()                    # commit V2: (1,1)=7
+    ws.saves.save_sprites()                    # commit V2: (1,1)=7
     _stroke(pe, 2, 2, 9)                 # uncommitted live stroke: (2,2)=9
 
     assert ws.history.undo() is True             # local: revert the live stroke
@@ -144,7 +144,7 @@ def test_paint_repeated_undo_walks_into_the_previous_commit(tmp_path):
 # -- map: a paste is one undo step; ops land in the journal ------------------
 
 def _open_map(ws):
-    ws._open_map()
+    ws.text._open_map()
     assert ws.menu_view == "map"
     return ws.map_ui.mapedit
 
@@ -183,7 +183,7 @@ def test_map_commit_embeds_ops_in_journal(tmp_path):
     me.place(2, 2)
     me.end_edit()
 
-    ws.save_map()
+    ws.saves.save_map()
 
     ents = _entries(path, "map.moymap")
     assert ents, "a map commit must journal"
@@ -201,7 +201,7 @@ def test_map_commit_embeds_ops_in_journal(tmp_path):
 # then the durable journal, crossing the boundary transparently.
 # ====================================================================
 def _open_code(ws):
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.menu_view == "code"
     return ws.editor
 
@@ -256,7 +256,7 @@ def test_code_commit_embeds_ops_in_journal(tmp_path):
     ed = _open_code(ws)
 
     _type(ws, "# note\n")
-    ws.save_code()                       # commit -> closes burst, drains the op batch
+    ws.saves.save_code()                       # commit -> closes burst, drains the op batch
 
     ents = _entries(path, "main.py")
     assert ents, "a code commit must journal"
@@ -276,9 +276,9 @@ def test_code_undo_walks_into_previous_commit(tmp_path):
     ed = _open_code(ws)
 
     _type(ws, "# one\n")
-    ws.save_code()                       # commit V1 (re-baselines the History)
+    ws.saves.save_code()                       # commit V1 (re-baselines the History)
     _type(ws, "# two\n")
-    ws.save_code()                       # commit V2
+    ws.saves.save_code()                       # commit V2
     _type(ws, "# three\n")               # a live, uncommitted burst
 
     assert ws.history.undo() is True             # local: revert the live burst
@@ -297,14 +297,14 @@ def test_code_ops_do_not_disturb_graduation(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     ed = _open_code(ws)
     _type(ws, "# free edit\n")
-    ws.save_code()
+    ws.saves.save_code()
     assert bool(ws.cart.get("graduated")) is False
 
 
 # -- blocks: structured whole-program ops on the same bar undo ---------------
 
 def _open_blocks(ws):
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     assert ws.menu_view == "blocks"
     return ws.block_ui.blocks_ed
 
@@ -354,7 +354,7 @@ def test_blocks_dimmed_state_is_truthful(tmp_path):
 # -- scene: a placement is one undo step; undo re-syncs ws.run.project.scenes (#111 phase 4) --
 
 def _open_scene(ws):
-    ws._open_scene()
+    ws.text._open_scene()
     assert ws.menu_view == "scene"
     return ws.scene_ui.sceneedit
 
@@ -399,7 +399,7 @@ def test_scene_commit_embeds_ops_in_journal(tmp_path):
     se.place(16, 16)
     se.place(32, 32)
 
-    ws.save_scene()
+    ws.saves.save_scene()
 
     ents = _entries(path, "scenes/main.moyscene")
     assert ents, "a scene commit must journal"
@@ -413,7 +413,7 @@ def test_scene_commit_embeds_ops_in_journal(tmp_path):
 # -- music: a step edit is one undo step; ops land in the journal (#111 phase 4) --
 
 def _open_music(ws):
-    ws._open_music()
+    ws.text._open_music()
     assert ws.menu_view == "music"
     return ws.music_ui.musicedit
 
@@ -473,7 +473,7 @@ def test_music_commit_embeds_ops_in_journal(tmp_path):
     me.set_pitch(60)
     me.cycle_wave(1)
 
-    ws.save_sounds()
+    ws.saves.save_sounds()
 
     ents = _entries(path, "sounds.json")
     assert ents, "a sounds commit must journal"
@@ -540,7 +540,7 @@ def test_config_commit_embeds_ops_in_journal(tmp_path):
     path = ws.cart["path"]
     step_card(ws, 2)
 
-    ws._save_config()
+    ws.saves._save_config()
 
     ents = _entries(path, "config.json")
     assert ents, "a config commit must journal"
@@ -560,7 +560,7 @@ def test_bar_cache_key_tracks_local_history(tmp_path):
     # key must now change as soon as the local History gains a step -- and again
     # when undo empties it.
     ws = _make_ws_with_cart(tmp_path)
-    ws._open_paint()
+    ws.text._open_paint()
     pe = ws.paint
     pe.n = 0
     before = ws.bar_layer._cart_bar_key("menu")
@@ -576,7 +576,7 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
     # On the launcher (no active editor tab) the bits are constant False/False --
     # and crucially computing them never touches the SD-backed journal check.
     ws = _make_ws_with_cart(tmp_path)
-    ws.go_home()
+    ws.home.go_home()
     assert ws.history.bar_undo_bits() == 0
 
 
@@ -589,16 +589,16 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
 def test_active_tab_files_maps_each_tab(tmp_path):
     # The tab -> journal-file-set table the scoped walk routes through.
     ws = _make_ws_with_cart(tmp_path)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.history.active_tab_files() == ("main.py",)
-    ws.set_menu_view("paint");  assert ws.history.active_tab_files() == ("sprites.moygfx",)
-    ws.set_menu_view("map");    assert ws.history.active_tab_files() == ("map.moymap",)
-    ws.set_menu_view("music");  assert ws.history.active_tab_files() == ("sounds.json",)
-    ws.set_menu_view("blocks"); assert ws.history.active_tab_files() == ("blocks.json", "main.py")
-    ws._open_scene()
+    ws.text.set_menu_view("paint");  assert ws.history.active_tab_files() == ("sprites.moygfx",)
+    ws.text.set_menu_view("map");    assert ws.history.active_tab_files() == ("map.moymap",)
+    ws.text.set_menu_view("music");  assert ws.history.active_tab_files() == ("sounds.json",)
+    ws.text.set_menu_view("blocks"); assert ws.history.active_tab_files() == ("blocks.json", "main.py")
+    ws.text._open_scene()
     assert ws.history.active_tab_files() == ("scenes/main.moyscene",)
     # off the Editor (launcher) there is no scoped set -> whole-project (None)
-    ws.go_home()
+    ws.home.go_home()
     assert ws.history.active_tab_files() is None
 
 
@@ -608,18 +608,18 @@ def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
     # with the higher seq), and the map tab's REDO must stay DIMMED.
     ws = _make_ws_with_cart(tmp_path)
     ed = _open_code(ws)
-    _type(ws, "# c1\n"); ws.save_code()          # main.py commit 1
-    _type(ws, "# c2\n"); ws.save_code()          # main.py commit 2
+    _type(ws, "# c1\n"); ws.saves.save_code()          # main.py commit 1
+    _type(ws, "# c2\n"); ws.saves.save_code()          # main.py commit 2
 
     me = _open_map(ws)                           # (tab switch hard-commits code -- deduped)
     tm = ws.run.project.tilemap
     me.n = 5
     me.begin_edit(); me.place(6, 6); me.end_edit()
-    ws.save_map()                                # map.moymap commit (the NEWEST commit)
+    ws.saves.save_map()                                # map.moymap commit (the NEWEST commit)
     assert tm.mget(6, 6) == 5
 
     # Back on the code tab: the bar UNDO walks main.py (its own timeline), not the map.
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.history.undo() is True
     assert "# c2" not in ws.editor.text()        # code stepped c2 -> c1
     assert "# c1" in ws.editor.text()
@@ -628,7 +628,7 @@ def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
     # Redo dim is per-tab: the code tab can redo (it was just rewound); after switching
     # to the map tab, REDO is dimmed (the map has nothing ahead).
     assert ws.history.can_redo() is True                 # (still on code)
-    ws.set_menu_view("map")
+    ws.text.set_menu_view("map")
     assert ws.history.can_redo() is False                # the map tab's REDO stays dark
 
 
@@ -655,13 +655,13 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
     path = ws.cart["path"]
 
     # Graduate via a diverging CODE commit.
-    ws.set_menu_view("code"); ws.screen = "menu"
+    ws.text.set_menu_view("code"); ws.screen = "menu"
     ws.editor.set_text(ws.cart["src"].replace("score = 7", "score = 999"))
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.cart["graduated"] is True
 
     # Open the (now frozen, History-less) Blocks tab and press the bar UNDO ONCE.
-    ws._open_blocks()
+    ws.text._open_blocks()
     assert ws.menu_view == "blocks"
     assert ws.run.project.history_for("blocks") is None       # no in-RAM history: journal walk
     assert ws.history.undo() is True

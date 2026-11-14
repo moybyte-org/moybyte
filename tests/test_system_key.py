@@ -47,10 +47,10 @@ def _press(ws, name):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button(name, False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -86,10 +86,10 @@ def test_super_opens_the_system_menu_from_every_surface(tmp_path, surface):
     if surface == "settings":
         ws.open_settings()
     elif surface == "calc":
-        ws.open_app(ws._apps_by_id["calc"])
+        ws.spine.open_app(ws._apps_by_id["calc"])
     else:
         open_cart(ws, "Star Catcher")
-        ws._exit_to_caller()
+        ws.spine._exit_to_caller()
         ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
     _frames(drv)
     top = ws.screen
@@ -102,7 +102,7 @@ def test_super_opens_the_system_menu_from_every_surface(tmp_path, surface):
 def test_super_on_the_windowed_desk_opens_the_system_menu(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(drv)
     drv.system_key()
     assert ws.sysmenu.open
@@ -135,7 +135,7 @@ def _tdeck_frame(ws, frame, raw=True, text=False):
     was = ws.input
     ws.input = table
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
     return table
@@ -344,7 +344,7 @@ def test_the_look_cards_rect_is_the_one_the_engine_draws(tmp_path, desk, cart):
     _moy(ws)
     drv = make_drv(ws)
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     if cart:
         ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
     _frames(drv)
@@ -380,9 +380,9 @@ def test_the_look_card_keeps_clear_of_the_bar_the_strip_and_its_anchor(tmp_path,
     drv = make_drv(ws)
     ws.idle_ladder = _Ladder()
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     else:
-        ws.set_home_tab("make")
+        ws.home.set_home_tab("make")
         ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     _frames(drv)
     ws._golden_popover = True
@@ -418,7 +418,7 @@ def test_the_card_menu_covers_its_point_only_to_show_whole(tmp_path):
     ws = build_ws(tmp_path)
     _moy(ws)
     drv = make_drv(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     _frames(drv)
     covered = 0
@@ -481,9 +481,9 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     column of the rows' icons, over the first row."""
     if desk:
         ws = build_desktop_ws(tmp_path)
-        ws.open_library()
+        ws.home.open_library()
         ws._open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
-        ws.play(ws.launcher_layer)
+        ws.spine.play(ws.launcher_layer)
         drv = make_drv(ws)
         _frames(drv, 3)
     else:
@@ -546,7 +546,7 @@ def _desk_game(tmp_path):
     host_app.moy_carts.ensure_dirs(carts)
     host_app.moy_carts.create("Counter", carts, src=COUNTER, type="game", edit=[])
     ws = build_desktop_ws(tmp_path)
-    ws.open_desk()
+    ws.home.open_desk()
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     drv = make_drv(ws)
@@ -572,8 +572,8 @@ def test_the_pause_card_offers_play_in_a_window_on_a_board_with_a_desk(tmp_path)
     _frames(drv, 2)
     assert ws.pause._host.box(ws.pause.WINDOW) is not None, "drawn on the card"
     drv.system_key()
-    ws._exit_to_caller()
-    ws.open_library()                            # console mode on the same board
+    ws.spine._exit_to_caller()
+    ws.home.open_library()                            # console mode on the same board
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     _frames(drv, 3)
@@ -587,10 +587,10 @@ def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tm
     where they were, and the running game stands in a window there, its run
     going on: no restart, no full screen."""
     ws, drv = _desk_game(tmp_path)
-    ws._exit_to_caller()
-    ws.open_app(ws._apps_by_id["calc"])          # a desk window to come back to
+    ws.spine._exit_to_caller()
+    ws.spine.open_app(ws._apps_by_id["calc"])          # a desk window to come back to
     _frames(drv, 2)
-    ws.open_library()
+    ws.home.open_library()
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     _frames(drv, 3)

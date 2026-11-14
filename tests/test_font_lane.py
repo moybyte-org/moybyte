@@ -655,7 +655,7 @@ def test_the_code_tab_hit_tests_at_the_mono_faces_7px_cell(tmp_path):
         assert moy_ui.use_font("mono", fid)
         ws._relayout_code()
         ws.screen = "menu"
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
         drv = host_app.ConsoleDriver(ws)
         lay, ed, cl = ws.code_layout, ws.editor, ws.code_layer
         # a row is the face's glyph box, 14 (petme128's is its line and the lead)

@@ -168,11 +168,11 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     PLAY/STOP) without marking dirty -- _content_static must exclude it."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(0.0)
     g = ws.projects_grid
     g.sel = next(i for i, it in enumerate(g.items) if it.get("type") != "new")
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     drv.frame(0.0)
     ws.editor_app.set_tab("music")
     drv.frame(0.0)
@@ -213,18 +213,18 @@ def test_drag_release_restarts_the_backdrop_restore(tmp_path):
     ws.pointer.x, ws.pointer.y = x0, y0          # grab the title strip
     ws.pointer.down = True
     ws.pointer.click = True                      # the press EDGE arms the grab
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     # No drv.frame() inside the gesture: the driver re-polls input and would
     # clear pointer.down, ending the drag before the release under test.
     for step in (60, 140, 240):                  # fast: big jumps per frame
         ws.pointer.x, ws.pointer.y = x0 - step, y0 + step // 2
-        ws.handle_pointer()
+        ws.router.handle_pointer()
     assert wm._drag is not None, "the title-strip grab did not start a drag"
     wm._desk_streak = wm._retained_n()           # a drag saturates the streak
 
     ws.pointer.down = False                      # let go
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     assert wm._drag is None
     assert wm._desk_streak == 0, (
         "release left the restore skipped (streak %d): the buffers the drag "
@@ -286,7 +286,7 @@ def _settings_beside_a_throttled_game(tmp_path):
     from ws_helpers import open_cart
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(0.0)
     for title in ("Star Catcher", "Brick Siege"):
         open_cart(ws, title)

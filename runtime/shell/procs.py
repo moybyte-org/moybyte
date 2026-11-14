@@ -607,7 +607,7 @@ class Procs:
         ws = self.ws
         if not self._detachable() or not self.detach():
             return False
-        ws.go_home()
+        ws.home.go_home()
         return True
 
     def switch(self, p):
@@ -619,10 +619,10 @@ class Procs:
             return
         if self._front_live():
             if not self._detachable() or not self.detach():
-                ws._exit_to_caller()    # a run that cannot join ends, as a launch ends it
+                ws.spine._exit_to_caller()    # a run that cannot join ends, as a launch ends it
         self.promote(p)
         ws.close_popover()
-        ws.play(ws.launcher_layer)
+        ws.spine.play(ws.launcher_layer)
 
     def promote(self, p):
         """Focus reached Proc `p`'s window: its run becomes the front one.
@@ -694,7 +694,7 @@ class Procs:
         """Close the run `key` names: a Proc, the front's by its exit, or a
         service by its stop."""
         if key == FRONT:
-            self.ws._exit_to_caller()
+            self.ws.spine._exit_to_caller()
             return
         if key.startswith(SVC):
             self.stop_service(int(key[len(SVC):]))
@@ -754,7 +754,7 @@ class Procs:
             pl = p.player
             if pl.cart_error is not None or pl.quit_asked:
                 if pl.cart_error is not None:
-                    note = getattr(ws, "notice", None)
+                    note = getattr(getattr(ws, "notices", None), "notice", None)
                     if note is not None:
                         note("STOPPED", "%s stopped" % p.title()[:20], "warn")
                 self.close(p)

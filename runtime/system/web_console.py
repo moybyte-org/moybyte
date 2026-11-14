@@ -135,7 +135,7 @@ class WebConsole:
         self.parked = True
         self.ui.on_enter()
         self.ws.wm.enter_console()
-        self.ws.go_home()
+        self.ws.home.go_home()
 
     @staticmethod
     def _stop_saying_why(wh, why):
@@ -191,7 +191,7 @@ class WebConsole:
         ws.mark_dirty()
         ws.wm.goto("launcher")          # out of the screen, not over it
         if getattr(ws.wm, "has_desk", False):
-            ws.open_desk()
+            ws.home.open_desk()
 
     def serving(self):
         wh = self.ws.webhost
@@ -210,7 +210,7 @@ class WebConsole:
     def on_failed(self):
         """The join ran out or the bind was refused: the row says why, the
         radio goes, and the glass (never parked by a join) stays where it is."""
-        self.ws.wifi_release("web")
+        self.ws.spine.wifi_release("web")
         self.ws.mark_dirty()
         if self.parked:
             self.unpark()
@@ -275,13 +275,13 @@ class WebConsole:
                 # still CLOSING keeps it and lets go from its own stop (the
                 # `on_stop` make_webhost wires). An immediate stop lets go now.
                 if not getattr(wh, "closing", None):
-                    self.ws.wifi_release("web")
+                    self.ws.spine.wifi_release("web")
             else:
-                self.ws.wifi_hold("web")
+                self.ws.spine.wifi_hold("web")
                 wh.start()
         except Exception as exc:  # noqa: BLE001
             wh.error = "%s" % exc
-            self.ws.wifi_release("web")      # a start that failed holds nothing
+            self.ws.spine.wifi_release("web")      # a start that failed holds nothing
         self.ws.mark_dirty()
         if getattr(wh, "serving", False):
             if not self.parked:

@@ -86,7 +86,7 @@ def test_every_desk_popover_lies_within_the_glass(tmp_path, glass, fs, bar):
     if bar == "bottom":
         _bottom_bar(ws)
     ws.bar_layer._today = lambda: (2026, 11, 9)          # six weeks
-    ws.open_desk()
+    ws.home.open_desk()
     drv = make_drv(ws)
     drv.frame(1 / 30)
 
@@ -106,8 +106,8 @@ def test_every_desk_popover_lies_within_the_glass(tmp_path, glass, fs, bar):
                                        lambda: ws.sysmenu.comp.page(-2)),
         "wifi": lambda: _opened(ws, drv, lambda: ws.widget_tap("wifi"), many),
         "battery": lambda: _opened(ws, drv, lambda: ws.widget_tap("battery")),
-        "panel": lambda: _opened(ws, drv, lambda: ws.open_status_menu(panel)),
-        "section": lambda: _opened(ws, drv, lambda: ws.open_status_menu(tall)),
+        "panel": lambda: _opened(ws, drv, lambda: ws.notices.open_status_menu(panel)),
+        "section": lambda: _opened(ws, drv, lambda: ws.notices.open_status_menu(tall)),
     }
     W, H = ws.sys_canvas.w, ws.sys_canvas.h
     for name, rect_of in cases.items():

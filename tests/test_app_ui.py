@@ -76,11 +76,11 @@ def _open(app, tier, base, desk=False):
     ws.pointer.visible = False
     ws.bar_layer._clock_text = lambda: "10:30"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
         cart = next(c for c in ws.carts.all if c["title"] == "%s %s" % (
             app.capitalize(), _TITLE[tier]))
         ws._open_workspace(cart)
-        ws.play(ws.launcher_layer)
+        ws.spine.play(ws.launcher_layer)
     else:
         open_cart(ws, "%s %s" % (app.capitalize(), _TITLE[tier]))
     if ws.confirm.open:             # a copied app's consent: Open
@@ -119,7 +119,7 @@ def clip(tmp_path_factory):
                 bands[(vx, top)] = [at(i, j) for j in range(top, top + 12)
                                     for i in range(vx, vx + vw)]
         out[tier] = (_content(ws), views, at(x, y + h - 1), bands)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -195,7 +195,7 @@ def tabs(tmp_path_factory):
             got.append((m[0], m[1], settled, _content(ws)))
         assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
         out[tier] = got
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -272,4 +272,4 @@ def test_back_steps_out_of_the_apps_views_before_it_leaves(tmp_path, tier, how, 
     first = (1, 0, 1, False)
     assert got[:3] == [(2, 1, 0, True), (2, 0, 0, True), first], (tier, how, got)
     assert got[3] == (None if how == "chevron" else first), (tier, how, got)
-    ws.exit()
+    ws.spine.exit()

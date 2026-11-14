@@ -134,7 +134,7 @@ def test_a_switch_moves_the_shelf_key_through_look_gen(tmp_path):
         src = f.read_text(encoding="utf-8")
         assert "id(ws.theme_colors)" not in src and "id(ws.look." not in src, f.name
     cv = ws.sys_canvas
-    ws.projects_grid = ws._home_grid("grid", [])
+    ws.projects_grid = ws.home._home_grid("grid", [])
     before = (ws.launcher_layer._statics_key(cv), ws.projects_layer._statics_key(cv))
     ws.look.set_theme("contrast", persist=False)
     assert ws.launcher_layer._statics_key(cv) != before[0]
@@ -358,7 +358,7 @@ def test_a_stored_wallpaper_row_reads_as_nothing(tmp_path):
     assert ws2.look.wallpaper_id == ws2.look.theme_wallpaper()
     assert ws2.look.wallpaper_id != "moybyte.sakura"
     src = inspect.getsource(appearance) + inspect.getsource(
-        type(ws2).load_system)
+        type(ws2.spine).load_system)
     assert '"wallpaper")' not in src and "'wallpaper')" not in src
 
 
@@ -663,7 +663,7 @@ def test_an_exit_writes_a_change_still_settling(tmp_path):
     ws.look.change("accent", _accent(6))
     ws.look.tick(0.0)
     assert not (Path(ws.carts_root) / "custom.moy").exists()
-    ws.go_home()
+    ws.home.go_home()
     assert _look(ws)["accent"] == _accent(6)
 
 
@@ -1100,10 +1100,10 @@ def test_no_look_member_is_a_property():
 def test_the_boot_cascade_calls_the_collaborator_directly(tmp_path):
     """3b: the kernel calls collaborators, it does not keep forwards for its own
     use. `load_system` names `self.look` and `self.set_*` never."""
-    src = inspect.getsource(type(build_ws(tmp_path)).load_system)
+    src = inspect.getsource(type(build_ws(tmp_path).spine).load_system)
     for verb in ("set_font_scale", "set_theme"):
-        assert ("self.look." + verb) in src, verb
-        assert ("self." + verb) not in src.replace("self.look." + verb, "")
+        assert ("ws.look." + verb) in src, verb
+        assert ("ws." + verb) not in src.replace("ws.look." + verb, "")
 
 
 def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):

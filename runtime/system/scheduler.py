@@ -1771,7 +1771,7 @@ def prepared(ws, cart, service=False):
     its source, read from the store when the shelf holds it slim, its
     consent record as a launch reads it (`Consent.for_run`), the console's
     services, its namespace's names: a
-    system process's, `ws.service_env`), or None where it has no source
+    system process's, `ws.notices.service_env`), or None where it has no source
     (a compiled cart's is its module, which its runtime reads). Where
     `service`, an app cart's is its own service's (`as_service`)."""
     carts = getattr(ws, "carts", None)
@@ -1792,7 +1792,7 @@ def prepared(ws, cart, service=False):
         have = app_perms.services(ws)
     else:
         rec, have = None, ()
-    env_of = getattr(ws, "service_env", None)
+    env_of = getattr(ws.notices, "service_env", None)
     return run, rec, have, env_of(run) if env_of is not None else None
 
 

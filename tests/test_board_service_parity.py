@@ -439,7 +439,7 @@ NOT_A_SERVICE = {
                  "no panel to blank",
     "soft_keyboard": "a fact about the page, not a backend: its ⌨ summons the "
                      "browser's own keyboard, so a text field can be typed "
-                     "under touch there (Workstation.can_type). The boards "
+                     "under touch there (Text.can_type). The boards "
                      "have no such keyboard and keep the class default",
 }
 

@@ -31,13 +31,13 @@ def _press(ws, name):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
 
 def _open(ws, app_id):
-    ws.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws._apps_by_id[app_id])
 
 
 def _tap_back(ws, drv, where):
@@ -153,7 +153,7 @@ def _desk_app(tmp_path, app_id, theme=None):
     if theme is not None:
         use_theme(ws, *theme)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     _open(ws, app_id)
     _frames(drv)
     return ws, drv, ws._apps_by_id[app_id], ws.wm._wins[app_id]
@@ -230,7 +230,7 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
     closes the page, never the window."""
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_settings()
     _frames(drv)
     sl, win = ws.settings_layer, ws.wm._wins["settings"]

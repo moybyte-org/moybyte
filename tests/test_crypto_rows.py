@@ -271,7 +271,7 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     lines = [t for _s, _t, _l, q, t in os_log.records(since, 256)
              if q == pid and not t.startswith("start ")]
-    ws.exit()
+    ws.spine.exit()
     assert lines == [
         "random 16", "random.short -2",
         "sha256 " + V.SHA256_ABC, "sha256.short -2",

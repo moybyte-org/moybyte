@@ -259,20 +259,20 @@ class EditorApp:
         # Another cart may ladder differently (a compiled cart without `src/`
         # has no Code tab), so the lent zone repaints whatever tab it lands on.
         self.zone_gen += 1
-        ws.set_menu_view("cards" if (ws.cart.get("edit")
+        ws.text.set_menu_view("cards" if (ws.cart.get("edit")
                                      or ws.cart.get("broken")) else "code")
 
     def open_paint(self):
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.paint_status = None
-        ws.set_menu_view("paint")
+        ws.text.set_menu_view("paint")
 
     def open_map(self):
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.map_ui.on_open()          # fresh gesture/zoom state (#37)
-        ws.set_menu_view("map")
+        ws.text.set_menu_view("map")
         # Open with the camera at the top-left so the whole map shows at the default
         # (fit-both) zoom with zero panning. set_menu_view builds the MapEditor.
         if ws.map_ui.mapedit is not None:
@@ -285,7 +285,7 @@ class EditorApp:
         # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
         # "CODE LOCKED" notice when it builds the editor in protected mode, and
         # clearing it after would hide the data-loss guard's message.
-        ws.set_menu_view("blocks")
+        ws.text.set_menu_view("blocks")
 
     def open_scene(self):
         """Open the scene placement editor (#85 Stage 2): the WYSIWYG placed-
@@ -294,7 +294,7 @@ class EditorApp:
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.scene_ui.on_open()        # fresh gesture/zoom/props state
-        ws.set_menu_view("scene")
+        ws.text.set_menu_view("scene")
         # Open with the camera at the world origin so the game viewport's frame
         # shows immediately (screen-space carts place inside it, no panning).
         if ws.scene_ui.sceneedit is not None:
@@ -308,7 +308,7 @@ class EditorApp:
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.music_ui._stop_music_preview()
-        ws.set_menu_view("music")
+        ws.text.set_menu_view("music")
 
     # -- the theme mode (runtime/editors/theme_editor.py) ----------------------------------
 
@@ -400,7 +400,7 @@ class EditorApp:
             self.theme_tab(view)
             return
         self._drop_theme()
-        if view == "code" and ws.cart is not None and not ws.code_sources():
+        if view == "code" and ws.cart is not None and not ws.text.code_sources():
             # A compiled cart that ships no `src/` has no Code tab: there is no
             # text behind its main.wasm to show (native/moy_wasm/README.md).
             view = "cards"
@@ -415,7 +415,7 @@ class EditorApp:
             # `self.project is ws.run.project` guard skips a stale/never-opened editor
             # (self.tab defaults to "cards" from __init__, meaningless if EditorApp.
             # open() was never actually called for the CURRENT project -- e.g. a
-            # bare ws.set_menu_view("code") on a workspace opened via the RUN path,
+            # bare ws.text.set_menu_view("code") on a workspace opened via the RUN path,
             # never the Editor) -- without it a plain RUN followed by a direct
             # set_menu_view call would spuriously commit_config() a "cards" tab
             # that was never really open (confirmed by test_journal_wiring.py).
@@ -469,7 +469,7 @@ class EditorApp:
                 # file and defaults to main, so a one-file cart reads exactly as
                 # it always did. `source_text` is the store's own reader, because
                 # main's text travels as `src` and the others as the two lists.
-                name = ws.code_file_name()
+                name = ws.text.code_file_name()
                 ws.editor = CodeEditor(ws.carts_store.source_text(ws.cart, name) or "",
                                        cols=ws.code_layout.cols,
                                        rows=ws.code_layout.rows,
@@ -482,7 +482,7 @@ class EditorApp:
                 if ws.run.player.crash_line is not None \
                         and (ws.run.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
-                    ws._mark_code_error(ws.run.player.crash_line - 1,
+                    ws.saves._mark_code_error(ws.run.player.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])
                 else:
                     ws.code_err = None
@@ -592,10 +592,10 @@ class EditorApp:
             # PLAY on Config = the old GO (fix B retired that button): re-run the cart
             # with the freshly-tuned config AND persist config.json. Config binds at
             # _start (make_api), so a re-start is what makes card edits take effect;
-            # _save_config commits them (mirrors ws.apply()). Only persist on a clean
+            # _save_config commits them (mirrors ws.saves.apply()). Only persist on a clean
             # start so a crash doesn't overwrite config with a half-applied edit.
             if ws.cart is not None and ws._start():
-                ws._save_config()
+                ws.saves._save_config()
         project = ws.run.project
         if ws.cart is not None and self.tab not in ("code", "blocks", "scene", "cards") \
                 and (restart or owed or project.play_world()):
@@ -605,7 +605,7 @@ class EditorApp:
         if self.restart_owed:
             self.restart_owed = False
             self.zone_gen += 1
-        ws.play(self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
+        ws.spine.play(self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
     #
@@ -1053,7 +1053,7 @@ class EditorApp:
     def _has_code(self):
         """Whether the open cart has a Code tab: every cart whose main is text
         does, and a compiled cart only when it ships `src/`."""
-        return bool(self.ws.cart is None or self.ws.code_sources())
+        return bool(self.ws.cart is None or self.ws.text.code_sources())
 
     def _ladder(self):
         """The base-density ladder for the open cart: `_ZONE_TABS`, less the
@@ -1232,21 +1232,21 @@ class EditorApp:
             return True
         self.zone_opened = tab in _OPENS
         if tab == "cards":
-            ws._open_menu()
+            ws.text._open_menu()
         elif tab == "code" and self.tab == "code" and ws.menu_view == "code":
             ws.code_layer.open_scripts()   # the tab tapped again: the cart's scripts
         elif tab == "code":
-            ws.set_menu_view("code")
+            ws.text.set_menu_view("code")
         elif tab == "paint":
-            ws._open_paint()
+            ws.text._open_paint()
         elif tab == "map":
-            ws._open_map()
+            ws.text._open_map()
         elif tab == "scene":
-            ws._open_scene()
+            ws.text._open_scene()
         elif tab == "blocks":
-            ws._open_blocks()
+            ws.text._open_blocks()
         elif tab == "music":
-            ws._open_music()
+            ws.text._open_music()
         elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
             ws.history.undo()
             self.owe_restart(self.tab)
@@ -1262,7 +1262,7 @@ class EditorApp:
             # asset tab) + compile + exec + first-world build run behind the
             # next painted frame (LOADING toast), never inside the bar tap
             # that asked for them.
-            ws.defer(ws._leave_menu)
+            ws.defer(ws.text._leave_menu)
         return True
 
     def playing(self):
@@ -1455,18 +1455,18 @@ class EditorApp:
             # force: this verb IS the hard-exit path (#154). A kid who goes home or
             # switches tab mid-line keeps the line even though it does not parse
             # yet -- the debounce is where the compile gate still refuses.
-            ws.save_code(force=True)
+            ws.saves.save_code(force=True)
         elif tab == "paint":
-            ws.save_sprites()
+            ws.saves.save_sprites()
         elif tab == "map":
-            ws.save_map()
+            ws.saves.save_map()
         elif tab == "scene":
-            ws.save_scene()
+            ws.saves.save_scene()
         elif tab == "music":
-            ws.save_sounds()
+            ws.saves.save_sounds()
         elif tab == "blocks":
             ws.block_ui.save_blocks()
             ws.block_ui.commit_workspace_scene()   # persist the side-by-side scene pane (#93/#85)
         elif tab == "cards":
-            ws._save_config()
+            ws.saves._save_config()
         return True

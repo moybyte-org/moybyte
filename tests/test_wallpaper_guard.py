@@ -319,10 +319,10 @@ def _strike_out(tmp_path, slug, src):
 def test_committing_fixed_code_forgives_a_struck_out_wallpaper(tmp_path):
     ws = _strike_out(tmp_path, "boom", CRASH_SRC)
     ws.open_in_editor(_cart(ws, "boom"))
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text(CALM_SRC)
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.wallpaper_guard.strikes("boom") == 0
     assert _on_card(tmp_path)["strikes"].get("boom") is None
 
@@ -349,8 +349,8 @@ def test_a_struck_out_wallpaper_stays_playable_and_editable(tmp_path):
     ws = _strike_out(tmp_path, "boom", CRASH_SRC)
     cart = _cart(ws, "boom")
     assert ws.app_guard.strikes("boom") == 0
-    assert ws.cart_broken(cart) is False
-    titles = [it.get("title") for it in ws._make_items(ws.carts.all)]
+    assert ws.spine.cart_broken(cart) is False
+    titles = [it.get("title") for it in ws.home._make_items(ws.carts.all)]
     assert "Boom" in titles
     open_cart(ws, "Boom")
     assert ws.run.player.cart_error is not None

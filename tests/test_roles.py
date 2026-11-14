@@ -348,7 +348,7 @@ def _count_rows(ws, app):
 def test_each_apps_drawn_frame_keeps_its_role_budget(tmp_path, kind):
     ws = build_ws(tmp_path)
     app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
+    assert ws.spine.open_app(app), kind + " has no identity cart"
     for _ in range(3):                       # the open's own settling frames
         ws.mark_dirty()
         ws.frame(1 / 30.0)
@@ -420,7 +420,7 @@ def test_the_surface_and_theme_rows_follow_the_fullscreen_shell(tmp_path, monkey
     ws = build_ws(tmp_path)
     bad = _checked_rows(monkeypatch, ws)
     for kind in sorted(BUDGETS):
-        assert ws.open_app(ws._apps_by_id[kind]), kind
+        assert ws.spine.open_app(ws._apps_by_id[kind]), kind
         for _ in range(3):
             ws.mark_dirty()
             ws.frame(1 / 30.0)
@@ -430,7 +430,7 @@ def test_the_surface_and_theme_rows_follow_the_fullscreen_shell(tmp_path, monkey
             ws.mark_dirty()
             ws.frame(1 / 30.0)
         ws.look.set_theme("night", variant="dark")
-        ws.exit()
+        ws.spine.exit()
     assert not bad, bad[:5]
 
 
@@ -440,19 +440,19 @@ def test_the_surface_and_theme_rows_follow_the_desk(tmp_path, monkeypatch):
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     bad = _checked_rows(monkeypatch, ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     for _ in range(4):
         drv.frame(1 / 30)
     calc = ws.wm._wins["calc"]
     ws.wm._resize_window(calc, 360, 300)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws._apps_by_id["files"])
     for _ in range(4):
         drv.frame(1 / 30)
     files = ws.wm._wins["files"]
     assert (calc.w, calc.h) != (files.w, files.h)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     for _ in range(3):
         drv.frame(1 / 30)
     cx, cy, cw, ch = calc.content_rect()

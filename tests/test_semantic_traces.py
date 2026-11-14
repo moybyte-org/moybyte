@@ -2237,22 +2237,22 @@ def roles_trace(ws):
     nv = ctx.nav
     say("nav", nv.is_system_app(cart), cart in nv.projects())
     say("open_app", nv.open_app("calc"), nv.open_app("nope"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit", nv.edit(cart, "code"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit_file", nv.edit_file(cart, "manifest.json"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_image", nv.open_image("pic", "drawings"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_text", nv.open_text("missing.md", "docs"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("run_script", _n(nv.run_script("docs", "nope.py")))
-    ws.go_home()
+    ws.home.go_home()
     say("cover", nv.cover({"title": "Nowhere"}))
     say("cover_gen", isinstance(nv.cover_gen(), int))
     nv.play(cart)
     say("play", ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
 
     # -- notify
     # award is a message to the achievements process, served at the start of
@@ -2754,7 +2754,7 @@ def roles_trace(ws):
     ws.rescan_carts()
     cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
     __import__("app_perms").made_here(ws, cart)
-    ws.select_cart(cart)
+    ws.home.select_cart(cart)
     ws.open()
     for _ in range(6):
         moy_loop.step()

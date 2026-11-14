@@ -65,7 +65,7 @@ def _editor(tmp_path, tab, **kw):
     open_cart(ws, _EDITOR_CART)
     ws.open_in_editor(next(c for c in ws.carts.all
                            if c.get("title") == _EDITOR_CART))
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     return ws
 
 

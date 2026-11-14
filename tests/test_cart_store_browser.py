@@ -733,7 +733,7 @@ def _shelf(tmp_path):
 def test_a_page_a_board_serves_says_where_carts_come_from(tmp_path):
     for home, words in (("board", "turn Web console off"), ("headless", "no screen")):
         ws, app = _app_ws(tmp_path / home, None, [], home=home)
-        ws.open_app(app)
+        ws.spine.open_app(app)
         _frame(ws)
         assert app.phase == "board"
         _icon, title, lines = app._empty_words()
@@ -746,7 +746,7 @@ def test_the_browser_lists_and_installs_through_a_non_blocking_net(tmp_path):
     keep = Keeper()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=keep,
                       pick=Picker())
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     assert [r["cart"]["name"] for r in app.rows] == ["Dungeon", "Rock Run"]
     app._tap_row(1)
@@ -763,7 +763,7 @@ def test_a_file_the_page_cannot_fetch_is_the_players_own_copy(tmp_path):
     pick = Picker()
     keep = Keeper()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=keep, pick=pick)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(0)                                   # Dungeon
     _frame(ws, net)
@@ -806,7 +806,7 @@ def test_a_file_on_the_site_comes_from_its_mirror_without_asking(tmp_path):
                   unreadable=list(repo.releases) + [arc])
     pick = Picker()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=Keeper(), pick=pick)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(0)
     _frame(ws, net)
@@ -830,7 +830,7 @@ def test_every_file_the_page_cannot_fetch_is_asked_for_and_kept_until_read(tmp_p
     net = Trickle(repo.routes(), cors=True, unreadable=unreadable)
     pick = Picker()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=Keeper(), pick=pick)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(0)
     _frame(ws, net)
@@ -857,7 +857,7 @@ def test_cancelling_the_question_fetches_nothing(tmp_path):
     repo, wad, net = _shelf(tmp_path)
     pick = Picker()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=Keeper(), pick=pick)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(0)
     _frame(ws, net)
@@ -884,7 +884,7 @@ def test_while_the_keeper_has_it_there_is_no_cancel(tmp_path):
     repo, wad, net = _shelf(tmp_path)
     keep = Keeper(answer=None)
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=keep, pick=Picker())
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(1)
     _frame(ws, net)
@@ -904,7 +904,7 @@ def test_remove_in_the_browser_sends_the_record_to_the_keeper(tmp_path):
     repo, wad, net = _shelf(tmp_path)
     keep = Keeper()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=keep, pick=Picker())
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     app._tap_row(1)
     _frame(ws, net)
@@ -928,7 +928,7 @@ def test_the_free_room_is_the_keepers(tmp_path):
         def free(self):
             return 10, 1
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")], keep=Tight(), pick=Picker())
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _until(ws, app, net, lambda: app.phase == "list")
     assert app.free == (10, 1)
     assert app.blocker(app.rows[1]).startswith("Not enough room")

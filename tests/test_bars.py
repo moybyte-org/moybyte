@@ -174,7 +174,7 @@ def test_each_bar_draws_its_strip_at_its_rect(tmp_path, where):
 def test_taps_route_by_the_bar_they_land_on(tmp_path):
     ws = build_ws(tmp_path)
     _pick(ws, FOUR)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws._apps_by_id["files"])
     _settle(ws)
     bar = ws.bar_layer
     lb, menu = bar.cell("app", "menu")
@@ -231,14 +231,14 @@ def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
     ws = build_desktop_ws(tmp_path)
     _pick(ws, (_bar("top", 18, ["zone"], [], ["clock", "close", "menu"]),
                _bar("left", 24, ["chips"], [], ["wifi", "battery"])))
-    ws.open_desk()
+    ws.home.open_desk()
     wm = ws.wm
     dx, dy, dw, dh = wm._desk_rect()
     (top, left), = [ws.bar_layer.bar_rects("desk")]
     assert (dx, dy) == (left[2], top[3])
     for _key, box, pill, _label, _cart in wm._backdrop_layer._icon_rects():
         assert _inside(box, (dx, dy, dw, dh)) and _inside(pill, (dx, dy, dw, dh))
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     ws.frame(DT)
     win = wm._wins[wm._order[-1]]
     wm._move_window(win, -10_000, win.y)
@@ -257,8 +257,8 @@ def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
     ws = build_desktop_ws(tmp_path)
     _pick(ws, (_bar("bottom", 22, ["menu", "separator", "chips", "zone"], [],
                     ["close", "wifi", "battery", "clock"]),))
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["calc"])
     ws.frame(DT)
     bar, cell = ws.bar_layer.cell("desk", "chips")
     (_k, r, _l), = ws.wm._chip_rects()
@@ -268,7 +268,7 @@ def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
 def test_a_window_keeps_its_band_on_top_under_a_bottom_bar(tmp_path):
     ws = build_desktop_ws(tmp_path)
     _pick(ws, (_bar("bottom", 18, ["zone"], [], ["clock", "close", "menu"]),))
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_settings()
     ws.frame(DT)
     win = ws.wm._wins[ws.wm._order[-1]]
@@ -406,7 +406,7 @@ def test_the_status_clusters_ink_is_one_gap_apart(tmp_path, config, lo, hi, mode
     try:
         ws = g._build(dict(g.CONFIGS[config], variant=mode, theme="moy"),
                       str(tmp_path / "carts"))
-        ws.go_home()
+        ws.home.go_home()
         ws.frame(1 / 30)
         bl = ws.bar_layer
         for _edge, _rect, _dy, cells in ws.layout.bars:

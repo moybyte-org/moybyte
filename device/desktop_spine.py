@@ -82,7 +82,7 @@ class Desktop:
         re-pointed at the compositor's new back buffer (handle_input, after
         the kernel's present_pending), the trackball's pulses and click spent
         on a surface's keys, a caret or the cursor (handle_input, the
-        T-Deck, `Workstation.ball`), the boot's first-frame
+        T-Deck, `InputRouter.ball`), the boot's first-frame
         report and the console's PERF half (frame). `after_frame(drew)` is a
         board's per-frame Python inside the frame upcall (the T-Deck's offline
         diag), never an upcall of its own."""
@@ -113,8 +113,8 @@ class Desktop:
                 if n or ws.ball_owed:
                     dx = (n >> 12 & 4095) - 2048 if n else 0
                     dy = (n & 4095) - 2048 if n else 0
-                    ws.ball_frame(dx, dy, n >> 24, pointer, cursor)
-            ws.handle_input()
+                    ws.router.ball_frame(dx, dy, n >> 24, pointer, cursor)
+            ws.router.handle_input()
 
         drawn = [0]
         rung = [0]
@@ -131,7 +131,7 @@ class Desktop:
             if not boot.done:
                 boot.first_frame(ws)
             if ws.perf_capture and moy_loop.perf_due():
-                ws.perf_push(moy_loop)
+                ws.perf.perf_push(moy_loop)
             if after_frame is not None:
                 after_frame(n != drawn[0])
             drawn[0] = n
@@ -150,7 +150,7 @@ class Desktop:
             serial.env["pump"] = _FrameClock(moy_loop)
         service = make_service(ws, moy_loop)
         _want_sched(moy_loop)
-        moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
+        moy_loop.register(handle_input, ws.router.handle_pointer, frame, words, service)
         moy_loop.fps(self.fps_cap)
         moy_loop.lit(boot.lit)
         moy_loop.capture(ws.perf_capture)
@@ -206,7 +206,7 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
                 took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, bezel),
                                    frames())
         if took:
-            ws.perf_push(loop, front=True)
+            ws.perf.perf_push(loop, front=True)
         return took
     return bind
 
@@ -469,7 +469,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # order as host build_workstation) so the persisted font scale is
         # applied before the root layout context is captured.
         ws.wm = wm(ws)
-        ws.open_desk()
+        ws.home.open_desk()
         _census("wm")
     wire_input.start_keyboards(ws, keyboard, ble_keyboard, _census)
     # A soft reset under a serving web console leaves the kernel's webhost up
@@ -512,7 +512,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         ws.run.player.release_radio()
         rec = kernel.resume()
         if rec:
-            ws.resume_launcher(rec)
+            ws.home.resume_launcher(rec)
         log("boot", "return start")
     else:
         report_update(ws, lambda m: log("OTA", m))

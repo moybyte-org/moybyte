@@ -38,7 +38,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
     if theme is not None:
         ws.look.set_theme(theme, persist=False)
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
-    ws.go_home()
+    ws.home.go_home()
     ws.wallpaper.is_animating = lambda dt: False
     ws.bar_layer._clock_text = lambda: "10:30"
     no_unlock_banner(ws)

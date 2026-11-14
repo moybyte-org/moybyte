@@ -121,7 +121,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
     quiesce(ws)
     ws.pointer.visible = False
     if chip:
-        ws.set_show_fps(True, persist=False)
+        ws.toggles.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
         ws.run.player.holds = lambda cv: False
@@ -152,19 +152,19 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
                                 moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
                                 ws.carts_root)
         _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
-        assert ws.open_app(ws._apps_by_id["myart"])
+        assert ws.spine.open_app(ws._apps_by_id["myart"])
     elif app == "getcarts":
         repo, net = _shelf_net()
         ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = net
         app_ = ws._apps_by_id["getcarts"]
         app_._inst = _SameFree(app_._inst)
-        assert ws.open_app(app_) is not False
+        assert ws.spine.open_app(app_) is not False
     else:
         if app == "storybook":
             seed_stories(ws)
         app_ = ws._apps_by_id[app]
-        assert ws.open_app(app_) is not False
+        assert ws.spine.open_app(app_) is not False
         if app == "files":
             # the list of projects, every cover made: which rows a frame's
             # floor reaches decides which covers are asked for first

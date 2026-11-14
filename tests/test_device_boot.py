@@ -77,6 +77,7 @@ class FakeWs:
         self.player = FakePlayer(tick_ms)
         self.armed = 0
         self.announced = 0
+        self.notices = self          # the console's notices, answered here
 
     def arm_splash(self):
         self.armed += 1
@@ -859,7 +860,7 @@ def test_every_board_emits_through_the_one_sampler(board):
     """No board writes a PERF line of its own. It had three producers with three
     shapes; the one writer is the kernel's (moy_perf.c), sampled from the
     loop's account stage on every board, and the console only pushes its half
-    (`ws.perf_push`) on the frame a sample is due, and once when a kernel run
+    (`ws.perf.perf_push`) on the frame a sample is due, and once when a kernel run
     takes the frame."""
     path = PERF_BOARDS[board][0] / "moy_runtime.py"
     src = runtime_text(path)
@@ -870,7 +871,7 @@ def test_every_board_emits_through_the_one_sampler(board):
             assert not node.value.startswith("PERF "), (board, node.value)
     assert "PerfSampler" not in src, board
     spine = SPINE.read_text(encoding="utf-8")
-    assert spine.count("ws.perf_push(moy_loop)") == 1
+    assert spine.count("ws.perf.perf_push(moy_loop)") == 1
 
 
 # -- the frame's pointer sample, EXECUTED (#208 rank 5) ---------------------------

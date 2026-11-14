@@ -130,7 +130,7 @@ def _dialogs(ws, frame):
     """The Blocks number and name prompts typed into, then Cart info typed
     into and its fields moved, every presented frame."""
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     frame(4)
     bu = ws.block_ui
     for kind, opener, typed in (
@@ -144,7 +144,7 @@ def _dialogs(ws, frame):
             frame(2)
         bu._blk_kbd_cancel()
         frame(3)
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(4)
     cl = ws.cards_layer
     cl._open_meta()
@@ -165,7 +165,7 @@ def _keyed(ws, frame):
     Cart info, A on its door, typed into and cancelled."""
     drv = frame.drv
     ws.open_in_editor(_cart(ws, "Tap Game"))
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     frame(4)
     bu = ws.block_ui
     prompts = menus = 0
@@ -239,9 +239,9 @@ def _keyed(ws, frame):
     ws.pointer.visible = False
     ws.mark_dirty()
     frame(2)
-    ws.exit()
+    ws.spine.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(4)
     page = ws.cards_layer.page()
     for _ in range(12):
@@ -344,7 +344,7 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
                                                                           monkeypatch):
     ws, frame, shots, puts = _console(tmp_path, monkeypatch, 1, False, False)
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(3)
     ws.cards_layer._open_meta()
     frame(3)
@@ -361,9 +361,9 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
     while ws.wm.release_cache():
         pass
     assert ws.held_pages[0] is None and ws.held_pages[2] is None
-    ws.exit()
+    ws.spine.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(2)
     ws.cards_layer._open_meta()
     n = puts[0]

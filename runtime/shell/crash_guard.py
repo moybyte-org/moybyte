@@ -43,8 +43,8 @@ app's heal.
 `Player` refuses a disabled app into the ordinary error panel, whose bar carries
 EDIT/CODE; the backdrop refuses a disabled wallpaper onto its solid fill and puts
 up a notice naming it. Committing new source is what clears the strikes in both
-roles: `Project.commit_code` -> `Workstation.forgive_app` /
-`Workstation.forgive_wallpaper` -> `forgive` here. Code and nothing else,
+roles: `Project.commit_code` -> `Spine.forgive_app` /
+`Spine.forgive_wallpaper` -> `forgive` here. Code and nothing else,
 because code is the only edit that can change whether the cart hangs or faults;
 the reasoning is in `forgive_app`. A wallpaper has one more way back: picking it
 again in Appearance is the kid saying "try again", and the pick
@@ -343,7 +343,7 @@ class CrashGuard:
     def forgive(self, cid):
         """Clear `cid`'s strikes -- re-enable a cart the owner has fixed.
 
-        Reached from `Workstation.forgive_app` / `forgive_wallpaper` when a
+        Reached from `Spine.forgive_app` / `forgive_wallpaper` when a
         code commit lands, and from `Appearance.change` on a deliberate
         wallpaper pick.
 
@@ -363,7 +363,7 @@ class CrashGuard:
 
     def broken_ids(self):
         """Every disabled id: what the home's Make tab marks
-        (`Workstation.broken_cart_ids`)."""
+        (`Spine.broken_cart_ids`)."""
         d = self._data()
         return sorted(k for k in d["strikes"] if self.disabled(k))
 

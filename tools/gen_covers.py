@@ -265,7 +265,7 @@ def capture(slug):
             return None
         ws.launcher.sel = target
         with seeded_lua():
-            ws.launch_selected()
+            ws.home.launch_selected()
         if ws.screen != "desktop" or ws.cart_error:
             print("skip (did not start):", slug, ws.cart_error)
             return None

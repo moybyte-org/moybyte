@@ -1138,7 +1138,7 @@ def _key(ws, app, k):
 
 
 def _open(ws, app):
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _frames(ws, app)
 
 
@@ -1388,7 +1388,7 @@ def test_open_finishes_what_install_held_a_store_op_a_frame(tmp_path):
         ops[0] += 1
         return op(fn)
     app._inst.op = counted
-    ws.open_app(app)
+    ws.spine.open_app(app)
     assert app._sweep is not None and app._tail is None
     frames = 0
     while app._sweep is not None and frames < 40:
@@ -1413,7 +1413,7 @@ def test_a_key_during_opens_sweep_lands(tmp_path):
     (stage / "jet.moy").mkdir()
     for i in range(6):
         (stage / "jet.moy" / ("f%d" % i)).write_text("x")
-    ws.open_app(app)
+    ws.spine.open_app(app)
     ws.mark_dirty()
     ws.frame(1 / 30)
     assert app._sweep is not None and app.phase == "checking"
@@ -1430,7 +1430,7 @@ def test_open_with_install_empty_sweeps_nothing(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
     (tmp_path / ci.STAGE_DIR).mkdir(exist_ok=True)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     assert app._sweep is None and app._tail is None
 
 
@@ -1591,7 +1591,7 @@ def test_buttons_walk_the_screens_without_a_finger(tmp_path):
 def test_b_stops_a_check_and_lets_the_radio_go(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
-    ws.open_app(app)
+    ws.spine.open_app(app)
     for _ in range(3):
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -1795,7 +1795,7 @@ def test_the_shelf_shows_before_its_covers_come(tmp_path):
     rock = (_VECTORS / "rgb_filter2.png").read_bytes()
     repo, _jet, net = _covered_shelf((rock, rock))
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
-    ws.open_app(app)
+    ws.spine.open_app(app)
     for _ in range(40):
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -1948,7 +1948,7 @@ def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
         _frames(ws, app)
         assert app.phase == "done" and app._current_verbs() == ("REMOVE", "USE")
         assert "dusk" in ws.look.theme_names()
-        assert not [c for c in ws._launcher_items(ws.carts.all, "games")
+        assert not [c for c in ws.home._launcher_items(ws.carts.all, "games")
                     if c.get("type") == "theme"]
         app.back()
         app._tap_row(0)

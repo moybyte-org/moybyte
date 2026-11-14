@@ -1294,10 +1294,10 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(tmp_path):
     kernel's STOPPED event fires."""
     ws = _ws(tmp_path)
     h = wh.WebHost(str(_store(tmp_path)), port=0,
-                   on_stop=lambda: ws.wifi_release("web"))
+                   on_stop=lambda: ws.spine.wifi_release("web"))
     h.update = None
     ws.webhost = h
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="10.0.0.5")
     ws.web.park()
 
@@ -1321,7 +1321,7 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
     h = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="127.0.0.1")
     assert h.serving
     h.stop()                                # a bare stop: the socket is gone
@@ -1337,7 +1337,7 @@ def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
     ws = _mode_ws(tmp_path)
     seen = []
     ws.web.ui.on_enter = lambda: seen.append(("on_enter", ws.web.parked))
-    ws.go_home = lambda: seen.append(("go_home", ws.web.parked))
+    ws.home.go_home = lambda: seen.append(("go_home", ws.web.parked))
     ws.park_web_console()
     assert seen == [("on_enter", True), ("go_home", True)]
 
@@ -1348,10 +1348,10 @@ def test_go_home_re_parks_exactly_while_the_flag_is_set(tmp_path):
     cart, the bar's X, a crash and the pause menu's Quit to all land back here."""
     ws = _mode_ws(tmp_path)
     ws.web.parked = True
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "webconsole"
     ws.web.parked = False
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1500,7 +1500,7 @@ def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
     from ws_helpers import build_desktop_ws
     ws = build_desktop_ws(tmp_path)
     ws.webhost = _ModeHost()
-    ws.open_desk()
+    ws.home.open_desk()
     assert ws.wm.desk_open() is True
     ws.toggle_webhost()
     assert ws.wm.top_kind() == "webconsole"
@@ -1623,9 +1623,9 @@ def test_launch_named_takes_a_title_or_a_folder(tmp_path):
     ws = _ws(tmp_path)
     for name in ("Star Catcher", "star_catcher", "moybyte.star_catcher.moy",
                  "star catch"):
-        assert ws.launch_named(name) == "Star Catcher", name
-        ws.go_home()
-    assert ws.launch_named("no such cart anywhere") is None
+        assert ws.home.launch_named(name) == "Star Catcher", name
+        ws.home.go_home()
+    assert ws.home.launch_named("no such cart anywhere") is None
 
 
 def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
@@ -1634,8 +1634,8 @@ def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
     ws = _ws(tmp_path)
     titles = [c["title"] for c in ws.launcher.items if c.get("path")]
     for t in titles:
-        assert ws.launch_named(t) == t, titles
-        ws.go_home()
+        assert ws.home.launch_named(t) == t, titles
+        ws.home.go_home()
 
 
 def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
@@ -1644,18 +1644,18 @@ def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
     takes the poll down with the whole session."""
     ws = _ws(tmp_path)
     for junk in (7, 3.5, True, {"a": 1}, ["x"]):
-        assert ws.launch_named(junk) is None, junk
+        assert ws.home.launch_named(junk) is None, junk
         assert ws.wm.top_kind() == "launcher", junk
     # None is not junk -- it is the dev channel's `run` with no argument, which
     # plays the first real cart.
-    assert ws.launch_named(None) is not None
+    assert ws.home.launch_named(None) is not None
 
 
 def test_launch_named_never_picks_a_pseudo_tile(tmp_path):
     """The pinned Make/+New cards carry no store path; running one would open
     an editor at a browser's request."""
     ws = _ws(tmp_path)
-    title = ws.launch_named("")
+    title = ws.home.launch_named("")
     assert title and any(c.get("path") and c["title"] == title
                          for c in ws.launcher.items)
 
@@ -1666,9 +1666,9 @@ def test_a_cart_launched_from_the_browser_exits_BACK_to_the_screen(tmp_path):
     on the connection screen rather than on a shelf the browser is rewriting."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    assert ws.launch_named("Star Catcher") == "Star Catcher"
+    assert ws.home.launch_named("Star Catcher") == "Star Catcher"
     assert ws.wm.top_kind() == "desktop", "the cart did not start"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "webconsole"
     assert ws.webhost_serving() is True, "the exit stopped the host"
 
@@ -1679,10 +1679,10 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
     the next exit to trip over."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    ws.launch_named("Star Catcher")
+    ws.home.launch_named("Star Catcher")
     ws.toggle_webhost()
     assert ws.web.parked is False
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1690,8 +1690,8 @@ def test_the_dev_channel_run_uses_the_same_lookup():
     """ONE author for the cart lookup: a name that works over serial works from
     the page, and neither can grow its own idea of what a cart is called."""
     src = runtime_file("dev_channel.py").read_text()
-    assert "ws.launch_named(" in src
-    assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
+    assert "ws.home.launch_named(" in src
+    assert "ws.home.launch_selected()" not in src, "the dev channel re-grew a lookup"
 
 
 # -- the goodbye ------------------------------------------------------------

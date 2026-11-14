@@ -210,7 +210,7 @@ def test_the_x_exits_and_flushes_nothing(tmp_path):
     con = _run(ws, "note.py", src)
     assert ws._running_cart_shows_bar(), "a script runs WITH the exitable bar"
     before = sorted(moy_carts.list_files("docs", ws.carts_root))
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frame(ws)
     assert not ws.wm.top_is_player()
     assert sorted(moy_carts.list_files("docs", ws.carts_root)) == before
@@ -254,7 +254,7 @@ def test_running_a_script_creates_no_folder_and_writes_nothing(tmp_path):
     ok, _why = ws.run_script("docs", "hi.py")
     assert ok
     _frame(ws, 3)
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frame(ws)
     assert sorted(os.listdir(root)) == before_carts
     assert sorted(os.listdir(docs)) == before_docs

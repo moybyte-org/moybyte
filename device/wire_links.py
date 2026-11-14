@@ -91,7 +91,7 @@ class CartNet:
     console whose internal RAM is spent says so. TLS verifies the server's
     certificate (native/moy_net/moy_ota.h), and cart_index checks every file
     against its index's sha256 besides. The radio is the
-    app's lease (`ws.wifi_hold("carts")`), never this."""
+    app's lease (`ws.spine.wifi_hold("carts")`), never this."""
 
     def __init__(self, wifi, autoconnect=None):
         self.wifi = wifi

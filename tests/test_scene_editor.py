@@ -189,7 +189,7 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
     assert "scene" in [t for t, _g in EA._ZONE_TABS]
     assert "scene" in [t for t, _l, _i in EA._TAB_CHIPS]
     ws = _open_ws(tmp_path)
-    ws._open_scene()
+    ws.text._open_scene()
     assert ws.menu_view == "scene" and ws.editor_app.tab == "scene"
     assert ws._content_layer() is ws._content_layers["scene"]
     ws.frame(0.016)                                  # the tab draws headlessly
@@ -201,7 +201,7 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
 
 def test_tap_places_selects_and_drag_moves(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     ws.scene_ui.page().set_tool("stamp")
     se = ws.scene_ui.sceneedit
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
@@ -228,7 +228,7 @@ def test_tap_places_selects_and_drag_moves(tmp_path):
 
 def test_drag_on_empty_world_pans_and_never_places(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     se = ws.scene_ui.sceneedit
     count = len(se.rows)
     layer = ws._content_layers["scene"]
@@ -256,11 +256,11 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
         "    n = len(scene())\n"
         "def _draw():\n    cls(0)\n"))
     assert ws.ns["n"] == 2
-    ws._open_scene()
+    ws.text._open_scene()
     ws.scene_ui.page().set_tool("stamp")
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     _tap(ws, x0 + 120, y0 + 40)                       # place actor #3
-    ws._leave_menu()                                  # PLAY re-runs _init AND commits
+    ws.text._leave_menu()                                  # PLAY re-runs _init AND commits
     assert ws.ns["n"] == 3
     # The placement is durably persisted too -- PLAY hard-commits (#111).
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
@@ -269,15 +269,15 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
 
 def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     se = ws.scene_ui.sceneedit
     se.place(80, 80)
-    ws.save_scene()
+    ws.saves.save_scene()
     assert ws.cart_error is None and not se.dirty    # invisible save: no failure text
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
     assert len(json.loads(live.read_text())) == 3
     ws.scene_ui.sceneedit.place(120, 80)
-    ws.save_scene()                                   # a second durable step
+    ws.saves.save_scene()                                   # a second durable step
     assert len(json.loads(live.read_text())) == 4
     # The durable journal walk restores the file AND the open workspace's live
     # Scenes (the _reload_after_walk rebuild), so the next run spawns 3 again.
@@ -290,7 +290,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
 
 def test_props_row_tag_typing_and_flip(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     ui = ws.scene_ui
     se = ui.sceneedit
     page = ui.page()
@@ -317,12 +317,12 @@ def test_props_row_tag_typing_and_flip(tmp_path):
 
 def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
     ws = _open_ws(tmp_path)                           # no scenes at all
-    ws._open_scene()
+    ws.text._open_scene()
     ui = ws.scene_ui
     assert ui.scene_name == "main" and ui.sceneedit.rows == []
     ui.sceneedit.place(24, 24)
     ui._sync_live()
-    ws.save_scene()
+    ws.saves.save_scene()
     man = json.loads((Path(ws.cart["path"]) / "manifest.json").read_text())
     assert man["moybyte"]["assets"]["scenes"] == ["main"]
     assert len(ws.run.project.scenes.scene("main")) == 1          # live object gained it too
@@ -330,7 +330,7 @@ def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
 
 def test_zoom_cycles_and_camera_clamps(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     ui = ws.scene_ui
     assert ui._sv_metrics()[2] == 1
     ui._cycle_zoom()
@@ -347,9 +347,9 @@ def test_zoom_cycles_and_camera_clamps(tmp_path):
 
 def test_editor_resets_between_carts(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws._open_scene()
+    ws.text._open_scene()
     assert ws.scene_ui.sceneedit is not None
-    ws.go_home()
+    ws.home.go_home()
     assert ws.scene_ui.sceneedit is None              # no stale editor leaks
 
 

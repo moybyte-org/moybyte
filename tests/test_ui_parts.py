@@ -973,7 +973,7 @@ def parts_runs(tmp_path_factory):
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -1744,7 +1744,7 @@ def files_runs(request, tmp_path_factory):
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _files_script(ws)
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -1867,7 +1867,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
             if snap is None:
                 snap = run._run.snap
             assert snap[wasm_binding.SNAP_FACE] & 1 == (1 if desk else 0), name
-        ws.exit()
+        ws.spine.exit()
 
 
 # -- the Appearance verbs (step 20): tabs, a grid of cards --------------------------------
@@ -2049,7 +2049,7 @@ def look_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2214,7 +2214,7 @@ def pop_runs(request, tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2449,7 +2449,7 @@ def menu_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2688,7 +2688,7 @@ def restyle_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 

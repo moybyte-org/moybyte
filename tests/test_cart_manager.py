@@ -90,7 +90,7 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     end); the two grid rebuilds -- the home's and the home window's -- must
     both read the SAME scan."""
     ws = build_ws(tmp_path)
-    ws.projects_grid = ws._home_grid("grid", [])
+    ws.projects_grid = ws.home._home_grid("grid", [])
     ws.projects_grid.tab = "make"
     order = []
     real_slim = ws.carts.slim
@@ -110,9 +110,9 @@ def test_the_grids_follow_a_create_through_apply(tmp_path):
     root = str(ws.carts_root)
     _mk(root, "Freshly")
     ws.carts.apply(shelf(root))
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Freshly" in _titles(ws.launcher)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert "Freshly" in _titles(ws.launcher)
 
 
@@ -127,7 +127,7 @@ def test_rescan_adopts_what_landed_on_the_store_and_marks_dirty(tmp_path):
     ws.frame_state.dirty = False
     ws.carts.rescan()
     assert ws.frame_state.dirty is True
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Synced" in _titles(ws.launcher)
 
 
@@ -163,7 +163,7 @@ def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
     on_sync = lambda folders: ws.rescan_carts(folders)   # noqa: E731 -- the webhost's shape
     made = _mk(str(ws.carts_root), "Pushed")
     on_sync((made["path"].rsplit("/", 1)[-1],))
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Pushed" in _titles(ws.launcher)
     again = _mk(str(ws.carts_root), "Pushed Too")
     on_sync(None)
@@ -216,7 +216,7 @@ def test_a_folder_rescan_reads_one_entry_and_matches_a_whole_scan(tmp_path, monk
     assert all(a is b for a, b in zip(kept, before)), "the other entries are kept"
     new = next(c for c in ws.carts.all if c["path"] == made["path"])
     assert new["lazy"] is True and "icon_rows" not in new
-    ws.set_home_tab("mine")
+    ws.home.set_home_tab("mine")
     assert "Middling" in _titles(ws.launcher)
 
 
@@ -333,7 +333,7 @@ def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     assert made is not None and made.get("path")
     assert len(ws.carts.all) == n0 + 1
     assert any(c["path"] == made["path"] for c in ws.carts.all)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert made["path"] in [it.get("path") for it in ws.launcher.items]
 
 
@@ -343,8 +343,8 @@ def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
     from the roster, which is what keeps the two halves from disagreeing about
     WHICH cart was just made."""
     ws = build_ws(tmp_path)
-    ws.set_home_tab("make")
-    ws.new_cart_and_edit()
+    ws.home.set_home_tab("make")
+    ws.home.new_cart_and_edit()
     assert ws.cart is not None
     assert ws.launcher.selected().get("path") == ws.cart["path"]
 
@@ -352,7 +352,7 @@ def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
 def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
     ws = build_ws(tmp_path)
     ws.can_manage = False
-    ws.new_cart_and_edit()
+    ws.home.new_cart_and_edit()
     assert ws.cart is None
 
 
@@ -418,7 +418,7 @@ def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
     assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
-    assert ws.notice_active()
+    assert ws.notices.notice_active()
 
 
 def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
@@ -600,7 +600,7 @@ def test_a_pseudo_tile_is_never_starred_or_recorded(tmp_path):
     """The "+ New" card carries no path, and a path is the identity
     everything here keys on."""
     ws = build_ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     make = ws.launcher.items[0]
     assert make.get("path") is None
     assert ws.carts.is_favorite(make) is False
@@ -647,7 +647,7 @@ def test_a_launcher_run_records_the_cart_as_recent(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     cart = ws.launcher.selected()
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.system.get("desk_mru")[0] == cart["path"]
 
 
@@ -750,7 +750,7 @@ def test_a_launcher_run_writes_the_play_record(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     cart = ws.launcher.selected()
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.carts.plays(cart)[0] == 1
 
 

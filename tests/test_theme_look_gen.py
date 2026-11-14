@@ -65,8 +65,8 @@ def _world(tmp_path, desk):
         ws.look.set_theme(BASE, persist=False, variant="dark")
     _quiet(ws)
     if desk:
-        ws.open_desk()
-        assert ws.open_app(ws._apps_by_id["files"])
+        ws.home.open_desk()
+        assert ws.spine.open_app(ws._apps_by_id["files"])
         ws.open_settings()               # focused; files stays behind it
     return ws
 
@@ -176,7 +176,7 @@ def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, d
             use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
         return ws
 
@@ -220,7 +220,7 @@ def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
             use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
         return ws
 

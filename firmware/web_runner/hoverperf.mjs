@@ -64,7 +64,7 @@ for _i, _c in enumerate(_ws.launcher.items):
         _ws.launcher.sel = _i
         break
 _ws.open_in_editor()
-_ws.set_menu_view("code")
+_ws.text.set_menu_view("code")
 `);
 for (let i = 0; i < 90; i++) { mp.runPython(`_f = step_frame_json(1/60, -1.0)`); const f = mp.globals.get("_f"); /* present is fixed-cost; not timed here */ }
 console.log("editor state:", JSON.stringify(pyJson(`json.dumps({"view": getattr(_ws, "menu_view", None), "editor": _ws.editor is not None})`)));
@@ -74,7 +74,7 @@ bench("editor forced-dirty (hover-flip class, code tab)", 60, { dirty: true });
 
 // heaviest tabs: sprites + map
 for (const tab of ["sprites", "map"]) {
-    mp.runPython(`_ws.set_menu_view(${JSON.stringify(tab)})`);
+    mp.runPython(`_ws.text.set_menu_view(${JSON.stringify(tab)})`);
     for (let i = 0; i < 60; i++) { mp.runPython(`_f = step_frame_json(1/60, -1.0)`); const f = mp.globals.get("_f"); /* present is fixed-cost; not timed here */ }
     bench(`editor ${tab} forced-dirty`, 60, { dirty: true });
 }

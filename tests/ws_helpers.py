@@ -131,7 +131,7 @@ def select_on_home(ws, title):
             ws.launcher.sel = i
             return c
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
-    if cart is None or not ws.select_cart(cart):
+    if cart is None or not ws.home.select_cart(cart):
         return None
     return ws.launcher.selected()
 
@@ -148,7 +148,7 @@ def open_cart(ws, title):
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
     ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
 
 
 def make_drv(ws):
@@ -245,8 +245,8 @@ def device_frames(ws, n=1, dt=1 / 30):
     refreshed by `handle_pointer`)."""
     for _ in range(n):
         ws.input.begin_frame()
-        ws.handle_input()
-        ws.handle_pointer()
+        ws.router.handle_input()
+        ws.router.handle_pointer()
         ws.frame(dt)
 
 

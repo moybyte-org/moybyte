@@ -92,7 +92,7 @@ def fresh(monkeypatch):
 def _stop(ws, s):
     """The VM stops: what the board's Player and teardown do, the record
     answered."""
-    rec = json.loads(ws.resume_record())
+    rec = json.loads(ws.home.resume_record())
     s.pause()
     moy_evq.vm_stop()
     door = moy_loop._ROLE[0]
@@ -121,7 +121,7 @@ def _back(ws, rec, door, monkeypatch):
     moy_loop.role(door)
     s = S.Scheduler()
     monkeypatch.setattr(S, "SCHED", s)
-    ws.resume_launcher(json.dumps(rec))
+    ws.home.resume_launcher(json.dumps(rec))
     started = S.boot(ws)
     return s, started
 

@@ -201,7 +201,7 @@ def test_a_lua_carts_textmode_reaches_the_keyboard(tmp_path):
 def test_the_trackball_steps_an_apps_page_and_shows_no_cursor(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Field App", LUA_APP if runtime == "lua" else PY_APP, runtime)
     assert ws.input_policy.ball_steps(), "an app's page takes the trackball as its W A S D"
-    ws._ball_axis_at -= ws.BALL_ROLLING_MS + 1
+    ws._ball_axis_at -= ws.router.BALL_ROLLING_MS + 1
     drv.pan(0, 1)
     for _ in range(2):
         drv.frame(DT)
@@ -262,7 +262,7 @@ def _stop(ws):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -350,7 +350,7 @@ def test_mic_cancels_a_shell_apps_field(tmp_path, app_id):
                         moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64), carts)
     ws = host_app.build_workstation(carts)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws._apps_by_id[app_id])
     for _ in range(3):
         drv.frame(DT)
     draft = SHELL_FIELDS[app_id](ws)

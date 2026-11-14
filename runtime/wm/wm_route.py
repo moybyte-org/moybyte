@@ -28,14 +28,14 @@ class WindowRoute:
         independent of the back-stack, so typing lands in the editor while a
         playtest keeps running beside it. No focused window (the desktop root) ->
         return False and the launcher layer takes the keys. The HOME key is the
-        desk's, whatever holds focus but a game (`ws.home_key`: show the
+        desk's, whatever holds focus but a game (`ws.home.home_key`: show the
         desktop, or bring the windows back). B and Esc are the window's back
         chevron while it shows one (`_win_back`)."""
         if not self._order:
             return False
         win = self._focus_win()
         if i.pressed("home") and (win is None or win.kind != "desktop"):
-            self.ws.home_key()
+            self.ws.home.home_key()
             return True
         if win is None or win.minimized:
             return False

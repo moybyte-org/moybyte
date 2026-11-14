@@ -215,7 +215,7 @@ def _editor(ws, drv, desk, size=None):
     full = size == "full"
     if desk:
         ws.system.set("win_full", {"menu": full})
-        ws.open_desk()
+        ws.home.open_desk()
         _frames(ws, drv)
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     _frames(ws, drv)
@@ -306,7 +306,7 @@ def test_the_status_widgets_give_way_only_where_the_ladder_needs_their_room(
 
 @pytest.mark.parametrize("where,opener", [
     ("menu", lambda ws: ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))),
-    ("projects", lambda ws: ws.open_projects()),
+    ("projects", lambda ws: ws.home.open_projects()),
     ("settings", lambda ws: ws.open_settings()),
 ])
 def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monkeypatch,
@@ -314,7 +314,7 @@ def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monke
     """Every zone owner a desk window holds is handed one rect for its draw
     and its tap, at the zone's far end as at its head."""
     ws, drv = _ws(tmp_path, DESK, "moy", "touch")
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(ws, drv)
     opener(ws)
     _frames(ws, drv)

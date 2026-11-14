@@ -620,7 +620,7 @@ def _editor_tab_hash(ws, tab):
     """Open the Editor on the pinned cart at `tab` and hash the settled frame --
     the same two calls `_surface_plan`'s per-tab `enter` makes."""
     ws.open_in_editor(_cart_by_title(ws, _EDITOR_CART))
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     return _render(ws, "editor_" + tab, _INDEPENDENCE_CONFIG)
 
 
@@ -717,21 +717,21 @@ def _surface_plan(ws, cfg):
     if desktop:
         # The desk (desktop mode's floor), the desk with ONE app window, and
         # the desk's PROJECTS: the home in a window, on Make, alone on the desk.
-        plan.append(("desk", lambda: ws.open_desk()))
+        plan.append(("desk", lambda: ws.home.open_desk()))
         plan.append(("desk_window_calc",
-                     lambda: ws.open_app(ws._apps_by_id["calc"])))
+                     lambda: ws.spine.open_app(ws._apps_by_id["calc"])))
 
         def projects():
-            ws.open_desk()
-            ws.open_projects()
+            ws.home.open_desk()
+            ws.home.open_projects()
         plan.append(("desk_window_projects", projects))
 
     def home():
         # The home, with nothing parked beneath it: go_home closes the desk's
         # windows, and on the windowed tier PLAY then enters console mode.
-        ws.go_home()
+        ws.home.go_home()
         if cfg["windowed"]:
-            ws.open_library()
+            ws.home.open_library()
 
     plan.append(("launcher", home))
     plan.append(("settings", lambda: ws.open_settings()))
@@ -807,13 +807,13 @@ def _surface_plan(ws, cfg):
             if desktop:
                 ws.wm.leave_console()
             ws.open_in_editor(cart)
-            ws.set_menu_view(tab)
+            ws.text.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
     pages = False
     for app in APPS:
         if app == "terminal":
             continue                     # last: its session's lines are its own
-        enter = (lambda app=app: ws.open_app(ws._apps_by_id[app]))
+        enter = (lambda app=app: ws.spine.open_app(ws._apps_by_id[app]))
         if app == "getcarts":
             enter = _open_get_carts(ws)
         if pages:
@@ -884,9 +884,9 @@ def _broken_cart(ws, cfg):
     Make tab, where its card wears the guard's mark. Last in the plan: it
     adds a cart to the roster."""
     def run():
-        ws.go_home()
+        ws.home.go_home()
         if cfg["windowed"]:
-            ws.open_library()
+            ws.home.open_library()
         d = os.path.join(str(ws.carts_root), "boomy.moy")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "manifest.json"), "w") as f:
@@ -896,8 +896,8 @@ def _broken_cart(ws, cfg):
         ws.carts.rescan()
         cart = next(c for c in ws.carts.all if c.get("title") == "Boomy")
         guard = ws.app_guard
-        ws.system.set(crash_guard.KEY, {"strikes": {ws.app_cart_id(cart): guard.STRIKES}})
-        ws.set_home_tab("make")
+        ws.system.set(crash_guard.KEY, {"strikes": {ws.spine.app_cart_id(cart): guard.STRIKES}})
+        ws.home.set_home_tab("make")
         items = ws.launcher.items
         ws.launcher.sel = next(i for i, c in enumerate(items) if c.get("title") == "Boomy")
     return run
@@ -908,12 +908,12 @@ def _two_windows(ws):
     line typed. Each strip names its own window, and Notes, drawn under the
     Terminal every frame, leaves the Terminal's strip as it drew it."""
     def run():
-        ws.go_home()                     # the desk's windows close
-        ws.open_desk()
+        ws.home.go_home()                     # the desk's windows close
+        ws.home.open_desk()
         open_cart(ws, "Notes")
         ws.run.player.ns["_open"](NOTES_VAULT[0][0])
         app = ws._apps_by_id["terminal"]
-        ws.open_app(app)
+        ws.spine.open_app(app)
         f = app.face
         f.clear_cands()
         f.set_line("clear")
@@ -998,7 +998,7 @@ def _files_document(ws):
     from runtime import files_app
     ws.confirm.cancel()
     _pin_file_times(ws)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws._apps_by_id["files"])
     app = ws.files_app
     app._refresh_counts()
     app.open_place(files_app.DOCUMENTS, keep="todo")
@@ -1029,11 +1029,11 @@ def _terminal_plan(ws, cfg):
         # on the desk, a window on the desk alone (the plan before left
         # console mode and its windows behind)
         if cfg["windowed"] and not cfg.get("console"):
-            ws.open_desk()
+            ws.home.open_desk()
         if tdeck:
             ui_draw.input_kind("tdeck")
             ui_draw.hint_kind("tdeck")
-        ws.open_app(app)
+        ws.spine.open_app(app)
 
     def line(kind, in_row=False):
         def enter():
@@ -1175,9 +1175,9 @@ def _mesh_installed(ws, desktop):
     its node and its messages pinned: from the home, or alone on the desk."""
     def run():
         from runtime.host import lora_sim
-        ws.go_home()                     # the desk's windows close
+        ws.home.go_home()                     # the desk's windows close
         if desktop:
-            ws.open_desk()
+            ws.home.open_desk()
         shutil.copytree(MESH_APP, os.path.join(str(ws.carts_root), "moymesh.moy"))
         ws.carts.rescan()
         lora_sim.install()
@@ -1274,9 +1274,9 @@ def _menus_plan(ws, cfg):
     import random
 
     def sysmenu():
-        ws.go_home()
+        ws.home.go_home()
         if cfg["windowed"]:
-            ws.open_desk()
+            ws.home.open_desk()
         ws._golden_popover = True
         ws.system_key()
         assert ws.sysmenu.open and ws.menu_ui.looked()
@@ -1286,12 +1286,12 @@ def _menus_plan(ws, cfg):
             ws._golden_popover = False
             ws.sysmenu.close()
             ws.pause.close()
-            ws.go_home()
+            ws.home.go_home()
             if cfg["windowed"]:
-                ws.open_library()
+                ws.home.open_library()
             random.seed(25)
             ws._open_workspace(_cart_by_title(ws, _PAUSE_CART))
-            ws.play(ws.launcher_layer)
+            ws.spine.play(ws.launcher_layer)
             for _ in range(_PAUSE_FRAMES):
                 _quiesce(ws)
                 ws.frame(_DT)
@@ -1316,13 +1316,13 @@ def _procs_plan(ws):
     import random
 
     def two():
-        ws.open_desk()
+        ws.home.open_desk()
         for i, title in enumerate(_PROCS_CARTS):
             random.seed(25 + i)
             cart = _cart_by_title(ws, title)
             assert ws.procs.launch(cart)       # the first game joins the running set
             ws._open_workspace(cart)
-            ws.play(ws.launcher_layer)
+            ws.spine.play(ws.launcher_layer)
             ws.frame(_DT)
             win = ws.wm._wins["desktop"]
             if win.saved is not None:
@@ -1424,25 +1424,25 @@ def _status_plan(ws, cfg):
 
     if cfg["windowed"]:
         def desk_bar():
-            ws.open_desk()
+            ws.home.open_desk()
             _status_item(ws)
 
         def desk_menu():
             from runtime.status_items import ITEMS
             ws._golden_popover = True
-            ws.open_status_menu(ITEMS.at(0))
+            ws.notices.open_status_menu(ITEMS.at(0))
             assert ws.sysmenu.open and ws.sysmenu.widget == "status"
 
         def desk_panel():
             ws.close_popover()
             it = _panel_item(ws)
-            ws.open_status_menu(it)
+            ws.notices.open_status_menu(it)
             assert ws.sysmenu.open and ws.status_open is it
         return [("status_desk_bar", desk_bar), ("status_desk_menu", desk_menu),
                 ("status_desk_panel", desk_panel)]
 
     def music():
-        ws.go_home()
+        ws.home.go_home()
         _status_item(ws)
 
     def focus():
@@ -1468,7 +1468,7 @@ def _status_plan(ws, cfg):
     def vmstop():
         ws.close_popover()
         ws._golden_popover = False
-        ws.ask_stop_music({"title": "Doom"})
+        ws.notices.ask_stop_music({"title": "Doom"})
         assert ws.confirm.open
 
     def paused():
@@ -1481,7 +1481,7 @@ def _status_plan(ws, cfg):
 
     def low():
         ws.pause.close()
-        ws.go_home()
+        ws.home.go_home()
         ws.battery_level = lambda: 9
         ws.bar_layer.invalidate()
 
@@ -1567,7 +1567,7 @@ def _music(ws, now, what, page="list", tab=0, cur=None, files=None):
         if s.wake is not None:
             moybyte.cancel(s.wake)
             s.wake = None
-    ws.open_app(app)
+    ws.spine.open_app(app)
     app.tab = tab
     if files is not None:
         app.files = files
@@ -1594,11 +1594,11 @@ def _music_plan(ws, cfg):
     if cfg.get("plan") == "music_noaudio":
         def noaudio():
             M.STREAM.face = False           # the Guition S3's: no media service
-            ws.open_app(ws._apps_by_id["jukebox"])
+            ws.spine.open_app(ws._apps_by_id["jukebox"])
         return [("music_noaudio", noaudio)]
     if cfg["windowed"]:
         def desk():
-            ws.open_desk()
+            ws.home.open_desk()
             _music(ws, _MUSIC_RADIO, groove, cur=3)
 
         def desk_files():
@@ -1606,18 +1606,18 @@ def _music_plan(ws, cfg):
 
         def desk_menu():
             from runtime.status_items import ITEMS
-            ws.open_desk()
-            ws.open_app(ws._apps_by_id["files"])
+            ws.home.open_desk()
+            ws.spine.open_app(ws._apps_by_id["files"])
             _music_wake_off()
             ws._golden_popover = True
-            ws.open_status_menu(ITEMS.at(0))
+            ws.notices.open_status_menu(ITEMS.at(0))
             assert ws.sysmenu.open and ws.sysmenu.widget == "status"
 
         def desk_failed():
             ws.close_popover()
             _music(ws, dict(_MUSIC_RADIO, state="failed", title=""),
                    ("radio", "Secret Agent", M.STATIONS[5][2]))
-            ws.open_status_menu(ws.status_open)
+            ws.notices.open_status_menu(ws.status_open)
         return [("music_desk", desk), ("music_desk_files", desk_files),
                 ("music_desk_menu", desk_menu), ("music_desk_failed", desk_failed)]
 
@@ -1632,7 +1632,7 @@ def _music_plan(ws, cfg):
 
     def cc():
         _music(ws, _MUSIC_RADIO, groove)
-        ws.go_home()
+        ws.home.go_home()
         ws._golden_popover = True
         ws.widget_tap("battery")
         assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
@@ -1641,7 +1641,7 @@ def _music_plan(ws, cfg):
         ws.close_popover()
         ws._golden_popover = False
         _music(ws, dict(_MUSIC_RADIO, paused=True), groove)
-        ws.go_home()
+        ws.home.go_home()
 
     def add_https():
         app = _music(ws, None, None, page="add")
@@ -1693,20 +1693,20 @@ def _tasks_plan(ws, cfg):
 
     def empty():
         if windowed:
-            ws.open_desk()
+            ws.home.open_desk()
         ws.open_tasks()
 
     def two():
         ws.close_tasks()
         if windowed:
-            ws.open_desk()
+            ws.home.open_desk()
         for i, title in enumerate(_PROCS_CARTS):
             random.seed(25 + i)
             cart = _cart_by_title(ws, title)
             if windowed:
                 assert ws.procs.launch(cart)
             ws._open_workspace(cart)
-            ws.play(ws.launcher_layer)
+            ws.spine.play(ws.launcher_layer)
             ws.frame(_DT)
             if windowed:
                 win = ws.wm._wins["desktop"]
@@ -1795,8 +1795,8 @@ def _popover_plan(ws):
     """The desk with a Calc window, then each widget's popover over it. The
     popover stays open through the render (`_golden_popover`)."""
     def desk():
-        ws.open_desk()
-        ws.open_app(ws._apps_by_id["calc"])
+        ws.home.open_desk()
+        ws.spine.open_app(ws._apps_by_id["calc"])
 
     def popover(widget):
         def enter():
@@ -1833,8 +1833,8 @@ def _desk_popover_plan(ws):
         def enter():
             ws.close_popover()
             if widget == "clock":
-                ws.open_desk()
-                ws.open_app(ws._apps_by_id["calc"])
+                ws.home.open_desk()
+                ws.spine.open_app(ws._apps_by_id["calc"])
             ws.bar_layer._today = lambda: day       # the card sizes as it opens
             ws._golden_popover = True
             ws.widget_tap(widget)
@@ -1859,7 +1859,7 @@ def _desk_popover_plan(ws):
             it = _panel_item(ws)
             it.section.set(parse(text))
             it.changed()
-            ws.open_status_menu(it)
+            ws.notices.open_status_menu(it)
             assert ws.sysmenu.open and ws.status_open is it
         return enter
 
@@ -1871,9 +1871,9 @@ def _desk_popover_plan(ws):
                 ITEMS._free(it)
         _music(ws, _MUSIC_LIST, ("list", "Road trip mix", "/m/r.m3u"), tab=1,
                files=_MUSIC_FILES)
-        ws.open_app(ws._apps_by_id["calc"])
+        ws.spine.open_app(ws._apps_by_id["calc"])
         _music_wake_off()
-        ws.open_status_menu(ITEMS.at(0))
+        ws.notices.open_status_menu(ITEMS.at(0))
         assert ws.sysmenu.open and ws.sysmenu.widget == "status"
 
     return [("popover_clock", popover("clock")), ("popover_clock_six",
@@ -1888,10 +1888,10 @@ def _home_plan(ws, cfg):
     arrangement (the layout's `home`)."""
     def tab(t):
         def enter():
-            ws.go_home()
+            ws.home.go_home()
             if cfg["windowed"]:
-                ws.open_library()
-            ws.set_home_tab(t)
+                ws.home.open_library()
+            ws.home.set_home_tab(t)
         return enter
 
     return [("launcher" if t == "games" else "launcher_" + t, tab(t))
@@ -1905,7 +1905,7 @@ def parts_app(ws, page):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     app = mod.PartsApp(ws, page)
-    ws.register_app(app)
+    ws.spine.register_app(app)
     return app
 
 
@@ -1929,7 +1929,7 @@ def _widget_page_plan(ws):
     def page(widget):
         def enter():
             ws.sysmenu.close()
-            ws.go_home()
+            ws.home.go_home()
             ws._golden_popover = widget == "menu"
             ws.widget_tap(widget)
         return enter
@@ -1948,7 +1948,7 @@ def _open_get_carts(ws):
         ws.cart_net = MemNet({INDEX_URL: snapshot("index.json")})
         app = ws._apps_by_id["getcarts"]
         app._inst.free = lambda: (64 * 1048576, 4096)
-        ws.open_app(app)
+        ws.spine.open_app(app)
         for _ in range(20):
             if app.phase != "checking":
                 break
@@ -2062,7 +2062,7 @@ def capture(config_name, carts_dir, golden=None, moved=None):
                     lambda: pixel_goldens.rgb565_rows(cv._buf, cv.w, cv.h),
                     cv.w, cv.h))
     finally:
-        ws.go_home()                   # the run in front ends: its canvas is the glass's
+        ws.home.go_home()                   # the run in front ends: its canvas is the glass's
         from runtime import scheduler
         scheduler.SCHED.reset()        # a service a plan started is process-wide too
         from runtime import notifications
@@ -2375,7 +2375,7 @@ def test_every_app_cart_is_covered(tmp_path):
     """The other half: an app that is a CART is claimed by no registry, so its
     coverage is pinned against the seeded store."""
     ws = _build(CONFIGS["tdeck_320x240_fs1_dark"], tmp_path / "carts")
-    carts = {c.get("title") for c in ws.carts.all if ws.is_user_app(c)}
+    carts = {c.get("title") for c in ws.carts.all if ws.spine.is_user_app(c)}
     assert carts == {title for _s, title in APP_CARTS}, (
         "the app-cart roster changed (%s) -- add it to APP_CARTS and "
         "re-baseline:\n    %s" % (sorted(carts), REBASELINE_CMD))

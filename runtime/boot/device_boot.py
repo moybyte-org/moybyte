@@ -232,7 +232,7 @@ def report_update(ws, log):
         verdict = upd.boot_check()
         if verdict:
             log("last update %s (%s)" % verdict)
-            ws.announce_update()   # and say so on the desktop, not just here
+            ws.notices.announce_update()   # and say so on the desktop, not just here
         return verdict
     except Exception as exc:  # noqa: BLE001 -- never block the desktop
         log("boot_check failed: %s" % (exc,))
@@ -256,6 +256,6 @@ def boot_ok(ws, kernel=None):
         if dump:
             print("core dump: %d bytes in flash (tools/coredump.py)" % dump)
         who = rec.get("id") or rec.get("task") or "?"
-        ws.notice(_ui_draw.s("notice.crashed_last"), "%s: %s" % (who, rec.get("what") or rec.get("kind")),
+        ws.notices.notice(_ui_draw.s("notice.crashed_last"), "%s: %s" % (who, rec.get("what") or rec.get("kind")),
                   "warn", 10000)
     return rec

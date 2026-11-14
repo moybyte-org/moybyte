@@ -307,6 +307,7 @@ class _Ws:
         self.system = _Rows(BOARD_DOC if doc is None else doc)
         self.carts_root = "/sd/moybyte/carts"
         self.applied = []
+        self.spine = self            # the console's spine, answered here
 
     def apply_system_keys(self, keys):
         self.applied.append(list(keys))
@@ -484,7 +485,7 @@ def test_a_theme_no_console_has_re_applies_as_boot_reads_it(tmp_path):
     ws = build_ws(tmp_path)
     ws.system.set("theme", "no_such_theme", persist=False)
     ws.system.set("theme_variant", "dark")
-    ws.apply_system_keys(["theme", "theme_variant"])
+    ws.spine.apply_system_keys(["theme", "theme_variant"])
     live = (ws.look.theme_name, ws.look.theme_variant)
     assert live == (DEFAULT_THEME, DEFAULT_VARIANT)
     assert live == (lambda w: (w.look.theme_name, w.look.theme_variant))(

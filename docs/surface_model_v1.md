@@ -125,7 +125,7 @@ are always `!=`, never `>`.
   - *Perf (the silent-disable direction):* on a placement-only gesture frame
     the harness asserts **zero content gens moved and zero surface streams
     shipped**; every backend exposes ship/skip counters via the existing
-    `ws.note_cost` convention. This is the direction the recurring real
+    `ws.perf.note_cost` convention. This is the direction the recurring real
     defects lived in — the 72ms bar-strip rebuild that "produced no signal"
     (ui_damage §2.1) and the make-group freeze that never engaged — and a
     hash assertion cannot catch either.

@@ -83,7 +83,7 @@ FIELDS = {"files": _files_rename, "appearance": _appearance_name,
 def test_a_shell_apps_field_types_and_mic_gives_it_back(tmp_path, app_id):
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
-    assert ws.open_app(ws._apps_by_id[app_id])
+    assert ws.spine.open_app(ws._apps_by_id[app_id])
     _frames(drv)
     assert not ws.input.text_mode, "the app's rows are no text surface"
     read, was = FIELDS[app_id](ws)
@@ -131,7 +131,7 @@ def test_the_terminal_and_the_code_tab_type_always(tmp_path):
 def test_a_menu_over_a_field_is_game_mode_and_typing_comes_back(tmp_path):
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_app(ws.files_app)
+    ws.spine.open_app(ws.files_app)
     _files_rename(ws)
     _frames(drv)
     assert ws.input.text_mode
@@ -180,7 +180,7 @@ def test_esc_b_and_the_chevron_end_in_one_state(tmp_path, app_id):
         if app_id == "settings":
             ws.open_settings()
         else:
-            assert ws.open_app(ws._apps_by_id[app_id])
+            assert ws.spine.open_app(ws._apps_by_id[app_id])
         _frames(drv)
         back(ws, drv)
         ends[how] = _state(ws)
@@ -190,8 +190,8 @@ def test_esc_b_and_the_chevron_end_in_one_state(tmp_path, app_id):
 def test_a_desk_windows_chevron_and_esc_step_its_page(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
-    ws.open_app(ws.storybook_app)
+    ws.home.open_desk()
+    ws.spine.open_app(ws.storybook_app)
     _frames(drv)
     app = ws.storybook_app
     for how in ("esc", "window"):
@@ -208,11 +208,11 @@ def test_a_desk_windows_chevron_and_esc_step_its_page(tmp_path):
 # -- a pending edit survives every exit -----------------------------------
 
 def _exit_home(ws, drv):
-    ws.go_home()
+    ws.home.go_home()
 
 
 def _exit_jump(ws, drv):
-    ws.open_app(ws.appearance_app)
+    ws.spine.open_app(ws.appearance_app)
 
 
 # Back is no exit for an edit in progress: its first step gives the field its
@@ -237,7 +237,7 @@ def test_a_name_still_typed_survives_every_exit(tmp_path, how):
 def test_a_name_still_typed_survives_the_window_x(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_settings()
     _frames(drv)
     _focus_name(ws, drv)
@@ -259,7 +259,7 @@ def test_ctrl_z_and_y_on_every_editor_tab_are_the_bars(tmp_path, tab, key, monke
     open_cart(ws, "Star Catcher")
     ws.open_in_editor(ws.cart)
     _frames(drv)
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     _frames(drv)
     calls = []
     monkeypatch.setattr(ws.history, "undo", lambda: calls.append("undo"))

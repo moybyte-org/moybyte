@@ -39,7 +39,7 @@ def _own(ws, title="Extra"):
     moy_carts.create(title, str(ws.carts_root), src="def _draw():\n    cls(1)\n",
                      type="game")
     ws.carts.apply(shelf(str(ws.carts_root)))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == title)
     return ws.launcher.selected()
@@ -245,12 +245,12 @@ def test_the_desk_projects_windows_delete_asks(tmp_path):
     ws = g._build(dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant="dark",
                        theme="moy"), tmp_path / "carts")
     drv = _drv(ws)
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frames(drv)
     grid = ws.projects_grid
     _own(ws)
-    ws.set_home_tab("make", grid)
+    ws.home.set_home_tab("make", grid)
     grid.sel = next(i for i, it in enumerate(grid.items) if it.get("title") == "Extra")
     _frames(drv)
     home = ws.projects_layer

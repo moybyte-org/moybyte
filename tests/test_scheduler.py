@@ -434,7 +434,7 @@ def test_autostart_starts_what_holds_it_at_the_first_frame(console):
     drv.frame(1 / 60)
     assert p.ns["n"] >= 1                       # ticked by the host's frame
     for tab in ("games", "mine"):               # no service on a home tab
-        assert not [c for c in ws._launcher_items(ws.carts.all, tab)
+        assert not [c for c in ws.home._launcher_items(ws.carts.all, tab)
                     if c.get("type") == "service"]
 
 
@@ -445,14 +445,14 @@ def test_a_vm_stop_starts_its_services_again_after_it(console):
     drv.frame(1 / 60)
     manual = [c for c in ws.carts.all if c.get("id") == "t.manual"][0]
     assert S.start_cart(ws, manual) is not None
-    rec = json.loads(ws.resume_record())
+    rec = json.loads(ws.home.resume_record())
     assert sorted(p.rsplit("/", 1)[-1] for p in rec["svc"]) == [
         "moybyte.achievements.moy", "t.auto.moy", "t.manual.moy", "t.off.moy"]
     S.SCHED.pause()                             # the Player's, before the stop
     assert _running() == []
     S.SCHED.reset()
     ws2, drv2 = console()                       # the console after the stop
-    ws2.resume_launcher(json.dumps(rec))
+    ws2.home.resume_launcher(json.dumps(rec))
     drv2.frame(1 / 60)
     drv2.frame(1 / 60)
     assert _running() == ["t.auto", "t.manual", "t.off"]

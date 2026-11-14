@@ -88,7 +88,7 @@ def test_notes_is_the_text_app_and_it_is_an_ordinary_cart(tmp_path):
     cart = next(c for c in ws.carts.all if c.get("title") == "Notes")
     assert cart.get("type") == "app"
     assert system_api.is_text_app(cart)
-    assert ws.is_user_app(cart), "no shell app claims it -- it runs as a cart"
+    assert ws.spine.is_user_app(cart), "no shell app claims it -- it runs as a cart"
     assert system_api.draws_in_look(cart), "a built-in: it draws in the look"
     assert sum(1 for c in ws.carts.all if system_api.is_text_app(c)) == 1
 
@@ -300,7 +300,7 @@ def test_the_bars_back_on_the_list_leaves_notes_and_writes_the_note(tmp_path):
     xb = ws.bar_layer.back_rect("tool")
     ws.pointer.place(xb[0] + 2, xb[1] + 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     assert moy_carts.load_file("docs", "kept", ws.carts_root) == "not lost"
@@ -346,7 +346,7 @@ def test_no_tool_holds_focus_while_the_note_has_the_keys(tmp_path):
     moy_carts.save_file("docs", "keys", "x", ws.carts_root)
     ns, drv = _open(ws)
     _press(drv, "down", "a")
-    assert ws.focused_cart_editor() is ns["ed"]
+    assert ws.router.focused_cart_editor() is ns["ed"]
     assert ui_draw._C.api_focus(ws.run.player._ui[0]) is None
 
 
@@ -404,7 +404,7 @@ def test_the_last_note_reopens_on_the_next_launch(tmp_path):
     ns, drv = _open(ws)
     _press(drv, "down", "a")
     assert ws.system.get("moybyte.notes_last") == "kept"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     ns, _drv = _open(ws)
     assert ns["ed"] is not None and ns["ed"].name() == "kept"
 
@@ -444,7 +444,7 @@ def test_files_opens_a_note_in_notes_and_x_returns_to_files(tmp_path):
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
     ed = ws.run.player.ns["ed"]
     assert (ed.name(), ed.text()) == ("letter", "dear you")
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "files", "X returns to whoever asked"
 
 
@@ -508,13 +508,13 @@ def test_run_saves_the_program_runs_it_and_comes_back_to_it(tmp_path):
     assert moy_carts.load_file("docs", "hi.py", ws.carts_root) == \
         "print('hello')\nprint('again')"
     assert ws.script_console.text() == "hello\nagain"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
     back = ws.run.player.ns["ed"]
     assert back is not ed and back.name() == "hi.py"
     assert back.caret() == caret and back.focused()
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "files", "Notes' own X still returns to Files"
 
 
@@ -535,7 +535,7 @@ def test_the_program_comes_back_scrolled_where_it_was(tmp_path):
     where, top = ed._where(), ed._top
     assert top > 0
     _tap(drv, _box(ws, "Run"))
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     back = ws.run.player.ns["ed"]
     assert back._where() == where
@@ -559,7 +559,7 @@ def test_on_the_desk_the_vault_comes_back_on_the_programs_row(tmp_path):
 
     assert shown()
     _tap(drv, _box(ws, "Run"))
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     assert ws.run.player.ns["cur"] == 41
     assert shown(), "the vault shows the program's row, not its top"
@@ -576,7 +576,7 @@ def test_a_program_that_does_not_parse_says_so_in_the_console(tmp_path):
     _tap(drv, _box(ws, "Run"))
     assert ws.cart.get("type") == "script"
     assert "SyntaxError" in ws.script_console.text()
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     assert ws.cart.get("title") == "Notes"
     assert ws.run.player.ns["ed"].name() == "bad.py"
@@ -606,7 +606,7 @@ def test_home_from_the_script_forgets_the_way_back(tmp_path):
     _frames(drv)
     _tap(drv, _box(ws, "Run"))
     assert ws.cart.get("type") == "script"
-    ws.go_home()
+    ws.home.go_home()
     assert ws._script_return is None
     assert not ws.wm.top_is_player()
 
@@ -703,7 +703,7 @@ def test_a_resized_window_moves_the_page_not_its_pixels(tmp_path):
 
 def test_the_canvas_goes_back_when_notes_closes(tmp_path):
     ws, ns, drv = _desk(tmp_path)
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     assert not ws.run.app_window_canvas and not ws.run.app_full_canvas
 
@@ -718,7 +718,7 @@ def test_on_the_desk_run_comes_back_to_the_notes_window(tmp_path):
     _tap(drv, run)
     assert ws.cart.get("type") == "script"
     assert ws.script_console.text() == "desk"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(drv)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
     assert ws.run.player.ns["ed"].name() == "hi.py"

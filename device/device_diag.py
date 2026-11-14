@@ -49,19 +49,19 @@ def _diag_drawbrk(diag, ws):
     if diag is None:
         return
     try:
-        if ws.perf_sample() is None:        # only while a cart is actively running
+        if ws.perf.perf_sample() is None:        # only while a cart is actively running
             return
-        b = ws.perf_breakdown()             # (logic, render, audio, chrome) ms
+        b = ws.perf.perf_breakdown()             # (logic, render, audio, chrome) ms
         # bg= is render's declared-backdrop share (#172), printed INSIDE render
         # rather than beside it -- it is the cart's own drawing, and showing it
         # as a peer would re-create the reading that sent #172 hunting the shell.
-        pb = getattr(ws, "perf_backdrop", None)
+        pb = getattr(getattr(ws, "perf", None), "perf_backdrop", None)
         bg_s = (" (bg=%.2f)" % pb()) if pb is not None else ""
         diag.log("DRAWBRK", "logic=%.2f render=%.2f%s audio=%.2f chrome=%.2f"
                  % (b[0], b[1], bg_s, b[2], b[3]))
         # #63 auto-batch profiling: flushes=1/maxrun=N means the cart's N-sprite loop
         # coalesced into ONE native blit_batch; flushes=N/maxrun=1 means it did NOT.
-        pb = getattr(ws, "perf_batch", None)
+        pb = getattr(getattr(ws, "perf", None), "perf_batch", None)
         if pb is not None:
             bt = pb()
             diag.log("BATCH", "flushes=%d sprites=%d maxrun=%d" % (bt[0], bt[1], bt[2]))
@@ -79,7 +79,7 @@ def _diag_draw2(diag, ws):
         return
     try:
         cv = ws.run.canvas
-        if cv is None or ws.perf_sample() is None:
+        if cv is None or ws.perf.perf_sample() is None:
             return
         # #66: map/text/fill joined so the WHOLE render ms attributes to named C
         # ops -- (DRAWBRK render) - (these) = Python dispatch + circ/line/pix.

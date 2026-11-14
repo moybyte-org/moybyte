@@ -34,7 +34,7 @@ cart's, which never upcall the console) -- against `pump.last`, the board's
 clock at the top of the frame the read lands in, at the edges of each window.
 It is the counter PERF's `fps=` is taken from, so the two agree
 (tests/test_board_cli.py holds them together on a paced and an uncapped run of
-the real console), and `ws.perf_net()` gives the lockstep rate
+the real console), and `ws.perf.perf_net()` gives the lockstep rate
 the line would have carried. --diag turns PERF DIAG on for the run and reads
 the PERF lines instead, adding the per-phase ms (draw / flush / logic / render
 / chrome) at the diag's own cost; the diag is put back as it was either way.
@@ -87,7 +87,7 @@ WINDOW_S = 2.0
 # One read of the counter, between two frames: the board's clock at the top of
 # this frame, the frames drawn before it, the lockstep rate since the last read
 # (None with no session) and the cart the console is running.
-COUNTER = ("(pump.last, pump.drawn, ws.perf_net(), "
+COUNTER = ("(pump.last, pump.drawn, ws.perf.perf_net(), "
            "(ws.cart or {}).get('title'))")
 
 # MicroPython's ticks_ms wraps here.

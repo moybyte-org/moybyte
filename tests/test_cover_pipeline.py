@@ -403,7 +403,7 @@ def test_cover_file_read_budget(tmp_path):
         for c in mine:
             _land_cover(ws, c, div)
     reads = ws.costs.get("cover.blob.read", 0)
-    assert reads >= 1, "no file read counted -- is ws.note_cost still wired?"
+    assert reads >= 1, "no file read counted -- is ws.perf.note_cost still wired?"
     assert reads <= len(mine), (
         "read %d files for %d carts across three asks -- the file cache is not "
         "holding" % (reads, len(mine)))

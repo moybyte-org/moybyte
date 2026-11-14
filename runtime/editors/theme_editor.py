@@ -12,7 +12,7 @@
 package opened in the console's Editor with two tabs and nothing a cart has
 -- no Code, Blocks, Map, Music and no Play: an edit applies live, so there is
 nothing to run. Appearance's Edit theme… opens it (`Appearance.edit_file`,
-which makes `custom` from a seed first), `Workstation.edit_theme` hands it
+which makes `custom` from a seed first), `Text.edit_theme` hands it
 to the Editor (`EditorApp.open_theme`), and Done (‹, K, Esc) brings the
 Editor back to where it was opened from.
 

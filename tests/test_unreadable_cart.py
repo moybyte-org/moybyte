@@ -60,7 +60,7 @@ def _deny_source(monkeypatch, cart, times):
 
 
 def _select(ws, cart):
-    if not ws.select_cart(cart):
+    if not ws.home.select_cart(cart):
         raise AssertionError("cart not on the shelf: " + cart["title"])
 
 
@@ -105,7 +105,7 @@ def test_the_launcher_survives_a_refused_cart(tmp_path, monkeypatch):
     _deny_source(monkeypatch, cart, 99)
     _select(ws, cart)
     ws.open()
-    ws.go_home()
+    ws.home.go_home()
     assert ws.screen == "launcher"
     assert ws.run.player.cart_error is None
     _select(ws, good)

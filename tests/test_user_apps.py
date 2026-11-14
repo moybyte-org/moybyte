@@ -86,7 +86,7 @@ def _tap_bar(ws, rect):
     x, y, w, h = rect
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
 
 
@@ -416,8 +416,8 @@ def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):
     strikes for a body nobody runs."""
     ws = build_ws(tmp_path)
     calc = next(c for c in ws.carts.all if c["title"] == "Calc")
-    assert ws.is_user_app(calc) is False
-    assert ws.cart_broken(calc) is False
+    assert ws.spine.is_user_app(calc) is False
+    assert ws.spine.cart_broken(calc) is False
 
 
 def _copy_of_calc(carts_dir, folder):
@@ -447,16 +447,16 @@ def test_a_user_cart_copying_a_built_ins_manifest_gets_no_built_in_privileges(tm
     ws = build_ws(tmp_path)
     by = {Path(c["path"]).name: c for c in ws.carts.all if c.get("path")}
     calc = by["moybyte.calc.moy"]
-    assert ws.is_system_app(calc) and system_api.draws_in_look(calc)
+    assert ws.spine.is_system_app(calc) and system_api.draws_in_look(calc)
     for folder in ("my_calc.moy", "moybyte.calc_too.moy"):
         fake = by[folder]
         assert fake["title"] == "Calc" and "calc" in fake["permissions"]
         assert fake["id"] == folder[:-4]
         assert app_perms.app_id(fake) != app_perms.app_id(calc)
         assert builtin_name(fake["path"]) is None
-        assert not ws.is_system_app(fake)
+        assert not ws.spine.is_system_app(fake)
         assert not system_api.draws_in_look(fake)
-        assert ws.is_user_app(fake)
+        assert ws.spine.is_user_app(fake)
 
 
 def test_a_text_marker_names_the_text_app_only_on_a_built_in(tmp_path):
@@ -614,7 +614,7 @@ def test_the_run_canvas_is_given_back_on_exit(tmp_path):
     _open(ws, "Flexy")
     _frames(ws)
     assert ws.run.canvas is ws.sys_canvas
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     _frames(ws)
     assert ws.run.canvas is stock
     assert ws.run.app_full_canvas is False
@@ -631,11 +631,11 @@ def test_the_desk_world_gives_a_responsive_cart_its_window(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
     ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     assert ws.windowed_chrome is True
     cart = next(c for c in ws.carts.all if c["title"] == "Flexy")
     ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     assert ws.run.player.start(ws.run.project) is True
     _frames(ws)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
@@ -652,7 +652,7 @@ def test_console_mode_gives_a_responsive_cart_the_whole_surface(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
     ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.open_library()                     # the desk's PLAY: console mode
+    ws.home.open_library()                     # the desk's PLAY: console mode
     assert ws.windowed_chrome is False
     _open(ws, "Flexy")
     _frames(ws)
@@ -739,7 +739,7 @@ def test_a_healthy_app_leaves_no_strike_behind(tmp_path):
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert ws.app_guard.strikes("moybyte.notes") == 0
     assert ws.app_guard.last_open() is None
-    assert ws.cart_broken(ws.cart) is False
+    assert ws.spine.cart_broken(ws.cart) is False
 
 
 def test_a_game_is_not_guarded(tmp_path):
@@ -776,14 +776,14 @@ def test_a_cart_that_raises_on_every_open_is_disabled_after_three(tmp_path):
     _write_cart(carts, "Boomy", BOOM_SRC)
     ws = build_ws(tmp_path)
     for i in range(3):
-        ws.go_home()
+        ws.home.go_home()
         _open(ws, "Boomy")
         assert ws.run.player.cart_error is not None, i
         assert "always broken" in ws.run.player.cart_error, ws.run.player.cart_error
         assert ws.app_guard.strikes("Boomy") == i + 1
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
-    assert ws.cart_broken(boomy) is True
-    ws.go_home()
+    assert ws.spine.cart_broken(boomy) is True
+    ws.home.go_home()
     _open(ws, "Boomy")
     assert ws.run.player.cart_error is not None
     assert "turned off" in ws.run.player.cart_error, ws.run.player.cart_error
@@ -802,7 +802,7 @@ def test_the_strikes_survive_a_reboot(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.app_guard.strikes("Boomy") == 3
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
-    assert ws.cart_broken(boomy) is True
+    assert ws.spine.cart_broken(boomy) is True
 
 
 def test_a_broken_app_stays_editable_on_make(tmp_path):
@@ -812,10 +812,10 @@ def test_a_broken_app_stays_editable_on_make(tmp_path):
     _write_cart(carts, "Boomy", BOOM_SRC)
     ws = build_ws(tmp_path)
     for _ in range(3):
-        ws.go_home()
+        ws.home.go_home()
         _open(ws, "Boomy")
-    ws.go_home()
-    titles = [it.get("title") for it in ws._make_items(ws.carts.all)]
+    ws.home.go_home()
+    titles = [it.get("title") for it in ws.home._make_items(ws.carts.all)]
     assert "Boomy" in titles
 
 
@@ -837,32 +837,32 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
     fixed code cleared nothing -- the only escapes were renaming the cart or
     hand-editing `system/settings`, i.e. the panel's one instruction was a lie.
     A COMMITTED code change is the hook (`Project.commit_code` ->
-    `ws.forgive_app`), because code is the only edit that can change whether
+    `ws.spine.forgive_app`), because code is the only edit that can change whether
     the cart hangs, faults or eats the heap."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Boomy", BOOM_SRC)
     ws = build_ws(tmp_path)
     for _ in range(3):
-        ws.go_home()
+        ws.home.go_home()
         _open(ws, "Boomy")
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
-    assert ws.cart_broken(boomy) is True
+    assert ws.spine.cart_broken(boomy) is True
 
     # The fourth open is refused -- and lands on the panel whose bar edits it.
-    ws.go_home()
+    ws.home.go_home()
     _open(ws, "Boomy")
     assert "turned off" in ws.run.player.cart_error, ws.run.player.cart_error
 
     # The kid fixes the code and it commits.
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text(FIXED_SRC)
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.app_guard.strikes("Boomy") == 0
-    assert ws.cart_broken(boomy) is False
+    assert ws.spine.cart_broken(boomy) is False
 
     # ...and the app opens and runs again, with a full three strikes back.
-    ws.go_home()
+    ws.home.go_home()
     _open(ws, "Boomy")
     _frames(ws, CrashGuard.HEAL_FRAMES + 1)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error

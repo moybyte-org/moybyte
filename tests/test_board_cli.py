@@ -505,14 +505,14 @@ def test_perf_keeps_a_switch_that_was_already_on(clock):
 
 def test_perf_refuses_samples_that_name_another_cart(clock, monkeypatch):
     ws, wire, b = console(clock)
-    real = ws.launch_named
+    real = ws.home.launch_named
 
     def wrong(name):
         got = real(name)
         ws.cart = {"title": "Other"}               # what PERF will name
         return got
 
-    ws.launch_named = wrong
+    ws.home.launch_named = wrong
     code, out = run(board.cmd_perf, b, args(titles=["Brick Siege"], secs=4.0,
                                             diag=True, uncap=False))
     assert code == 1 and "PERF names cart=Other" in out
@@ -548,14 +548,14 @@ def test_the_counter_names_a_lockstep_match(clock):
 def test_the_counter_refuses_a_run_of_another_cart(clock):
     import p4_perf
     ws, wire, b = console(clock)
-    real = ws.launch_named
+    real = ws.home.launch_named
 
     def wrong(name):
         got = real(name)
         ws.cart = {"title": "Other"}
         return got
 
-    ws.launch_named = wrong
+    ws.home.launch_named = wrong
     with pytest.raises(RuntimeError, match="ran Other, not Brick Siege"):
         p4_perf.measure(b, "Brick Siege", 4.0, lambda *x: None)
 
@@ -580,7 +580,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
     def frame(dt):
         ws.frame(1 / 60.0)
         if moy_loop.perf_due():
-            ws.perf_push(moy_loop)
+            ws.perf.perf_push(moy_loop)
         return ws.frame_state.frames_drawn
 
     moy_loop.register(ws.input.begin_frame, lambda: None, frame)
@@ -681,8 +681,8 @@ def c6_console(clock, monkeypatch, radio):
     ws.c6_updater = radio
     held = []
     ws.wifi = types.SimpleNamespace(status=lambda: (True, "net", "10.0.0.2"))
-    ws.wifi_hold = held.append
-    ws.wifi_release = held.remove
+    ws.spine.wifi_hold = held.append
+    ws.spine.wifi_release = held.remove
     monkeypatch.setitem(sys.modules, "device_wifi", types.SimpleNamespace(
         autoconnect_wifi=lambda w: True))
     monkeypatch.setitem(sys.modules, "moy_ota", types.SimpleNamespace(SINK_C6=2))

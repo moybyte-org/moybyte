@@ -202,7 +202,7 @@ def _code(tmp_path, text):
     ws = build_ws(tmp_path)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text(text)
     d = make_drv(ws)
@@ -347,7 +347,7 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     ws = build_desktop_ws(tmp_path)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text("\n".join("v%d = 1" % i for i in range(300)))
     d = make_drv(ws)

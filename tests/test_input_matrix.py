@@ -368,7 +368,7 @@ class Rig:
             ctx.ui = AppHost("matrix", ctx.surface)
             ws._app_hosts["matrix"] = ctx.ui
             app = MatrixShellPage(ctx)
-            ws.register_app(app)
+            ws.spine.register_app(app)
             self.app = app
         open_cart(ws, "Matrix Shell" if layer == "py_shell" else "Matrix")
         if ws.confirm.open:
@@ -419,7 +419,7 @@ class Rig:
         r = (self.state() or {}).get("r") or PAGE_RECT.get(self.row)
         if r is None:
             ref = Rig(self.tmp / "rect", "py_app", self.row, self.monkeypatch, {})
-            ref.ws.exit()
+            ref.ws.spine.exit()
             r = PAGE_RECT[self.row]
         x, y = self.screen_of(r[0] + INSET, r[1] + INSET)
         sc = 1 if self.layer == "py_shell" else self.ws._viewport()[2]
@@ -658,7 +658,7 @@ def _reference(tmp_path, row, col, monkeypatch, built):
         what = GESTURES[row][col]
         gesture(rig, col, what)
         _REF[key] = (a, rig.shot(), effect(what, s0, rig.state()))
-        rig.ws.exit()
+        rig.ws.spine.exit()
     return _REF[key]
 
 
@@ -710,7 +710,7 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
         assert effect(what, before, after), (
             "%s: %s by %s: %r -> %r" % (layer, what, col, before, after))
     finally:
-        rig.ws.exit()
+        rig.ws.spine.exit()
 
 
 def test_every_failing_cell_is_a_cell_and_names_one_phase():

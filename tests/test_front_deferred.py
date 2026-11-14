@@ -124,4 +124,4 @@ def test_a_share_from_a_carts_load_opens_notes_at_the_frame_boundary(tmp_path, m
         if tier == "wasm":
             assert runs[0]._run._r is None, "the module's instance was freed"
     finally:
-        ws.exit()
+        ws.spine.exit()

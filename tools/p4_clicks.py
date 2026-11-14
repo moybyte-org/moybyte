@@ -127,9 +127,9 @@ def _tab(t):
 
 # name -> (setup verbs run BEFORE recording, the click verb itself)
 SCENARIOS = {
-    "open_projects": ([], "ws.open_projects()"),
+    "open_projects": ([], "ws.home.open_projects()"),
     "open_settings": ([], "ws.open_settings()"),
-    "open_project":  (["ws.open_projects()"], COIN),
+    "open_project":  (["ws.home.open_projects()"], COIN),
     "ws_art":        ([COIN], _tab("paint")),
     "pane_map":      ([COIN, _tab("paint")], _tab("map")),
     "ws_blocks":     ([COIN, _tab("paint")], _tab("blocks")),
@@ -137,13 +137,13 @@ SCENARIOS = {
     "ws_world":      ([COIN], _tab("scene")),
     "ws_sound":      ([COIN], _tab("music")),
     "ws_settings":   ([COIN], _tab("cards")),
-    "back_to_desk":  (["ws.open_settings()"], "ws.go_home()"),
+    "back_to_desk":  (["ws.open_settings()"], "ws.home.go_home()"),
     # The SECOND home visit (2026-07-27): the first visit paints live and the
     # retained-frame cache captures it (launcher_layer._capture_retained); the
     # revisit must present as ONE stamp. This is the common kid loop (play ->
     # home -> pick next), which the reset-per-scenario harness otherwise
     # never measures.
-    "home_revisit":  (["ws.open_library()", "ws.open_settings()"], "ws.go_home()"),
+    "home_revisit":  (["ws.home.open_library()", "ws.open_settings()"], "ws.home.go_home()"),
 }
 
 rows = []

@@ -529,7 +529,7 @@ def test_console_runs_game_cart_and_scores(tmp_path):
     _open_cart(ws, "Star Catcher")
     assert ws.cart["type"] == "game"
     ws.run.project.config["autoplay"] = 1               # opt into attract mode, then re-run
-    ws.apply()
+    ws.saves.apply()
     for _ in range(240):                    # attract-mode auto-play
         ws.frame(1 / 30)
     # `best` survives the game-over reset, so it's the honest "did it score" check.
@@ -570,7 +570,7 @@ def test_enter_in_config_plays_the_cart(tmp_path):
 
     # The device delivers Enter as the "a" button (0x0D -> "a"): it must ALSO play, which
     # is the exact bug the owner hit (Enter -> "a" -> code editor).
-    ws.go_home()
+    ws.home.go_home()
     _select_by_title(ws, "Star Catcher")
     ws.open_in_editor()
     assert ws.menu_view == "cards"
@@ -598,7 +598,7 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
     ws.open_in_editor()                        # starts the cart, lands on the cards tab
     # The leak zones: 8px left/right strips (in the content area) + the 20px bottom strip.
     strips = [(3, 100), (316, 100), (3, 230), (160, 235)]
-    for open_tab in (ws._open_paint, ws._open_map):
+    for open_tab in (ws.text._open_paint, ws.text._open_map):
         open_tab()
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -620,7 +620,7 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     ground_row = ws.ns["MH"] - 1                               # ground is the bottom row
     assert ws.ns["_solid"](0, ground_row) and not ws.ns["_solid"](0, 0)  # mget collision works
     ws.run.project.config["autoplay"] = 1
-    ws.apply()
+    ws.saves.apply()
     coins = len(ws.ns["coins"])
     most, won = 0, False
     for _ in range(900):                    # attract-mode auto-play climbs the stair
@@ -650,7 +650,7 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
     import random
     random.seed(1234)                       # deterministic attract run (spawns + auto-pilot use rnd())
     ws.run.project.config["autoplay"] = 1
-    ws.apply()
+    ws.saves.apply()
     assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.run.project.config["enemies"]
     best_score, states = 0, set()
     for _ in range(2400):                   # attract-mode auto-play hunts enemies (headroom to end a round)
@@ -703,12 +703,12 @@ def test_console_cards_make_it_mine_edit_and_run(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
-    ws._open_menu()                         # Space has an edit schema -> cards
+    ws.text._open_menu()                         # Space has an edit schema -> cards
     assert ws.menu_view == "cards"
     before = ws.run.project.config.get("star_count", 80)
     step_card(ws, 1)                        # +step on the first field (star_count, +10)
     assert ws.run.project.config["star_count"] == before + 10
-    ws.apply()                              # re-run with the new config
+    ws.saves.apply()                              # re-run with the new config
     assert ws.screen == "desktop"
     assert len(ws.ns["stars"]) == before + 10
 
@@ -733,11 +733,11 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     # Stage 5 exit model: a running game exits via the pause menu (covered in
     # test_desktop_shell); here we just leave to the launcher via go_home() (the ≡ HOME
     # action) -- robust regardless of the seed cart's type -- then open it in the Editor.
-    ws.go_home()
+    ws.home.go_home()
     assert ws.screen == "launcher"                      # left the cart, back home
     ws.open_in_editor()                                 # maker landing -> the Editor
     if ws.menu_view == "cards":
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     assert ws.menu_view == "code" and ws.editor is not None
     drv.frame(1 / 30)                                   # the tab's first frame
     ws.editor.row, ws.editor.col = 0, 0
@@ -756,9 +756,9 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text("\n".join(("c" * 60) + " r%02d" % i for i in range(40)))
     drv.pan(0, 1)                                      # hold "down" -> caret moves down
@@ -788,9 +788,9 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     ws.editor.set_text("\n".join("line %02d" % i for i in range(40)))
     drv.frame(1 / 30)                         # the tab's first frame draws it
     drv.touch(C._CODE_X0 + 20, C._CODE_Y0 + 100); drv.frame(1 / 30)   # finger down
@@ -809,9 +809,9 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     from runtime import ui_draw
     drv.frame(1 / 30)
     ed = ws.editor
@@ -844,7 +844,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws._open_paint()                                     # the Editor's PAINT, over the run
+    ws.text._open_paint()                                     # the Editor's PAINT, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "paint" and ws.paint is not None
     lay = ws.paint_layer.layout
@@ -1349,7 +1349,7 @@ def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_map()
+    ws.text._open_map()
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
@@ -1380,7 +1380,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws._open_map()                                       # the Editor's MAP, over the run
+    ws.text._open_map()                                       # the Editor's MAP, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
@@ -1408,7 +1408,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
-    ws._open_map()                                       # the Editor's MAP, over the run
+    ws.text._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 3
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 3 at (0,0)
@@ -1435,13 +1435,13 @@ def test_host_console_map_save_roundtrips(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
-    ws._open_map()                                       # the Editor's MAP, over the run
+    ws.text._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 6
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 6 at (0,0)
-    # No SAVE button (#111) -- ws.save_map is the hard-commit verb every exit path
+    # No SAVE button (#111) -- ws.saves.save_map is the hard-commit verb every exit path
     # (tab switch/PLAY/CLOSE/...) now dispatches automatically.
-    ws.save_map()
+    ws.saves.save_map()
     reloaded = moy_carts.load(cart_path)                  # map.moymap persisted on disk
     assert reloaded["map"] is not None
     assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6
@@ -1459,7 +1459,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.run.project.tilemap
     before = tm.gen
-    ws._open_map()                                       # the Editor's MAP, over the run
+    ws.text._open_map()                                       # the Editor's MAP, over the run
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
@@ -1485,7 +1485,7 @@ def _open_cart_map(tmp_path, cart_name):
     assert sel is not None, "cart %r not seeded" % cart_name
     ws.launcher.sel = sel
     ws.open()
-    ws._open_map()
+    ws.text._open_map()
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     return C, ws, host_app.ConsoleDriver(ws)
 

@@ -37,7 +37,7 @@ the tool is for. Numbers live in #66.
 
 **Input on wall-clock time.** The console plays a schedule against its own
 clock from inside its frame loop (`ws._ib`, installed over `ws.frame`,
-`ws.ball` and `ws.comp`), through an input-table source of its own
+`ws.router.ball` and `ws.comp`), through an input-table source of its own
 ("bench"): a finger is where a finger moving at that speed would be when a
 frame starts, a key goes down and up on its schedule, trackball pulses reach
 the console's own `ball`. A slow frame gets fewer, larger finger steps, as a
@@ -181,7 +181,7 @@ if ib is None:
     ib.wrapped = []                    # (object, attribute name) the bench set
     ib.ncv = []
     ib.of = ws.frame
-    ib.ob = ws.ball
+    ib.ob = ws.router.ball
     ib.oc = ws.comp
     ib.ov = getattr(ws.comp, 'overlap_stats', None)
     _lcd = getattr(ws.comp, '_lcd', None)
@@ -454,7 +454,7 @@ def _bl(dx, dy, click=False):
     return r
 
 ws.frame = _fr
-ws.ball = _bl
+ws.router.ball = _bl
 
 def _ib_arm(ev, probe, ms, null=False):
     ib = ws._ib
@@ -527,20 +527,20 @@ def _ib_off(name, x, y):
 
 def _ib_home(arr):
     if getattr(ws.wm, 'has_desk', False):
-        ws.open_library()
+        ws.home.open_library()
     else:
-        ws.go_home()
-    ws.set_home_arrangement(arr)
-    ws.set_home_tab('games')
+        ws.home.go_home()
+    ws.home.set_home_arrangement(arr)
+    ws.home.set_home_tab('games')
     ws.launcher.sel = 0
     ws.launcher._scroll_to_sel()
     ws.mark_dirty()
 
 def _ib_desk():
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, 'has_desk', False) and ws.wm.top_kind() != 'desktop':
         try:
-            ws.open_desk()
+            ws.home.open_desk()
         except Exception:
             pass
 
@@ -549,7 +549,7 @@ def _ib_app(app):
     if app == 'settings':
         ws.open_settings()
     else:
-        ws.open_app(ws._apps_by_id[app])
+        ws.spine.open_app(ws._apps_by_id[app])
 
 def _ib_cart(title):
     for c in ws.carts.all:
@@ -836,13 +836,13 @@ CLEANUP_STEPS = (
     "            except OSError:\n"
     "                pass",
     "for _k, _v in (('carousel', None), ('grid', None), ('icons', None)):\n"
-    "    ws.set_home_arrangement(_k)\n"
+    "    ws.home.set_home_arrangement(_k)\n"
     "    if type(ws.launcher) is ws._ib_s['home']:\n"
     "        break",
-    "ws.set_home_tab(ws._ib_s['tab'])",
+    "ws.home.set_home_tab(ws._ib_s['tab'])",
     "if 'tn' in ws._ib_s:\n"
     "    ws.look.set_theme(ws._ib_s['tn'], persist=False)",
-    "ws.go_home()\nws.mark_dirty()",
+    "ws.home.go_home()\nws.mark_dirty()",
 )
 
 # A note long enough to scroll (under the editor handle's 8000 characters,
@@ -1697,7 +1697,7 @@ def surfaces():
         s.append(Surface("home " + arr, _home(arr), "ws.launcher._region.offset", px=True,
                          axis="h" if h else "v", keys=("right", "left") if h else ("down", "up"),
                          rect="band"))
-    s.append(Surface("PROJECTS", [("_ib_desk()\nws.open_projects()", 6.0)],
+    s.append(Surface("PROJECTS", [("_ib_desk()\nws.home.open_projects()", 6.0)],
                      "ws.projects_grid._region.offset", px=True, axis="h",
                      keys=("right", "left"), where="desk", rect="projects"))
     for app, label in (("settings", "Settings"), ("files", "Files"), ("getcarts", "Get Carts"),
@@ -1730,7 +1730,7 @@ def surfaces():
          "ws.editor.col = 0\nws.mark_dirty()", 1.0)], "ws.editor.left * 1000 + ws.editor.col",
         axis="h", keys=("right", "left"), inputs=("key_steps", "ball_slow", "ball_fast"),
         rect=CODE_RECT))
-    s.append(Surface("Theme Config text", [("_ib_desk()\nws.edit_theme()", 4.0),
+    s.append(Surface("Theme Config text", [("_ib_desk()\nws.text.edit_theme()", 4.0),
                                            ("ws._ib_theme0 = ws.editor.text()\n"
                                             "ws.editor.row = 0\nws.editor.col = 0\n"
                                             "ws.editor.top = 0\nws.mark_dirty()", 1.0)],
@@ -1768,7 +1768,7 @@ def surfaces():
     s.append(Surface("Pause card", [("_ib_desk()", 1.0), ("@run Star Catcher", 4.0),
                                     ("ws.pause.show()\nws.mark_dirty()", 1.5)],
                      "ws.pause.sel", inputs=("key_steps", "key_20"),
-                     teardown="ws.pause.open and ws.pause.close()\nws.exit()"))
+                     teardown="ws.pause.open and ws.pause.close()\nws.spine.exit()"))
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
@@ -1788,12 +1788,12 @@ def surfaces():
                      "h.ed.col if h else -1)(ws.run.player._focus_editor)",
                      inputs=("fling", "drag", "key_steps", "key_held", "type", "type_fast",
                              "type_line", "ball_slow"),
-                     rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.exit()"))
+                     rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.spine.exit()"))
     s.append(Surface("Text console", [("_ib_desk()", 1.0),
                                       ("ws.run_script('docs', ws._ib_script)", 4.0)],
                      "ws.script_console.top", inputs=("fling", "drag", "type", "type_fast",
                                                        "ball_slow"),
-                     teardown="ws.exit()"))
+                     teardown="ws.spine.exit()"))
     return s
 
 

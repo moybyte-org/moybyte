@@ -78,7 +78,7 @@ def test_a_load_replaces_the_rows_in_place(tmp_path):
     alias = ws.system                       # what the writers/Prefs/the guard hold
     moy_carts.save_system({"font_scale": 1, "marker": "from-the-card"},
                           ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system is alias
     assert ws.prefs.rows is alias
     assert alias.get("marker") == "from-the-card"
@@ -90,7 +90,7 @@ def test_a_load_replaces_what_was_there(tmp_path):
     ws = _ws(tmp_path)
     ws.system.set("stale", 1)
     moy_carts.save_system({"marker": 2}, ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.text("stale") is None
     assert ws.system.get("marker") == 2
     assert not ws.system.dirty()            # what was read is what is on the card
@@ -127,7 +127,7 @@ def test_a_safe_start_ignores_the_file_and_leaves_it_alone(tmp_path, monkeypatch
     ws = _ws(tmp_path)
     ws.prefs.safe = system_store.safe_mode()
     moy_carts.save_system({"wallpaper": "aurora", "marker": 1}, ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.get("marker") is None and ws.system.get("wallpaper") is None
     assert ws.look.wallpaper_id is None            # no wallpaper cart runs
     ws.system.set("theme", "berry")
@@ -154,7 +154,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
     moy_carts.save_system(
         {crash_guard.KEY: {"strikes": {"some_app": 2}, "open": None}},
         ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.app_guard.strikes("some_app") == 2
     assert ws.app_guard.arm("some_app") is True     # its third and last
     assert ws.app_guard.disabled("some_app") is True

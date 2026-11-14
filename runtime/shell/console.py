@@ -136,7 +136,7 @@ from perf_hud import PerfHud
 # The firmware-update (OTA) SCREEN's UI layer (#53): the
 # confirm/download/install/done lifecycle + its pump + drawing. The update
 # *queries* (_update_available/_online_update_available) stay below, and the
-# channel choice (_ota_channel/_cycle_channel) is the SettingsToggles mixin's
+# channel choice (_ota_channel/_cycle_channel) is `ws.toggles`'
 # (console_settings.py). Same bare-or-package fallback as the editors above.
 from update_ui import UpdateUI
 
@@ -214,8 +214,8 @@ from shell_cards import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
 # badges are the achievements process's (`ach`, its link); starting it and the
-# unlock's effects (load_achievements/_achievement_unlocked) are on the Notices
-# mixin (console_notices.py), and the banner's
+# unlock's effects (load_achievements/_achievement_unlocked) are on `ws.notices`
+# (console_notices.py), and the banner's
 # DEADLINE the unlock pushes into at event time is created in _init_overlays
 # below (#209 landing B). Same bare-or-package fallback.
 from achievements_ui import AchievementsUI
@@ -238,14 +238,14 @@ from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
 from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
 # The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
-# STATE stays on Workstation: ws.run.project.config / ws.apply; the tab's page mutates
+# STATE stays on Workstation: ws.run.project.config / ws.saves.apply; the tab's page mutates
 # ws.run.project.config in place.
 from cards_layer import CardsLayer
 
 # The Settings app surface (#28/#39/#53 -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing, owning NO config -- it reads ws state
 # (system/ws.look/diag_live) and dispatches every mutation to the ws setters
-# (the SettingsToggles mixin); the wallpaper cluster is single-sourced on
+# (`ws.toggles`); the wallpaper cluster is single-sourced on
 # ws.look (the launcher shares that backdrop). settings_layer.py is the single
 # source of the _SET_* geometry constants; the two tests reach as console._X are
 # imported back here.
@@ -348,7 +348,7 @@ from text_console import TextConsole
 import text_modes as _modes
 
 # EditorApp (editor_app.py): the tab ladder + PLAY. ws.menu_view is a
-# forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
+# forwarding projection of EditorApp.tab; ws.text.set_menu_view/_open_*/_leave_menu
 # stay one-line forwards (tested surface).
 from editor_app import EditorApp
 
@@ -383,29 +383,28 @@ from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                     _clamp_scroll, _in, _SPLASH_MS)
 
 
-# The Workstation's mixins -- what a kernel does not need to be in the same
-# file with: the input routers, pointer and trackball (console_input), the
-# home's verbs and cards (console_home), typing, text mode and the Editor's
-# tab landings (console_text), a run's own canvas bound and released
-# (console_canvas), the
-# perf meters + query API (console_perf), the Settings toggles + OTA channel
-# (console_settings), the Editor's save/PLAY verbs (console_saves), the
-# notices, toast and achievements wiring (console_notices) and the run/exit
-# spine (console_spine). Each is a bag of methods over `self`; the class below
-# is where the state they touch is created. A method the class does not define
-# is looked up base by base in the order listed, so the bases that hold the
-# per-frame verbs come first, and the verbs `frame` itself calls stay on the
-# class.
-from console_input import InputVerbs
-from console_home import HomeVerbs
-from console_text import TextVerbs
+# The Workstation's services -- each an object over the console with its own
+# verbs, held as an attribute and built first in `__init__`: the input
+# routers, pointer and trackball (`router`, console_input), the home's verbs
+# and cards (`home`, console_home), typing and the Editor's tab landings
+# (`text`, console_text), a run's own canvas bound and released (`binding`,
+# console_canvas), the perf meters and query API (`perf`, console_perf), the
+# Settings toggles and OTA channel (`toggles`, console_settings), the Editor's
+# save and PLAY verbs (`saves`, console_saves), the notices and achievements
+# wiring (`notices`, console_notices), the intents' hooks (`intents`,
+# console_intents) and the run/exit spine (`spine`, console_spine), beside
+# the input policy (`input_policy`). The state they touch is created on the
+# class below; the frame loop reaches each service directly.
+from console_input import InputRouter
+from console_home import Home
+from console_text import Text
 from console_canvas import CanvasBinding
 from console_perf import FrameState, PerfMeters, _ema
 from console_settings import SettingsToggles
-from console_saves import SaveVerbs
+from console_saves import Saves
 from console_notices import Notices
-from console_intents import IntentVerbs
-from console_spine import SpineVerbs
+from console_intents import Intents
+from console_spine import Spine
 from moy_spine import AppRegistry, Returns
 from moy_lease import Wifi, wifi_reset
 
@@ -552,8 +551,7 @@ def draw_splash(cv, frac=None, status=None, pal=None):
     cv.splash(pal, permille, status or "")
 
 
-class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
-                  IntentVerbs, SpineVerbs, HomeVerbs, TextVerbs, CanvasBinding):
+class Workstation:
     # The editor surfaces, built at their first use (_LAZY_MODULES above).
     block_ui = _first_use("block_ui", _build_block_ui)
     map_ui = _first_use("map_ui", _build_map_ui)
@@ -583,11 +581,21 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # anything sets their forwarded fields, and the layer stack last.
         self.shell_grants = set()      # the system apps' grants (app_context)
         self.frame_state = FrameState()
+        self.router = InputRouter(self)
+        self.home = Home(self)
+        self.text = Text(self)
+        self.binding = CanvasBinding(self)
+        self.perf = PerfMeters(self)
+        self.toggles = SettingsToggles(self)
+        self.saves = Saves(self)
+        self.notices = Notices(self)
+        self.intents = Intents(self)
+        self.spine = Spine(self)
         self._init_canvases(comp, canvas, sys_canvas, font_scale,
                             panel_diagonal_in)
         self._init_components(input, carts)
         self._init_state()
-        self._init_perf()
+        self.perf._init_perf()
         self._init_overlays()
         # The compositor/router layer stack (docs/history/shell_layers_refactor_v1.md). Built
         # once here; the WM's visible_stack()/draw_stack() z-order + gate them per frame.
@@ -866,8 +874,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.search_query = ""
         self.search_typing = False
         # The home's carousel over the Games tab; each tab remembers its card.
-        self.launcher = self._home_grid("carousel",
-                                        self._launcher_items(self.carts.all, "games"))
+        self.launcher = self.home._home_grid("carousel",
+                                        self.home._launcher_items(self.carts.all, "games"))
         # The home window's card model (the desk's PROJECTS, `open_projects`):
         # minted on its first open, so a console-only board never holds one.
         self.projects_grid = None
@@ -901,7 +909,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # (runtime/shell/procs.py, docs/os_2026-11/processes.md §1).
         self.procs = Procs(self)
         _hwleases.LEASES.grants = self.procs.granted
-        _hwleases.LEASES.settle = self.wifi_settle
+        _hwleases.LEASES.settle = self.spine.wifi_settle
         _devices.grants = self.procs.granted
         _devices.cart_of = lambda pid: self.procs.who(pid)[1]
         _moybyte.WAKES.woke = self.alarm_woke
@@ -991,7 +999,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # the tap target hit-tested in handle_pointer. Named perf_ui (NOT
         # perf_hud -- that stays the tested boolean flag for "breakdown shown?",
         # set in _init_perf). The perf query API (perf_sample/perf_breakdown/...)
-        # is the PerfMeters mixin's (console_perf.py, the device diag contract).
+        # is `ws.perf`'s (console_perf.py, the device diag contract).
         # Pure read-only consumer of the timing fields.
         self.perf_ui = PerfHud(self, NAMES)
 
@@ -1113,9 +1121,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._notice_until = 0
         # An app's notifications (runtime/system/notifications.py): the
         # banner over whatever is up, and what acting on one does.
-        self._init_notes()
-        self._init_status()
-        self._init_intents()
+        self.notices._init_notes()
+        self.notices._init_status()
+        self.intents._init_intents()
         # The popover (#52, docs/theme_and_shell_2026-11.md §8.6): ONE Popup owns
         # its open/selected state and what it holds -- the system menu's rows
         # (the SYSTEM group always, a CART group prepended while a cart is
@@ -1242,7 +1250,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._apps = []
         self._apps_by_id = {}
         self._app_hosts = {}            # id -> the AppHost of an app on the UI verbs
-        self._init_apps()
+        self.spine._init_apps()
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
         self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
@@ -1250,11 +1258,11 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # a game-domain overlay (drawn before the composite, riding the viewport); the
         # rest are system-domain, on top of the composited screen.
         self._perf_layer = _PerfLayer(self)
-        self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
-        self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
-        self._note_layer = L("note", "system", draw=lambda dt: self._draw_note(),
-                             ptr=self._note_pointer)
-        self._rec_layer = L("rec", "system", draw=lambda dt: self._draw_rec())
+        self._toast_layer = L("toast", "system", draw=lambda dt: self.notices._draw_toast())
+        self._notice_layer = L("notice", "system", draw=lambda dt: self.notices._draw_notice())
+        self._note_layer = L("note", "system", draw=lambda dt: self.notices._draw_note(),
+                             ptr=self.notices._note_pointer)
+        self._rec_layer = L("rec", "system", draw=lambda dt: self.notices._draw_rec())
         self._sysmenu_layer = _SysMenuLayer(self)
         self._pause_layer = _PauseLayer(self)
         self._confirm_layer = _ConfirmLayer(self)
@@ -1464,7 +1472,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if not self._open_workspace(cart):
             self._text_request = None
             return False
-        self.play(caller or self.launcher_layer)
+        self.spine.play(caller or self.launcher_layer)
         return True
 
     def open_project_file(self, cart, name, mode=None):
@@ -1714,7 +1722,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         d = self.usb_drive
         if d is None or not d.on:
             return False
-        self.notice("USB drive is on", "Turn it off in Settings first")
+        self.notices.notice("USB drive is on", "Turn it off in Settings first")
         return True
 
     def open_settings(self):
@@ -1778,7 +1786,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if _ck is not None and self.wm.desk_open():
             _ck("tasks")
             if home:
-                self.home_key()
+                self.home.home_key()
             return
         back = self._tasks_return
         self._tasks_return = None
@@ -1789,7 +1797,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if home or back is None or back == "tasks" or not self.wm.stack.has(back):
             if self.wm.stack.has("desktop") and self.procs._detachable():
                 self.procs.detach()     # the run that played joins the running set
-            self.go_home()
+            self.home.go_home()
             return
         self.wm.goto(back)
 
@@ -1864,7 +1872,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.wm.goto("desktop")    # Stage 6e: pop Settings, resume the cart below
             self.frame_state.dirty = True
         else:
-            self.go_home()
+            self.home.go_home()
 
     # -- the input in use (the hints' keys) ---------------------------------
 
@@ -2289,7 +2297,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self.web.parked:
             self.cart_error = None
             self.run.player.crash_line = None
-            self.go_home()
+            self.home.go_home()
             return True
         # A compiled cart has no source to open: its trap stays on the stop
         # card, which offers no See why (native/moy_wasm/README.md).
@@ -2314,12 +2322,12 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             _cp()
         self.editor_app.open(self.run.project)
         self.editor = None            # rebuild over the file that raised
-        self.set_menu_view("code")
+        self.text.set_menu_view("code")
         if line is not None:
             # Land the caret on the line that raised (set_menu_view only marks
             # it when it BUILDS the editor -- an editor kept open across the
             # PLAY needs the explicit jump).
-            self._mark_code_error(line - 1, err[:32])
+            self.saves._mark_code_error(line - 1, err[:32])
         self.crash_popup = err
         self.frame_state.dirty = True
         return True
@@ -2567,7 +2575,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # the fixed 320x240 contract, while an app reflows to a P4/web window.
         for _app in self._apps:
             if _app.is_app(selected):
-                self.open_app(_app, selected)
+                self.spine.open_app(_app, selected)
                 return
         if (selected or {}).get("broken"):
             # A cart whose manifest will not parse cannot be RUN -- it has no
@@ -2578,7 +2586,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return
         # A cart that arrived as files is asked for its permissions first
         # (app_perms.asks_first): Open records them and opens it again.
-        if self.ask_first(selected, lambda: self.open(selected)):
+        if self.notices.ask_first(selected, lambda: self.open(selected)):
             return
         # Several games at once (runtime/shell/procs.py): the front one joins
         # the running set, a game already running comes forward, or the
@@ -2596,7 +2604,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self.run.player.declined:
             self.run.player.declined = False      # the shell asked first (ask_stop_music)
             return
-        self.play(self.launcher_layer)   # activate desktop, record caller
+        self.spine.play(self.launcher_layer)   # activate desktop, record caller
 
     def run_script(self, kind, name):
         """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
@@ -2665,7 +2673,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         player._update = con.driver(player._update)
         self.run.textmode = True       # a script TYPES (`Player.typing`)
         self.input.spend_key()         # the key that ran it types nothing
-        self.play(caller)
+        self.spine.play(caller)
         return (True, "")
 
     def ask_run(self, handle):
@@ -2707,9 +2715,9 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._text_request = (kind, name, mode)
         if not self._open_workspace(cart):
             self._text_request = None
-            self._go_home_or_back()
+            self.spine._go_home_or_back()
             return
-        self.play(caller)
+        self.spine.play(caller)
         for ed in self.run.player._editors:
             if ed.kind == kind and ed.name() == name:
                 ed._put(where)
@@ -2736,7 +2744,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             if self.run.project is not None and self.run.project.cart is cart:
                 into_project = cart      # opened FROM this project's Editor
         self.artwork.open_named(name, kind)
-        if not self.open_app(app):
+        if not self.spine.open_app(app):
             return False
         # Leaving Paint comes back to the Config tab THROUGH the loader, the
         # same contract a project TEXT file has: the folder is re-read, so an
@@ -2757,12 +2765,12 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if wm.has_desk and wm.mode == "console" and self.screen == "launcher":
             sel = self.launcher.selected()
             back = (self.launcher.tab, sel.get("path") if sel else None)
-            self.open_desk()
+            self.home.open_desk()
         self._editor_from = None
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
-            self.play(self.launcher_layer)
+            self.spine.play(self.launcher_layer)
             return
         self.editor_app.open(self.run.project)
         if back is not None:
@@ -2781,8 +2789,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         tab, path, kinds = back
         if not set(wm.window_kinds()) <= kinds:
             return
-        self.open_library()
-        self.set_home_tab(tab)
+        self.home.open_library()
+        self.home.set_home_tab(tab)
         lw = self.launcher
         for j in range(len(lw.items)):
             if path and lw.items[j].get("path") == path:
@@ -3082,7 +3090,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         now = _ticks_ms()
         if self._toast_until and _ticks_diff(self._toast_until, now) > 0:
             return True
-        if self.notice_active():
+        if self.notices.notice_active():
             return True
         return _NOTES.banner is not None and _NOTES.up(now) is not None
 
@@ -3255,7 +3263,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             now = _ticks_ms()
             cv.covered = bool((self._toast_until and _ticks_diff(self._toast_until, now) > 0
                                and self.ach.toast is not None)
-                              or (self._notice is not None and self.notice_active(now))
+                              or (self._notice is not None and self.notices.notice_active(now))
                               or (_NOTES.banner is not None and _NOTES.up(now) is not None))
         # Input focus moved (a window clicked, a screen left): Settings stores
         # a Name still being typed.
@@ -3566,7 +3574,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # calls gated on perf_hud OR perf_capture (device diag sampling), so the
         # render path itself is unchanged.
         if _perf:
-            self._frame_perf_end(_frame_t0)
+            self.perf._frame_perf_end(_frame_t0)
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -3845,10 +3853,10 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.input_policy.attach_keyboard()
     if first_variant in THEME_VARIANTS:
         ws.look.theme_variant = first_variant   # load_system's absent-row default
-    ws.load_system()            # #28: system/settings, the theme and its wallpaper
+    ws.spine.load_system()            # #28: system/settings, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))
     except (TypeError, ValueError):
         pass
     ws.look.load_icon_sheet()       # Stage 1: the 16x16 bar IconSheet (theme or baked)
-    ws.load_achievements()          # #21: unlocked badges survive reboots
+    ws.notices.load_achievements()          # #21: unlocked badges survive reboots

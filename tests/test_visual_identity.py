@@ -111,7 +111,7 @@ def test_base_tier_editors_follow_the_theme(tmp_path):
     ws = _ws(tmp_path)                      # 320x240 base tier
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("edit"))
-    ws.change_selected()
+    ws.home.change_selected()
     assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]  # dark
     ws.look.set_theme_variant("light")
     # The code editor gets exactly a light-and-dark pair on the base tier.
@@ -152,7 +152,7 @@ def _select_real_cart(ws):
 def test_change_selected_opens_editor_on_config(tmp_path):
     ws = _ws(tmp_path)
     cart = _select_real_cart(ws)
-    ws.change_selected()
+    ws.home.change_selected()
     assert ws.screen == "menu"                    # the Editor app
     assert ws.cart["path"] == cart["path"]        # the SAME project, in place
     # Config-first (Section 1.3): the cards tab when the cart has an edit
@@ -162,10 +162,10 @@ def test_change_selected_opens_editor_on_config(tmp_path):
 
 def test_change_selected_ignores_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0                           # Make's "+ New" pseudo card
     assert ws.launcher.selected().get("path") is None
-    ws.change_selected()
+    ws.home.change_selected()
     assert ws.screen == "launcher"                # no-op: "+ New" has one verb, its tap
 
 
@@ -173,16 +173,16 @@ def test_primary_activation_still_always_plays(tmp_path):
     """Section 1.2: a tap/confirm on the card has ONE predictable meaning."""
     ws = _ws(tmp_path)
     _select_real_cart(ws)
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "desktop"                 # the Player owns the screen
 
 
 def test_player_exit_returns_to_library(tmp_path):
     ws = _ws(tmp_path)
     _select_real_cart(ws)
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "desktop"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.screen == "launcher"                # Library is Home (Section 1.1)
 
 
@@ -191,11 +191,11 @@ def test_studio_play_returns_to_same_tab(tmp_path):
     and tab."""
     ws = _ws(tmp_path)
     cart = _select_real_cart(ws)
-    ws.change_selected()
+    ws.home.change_selected()
     ws.menu_view = "code"
-    ws.run_code()
+    ws.saves.run_code()
     assert ws.screen == "desktop"
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.screen == "menu"
     assert ws.editor_app.tab == "code"            # the SAME tab
     assert ws.cart["path"] == cart["path"]
@@ -210,16 +210,16 @@ def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
         _select_real_cart(ws)
         assert ws.launcher.action_rects() is None
         assert home.zone_verbs() == ("play", "change", "search")
-        ws.set_home_tab("mine")                   # nothing made yet: "+ New"
+        ws.home.set_home_tab("mine")                   # nothing made yet: "+ New"
         assert home.zone_verbs() == ("new",)
-        ws.set_home_tab("apps")
+        ws.home.set_home_tab("apps")
         assert home.zone_verbs() == ("open",)
-        ws.set_home_tab("make")
+        ws.home.set_home_tab("make")
         assert home.zone_verbs() == ("new",)      # "+ New" first
         ws.launcher.sel = 1
         assert home.zone_verbs() == ("new", "change", "copy")     # a built-in
         ws.carts.dup(ws.launcher.selected())      # a project of the kid's own
-        ws.set_home_tab("make")
+        ws.home.set_home_tab("make")
         ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                                if (it.get("title") or "").endswith(" copy"))
         assert home.zone_verbs() == ("new", "change", "copy", "delete")
@@ -239,15 +239,15 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
     ws.frame(1 / 30)                  # #184: the tap scheduled; a frame lands it
     assert ws.screen == "menu"
-    ws.go_home()
+    ws.home.go_home()
     _select_real_cart(ws)
     x, y, w, h = chips["play"]
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
     ws.frame(1 / 30)
     assert ws.screen == "desktop"
     # On Make's "+ New" card the one chip is NEW: no PLAY to tap.
-    ws._exit_to_caller()
-    ws.set_home_tab("make")
+    ws.spine._exit_to_caller()
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0
     assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}
 

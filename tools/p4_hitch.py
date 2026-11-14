@@ -123,7 +123,7 @@ def main():
         def fresh():
             """Boot into the DESK world with the probe loaded.
 
-            Deliberately a RESET between surfaces, not ws.go_home(): go_home on
+            Deliberately a RESET between surfaces, not ws.home.go_home(): go_home on
             the desk closes every window, the Make window with it -- so
             ws.wm._wins has no 'projects' and the measurement dies with a
             KeyError. A reset also keeps the two surfaces from contaminating

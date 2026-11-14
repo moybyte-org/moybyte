@@ -167,10 +167,10 @@ def test_super_leaves_the_last_frame_in_the_canvas_and_resume_takes_the_front(fr
     # The canvas holds it in its wire words (byte-swapped on a swapped wire).
     assert bytes(buf) in (last, _swapped(last)), "the canvas lacks the frame the glass showed"
     assert not mp.front_live() and mp.info()[6] is False
-    ws.handle_input()
+    ws.router.handle_input()
     src.set_button("start", False)
     inp.begin_frame()
-    ws.handle_input()
+    ws.router.handle_input()
     assert ws.pause.open and ws.run.player.paused
     ws.frame(1 / 30)
     ws.pause.close()

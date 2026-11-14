@@ -98,14 +98,14 @@ def test_music_is_a_registered_app_its_cart_claims(tmp_path):
     ws = build_ws(tmp_path)
     app = _app(ws)
     cart = next(c for c in ws.carts.all if c["title"] == "Music")
-    assert app.is_app(cart) and ws.is_system_app(cart)
-    assert ws.open_app(app) and ws.wm.top_kind() == "jukebox"
+    assert app.is_app(cart) and ws.spine.is_system_app(cart)
+    assert ws.spine.open_app(app) and ws.wm.top_kind() == "jukebox"
 
 
 def test_a_station_plays_and_its_status_item_follows_the_stream(tmp_path, face):
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _settle(ws)
     rows = app._station_rows()
     app._open_row(0, 1, rows)
@@ -164,7 +164,7 @@ def test_music_plays_as_the_shell_while_a_game_is_current(tmp_path, face):
     from runtime import moy_log as L
     from runtime import moybyte
     ws = build_desktop_ws(tmp_path)
-    ws.open_desk()
+    ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
     ws.open_in_editor(cart)
     _settle(ws)
@@ -174,7 +174,7 @@ def test_music_plays_as_the_shell_while_a_game_is_current(tmp_path, face):
     play = face.play
     face.play = lambda src, label=None: (heard.append(L.current()), play(src, label))[1]
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _settle(ws)
     app._open_row(0, 1, app._station_rows())
     assert heard == [L.SHELL] and L.current() == game
@@ -185,7 +185,7 @@ def test_music_plays_as_the_shell_while_a_game_is_current(tmp_path, face):
 
 def test_a_station_that_fails_shows_the_danger_state_and_tries_again(tmp_path, face):
     ws = build_ws(tmp_path)
-    ws.open_app(_app(ws))
+    ws.spine.open_app(_app(ws))
     M.STREAM.play("radio", "Secret Agent", "http://x/y")
     face.n["state"] = "failed"
     M.STREAM.poll()
@@ -200,7 +200,7 @@ def test_the_section_draws_the_card_with_the_apps_own_ids(tmp_path, face):
     Music's stops is `music.*`."""
     ws = build_ws(tmp_path)
     M.STREAM.play("radio", GROOVE[0], GROOVE[2])
-    ws.go_home()
+    ws.home.go_home()
     _settle(ws)
     ws.widget_tap("battery")
     assert ws.sysmenu.open and ws.sysmenu.widget == "battery"
@@ -225,7 +225,7 @@ def test_the_section_draws_the_card_with_the_apps_own_ids(tmp_path, face):
 def test_add_a_station_refuses_https_and_keeps_an_http_one(tmp_path, face):
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     app._go("add")
     _settle(ws, 2)
     assert app.page == "add" and ws.input.text_mode
@@ -256,8 +256,8 @@ def test_enter_on_add_a_station_types_into_its_address(tmp_path, face, desk):
     ws = build_desktop_ws(tmp_path) if desk else build_ws(tmp_path)
     app = _app(ws)
     if desk:
-        ws.open_desk()
-    ws.open_app(app)
+        ws.home.open_desk()
+    ws.spine.open_app(app)
     drv = make_drv(ws)
     _settle(ws)
     app.cur[0] = 0                                  # the Add a station row
@@ -282,7 +282,7 @@ def test_enter_on_add_a_station_types_into_its_address(tmp_path, face, desk):
 def test_mic_cancels_add_a_station(tmp_path, face):
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     app._go("add")
     assert ws.input_policy.cancel() and app.page == "list"
 
@@ -290,7 +290,7 @@ def test_mic_cancels_add_a_station(tmp_path, face):
 def test_back_leaves_and_the_stream_plays_on(tmp_path, face):
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     M.STREAM.play("radio", GROOVE[0], GROOVE[2])
     app._go("now")
     ws.input_policy.back()
@@ -303,13 +303,13 @@ def test_back_leaves_and_the_stream_plays_on(tmp_path, face):
 def test_back_on_the_desk_minimises_the_window(tmp_path, face):
     ws = build_desktop_ws(tmp_path)
     app = _app(ws)
-    ws.open_desk()
-    ws.open_app(app)
+    ws.home.open_desk()
+    ws.spine.open_app(app)
     _settle(ws)
     assert "jukebox" in ws.wm._wins and not ws.wm._wins["jukebox"].minimized
     ws.input_policy.back(leave=True)
     assert ws.wm._wins["jukebox"].minimized and ws.wm._focus != "jukebox"
-    assert ws.open_app(app) and not ws.wm._wins["jukebox"].minimized
+    assert ws.spine.open_app(app) and not ws.wm._wins["jukebox"].minimized
 
 
 def test_a_console_without_media_shows_the_no_audio_page(tmp_path, monkeypatch):
@@ -318,7 +318,7 @@ def test_a_console_without_media_shows_the_no_audio_page(tmp_path, monkeypatch):
     assert M.STREAM.media() is None
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     texts = []
     from runtime import ui
     orig = ui.empty
@@ -355,7 +355,7 @@ def test_left_and_right_seek_a_file_and_a_tap_on_its_bar_seeks_along_it(tmp_path
                                                                          monkeypatch):
     ws = build_ws(tmp_path)
     app = _app(ws)
-    ws.open_app(app)
+    ws.spine.open_app(app)
     M.STREAM.play("song", "Tone", str(TONE))
     face.n.update(at=60, len=200)
     M.STREAM.poll()
@@ -396,7 +396,7 @@ def test_a_station_that_blocks_browsers_says_so(tmp_path, face):
     """In the browser a station's bytes are the page's fetch, which a server
     without CORS headers refuses: the face fails it with EACCES."""
     ws = build_ws(tmp_path)
-    ws.open_app(_app(ws))
+    ws.spine.open_app(_app(ws))
     M.STREAM.play("radio", "Secret Agent", "http://x/y")
     face.n["state"] = "failed"
     face.n["err"] = 13
@@ -426,8 +426,8 @@ def test_a_stream_that_starts_during_the_desks_draw_waits_for_the_next_frame(tmp
     inside the frame) shows on the next frame, never as a card with no state."""
     ws = build_desktop_ws(tmp_path)
     app = _app(ws)
-    ws.open_desk()
-    ws.open_app(app)
+    ws.home.open_desk()
+    ws.spine.open_app(app)
     _settle(ws)
     assert M.STREAM.card is None
     rows_of = app._station_rows
@@ -455,8 +455,8 @@ def _list_on(tmp_path, desk):
     ws = build_desktop_ws(tmp_path) if desk else build_ws(tmp_path)
     app = _app(ws)
     if desk:
-        ws.open_desk()
-    ws.open_app(app)
+        ws.home.open_desk()
+    ws.spine.open_app(app)
     drv = make_drv(ws)
     views = []
     rows = type(app)._rows

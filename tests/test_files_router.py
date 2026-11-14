@@ -205,7 +205,7 @@ def _tap_x(ws):
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -306,11 +306,11 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)
 
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "launcher"
     assert ws.returns.back() is None
     ws.open_settings()
-    ws.exit()
+    ws.spine.exit()
     assert ws.wm.top_kind() == "launcher"
 
 

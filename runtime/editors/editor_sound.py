@@ -14,7 +14,7 @@ under it, painted with the wave brush; the volume ladder; the step ops.
 It draws inside `EditorDesk`'s frame over the `MusicEditor` core the
 handheld Music tab edits (`ws.music_ui.musicedit`), so every change is the
 core's own undo step, reaches the running game at once (the bank is edited
-in place, E-02) and is saved with the bank (`ws.save_sounds`). The rows,
+in place, E-02) and is saved with the bank (`ws.saves.save_sounds`). The rows,
 tools and buttons are the verbs; the graph, the wave marks and the ladder
 are drawn in the theme's roles and the waves' MOY64 inks, and answer the
 pointer here."""

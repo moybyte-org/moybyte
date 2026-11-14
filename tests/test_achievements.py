@@ -111,9 +111,9 @@ def test_save_code_unlocks_code_wizard(tmp_path):
     ws = host_app.build_workstation(carts)
     ws.launcher.sel = 0
     ws.open()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.editor is not None
-    ws.save_code()
+    ws.saves.save_code()
     settle_badges(ws)
     assert ws.ach.has(A.SYSTEM, "first_code")
 
@@ -122,8 +122,8 @@ def test_save_sprites_unlocks_little_artist(tmp_path):
     ws = _ws(tmp_path)
     ws.launcher.sel = 0
     ws.open()
-    ws.set_menu_view("paint")
-    ws.save_sprites()
+    ws.text.set_menu_view("paint")
+    ws.saves.save_sprites()
     settle_badges(ws)
     assert ws.ach.has(A.SYSTEM, "first_paint")
 
@@ -203,8 +203,8 @@ def test_konami_egg_fires_and_awards(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     armed = []
-    hook = ws._achievement_unlocked
-    ws._achievement_unlocked = lambda b: (armed.append(b), hook(b))
+    hook = ws.notices._achievement_unlocked
+    ws.notices._achievement_unlocked = lambda b: (armed.append(b), hook(b))
     for b in ws.ach_ui._KONAMI:
         _press(drv, b)
     assert ws.ach.has(A.SYSTEM, "konami")    # hidden "Secret Coder" awarded
@@ -305,14 +305,14 @@ def test_the_unlock_banner_over_a_game_sits_at_the_glass_top(tmp_path):
     try:
         ws.ach.award("decorator")
         settle_badges(ws)
-        ws._draw_toast()
+        ws.notices._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, ws.layout.cy + 6)
         ws.launcher.sel = [it.get("title") for it in ws.launcher.items].index("Star Catcher")
         ws.open()
         for _ in range(3):
             ws.frame(1 / 30)
         assert not ws._running_cart_shows_bar() and ws.wm.top_is_player()
-        ws._draw_toast()
+        ws.notices._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, 6)
     finally:
         ui_draw.unlock = real

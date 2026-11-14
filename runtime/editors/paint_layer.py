@@ -8,7 +8,7 @@
 
 It edits the cart's SpriteSheet (ws.run.project.sheet) through `ws.paint` (a PaintEditor).
 SAVE is GONE (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the
-editor -- CLOSE hard-commits the sheet on its way out (ws._leave_menu, which is
+editor -- CLOSE hard-commits the sheet on its way out (ws.text._leave_menu, which is
 EditorApp.leave -- PLAY, a hard-commit trigger now), and the idle-typing autosave-commit +
 every other tab-leaving exit path (a tab switch, PROJECTS, a window/context-X, a workspace
 swap, going home) commit it too. A theme's icons are the Editor's theme mode's
@@ -17,8 +17,8 @@ swap, going home) commit it too. A theme's icons are the Editor's theme mode's
 Boundary (the anti-spaghetti line, per the doc): the SHEET + the current-editor handle
 + the persistence verbs stay on Workstation -- `ws.run.project.sheet` (single source of the
 pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like ws.editor),
-`ws.paint_status` (status), and `ws.save_sprites` / `ws.share_tile_get` /
-`ws.share_tile_put` (cart state the device + tests pin). PaintLayer READS those and
+`ws.paint_status` (status), and `ws.saves.save_sprites` / `ws.saves.share_tile_get` /
+`ws.saves.share_tile_put` (cart state the device + tests pin). PaintLayer READS those and
 DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
@@ -404,7 +404,7 @@ class PaintLayer(Layer):
 
     def at_top(self):
         """Up goes on to the bar from the grid's top row, where the keys move
-        its cursor (Workstation._bar_keys)."""
+        its cursor (InputRouter._bar_keys)."""
         return (not self._pop and self.ws.paint is not None and self._cur[1] == 0
                 and _ui_draw.input_kind() != "keys")
 
@@ -671,12 +671,12 @@ class PaintLayer(Layer):
         elif _in(px, py, lay.size_btn) or _in(px, py, lay.caption):
             self._open_pickers()               # the sprite and its size, a popover
         elif _in(px, py, lay.get_btn):
-            ws.share_tile_get()              # import the tile from the shared sheet
+            ws.saves.share_tile_get()              # import the tile from the shared sheet
         elif _in(px, py, lay.put_btn):
-            ws.share_tile_put()              # save the tile to the shared sheet
+            ws.saves.share_tile_put()              # save the tile to the shared sheet
         elif (getattr(lay, "files_btn", None) is not None
               and _in(px, py, lay.files_btn)):
-            ws.send_sprites_to_files()       # export the sheet to files/Pictures/Sprites/ (#108)
+            ws.saves.send_sprites_to_files()       # export the sheet to files/Pictures/Sprites/ (#108)
 
     # -- tool row (#90) ------------------------------------------------------
 

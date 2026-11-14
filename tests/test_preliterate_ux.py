@@ -124,7 +124,7 @@ def _tap_cell(ws, key, k):
     (cx, cy, cw, ch), _k = ws.cards_layer.page()._tiles[key][k]
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
 
 
@@ -201,7 +201,7 @@ def _open(ws, title):
     if cart is None:
         raise AssertionError("cart not found: " + title)
     ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
 
 
 def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
@@ -219,12 +219,12 @@ def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
     assert ws.cart_error is None
 
     # its CATCHER card is a sprite-tile picker.
-    ws._open_menu()
+    ws.text._open_menu()
     basket = [f for f in ws.cart["edit"] if f["key"] == "basket"][0]
     assert basket["display"] == "sprite-tiles"
     _tap_cell(ws, "basket", 1)                          # pick the robot tile
     assert ws.run.project.config["basket"] == 1
-    ws.apply()                                          # re-run with the new pick
+    ws.saves.apply()                                          # re-run with the new pick
     assert ws.cart_error is None
     assert ws.ns["catcher"] == 1
 
@@ -234,7 +234,7 @@ def test_showcase_runs_with_a_stale_string_basket(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Star Catcher")
     ws.run.project.config["basket"] = "robot"
-    ws.apply()
+    ws.saves.apply()
     assert ws.cart_error is None
     assert ws.ns["catcher"] == 1                        # mapped name -> tile id
 
@@ -255,14 +255,14 @@ def test_bg_thumbs_card_renders_and_selects_by_tapping_a_thumbnail():
 def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Space Desktop")
-    ws._open_menu()
+    ws.text._open_menu()
     bg = [f for f in ws.cart["edit"] if f["key"] == "bg"][0]
     assert bg["display"] == "bg-thumbs"
     ws.cards_layer.page().host.focus("bg")       # the page scrolls it into view
     _draw_once(ws)
     _tap_cell(ws, "bg", 2)                       # "stripes"
     assert ws.run.project.config["bg"] == "stripes"
-    ws.apply()                                   # the cart paints stripes, no crash
+    ws.saves.apply()                                   # the cart paints stripes, no crash
     assert ws.cart_error is None
     for _ in range(10):
         ws.input.begin_frame()
@@ -277,14 +277,14 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
     for title in ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red"):
         _open(ws, title)
         if not ws.cart.get("edit"):
-            ws.go_home()
+            ws.home.go_home()
             continue
-        ws._open_menu()
+        ws.text._open_menu()
         assert ws.menu_view == "cards"
         ws.input.begin_frame()
         ws.frame(1 / 30)                                # draws cards, no error
         assert probe.drew_something(ws.run.canvas)
-        ws.go_home()
+        ws.home.go_home()
 
 
 # -- robustness: a malformed sprite-tiles card can't crash the cards menu (#1) --

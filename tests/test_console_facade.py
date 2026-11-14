@@ -31,6 +31,7 @@ import re
 from pathlib import Path
 
 from ws_helpers import build_desktop_ws, build_ws
+from ws_services import services
 from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -148,37 +149,11 @@ def _workstation():
     raise AssertionError("Workstation is not a class in runtime/shell/console.py")
 
 
-def _mixin_modules(tree, bases):
-    """base class name -> the runtime module console.py imports it from."""
-    out = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                if alias.name in bases and (alias.asname or alias.name) in bases:
-                    out.setdefault(alias.name, node.module.split(".")[-1])
-    return out
-
-
 def _workstation_classes():
-    """The Workstation ClassDef plus every mixin it lists as a base, each
-    parsed from its own module. The ratchets walk ALL of them: a method moved
-    onto a mixin is still a Workstation method, and a forward or a property
-    that hid there would otherwise vanish from every check below."""
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    ws = _workstation()
-    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
-    found = _mixin_modules(tree, bases)
-    assert set(found) == bases, "a Workstation base is not imported by name"
-    out = [ws]
-    for name in sorted(bases):
-        path = runtime_file(found[name] + ".py")
-        for node in ast.parse(path.read_text(encoding="utf-8")).body:
-            if isinstance(node, ast.ClassDef) and node.name == name:
-                out.append(node)
-                break
-        else:
-            raise AssertionError("%s is not a class in %s" % (name, path))
-    return out
+    """The Workstation ClassDef plus every service class its `__init__`
+    builds (tests/ws_services.py). The checks below walk ALL of them: a verb
+    moved onto a service is still part of the console's surface."""
+    return [_workstation()] + [cls for _a, _n, _m, cls in services()]
 
 
 def _methods():
@@ -189,31 +164,26 @@ def _methods():
                 yield fn
 
 
-# The mixins Workstation lists as bases, by module. A new one is a deliberate
-# edit here: the ratchets below walk exactly these, so a base that was not
-# imported by name -- or a carve that forgot this table -- fails here first.
-MIXINS = {
-    "InputVerbs": "console_input",
-    "HomeVerbs": "console_home",
-    "TextVerbs": "console_text",
-    "CanvasBinding": "console_canvas",
-    "PerfMeters": "console_perf",
-    "SettingsToggles": "console_settings",
-    "SaveVerbs": "console_saves",
-    "Notices": "console_notices",
-    "IntentVerbs": "console_intents",
-    "SpineVerbs": "console_spine",
+# The services Workstation builds over itself, by attribute: (class, module).
+SERVICES = {
+    "router": ("InputRouter", "console_input"),
+    "home": ("Home", "console_home"),
+    "text": ("Text", "console_text"),
+    "binding": ("CanvasBinding", "console_canvas"),
+    "perf": ("PerfMeters", "console_perf"),
+    "toggles": ("SettingsToggles", "console_settings"),
+    "saves": ("Saves", "console_saves"),
+    "notices": ("Notices", "console_notices"),
+    "intents": ("Intents", "console_intents"),
+    "spine": ("Spine", "console_spine"),
 }
 
 
-def test_the_ratchet_sees_every_mixin():
-    """The walk covers exactly the mixins console.py names as bases, each
-    from the module MIXINS pins."""
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    bases = {b.id for b in _workstation().bases if isinstance(b, ast.Name)}
-    assert _mixin_modules(tree, bases) == MIXINS
-    names = [c.name for c in _workstation_classes()]
-    assert names == ["Workstation"] + sorted(MIXINS), names
+def test_the_walk_sees_every_service():
+    """The walk covers exactly the services the console builds, each from
+    the module SERVICES pins, and the Workstation has no base class."""
+    assert not _workstation().bases
+    assert {a: (n, m) for a, n, m, _c in services()} == SERVICES
 
 
 def _statements(fn):

@@ -70,7 +70,7 @@ def test_the_s3_build_stages_no_windowed_tier():
 def test_make_hides_claimed_system_apps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
-    ws.open_projects()
+    ws.home.open_projects()
     titles = [c.get("title") for c in ws.projects_grid.items if c.get("path")]
     claimed = []
     for cart in ws.carts.all:

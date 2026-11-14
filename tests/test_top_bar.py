@@ -140,10 +140,10 @@ def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
     ws.set_pointer(console.Pointer(320, 240))
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.look.icon_sheet is None              # never wired
     ws.frame(1 / 30)                          # launcher bar renders (glyph fallback)
-    ws.set_home_tab("mine")                   # Plain is the kid's own
+    ws.home.set_home_tab("mine")                   # Plain is the kid's own
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                          # running-cart bar renders too
@@ -189,7 +189,7 @@ def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
     ws = _ws(tmp_path)
     assert ws.can_manage
     drv = host_app.ConsoleDriver(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     drv.frame(1 / 30)
     n0 = len(ws.launcher.items)
@@ -211,7 +211,7 @@ def test_make_tab_management_hidden_when_read_only(tmp_path):
     to make, copy or delete, and no "+ New" card."""
     ws = _ws(tmp_path)
     ws.can_manage = False
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert all(it.get("path") for it in ws.launcher.items)
     for i in range(min(3, len(ws.launcher.items))):
         ws.launcher.sel = i
@@ -331,7 +331,7 @@ def _run_a_cart(tmp_path):
                             type="tool")
     ws.carts.rescan()
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     assert ws.screen == "desktop"
     ws.mark_dirty()
     drv.frame(1 / 30)
@@ -536,7 +536,7 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
         return orig_whole(cv, key, i)
     ws.bar_layer._render_cart_part = counting
     ws.bar_layer._render_cart_bar = counting_whole
-    ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
+    ws.text._open_paint()                 # EditorApp.set_tab bumps zone_gen
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert calls[0] == 1, "switching Editor tabs must draw the zoned bar's zone once"
@@ -587,7 +587,7 @@ def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
     drv.frame(1 / 30)
     assert strip() == kept
     calls[0] = 0
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     for _ in range(3):
         ws.mark_dirty()
         drv.frame(1 / 30)
@@ -642,7 +642,7 @@ def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")                 # land on the code tab (system canvas)
+    ws.text.set_menu_view("code")                 # land on the code tab (system canvas)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "code"
     drv.click(*_sys_zone_center(ws, "paint"))    # the ladder switches code -> paint
@@ -656,7 +656,7 @@ def test_code_tab_bar_play_runs_the_cart(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     drv.click(*_sys_zone_center(ws, None))       # PLAY
     drv.frame(1 / 30)
@@ -669,7 +669,7 @@ def test_code_tab_context_x_exits_to_home(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
@@ -679,18 +679,18 @@ def test_code_tab_context_x_exits_to_home(tmp_path):
 def test_play_hard_commits_the_active_tab(tmp_path):
     """#111: there is no SAVE icon anymore -- PLAY is a hard-commit trigger itself,
     dispatching to the ACTIVE tab's persist verb (EditorApp.leave calls
-    save_current() before running). On the code tab that must reach ws.save_code."""
+    save_current() before running). On the code tab that must reach ws.saves.save_code."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     ws.editor.set_text("def _draw():\n    cls(3)\n")     # a valid edit to persist
     calls = []
-    orig = ws.save_code
-    ws.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
+    orig = ws.saves.save_code
+    ws.saves.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
     drv.click(*_sys_zone_center(ws, None))                # PLAY
     drv.frame(1 / 30)
     assert calls == [1], "PLAY must hard-commit the code tab via save_code"
@@ -705,12 +705,12 @@ def test_tab_switch_hard_commits_the_outgoing_tab(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     ws.editor.set_text("def _draw():\n    cls(5)\n")
     calls = []
-    orig = ws.save_code
-    ws.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
+    orig = ws.saves.save_code
+    ws.saves.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
     drv.click(*_sys_zone_center(ws, "paint"))             # switch away from CODE
     drv.frame(1 / 30)
     assert calls == [1], "leaving the code tab must hard-commit it via save_code"
@@ -727,7 +727,7 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
 
     # Nothing journaled for this cart yet -- UNDO must read disabled.
@@ -735,11 +735,11 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     assert ws.history.can_redo() is False
 
     ws.editor.set_text(ws.editor.text() + "\n# commit A\n")
-    assert ws.save_code() is True          # commit #1: the floor -- still nothing before it
+    assert ws.saves.save_code() is True          # commit #1: the floor -- still nothing before it
     assert ws.history.can_undo() is False
 
     ws.editor.set_text(ws.editor.text() + "# commit B\n")
-    assert ws.save_code() is True          # commit #2: now there's a step back to A
+    assert ws.saves.save_code() is True          # commit #2: now there's a step back to A
     assert ws.history.can_undo() is True
     assert ws.history.can_redo() is False
     src_b = ws.editor.text()
@@ -764,7 +764,7 @@ def test_bar_undo_redo_icons_are_a_no_op_when_disabled(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     assert ws.history.can_undo() is False and ws.history.can_redo() is False
     src = ws.editor.text()
@@ -784,13 +784,13 @@ def test_blocks_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_blocks()
+    ws.text._open_blocks()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "blocks"
     drv.click(*_sys_zone_center(ws, "code"))     # ladder: blocks -> code
     drv.frame(1 / 30)
     assert ws.menu_view == "code"
-    ws._open_blocks()
+    ws.text._open_blocks()
     drv.frame(1 / 30)
     drv.click(*_sys_zone_center(ws, None))       # PLAY
     drv.frame(1 / 30)
@@ -805,7 +805,7 @@ def test_blocks_tab_play_hard_commits_via_save_blocks(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_blocks()
+    ws.text._open_blocks()
     drv.frame(1 / 30)
     calls = []
     orig = ws.block_ui.save_blocks
@@ -830,13 +830,13 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "music"
     drv.click(*_game_zone_center("paint", ws))       # ladder: music -> paint
     drv.frame(1 / 30)
     assert ws.menu_view == "paint"
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
@@ -853,12 +853,12 @@ def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     ws.music_ui.musicedit.toggle_rest()          # a real edit: PLAY must persist it
     calls = []
-    orig = ws.save_sounds
-    ws.save_sounds = lambda: (calls.append(1), orig())[-1]
+    orig = ws.saves.save_sounds
+    ws.saves.save_sounds = lambda: (calls.append(1), orig())[-1]
     drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
     assert calls == [1], "PLAY on the music tab must reach save_sounds"
@@ -871,7 +871,7 @@ def test_music_tab_context_x_exits_to_home(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
@@ -905,8 +905,8 @@ def test_config_tab_play_runs_and_persists_config(tmp_path):
     ws.open_in_editor()
     assert ws.screen == "menu" and ws.menu_view == "cards"   # Config-first landing
     saved = []
-    orig = ws._save_config
-    ws._save_config = lambda: (saved.append(1), orig())[-1]
+    orig = ws.saves._save_config
+    ws.saves._save_config = lambda: (saved.append(1), orig())[-1]
     drv.click(*_game_zone_center(None, ws))          # PLAY (game-canvas bar)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
@@ -947,11 +947,11 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     drv.frame(1 / 30)
     assert ws.sysmenu.open
     ws.sysmenu.close()
-    ws.go_home()
+    ws.home.go_home()
 
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_paint()
+    ws.text._open_paint()
     drv.frame(1 / 30)
     drv.click(*_center(ws.bar_layer.cell("menu", "menu")[1]))  # the Editor's ≡
     drv.frame(1 / 30)
@@ -971,7 +971,7 @@ def test_context_x_exits_the_editor_to_home(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
+    ws.text._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
     drv.frame(1 / 30)
     assert ws.screen == "menu"
     drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))
@@ -1107,7 +1107,7 @@ def test_bar_strip_rebuild_budget(tmp_path):
     is what makes it fail here instead: alternating destinations must cost a
     BOUNDED number of strip builds, not one per switch.
 
-    Asserts on ws.costs (ws.note_cost), which is counted on the BUILD path only, so
+    Asserts on ws.costs (ws.perf.note_cost), which is counted on the BUILD path only, so
     the net costs nothing in the healthy case."""
     ws = _ws(tmp_path)
     ws.open_settings()
@@ -1123,7 +1123,7 @@ def test_bar_strip_rebuild_budget(tmp_path):
     # which is how a regression net quietly stops being one (caught while
     # verifying it -- stashing the fix removed the note_cost calls too, and the
     # assertion below read 0 and sailed through).
-    assert renders >= 1, "no strip build counted -- is ws.note_cost still wired?"
+    assert renders >= 1, "no strip build counted -- is ws.perf.note_cost still wired?"
     # One per distinct destination is right; one per SWITCH is the bug (would be 12).
     assert allocs <= 2, "strip layer reallocated %d times in 24 frames" % allocs
     assert renders <= 2, "strip re-rendered %d times in 24 frames" % renders
@@ -1165,7 +1165,7 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     import sys
     sets = sys.modules.get("iconsets") or sys.modules["runtime.iconsets"]
     drew = []

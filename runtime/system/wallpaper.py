@@ -831,7 +831,7 @@ class Wallpaper:
         if self._refused is not None:
             title = self._refused
             self._refused = None
-            note = getattr(ws, "notice", None)
+            note = getattr(getattr(ws, "notices", None), "notice", None)
             if note is not None:
                 note("WALLPAPER OFF", "%s couldn't start" % title, "warn")
         # The desk's fill: the theme's backdrop over its `desktop` (NONE, a
@@ -983,7 +983,7 @@ class Wallpaper:
         ITS OWN compositor -- the one-buffer compositor on the host and in the
         browser, an moy_alloc-backed _LayerComp in board PSRAM -- so there is
         nothing left to choose between and no per-tier name in this file at
-        all. It is the same factory `Workstation.bind_run_canvas` uses to give a cart with a small raster
+        all. It is the same factory `CanvasBinding.bind_run_canvas` uses to give a cart with a small raster
         (SPEC.md 3.1) a canvas to play on, which is the same request: an
         offscreen surface the size of a cart frame.
 

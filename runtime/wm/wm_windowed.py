@@ -571,7 +571,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return
         ws = self.ws
         if self.stack.has("desktop"):
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
         self._sync_windows()
         st = self.stack.kinds()
         at = self.stack.index("desk")
@@ -606,11 +606,11 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return
         ws = self.ws
         if self.stack.depth() > 1 and not game:
-            ws.go_home()                  # what stood on the home leaves first
+            ws.home.go_home()                  # what stood on the home leaves first
         p = self._parked or _Parked([], [], {}, None)
         self._parked = None
         kinds = list(p.kinds)
-        if ("menu" in kinds and not ws._editing_icons
+        if ("menu" in kinds and not ws.text._editing_icons
                 and ws.editor_app.project is not ws.run.project):
             kinds.remove("menu")
             win = p.wins.pop("menu", None)
@@ -1078,8 +1078,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _min_for(self, kind, title_h, max_w, max_h):
         """`_min_size` for a window of `kind` not yet made."""
         fs = self._fs()
-        ms = self.ws.app_min_size(kind) \
-            if hasattr(self.ws, "app_min_size") else None
+        ms = self.ws.spine.app_min_size(kind) \
+            if hasattr(getattr(self.ws, "spine", None), "app_min_size") else None
         if ms is not None:
             return (min(max_w, ms[0] * fs), min(max_h, ms[1] * fs))
         return (160 * fs, 90 * fs + title_h)
@@ -1404,7 +1404,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """The Editor's window drawn again where a game left its workspaces
         or came back to them: its bar's Play or Stop, its Game tab."""
         host = self._wins.get("menu")
-        if host is not None and not self.ws._editing_icons:
+        if host is not None and not self.ws.text._editing_icons:
             self.ws.editor_app.zone_gen += 1
             self._prewarm(host)
 
@@ -1427,7 +1427,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if pause.open and not pause.stopped:
             pause.close()
         ws._reset_canvas_state()
-        ws._exit_to_caller()
+        ws.spine._exit_to_caller()
 
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
@@ -1678,7 +1678,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True
         if _NOTES.banner is not None and _NOTES.up() is not None:
             return True
-        return ws.notice_active()
+        return ws.notices.notice_active()
 
     def keeps_animating(self, dt, pages=True):
         """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
@@ -2031,7 +2031,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def close_player(self):
         """Close the playtest window (its X, or the pause menu's Quit routed through
-        ws._exit_to_caller): remove ONLY the player from the stack, then hand
+        ws.spine._exit_to_caller): remove ONLY the player from the stack, then hand
         focus back to the run CALLER's window when it's open (the Editor for a
         PLAY run) -- the launch-and-return contract, without collateral pops."""
         ws = self.ws
@@ -2059,7 +2059,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         ws.mark_dirty()
         ws.leave_surface(kind)
-        if kind == "menu" and not ws._editing_icons:
+        if kind == "menu" and not ws.text._editing_icons:
             self._end_playtest()              # its playtest goes with it
         if kind == "desktop":
             self.close_player()
@@ -2067,7 +2067,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             ws.procs.close(ws.procs.by_key[kind])
         else:
             self._remove_kind(kind)
-        if kind == "menu" and not ws._editing_icons:
+        if kind == "menu" and not ws.text._editing_icons:
             ws.editor_closed()                # back where it was opened from
 
     def _close_window(self, kind):

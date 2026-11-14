@@ -175,22 +175,22 @@ class HostBoard:
             f = ws.input.apply_pointer(ws.pointer)
             ws.pointer.click = bool(f & 4)          # moy_input.P_CLICK: the press edge
             if ws.ball_owed:
-                ws.ball(0, 0, False)
-            moy_loop.drive(ws.handle_input, ws.handle_pointer,
+                ws.router.ball(0, 0, False)
+            moy_loop.drive(ws.router.handle_input, ws.router.handle_pointer,
                            lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
             self.frames += 1
         return []
 
     def cmd(self, text, wait_for=None, timeout=8):
         if text.startswith("run "):
-            self.ws.launch_named(text[4:])      # the dev channel's `run`
+            self.ws.home.launch_named(text[4:])      # the dev channel's `run`
 
     def state(self):
         return {"order": [], "wins": {}}
 
     def leave_cart(self):
         if self.ws.run.player._update is not None or self.ws.run.player._draw is not None:
-            self.ws.exit()
+            self.ws.spine.exit()
 
     def close(self):
         pass

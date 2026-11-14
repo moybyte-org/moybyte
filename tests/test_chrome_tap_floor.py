@@ -232,7 +232,7 @@ def test_every_editor_tab_re_derives_on_BOTH_scales(tmp_path):
     assert tabs, "the Editor tab ladder is empty -- this test covers nothing"
     for tab in tabs:
         ws.open_in_editor(cart)
-        ws.set_menu_view(tab)
+        ws.text.set_menu_view(tab)
         if tab == "code":
             lay = ws.code_layout
         else:
@@ -332,7 +332,7 @@ def _frames(ws, n=3):
 
 
 def _appearance(ws):
-    assert ws.open_app(ws.appearance_app)
+    assert ws.spine.open_app(ws.appearance_app)
     _frames(ws)
     return ws.appearance_app
 

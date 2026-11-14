@@ -398,7 +398,7 @@ class Player(PlayerDiag):
             _ui_draw._C.api_keys_back(self._ui[0])
 
     def focused_editor(self):
-        """The handle holding the keyboard, or None -- what `ws.nav` asks
+        """The handle holding the keyboard, or None -- what `ws.router.nav` asks
         before it spends a trackball roll on the cursor. None while the run
         is deaf: the keyboard is another window's."""
         return None if self.deaf else self._focus_editor
@@ -612,13 +612,13 @@ class Player(PlayerDiag):
                 _link.stop()
             except Exception:  # noqa: BLE001 -- teardown must never block an exit
                 pass
-            self.ws.wifi_release("link")
+            self.ws.spine.wifi_release("link")
         # ...and the run's own lease, which its process's end let go; a run
         # that ended in the kernel has no process left to name, so every
         # "cart" hold goes (one run holds it at a time). Nothing else holds
         # the WiFi at a plain exit, so this is where a console goes back to
         # radio-off.
-        self.ws.wifi_release("cart", 0)
+        self.ws.spine.wifi_release("cart", 0)
 
     def release_world(self):
         """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
@@ -655,7 +655,7 @@ class Player(PlayerDiag):
         # Nor its per-run cart canvas (SPEC.md 1/3.1) -- whoever ran us draws
         # on the boot raster, so the small canvas dies with the run. (Also the
         # RESPONSIVE app-cart bind, #181: same field, same release.)
-        self.ws.release_run_canvas()
+        self.ws.binding.release_run_canvas()
         # ...and the root's fold scratch its frames were shown through (a
         # canvas without one has no release_fold).
         rf = getattr(self.ws.sys_canvas, "release_fold", None)
@@ -838,7 +838,7 @@ class Player(PlayerDiag):
             # console on a shelf has nobody to talk to. Announcing the cart is
             # what lets a peer recognise "we are both in the same game".
             try:
-                ws.wifi_hold("link")   # the STA up, owned by the wifi service, BEFORE the radio
+                ws.spine.wifi_hold("link")   # the STA up, owned by the wifi service, BEFORE the radio
                 link.start()
                 link.announce(cart.get("title") or "", 1, fps=cart.get("fps"))
                 # A DEAD match never survives into the next run (#65). The
@@ -1085,15 +1085,15 @@ class Player(PlayerDiag):
             # clip the repr: a malformed value can be an arbitrary object and
             # the panel wraps 8px cells -- the NAME matters, not the whole blob
             return 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
-        ws.release_run_canvas()        # a straggler bind never leaks into this run
-        if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
+        ws.binding.release_run_canvas()        # a straggler bind never leaks into this run
+        if cv is not None and not ws.binding.bind_run_canvas(cv[0], cv[1]):
             return "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
         # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
         #
         # A `type: "app"` cart no shell app claims is a USER APP: written by
         # whoever owns the console, editable on Make, and handed shell
         # capabilities by MANIFEST PERMISSION (make_system_api, below).
-        if ws.is_user_app(cart):
+        if ws.spine.is_user_app(cart):
             # A manifest this build cannot honour AS WRITTEN is refused by
             # name, like an unknown runtime or an out-of-set canvas -- and
             # BEFORE the crash guard arms, because a mis-declared permission is
@@ -1110,7 +1110,7 @@ class Player(PlayerDiag):
             # refused into the ORDINARY error panel, whose top bar carries
             # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
             # are the same screen.
-            self._app_id = ws.app_cart_id(cart)
+            self._app_id = ws.spine.app_cart_id(cart)
             self._boundary = 0 if draws_in_look(cart) else 1
             if not ws.app_guard.arm(self._app_id):
                 self._app_id = None
@@ -1128,7 +1128,7 @@ class Player(PlayerDiag):
                 # (docs/app_api_v1.md section 3): the boundary keeps its print
                 self._responsive = True
                 self._boundary = self._boundary and 2
-                ws.bind_app_canvas()
+                ws.binding.bind_app_canvas()
         # A SCRIPT is responsive by construction -- the SHELL draws it, and text
         # is the one thing an integer upscale of the 320x240 raster serves worst
         # -- so it takes the same whole-surface bind an app opts into, with no
@@ -1136,7 +1136,7 @@ class Player(PlayerDiag):
         # bind's own docstring gives, where it stays the fixed raster in a
         # window like any cart.)
         elif self._script:
-            ws.bind_app_canvas()
+            ws.binding.bind_app_canvas()
         return None
 
     @staticmethod
@@ -1206,7 +1206,7 @@ class Player(PlayerDiag):
         # cart namespace iff the backend it receives is non-None.
         wifi = ws.wifi if ws._cart_has_perm("network") else None
         if wifi is not None:
-            ws.wifi_hold("cart", self.pid)  # the radio lease for this run; its end lets go
+            ws.spine.wifi_hold("cart", self.pid)  # the radio lease for this run; its end lets go
         # Multiplayer message service (#65): gate net.* by the "multiplayer"
         # manifest permission exactly like wifi's "network" gate. reset() drops any
         # handler/inbox from a previous run so a fresh run starts clean; make_api
@@ -1280,7 +1280,7 @@ class Player(PlayerDiag):
         """Whether the trackball steps this run's page, as it steps every
         surface that takes the keys (`InputPolicy.ball_steps`): an app's,
         unless a caret holds the keyboard (its editor handle takes the roll
-        as arrows, `Workstation.nav`); a game's trackball is its pointer."""
+        as arrows, `InputRouter.nav`); a game's trackball is its pointer."""
         return self._is_tool and self._focus_editor is None
 
     def typing(self):
@@ -1786,7 +1786,7 @@ class Player(PlayerDiag):
         the launch ends unrun and the shell asks first, "Stop the music to
         play <game>?", whose Stop & play stops the stream and opens the cart
         again once the service has given its memory back
-        (`Workstation.ask_stop_music`). The Player stays where it was:
+        (`Notices.ask_stop_music`). The Player stays where it was:
         `declined` tells the opener not to run it, and the run's process
         ends, so the shell is current again for the dialog's answer."""
         info_of = getattr(_moy_play, "info", None)
@@ -1803,7 +1803,7 @@ class Player(PlayerDiag):
         _os_log.end(self.pid, "declined")
         _moybyte.end(self.pid)
         self.pid = None
-        ws.ask_stop_music(cart)
+        ws.notices.ask_stop_music(cart)
         return True
 
     def _stop_for(self, run, cart):
@@ -1825,7 +1825,7 @@ class Player(PlayerDiag):
         if stop is None:
             return False
         ws = self.ws
-        rec = getattr(ws, "resume_record", None)
+        rec = getattr(getattr(ws, "home", None), "resume_record", None)
         resume = getattr(moy_kernel, "resume", None)
         if rec is not None and resume is not None:
             try:
@@ -1856,7 +1856,7 @@ class Player(PlayerDiag):
         if (app is None or getattr(app, "stop_hold", None) is None
                 or cart.get("runtime") != "wasm"
                 or APP_EXT not in (cart.get("extensions") or ())
-                or not ws.is_user_app(cart)):
+                or not ws.spine.is_user_app(cart)):
             return
         roles, kind = _moy_app.policy(self.granted)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
@@ -1939,7 +1939,7 @@ class Player(PlayerDiag):
         if info is None or not info[6]:
             return False
         ws._reset_canvas_state()
-        ws._exit_to_caller()
+        ws.spine._exit_to_caller()
         return True
 
     # -- the pause menu's hold (docs/history/look_2026-10.md step 25a) -----------------
@@ -2196,7 +2196,7 @@ class Player(PlayerDiag):
                 # The sub-line names the cause; an unrecognised or absent one
                 # (a fixture, or a runtime that predates interp_cause) reads
                 # as "missing", the more common case.
-                notice = getattr(ws, "notice", None)
+                notice = getattr(getattr(ws, "notices", None), "notice", None)
                 if notice is not None:
                     sub = INTERP_NOTICE_SUB.get(getattr(lua, "interp_cause", None),
                                                 INTERP_NOTICE_SUB_DEFAULT)
@@ -2606,7 +2606,7 @@ class Player(PlayerDiag):
             if self.detached:
                 self.quit_asked = True      # the running set closes it
                 return
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
             return
         if self.detached:
             ws._reset_canvas_state()

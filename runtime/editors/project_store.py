@@ -356,7 +356,7 @@ class ProjectStore:
     #
     # These write the cart's live data back through the injected store inside the
     # SD session (ws._with_sd). The Workstation ws.save_* /
-    # ws._save_config names stay as one-line forwards (tested surface); the
+    # ws.saves._save_config names stay as one-line forwards (tested surface); the
     # save-failure UI field (ws.cart_error) + achievements (ws.ach)
     # they touch stay on Workstation, reached via the ws back-reference.
 
@@ -421,8 +421,8 @@ class ProjectStore:
 
     def commit_code(self, src, quiet=False, force=False, name=None):
         """Persist validated source through the store -- the store-write half of the
-        old Workstation.save_code. The compile-check + code-UI half stays on the code
-        surface (ws.save_code), which calls this once the source is known to parse.
+        old Saves.save_code. The compile-check + code-UI half stays on the code
+        surface (ws.saves.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
 
         `name` is WHICH of the cart's scripts (SPEC.md 4) the Code tab is on --
@@ -499,15 +499,15 @@ class ProjectStore:
             # ...and the same for a cart the crash guard struck out (#160), as
             # an app or as the wallpaper. The refusal panel says "EDIT it";
             # this is the line that makes that true. Code is the ONLY edit that
-            # clears strikes -- see Workstation.forgive_app for why not every
+            # clears strikes -- see Spine.forgive_app for why not every
             # commit_* verb.
             # Neither is true of a KEPT write: the code is on disk and still
             # broken, so a stale crash panel is not stale and re-arming the guard
             # would just let the same cart strike out again.
             if parsed:
                 ws.cart_error = None
-                ws.forgive_app(self.cart)
-                ws.forgive_wallpaper(self.cart)
+                ws.spine.forgive_app(self.cart)
+                ws.spine.forgive_wallpaper(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

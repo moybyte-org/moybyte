@@ -295,7 +295,7 @@ class CardsLayer(Layer):
             return self._fix_input(i)
         page = self.page()
         if (i.pressed("run") or i.pressed("a")) and not page.on_door():
-            ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+            ws.defer(ws.text._leave_menu)   # Enter PLAYs (a device's Enter is "a")
             return True
         if page.open_door(i):
             if self.prompt is not None:
@@ -303,7 +303,7 @@ class CardsLayer(Layer):
             return True
         if page.keys(i):
             ws.mark_dirty()
-        ws._leave_or_home(ws.exit)
+        ws.home._leave_or_home(ws.spine.exit)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -445,7 +445,7 @@ class CardsLayer(Layer):
             return True
         if self._fix_host.keys(i):
             ws.mark_dirty()
-        ws._leave_or_home(ws.exit)
+        ws.home._leave_or_home(ws.spine.exit)
         return True
 
     def draw_choice(self, f, k, rect):
@@ -594,7 +594,7 @@ class CardsLayer(Layer):
         if name in ws.carts_store.cart_sources(cart):
             self._close_files()
             ws.editor_app.set_tab("code")
-            ws.open_code_file(name)
+            ws.text.open_code_file(name)
             return
         tab = self._asset_tab(name)
         if tab is not None:
@@ -627,7 +627,7 @@ class CardsLayer(Layer):
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
-                ws.home_key()
+                ws.home.home_key()
             return True
         if self._files_host.keys(i):
             ws.mark_dirty()
@@ -800,7 +800,7 @@ class CardsLayer(Layer):
         self._close_prompt()
         self._close_files()
         ws.editor_app.set_tab("code")
-        ws.open_code_file(made)
+        ws.text.open_code_file(made)
 
     def _prompt_event(self, ev):
         if ev == "commit":

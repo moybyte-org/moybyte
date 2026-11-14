@@ -245,6 +245,6 @@ end
 function _draw() cls(0) end
 """
     ws, _lua = _run(tmp_path, src, ["graphics", "files:documents"])
-    ws.exit()
+    ws.spine.exit()
     files = ws.app_context("check", ("files",), prefs_ns="check").files
     assert files.load("docs", "unsaved.txt") == ("written, never closed", None)

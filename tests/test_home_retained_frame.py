@@ -83,7 +83,7 @@ def test_reentry_stamps_instead_of_redrawing(tmp_path):
     ws.open_settings()
     drv.frame(0.0)
     calls = _count_grid(ws)
-    ws.go_home()
+    ws.home.go_home()
     _quiesce(ws)          # navigation can fire an achievement toast; an active
     drv.frame(0.0)        # toast reads as _animating and refuses the stamp
     assert ws.wm.top_kind() == "launcher"
@@ -94,7 +94,7 @@ def test_stamped_frame_matches_live_render(tmp_path):
     ws, drv = _settle_home(tmp_path)
     ws.open_settings()
     drv.frame(0.0)
-    ws.go_home()
+    ws.home.go_home()
     _quiesce(ws)
     drv.frame(0.0)                                   # the stamped re-entry
     stamped = bytes(ws.sys_canvas._buf)
@@ -111,7 +111,7 @@ def test_selection_change_invalidates(tmp_path):
     ws, drv = _settle_home(tmp_path)
     ws.open_settings()
     drv.frame(0.0)
-    ws.go_home()
+    ws.home.go_home()
     _quiesce(ws)
     drv.frame(0.0)
     calls = _count_grid(ws)
@@ -163,7 +163,7 @@ def test_foreign_paints_void_the_band(tmp_path):
                                           orig(dt, **kw))[1]
     ws.open_settings()
     drv.frame(0.0)                                   # a foreign paint
-    ws.go_home()
+    ws.home.go_home()
     _quiesce(ws)
     home._lib_key = None                             # (no retained frame to stamp)
     drv.frame(0.0)                                   # the re-entry paint

@@ -5,7 +5,7 @@ whose manifest opts into the "network" permission (host == device: it mirrors th
 host make_wifi). It is a SYSTEM service, and THE RADIO IS A LEASE (2026-09-07):
 off unless something holds it. The holds are the kernel's lease table's radio
 rows, and the kernel's WiFi driver powers the station from them
-(native/moy_net/moy_net.h's THE BOOK): `Workstation.wifi_hold(tag)` takes a
+(native/moy_net/moy_net.h's THE BOOK): `Spine.wifi_hold(tag)` takes a
 row, whose first holder powers the station up, and the last
 `wifi_release(tag)` lets it go, which powers it down; radio_on and radio_off
 here keep this service's view of the station in step. A console on a shelf

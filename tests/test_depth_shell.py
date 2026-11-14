@@ -104,7 +104,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
 def _drag(ws, drv):
     """Settings dragged over the desk, the home's window standing still
     beside it (its shadow is the one a careless restore would blend twice)."""
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(0.0)
     ws.open_settings()
     drv.frame(0.0)
@@ -285,7 +285,7 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
 
     bare = bytes(drv.rgb888())
     rasters = ws.wallpaper.rasters
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
     win = ws.wm._wins["calc"]
     win.x, win.y = 60, 560 - win.h
@@ -306,11 +306,11 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
 def _overlapping(tmp_path, variant):
     """Files, then Calc above it over its right half."""
     ws, drv = _desk(tmp_path, variant)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(0.0)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws._apps_by_id["files"])
     drv.frame(0.0)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     drv.frame(0.0)
     files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
     # Files centred on the glass (the geometry these tests drag in), Calc
@@ -454,7 +454,7 @@ def test_an_apps_page_in_a_window_lies_on_the_windows_body(tmp_path, variant):
         if app == "settings":
             ws.open_settings()
         else:
-            ws.open_app(ws._apps_by_id[app])
+            ws.spine.open_app(ws._apps_by_id[app])
         for _ in range(3):
             ws.mark_dirty()
             drv.frame(1 / 30)

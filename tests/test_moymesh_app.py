@@ -617,7 +617,7 @@ def _open_mesh(tmp_path, tweak=None, name=None):
 
 def _close_mesh(svc, ws=None):
     if ws is not None:
-        ws.go_home()            # the window's run ends, and its process's queue
+        ws.home.go_home()            # the window's run ends, and its process's queue
     S.SCHED.stop(svc.pid)
     S.SCHED.poll()
     while N.owner():
@@ -1010,12 +1010,12 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
     def titles(rows):
         return [c.get("title") for c in rows if c]
     desk = ws.wm._backdrop_layer
-    assert TITLE not in titles(ws._runnable_items())
+    assert TITLE not in titles(ws.home._runnable_items())
     assert TITLE not in titles(c for _k, _l, c in desk._icon_catalog())
-    assert TITLE in titles(ws._launcher_items(ws.carts.all, "make"))
+    assert TITLE in titles(ws.home._launcher_items(ws.carts.all, "make"))
     lora_sim.install()
     try:
-        assert TITLE in titles(ws._launcher_items(ws.carts.all, "apps"))
+        assert TITLE in titles(ws.home._launcher_items(ws.carts.all, "apps"))
         assert ("moymesh", TITLE) in [(k, lb) for k, lb, _c in desk._icon_catalog()], \
             "its tile is the mesh icon slot"
     finally:
@@ -1058,7 +1058,7 @@ def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
     lora_sim.install()
     ws = build_desktop_ws(tmp_path)
     try:
-        ws.open_desk()
+        ws.home.open_desk()
         _install(ws)
         open_cart(ws, TITLE)
         pl = ws.run.player
@@ -1540,7 +1540,7 @@ def test_every_page_and_state_renders_on_every_board(tmp_path, board):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **BOARDS[board])
     try:
         if board == "desk":
-            ws.open_desk()
+            ws.home.open_desk()
         _install(ws)
         open_cart(ws, TITLE)
         pl = ws.run.player
@@ -1559,7 +1559,7 @@ def test_every_page_and_state_renders_on_every_board(tmp_path, board):
             seen.add(bytes(cv._buf))
         assert len(seen) == len(_states(0)), "every state draws its own picture"
     finally:
-        ws.go_home()
+        ws.home.go_home()
         S.SCHED.reset()
         while N.owner():
             moybyte.end(N.owner())

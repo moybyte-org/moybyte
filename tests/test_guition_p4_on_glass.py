@@ -622,12 +622,12 @@ def test_a_cart_s_timed_lanes_run_and_a_runaway_is_struck(board, lanes_carts, ti
 def test_a_quiet_game_frame_rotates_one_rect(board):
     """The whole point of the rotated compositor: a running game pays ONE
     scale+rotate of the game canvas per frame, not a whole-frame rotate. Run
-    a cart (fullscreen: the ws.exit() calls first close the tour's windows),
+    a cart (fullscreen: the ws.spine.exit() calls first close the tour's windows),
     let it tick, and read the meters -- rect frames must have grown far more
     than full frames. Runs after the window tests on purpose: its exits leave
     the desk, which open_desk() at the end restores."""
     for _ in range(3):
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(0.5)
     line = board.cmd("run star", wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
@@ -650,10 +650,10 @@ def test_a_quiet_game_frame_rotates_one_rect(board):
     strips = board.pyval("comp.strips()", strict=True)
     assert len(strips) == 1 and tuple(strips[0][:3]) == (0, 0, w), strips
     assert strips1[0] - strips0[0] <= 1, (strips0, strips1)
-    board.cmd("py ws.exit()", wait_for="PY")
+    board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(1.5)
     assert not board.state().get("cart")
-    board.cmd("py ws.open_desk()", wait_for="PY")     # leave the desk for the next test
+    board.cmd("py ws.home.open_desk()", wait_for="PY")     # leave the desk for the next test
     board.drain(0.5)
 
 

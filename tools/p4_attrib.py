@@ -171,7 +171,7 @@ ws._g['_countverbs'] = _countverbs
 
 HELPER = """
 def _edit(tab, want=''):
-    ws.open_projects()
+    ws.home.open_projects()
     items = ws.projects_grid.items
     pick = -1
     for i in range(len(items)):
@@ -188,7 +188,7 @@ def _edit(tab, want=''):
                 pick = i
                 break
     ws.projects_grid.sel = pick
-    ws.launch_selected(ws.projects_grid)
+    ws.home.launch_selected(ws.projects_grid)
     ws.editor_app.set_tab(tab)
     return str(items[pick].get('title'))
 def _litpx(sh, n):

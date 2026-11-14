@@ -187,7 +187,7 @@ def _leases(ws):
     """Whether the server holds the radio and the name for itself: a
     console's radio is off unless held. A console with no lease
     (`wifi_hold` None, the Zero) keeps both up for its webhost."""
-    return getattr(ws, "wifi_hold", None) is not None
+    return getattr(getattr(ws, "spine", None), "wifi_hold", None) is not None
 
 
 def rename(ws):
@@ -205,13 +205,13 @@ def start(ws):
     _unpark()
     lease = _leases(ws)
     if lease:
-        ws.wifi_hold(TAG)
+        ws.spine.wifi_hold(TAG)
     try:
         _N.start(system_dir(ws))
     except Exception as exc:  # noqa: BLE001 -- a server that will not start serves nothing
         print("Moybyte ssh: %s" % (exc,))
         if lease:
-            ws.wifi_release(TAG)
+            ws.spine.wifi_release(TAG)
         return False
     _state["serving"] = True
     if lease:
@@ -233,7 +233,7 @@ def _unannounce():
 
 def _let_go(ws):
     _unannounce()
-    ws.wifi_release(TAG)
+    ws.spine.wifi_release(TAG)
 
 
 def _unpark():

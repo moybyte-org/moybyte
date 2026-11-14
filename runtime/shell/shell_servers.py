@@ -277,14 +277,14 @@ class NavServer:
         app = ws._apps_by_id.get(app_id)
         if app is None:
             return False
-        title = ws.app_title(app.id) or app.id
+        title = ws.spine.app_title(app.id) or app.id
         return self._go(g, "Wants to open " + str(title),
-                        lambda: bool(ws.open_app(app, cart)))
+                        lambda: bool(ws.spine.open_app(app, cart)))
 
     def is_system_app(self, g, cart):
         """True when a registered app's identity claims `cart` -- what keeps
         app carts out of project lists."""
-        return self.__ws.is_system_app(cart)
+        return self.__ws.spine.is_system_app(cart)
 
     def projects(self, g):
         """The editable PROJECTS: every scanned cart a system app does not
@@ -293,23 +293,23 @@ class NavServer:
         a list of places to GO is not permission to author one."""
         ws = self.__ws
         return [c for c in ws.carts.all
-                if c.get("type") != "theme" and not ws.is_system_app(c)]
+                if c.get("type") != "theme" and not ws.spine.is_system_app(c)]
 
     def edit(self, g, cart, tab=None):
         """Open `cart` in the project EDITOR, optionally on one tab. False when
         there is nothing to edit. Leaving the Editor comes back to the app
-        that opened it (`Workstation._go_home_or_back`)."""
+        that opened it (`Spine._go_home_or_back`)."""
         if cart is None:
             return False
         ws = self.__ws
 
         def then():
-            ws._note_app_caller()
+            ws.spine._note_app_caller()
             ws.open_in_editor(cart)
             if ws.run.project is None or ws.run.project.cart is not cart:
                 return False
             if tab:
-                ws.set_menu_view(tab)
+                ws.text.set_menu_view(tab)
             return True
         return self._go(g, "Wants to edit " + str(cart.get("title") or "a cart"), then)
 
@@ -335,7 +335,7 @@ class NavServer:
         ws = self.__ws
 
         def then():
-            ws._note_app_caller()
+            ws.spine._note_app_caller()
             return bool(ws.open_project_file(cart, name, mode))
         return self._go(g, "Wants to edit " + str(name), then)
 
@@ -349,10 +349,10 @@ class NavServer:
 
         def go():
             ws._open_workspace(cart)
-            ws.play(caller)
+            ws.spine.play(caller)
 
         def then():
-            if not ws.ask_first(cart, go):
+            if not ws.notices.ask_first(cart, go):
                 go()
         self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
@@ -518,10 +518,10 @@ class InstallServer:
 
     def hold(self, g):
         """Take the radio under the "carts" lease. True when it came up."""
-        return self.__ws.wifi_hold("carts")
+        return self.__ws.spine.wifi_hold("carts")
 
     def release(self, g):
-        self.__ws.wifi_release("carts")
+        self.__ws.spine.wifi_release("carts")
 
     def root(self, g):
         return self.__ws.carts_root

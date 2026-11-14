@@ -865,7 +865,7 @@ class Appearance:
 
     def edit_file(self):
         """Appearance's Edit theme…: the active theme opened in the Editor's
-        theme mode (`Workstation.edit_theme`). On a seed or an installed
+        theme mode (`Text.edit_theme`). On a seed or an installed
         package `custom` is made from it first and switched to (a seed is
         firmware); on `custom` its unwritten change is written first, so the
         file opened is the look shown. The mode's saves come back through
@@ -887,7 +887,7 @@ class Appearance:
         store = getattr(ws, "store", None)
         if store is None or not store.writable() or not self.commit():
             return False
-        return bool(ws.edit_theme(made))
+        return bool(ws.text.edit_theme(made))
 
     def file_text(self):
         """custom's theme.json as the look holds it, unwritten change and
@@ -1644,7 +1644,7 @@ class Appearance:
         if name in self._refused:
             return
         self._refused.add(name)
-        notice = getattr(self.ws, "notice", None)
+        notice = getattr(getattr(self.ws, "notices", None), "notice", None)
         if notice is not None:
             notice(_ui_draw.s("notice.theme_refused") % name,
                    _ui_draw.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
@@ -1714,7 +1714,7 @@ class Appearance:
         home = self._theme_layout(self.layout_theme() or self.theme_name)[2]
         if home != self.home:
             self.home = home
-            ws.set_home_arrangement(home)
+            ws.home.set_home_arrangement(home)
         if bars != self.bars:
             self.bars = bars
             ws.mark_dirty()

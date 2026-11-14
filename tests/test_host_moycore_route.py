@@ -63,7 +63,7 @@ def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
         for _ in range(5):
             ws.frame(1 / 60)
             assert ws.run.player.cart_error is None, title
-        ws._exit_to_caller()
+        ws.spine._exit_to_caller()
 
 
 @pytest.mark.skipif(not lua_binding.HostLuaRun.available(),

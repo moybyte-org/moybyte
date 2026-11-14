@@ -87,7 +87,7 @@ def _open(ws, root, app):
         # is made first, and an eviction would then differ between the desks
         _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
         ws._apps_by_id["myart"].covers.KEEP = 1000
-        assert ws.open_app(ws._apps_by_id["myart"]) is not False
+        assert ws.spine.open_app(ws._apps_by_id["myart"]) is not False
     elif app == "blocks":
         from ws_helpers import select_on_home
         cart = select_on_home(ws, "Coin Quest")
@@ -106,11 +106,11 @@ def _open(ws, root, app):
         ws.cart_net = MemNet(repo.routes())
         a = ws._apps_by_id["getcarts"]
         a._inst = _SameFree(a._inst)
-        assert ws.open_app(a) is not False
+        assert ws.spine.open_app(a) is not False
     else:
         if app == "storybook":
             seed_stories(ws)
-        assert ws.open_app(ws._apps_by_id[app]) is not False
+        assert ws.spine.open_app(ws._apps_by_id[app]) is not False
 
 
 # The Waveshare P4's desk as it ships: the desk's size class at the scale 1
@@ -127,7 +127,7 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
     ws.pointer.visible = False
     settle_badges(ws)
     ws._toast_until = 0
-    ws.open_desk()
+    ws.home.open_desk()
     if not ships:
         ws.wm._speaks = lambda win: False
         ws.wm._vouches = lambda win: False

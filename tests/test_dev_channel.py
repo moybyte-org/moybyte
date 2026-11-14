@@ -343,8 +343,8 @@ def test_link_reports_and_arms_the_radio_by_hand(capsys):
     ws, ch = make()
     ws.link = FakeLink()
     held = []
-    ws.wifi_hold = lambda tag: held.append(tag)
-    ws.wifi_release = lambda tag: held.remove(tag)
+    ws.spine.wifi_hold = lambda tag: held.append(tag)
+    ws.spine.wifi_release = lambda tag: held.remove(tag)
 
     def said():
         """The one LINK line the command prints, parsed. Every branch reports,

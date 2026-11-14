@@ -192,7 +192,7 @@ class Run:
         if self.windowed:
             self.pb.home(self.b)
         else:
-            self.ex("ws.go_home()")
+            self.ex("ws.home.go_home()")
             self.b.drain(1.5)
 
     def _row(self, name, r, **extra):
@@ -305,7 +305,7 @@ class Run:
             self.ex("ws.open_settings()")
             return True
         return bool(self.pb.pyval(self.b,
-                                  "ws.open_app(ws._apps_by_id[%r])" % app))
+                                  "ws.spine.open_app(ws._apps_by_id[%r])" % app))
 
     # -- the groups -------------------------------------------------------
     def meta(self):
@@ -460,7 +460,7 @@ class Run:
 
     def projects_window(self):
         self.home()
-        self.ex("ws.open_projects()")
+        self.ex("ws.home.open_projects()")
         self.b.drain(12.0)
         self.measure("window drag: PROJECTS", self.win_drag())
         self.home()
@@ -522,7 +522,7 @@ class Run:
                                              "ws.mark_dirty()" % key), 2.5)
             self.measure("editor workspace idle: %s" % key, self.idle(3.0))
         self.frames("editor Play (the playtest docks)",
-                    lambda: self.ex("ws.defer(ws._leave_menu)"), 5.0)
+                    lambda: self.ex("ws.defer(ws.text._leave_menu)"), 5.0)
         self.measure("editor playtest running beside the Editor", self.idle(3.0))
         self.ex("ws.wm.close_player()")
         b.drain(2.0)

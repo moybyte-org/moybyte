@@ -43,8 +43,8 @@ def test_builtin_apps_are_registered(tmp_path):
                      "files", "calc", "getcarts", "jukebox", "terminal"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
-    assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
-    assert ws.app_min_size("calc") == (170, 190)          # inferred from CalcLayout
+    assert ws.spine.app_min_size("artwork") == (310, 230)       # registered minimum
+    assert ws.spine.app_min_size("calc") == (170, 190)          # inferred from CalcLayout
 
 
 def test_register_app_dispatches_a_custom_app(tmp_path):
@@ -73,12 +73,12 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
             return True
 
     demo = Demo(ws)
-    ws.register_app(demo, min_size=(200, 100))
+    ws.spine.register_app(demo, min_size=(200, 100))
     assert ws._content_layers["demo"] is demo
-    assert ws.app_min_size("demo") == (200, 100)
-    assert ws.app_title("demo") == "BATTLE DEMO"
+    assert ws.spine.app_min_size("demo") == (200, 100)
+    assert ws.spine.app_title("demo") == "BATTLE DEMO"
     _select(ws, "Brick Siege")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert demo.opened == 1
     assert ws.screen == "demo"                            # back-stack kind
 
@@ -100,8 +100,8 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
             self.layout = DemoLayout()
 
     demo = Demo()
-    ws.register_app(demo)
-    assert ws.app_min_size(demo.id) == (210, 130)
+    ws.spine.register_app(demo)
+    assert ws.spine.app_min_size(demo.id) == (210, 130)
     assert ws.wm._root_ctx.app_layouts[demo.id] is demo.layout
     win = type("Win", (), {"kind": demo.id})()
     assert ws.wm._win_title(win) == "Story Editor"
@@ -112,7 +112,7 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
     its Rename dialog's field is, while it shows."""
     ws = _ws(tmp_path)
     _select(ws, "Files")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "files"
     assert not ws.input.text_mode
     ws.files_app.dialog = "rename"
@@ -131,11 +131,11 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
 def test_calc_opens_from_its_identity_cart(tmp_path):
     ws = _ws(tmp_path)
     _select(ws, "Calc")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "calc"
     ws.frame(1 / 30)                                      # draws without error
-    # Exit returns home (the tool-bar context X path uses ws.exit).
-    ws.exit()
+    # Exit returns home (the tool-bar context X path uses ws.spine.exit).
+    ws.spine.exit()
     assert ws.screen == "launcher"
 
 
@@ -157,7 +157,7 @@ class _Key:
 def _calc(tmp_path):
     ws = _ws(tmp_path)
     _select(ws, "Calc")
-    ws.launch_selected()
+    ws.home.launch_selected()
     calc = ws._content_layers["calc"]
     ws.frame(1 / 30)
     return ws, calc
@@ -501,11 +501,11 @@ def _open_app_kind(ws, kind):
         names = ws._NAMES if hasattr(ws, "_NAMES") else None
         colour = 7 if names is None else 7
         app.draw = lambda dt, cv=ws.sys_canvas, c=colour: cv.cls(c)
-        ws.register_app(app)
-        ws.open_app(app, cart=ws.carts.all[0])
+        ws.spine.register_app(app)
+        ws.spine.open_app(app, cart=ws.carts.all[0])
         return app
     app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
+    assert ws.spine.open_app(app), kind + " has no identity cart"
     return app
 
 
@@ -542,7 +542,7 @@ def test_host_routes_the_context_x_and_the_app_exits(tmp_path, kind, size):
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher", kind + " did not exit on its bar X"
     if kind == "naked":
@@ -553,7 +553,7 @@ def test_the_windowed_tier_still_suppresses_the_app_bar(tmp_path):
     """In the desk world the WM's title strip carries the close, so the host
     must draw NO app strip -- muting it may not change a single pixel."""
     ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     assert ws.windowed_chrome                     # the make world is open
     with_bar = _settle(ws)
     _mute_app_strip(ws)

@@ -46,8 +46,8 @@ import board as bd                                                  # noqa: E402
 M = "__import__('mem_census')"
 
 # The scripted session: each step is (kind, what, seconds). A cart is run by
-# title and left with `ws.exit()`; an app is opened by id and left with
-# `ws.go_home()`. Titles a store lacks are skipped and the reading says so.
+# title and left with `ws.spine.exit()`; an app is opened by id and left with
+# `ws.home.go_home()`. Titles a store lacks are skipped and the reading says so.
 SESSION = (
     ("cart", "Star Catcher", 6),
     ("cart", "Sky Run", 6),
@@ -112,7 +112,7 @@ def home(b):
     st = b.state() or {}
     stack = st.get("stack") or []
     if stack and stack[-1] not in ("launcher", "desk"):
-        val(b, "ws.go_home() or 1")
+        val(b, "ws.home.go_home() or 1")
         b.drain(0.8)
         st = b.state() or {}
     return st.get("stack")
@@ -216,7 +216,7 @@ def session(b):
                 continue
             r = settle_cart(b, what, secs)
         elif kind == "app":
-            ok = val(b, "ws.open_app(ws._apps_by_id[%r]) if %r in ws._apps_by_id "
+            ok = val(b, "ws.spine.open_app(ws._apps_by_id[%r]) if %r in ws._apps_by_id "
                         "else None" % (what, what))
             b.drain(secs)
             r = {"opened": ok, "stack": (b.state() or {}).get("stack")}
@@ -243,7 +243,7 @@ import time as _t
 from device_wifi import autoconnect_wifi as _ac
 ws._census_wifi = None
 try:
-    ws.wifi_hold('dev')
+    ws.spine.wifi_hold('dev')
 except Exception as e:
     ws._census_wifi = 'hold: %s' % e
 try:
@@ -321,7 +321,7 @@ LAUNCH = """
 import time as _t
 _c = __import__('console')
 _s = _t.ticks_us()
-_items = ws._launcher_items(ws.carts.all)
+_items = ws.home._launcher_items(ws.carts.all)
 _i = _t.ticks_diff(_t.ticks_us(), _s)
 _s = _t.ticks_us()
 _l = _c.Launcher(_items, ws.layout, _c.NAMES)
@@ -335,7 +335,7 @@ import time as _t
 ws._census_exit = None
 _f0 = ws.frame_state.frames_drawn
 ws._census_t0 = _t.ticks_ms()
-ws.exit()
+ws.spine.exit()
 ws._census_t1 = _t.ticks_ms()
 ws._census_f0 = _f0
 """
@@ -343,7 +343,7 @@ ws._census_f0 = _f0
 
 def launcher(b, title="Star Catcher"):
     """The launcher's item list and constructor, timed on the live console;
-    and exit-to-launcher from a running cart: ws.exit()'s own time, then the
+    and exit-to-launcher from a running cart: ws.spine.exit()'s own time, then the
     host's view of when the launcher's next frame was drawn."""
     run(b, LAUNCH)
     built = val(b, "ws._census_launch")

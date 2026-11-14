@@ -83,7 +83,7 @@ SERIAL_CMDS = True
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # The inputs as the hints know them (Workstation.use_inputs): the C3 keyboard
 # writes "kbd", in use from boot, and the trackball's presses where a surface
-# takes the keys "ball" (Workstation.ball); a paired BLE keyboard is a desk
+# takes the keys "ball" (InputRouter.ball); a paired BLE keyboard is a desk
 # keyboard; the GT911 is touch, under which the hints keep the keys used last.
 INPUT_KINDS = (("kbd", "tdeck"), ("ball", "tdeck"), ("ble", "keys"), ("touch", "touch"))
 

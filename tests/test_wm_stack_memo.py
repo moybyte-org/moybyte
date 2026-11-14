@@ -113,7 +113,7 @@ def test_backstack_push_pop_invalidates_the_memo(tmp_path):
     ws, drv = _running_cart(tmp_path)
     a = ws.wm.visible_stack()
     assert a is ws.wm.visible_stack()          # stable until a change
-    ws.go_home()                               # pop the Player -> launcher root
+    ws.home.go_home()                               # pop the Player -> launcher root
     b = ws.wm.visible_stack()
     assert b is not a
     assert ws.screen == "launcher"
@@ -124,7 +124,7 @@ def test_overlay_gate_change_invalidates_the_memo(tmp_path):
     """An overlay gate flipping ON (the system menu opening) rebuilds the stack and adds
     the overlay -- the memo signature caught it without any explicit nav."""
     ws, drv = _running_cart(tmp_path)
-    ws.go_home()
+    ws.home.go_home()
     for _ in range(2):
         drv.frame(DT)
     a = ws.wm.draw_stack()
@@ -142,10 +142,10 @@ def test_editor_tab_switch_invalidates_the_memo(tmp_path):
     assert ws.launcher.items
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     a = ws.wm.visible_stack()
     assert ws.wm.visible_stack() is a
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     b = ws.wm.visible_stack()
     assert b is not a
     assert b[0] is ws.code_layer               # the Code tab is now the content slot

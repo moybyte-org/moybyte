@@ -32,7 +32,7 @@ def _desk(tmp_path, size=(1024, 600), restored_editor=False):
     ws.look.set_theme("moy", persist=False, variant="light")
     if restored_editor:
         ws.system.set("win_full", {"menu": False})
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(ws)
     return ws
 
@@ -60,7 +60,7 @@ def _tap(ws, drv, x, y):
 
 
 def _open(ws, app):
-    ws.open_app(ws._apps_by_id[app])
+    ws.spine.open_app(ws._apps_by_id[app])
     _frames(ws)
     return ws.wm._wins[app]
 

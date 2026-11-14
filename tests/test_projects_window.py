@@ -42,8 +42,8 @@ def _uninstall():
 
 
 def _projects(ws, size=None):
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frame(ws)
     win = ws.wm._wins["projects"]
     if size is not None:
@@ -266,9 +266,9 @@ def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where)
         win, grid = _projects(ws)
         cv, ctx = win.buf, win.ctx
     else:
-        ws.open_library()
-        ws.set_home_arrangement("carousel")
-        ws.set_home_tab("games")
+        ws.home.open_library()
+        ws.home.set_home_arrangement("carousel")
+        ws.home.set_home_tab("games")
         grid, cv, ctx = ws.launcher, ws.wm._root_canvas, ws.wm._root_ctx
     grid.sel = len(grid.items) - 1         # far past the card it looks at
     _frame(ws)

@@ -35,7 +35,7 @@ which rect it drew the editor into, so they stay the cart's to forward.
 DIRECTIONAL input follows the keyboard for the same reason (`nav`): on the
 T-Deck the trackball IS the arrow keys, and whether a roll is a caret or a
 mouse cursor is a question about which surface holds the keyboard -- so
-`Workstation.nav` answers it once, for the Code tab and for a cart's focused
+`InputRouter.nav` answers it once, for the Code tab and for a cart's focused
 handle alike, and reports whether it spent the pulses.
 
 **The document draws as a text view** (`ui.text_view`, the Code tab's): the
@@ -299,7 +299,7 @@ class EditorHandle:
     def nav(self, dx, dy, select=None):
         """Feed DIRECTIONAL input -- the T-Deck trackball, a host arrow key.
 
-        It moves the CARET and the view follows, which is `ws.nav`'s contract
+        It moves the CARET and the view follows, which is `ws.router.nav`'s contract
         for the Code tab held one rung down: on the writing board the ball IS
         the arrow keys, and a text surface that spent them on a mouse cursor
         would leave the caret unreachable. In SELECT mode the same motion

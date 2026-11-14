@@ -84,7 +84,7 @@ gc heap (moy_alloc), which is exactly why a 1.2MB layer shows up as ~0 bytes her
 and why an allocation tool was the wrong instrument for it.
 
 One trap worth keeping in mind when extending this: `run_desktop` calls
-`ws.handle_input()` and `ws.handle_pointer()` OUTSIDE `ws.frame(dt)`, so a hook
+`ws.router.handle_input()` and `ws.router.handle_pointer()` OUTSIDE `ws.frame(dt)`, so a hook
 that resets its accumulator at frame entry silently discards everything the input
 path allocates -- which is where a press/release edge does its work. The reset
 below happens at frame END for that reason.

@@ -26,8 +26,8 @@
   * `LauncherHomeLayer` -- the "launcher" content Layer: the home, console mode's
                       root on every board (wallpaper -> cells -> hint strip ->
                       bar, its tabs in the bar's zone), its four tabs (Games / Mine / Apps / Make, the lists
-                      ws._launcher_items builds) and their input. A tap on the
-                      centre card is the active tab's (ws.launch_selected).
+                      ws.home._launcher_items builds) and their input. A tap on the
+                      centre card is the active tab's (ws.home.launch_selected).
                       Its bases, in order: `HomeHints` (home_hints.py, the
                       hint strip, which a band frame draws), `HomeDetails`
                       (home_details.py, the desk hero's details and verb
@@ -94,7 +94,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
     """The "launcher" content Layer (system domain): the home, console mode's root.
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
-    the active tab's tap (ws.launch_selected). Owns the cursor's hover state
+    the active tab's tap (ws.home.launch_selected). Owns the cursor's hover state
     (_lhover), the tab-row focus; `grid` is the single source
     it reads. `HomeWindowLayer` is the same home in a window."""
 
@@ -186,7 +186,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
 
     def at_top(self):
         """Up goes on to the bar from the tab row where the row is below
-        the bar (Workstation._bar_keys); where the bar holds the tabs they
+        the bar (InputRouter._bar_keys); where the bar holds the tabs they
         are one row with its items, and up stays."""
         return bool(self._tab_keys) and not self.tabs_in_bar()
 
@@ -334,7 +334,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
                 self._button_focus = None
             self._do_verb(v)
         elif i.pressed("home"):
-            ws.home_key()
+            ws.home.home_key()
         return True
 
     def _statics_key(self, cv):
@@ -350,7 +350,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id, modal_keys(ws),
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            getattr(ws, "search_typing", False) and ws.can_type(),
+            getattr(ws, "search_typing", False) and ws.text.can_type(),
             self.grid.tab, self._button_focus, self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
@@ -521,7 +521,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             if cache is None or cache.w != cv.w or cache.h != cv.h:
                 cache = self._lib_cache = cv.new_layer(cv.w, cv.h)
                 lp = None
-            ws.note_cost("home.frame.capture")
+            ws.perf.note_cost("home.frame.capture")
             if parts is not None and lp is not None and lp[0] == parts[0]:
                 # The captured frame has this one's backdrop: only the
                 # parts that moved since are copied.
@@ -745,7 +745,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         typing = getattr(ws, "search_typing", False)
         base = (bd, cv.w, cv.h, ws.layout.fs, ws.look.look_gen, g._geom(),
                 ws.look.wallpaper_id, modal_keys(ws), getattr(ws, "search_query", ""),
-                typing, typing and ws.can_type(), self._tab_focus, self._tab_at,
+                typing, typing and ws.text.can_type(), self._tab_focus, self._tab_at,
                 self._on_bar, self._back_tip)
         items = g.items
         it = items[g.nearest()] if items else None
@@ -1161,7 +1161,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
                 at = self.focused_tab()
                 self._tab_focus = False
                 if at != self.grid.tab:
-                    ws.set_home_tab(at, self.grid)
+                    ws.home.set_home_tab(at, self.grid)
                 ws.mark_dirty()
             elif i.steps("down"):
                 self._tab_focus = False
@@ -1170,7 +1170,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
                 self._tab_focus = False
                 ws.mark_dirty()
             elif i.pressed("home"):
-                ws.home_key()
+                ws.home.home_key()
             return True
         if self._button_keys(i):
             return True
@@ -1220,7 +1220,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         if i.pressed("b") and ws.ach_ui._konami_pos == 0:
             self._back()                     # (a B inside the Konami code is the code's)
         elif i.pressed("home"):
-            ws.home_key()
+            ws.home.home_key()
         return True
 
     def favourable(self):
@@ -1246,19 +1246,19 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         """B: closes a held search, cleared; else the home's X, from a
         keyboard -- where the X shows."""
         if self._search_open():
-            self.ws.close_search(clear=True)
+            self.ws.home.close_search(clear=True)
         elif self.ws.bar_layer._show_x(self.strip):
-            self.ws.open_desk()
+            self.ws.home.open_desk()
 
     # The doors out of the home.
     def _launch(self):
-        self.ws.launch_selected(self.grid)
+        self.ws.home.launch_selected(self.grid)
 
     def _change(self):
-        self.ws.change_selected(self.grid)
+        self.ws.home.change_selected(self.grid)
 
     def _new(self):
-        self.ws.new_cart_and_edit(self.grid)
+        self.ws.home.new_cart_and_edit(self.grid)
 
     def _grid_top_row(self):
         grid = self.grid
@@ -1319,7 +1319,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             for tid, r, _on in self.tab_rects():
                 if _in(px, py, r):
                     self._tab_focus = False
-                    ws.set_home_tab(tid, grid)
+                    ws.home.set_home_tab(tid, grid)
                     return True
             frect = grid.favorite_rect(grid.sel)
             if frect is not None and _in(px, py, frect):
@@ -1425,7 +1425,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         elif verb == "window":
             ws.defer(self._play_window)
         else:
-            ws.toggle_search()
+            ws.home.toggle_search()
         ws.mark_dirty()
 
     def _play_window(self):

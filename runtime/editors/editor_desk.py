@@ -730,7 +730,7 @@ class EditorDesk(Layer):
         object, the Map's tools, the Code pane's file and find tool."""
         ws = self.ws
         if c in ("code", "theme_config"):
-            return (ws.code_file_name(), bool(ws.layer_of(c)._find_open))
+            return (ws.text.code_file_name(), bool(ws.layer_of(c)._find_open))
         if c == "blocks":
             bu = ws.block_ui
             be = bu.blocks_ed
@@ -1170,13 +1170,13 @@ class EditorDesk(Layer):
                     cl.jump_anchor = (tx, y, cell, hh) if op == "goto" else None
                     cl._run_tool(op, ws.editor)
                 ws.mark_dirty()
-        name = ws.code_file_name() or ""
-        names = ws.code_sources() or [name]
+        name = ws.text.code_file_name() or ""
+        names = ws.text.code_sources() or [name]
         cur = names.index(name) if name in names else 0
         ui.at(x + 4 * u, y + 2 * u, max(0, tx - x - 8 * u), hh - 4 * u)
         got = ui.tabs(pid + " files", names, cur, {"id": pid + " files"})
         if got is not None and 0 <= got < len(names) and got != cur:
-            ws.open_code_file(names[got])
+            ws.text.open_code_file(names[got])
         return tx
 
     def _head_fit(self, pane, c, x, w, u):
@@ -1256,7 +1256,7 @@ class EditorDesk(Layer):
         if self.paused:
             self.pause(False)
         else:
-            self.ws.defer(self.ws._leave_menu)
+            self.ws.defer(self.ws.text._leave_menu)
 
     def pause(self, on):
         """The Run slot's pause: the playtest's window hides with its run
@@ -1284,7 +1284,7 @@ class EditorDesk(Layer):
         if c == "paint" and ws.paint is not None:
             return "Sprite %d" % ws.paint.n
         if c == "code":
-            return ws.code_file_name()
+            return ws.text.code_file_name()
         if c == "music":
             return Sound.title(self)
         return label
@@ -1817,7 +1817,7 @@ class EditorDesk(Layer):
             elif app.playing():
                 ws.defer(app.restart)
             else:
-                ws.defer(ws._leave_menu)
+                ws.defer(ws.text._leave_menu)
             return True
         if ctrl and code == ord("."):
             if app.playing():
@@ -1865,7 +1865,7 @@ class EditorDesk(Layer):
         if holder != "menu" and not (holder == "desktop" and win is not None and win.docked):
             return False
         app = ws.editor_app
-        ws.defer(app.restart if app.playing() else ws._leave_menu)
+        ws.defer(app.restart if app.playing() else ws.text._leave_menu)
         return True
 
     def _nudge(self, code):

@@ -119,7 +119,7 @@ def test_the_desk_item_is_a_cell_that_opens_its_menu(tmp_path):
     sec = Section()
     it = _as(42, moybyte.status, "music", sec, 0)
     it.show()
-    ws.open_desk()
+    ws.home.open_desk()
     ws.frame(1 / 30)
     got = ws.bar_layer.cell("desk", "status")
     assert got is not None
@@ -154,8 +154,8 @@ def test_a_tap_on_a_desk_menu_row_acts_on_it(tmp_path, fs):
     sec = Section()
     it = _as(42, moybyte.status, "music", sec, 0)
     it.show()
-    ws.open_desk()
-    ws.open_status_menu(it)
+    ws.home.open_desk()
+    ws.notices.open_status_menu(it)
     drv = make_drv(ws)
     drv.frame(1 / 30)
     _tap_row(ws, drv, "music.stop")
@@ -173,8 +173,8 @@ def test_a_tap_on_a_compiled_panel_row_acts_on_it(tmp_path, fs):
     was = ITEMS.post
     ITEMS.post = lambda pid, name, args: heard.append(args)
     try:
-        ws.open_desk()
-        ws.open_status_menu(it)
+        ws.home.open_desk()
+        ws.notices.open_status_menu(it)
         drv = make_drv(ws)
         drv.frame(1 / 30)
         k = it.k
@@ -205,12 +205,12 @@ def test_stop_and_play_stops_the_stream_then_opens_the_game(tmp_path, monkeypatc
     monkeypatch.setattr(devices, "api", lambda name: Media() if name == "media" else None)
     monkeypatch.setattr(ws, "open", lambda cart: opened.append(cart))
     cart = {"title": "Doom"}
-    ws.ask_stop_music(cart)
+    ws.notices.ask_stop_music(cart)
     c = ws.confirm
     assert c.open and c.title == "Stop the music to play Doom?"
     c.cancel()
     assert not stopped and not opened, "Cancel leaves the music playing"
-    ws.ask_stop_music(cart)
+    ws.notices.ask_stop_music(cart)
     ws.confirm._act()
     assert stopped and opened == [cart]
 
@@ -224,7 +224,7 @@ def test_a_game_that_fits_only_without_the_music_asks_first(tmp_path, monkeypatc
     monkeypatch.setattr(P._moy_play, "info", lambda run: (0,) * 11 + (why[0], 0), raising=False)
     monkeypatch.setattr(P._moy_play, "end", lambda run, *a: ended.append(run), raising=False)
     asked = []
-    monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
+    monkeypatch.setattr(ws.notices, "ask_stop_music", lambda cart: asked.append(cart))
     cart = {"title": "Doom", "runtime": "wasm"}
     ws.run.player._log_begin(cart)
     assert moy_log.current() != moy_log.SHELL
@@ -281,8 +281,8 @@ def test_a_compiled_item_is_a_slot_its_panel_drawn_by_the_shell(tmp_path):
     was = ITEMS.post
     ITEMS.post = lambda pid, name, args: heard.append((pid, name, args))
     try:
-        ws.open_desk()
-        ws.open_status_menu(it)
+        ws.home.open_desk()
+        ws.notices.open_status_menu(it)
         ws.frame(1 / 30)
         assert ws.sysmenu.open and ws.status_open is it
         drv = make_drv(ws)
@@ -302,9 +302,9 @@ def test_a_compiled_item_is_a_slot_its_panel_drawn_by_the_shell(tmp_path):
 def test_a_bare_item_opens_its_app(tmp_path, monkeypatch):
     ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
     opened = []
-    monkeypatch.setattr(ws, "open_status_app", lambda item: opened.append(item))
+    monkeypatch.setattr(ws.notices, "open_status_app", lambda item: opened.append(item))
     it = ITEMS.slots[ITEMS.show_compiled(42, "music", ON, 0) - 1]
-    ws.open_desk()
+    ws.home.open_desk()
     ws.frame(1 / 30)
     bar, (x, y, w, h) = ws.bar_layer.cell("desk", "status")
     ws.bar_layer.handle_bar_tap("desk", x + w // 2, y + h // 2)
@@ -314,7 +314,7 @@ def test_a_bare_item_opens_its_app(tmp_path, monkeypatch):
 def test_a_bare_item_s_card_is_one_open_row_on_a_handheld(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     opened = []
-    monkeypatch.setattr(ws, "open_status_app", lambda item: opened.append(item))
+    monkeypatch.setattr(ws.notices, "open_status_app", lambda item: opened.append(item))
     it = ITEMS.slots[ITEMS.show_compiled(42, "music", ON, 0) - 1]
     ws.frame(1 / 30)
     ws.widget_tap("battery")

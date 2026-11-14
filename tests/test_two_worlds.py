@@ -69,10 +69,10 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     if titles:
         # An app's manifest title, as declared: the registry's rows are
         # written once, so the test registers its own title over the read.
-        declared = ws.app_title
-        ws.app_title = lambda kind: titles.get(kind) or declared(kind)
+        declared = ws.spine.app_title
+        ws.spine.app_title = lambda kind: titles.get(kind) or declared(kind)
     ws.look.select_wallpaper("moybyte.open_machine", persist=False)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.pointer.visible = False
     settle_badges(ws)
     ws._toast_until = 0
@@ -183,7 +183,7 @@ def test_the_home_splits_games_and_apps_the_same_on_every_tier(tmp_path):
         for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
             assert app_cart not in titles             # Games holds no app
         assert "Star Catcher" in titles
-        ws.set_home_tab("apps")
+        ws.home.set_home_tab("apps")
         titles = [c.get("title") for c in ws.launcher.items]
         for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
             assert app_cart in titles                 # the Apps tab holds them
@@ -194,7 +194,7 @@ def test_the_home_splits_games_and_apps_the_same_on_every_tier(tmp_path):
 def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
     ws.open()
@@ -211,7 +211,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     game_px = ws.run.canvas.pix(160, 100)
     sys_px = ws.sys_canvas.pix(ox + 160 * scale, oy + 100 * scale)
     assert sys_px == game_px
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]           # back in the Library
     assert ws.cart is None                        # full go_home cleanup ran
@@ -231,7 +231,7 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
     """
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
     ws.open()
@@ -285,7 +285,7 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     """
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
     ws.open()
@@ -296,7 +296,7 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     ox, oy, _scale = wm.viewport()
     assert ox > 0 and oy > 0                      # there IS a letterbox here
 
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     for _ in range(2):
         drv.frame(1 / 30)
 
@@ -321,14 +321,14 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     to the console-mode home, on the tab and the card it came from (R5-05)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert _select(ws, "Star Catcher")
     want = ws.launcher.selected().get("path")
-    ws.launch_selected()                          # Make's tap edits
+    ws.home.launch_selected()                          # Make's tap edits
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and ws.wm.desk_open()
     assert ws.wm._order == ["calc", "menu"] and ws.screen == "menu"
@@ -337,20 +337,20 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.screen == "launcher"
     assert ws.launcher.tab == "make" and ws.launcher.selected().get("path") == want
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
-    ws.change_selected()                          # CHANGE = the Editor, a window
+    ws.home.change_selected()                          # CHANGE = the Editor, a window
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
     ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.launcher.tab == "games"
     assert ws.launcher.selected().get("path") == want
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0                           # the "+ New" card
     n0 = len(ws.carts.all)
-    ws.launch_selected()
+    ws.home.launch_selected()
     drv.frame(1 / 30)
     assert len(ws.carts.all) == n0 + 1
     assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
@@ -361,7 +361,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     assert ws.wm.mode == "console" and ws.launcher.tab == "make"
     assert ws.launcher.selected().get("path") == made, "back on the cart it made"
     # The parked windows came through the trip untouched.
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     assert ws.wm._order == ["calc"]
 
@@ -371,11 +371,11 @@ def test_closing_the_editor_stays_on_the_desk_once_another_window_opened(tmp_pat
     desk meanwhile keeps them there when the Editor closes."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert _select(ws, "Star Catcher")
-    ws.launch_selected()
+    ws.home.launch_selected()
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
     ws.wm._backdrop_layer._open_icon("files")
@@ -390,11 +390,11 @@ def test_an_editor_opened_on_the_desk_closes_onto_the_desk(tmp_path):
     the desk's PROJECTS opened closes onto the desk."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(1 / 30)
     g = ws.projects_grid
     g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm._order == ["projects", "menu"]
     ws.wm.close_window_kind("menu")
@@ -427,14 +427,14 @@ def test_font_scale_flip_inside_desk_never_leaks_chrome(tmp_path):
     drv = _drv(ws)
     ws.look.set_font_scale(1)                          # relayout INSIDE the desk
     drv.frame(1 / 30)
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)                             # the mode switch relayouts again
     assert not ws.windowed_chrome
     assert _select(ws, "Star Catcher")
     ws.open()
     drv.frame(1 / 30)
     assert ws.cart_error is None                  # console mode renders cleanly
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]
 
@@ -443,8 +443,8 @@ def test_fullscreen_tiers_are_untouched(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert not getattr(ws.wm, "has_desk", False)
     assert not ws.windowed_chrome
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0                           # Make's "+ New"
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.wm.top_kind() == "menu"             # a new game, in the Editor
 

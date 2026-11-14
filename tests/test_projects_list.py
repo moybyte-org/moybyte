@@ -49,7 +49,7 @@ class _Keys:
 def test_make_lists_the_new_card_then_every_editable_cart(tmp_path):
     from runtime.home_grid import NEW_TILE_TYPE
     ws = _ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     items = ws.launcher.items
     assert items[0]["type"] == NEW_TILE_TYPE and items[0]["path"] is None
     real = [c for c in items if c.get("path")]
@@ -73,9 +73,9 @@ def test_wallpapers_leave_the_tabs_that_run(tmp_path):
     Apps, present on Make (editable) and in Settings (chosen as a backdrop)."""
     ws = _ws(tmp_path)
     for tab in ("games", "mine", "apps"):
-        ws.set_home_tab(tab)
+        ws.home.set_home_tab(tab)
         assert all(c.get("type") != "wallpaper" for c in ws.launcher.items), tab
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert any(c.get("type") == "wallpaper" for c in ws.launcher.items)
     store_wp = {c["path"] for c in ws.carts.all if c.get("type") == "wallpaper"}
     assert store_wp == {c["path"] for c in ws.look.wallpaper_carts()}
@@ -86,7 +86,7 @@ def test_projects_without_a_desk_is_the_home_make_tab(tmp_path):
     console mode) lands on the home's Make tab: no window, no second home."""
     ws = _ws(tmp_path)
     ws.open_settings()
-    ws.open_projects()
+    ws.home.open_projects()
     assert ws.screen == "launcher" and ws.launcher.tab == "make"
     assert ws.projects_grid is None
 
@@ -105,7 +105,7 @@ def test_no_picker_survives(tmp_path):
 def test_a_tap_on_the_make_tab_edits(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)  # at the centre
     target = ws.launcher.selected()
     drv.frame(1 / 30)
@@ -121,7 +121,7 @@ def test_new_card_creates_a_game_and_opens_the_editor(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     n0 = len(ws.carts.all)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0
     assert ws.launcher.selected()["type"] == NEW_TILE_TYPE
     drv.frame(1 / 30)
@@ -133,7 +133,7 @@ def test_new_card_creates_a_game_and_opens_the_editor(tmp_path):
     assert len(ws.carts.all) == n0 + 1
     # Backing out lands on the new project's card.
     path = ws.cart.get("path")
-    ws.exit()
+    ws.spine.exit()
     assert ws.screen == "launcher" and ws.launcher.tab == "make"
     assert ws.launcher.selected().get("path") == path
 
@@ -142,9 +142,9 @@ def test_the_editor_bar_has_no_projects_button(tmp_path):
     from runtime import editor_app as EA
     assert all(t != "projects" and g != "projects" for t, g in EA._ZONE_TABS)
     ws = _ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
-    ws.launch_selected()
+    ws.home.launch_selected()
     rect = ws.layout.zone_left
     glyphs = [g for _t, g, _r in ws.editor_app._ladder_rects(rect)]
     assert "projects" not in glyphs
@@ -156,13 +156,13 @@ def test_the_one_bar_names_the_open_tab(tmp_path):
     the whole ladder holds its name, which the T-Deck's does."""
     from runtime import editor_app as EA
     ws = _ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
-    ws.launch_selected()
+    ws.home.launch_selected()
     ea = ws.editor_app
     rect = ws.bar_layer._zone_rect("menu")
     for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
-        ws.set_menu_view(tab)
+        ws.text.set_menu_view(tab)
         for zone in (rect, (rect[0], rect[1], rect[2] + 80, rect[3])):
             rects, gap = ea._ladder_layout(zone)
             assert len(rects) == len(ea._ladder())       # nothing dropped
@@ -183,16 +183,16 @@ def test_the_editor_x_returns_to_the_tab_it_came_from(tmp_path):
     the home on the tab and card the Editor was opened from."""
     ws = _ws(tmp_path)
     for tab in ("games", "make"):
-        ws.set_home_tab(tab)
+        ws.home.set_home_tab(tab)
         ws.launcher.sel = _first_real(ws.launcher)
         want = ws.launcher.selected().get("path")
         if tab == "make":
-            ws.launch_selected()
+            ws.home.launch_selected()
         else:
-            ws.change_selected()
+            ws.home.change_selected()
         assert ws.screen == "menu", tab
         assert ws.wm.stack.kinds() == ["launcher", "menu"], tab
-        ws.exit()
+        ws.spine.exit()
         assert ws.screen == "launcher" and ws.launcher.tab == tab
         assert ws.launcher.selected().get("path") == want
 
@@ -200,7 +200,7 @@ def test_the_editor_x_returns_to_the_tab_it_came_from(tmp_path):
 # -- COPY and DEL moved onto Make -------------------------------------------
 
 def _make_with(ws, title):
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == title)
 
@@ -224,7 +224,7 @@ def test_make_carries_copy_and_delete(tmp_path):
     ws = _ws(tmp_path, sys_size=(800, 480))
     _extra(ws)
     layer = ws.launcher_layer
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0
     assert layer.zone_verbs() == ("new",)            # the "+ New" card
     _make_with(ws, "Extra")
@@ -233,7 +233,7 @@ def test_make_carries_copy_and_delete(tmp_path):
 
 def test_copy_duplicates_the_selected_project(tmp_path):
     ws = _ws(tmp_path, sys_size=(800, 480))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
     target = ws.launcher.selected()
     n0 = len(ws.carts.all)
@@ -264,7 +264,7 @@ def test_del_asks_before_the_cart_goes(tmp_path):
 def _desk(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = _drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     return ws, drv
 
@@ -282,10 +282,10 @@ def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
     assert ws._content_layers["projects"] is ws.projects_layer
     # Switching the window's tab leaves the fullscreen home's alone.
     tab = ws.launcher.tab
-    ws.set_home_tab("games", g)
+    ws.home.set_home_tab("games", g)
     assert ws.launcher.tab == tab
     # A second PROJECTS brings it back to Make.
-    ws.open_projects()
+    ws.home.open_projects()
     assert g.tab == "make" and ws.wm._order == ["projects"]
 
 
@@ -293,7 +293,7 @@ def test_projects_window_is_a_normal_window(tmp_path):
     """It moves, resizes, minimises to a chip; its X closes it and never
     switches modes."""
     ws, drv = _desk(tmp_path)
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(1 / 30)
     win = ws.wm._wins["projects"]
     lay = win.ctx.layout
@@ -306,11 +306,11 @@ def test_projects_window_is_a_normal_window(tmp_path):
 
 def test_a_make_pick_opens_the_editor_in_its_own_window(tmp_path):
     ws, drv = _desk(tmp_path)
-    ws.open_projects()
+    ws.home.open_projects()
     g = ws.projects_grid
     g.sel = _first_real(g)
     want = g.selected().get("path")
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
     assert ws.wm._order == ["projects", "menu"]
@@ -323,11 +323,11 @@ def test_a_make_pick_opens_the_editor_in_its_own_window(tmp_path):
 
 def test_a_games_pick_runs_in_a_window(tmp_path):
     ws, drv = _desk(tmp_path)
-    ws.open_projects()
+    ws.home.open_projects()
     g = ws.projects_grid
-    ws.set_home_tab("games", g)
+    ws.home.set_home_tab("games", g)
     g.sel = _first_real(g)
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
     assert ws.wm._order == ["projects", "desktop"]   # the player's window
@@ -336,13 +336,13 @@ def test_a_games_pick_runs_in_a_window(tmp_path):
 
 def test_an_apps_pick_opens_its_app_window(tmp_path):
     ws, drv = _desk(tmp_path)
-    ws.open_projects()
+    ws.home.open_projects()
     g = ws.projects_grid
-    ws.set_home_tab("apps", g)
+    ws.home.set_home_tab("apps", g)
     i = next(i for i, it in enumerate(g.items)
              if ws._apps_by_id["calc"].is_app(it))
     g.sel = i
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
     assert ws.wm._order == ["projects", "calc"]
@@ -352,22 +352,22 @@ def test_the_window_draws_through_the_window_bar(tmp_path):
     """The window's bar is its lent zone alone (no OS widgets in a window);
     the zone owner is the window's home, with the home's verbs, no SEARCH."""
     ws, drv = _desk(tmp_path)
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(1 / 30)
     assert ws.bar_layer._zone_owner("projects") is ws.projects_layer
     g = ws.projects_grid
-    ws.set_home_tab("games", g)
+    ws.home.set_home_tab("games", g)
     g.sel = _first_real(g)
     assert "search" not in ws.projects_layer.zone_verbs()
-    ws.set_home_tab("make", g)
+    ws.home.set_home_tab("make", g)
     g.sel = 0
     assert ws.projects_layer.zone_verbs() == ("new",)
 
 
 def test_b_closes_the_window_alone(tmp_path):
     ws, drv = _desk(tmp_path)
-    ws.open_app(ws._apps_by_id["calc"])
-    ws.open_projects()
+    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.home.open_projects()
     drv.frame(1 / 30)
     assert ws.wm._order == ["calc", "projects"]
     ws.projects_layer.handle_input(_Keys({"b"}))

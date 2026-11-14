@@ -44,8 +44,8 @@ def _desk(tmp_path, beneath, how):
     drv = make_drv(ws)
     if how == "look":
         use_theme(ws, "night", "dark")
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id[beneath])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id[beneath])
     if how == "look":
         _frames(ws, drv)
     ws.open_settings()

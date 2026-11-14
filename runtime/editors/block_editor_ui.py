@@ -301,7 +301,7 @@ class BlockEditorUI:
 
     def build(self):
         """Build the BlockEditor over the cart's block program (#29), lazily --
-        called from Workstation.set_menu_view("blocks"). A cart authored from
+        called from Text.set_menu_view("blocks"). A cart authored from
         blocks carries blocks.json (cart["blocks"]); a code-only cart starts a
         fresh empty program -- saving it makes the cart block-authored from then
         on. The Part-1 `blocks` module is injected so the editor core stays
@@ -330,7 +330,7 @@ class BlockEditorUI:
         # main.py and tell the kid why. A genuinely block-authored cart (has
         # blocks.json) -- or an empty/new-template cart with no real code -- is
         # unprotected and round-trips exactly as before.
-        self.blk_protect = (prog is None and ws._cart_has_handwritten_code())
+        self.blk_protect = (prog is None and ws.text._cart_has_handwritten_code())
         # GRADUATION (Stage 8, spec Section 8): a STORED, one-way project fact (read
         # from the manifest via cart["graduated"]), NOT the re-derived blk_protect
         # heuristic. A graduated cart's blocks.json is FROZEN -- it still opens (so the
@@ -350,7 +350,7 @@ class BlockEditorUI:
     def reset(self):
         """Drop the active editor + any open menu/prompt (a stale one must never
         leak into an unrelated cart or back to the launcher). Called from both
-        Workstation.open() (switching carts) and Workstation.go_home()."""
+        Workstation.open() (switching carts) and Home.go_home()."""
         self.blocks_ed = None
         self.blk_menu = None
         self.blk_kbd = None
@@ -358,7 +358,7 @@ class BlockEditorUI:
         self.blk_graduated = False
 
     def on_leave(self):
-        """Called from Workstation._leave_menu() when menu_view == "blocks"."""
+        """Called from Text._leave_menu() when menu_view == "blocks"."""
         self.blk_menu = None
         self.blk_kbd = None
         # #93: don't leave a half-started MOVE armed when the kid steps away.
@@ -374,7 +374,7 @@ class BlockEditorUI:
         su = self.ws.scene_ui
         se = getattr(su, "sceneedit", None)
         if se is not None and getattr(se, "dirty", False):
-            self.ws.save_scene()
+            self.ws.saves.save_scene()
 
     # -- block editor (#29 Part 2) -------------------------------------------
     #
@@ -995,7 +995,7 @@ class BlockEditorUI:
             # code you already have" (for a graduated cart, that door is one-way).
             ws.editor = None
             self.blk_menu = None
-            ws.set_menu_view("code")
+            ws.text.set_menu_view("code")
             return
         try:
             src = _blocks_mod.compile_blocks(be.program)
@@ -1006,7 +1006,7 @@ class BlockEditorUI:
         ws.run.project.cart["src"] = src                     # ensure the editor opens the latest
         ws.editor = None                         # rebuild on the new source
         self.blk_menu = None
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
 
     # -- block-editor input / pointer ----------------------------------------
     def _blocks_input(self):
@@ -1083,7 +1083,7 @@ class BlockEditorUI:
         elif i.pressed("run"):
             self.save_blocks()
         else:
-            ws._leave_or_home(ws.exit)
+            ws.home._leave_or_home(ws.spine.exit)
 
     def _blk_left(self):
         be = self.blocks_ed

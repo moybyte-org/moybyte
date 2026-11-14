@@ -1002,14 +1002,14 @@ def test_the_console_reports_no_session_as_None_never_as_a_rate(tmp_path):
     has stopped advancing, which is a state the field has to be able to show."""
     ws = build_ws(tmp_path)
     assert ws.netplay is None
-    assert ws.perf_net() is None
-    assert ws.perf_lock() is None
+    assert ws.perf.perf_net() is None
+    assert ws.perf.perf_lock() is None
 
 
 def test_the_console_asks_the_live_session_for_the_rate(tmp_path):
     ws = build_ws(tmp_path)
     ws.netplay = _FakeSession(29)
-    assert ws.perf_net() == 29
+    assert ws.perf.perf_net() == 29
     assert len(ws.netplay.asked) == 1, "one read per sample -- it spends a window"
 
 
@@ -1023,10 +1023,10 @@ def test_perf_sample_does_not_spend_the_meters_window(tmp_path):
     ws.wm.top_is_player = lambda: True
     ws.cart = {"title": "Brick Siege"}
     ws.cart_error = None
-    sample = ws.perf_sample()
+    sample = ws.perf.perf_sample()
     assert sample is not None and sample[0] == "Brick Siege"
     for _ in range(4):
-        ws.perf_sample()
+        ws.perf.perf_sample()
     assert ws.netplay.asked == []
 
 

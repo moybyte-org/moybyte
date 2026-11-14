@@ -45,7 +45,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
         else:
             use_theme(ws, theme)
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
-    ws.open_library()
+    ws.home.open_library()
     ws.wallpaper.is_animating = lambda dt: False
     ws.bar_layer._clock_text = lambda: "10:30"
     no_unlock_banner(ws)          # a banner's deadline is the wall clock's
@@ -99,7 +99,7 @@ def _session(ws, drv, frame):
     ws.mark_dirty()
     run(6)
     for t in ("mine", "apps", "make", "games"):
-        ws.set_home_tab(t)
+        ws.home.set_home_tab(t)
         run(6)
     bx, by, bw, bh = ws.launcher.band_rect()
     cy = by + bh // 2
@@ -180,13 +180,13 @@ def test_a_change_settles_every_buffer_then_rests(tmp_path, monkeypatch, bufs):
     retained frame holds the glass's picture."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
     for t in ("apps", "games"):           # the tab's covers in the cache
-        ws.set_home_tab(t)
+        ws.home.set_home_tab(t)
         quiet = 0
         for _ in range(200):              # until the covers stop popping in
             quiet = quiet + 1 if frame() is None else 0
             if quiet >= 5:
                 break
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     shots = [s for s in (frame() for _ in range(10)) if s is not None]
     assert len(shots) == bufs, len(shots)
     assert frame() is None
@@ -228,7 +228,7 @@ def test_coming_back_settles_every_buffer(tmp_path, monkeypatch, bufs):
     for _ in range(10):
         ws.mark_dirty()
         frame()
-    ws.open_library()
+    ws.home.open_library()
     shots = [s for s in (frame() for _ in range(10)) if s is not None]
     assert len(shots) == bufs, len(shots)
     home = ws.launcher_layer

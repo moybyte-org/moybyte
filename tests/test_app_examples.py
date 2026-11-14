@@ -56,7 +56,7 @@ def test_the_python_app_scrolls_its_list_and_keeps_its_choice(tmp_path):
     _frames(drv)
     assert ns["cur"] == 30
     assert ns["prefs"].get("cur") == 30
-    ws.exit()
+    ws.spine.exit()
     _frames(drv)
     ns, drv = _open(ws, "Shopping")         # a new run reads its prefs back
     assert ns["cur"] == 30

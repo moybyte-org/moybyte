@@ -17,11 +17,11 @@ def link(chan, ws, parts, line):
         return
     action = parts[1] if len(parts) > 1 else ""
     if action == "on":
-        ws.wifi_hold("link")
+        ws.spine.wifi_hold("link")
         lk.start()
     elif action == "off":
         lk.stop()
-        ws.wifi_release("link")
+        ws.spine.wifi_release("link")
     elif action == "rate" and len(parts) > 2:
         lk.rate_force = int(parts[2]) if parts[2] in ("30", "60") else None
     elif action == "check" and len(parts) > 2:

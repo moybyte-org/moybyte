@@ -134,7 +134,7 @@ def runs(tmp_path_factory):
         ws = host_app.build_workstation(root)
         tier = "wasm" if name == "wasi" else name
         if name != "python" and tier not in ws.runtimes:
-            ws.exit()
+            ws.spine.exit()
             continue
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
@@ -149,7 +149,7 @@ def runs(tmp_path_factory):
         assert p.cart_error is None, (name, p.cart_error)
         shots = _script(ws)
         out[name] = (shots, p.cart_error, ws.screen)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 

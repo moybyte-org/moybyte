@@ -1618,10 +1618,10 @@ def _setup(scene, config):
         ctx = ws.app_context(cls.id, cls.NEEDS)
         ctx.ui = AppHost(cls.id)
         app = cls(ctx, scene)
-        ws.register_app(app)
+        ws.spine.register_app(app)
         if config == L.DESK:
-            ws.open_desk()
-        ws.open_app(app, cart={"title": "Music", "id": "moybyte.music",
+            ws.home.open_desk()
+        ws.spine.open_app(app, cart={"title": "Music", "id": "moybyte.music",
                                "permissions": ["media", "media:url", "http"]})
         if config == L.DESK:
             L._settle(g, ws, 2)

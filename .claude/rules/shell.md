@@ -21,9 +21,10 @@ to whoever called it.
 - `runtime/shell/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
   refactor to a compositor — the Layer-stack frame loop, the shared draw
   toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
-  (`carts_store`/`wifi`/`updater`); the rest of the class is its `console_*`
-  mixins (`runtime/README.md` lists them): the key and pointer routers are
-  `console_input.py`'s, and the spawn/exit verbs, app registration and
+  (`carts_store`/`wifi`/`updater`); the rest of the console is its services,
+  one object per `console_*` module that `Workstation.__init__` builds over
+  itself (`ws.router`, `ws.home`, `ws.spine`, ...; `runtime/README.md` lists
+  them): the key and pointer routers are `console_input.py`'s, and the spawn/exit verbs, app registration and
   the WiFi lease `runtime/shell/console_spine.py`'s, over the spine's components
   in `native/moy_spine` and the lease table's radio rows (ids, kinds and tags,
   never objects); everything
@@ -312,7 +313,7 @@ Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, every board.** The kernel writes it
   (`native/moy_kernel/moy_perf.c`, from its loop's account stage, the
-  console pushing its half with `ws.perf_push` when a sample is due, and once
+  console pushing its half with `ws.perf.perf_push` when a sample is due, and once
   when a kernel run takes the frame, whose PERF names the cart and leaves the
   console's meters `-`) and
   `runtime/system/perf_line.py` holds the field table and the parser; it is written

@@ -5,8 +5,8 @@
 its unlock banner (deadline + beep), the timed system notice and the
 firmware-update verdict that rides it, the banners -- the notice, the unlock
 and an app's notification (runtime/system/notifications.py), each
-native/moy_ui's `moy_ui_unlock` -- and the notification's input. A mixin
-of `Workstation`; the deadlines it arms are the flat kernel fields
+native/moy_ui's `moy_ui_unlock` -- and the notification's input. The
+console's `ws.notices`; the deadlines it arms are the flat kernel fields
 `_animating` and both WMs read. The cards the console puts up over what is
 running are runtime/shell/shell_cards.py's; the intents' hooks are
 runtime/shell/console_intents.py's.
@@ -43,25 +43,31 @@ def _desk_class():
 
 class Notices:
 
+    def __init__(self, ws):
+        self.ws = ws
+
     def load_achievements(self):
         """(Re)start the achievements process (runtime/system/achievements.py,
         docs/os_2026-11/processes.md section 8), whose prefs hold the badges.
         Call after the store + carts_root are injected (host
         build_workstation / device run_desktop)."""
-        self.ach.start()
+        ws = self.ws
+        ws.ach.start()
 
     def service_env(self, cart):
         """What the console hands service `cart` in its namespace beside
         its app's roles: the achievements process's `game`, `clock_day` and
         `row_stamp`; None for any other."""
+        ws = self.ws
         if _ach.is_proc(cart):
-            return self.ach.env()
+            return ws.ach.env()
         return None
 
     def _today_ymd(self):
         """Today as YYYYMMDD off the bar's wall clock, 0 without one (a board
         that never set its clock reads a year before 2020)."""
-        y, m, d = self.bar_layer._today()
+        ws = self.ws
+        y, m, d = ws.bar_layer._today()
         return y * 10000 + m * 100 + d if y >= 2020 else 0
 
     def _achievement_unlocked(self, badge):
@@ -80,14 +86,15 @@ class Notices:
 
         The deadline is armed BEFORE the beep so a silent (or broken) backend
         cannot cost the kid the banner; the beep itself is best-effort."""
-        t = self.ach.toast = badge
+        ws = self.ws
+        t = ws.ach.toast = badge
         now = _ticks_ms()
-        self._toast_at = now
-        self._toast_until = now + TOAST_MS
+        ws._toast_at = now
+        ws._toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
         if t:
-            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), self._toast_until)
-        au = self.run.audio
+            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), ws._toast_until)
+        au = ws.run.audio
         if au is not None:
             try:
                 au.beep(880, 0.08)
@@ -102,18 +109,20 @@ class Notices:
         is for things the kid did. It expires on a timer with no input, because a
         notice that needs dismissing is a modal, and a modal in front of a kid who
         just wanted to play is worse than the message is worth."""
-        self._notice = (str(title), str(sub), kind)
-        self._notice_until = _ticks_ms() + int(ms)
-        self.frame_state.dirty = True
+        ws = self.ws
+        ws._notice = (str(title), str(sub), kind)
+        ws._notice_until = _ticks_ms() + int(ms)
+        ws.frame_state.dirty = True
         # The kernel's copy, which a run it drives draws over its frames.
-        _ch._moy_play().chrome_notice(self._notice[0], self._notice[1], kind == "ok",
-                                      self._notice_until)
+        _ch._moy_play().chrome_notice(ws._notice[0], ws._notice[1], kind == "ok",
+                                      ws._notice_until)
 
     def notice_active(self, now=None):
-        if self._notice is None:
+        ws = self.ws
+        if ws._notice is None:
             return False
-        if _ticks_diff(self._notice_until, now if now is not None else _ticks_ms()) <= 0:
-            self._notice = None
+        if _ticks_diff(ws._notice_until, now if now is not None else _ticks_ms()) <= 0:
+            ws._notice = None
             return False
         return True
 
@@ -125,7 +134,8 @@ class Notices:
         learns nothing -- a successful update looks like a slow reboot, and a
         rolled-back one looks exactly the same. Reading it here does NOT clear it;
         Settings -> UPDATE still has it for anyone who missed the banner."""
-        u = getattr(self, "updater", None)
+        ws = self.ws
+        u = getattr(ws, "updater", None)
         verdict = getattr(u, "boot_verdict", None)
         if not verdict:
             return False
@@ -139,14 +149,15 @@ class Notices:
         """The system notice: the unlock banner's card at the top centre of
         the content, its tile a check (a warning's, the warning sign), the
         title in `value` over the line under it. The card's rect."""
-        notice = self._notice
+        ws = self.ws
+        notice = ws._notice
         if notice is None:      # expired between the frame's check and its draw
             return None
-        cv = self.sys_canvas
-        lay = self.layout
+        cv = ws.sys_canvas
+        lay = ws.layout
         title, sub, kind = notice
         desk = _desk_class()
-        return _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, lay.cy + (12 if desk else 6 * lay.fs),
+        return _ui_draw.unlock(cv, ws.theme_colors, cv.w // 2, lay.cy + (12 if desk else 6 * lay.fs),
                         title, sub or "", "check" if kind == "ok" else "warn", 0, desk)
 
     def _draw_toast(self):
@@ -154,21 +165,22 @@ class Notices:
         centre of the glass: under the bar where there is one, at the glass's
         top over a fullscreen game. A secret's bursts confetti from its
         edges (achievements_ui names the heads and the burst)."""
-        t = self.ach.toast
+        ws = self.ws
+        t = ws.ach.toast
         if t is None:
             return
-        cv = self.sys_canvas
-        lay = self.layout
+        cv = ws.sys_canvas
+        lay = ws.layout
         desk = _desk_class()
-        wm = self.wm
+        wm = ws.wm
         game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
-                and not self._running_cart_shows_bar())
+                and not ws._running_cart_shows_bar())
         top = (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
         burst = 0
         if t[3]:
-            el = _ticks_diff(_ticks_ms(), self._toast_at)
+            el = _ticks_diff(_ticks_ms(), ws._toast_at)
             burst = 255 if el >= _ach_ui.BURST_MS else max(1, el * 255 // _ach_ui.BURST_MS)
-        _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, top, t[0], t[1], t[2], burst, desk)
+        _ui_draw.unlock(cv, ws.theme_colors, cv.w // 2, top, t[0], t[1], t[2], burst, desk)
 
     # -- notifications (docs/os_2026-11/processes.md §7) ----------------------
 
@@ -176,36 +188,40 @@ class Notices:
         """The notification service's hooks are this console's: who a pid
         is, which cart an app id names, the banner's kernel copy, and acting
         on one."""
+        ws = self.ws
         _NOTES.who = self._note_who
         _NOTES.titled = self._note_titled
         _NOTES.shown = self._note_shown
         _NOTES.acted = self._note_acted
-        self._note_rect = None          # the banner's card where it last drew
-        self._note_y0 = None            # where a press on it went down
+        ws._note_rect = None          # the banner's card where it last drew
+        ws._note_y0 = None            # where a press on it went down
     # -- the apps' status items (docs/theme_and_shell_2026-11.md §8.6) --------
 
     def _init_status(self):
         """The status items' hooks are this console's: an item's caption is
         its process's title, and its menu closes with it."""
+        ws = self.ws
         _ITEMS.title_of = self._status_title
         _ITEMS.closed = self._status_closed
-        self.status_open = None         # the item whose desk menu is open
-        self.status_open_k = 0          # ...its place in the bar
+        ws.status_open = None         # the item whose desk menu is open
+        ws.status_open_k = 0          # ...its place in the bar
 
     def _status_title(self, pid):
+        ws = self.ws
         try:
-            return self.procs.who(pid)[0]
+            return ws.procs.who(pid)[0]
         except Exception:  # noqa: BLE001 -- a caption is never worth a crash
             return ""
 
     def _status_closed(self, item):
-        m = self.sysmenu
-        if m.open and ((m.widget == "status" and self.status_open is item)
-                       or (m.widget == "battery" and not self.wm.desk_open())):
-            self.close_popover()
-        if self.status_open is item:
-            self.status_open = None
-        self.frame_state.dirty = True
+        ws = self.ws
+        m = ws.sysmenu
+        if m.open and ((m.widget == "status" and ws.status_open is item)
+                       or (m.widget == "battery" and not ws.wm.desk_open())):
+            ws.close_popover()
+        if ws.status_open is item:
+            ws.status_open = None
+        ws.frame_state.dirty = True
 
     def ask_stop_music(self, cart):
         """A compiled game that fits with the VM stopped only without the
@@ -214,26 +230,28 @@ class Notices:
         the shell, then opens the game again once the media service has
         given its memory back (its run ends on the frame's job), now free
         to stop the VM."""
+        ws = self.ws
         title = str((cart or {}).get("title") or "this game")[:18]
 
         def then():
             media = _devices.api("media")
             if media is None:
-                self.open(cart)
+                ws.open(cart)
                 return
             media.stop()
             self._open_when_quiet(media, cart)
-        self.confirm.ask_close("Stop the music to play %s?" % title,
+        ws.confirm.ask_close("Stop the music to play %s?" % title,
                                "%s needs the music's memory. You can start the music "
                                "again after." % title, then, _STOP_PLAY)
 
     def _open_when_quiet(self, media, cart, waited=None):
         """`cart` opened once the media service's run has ended (a frame or
         two after its stop), STOP_QUIET_MS at most."""
+        ws = self.ws
         if not media.running() or (waited is not None and waited[0] >= STOP_QUIET_MS):
             if waited is not None:
                 _scheduler.SCHED.plain_cancel(waited[1])
-            self.open(cart)
+            ws.open(cart)
             return
         if waited is None:
             waited = [0, 0]
@@ -247,7 +265,8 @@ class Notices:
         lines in the running set's dialog, "Open <title>?", No focused;
         Open records the consent, as an install does, then `then()`. No
         records nothing and the cart stays unrun. True when it asked."""
-        consent = getattr(self, "consent", None)
+        ws = self.ws
+        consent = getattr(ws, "consent", None)
         if consent is None or not cart:
             return False
         aid = _perms.app_id(cart)
@@ -259,35 +278,38 @@ class Notices:
         def allow():
             consent.record(aid, perms)
             then()
-        self.confirm.ask_lines("Open %s?" % title, _perms.prompt(cart), allow, _OPEN)
+        ws.confirm.ask_lines("Open %s?" % title, _perms.prompt(cart), allow, _OPEN)
         return True
 
     def open_status_menu(self, item):
         """Status item `item`'s menu on the desk, hung from its cell; the
         same item again closes it (`toggle_popover`)."""
+        ws = self.ws
         if item is None:
             return
         if _ITEMS.bare(item):
             self.open_status_app(item)
             return
-        m = self.sysmenu
-        same = m.open and m.widget == "status" and self.status_open is item
+        m = ws.sysmenu
+        same = m.open and m.widget == "status" and ws.status_open is item
         if m.open and m.widget == "status" and not same:
-            self.close_popover()
-        self.status_open = item
+            ws.close_popover()
+        ws.status_open = item
         sh = _ITEMS.shown
         for k in range(len(sh)):
             if sh[k] is item:
-                self.status_open_k = k
-        self.toggle_popover("status")
-        self.frame_state.dirty = True
+                ws.status_open_k = k
+        ws.toggle_popover("status")
+        ws.frame_state.dirty = True
 
     def _note_who(self, pid):
-        return self.procs.who(pid)
+        ws = self.ws
+        return ws.procs.who(pid)
 
     def _note_titled(self, app):
         """The cart app id `app` names, None where none on the shelf does."""
-        for c in self.carts.all:
+        ws = self.ws
+        for c in ws.carts.all:
             if _perms.app_id(c) == app:
                 return c
         return None
@@ -297,14 +319,15 @@ class Notices:
         it drives draws over its frames, follows. The achievements process's
         banner is the unlock banner: its card with the kernel's words and a
         secret's burst, and the beep; the notification stays in the list."""
-        self.frame_state.dirty = True
-        badge = self.ach.badge_of(n)
+        ws = self.ws
+        ws.frame_state.dirty = True
+        badge = ws.ach.badge_of(n)
         if badge is not None:
             self._achievement_unlocked(badge)
             _NOTES.dismiss()
             return
         if n is None:
-            self._note_rect = None
+            ws._note_rect = None
             _ch._moy_play().chrome_note("", "", "", 0)
         else:
             _ch._moy_play().chrome_note(n.app, n.summary, n.icon, until or 1)
@@ -317,11 +340,12 @@ class Notices:
         `moy_action(id, key)` runs; a service, which has no window, gets
         the call alone, and an app's own service's notification opens its
         app too (scheduler.as_service)."""
-        self.frame_state.dirty = True
+        ws = self.ws
+        ws.frame_state.dirty = True
         brought = self._bring(n.pid)
         if brought is not None:
             if brought:
-                self.run.player.window_event("moy_action", n.id, key)
+                ws.run.player.window_event("moy_action", n.id, key)
             return
         import scheduler as _sched
         hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
@@ -333,98 +357,105 @@ class Notices:
     def _open_cart_of(self, c):
         """Process cart `c` opened again: an app's own service's its app's
         cart, a service with no app nothing."""
+        ws = self.ws
         if c and c.get("entry") and c.get("path"):
-            c = next((a for a in self.carts.all if a.get("path") == c["path"]), None)
+            c = next((a for a in ws.carts.all if a.get("path") == c["path"]), None)
         if c and c.get("path") and c.get("type") != "service":
-            if self.wm.top_is("tasks") and self.procs.handheld():
-                self.close_tasks()
-            self.open(c)
+            if ws.wm.top_is("tasks") and ws.procs.handheld():
+                ws.close_tasks()
+            ws.open(c)
 
     def open_status_app(self, item):
         """Status item `item`, which has no menu, was tapped: its process's
         run comes to the front, as a notification's does, else its cart
         opens (an app's own service's, its app)."""
+        ws = self.ws
         if item is None or not item.pid:
             return
-        self.frame_state.dirty = True
-        self.close_popover()
+        ws.frame_state.dirty = True
+        ws.close_popover()
         if self._bring(item.pid) is not None:
             return
-        self._open_cart_of(self.procs.who(item.pid)[1])
+        self._open_cart_of(ws.procs.who(item.pid)[1])
 
     def _bring(self, pid):
         """Process `pid`'s run comes to the front, as the task manager's
         Switch to brings it: True where it is the front run after, False
         where it could not come, None where no run is `pid`'s."""
+        ws = self.ws
         if pid is None:
             return None
-        procs = self.procs
-        pl = self.run.player
+        procs = ws.procs
+        pl = ws.run.player
         if pl is not None and pl.pid == pid:
             if not procs.handheld():
-                self.wm.bring_forward("desktop")
-            elif self.wm.top_is("tasks"):
-                self.close_tasks()
+                ws.wm.bring_forward("desktop")
+            elif ws.wm.top_is("tasks"):
+                ws.close_tasks()
             return True
         for p in procs.list:
             if p.player.pid == pid:
-                self.tasks_switch(p.key)
-                return self.run.player.pid == pid
+                ws.tasks_switch(p.key)
+                return ws.run.player.pid == pid
         return None
 
     def _note_top(self):
         """The banner's top: under the bar where there is one, at the
         glass's top over a fullscreen game (the unlock banner's)."""
-        lay = self.layout
+        ws = self.ws
+        lay = ws.layout
         desk = _desk_class()
-        wm = self.wm
+        wm = ws.wm
         game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
-                and not self._running_cart_shows_bar())
+                and not ws._running_cart_shows_bar())
         return (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
 
     def _draw_note(self):
         """The notification banner over whatever is up: the posting app's
         title over the summary, on its icon's tile, at the top centre."""
+        ws = self.ws
         n = _NOTES.up()
         if n is None:
             return
-        cv = self.sys_canvas
-        self._note_rect = _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, self._note_top(),
+        cv = ws.sys_canvas
+        ws._note_rect = _ui_draw.unlock(cv, ws.theme_colors, cv.w // 2, self._note_top(),
                                           n.app, n.summary, n.icon, 0, _desk_class())
 
     def _draw_rec(self):
         """The recording indicator while a process holds the microphone
         (`devices.MIC`): kernel chrome at the glass's top right, over
         everything but the cursor, which nothing turns off."""
-        cv = self.sys_canvas
-        _ui_draw.rec(cv, self.theme_colors, cv.w - 2, 2, _desk_class())
+        ws = self.ws
+        cv = ws.sys_canvas
+        _ui_draw.rec(cv, ws.theme_colors, cv.w - 2, 2, _desk_class())
 
     def _note_pointer(self, px, py, click):
         """A tap on the banner opens its notification; a press on it dragged
         up dismisses it, the app in front playing on. While a press on it is
         held, the pointer is the banner's."""
+        ws = self.ws
         n = _NOTES.up()
-        y0 = self._note_y0
+        y0 = ws._note_y0
         if n is None:
-            self._note_y0 = None
+            ws._note_y0 = None
             return False
-        down = bool(getattr(self.pointer, "down", False))
+        down = bool(getattr(ws.pointer, "down", False))
         if y0 is None:
-            r = self._note_rect
+            r = ws._note_rect
             if r is None or not (down or click) or not _in_box(px, py, r):
                 return False
             if click and not down:
                 _NOTES.act(n.id)
                 return True
-            self._note_y0 = py
+            ws._note_y0 = py
             return True
         if down and not click:
             return True
-        self._note_y0 = None
-        if y0 - py >= 8 * self.layout.fs:
+        ws._note_y0 = None
+        if y0 - py >= 8 * ws.layout.fs:
             _NOTES.dismiss()
         else:
-            r = self._note_rect
+            r = ws._note_rect
             if r is not None and _in_box(px, py, r):
                 _NOTES.act(n.id)
         return True

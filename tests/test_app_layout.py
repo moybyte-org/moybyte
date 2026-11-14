@@ -142,16 +142,16 @@ def _open(tier, base, desk, **kw):
     ws = build_desktop_ws(base) if desk else host_app.build_workstation(root, **kw)
     rt = {"wasi": "wasm"}.get(tier, tier)
     if tier != "python" and rt not in ws.runtimes:
-        ws.exit()
+        ws.spine.exit()
         return None
     ws.look.set_theme("moy", persist=False)
     ws.pointer.visible = False
     ws.bar_layer._clock_text = lambda: "10:30"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c["title"] == TITLES[tier])
     ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     if ws.confirm.open:             # a copied app's consent: Open
         act = ws.confirm._act
         ws.confirm.cancel()
@@ -175,7 +175,7 @@ def runs(tmp_path_factory):
         assert p.cart_error is None, (tier, p.cart_error)
         init = _pmem0(ws) if tier in ("python", "lua", "wasm") else None
         out[tier] = (shots, bound, init)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -198,7 +198,7 @@ def consoles(tmp_path_factory):
                 _frame(drv)
             out[(name, tier)] = (ws.run.player.ui_face(), _shot(drv))
             assert ws.run.player.cart_error is None, (name, tier)
-            ws.exit()
+            ws.spine.exit()
     return out
 
 
@@ -267,7 +267,7 @@ def test_the_look_is_not_the_carts(tmp_path):
     look = _shot(drv)
     ws.run.player._boundary = 1
     cart = _shot(drv)
-    ws.exit()
+    ws.spine.exit()
     assert look != cart
 
 

@@ -10,7 +10,7 @@ session the running cart uses). On the handheld the Music tab is the page
 `runtime/editors/editor_parts.py`'s.
 
 One instance lives on Workstation (`ws.music_ui`), with a back-reference to
-it for the cart's audio session and `save_sounds`. Workstation.go_home() does
+it for the cart's audio session and `save_sounds`. Home.go_home() does
 not reset musicedit/music_preview (blocks/map's go_home does reset their
 active editor). Ctrl+Z/Ctrl+Y walk the editor's undo (`_music_input`)."""
 
@@ -70,7 +70,7 @@ class MusicEditorUI:
         by the preview AND by the cart on resume. The bank is the run's audio
         session's (ws.run.audio.bank); SFX/MusicTrack are injected as
         factories so the editor core stays import-free. Called from
-        Workstation.set_menu_view("music")."""
+        Text.set_menu_view("music")."""
         ws = self.ws
         if self.musicedit is None and ws.run.audio is not None:
             bank = ws.run.audio.bank
@@ -79,7 +79,7 @@ class MusicEditorUI:
 
     def reset(self):
         """Drop the active editor + preview flag -- called from Workstation.open()
-        (switching carts). NOTE: unlike blocks/map, Workstation.go_home() does NOT
+        (switching carts). NOTE: unlike blocks/map, Home.go_home() does NOT
         call this (pre-existing asymmetry, preserved as-is)."""
         self.musicedit = None
         self.music_preview = None
@@ -128,7 +128,7 @@ class MusicEditorUI:
 
     def at_top(self):
         """The cursor on the first step or slot and no popover open: an up
-        goes on to the bar (Workstation._bar_keys)."""
+        goes on to the bar (InputRouter._bar_keys)."""
         me = self.musicedit
         page = self._page
         if me is None or (page is not None and page.pop is not None):
@@ -176,7 +176,7 @@ class MusicEditorUI:
                     self._play_music_preview()
         if i.pressed("b") or i.pressed("home"):
             changed = True
-        ws._leave_or_home(ws.exit)
+        ws.home._leave_or_home(ws.spine.exit)
         if changed:
             ws.mark_dirty()
 

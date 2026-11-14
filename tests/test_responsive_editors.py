@@ -82,7 +82,7 @@ def _enter(ws, view):
     """Enter an editor sub-view exactly as the shell does (screen -> menu, then the
     sub-view), so frame() dispatches to the editor draw (not the desktop)."""
     ws.screen = "menu"
-    ws.set_menu_view(view)
+    ws.text.set_menu_view(view)
 
 
 def _render_editor(ws, view):
@@ -307,7 +307,7 @@ def _scrolled_code_ws(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     select_first_game(ws)
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text(_LONG_SRC)
     ed.row, ed.col = 20, 3
@@ -324,8 +324,8 @@ def test_leaving_and_re_entering_code_keeps_the_view(tmp_path):
     ws, ed = _scrolled_code_ws(tmp_path)
     was = _view(ed)
 
-    ws.set_menu_view("paint")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("paint")
+    ws.text.set_menu_view("code")
 
     assert ws.editor is ed                  # the same buffer came back...
     assert _view(ed) == was, "entering the Code tab must not move the view (#216)"
@@ -337,7 +337,7 @@ def test_re_entering_the_tab_already_shown_keeps_the_view(tmp_path):
     ws, ed = _scrolled_code_ws(tmp_path)
     was = _view(ed)
 
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
 
     assert _view(ed) == was
 
@@ -353,8 +353,8 @@ def test_re_entry_keeps_the_view_with_the_gutter_on(tmp_path):
     narrowed = ed.COLS
     was = _view(ed)
 
-    ws.set_menu_view("map")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("map")
+    ws.text.set_menu_view("code")
 
     assert _view(ed) == was
     assert ed.COLS == narrowed              # ...and the gutter's window survived
@@ -376,9 +376,9 @@ def test_a_pending_commit_does_not_move_the_view_either(tmp_path):
     ed.scroll(-40, 0)                       # ...then look somewhere else
     was = _view(ed)
 
-    ws.set_menu_view("music")
+    ws.text.set_menu_view("music")
     ws.frame(1 / 30)                        # the frame that pays the owed commit
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
 
     assert _view(ed) == was
     assert moy_carts.load(path)["src"] == ed.text()
@@ -416,7 +416,7 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws._open_paint()
+        ws.text._open_paint()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -431,7 +431,7 @@ def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_paint()
+    ws.text._open_paint()
     lay = ws.paint_layer.layout
     assert lay.pg_span > P._PG_SPAN and lay.pg_span % 48 == 0
     drv.frame(1 / 30)
@@ -446,7 +446,7 @@ def test_paint_editor_tap_paints_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_paint()
+    ws.text._open_paint()
     drv.frame(1 / 30)
     pe = ws.paint
     lay = ws.paint_layer.layout
@@ -470,7 +470,7 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws._open_map()
+        ws.text._open_map()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -484,7 +484,7 @@ def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_map()
+    ws.text._open_map()
     lay = ws.map_ui.layout
     base = M.MapLayout(320, 240, 1)
     assert lay.mv_avail_w > base.mv_avail_w and lay.mv_avail_h > base.mv_avail_h
@@ -504,7 +504,7 @@ def test_map_editor_tap_paints_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_map()
+    ws.text._open_map()
     drv.frame(1 / 30)
     me = ws.map_ui.mapedit
     tm = ws.run.project.tilemap
@@ -524,7 +524,7 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws._open_music()
+        ws.text._open_music()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -536,7 +536,7 @@ def test_music_editor_renders_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
@@ -549,7 +549,7 @@ def test_music_editor_tap_works_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws._open_music()
+    ws.text._open_music()
     drv.frame(1 / 30)
     if ws.music_ui.musicedit is None:
         return                                     # no audio bank -- nothing to pin
@@ -589,7 +589,7 @@ def test_theme_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        assert ws.edit_theme()
+        assert ws.text.edit_theme()
         ws.editor_app.theme_tab("theme_sprites")
         _quiesce(ws)
         ws.frame(1 / 30)

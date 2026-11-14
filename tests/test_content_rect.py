@@ -120,9 +120,9 @@ def _open_every_surface(ws):
     cart = next(c for c in ws.carts.all if c.get("title") == "Star Catcher")
     ws.open_in_editor(cart)
     for tab in EDITOR_TABS:
-        ws.set_menu_view(tab)
+        ws.text.set_menu_view(tab)
         ws.frame(DT)
-    ws.go_home()
+    ws.home.go_home()
 
 
 def _layouts(ws):
@@ -227,12 +227,12 @@ def _band_split(ws, frame, rect):
 
 
 SURFACES = {
-    "home": lambda ws: ws.go_home(),
+    "home": lambda ws: ws.home.go_home(),
     "settings": lambda ws: ws.open_settings(),
     "menu": lambda ws: (ws.open_in_editor(next(
         c for c in ws.carts.all if c.get("title") == "Star Catcher")),
-        ws.set_menu_view("code")),
-    "app": lambda ws: ws.open_app(ws._apps_by_id["files"]),
+        ws.text.set_menu_view("code")),
+    "app": lambda ws: ws.spine.open_app(ws._apps_by_id["files"]),
 }
 
 
@@ -267,7 +267,7 @@ def test_the_bar_draws_in_its_band_at_the_bottom(tmp_path, size, where):
 def _tap(ws, x, y):
     ws.pointer.place(x, y)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
 
 
@@ -275,7 +275,7 @@ def _tap(ws, x, y):
 def test_the_system_menu_opens_from_the_bottom_bar_upward(tmp_path, size):
     ws = build_ws(tmp_path, **SIZES[size])
     _bottom(ws)
-    ws.go_home()
+    ws.home.go_home()
     x, y, w, h = ws.layout.sysmenu_btn
     _tap(ws, x + w // 2, y + h // 2)              # where a TOP bar's ≡ is
     assert not ws.sysmenu.open
@@ -295,7 +295,7 @@ def test_an_app_exits_on_the_bottom_bars_x(tmp_path, size):
     ws = build_ws(tmp_path, **SIZES[size])
     _bottom(ws)
     app = ws._apps_by_id["calc"]
-    assert ws.open_app(app)
+    assert ws.spine.open_app(app)
     x, y, w, h = ws.layout.context_x_btn
     _tap(ws, x + w // 2, y + h // 2)              # the app's own top rows now
     assert ws.screen == "calc"
@@ -411,7 +411,7 @@ def test_a_tool_cart_exits_on_the_bottom_bars_x(tmp_path):
 
 def test_the_desk_keeps_windows_and_icons_off_the_bottom_bar(tmp_path):
     ws = build_desktop_ws(tmp_path)
-    ws.open_desk()
+    ws.home.open_desk()
     _bottom(ws)
     wm = ws.wm
     dx, dy, dw, dh = wm._desk_rect()
@@ -419,7 +419,7 @@ def test_the_desk_keeps_windows_and_icons_off_the_bottom_bar(tmp_path):
     assert (dx, dy, dw, dh) == (0, 0, 1024, 600 - bh) and by == dh
     for _key, box, pill, _label, _cart in wm._backdrop_layer._icon_rects():
         assert _inside(box, (dx, dy, dw, dh)) and _inside(pill, (dx, dy, dw, dh))
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     ws.frame(DT)
     win = wm._wins[wm._order[-1]]
     assert dy <= win.y and win.y + win.h <= dy + dh

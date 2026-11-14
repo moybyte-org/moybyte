@@ -10,7 +10,7 @@ Two things follow, and both are tested here:
   drives that poll() against a stubbed GT911 (#208);
 * the repeat frames are marked `pointer.fresh = False`, and the console banks
   their time instead of charging the kinetic velocity a delta the hardware
-  never measured (Workstation._tick_pointer_dt). Charging it -- what a naive
+  never measured (InputRouter._tick_pointer_dt). Charging it -- what a naive
   "every frame is a sample" feed does -- halves the release velocity per stale
   frame, so real flicks died below MIN_FLING.
 
@@ -114,19 +114,19 @@ def test_stale_frames_bank_their_time_for_the_next_real_sample(tmp_path):
     p = ws.pointer
 
     p.fresh = True
-    ws._tick_pointer_dt(p)
+    ws.router._tick_pointer_dt(p)
     assert ws.frame_state.pointer_dt_ms == DT
 
     p.fresh = False
-    ws._tick_pointer_dt(p)
+    ws.router._tick_pointer_dt(p)
     assert ws.frame_state.pointer_dt_ms is None       # measured nothing -> charge nothing
-    ws._tick_pointer_dt(p)
+    ws.router._tick_pointer_dt(p)
     assert ws.frame_state.pointer_dt_ms is None
 
     p.fresh = True
-    ws._tick_pointer_dt(p)
+    ws.router._tick_pointer_dt(p)
     assert ws.frame_state.pointer_dt_ms == DT * 3     # the two skipped frames, banked
-    ws._tick_pointer_dt(p)
+    ws.router._tick_pointer_dt(p)
     assert ws.frame_state.pointer_dt_ms == DT         # ...and spent exactly once
 
 
@@ -135,9 +135,9 @@ def test_banked_time_is_clamped_like_the_frame_tick(tmp_path):
     ws.frame_state.frame_dt_ms = DT
     ws.pointer.fresh = False
     for _ in range(50):                    # a long stall (the board slept, a GC hit)
-        ws._tick_pointer_dt(ws.pointer)
+        ws.router._tick_pointer_dt(ws.pointer)
     ws.pointer.fresh = True
-    ws._tick_pointer_dt(ws.pointer)
+    ws.router._tick_pointer_dt(ws.pointer)
     assert ws.frame_state.pointer_dt_ms == 100.0      # the physics can't be spiked by a hitch
 
 

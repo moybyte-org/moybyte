@@ -60,7 +60,7 @@ def _frame(ws, n=2):
 def _open(ws):
     if select_on_home(ws, "Appearance") is None:
         # Not on the home: Appearance is one of the WM's HIDDEN_APPS.
-        assert ws.open_app(ws.appearance_app)
+        assert ws.spine.open_app(ws.appearance_app)
     else:
         ws.open()
     _frame(ws, 3)

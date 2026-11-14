@@ -298,7 +298,7 @@ def _achievements(config, state, focus, pop=False, scroll=False):
         _board(ws, config)
         ws.open_settings()
         if config in (DESK,):
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
             _settle(g, ws, 2)
             _place(ws, "settings", 226, 52, 680, 536)
@@ -318,11 +318,11 @@ def _unlock(config, badge, game=False, secret=False):
         found = ws.ach.doc().get("system", {}).get("found", {})
         ws.ach.seed({k: v[0] for k, v in found.items() if k != badge})
         if game:
-            ws.go_home()
+            ws.home.go_home()
             if getattr(ws.wm, "mode", None) is not None:
-                ws.open_library()
+                ws.home.open_library()
             ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-            ws.play(ws.launcher_layer)
+            ws.spine.play(ws.launcher_layer)
             for _ in range(PAUSE_FRAMES):
                 g._quiesce(ws)
                 ws.frame(g._DT)
@@ -378,7 +378,7 @@ def _licences(config, entry=None, focus="The console"):
     def setup(g, ws):
         _board(ws, config)
         if config == DESK:
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
             _settle(g, ws, 2)
             _place(ws, "settings", 226, 52, 680, 536)
@@ -477,11 +477,11 @@ def _loading(g, ws):
 def _stopped(compiled=False):
     """Star Catcher stopped mid-frame on line 42 (the targets' error)."""
     def setup(g, ws):
-        ws.go_home()
+        ws.home.go_home()
         if getattr(ws.wm, "mode", None) is not None:
-            ws.open_library()
+            ws.home.open_library()
         ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-        ws.play(ws.launcher_layer)
+        ws.spine.play(ws.launcher_layer)
         for _ in range(PAUSE_FRAMES):
             g._quiesce(ws)
             ws.frame(g._DT)
@@ -500,7 +500,7 @@ def _notice(g, ws):
     p = ws.run.player
     p._notice = p.cart_error = chrome_ops.newer_text(["tilemap2"])
     p._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
 
 
 def _see_why(g, ws):
@@ -648,7 +648,7 @@ def _tool_cart(g, ws):
     made = moy_catalogue.create("Egg Timer", ws.carts_root, src=EGG_TIMER, type="tool")
     ws.carts.rescan()
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
 
 
 # The Editor's theme mode (GAPS 56, rounds/round17.py's theme_*): the door,
@@ -659,7 +659,7 @@ THEME_CUR = (6, 3)
 
 
 def _theme_door(g, ws):
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws._apps_by_id["appearance"])
     _app(ws, "appearance").show_row("Edit theme\u2026")
 
 
@@ -667,8 +667,8 @@ def _theme(tab, copied=True, edited=False):
     def setup(g, ws):
         desk = getattr(ws.wm, "mode", None) == "desktop"
         if desk:
-            ws.open_desk()
-        ws.open_app(ws._apps_by_id["appearance"])
+            ws.home.open_desk()
+        ws.spine.open_app(ws._apps_by_id["appearance"])
         _settle(g, ws, 2)
         assert ws.look.edit_file()
         doc = ws.editor_app.theme
@@ -709,7 +709,7 @@ def _arranged(arrangement, console=False):
     second tile in the icons."""
     def setup(g, ws):
         (_console_home if console else _home)(g, ws)
-        ws.set_home_arrangement(arrangement)
+        ws.home.set_home_arrangement(arrangement)
         grid = ws.launcher
         grid.sel = min(len(grid.items) - 1, grid.index_of(0, 1) if arrangement == "grid"
                        else grid.index_of(1, 1))
@@ -863,7 +863,7 @@ def _app_open(app, page=None, window=False):
     on `page` (one of Paint's modes), in a window where the target has it."""
     def setup(g, ws):
         if window:
-            ws.open_desk()
+            ws.home.open_desk()
         if app == "notes":
             _notes(g, ws, "edit" if window else page, window)
             return
@@ -879,7 +879,7 @@ def _app_open(app, page=None, window=False):
         if app == "storybook":
             _storybook(g, ws, page, window)
             return
-        ws.open_app(ws._apps_by_id[app])
+        ws.spine.open_app(ws._apps_by_id[app])
         _settle(g, ws, 2)
         if page is not None:
             _app(ws, app).mode = page
@@ -957,8 +957,8 @@ def _getcarts(g, ws, state, window):
         net.up = False
         ws.wifi = _NoLink()
     if window:
-        ws.open_desk()
-    ws.open_app(app)
+        ws.home.open_desk()
+    ws.spine.open_app(app)
     for _ in range(12):
         ws.mark_dirty()
         ws.frame(g._DT)
@@ -1129,7 +1129,7 @@ def _storybook(g, ws, state, window):
     if not window:
         ws.pointer.visible = False
     app = ws._apps_by_id["storybook"]
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _settle(g, ws, 2)
     if window:
         size = (1024, 600) if state == "max" else (900, 536)
@@ -1251,9 +1251,9 @@ def _notes(g, ws, state, window):
                 os.utime(path, (t - 60 * i, t - 60 * i))
     if not window:
         ws.pointer.visible = False        # the T-Deck's targets: no pointer rests
-    ws.go_home()
+    ws.home.go_home()
     ws._open_workspace(g._cart_by_title(ws, "Notes"))
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     _settle(g, ws, 3)
     if window:
         _place(ws, "desktop", 112, 52, 900, 536)
@@ -1365,11 +1365,11 @@ def _paint(g, ws, state, window):
     if not window:
         ws.pointer.visible = False
     else:
-        ws.open_desk()
+        ws.home.open_desk()
     ws.artwork.open_named("garden", "drawings")
     app = _app(ws, "artwork")
     app._starter_pending = False
-    ws.open_app(ws._apps_by_id["artwork"])
+    ws.spine.open_app(ws._apps_by_id["artwork"])
     if window:
         _settle(g, ws, 1)
         _place(ws, "artwork", 112, 52, 900, 536)
@@ -1425,9 +1425,9 @@ def _myart(g, ws, state, window):
     if not window:
         ws.pointer.visible = False
     else:
-        ws.open_desk()
+        ws.home.open_desk()
     app = _app(ws, "myart")
-    ws.open_app(ws._apps_by_id["myart"])
+    ws.spine.open_app(ws._apps_by_id["myart"])
     if window:
         _settle(g, ws, 1)
         _place(ws, "myart", 112, 52, 900, 536)
@@ -1559,20 +1559,20 @@ def _place(ws, key, x, y, w, h):
 
 
 def _pick_home(g, ws):
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     titles = [it.get("title") for it in ws.launcher.items]
     if "Sky Run" in titles:
         ws.launcher.sel = titles.index("Sky Run")
 
 
 def _home(g, ws):
-    ws.go_home()
+    ws.home.go_home()
     _pick_home(g, ws)
 
 
 def _console_home(g, ws):
-    ws.go_home()
-    ws.open_library()
+    ws.home.go_home()
+    ws.home.open_library()
     _pick_home(g, ws)
     # the target's records: played twelve times, the last on the pinned day
     y, m, d = g._DATE
@@ -1591,14 +1591,14 @@ def _key_calc(g, ws):
 
 def _desk(g, ws, calc_x=648):
     # The target's windows where it puts them, in glass pixels.
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["files"])
     _settle(g, ws, 2)
     _place(ws, "files", 112, 54, 548, 534)
     files = _app(ws, "files")
     files.open_place("projects", keep="Harpoon Pop")
     _settle(g, ws, 2)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)
     _place(ws, "calc", calc_x, 96, 344, 488)
     _key_calc(g, ws)
@@ -1623,11 +1623,11 @@ PAUSE_FRAMES = 45
 
 
 def _pause(g, ws):
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, "mode", None) is not None:
-        ws.open_library()                 # the windowed tier plays in console mode
+        ws.home.open_library()                 # the windowed tier plays in console mode
     ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     for _ in range(PAUSE_FRAMES):
         g._quiesce(ws)
         ws.frame(g._DT)
@@ -1663,13 +1663,13 @@ def _settings(g, ws):
 
 def _appearance(g, ws):
     # The target's focus: Tint.
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws._apps_by_id["appearance"])
     _app(ws, "appearance").show_row("Tint")
 
 
 def _desk_appearance(g, ws):
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["appearance"])
     _settle(g, ws, 2)
     _place(ws, "appearance", 226, 65, 680, 510)    # the target's window
     _app(ws, "appearance").show_row("Tint")
@@ -1679,7 +1679,7 @@ def _editor(g, ws, tab):
     """The Editor on Star Catcher at `tab`: on a desk, the workspace that
     holds it."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
 
 
 # The Code tab's state in the targets: the caret on line 42, column 13, with
@@ -1690,7 +1690,7 @@ CODE_TOP, CODE_ROW, CODE_COL = 33, 41, 12
 def _code(g, ws):
     desk = getattr(ws.wm, "mode", None) == "desktop"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     _editor(g, ws, "code")
     if desk:
         _settle(g, ws, 2)
@@ -1702,7 +1702,7 @@ def _code(g, ws):
 def _playtest(g, ws):
     _code(g, ws)
     _settle(g, ws, 2)
-    ws._leave_menu()
+    ws.text._leave_menu()
 
 
 # The Sprites tab's state in the targets: the cursor on column 3, row 2, and
@@ -1713,7 +1713,7 @@ SPRITE_CUR, SPRITE_COLOUR = (3, 2), 11
 def _sprites(g, ws):
     desk = getattr(ws.wm, "mode", None) == "desktop"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     _editor(g, ws, "paint")
     if desk:
         _settle(g, ws, 2)
@@ -1729,7 +1729,7 @@ def _tab(tab):
     def setup(g, ws):
         desk = getattr(ws.wm, "mode", None) == "desktop"
         if desk:
-            ws.open_desk()
+            ws.home.open_desk()
         _editor(g, ws, tab)
         if desk:
             _settle(g, ws, 2)
@@ -1784,7 +1784,7 @@ def _workspace(key, full, cart="Sky Run"):
     Blocks workspace) on the desk, showing workspace `key`: full screen, or
     restored over the whole desk under the bar."""
     def setup(g, ws):
-        ws.open_desk()
+        ws.home.open_desk()
         ws.open_in_editor(g._cart_by_title(ws, cart))
         _settle(g, ws, 2)
         win = ws.wm._wins["menu"]
@@ -1829,7 +1829,7 @@ def _playtest_restored(g, ws):
 
 
 def _calc(g, ws):
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)
     _key_calc(g, ws)
 
@@ -2158,7 +2158,7 @@ def _make_own(g, ws):
     Duplicate and, set apart, Delete."""
     own = _own_cart(g, ws)
     _home(g, ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     for i, it in enumerate(ws.launcher.items):
         if it.get("path") == own["path"]:
             ws.launcher.sel = i
@@ -2167,14 +2167,14 @@ def _make_own(g, ws):
 def _cart_open(g, ws):
     """A cart of the kid's own open on its Code tab."""
     ws.open_in_editor(_own_cart(g, ws))
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
 
 
 def _desk_files(g, ws):
     """Files alone on the desk, on Projects, its window shorter than its
     rows: covers, and the cut row's fade."""
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["files"])
     _settle(g, ws, 2)
     _place(ws, "files", 112, 54, 548, 380)
     _app(ws, "files").open_place("projects", keep="Harpoon Pop")
@@ -2189,8 +2189,8 @@ def _projects(size=None):
     project selected: the home's hero, details and shelf in a window, at its
     default size or placed at `size` (x, y, w, h)."""
     def setup(g, ws):
-        ws.open_desk()
-        ws.open_projects()
+        ws.home.open_desk()
+        ws.home.open_projects()
         _settle(g, ws, 2)
         if size is not None:
             _place(ws, "projects", *size)
@@ -2211,8 +2211,8 @@ def _projects_own(size=None, menu=None, editor=False):
     R5-07)."""
     def setup(g, ws):
         own = _own_cart(g, ws)
-        ws.open_desk()
-        ws.open_projects()
+        ws.home.open_desk()
+        ws.home.open_projects()
         _settle(g, ws, 2)
         if size is not None:
             _place(ws, "projects", *size)
@@ -2231,7 +2231,7 @@ def _projects_own(size=None, menu=None, editor=False):
                               and it[3] == shell_cards._DANGER_ICON), m.sel)
             _EXPECT[0] = _card_menu_open("the PROJECTS card")
         if editor:
-            ws.launch_selected(grid)
+            ws.home.launch_selected(grid)
 
             def check(ws):
                 key = ws.wm.input_holder()
@@ -2249,8 +2249,8 @@ def _home_search(g, ws):
     else the field's word on pairing a keyboard."""
     _home(g, ws)
     _settle(g, ws, 2)
-    ws.open_search()
-    if ws.can_type():
+    ws.home.open_search()
+    if ws.text.can_type():
         _typed(g, ws, SEARCH_TYPED)
 
 
@@ -2265,7 +2265,7 @@ def _first_card(ws):
 def _make(g, ws):
     """The Make tab with a project selected: New, Change, Copy and Delete."""
     _home(g, ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     _first_card(ws)
 
 

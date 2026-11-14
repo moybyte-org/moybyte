@@ -902,15 +902,15 @@ class BarLayer:
             # buffer across re-renders when the size is unchanged; allocate a fresh
             # layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
-                self.ws.note_cost("bar.strip.alloc")
+                self.ws.perf.note_cost("bar.strip.alloc")
                 _release_layer(strip)              # the old size's / canvas's
                 strip = cv.new_layer(bw, bh)
                 slot[0] = strip
                 slot[2] = cv
-            self.ws.note_cost("bar.strip.render")
+            self.ws.perf.note_cost("bar.strip.render")
             self._render_cart_bar(strip, key, i)
         elif part:
-            self.ws.note_cost("bar.strip.part")
+            self.ws.perf.note_cost("bar.strip.part")
             self._render_cart_part(strip, key, i, part, slot[3])
         if fresh or part:
             slot[1] = _ui.block_gen(blk)
@@ -1247,7 +1247,7 @@ class BarLayer:
         do there (`InputPolicy.back`); the home's goes to the desk."""
         ws = self.ws
         if where == "home":
-            ws.open_desk()
+            ws.home.open_desk()
         else:
             ws.input_policy.back()
         ws.mark_dirty()
@@ -1691,7 +1691,7 @@ class BarLayer:
         if where in ("tool", "app", "menu") and ws.cart:
             return ws.cart.get("title") or ""
         if where == "home":
-            return ws.home_title()
+            return ws.home.home_title()
         return _TITLES.get(where, "")
 
     def _show_x(self, where):
@@ -2028,7 +2028,7 @@ class BarLayer:
         """The keys walk off an end of the home's tab row onto the bar item
         beside it: `d` < 0 the one left of the tabs, else the one right.
         False where there is none (the row stops there)."""
-        if self.ws.bar_where() != "home":
+        if self.ws.router.bar_where() != "home":
             return False
         items = self.focus_items("home")
         split = self._tabs_split("home", items)
@@ -2073,7 +2073,7 @@ class BarLayer:
         bar's."""
         where = self.focus_where
         items = self.focus_items(where)
-        if not items or self.ws.bar_where() != where:
+        if not items or self.ws.router.bar_where() != where:
             self.focus_leave()
             return False
         split = self._tabs_split(where, items)
@@ -2099,7 +2099,7 @@ class BarLayer:
             self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
             ws = self.ws
             ws.mark_dirty()
-            if ws.bar_where() != where or getattr(owner, "zone_opened", False):
+            if ws.router.bar_where() != where or getattr(owner, "zone_opened", False):
                 # the tap left the surface (back, a door), or opened one of
                 # the zone's tabs, which takes the keys down into it as the
                 # home's row does
@@ -2175,7 +2175,7 @@ class BarLayer:
         if name == "status":
             k = self.status_hit(hit[1], hit[2] or 0, px)
             if k is not None:
-                ws.open_status_menu(_ITEMS.at(k))
+                ws.notices.open_status_menu(_ITEMS.at(k))
             return True
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)
@@ -2189,11 +2189,11 @@ class BarLayer:
         # app (Editor/Settings) uses the screen-string exit.
         if name == "close" and self._show_x(where):
             if where == "home":
-                ws.open_desk()
+                ws.home.open_desk()
             elif where in ("tool", "app"):
-                ws._exit_to_caller()
+                ws.spine._exit_to_caller()
             else:
-                ws.exit()
+                ws.spine.exit()
             return True
         owner = self._zone_owner(where)
         if zone is not None and self.draws_back(where):

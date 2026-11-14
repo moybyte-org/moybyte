@@ -79,11 +79,11 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         ws.look.set_theme(theme, persist=False)
         ws.look.select_wallpaper(None, persist=False)
     if tier == "desk":
-        ws.open_library()
+        ws.home.open_library()
     else:
-        ws.go_home()
-    ws.set_home_arrangement(arrangement)
-    ws.set_home_tab(tab)                   # Mine: the made carts, "+ New" first
+        ws.home.go_home()
+    ws.home.set_home_arrangement(arrangement)
+    ws.home.set_home_tab(tab)                   # Mine: the made carts, "+ New" first
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     ws.wallpaper.is_animating = lambda dt: False
@@ -357,7 +357,7 @@ def test_kept_faces_are_released(tmp_path, monkeypatch):
     assert frame() is not None
     assert g.faces_bytes() > 0
     lay = g._face_lay
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
 
 

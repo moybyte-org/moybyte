@@ -26,7 +26,7 @@ def _open_paint(ws):
 def _opened_paint(ws):
     if select_on_home(ws, "Paint") is None:
         # Windowed tier (#105): system apps are desk-only, not on the shelf.
-        assert ws.open_app(ws.artwork_app)
+        assert ws.spine.open_app(ws.artwork_app)
         ws.input.begin_frame()
         ws.frame(1 / 30)
         assert ws.cart_error is None
@@ -90,8 +90,8 @@ def test_going_home_with_paint_never_opened_writes_nothing(tmp_path):
     the gallery, no first-save achievement, and the document stays unbuilt."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = ws.artwork_app
-    ws.go_home()
-    ws.go_home()
+    ws.home.go_home()
+    ws.home.go_home()
     assert app._doc is None
     assert not list(tmp_path.rglob("drawing_*"))
     assert not ws.ach.has("system", "first_paint")     # a save's award
@@ -184,7 +184,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
     ws._open_workspace(other)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     assert "artwork" not in ws.ns
 
 
@@ -192,7 +192,7 @@ def test_a_desks_drawing_is_1024x600_and_a_window_resize_never_resamples_it(tmp_
     ws = host_app.build_workstation(str(tmp_path / "carts"),
                                     sys_size=(1024, 600), font_scale=2,
                                     windowed=True, panel_diagonal_in=7.0)
-    ws.open_desk()
+    ws.home.open_desk()
     app = _open_paint(ws)
     ws.frame(1 / 30)
     win = ws.wm._wins["artwork"]
@@ -748,7 +748,7 @@ def test_put_in_a_story_adds_a_last_page_and_its_undo_takes_it_out(tmp_path):
 def test_the_desk_window_is_titled_with_the_drawing(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True, panel_diagonal_in=7.0)
-    ws.open_desk()
+    ws.home.open_desk()
     app = _open_paint(ws)
     for _ in range(2):
         ws.mark_dirty()
@@ -823,7 +823,7 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     if desk:
         ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                         font_scale=2, windowed=True, panel_diagonal_in=7.0)
-        ws.open_desk()
+        ws.home.open_desk()
     else:
         ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)

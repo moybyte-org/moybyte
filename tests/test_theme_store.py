@@ -62,7 +62,7 @@ def test_a_package_is_listed_with_the_seeds_and_nowhere_a_cart_is(tmp_path):
     assert ws.look.theme_names() == chrome.THEME_NAMES + (NAME,)
     assert NAME not in chrome.THEME_NAMES
     for tab in ("games", "mine", "apps", "make"):
-        assert not [c for c in ws._launcher_items(ws.carts.all, tab)
+        assert not [c for c in ws.home._launcher_items(ws.carts.all, tab)
                     if c.get("type") == "theme"], tab
     from runtime.shell_servers import NavServer
     assert not [c for c in NavServer(ws).projects(None) if c.get("type") == "theme"]
@@ -174,7 +174,7 @@ def test_the_desk_draws_a_package(tmp_path):
     ws = build_desktop_ws(tmp_path)
     _put(ws)
     ws.look.set_theme(NAME)
-    ws.open_desk()
+    ws.home.open_desk()
     for _ in range(3):
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -202,7 +202,7 @@ def test_contrast_is_a_seed_that_reads_in_both_variants():
 def test_files_lists_a_package_as_a_theme_whose_door_is_appearance(tmp_path):
     ws = build_ws(tmp_path)
     files = ws._apps_by_id["files"]
-    assert ws.open_app(files)
+    assert ws.spine.open_app(files)
     files.open()
     assert "themes" not in [p[0] for p in files.shown_places()]
     _put(ws)
@@ -237,7 +237,7 @@ def test_an_installed_package_as_the_carts_repository_ships_it(tmp_path):
     assert len(rows) == 1 and rows[0].get("type") == "theme"
     assert ws.look.theme_names().count(NAME) == 1
     files = ws._apps_by_id["files"]
-    assert ws.open_app(files)
+    assert ws.spine.open_app(files)
     files.open()
     files.open_place("themes")
     assert files.names_shown() == ["dusk"]

@@ -75,7 +75,7 @@ def _handheld(tmp_path, seed=True):
     if seed:
         _seed(ws.carts_root)
     app = ws._apps_by_id["storybook"]
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
 
@@ -87,9 +87,9 @@ def _desk(tmp_path, seed=True):
     ws.pointer.visible = False
     if seed:
         _seed(ws.carts_root)
-    ws.open_desk()
+    ws.home.open_desk()
     app = ws._apps_by_id["storybook"]
-    ws.open_app(app)
+    ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
 
@@ -185,7 +185,7 @@ def test_present_draws_no_bar_and_the_bars_band_is_the_slides(tmp_path):
     assert top == bytes(len(top)), "black above the slide, where the bar was"
     ws.pointer.place(14, 9)                     # where the bar's way back was
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     assert ws.wm.top_kind() == "storybook" and app.show is not None
 
@@ -389,10 +389,10 @@ def _tap_part(ws, app, part):
     x, y, w, h = app._ui.box(part)
     ws.pointer.place(cx + x + w // 2, cy + y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     _frames(ws, 1)
     ws.pointer.click = False
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     _frames(ws, 2)
 
 

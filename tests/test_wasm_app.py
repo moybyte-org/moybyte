@@ -102,11 +102,11 @@ def test_a_compiled_app_reaches_prefs_and_theme_with_no_upcall(tmp_path):
     cv = ws.sys_canvas
     i = 2 * (34 * cv.w + 300)          # the band under the app bar, past the toast
     assert cv._buf[i] | cv._buf[i + 1] << 8 == cv._wire[token & 63]
-    ws.exit()
+    ws.spine.exit()
     assert _runs(ws) == 1
     open_cart(ws, "App Roles Wasm")
     _frames(ws, 2)
-    ws.exit()
+    ws.spine.exit()
     assert _runs(ws) == 2, "the count kept is the app's, run to run"
 
 
@@ -217,7 +217,7 @@ def talk(tmp_path):
         return got
     yield run
     for ws, pid in held:
-        ws.exit()
+        ws.spine.exit()
         assert not moy_evq.has(pid), "the run's queue closes with it"
 
 
@@ -291,7 +291,7 @@ def test_a_compiled_app_s_timers_are_the_system_s_messages_and_cancel_its_own(ta
     assert "timers %d -2" % (moybyte.TIMERS_MAX - 3) in lines, lines
     assert "uncap %d" % (moybyte.TIMERS_MAX - 4) in lines, lines
     assert moy_evq.timers(pid) == 1 and not [w for w in moybyte.WAKES.list if w[1] == pid]
-    ws.exit()
+    ws.spine.exit()
     assert not [w for w in moybyte.WAKES.list + moybyte.WAKES.mail if w[1] == pid]
     assert moy_evq.timers(pid) == 0
 
@@ -350,7 +350,7 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
             with pytest.raises(OSError) as e:
                 leases.LEASES.take(moybyte.SHELL, "gpio6")
             assert e.value.errno == 16                                  # EBUSY
-            ws.exit()
+            ws.spine.exit()
             assert N.held() == 0 and N.pin_state(6) == N.PIN_SAFE == N.pin_state(20)
             # A Python program's lease is a machine object in the VM: it
             # keeps the VM.
@@ -360,7 +360,7 @@ def test_a_compiled_app_holds_leases_by_handle_until_its_run_ends(talk, off):
             assert got == ["dev_open -4", "dev_get -8", "dev_write -8", "dev_read -8",
                            "dev_close -8"], lines                       # DENIED, ABSENT
             assert N.held() == 1                                         # the pins'
-            ws.exit()
+            ws.spine.exit()
             assert N.held() == 0 and N.pin_state(20) == N.PIN_SAFE
     finally:
         for p in list(leases.LEASES.held):
@@ -402,7 +402,7 @@ def test_a_compiled_app_talks_on_a_port_of_the_radio_link_by_handle(talk):
     heard = [t for _s, _t, _l, q, t in os_log.records(since, 64)
              if q == pid and t.startswith("net_")]
     assert heard == ["net_heard 2 7 hi there"], heard
-    ws.exit()
+    ws.spine.exit()
     assert ws.link.ports_open() == 0 and not ws.link.active
 
 
@@ -429,7 +429,7 @@ def test_a_compiled_app_joins_a_lorawan_network_by_handle(talk):
         assert lora_sim.air(accept, freq, sf)
         N.step(due + 20)
         assert N.owner() == pid and N.joined()[0]
-        ws.exit()
+        ws.spine.exit()
         assert N.owner() == 0
     finally:
         lora_sim.remove()
@@ -459,5 +459,5 @@ def test_a_compiled_app_s_status_item_hears_its_panel_and_goes_with_its_run(talk
     heard = [t for _s, _t, _l, q, t in os_log.records(since, 64) if q == pid]
     assert heard == ['heard moybyte.status from system [%d, "hi", 1]' % h,
                      'heard moybyte.status from system [%d, "vol", 7]' % h], heard
-    ws.exit()
+    ws.spine.exit()
     assert ITEMS.of(pid, h) is None and ITEMS.count() == 0, "the run's end sweeps it"

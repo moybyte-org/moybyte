@@ -507,10 +507,10 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     ws = _ws(tmp_path)
     # A tool/app cart the PLAYER runs -- one a registered system app claims
     # opens that app's layer instead, and ticks nothing here.
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     tool = next(c["title"] for c in ws.launcher.items
                 if c.get("type") in ("tool", "app")
-                and not ws.is_system_app(c))
+                and not ws.spine.is_system_app(c))
     _open(ws, tool)
     assert ws.run.player.tick_ms == 0
     calls = _count(ws)
@@ -542,7 +542,7 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
     assert ws.run.player.tick_ms == 33
-    ws.go_home()
+    ws.home.go_home()
     assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
     ws.mark_dirty()
     drawn0 = ws.frame_state.frames_drawn
@@ -634,7 +634,7 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
     assert ws.steady is True                      # the kid default
     _open(ws, PACED_GAME)
     assert ws.run.player.sched.steady is True
-    ws.set_steady(False)
+    ws.toggles.set_steady(False)
     assert ws.system.get("steady") is False
     assert ws.run.player.sched.steady is False
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
@@ -644,7 +644,7 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
 def test_a_stored_frameskip_key_is_dropped_on_load(tmp_path):
     ws = _ws(tmp_path)
     ws.system.set("frameskip", True)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.text("frameskip") is None
     assert ws.steady is True
 

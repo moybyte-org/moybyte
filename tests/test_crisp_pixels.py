@@ -57,7 +57,7 @@ def test_boot_apply_does_not_persist_but_reaches_the_canvas(tmp_path):
     ws = build_ws(tmp_path)
     calls = _grant_hook(ws)
     ws.system.delete("crisp_pixels")
-    ws.set_crisp_pixels(True, persist=False)
+    ws.toggles.set_crisp_pixels(True, persist=False)
     assert ws.crisp_pixels is True
     assert ws.system.text("crisp_pixels") is None
     assert calls == [True]

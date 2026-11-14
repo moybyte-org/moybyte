@@ -153,7 +153,7 @@ def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):
     assert "kaboom" in ws.cart_error and "ValueError" in ws.cart_error
     assert bytes(ws.run.canvas._buf) != blank  # the panel drew something
     # The editor stays reachable so the kid can fix the cart.
-    ws._open_menu()
+    ws.text._open_menu()
     assert ws.screen == "menu"
 
 
@@ -202,10 +202,10 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
     assert ws.cart_error is None
     path = ws.cart["path"]
 
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(\n")   # break it
-    ws.run_code()
+    ws.saves.run_code()
 
     assert ws.screen == "menu" and ws.menu_view == "code"   # stayed in the editor
     assert ws.cart_error and "Syntax error" in ws.cart_error
@@ -214,7 +214,7 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
 
     # Now fix it and RUN -> it persists and runs.
     ws.editor.set_text("def _draw():\n    cls(6)\n")
-    ws.run_code()
+    ws.saves.run_code()
     assert ws.screen == "desktop" and ws.cart_error is None
     assert "cls(6)" in moy_carts.load(path)["src"]
 
@@ -286,7 +286,7 @@ def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
     # A fresh crash re-arms it; the first EDIT dismisses it with the marker.
     ws.cart["src"] = "def _draw():\n    raise ValueError('again')\n"
     ws._start()
-    ws.play(ws.editor_app)
+    ws.spine.play(ws.editor_app)
     assert ws.screen == "desktop"
     ws.frame(1 / 30)
     _see_why(ws)
@@ -327,7 +327,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     journal-commit fallback."""
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n",
                             title="Undoable")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ed = ws.editor
     # -- local tier: a typing burst breaks line 2, PLAY crashes, undo fixes.
@@ -335,7 +335,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ed.set_text("def _draw():\n    boom_undefined()\n")
     ws.cart["src"] = ed.text()
     ws._start()
-    ws.play(ws.editor_app)
+    ws.spine.play(ws.editor_app)
     ws.frame(1 / 30)                            # crash -> the stop card
     _see_why(ws)
     assert ws.screen == "menu" and ws.code_err_row == 1
@@ -347,9 +347,9 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     # -- journal tier: two commits, caret parked low, undo reloads the file.
     ed = ws.editor
     ed.set_text("def _draw():\n    cls(2)\n    cls(3)\n    cls(4)\n")
-    assert ws.save_code() is True               # commit 1
+    assert ws.saves.save_code() is True               # commit 1
     ed.set_text("def _draw():\n    cls(5)\n    cls(6)\n    cls(7)\n")
-    assert ws.save_code() is True               # commit 2
+    assert ws.saves.save_code() is True               # commit 2
     ed.goto_row(2, 4)
     ws.code_err = "stale"                       # a stale marker must not survive
     ws.code_err_row = 1
@@ -371,16 +371,16 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     assert ws.cart_error is not None and ws.run.player._draw is None
 
     # Open the code editor, fix the source, and hit SAVE (not RUN).
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw():\n    cls(7)\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
     assert "cls(7)" in moy_carts.load(path)["src"]
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart
     # actually runs again -- _draw is re-bound, no leftover panel.
-    ws._leave_menu()
+    ws.text._leave_menu()
     assert ws.screen == "desktop"
     assert ws.cart_error is None
     assert ws.run.player._draw is not None           # re-_start() rebound the (now valid) cart
@@ -399,7 +399,7 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
     def _boom(cart, hexs):
         raise OSError("disk full")
     monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
-    ws.save_sprites()
+    ws.saves.save_sprites()
     assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
     assert ws.sheet.dirty is True         # not marked clean on failure
 

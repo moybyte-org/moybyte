@@ -1174,7 +1174,7 @@ def compile_check(src):
 
 def runtime_compile_check(cart, src):
     """The parse gate for THIS cart's runtime -- (ok, message), compile_check's
-    shape. Every commit path asks here (the store's save_code, ws.save_code,
+    shape. Every commit path asks here (the store's save_code, ws.saves.save_code,
     the idle autosave, the live error marker), so "does this compile" cannot
     mean the PYTHON compiler on one path and something else on the next.
 

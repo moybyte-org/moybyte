@@ -27,7 +27,7 @@ def hh(tmp_path):
 
 def _open(hh, tab):
     ws, drv = hh
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     ws.pointer.visible = False
     settle_badges(ws)
     ws._toast_until = 0

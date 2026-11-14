@@ -141,7 +141,7 @@ class SceneEditorUI:
     def build(self):
         """Build the SceneEditor over the open cart's DEFAULT scene (the
         manifest's element 0; a cart with none starts an empty "main"). Called
-        from Workstation.set_menu_view("scene")."""
+        from Text.set_menu_view("scene")."""
         ws = self.ws
         if self.sceneedit is not None or ws.run.project.sheet is None:
             return
@@ -182,7 +182,7 @@ class SceneEditorUI:
     def save(self):
         """SAVE: persist the edited scene through Project.commit_scene (atomic
         write + manifest registration + the durable undo journal, Stage 1).
-        The ws entry point Workstation.save_scene forwards here."""
+        The ws entry point Saves.save_scene forwards here."""
         ws = self.ws
         se = self.sceneedit
         if se is None or self.scene_name is None:
@@ -318,7 +318,7 @@ class SceneEditorUI:
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()
-        ws._leave_or_home(ws.exit)
+        ws.home._leave_or_home(ws.spine.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit

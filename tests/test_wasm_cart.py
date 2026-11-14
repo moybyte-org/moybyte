@@ -599,17 +599,17 @@ def test_the_code_tab_is_absent_unless_the_cart_ships_src(tmp_path):
     ws = host_app.build_workstation(_store(
         tmp_path, _hello, _wat_cart("Bare", COUNTER, 1)))
     ws.open_in_editor(_cart(ws, "Bare"))
-    assert ws.code_sources() == []
+    assert ws.text.code_sources() == []
     assert ws.editor_app.tab != "code"
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.editor_app.tab == "cards", "a Code tab over no code"
     assert "code" not in [t for t, _g in ws.editor_app._ladder()]
     assert "code" not in [t[0] for t in ws.editor_app._chips()]
     ws.open_in_editor(_cart(ws, "Hello Wasm"))
-    assert ws.code_sources() == ["src/main.wat"]
-    ws.set_menu_view("code")
+    assert ws.text.code_sources() == ["src/main.wat"]
+    ws.text.set_menu_view("code")
     assert ws.editor_app.tab == "code"
-    assert ws.code_file_name() == "src/main.wat"
+    assert ws.text.code_file_name() == "src/main.wat"
     assert "(module" in ws.editor.text()
 
 
@@ -746,7 +746,7 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     assert p._notice_title == "Too big for this console."
     st = _remote_state(ws)
     assert st["notice"] == p.notice and st["cart_error"] is None
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     open_cart(ws, "Hello Wasm")
     assert ws.run.player.cart_error is None and ws.run.player.notice is None
     _frames(ws, 3)
@@ -764,7 +764,7 @@ def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch)
     assert ws.run.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. This "
                                 "console has 0.2 MB free. Restarting the console "
                                 "might free enough."), ws.run.player.notice
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Hello Wasm")
     assert ws.run.player.cart_error is None and ws.run.player.notice is None
@@ -806,7 +806,7 @@ def test_a_load_that_still_runs_out_of_memory_gets_the_same_notice(tmp_path):
         ws.runtimes["wasm"] = _Runtime(real, start=exc)
         open_cart(ws, "Hello Wasm")
         assert ws.run.player.notice == want, ws.run.player.notice
-        ws._exit_to_caller()
+        ws.spine._exit_to_caller()
     # any other start failure stays an error, with its own words
     ws.runtimes["wasm"] = _Runtime(real, start=RuntimeError("refused: bad signature"))
     open_cart(ws, "Hello Wasm")
@@ -834,10 +834,10 @@ def _parked_desk(tmp_path):
         if app == "settings":
             ws.open_settings()
         else:
-            ws.open_app(ws._apps_by_id[app])
+            ws.spine.open_app(ws._apps_by_id[app])
     ws.wm._sync_windows()
     wins = dict(ws.wm._wins)
-    ws.open_library()                            # the desk's PLAY
+    ws.home.open_library()                            # the desk's PLAY
     ws.launcher_layer.prealloc_retained()
     return ws, wins
 
@@ -866,8 +866,8 @@ def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
     assert [k for k, w in wins.items() if w.buf is None] == ["settings", "calc"]
     assert wins["files"].buf is not None
     assert ws.launcher_layer._lib_cache is not None
-    ws._exit_to_caller()
-    ws.open_desk()
+    ws.spine._exit_to_caller()
+    ws.home.open_desk()
     assert all(w.buf is not None for w in wins.values())
 
 
@@ -923,7 +923,7 @@ def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path
     _frames(ws, 3)
     st = _remote_state(ws)
     assert st["notice"] == p.notice and st["cart_error"] is None
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     open_cart(ws, "Hello Wasm")
     assert ws.run.player.cart_error is None and ws.run.player.notice is None
 
@@ -944,7 +944,7 @@ def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
     assert ws.run.player.notice == ("It uses write, erase, list. Update in Settings, "
                                 "then try again."), \
         ws.run.player.cart_error
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Files Wasm")
     assert ws.run.player.notice is None and ws.run.player.cart_error is None

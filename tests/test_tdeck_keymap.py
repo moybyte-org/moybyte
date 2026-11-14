@@ -452,14 +452,14 @@ def test_the_tdeck_home_acts_on_letters_from_the_matrix(tmp_path):
     assert ws.carts.is_favorite(cart) is False
     _matrix_press(ws, drv, _chord(mod, ord("g"), sym=True))
     assert ws.search_typing
-    ws.close_search(clear=True)
+    ws.home.close_search(clear=True)
     drv.frame(1 / 30)
     _real_card(ws)
     _matrix_press(ws, drv, _chord(mod, ord("c")))
     assert ws.screen == "menu", "C on a Games card is Change: the Editor"
-    ws.go_home()
+    ws.home.go_home()
     drv.frame(1 / 30)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     _real_card(ws)
     n = len(ws.carts.all)
     _matrix_press(ws, drv, _chord(mod, ord("y")))

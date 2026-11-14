@@ -124,10 +124,10 @@ def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):
     assert mp.front_frame(7033, 33333) == -1, "the press gives the frame back"
     assert not mp.front_live() and mp.current(), "the run is live"
     assert mp.info()[6] is False
-    ws.handle_input()
+    ws.router.handle_input()
     src.set_button("start", False)
     inp.begin_frame()
-    ws.handle_input()                 # the console's key acts when it comes up
+    ws.router.handle_input()                 # the console's key acts when it comes up
     assert ws.pause.open and ws.run.player.paused
     ws.frame(1 / 30)
     ws.pause.close()

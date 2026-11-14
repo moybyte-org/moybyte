@@ -79,7 +79,7 @@ def _latched_frame(ws, byte=0x0D):
     ws.input.set_held("a", True)
     ws.input.begin_frame()
     ws.input.last_key = byte
-    ws.handle_input()
+    ws.router.handle_input()
     ws.input.last_key = 0
     ws.input.set_held("a", False)
     ws.input.begin_frame()
@@ -90,11 +90,11 @@ def _typed_frame(ws, byte):
     its keys as it draws (ui.field)."""
     ws.input.begin_frame()
     ws.input.last_key = byte
-    ws.handle_input()
+    ws.router.handle_input()
     ws.frame(1 / 30)
     ws.input.last_key = 0
     ws.input.begin_frame()
-    ws.handle_input()
+    ws.router.handle_input()
     ws.frame(1 / 30)
 
 
@@ -133,7 +133,7 @@ def test_new_script_survives_the_keypress_that_opened_it(tmp_path):
 
 def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     ws = _ws_with_lua_cart(tmp_path)
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     bu = ws.block_ui
     ws.input.begin_frame()
     ws.input.last_key = 0x0D

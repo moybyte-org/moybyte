@@ -219,7 +219,7 @@ class _Net(_Handle):
             raise OSError(ENOSPC, "a process holds %d ports" % NET_PORTS)
         ws, self.link = _link()
         self.port = port
-        hold = getattr(ws, "wifi_hold", None)
+        hold = getattr(getattr(ws, "spine", None), "wifi_hold", None)
         if hold is not None:
             hold("net", pid)
         try:
@@ -265,7 +265,7 @@ class _Net(_Handle):
 
     def _let_go(self, ws, pid):
         if not any(type(x) is _Net for x in HANDLES.get(pid, {}).values()):
-            release = getattr(ws, "wifi_release", None)
+            release = getattr(getattr(ws, "spine", None), "wifi_release", None)
             if release is not None:
                 release("net", pid)
 

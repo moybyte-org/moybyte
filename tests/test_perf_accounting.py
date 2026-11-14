@@ -50,8 +50,8 @@ def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     assert "_flush_t0 = _ticks_us()" in body
     assert "_total = _ticks_diff(_ticks_us(), frame_t0)" in body
     # Converted ONCE, at the EMA -- every public number stays milliseconds.
-    assert "self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)" in body
-    assert "self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)" in body
+    assert "ws._flush_ms = _ema(ws._flush_ms, _flush / 1000.0)" in body
+    assert "ws._draw_ms = _ema(ws._draw_ms, _draw / 1000.0)" in body
 
 
 
@@ -76,7 +76,7 @@ def test_a_run_in_front_names_its_cart_and_leaves_the_console_meters_absent(tmp_
             self.v[name] = value
 
     loop = Loop()
-    ws.perf_push(loop, front=True)
+    ws.perf.perf_push(loop, front=True)
     assert loop.v.pop("cart") == "Coin Quest"
     assert loop.v.pop("net") is None
     assert loop.v.pop("lock") is None

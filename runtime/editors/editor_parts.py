@@ -667,13 +667,13 @@ def log_rows(desk):
     out = []
     err, line = ws.cart_error, ws.run.player.crash_line
     if err:
-        f = ws.run.player.crash_file or ws.code_file_name()
+        f = ws.run.player.crash_file or ws.text.code_file_name()
         if line:
             out.append(("%s:%d  %s" % (f, line, err), f, line - 1))
         else:
             out.append((str(err), None, None))
     if ws.code_err and ws.code_err_row is not None:
-        f = ws.code_file_name()
+        f = ws.text.code_file_name()
         out.append(("%s:%d  %s" % (f, ws.code_err_row + 1, ws.code_err), f, ws.code_err_row))
     return out
 
@@ -698,8 +698,8 @@ def goto(desk, name, row):
     ws = desk.ws
     if row is None:
         return
-    if name and name != ws.code_file_name():
-        ws.open_code_file(name)
+    if name and name != ws.text.code_file_name():
+        ws.text.open_code_file(name)
     ed = ws.editor
     if ed is not None:
         ed.goto_row(row)

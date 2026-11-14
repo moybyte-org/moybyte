@@ -337,7 +337,7 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     nothing consented in particular); its author gives it permissions; PLAY
     grants them, with no prompt."""
     ws = build_ws(tmp_path)
-    ws.new_cart_and_edit()
+    ws.home.new_cart_and_edit()
     new = ws.run.project.cart
     man_path = Path(new["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
@@ -394,7 +394,7 @@ def _settle(ws, app):
 def _get(ws, app, cid):
     """Open Get Carts, open `cid`'s page and press Get; frames until the
     install asks or ends."""
-    ws.open_app(app)
+    ws.spine.open_app(app)
     for _ in range(40):
         _frames(ws, 1)
         if app.phase != "checking":

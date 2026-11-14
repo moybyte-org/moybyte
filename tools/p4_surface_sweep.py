@@ -89,23 +89,23 @@ from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 OPEN = {
     "settings":  "ws.open_settings()",
-    "projects":  "ws.open_projects()",
+    "projects":  "ws.home.open_projects()",
     "code":      "ws._g['_edit']('code')",
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
     "map":       "ws._g['_edit']('map')",
-    "files":     "ws.open_app(ws.files_app)",
-    "storybook": "ws.open_app(ws.storybook_app)",
+    "files":     "ws.spine.open_app(ws.files_app)",
+    "storybook": "ws.spine.open_app(ws.storybook_app)",
 }
 HELPER = """
 def _edit(tab):
-    ws.open_projects()
+    ws.home.open_projects()
     g = ws.projects_grid
     for i in range(len(g.items)):
         if g.items[i].get('type') != 'new':
             g.sel = i
             break
-    ws.launch_selected(g)
+    ws.home.launch_selected(g)
     ws.editor_app.set_tab(tab)
     return True
 ws._g['_edit'] = _edit

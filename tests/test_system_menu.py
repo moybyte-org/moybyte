@@ -91,7 +91,7 @@ def _open_own_cart(ws, tmp_path):
     moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
                      type="app")
     ws.carts.apply(shelf(str(tmp_path / "carts")))   # refresh both grids + carts.all
-    ws.set_home_tab("mine")                           # a cart of the kid's own
+    ws.home.set_home_tab("mine")                           # a cart of the kid's own
     titles = [it.get("title") for it in ws.launcher.items]
     ws.launcher.sel = titles.index("Extra")
     ws.open()
@@ -382,9 +382,9 @@ def test_every_home_menu_opens_on_a_safe_row(tmp_path, tab, sleep):
     if sleep:
         _ladder(ws)
     if tab == "mine":
-        ws.set_home_tab("games")
+        ws.home.set_home_tab("games")
         ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
-    ws.set_home_tab(tab)
+    ws.home.set_home_tab(tab)
     real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
     for i in (real or [0]):
         ws.launcher.sel = i
@@ -401,9 +401,9 @@ def test_a_cards_delete_stands_apart_under_a_rule(tmp_path):
     """The card group's Delete is set apart from the verbs above it, in the
     system menu and in the card's own menu (design review R4-13)."""
     ws = _ws(tmp_path)
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     from runtime.moy_store_base import builtin_name
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and builtin_name(it["path"]) is None)
@@ -421,13 +421,13 @@ def test_the_desk_menus_open_on_a_safe_row(tmp_path, sleep):
     drv = _drv(ws)
     if sleep:
         _ladder(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     _assert_opens_safe(ws, "desk")
     ws.sysmenu.close()
-    ws.open_projects()
+    ws.home.open_projects()
     drv.frame(1 / 30)
     g = ws.projects_grid
     for i, it in enumerate(g.items):
@@ -651,8 +651,8 @@ def test_a_cut_system_menu_shows_a_row_under_its_fade(tmp_path, theme, mode, inp
     if sleep:
         ws.idle_ladder = _Ladder()
     ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
-    ws.go_home()
-    ws.set_home_tab("make")
+    ws.home.go_home()
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and _builtin_name(it["path"]) is None)
     _settle(ws, 2)
@@ -677,7 +677,7 @@ def test_the_handheld_more_menu_shows_a_row_under_its_fade(tmp_path, theme, mode
     part of a row, never over the bare card under the rule before Clear."""
     ws = _goldens_ws(tmp_path, theme, mode, inputs)
     ws.open_in_editor(_g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view("paint")
+    ws.text.set_menu_view("paint")
     _settle(ws, 2)
     ws.paint.set_selection(1, 1, 4, 4)
     ws.paint_layer._open_more()
@@ -700,8 +700,8 @@ def test_a_long_press_menu_slides_up_to_fit_whole(tmp_path, theme, mode):
     the engine draws."""
     ws = _goldens_ws(tmp_path, theme, mode, "touch")
     ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
-    ws.go_home()
-    ws.set_home_tab("make")
+    ws.home.go_home()
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and _builtin_name(it["path"]) is None)
     _settle(ws, 2)
@@ -733,8 +733,8 @@ def _projects_own(tmp_path, theme="moy", mode="light", inputs="keys"):
     ws = _g._build(cfg, tmp_path / "carts")
     ws.use_inputs([("local", inputs)])
     ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _settle(ws, 2)
     grid = ws.projects_grid
     grid.sel = next(i for i, it in enumerate(grid.items)

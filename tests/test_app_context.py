@@ -309,7 +309,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     assert boot >= 7, "no role construction counted at boot (%d)" % boot
 
     app = ws._apps_by_id["files"]
-    assert ws.open_app(app)
+    assert ws.spine.open_app(app)
     del built[:]
     for _ in range(24):
         ws.mark_dirty()
@@ -335,7 +335,7 @@ def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
     added."""
     ws = _ws(tmp_path)
     app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
+    assert ws.spine.open_app(app), kind + " has no identity cart"
 
     def quiet_loop():
         _quiesce_frame(ws)
@@ -779,9 +779,9 @@ def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
     settle_badges(ws)                                  # the achievements process takes it
     assert notify.award("konami") is False             # a repeat is no find
     shell = {b[0]: b for b in notify.groups()[0][2]}
-    assert shell["konami"][6] == ws._today_ymd() and shell["decorator"][6] is None
-    assert notify.today() == ws._today_ymd()
-    ws.load_achievements()
+    assert shell["konami"][6] == ws.notices._today_ymd() and shell["decorator"][6] is None
+    assert notify.today() == ws.notices._today_ymd()
+    ws.notices.load_achievements()
     assert notify.groups() is ws.ach.groups()
 
 
@@ -975,10 +975,10 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
             Demo.closed += 1
 
     demo = Demo(ws)
-    ws.register_app(demo)
-    ws.open_app(demo, cart=ws.carts.all[0])
+    ws.spine.register_app(demo)
+    ws.spine.open_app(demo, cart=ws.carts.all[0])
     assert ws.screen == "leaver"
-    ws.go_home()
+    ws.home.go_home()
     assert ws.screen == "launcher"
     assert Demo.closed == 1, "the host did not call close() on the way home"
 

@@ -486,7 +486,7 @@ def test_the_gutter_widening_draws_whole(tmp_path, bufs):
 def _config_session(p):
     """theme Config: typing, the caret moving through the JSON, a held key
     scrolling it, Backspace held."""
-    p.run("ws.open_app(ws._apps_by_id['appearance'])")
+    p.run("ws.spine.open_app(ws._apps_by_id['appearance'])")
     p.frame(3)
     p.run("assert ws.look.edit_file()")
     p.frame(4)
@@ -706,7 +706,7 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
             assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
             shots.append((_cart_pixels(ws), _cart_pmem(ws)))
         runs[name] = shots
-        ws.exit()
+        ws.spine.exit()
     py, lua = runs["python"], runs["lua"]
     for k in range(len(py)):
         assert py[k][1][0] == lua[k][1][0], (k, py[k][1], lua[k][1])

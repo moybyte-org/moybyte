@@ -461,7 +461,7 @@ def test_send_sprites_to_files_producer(tmp_path):
     ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
     ws.run.project.sheet.pset(0, 0, 9)
-    name = ws.send_sprites_to_files()
+    name = ws.saves.send_sprites_to_files()
     assert name in moy_carts.list_files("sprites", carts)
     assert moy_carts.load_file("sprites", name, carts) == ws.run.project.sheet.to_hex()
 
@@ -497,8 +497,8 @@ def test_the_desk_shows_the_places_beside_the_files(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts, sys_size=(1024, 600), panel_diagonal_in=7.0,
                                     font_scale=1, windowed=True)
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["files"])
     drv = host_app.ConsoleDriver(ws)
     _frames(drv, 4)
     app = ws.files_app
@@ -549,8 +549,8 @@ def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
     cfg["theme"] = theme
     ws = g._build(cfg, Path(tmp_path) / "carts")
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws._apps_by_id["files"])
     el._frame(ws, 2)
     win = el._place(ws, "files", (112, 54, 548, 380))
     ws.files_app.open_place("projects", keep="Harpoon Pop")

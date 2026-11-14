@@ -439,7 +439,7 @@ class WindowChrome:
         named = self._page_named(win)
         if named:
             return named                      # the page a shell app names (a story's)
-        base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
+        base = ws.spine.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
         app = ws._apps_by_id.get(win.kind)
         host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
         if host is not None:
@@ -463,7 +463,7 @@ class WindowChrome:
         t = self._win_title(win)
         named = self._page_named(win)
         if named and t == named:
-            t = self.ws.app_title(win.kind) or t  # the chip names the app
+            t = self.ws.spine.app_title(win.kind) or t  # the chip names the app
         for sep in (_SEP_DOT, _SEP_ASCII):
             at = t.find(sep)
             if at > 0 and win.kind == "desktop" and self.ws.run.app_window_canvas:

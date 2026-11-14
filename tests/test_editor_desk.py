@@ -136,7 +136,7 @@ def _place(arr):
 def desk(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
     ws.open_in_editor(cart)
     drv = host_app.ConsoleDriver(ws)
@@ -846,7 +846,7 @@ def test_a_sound_is_renamed_and_its_name_saved_with_the_bank(desk):
     me.undo()
     assert me.bank.sfx[0].name is None
     me.redo()
-    ws.save_sounds()
+    ws.saves.save_sounds()
     import json
     with open(ws.cart["path"] + "/sounds.json") as f:
         assert json.load(f)["sfx"][0]["name"] == "boom"
@@ -916,7 +916,7 @@ def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
 def blocks_desk(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c.get("title") == "Coin Quest")
     ws.open_in_editor(cart)
     drv = host_app.ConsoleDriver(ws)
@@ -1128,9 +1128,9 @@ def test_the_code_panes_file_tabs_switch_the_script(desk, monkeypatch):
     ws, drv = desk
     d = ws.editor_desk
     _tap(drv, ord("2"), 1)
-    monkeypatch.setattr(ws, "code_sources", lambda: ["main.py", "enemies.py"])
+    monkeypatch.setattr(ws.text, "code_sources", lambda: ["main.py", "enemies.py"])
     opened = []
-    monkeypatch.setattr(ws, "open_code_file", lambda name: opened.append(name) or True)
+    monkeypatch.setattr(ws.text, "open_code_file", lambda name: opened.append(name) or True)
     ws.mark_dirty()
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("pane 0 files")
@@ -1211,7 +1211,7 @@ def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
 def _desk_at(path):
     ws = host_app.build_workstation(str(path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
     ws.bar_layer._clock_text = lambda: "10:30"
     drv = host_app.ConsoleDriver(ws)
@@ -1273,7 +1273,7 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
 def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(800, 480),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
@@ -1591,7 +1591,7 @@ def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_
     for warm in (True, False):
         ws = host_app.build_workstation(str(tmp_path / str(warm)), sys_size=(1024, 600),
                                         panel_diagonal_in=7.0, font_scale=1, windowed=True)
-        ws.open_desk()
+        ws.home.open_desk()
         ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
         drv = host_app.ConsoleDriver(ws)
         d = ws.editor_desk

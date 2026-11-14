@@ -24,7 +24,7 @@ bodies those tests call.
 
 What is deliberately NOT here is every genuine difference, which stays in the
 suite that owns it: the P4's windowed-desk tour, its OTA-verifier trio and its
-own cart exit path (`ws.exit()`, so the T-Deck keeps the kid-facing `quit()`
+own cart exit path (`ws.spine.exit()`, so the T-Deck keeps the kid-facing `quit()`
 flag pinned), the Guition's landscape canvas and sync-RPC tests, each board's
 swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 0`, the S3s pin the restore.
@@ -330,7 +330,7 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
     drawing takes (the leave's, or the idle autosave's if it came first) is
     timed on the board, and the file must read back as the page."""
     _home_desk(board)
-    assert board.pyval("ws.open_app(ws._apps_by_id['artwork'])", strict=True)
+    assert board.pyval("ws.spine.open_app(ws._apps_by_id['artwork'])", strict=True)
     board.drain(2.5)
     try:
         board.pyexec(
@@ -347,7 +347,7 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "a._art.save = _paint_timed\n"
             "def _paint_leave():\n"
             "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
-            "    ws.go_home()\n"
+            "    ws.home.go_home()\n"
             "    return 1\n"
             "def _paint_glass(px, py):\n"
             "    w = getattr(ws.wm, '_wins', {}).get('artwork')\n"
@@ -403,10 +403,10 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
 def _home_desk(board):
     """Home, and on a windowed tier the desk again: there home is the
     fullscreen Library, and the next test expects the desk it booted to."""
-    board.pyexec("ws.go_home()", strict=True)
+    board.pyexec("ws.home.go_home()", strict=True)
     board.drain(1.5)
     if board.state().get("desk") is False:
-        board.pyexec("ws.open_desk()", strict=True)
+        board.pyexec("ws.home.open_desk()", strict=True)
         board.drain(1.0)
 
 
@@ -1396,7 +1396,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
     import calendar
     was = board.pyval("ws.system.get('tz')", strict=True)
     try:
-        board.pyval("ws.set_time_zone(%r) or 1" % tz, strict=True)
+        board.pyval("ws.toggles.set_time_zone(%r) or 1" % tz, strict=True)
         st, out = _sh(board, "pkg update", timeout=120)
         if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
             pytest.skip("no network: %r" % out)
@@ -1414,7 +1414,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         assert board.pyval("sorted(ws.leases.holders())", strict=True) == \
             rest_holders(board), "the radio stayed held"
     finally:
-        board.pyval("ws.set_time_zone(%r) or 1" % (was,), strict=True)
+        board.pyval("ws.toggles.set_time_zone(%r) or 1" % (was,), strict=True)
         if was is None:
             board.pyval("ws.system.delete('tz') or 1", strict=True)
 
@@ -2049,7 +2049,7 @@ def draw_gates_take_the_traffic(board, windowed=False):
     board.drain(1.5)
     fills, texts = board.pyval(
         "[sum(c.gate_counts()[i] for c in %s) for i in (0, 1)]" % bufs)
-    board.cmd("py ws.exit()", wait_for="PY")
+    board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(0.5)
     assert fills > 0 and texts > 0, (fills, texts)
 
@@ -2227,15 +2227,15 @@ def web_console_is_baked_into_the_image(board):
 
 
 def _clear_to_console(board, clear):
-    """`clear` ws.exit()s to shut what the tour left open, then -- on the
+    """`clear` ws.spine.exit()s to shut what the tour left open, then -- on the
     windowed tier, the only one that clears -- the desk's PLAY: a launcher
     run goes fullscreen from console mode's home and exits back to it
     (docs/theme_and_shell_2026-11.md §8.1), whatever windows are left parked."""
     for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(0.5)
     if clear:
-        board.cmd("py ws.open_library()", wait_for="PY")
+        board.cmd("py ws.home.open_library()", wait_for="PY")
         board.drain(0.5)
 
 
@@ -2249,10 +2249,10 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     `door` is a real difference between the tiers, not a preference. "quit"
     is the kid-facing `cart_quit` flag the Player honors (the same flag the
     cart API's quit() verb sets), and on a fullscreen tier it pops all the way
-    to the launcher, which is what those boards pin. "shell" is `ws.exit()`,
+    to the launcher, which is what those boards pin. "shell" is `ws.spine.exit()`,
     the desk's own close: on the windowed tier a run started from a
     projects/Settings arrangement does not pop through the flag, so those boards
-    pin the launch and the close instead. `clear` ws.exit()s that many times
+    pin the launch and the close instead. `clear` ws.spine.exit()s that many times
     first, to shut whatever windows the tour above left open, and then enters
     console mode (`_clear_to_console`), so the run is the fullscreen one a
     kid starts from the home.
@@ -2279,7 +2279,7 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     elif door == "quit":
         board.cmd("py ws.input.cart_quit = True", wait_for="PY")
     else:
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(1.5)
     st = board.state()
     assert not st.get("cart"), "%s did not end the run: %r" % (door, st)
@@ -2453,7 +2453,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
         assert bool(st.get("front")) is front and not st.get("cart_error"), \
             "%s did not run again after the soft reset: %r" % (title, st.get("cart_error"))
     finally:
-        board.cmd("end" if st.get("front") else "py ws.exit()", wait_for="REMOTE")
+        board.cmd("end" if st.get("front") else "py ws.spine.exit()", wait_for="REMOTE")
         board.drain(1.5)
 
 
@@ -2524,7 +2524,7 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         elif door == "quit":
             board.cmd("py ws.input.cart_quit = True", wait_for="PY")
         else:
-            board.cmd("py ws.exit()", wait_for="PY")
+            board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(1.5)
 
 
@@ -2783,7 +2783,7 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
     try:
         for _ in range(cycles):
             if hold_link:
-                assert board.pyexec("ws.wifi_hold('link')"), board.last_error
+                assert board.pyexec("ws.spine.wifi_hold('link')"), board.last_error
             # Written raw and waited for by the stop's own line: the stop can
             # print in the same burst as the run's echo, which `cmd` reads
             # past.
@@ -2848,7 +2848,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
         assert board.pyexec(
             "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
             "ws._open_workspace(c)\n"
-            "ws.play(ws.launcher_layer)" % title), board.last_error
+            "ws.spine.play(ws.launcher_layer)" % title), board.last_error
         st = None
         for _ in range(20):
             time.sleep(0.5)
@@ -2859,7 +2859,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
         assert st.get("vm") is not False, st
         # A run with the VM up is the console's to end (the kernel's `end`
         # answers only a run in its front with the VM down).
-        assert board.pyexec("ws.exit()"), board.last_error
+        assert board.pyexec("ws.spine.exit()"), board.last_error
         for _ in range(30):
             time.sleep(0.5)
             st = board.state()
@@ -3601,7 +3601,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
     over, while a cart animates every frame and the WiFi radio is up -- the
     cache sync at each load runs with the other core busy. Every pass must
     return the same cycle count (a stale instruction cache would not)."""
-    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
+    board.cmd("py ws.spine.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         board.cmd("run star", wait_for="REMOTE run")
         board.drain(2.5)
@@ -3624,7 +3624,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
         assert drew > 0, "no frame drew while the loop ran"
         return r, drew
     finally:
-        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
+        board.cmd("py ws.spine.wifi_release('dev')", wait_for="PY", timeout=20)
 
 
 def wasm_low_water_with_radios_up(board, paths):
@@ -3642,14 +3642,14 @@ def wasm_low_water_with_radios_up(board, paths):
     with BLE as it found it."""
     ble_was_up = board.pyval("bool(getattr(%s, 'available', False))" % _ble(board),
                              strict=True)
-    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
+    board.cmd("py ws.spine.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
         board.drain(3.0)
         r = wasm_run(board, paths["hello"], "step", (20000,), loops=20)
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
     finally:
-        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
+        board.cmd("py ws.spine.wifi_release('dev')", wait_for="PY", timeout=20)
         if not ble_was_up:
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
@@ -4181,7 +4181,7 @@ def wasm_app_push(board, board_dir):
     # Pushed code is fixed code: the strikes an earlier run of these left
     # (the crash guard, #160) are forgiven, as a commit forgives them.
     for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
-        board.pyval("ws.app_guard.forgive(ws.app_cart_id(next(c for c in "
+        board.pyval("ws.app_guard.forgive(ws.spine.app_cart_id(next(c for c in "
                     "ws.carts.all if c['title'] == %r))) or 1" % title, strict=True)
     return root
 
@@ -4226,7 +4226,7 @@ def wasm_app_reaches_its_roles(board, root):
         board.leave_cart()
         board.drain(1.0)
     # The run's frames were the kernel's: its end healed the crash guard.
-    strikes = board.pyval("ws.app_guard.strikes(ws.app_cart_id(next(c for c in ws.carts.all "
+    strikes = board.pyval("ws.app_guard.strikes(ws.spine.app_cart_id(next(c for c in ws.carts.all "
                           "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
     assert strikes == 0, "the run's end left %r strikes" % strikes
     hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
@@ -4287,7 +4287,7 @@ def _app_ui_host_pmem(look, tier):
         ws.mark_dirty()
         drv.frame(1.0 / 30.0)
     pm = list(ws.run.player._lua._run.pmem()[1])
-    ws.exit()
+    ws.spine.exit()
     ui_draw.input_kind("keys")      # the host's own again
     return pm
 

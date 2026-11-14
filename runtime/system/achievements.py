@@ -230,7 +230,7 @@ class Link:
 
     def env(self):
         """What the console hands the process, in its namespace."""
-        return {"game": self.game, "clock_day": self.ws._today_ymd,
+        return {"game": self.game, "clock_day": self.ws.notices._today_ymd,
                 "row_stamp": self.stamp}
 
     def game(self, app):
@@ -419,7 +419,7 @@ class Link:
         return self._total
 
     def today(self):
-        return self.ws._today_ymd()
+        return self.ws.notices._today_ymd()
 
 
 def _badges(decl, rec):

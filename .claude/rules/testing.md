@@ -88,7 +88,7 @@ paths:
     written against; a leftover menu or a scrolled shelf makes a fling land on
     a tile, and the failure reads as `['launcher', 'menu'] != launcher` from
     whichever swipe ran first. The windowed boards have a second shape: closing
-    a cart with `ws.exit()` pops through to the bare launcher and the DESK goes
+    a cart with `ws.spine.exit()` pops through to the bare launcher and the DESK goes
     with it (`['launcher', 'desk', 'desktop']` → `['launcher']`, measured
     2026-09-22), and every test then reads `desk` False — six failures from one
     leftover on the attach-only Guition P4, where nothing resets the board at
@@ -109,7 +109,7 @@ paths:
     the others. A tier difference is an ARGUMENT to the shared body, never a
     second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves by
     (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk boards
-    pin `ws.exit()`, because a run started from a desk window does not
+    pin `ws.spine.exit()`, because a run started from a desk window does not
     pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
     window-buffer half only where windows exist.
   - **The dev channel is ONE class** (`runtime/boot/dev_channel.py`) with one

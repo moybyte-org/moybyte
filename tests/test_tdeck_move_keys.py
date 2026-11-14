@@ -118,7 +118,7 @@ def _pixels(drv):
 
 
 def _make_card(ws, t):
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     t.tick(4)
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     t.tick(2)
@@ -155,7 +155,7 @@ def test_a_menu_over_the_code_tab_steps_and_gives_the_tab_its_text_back(tmp_path
     ws, drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     t.tick(2)
     assert ws.input.text_mode
     src = ws.editor.text()
@@ -177,7 +177,7 @@ def test_a_menu_row_that_opens_a_surface_keeps_its_mode(tmp_path):
     ws, _drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     t.tick(2)
     ws.system_key()
     t.tick(2)
@@ -189,7 +189,7 @@ def test_a_menu_row_that_opens_a_surface_keeps_its_mode(tmp_path):
 
 def test_files_rows_step_and_its_rename_field_types(tmp_path):
     ws, drv, t = _console(tmp_path)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws._apps_by_id["files"])
     t.tick(3)
     assert not ws.input.text_mode, "Files' rows are no text surface"
     before = _pixels(drv)
@@ -224,7 +224,7 @@ def test_the_sprite_tab_w_moves_the_cursor_and_e_steps_the_sprite(tmp_path):
     ws, _drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("paint")
+    ws.text.set_menu_view("paint")
     t.tick(2)
     pe = ws.paint
     cur = ws.paint_layer._cur
@@ -240,7 +240,7 @@ def test_the_sprite_tab_w_moves_the_cursor_and_e_steps_the_sprite(tmp_path):
 
 def test_my_art_w_is_no_wallpaper_on_the_tdeck(tmp_path):
     ws, _drv, t = _console(tmp_path)
-    ws.open_app(ws._apps_by_id["myart"])
+    ws.spine.open_app(ws._apps_by_id["myart"])
     t.tick(3)
     calls = []
     art = ws.myart_app

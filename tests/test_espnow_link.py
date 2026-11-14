@@ -1211,7 +1211,7 @@ def test_a_match_plays_while_one_console_serves_ssh(tmp_path, monkeypatch):
     server's hops take at the frame's tail, are glass's to measure."""
     def serving(wss):
         ws = wss[0]
-        ws.wifi_hold("ssh")
+        ws.spine.wifi_hold("ssh")
         ws.link.wlan.ch, ws.link.wlan.assoc = 6, True
 
     worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 900,

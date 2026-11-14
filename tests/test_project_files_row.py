@@ -201,7 +201,7 @@ def test_the_keys_and_the_trackball_step_the_list_and_open_a_row(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.top_is_player() and ws.run.player.ns["ed"].name() == "config.json"
 
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     cl._open_files()
     drv.frame(1 / 30)
     drv.press("a")                               # A on the first row: the main script
@@ -365,7 +365,7 @@ def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):
     assert json.loads(ed.text()) == {}          # the file's real bytes
 
     # and a `.md` beside the main opens in MARKDOWN, not as JSON
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("notes.md")
@@ -382,7 +382,7 @@ def test_leaving_the_handle_returns_to_the_config_tab(tmp_path):
     _frame(ws)
     assert ws.wm.top_is_player()
 
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "menu"
     assert ws.editor_app.tab == "cards"
     assert ws.run.project.cart["path"] == cart["path"]   # the PROJECT, not Notes
@@ -401,12 +401,12 @@ def test_home_ends_the_way_back_to_the_project(tmp_path):
     cl._files_open("config.json")
     _frame(ws)
     assert ws._project_return is cart
-    ws.go_home()
+    ws.home.go_home()
     assert ws._project_return is None
     assert select_on_home(ws, "Notes") is not None
     ws.open()
     _frame(ws)
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.wm.top_kind() == "launcher", "home, not the project's Editor"
 
 
@@ -459,7 +459,7 @@ def test_an_invalid_manifest_is_refused_on_the_soft_save_and_written_on_exit(
 
     # and the LOADER re-validates on the very next read -- which is what the
     # return from the handle does.
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.run.project.cart.get("broken", "").startswith("manifest.json: ")
     assert ws.editor_app.tab == "cards"
 
@@ -475,7 +475,7 @@ def _broken(ws):
     (Path(cart["path"]) / "manifest.json").write_text("{ oops")
     ws.carts.rescan()
     cart = next(c for c in ws.carts.all if c["path"].endswith("fixme.moy"))
-    assert ws.select_cart(cart)
+    assert ws.home.select_cart(cart)
     ws.open()
     return cart
 
@@ -591,7 +591,7 @@ def test_leaving_paint_returns_to_the_config_tab_through_the_loader(tmp_path):
     assert ws._project_return is cart
 
     ws.artwork.save(bytes((5,)) * 16, 4, 4)
-    ws._exit_to_caller()                       # the context-X out of Paint
+    ws.spine._exit_to_caller()                       # the context-X out of Paint
 
     assert ws.wm.top_kind() == "menu" and ws.editor_app.tab == "cards"
     assert ws.run.project.cart.get("path") == cart["path"]

@@ -75,7 +75,7 @@ row), the VM up or stopped; the console's frame finds a run one started
 (`frame`) and follows it as it follows its own.
 
 THE RADIO. While a URL of the list may play, the run holds the radio's
-"media" tag under its own pid (`Workstation.wifi_hold`); its end lets it go
+"media" tag under its own pid (`Spine.wifi_hold`); its end lets it go
 in C (moy_media.c's reap), and this face settles the radio after it. The
 hold is taken after the C's play() begun the list, so a URL waits on the
 service's task for the link (moy_net.h's THE NETWORK'S GATE), MOY_NET_DIAL_MS
@@ -268,7 +268,7 @@ def _hold():
     ws, pid = _D.console, _s["pid"]
     if ws is None or not pid or _holds(ws, pid):
         return
-    ws.wifi_hold(TAG, pid)
+    ws.spine.wifi_hold(TAG, pid)
     _s["radio"] = pid
     dial = getattr(getattr(ws, "cart_net", None), "dial", None)
     if dial is not None:
@@ -356,7 +356,7 @@ def _end():
     _close_file()
     _D.MEDIA[0] = 0
     ws = _D.console
-    settle = getattr(ws, "wifi_settle", None)
+    settle = getattr(getattr(ws, "spine", None), "wifi_settle", None)
     if settle is not None:
         settle()
 

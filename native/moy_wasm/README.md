@@ -723,7 +723,7 @@ check out for a reason that is not tamper evidence (an unsigned module, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
 `runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
 (`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
-UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notice(
+UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notices.notice(
 INTERP_NOTICE_TITLE, sub, "warn")`, where `sub` is `self.interp_cause`
 ("missing", "unsigned" or "firmware") read through `INTERP_NOTICE_SUB`. It
 never blocks the crash panel: the cart is already playing by the time the

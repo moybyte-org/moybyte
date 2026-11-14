@@ -292,7 +292,7 @@ class _BackdropLayer(Layer):
         `notes`) and no registered app has that id, else its whole id."""
         ws = self.ws
         out = [("play", "Play", None), ("projects", "Projects", None)]
-        carts = ws.runs_here(ws.carts.all)
+        carts = ws.home.runs_here(ws.carts.all)
         apps = getattr(ws, "_apps", ())
         for app in apps:
             if app.id in self.HIDDEN_APPS or not getattr(app, "DESK_TILE", True):
@@ -302,9 +302,9 @@ class _BackdropLayer(Layer):
                 if app.is_app(c):
                     cart = c
                     break
-            out.append((app.id, str(ws.app_title(app.id) or app.id.upper()), cart))
+            out.append((app.id, str(ws.spine.app_title(app.id) or app.id.upper()), cart))
         ids = ws._apps_by_id
-        for c in ws.unclaimed_apps(carts):
+        for c in ws.home.unclaimed_apps(carts):
             cid = str(c.get("id") or c.get("title") or "")
             tail = cid.rsplit(".", 1)[-1]
             key = tail if tail in _iconsets.SLOT and tail not in ids else cid
@@ -419,13 +419,13 @@ class _BackdropLayer(Layer):
         set, no registered app's) runs its cart as the home's Apps tab does."""
         ws = self.ws
         if key == "play":
-            ws.open_library()
+            ws.home.open_library()
         elif key == "projects":
-            ws.open_projects()
+            ws.home.open_projects()
         else:
             app = ws._apps_by_id.get(key)
             if app is not None and (cart is None or app.is_app(cart)):
-                ws.open_app(app)
+                ws.spine.open_app(app)
             elif cart is not None:
                 ws.open(cart)
 

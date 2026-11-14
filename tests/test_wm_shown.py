@@ -25,9 +25,9 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
                             lambda self, win, f, c: False)
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     font_scale=2, windowed=True, panel_diagonal_in=7.0)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.wallpaper.is_animating = lambda dt: False
-    assert ws.open_app(ws.artwork_app)
+    assert ws.spine.open_app(ws.artwork_app)
     ws.input.begin_frame()
     ws.frame(1 / 30)
     if full:

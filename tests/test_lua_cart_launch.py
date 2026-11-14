@@ -101,7 +101,7 @@ def test_lua_cart_exit_closes_the_state(tmp_path):
     _open(ws, "Sakura Lua")
     ws.frame(1 / 30)
     lua = ws.run.player._lua
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert ws.run.player._lua is None                        # closed with the run
     assert lua.update is None                            # handle torn down
 

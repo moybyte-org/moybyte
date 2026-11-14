@@ -155,9 +155,9 @@ class CartManager:
             # hit the STALE entry and make it permanent.
             ws.covers.invalidate(paths)
             self.slim(paths)               # #66: bake the new entries' icons, mark them lazy
-            ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
+            ws.launcher.set_items(ws.home._launcher_view_items())   # #105: keep an active filter
             if ws.projects_grid is not None:
-                ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
+                ws.projects_grid.set_items(ws.home._launcher_view_items(ws.projects_grid))
             look = getattr(ws, "look", None)
             if look is not None:
                 look.store_moved()      # the theme packages are carts too
@@ -385,7 +385,7 @@ class CartManager:
         that is left to do is tell the kid why nothing appeared."""
         full = getattr(self.ws.carts_store, "store_full", None)
         if full is not None and full(exc):
-            self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
+            self.ws.notices.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
 
     def delete(self, cart=None):
         """Delete `cart` (a home's Delete), else the OPEN cart (the system

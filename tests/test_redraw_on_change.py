@@ -39,8 +39,8 @@ def _static_code_editor(tmp_path):
     assert ws.launcher.items, "system carts should be seeded"
     ws.launcher.sel = 0
     ws.open()
-    ws._open_menu()
-    ws.set_menu_view("code")
+    ws.text._open_menu()
+    ws.text.set_menu_view("code")
     settle_badges(ws)
     ws._toast_until = 0
     assert ws.menu_view == "code" and ws.editor is not None

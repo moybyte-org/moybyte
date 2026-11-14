@@ -18,6 +18,7 @@ class WS:
     def __init__(self, name=""):
         self.system = Rows(name=name)
         self.held = []
+        self.spine = self            # the console's spine, answered here
 
     def wifi_hold(self, tag):
         if tag not in self.held:  # idempotent per tag, as the console's

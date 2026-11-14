@@ -98,7 +98,7 @@ def _behind(ws, drv):
     """Asker running, minimised on a handheld; Star Catcher in front."""
     asker = _on_screen(ws, drv)
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     open_cart(ws, "Star Catcher")
     _frames(drv)
     assert [p.title() for p in ws.procs.list] == ["Asker"]
@@ -109,7 +109,7 @@ def _behind(ws, drv):
 def _tap_banner(ws, drv):
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
-    assert ws._note_pointer(x + w // 2, y + h // 2, True)
+    assert ws.notices._note_pointer(x + w // 2, y + h // 2, True)
     _frames(drv)
 
 

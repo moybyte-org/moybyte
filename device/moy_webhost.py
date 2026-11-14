@@ -203,7 +203,7 @@ class ConsoleUpdate:
         try:
             # The update screen's lease first: the stop below releases "web",
             # and the radio would power down between the two.
-            ws.wifi_hold("update")
+            ws.spine.wifi_hold("update")
             web = getattr(ws, "web", None)
             if web is not None:
                 # A BARE stop: this path can fail after it (the screen raises
@@ -219,7 +219,7 @@ class ConsoleUpdate:
             self.error = "%s" % exc
             print("UPDATE hand-off failed:", exc)
             try:
-                ws.wifi_release("update")
+                ws.spine.wifi_release("update")
             except Exception:                # noqa: BLE001
                 pass
         return True
@@ -266,7 +266,7 @@ class ConsoleSystem:
         ws = self.ws
         applied, errors, changed = self._rx.apply(ops, ws.system, ws.carts_root)
         if changed:
-            ws.apply_system_keys(changed)
+            ws.spine.apply_system_keys(changed)
         return applied, errors
 
 
@@ -418,7 +418,7 @@ class WebHost:
         if not self.serving:
             return False
         try:
-            ws.wifi_hold("web")
+            ws.spine.wifi_hold("web")
             self._read_auth()
             moy_net.web_auth(self.auth or None)
         except Exception as exc:         # noqa: BLE001 -- the console boots regardless
@@ -683,8 +683,8 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None, port=None):
                    dial=lambda: dial_saved(getattr(ws, "wifi", None)),
                    auth_source=lambda: _system_dir(ws),
                    on_sync=lambda folders: ws.rescan_carts(folders),
-                   on_run=lambda name: ws.launch_named(name),
-                   on_stop=lambda: ws.wifi_release("web"),
+                   on_run=lambda name: ws.home.launch_named(name),
+                   on_stop=lambda: ws.spine.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),
                    on_failed=lambda: ws.web.on_failed(),
                    on_paired=lambda: ws.web.on_paired(),

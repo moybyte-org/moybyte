@@ -67,7 +67,7 @@ def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):
     pl = ws.run.player
     pl._notice = pl.cart_error = chrome_ops.newer_text(["tilemap2"])
     pl._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     p = ws.pause
     assert p.open and p.stopped and not ws.wm.top_is_player()
     assert p.rows == (p.UPDATES, p.HOME)
@@ -79,7 +79,7 @@ def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):
 
 def test_a_fresh_run_puts_a_stop_card_down(tmp_path):
     ws = _stopped(tmp_path)
-    ws._exit_to_caller()
+    ws.spine._exit_to_caller()
     assert not ws.pause.open
 
 

@@ -291,7 +291,7 @@ def _app_ui_host_words(tmp_path):
         ws.mark_dirty()
         drv.frame(1.0 / 30.0)
     words = tier_frame.from_canvas(ws.sys_canvas._buf, True)     # the host keeps panel order
-    ws.exit()
+    ws.spine.exit()
     return words
 
 

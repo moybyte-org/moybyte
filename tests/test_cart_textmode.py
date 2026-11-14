@@ -177,7 +177,7 @@ def test_textmode_resets_on_cart_exit(tmp_path):
 
     # Leaving to the home desktop must drop text mode (don't leak it into the
     # launcher / next cart). go_home() is the device + host exit path.
-    ws.go_home()
+    ws.home.go_home()
     drv.frame(1.0 / 30)                          # the home's key pass: no text surface
     assert ws.input.text_mode is False
     assert drv.in_text_mode() is False           # not on the desktop anymore anyway

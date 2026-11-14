@@ -36,7 +36,7 @@ def _open_paint(ws):
     # Open the first cart that has a sheet, then the paint editor.
     ws.launcher.sel = 0
     ws.open()
-    ws._open_paint()
+    ws.text._open_paint()
     assert ws.menu_view == "paint"
 
 
@@ -242,7 +242,7 @@ def test_release_resets_stroke_so_taps_dont_connect(tmp_path):
 
 def test_save_persists_a_2x2_sprite(tmp_path):
     # Paint a 2x2 sprite, commit, reload from disk: all four constituent tiles
-    # survive. There's no SAVE button (#111) -- ws.save_sprites is the hard-commit
+    # survive. There's no SAVE button (#111) -- ws.saves.save_sprites is the hard-commit
     # verb every exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     from runtime import host_app, moy_carts
     from runtime.editors_sheet import SpriteSheet
@@ -255,7 +255,7 @@ def test_save_persists_a_2x2_sprite(tmp_path):
     ws.paint.color = 14
     for q in ((1, 1), (9, 1), (1, 9), (9, 9)):     # one pixel per quadrant tile
         ws.paint.paint(*q)
-    ws.save_sprites()
+    ws.saves.save_sprites()
 
     reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"],
                                     cols=cols, rows=ws.sheet.rows)
@@ -279,7 +279,7 @@ def _open_map_cart(ws):
     if select_on_home(ws, _MAP_CART) is None:
         raise AssertionError("no seed cart titled " + _MAP_CART)
     ws.open_in_editor()
-    ws._open_map()
+    ws.text._open_map()
 
 
 def _map_cell_center(ws, cx, cy):
@@ -591,4 +591,4 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
     reloaded = TileMap.from_hex(ws.run.project.tilemap.to_hex())
     assert (reloaded.w, reloaded.h) == (ws.run.project.tilemap.w, ws.run.project.tilemap.h)
     assert reloaded.mget(0, 0) == 3
-    ws.save_map()                                  # persists without error
+    ws.saves.save_map()                                  # persists without error

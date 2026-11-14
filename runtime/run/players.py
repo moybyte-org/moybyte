@@ -979,7 +979,7 @@ class EspNowLink:
     def _say_desync(self, ws):
         """The match's desync on the screen: two worlds that disagree are
         said, never left to paint two plausible games."""
-        notice = getattr(ws, "notice", None)
+        notice = getattr(getattr(ws, "notices", None), "notice", None)
         if notice is None:
             return
         try:
@@ -1117,7 +1117,7 @@ def launch_cart(ws, title):
             continue
         if want == str(it.get("title") or "").lower():
             ws.launcher.sel = i
-            ws.launch_selected()
+            ws.home.launch_selected()
             return True
     return False
 

@@ -319,7 +319,7 @@ renders the owner chose from):
 9. **Stop & play.** When the VM must stop for a compiled game and the
    music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
    Cancel (focused) and Stop & play, which stops the stream and opens the
-   game (`Player._music_keeps_the_vm`, `Workstation.ask_stop_music`).
+   game (`Player._music_keeps_the_vm`, `Notices.ask_stop_music`).
 10. The system menu has no Stop music row: the music app's status item is
     where a stream stops.
 
@@ -1936,9 +1936,9 @@ the open one its current mark, so the two read apart; the hint strip names
 the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
 bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
 ends and up goes on to the bar. A trackball roll steps on its stronger axis,
-and mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
+and mid-roll the other axis takes `InputRouter.BALL_TURN` pulses, so a roll
 along the row that drifts a pulse or two down stays on it; a pause frees it
-(`Workstation._ball_roll`).
+(`InputRouter._ball_roll`).
 
 **The Editor's tabs and the bar's items are one row too** (owner call
 2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
@@ -2284,7 +2284,7 @@ relayout) and exit (the desk re-render, the stamps, one full frame) — are
 gated as single-frame maxima. Idle
 stays zero under every layout and in both modes: `tools/p4_bench.py`'s
 `desk idle`, `library idle`, `settings idle` and `app idle` capture no frame,
-and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
+and `ws.perf.note_cost`'s `bar.strip.render` count over an idle minute is one
 (the clock's) (`runtime/shell/console_perf.py`). The carousel's motion cost is
 §8.10's and goes to #66; parked windows' memory and the off-heap census are #58's.
 
@@ -2590,7 +2590,7 @@ records who it is returning to: the run's caller kind (`ws.returns`) for a run
 (the Notes cart), `_project_return` for a project file (which returns through
 the loader), and the app-return (`ws.returns.back()`) for a jump into another
 app's own surface (Paint, a project's Editor) -- popped by
-`Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
+`Spine._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file. Every file draws as its
 monospace source in `ui.text_view` (`runtime/editors/editor_handle.py`): Markdown wraps
@@ -2645,7 +2645,7 @@ foot and after a rule on the desk; any cart holding a handle gets the same verb.
 
 The T-Deck is the writing device (keyboard, trackball as caret, the symbol
 palette for the keys it lacks). **The trackball is the caret in a cart's editor
-handle too, not only in the Code tab**: `Workstation.nav` is the one place that
+handle too, not only in the Code tab**: `InputRouter.nav` is the one place that
 decides, and it answers whether it spent the roll so the board loop can give the
 same pulses to the cursor when nothing holds a caret.
 

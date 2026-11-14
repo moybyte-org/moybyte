@@ -214,7 +214,7 @@ def test_the_backdrop_rasters_once_per_theme_load_on_the_desk(tmp_path):
     assert ws.screen == "desk" and ws.look.wallpaper_id is None
     assert ws.wallpaper.rasters == 1
     assert _at(drv, 200, 595) == M.q("#e5e3f1")       # Day's left disc
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     drv.frame(1 / 30)
     win = ws.wm._wins["calc"]
     for i in range(12):                                # a window moving over it
@@ -277,7 +277,7 @@ def test_the_desk_comes_back_from_console_mode_out_of_its_cache(tmp_path):
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
     ws.look.set_theme("moy", variant="light")
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws._apps_by_id["calc"])
     for _ in range(6):
         drv.frame(1 / 30)
     assert not ws._animating(1 / 30)
@@ -285,11 +285,11 @@ def test_the_desk_comes_back_from_console_mode_out_of_its_cache(tmp_path):
     renders = []
     draw = desk._draw_desktop
     desk._draw_desktop = lambda dt: renders.append(1) or draw(dt)
-    ws.open_library()
+    ws.home.open_library()
     for _ in range(6):
         drv.frame(1 / 30)
     assert ws.wm.mode == "console"
-    ws.open_desk()
+    ws.home.open_desk()
     for _ in range(6):
         drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and "calc" in ws.wm._wins
@@ -443,7 +443,7 @@ def test_the_benchs_backdrop_snippets_run_on_the_host(tmp_path):
     assert ws.wallpaper.rasters - ws._bd_r0 == (1 if now != was else 0)
     nbytes, us = ns["_bd_raster"]("desk")
     assert nbytes == len(ws.look.backdrop("desk")) and us >= 0
-    ws.open_library()
+    ws.home.open_library()
     drv.frame(1 / 30)
     assert ns["_bd_raster"]("home")[0] == len(ws.look.backdrop("home"))
     ws.look.uninstall_theme()

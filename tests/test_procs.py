@@ -26,7 +26,7 @@ def _windowed(ws, drv):
 def _two(tmp_path, a="Star Catcher", b="Brick Siege"):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     open_cart(ws, a)
     wa = _windowed(ws, drv)
@@ -172,7 +172,7 @@ def test_a_crash_in_a_background_game_closes_it_with_a_notice(tmp_path):
     p.player._update = boom
     drv.frame(1 / 30)
     assert ws.procs.list == [] and ws.cart_error is None
-    assert ws.notice_active()
+    assert ws.notices.notice_active()
 
 
 def test_launching_a_running_game_brings_it_forward(tmp_path):
@@ -231,7 +231,7 @@ def _lua_desk(tmp_path, *games):
         _lua_game(carts, *g)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     return ws, drv
 
@@ -358,7 +358,7 @@ def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
     _wasm_game(carts, "Count Two")
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     open_cart(ws, "Count One")
     w1 = _windowed(ws, drv)

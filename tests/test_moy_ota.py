@@ -1085,8 +1085,8 @@ def _dialling_screen(tmp_path, board, monkeypatch):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.updater = board.u
     lease = []
-    ws.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
-    ws.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
+    ws.spine.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
+    ws.spine.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
     labels = []
     real = update_ui._ui.label
     monkeypatch.setattr(update_ui._ui, "label",

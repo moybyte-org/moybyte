@@ -49,7 +49,7 @@ def _lua_twin(ws):
     shutil.rmtree(dst)
     shutil.copytree(LUA_TWIN, dst)
     ws.carts.rescan()
-    ws.load_achievements()
+    ws.notices.load_achievements()
     assert S.SCHED.procs[ws.ach.pid].native
 
 
@@ -121,7 +121,7 @@ def test_a_shell_award_reaches_the_prefs_and_posts(ws):
     assert notes.banner is None             # the unlock banner is its banner
     day, title, icon, hint = _row(ws)["system"]["found"]["first_paint"]
     assert (title, icon, hint) == ("Little Artist", "paint", "Save a drawing")
-    assert day == ws._today_ymd()
+    assert day == ws.notices._today_ymd()
 
 
 def test_the_tick_serves_a_message_the_frame_did_not(ws):
@@ -221,7 +221,7 @@ def test_the_page_lists_by_game_and_keeps_a_deleted_games_badges(ws):
     groups = ws.ach.groups()
     assert [g[:2] for g in groups] == [(A.SYSTEM, "Moybyte"), (GAME, "Harpoon Pop")]
     hp = {b[0]: b for b in groups[1][2]}
-    assert hp["first_clear"][6] == ws._today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
+    assert hp["first_clear"][6] == ws.notices._today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
     assert hp["untouchable"][5] is True and hp["untouchable"][6] is None
     assert ws.ach.count() == 2 and ws.ach.total() == len(A.SHELL) + 4
     cart = next(c for c in ws.carts.all if c.get("id") == GAME)
@@ -425,8 +425,8 @@ def test_with_the_process_stopped_messages_go_nowhere_and_reads_hold(ws):
     assert S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.award("konami") is False
     assert ws.ach.has(A.SYSTEM, "first_run") and ws.ach.count() == 1   # its prefs
-    assert ws.ach.today() == ws._today_ymd()
-    ws.load_achievements()                  # a store load starts it again
+    assert ws.ach.today() == ws.notices._today_ymd()
+    ws.notices.load_achievements()                  # a store load starts it again
     assert ws.ach.running() and ws.ach.has(A.SYSTEM, "first_run")
 
 
@@ -434,7 +434,7 @@ def test_a_load_restarts_the_process_and_keeps_what_it_found(ws):
     first = ws.ach.pid
     ws.ach.award("first_run")
     S.SCHED.tick(0)
-    ws.load_achievements()
+    ws.notices.load_achievements()
     assert ws.ach.pid != first and S.SCHED.procs[first].state == S.EXITED
     assert ws.ach.has(A.SYSTEM, "first_run")
 

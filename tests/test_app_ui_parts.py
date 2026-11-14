@@ -116,10 +116,10 @@ def _open(tier, base, console):
     ws.pointer.visible = False
     ws.bar_layer._clock_text = lambda: "10:30"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c["title"] == _TITLE[tier])
     ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.spine.play(ws.launcher_layer)
     if ws.confirm.open:             # a copied app's consent: Open
         act = ws.confirm._act
         ws.confirm.cancel()
@@ -258,7 +258,7 @@ def pages(tmp_path_factory):
                 out[(console, tier, "drag")] = _drags(ws, drv)
                 if SHOTS:
                     _shot("%s_drag_%s" % (console, tier), *out[(console, tier, "drag")][0][0])
-            ws.exit()
+            ws.spine.exit()
     return out
 
 

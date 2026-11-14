@@ -170,7 +170,7 @@ def test_on_the_vm_the_guard_counts_what_a_call_allocates(tmp_path):
 def _desk_two(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     for t in ("Star Catcher", "Brick Siege"):
         open_cart(ws, t)
@@ -329,7 +329,7 @@ def test_a_minimised_app_keeps_updating_on_a_handheld(tmp_path):
     drv.frame(_DT)
     assert ws.procs._detachable()
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     p = ws.procs.list[0]
     assert p.app and p.state == "minimised" and not p.player.paused
     n = p.player.ns["n"]
@@ -351,16 +351,16 @@ def _start_frames(ws, monkeypatch, held_ms):
     try:
         i.source("kbd").set_button("start", True)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         t = 0
         while t < held_ms:
             now[0] += 100
             t += 100
             i.begin_frame()
-            ws.handle_input()
+            ws.router.handle_input()
         i.source("kbd").set_button("start", False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -432,18 +432,18 @@ def test_a_chord_on_the_console_key_spends_it(tmp_path, monkeypatch):
     try:
         i.source("kbd").set_button("start", True)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button("up", True)      # another key while it is held
         now[0] += 100
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         now[0] += 900
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button("start", False)
         i.source("kbd").set_button("up", False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
     assert ws.screen == "launcher" and not ws.sysmenu.open

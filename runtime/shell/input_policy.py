@@ -209,13 +209,13 @@ class InputPolicy:
         elif kind == "tasks":
             ws.close_tasks()
         elif kind == "menu":
-            ws.exit()
+            ws.spine.exit()
         elif kind == "desktop" or kind in ws._apps_by_id:
             ws.leave_surface(kind)
             app = ws._apps_by_id.get(kind)
             if app is not None and app.BACK_MINIMISES and ws.wm.minimise_kind(kind):
                 return
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
 
     # -- the trackball ---------------------------------------------------------
 
@@ -226,7 +226,7 @@ class InputPolicy:
         but one whose `ball_steps` says otherwise: a running game, a canvas
         whose cursor it moves (the sprite tab and Paint until a popover
         opens, the map, the scene) and a caret, which takes it as arrows
-        (`Workstation.nav`). The desk's windows are pointed at."""
+        (`InputRouter.nav`). The desk's windows are pointed at."""
         ws = self.ws
         if ws._modal_layer() is not None or ws._about:
             return True

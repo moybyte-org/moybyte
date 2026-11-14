@@ -2,7 +2,7 @@
 §1) are this console's: the app carts that may open an item, a cart's key,
 the delivery through Paint's and the text app's doors or a user app's
 `moy_open(h)`, the "open with" menu as `DeleteConfirm.choose`, and a file
-grant's store. A mixin of `Workstation`.
+grant's store. The console's `ws.intents`.
 """
 
 from front import FRONT as _FRONT
@@ -23,7 +23,10 @@ _PICK_ICON = {"docs": "notes", "drawings": "art", "sprites": "sprite", "music": 
               "recordings": "music", "stories": "storybook"}
 
 
-class IntentVerbs:
+class Intents:
+
+    def __init__(self, ws):
+        self.ws = ws
 
     def _init_intents(self):
         """The intents' hooks are this console's (runtime/system/intents.py):
@@ -35,27 +38,31 @@ class IntentVerbs:
         (runtime/system/front.py) reads the run on screen and brings a
         process's run forward as acting on a notification does, and what a
         process asked of it runs at the start of this console's frame."""
-        _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
+        ws = self.ws
+        _INTENTS.bind(self._intent_handlers, ws.spine.app_cart_id, self._intent_deliver,
                       self._intent_ask, self._intent_read, self._intent_write,
-                      self.system, self._intent_list, self._intent_ask_pick,
+                      ws.system, self._intent_list, self._intent_ask_pick,
                       self._intent_hand)
-        _FRONT.bind(self._front_pid, self._bring, True)
+        _FRONT.bind(self._front_pid, ws.notices._bring, True)
 
     def _front_pid(self):
         """The pid of the run the user is in: the front run while its
         window holds the input, else None (the shell's)."""
-        pl = self.run.player
-        if pl is None or pl.pid is None or self.cart is None:
+        ws = self.ws
+        pl = ws.run.player
+        if pl is None or pl.pid is None or ws.cart is None:
             return None
-        return pl.pid if self.wm.input_holder() == _FRONT_KEY else None
+        return pl.pid if ws.wm.input_holder() == _FRONT_KEY else None
 
     def _intent_handlers(self):
-        return [c for c in self.carts.all
+        ws = self.ws
+        return [c for c in ws.carts.all
                 if c.get("type") == "app" and c.get("handles") and not c.get("broken")]
 
     def _intent_app(self, cart):
         """The registered app whose identity `cart` is, else None."""
-        for app in self._apps:
+        ws = self.ws
+        for app in ws._apps:
             if app.is_app(cart):
                 return app
         return None
@@ -67,7 +74,8 @@ class IntentVerbs:
         return "notes" if _system_api.is_text_app(cart) else "app"
 
     def _intent_ask(self, label, carts, then):
-        return self.confirm.choose(_OPEN_WITH, label,
+        ws = self.ws
+        return ws.confirm.choose(_OPEN_WITH, label,
                                    [str(c.get("title") or "") for c in carts],
                                    [self._intent_icon(c) for c in carts], then)
 
@@ -75,6 +83,7 @@ class IntentVerbs:
         """The picker: the console's one question, its title the type asked
         for, a row a file (its name as the Files app shows it, its kind's
         icon), the asking app's title under the title."""
+        ws = self.ws
         title = _PICK_TITLE[-1][1]
         for head, t in _PICK_TITLE:
             if mime.startswith(head):
@@ -86,17 +95,18 @@ class IntentVerbs:
             rows.append(kn[1] if kn else item)
             icons.append(_PICK_ICON.get(kn[0], "doc") if kn else "doc")
         try:
-            who = self.procs.who(pid)[0]
+            who = ws.procs.who(pid)[0]
         except Exception:  # noqa: BLE001 -- a caption is never worth a crash
             who = ""
-        return self.confirm.choose(title, ("For " + who) if who else "", rows, icons, then)
+        return ws.confirm.choose(title, ("For " + who) if who else "", rows, icons, then)
 
     def _intent_list(self, kind):
-        h = self.store
-        if self.carts_store is None or not h.ready():
+        ws = self.ws
+        h = ws.store
+        if ws.carts_store is None or not h.ready():
             return ()
         try:
-            return h.call(lambda: self.carts_store.list_files(kind, self.carts_root))
+            return h.call(lambda: ws.carts_store.list_files(kind, ws.carts_root))
         except Exception:  # noqa: BLE001 -- an unreadable kind lists nothing
             return ()
 
@@ -106,9 +116,10 @@ class IntentVerbs:
         process's the message `moy_open` (moybyte.hand_item: a native
         command's or a service's). True where it took it (None, a cancel,
         reaches it too)."""
+        ws = self.ws
         if pid is None:
             return False
-        pl = self.run.player
+        pl = ws.run.player
         if pl is not None and pl.pid == pid:
             if pl.cart_error is not None:
                 return False
@@ -117,20 +128,22 @@ class IntentVerbs:
         return _moybyte.hand_item(pid, g)
 
     def _intent_read(self, kind, name):
-        h = self.store
-        if self.carts_store is None or not h.ready():
+        ws = self.ws
+        h = ws.store
+        if ws.carts_store is None or not h.ready():
             return None
         try:
-            return h.call(lambda: self.carts_store.load_file(kind, name, self.carts_root))
+            return h.call(lambda: ws.carts_store.load_file(kind, name, ws.carts_root))
         except Exception:  # noqa: BLE001 -- an unreadable file reads as gone
             return None
 
     def _intent_write(self, kind, name, data):
-        h = self.store
-        if self.carts_store is None or not h.writable():
+        ws = self.ws
+        h = ws.store
+        if ws.carts_store is None or not h.writable():
             return False
         try:
-            h.call(lambda: self.carts_store.save_file(kind, name, data, self.carts_root))
+            h.call(lambda: ws.carts_store.save_file(kind, name, data, ws.carts_root))
         except Exception:  # noqa: BLE001 -- the store refused: the grant says so
             return False
         return True
@@ -138,14 +151,15 @@ class IntentVerbs:
     def _intent_keep(self, g, kind):
         """Shared data a shell door opens as a file: written into `kind` as a
         new item named for its type, `(kind, name)`, or None."""
-        h = self.store
-        if self.carts_store is None or not h.writable():
+        ws = self.ws
+        h = ws.store
+        if ws.carts_store is None or not h.writable():
             return None
         ext = ""
         for e, m in _intents.TYPES.items():
             if m == g.mime and e != ".md":
                 ext = e
-        store, root = self.carts_store, self.carts_root
+        store, root = ws.carts_store, ws.carts_root
         try:
             name = h.call(lambda: store.free_file_name(kind, "Shared" + ext, root))
             h.call(lambda: store.save_file(kind, name, g.read(), root))
@@ -158,6 +172,7 @@ class IntentVerbs:
         doors (the shell opens the one file for them), any other app cart
         launched and handed the grant by its `moy_open(h)`. The receiving
         pid, the shell's for a door, or None where nothing opened."""
+        ws = self.ws
         app = self._intent_app(cart)
         door = "paint" if app is not None and app.id == "artwork" else (
             "text" if _system_api.is_text_app(cart) else None)
@@ -169,17 +184,17 @@ class IntentVerbs:
             if kn is None:
                 return None
             if door == "paint":
-                ok = self.open_image(kn[1], kn[0])
+                ok = ws.open_image(kn[1], kn[0])
             else:
-                ok = self.open_text_cart(kn[1], kn[0], _text_modes.mode_for(
+                ok = ws.open_text_cart(kn[1], kn[0], _text_modes.mode_for(
                     _text_modes.file_name(kn[0], kn[1])))
             return _intents.SHELL if ok else None
         if app is not None:
             return None
-        self.open(cart)
-        pl = self.run.player
-        if pl is None or self.cart is None or pl.cart_error is not None \
-                or self.app_cart_id(self.cart) != self.app_cart_id(cart):
+        ws.open(cart)
+        pl = ws.run.player
+        if pl is None or ws.cart is None or pl.cart_error is not None \
+                or ws.spine.app_cart_id(ws.cart) != ws.spine.app_cart_id(cart):
             return None
         if not pl.window_event("moy_open", g):
             return None

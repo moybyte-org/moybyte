@@ -116,7 +116,7 @@ class WindowPaint:
             return
         try:
             cache = self._ensure_backdrop()
-            self.ws.note_cost("desk.backdrop")
+            self.ws.perf.note_cost("desk.backdrop")
             cache.blit_strip(self._root_canvas, 0, 0)
             self._backdrop_valid = True
             self._desk_tile = self.ws.bar_layer.tile_on()
@@ -318,7 +318,7 @@ class WindowPaint:
 
     def app_surface(self):
         """(w, h) of the canvas a window-bound app cart draws on
-        (`Workstation._bind_window_canvas`): the desk's work area, so its
+        (`CanvasBinding._bind_window_canvas`): the desk's work area, so its
         window shows any size of it with no new pixels."""
         _dx, _dy, dw, dh = self._desk_rect()
         return (dw, dh)

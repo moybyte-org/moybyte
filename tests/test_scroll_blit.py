@@ -362,7 +362,7 @@ def test_a_window_drag_takes_the_band_frame(tmp_path):
                                     sys_size=(1024, 600), font_scale=2,
                                     windowed=True)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_projects()
+    ws.home.open_projects()
     for _ in range(80):                      # settle covers
         drv.frame(1 / 30)
     win = ws.wm._wins["projects"]
@@ -390,7 +390,7 @@ def test_set_layout_keeps_the_bands_record(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     for _ in range(60):
         ws.mark_dirty()
         drv.frame(1 / 30)

@@ -118,7 +118,7 @@ class HistoryRouter:
         # The idle-typing debounce (Stage 7 of
         # docs/history/shell_ux_technical_plan_v1.md). `edit_ms` is the ticks of
         # the last keystroke in the code editor (None = no pending edit) and is
-        # a PLAIN PUBLIC ATTRIBUTE because `Workstation.handle_input` stores to
+        # a PLAIN PUBLIC ATTRIBUTE because `InputRouter.handle_input` stores to
         # it on every keypress that reaches the code tab -- one attribute store,
         # never a call, never a forward (doc 3e). `idle_tick()` below fires a
         # durable, INVISIBLE autosave-commit once the tab's quiet window of no
@@ -390,7 +390,7 @@ class HistoryRouter:
             # (SPEC.md 4, #89). Scoping to the OPEN file is the same rule the
             # rest of this table follows -- an undo on p8.lua must not revert
             # the newest commit to main.lua any more than the Map tab's should.
-            return (ws.code_file_name(),)
+            return (ws.text.code_file_name(),)
         if v == "blocks":
             # blocks.json is not itself journaled today (block saves write it straight to
             # disk); main.py IS -- so the pair is walked together and can't desync, and a
@@ -518,7 +518,7 @@ class HistoryRouter:
         view = ws.menu_view
         if ws.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
                                              "blocks", "music"):
-            ws.set_menu_view(view)     # rebuild the active editor from fresh data
+            ws.text.set_menu_view(view)     # rebuild the active editor from fresh data
             if caret is not None and ws.editor is not None:
                 ws.editor.goto_row(caret[0], caret[1])
             if view == "code":

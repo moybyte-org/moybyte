@@ -2,7 +2,7 @@
 roll is the W A S D press it matches and the click is Enter, and no cursor
 shows -- the home and every fullscreen surface; a running game keeps the
 pointer, and a caret takes it as the arrows
-(`Workstation.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
+(`InputRouter.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
 `ball_click`) spend it the way the T-Deck's handle_input does.
 """
 
@@ -31,7 +31,7 @@ def _drv(tmp_path):
 def _roll(drv, dx, dy, pulses):
     """`pulses` frames of a one-pulse roll, then a few frames after it.
     Each is a roll of its own, after the last one stopped."""
-    drv.ws._ball_axis_at -= drv.ws.BALL_ROLLING_MS + 1
+    drv.ws._ball_axis_at -= drv.ws.router.BALL_ROLLING_MS + 1
     drv.pan(dx, dy)
     for _ in range(pulses):
         drv.frame(1 / 30)
@@ -61,7 +61,7 @@ def test_a_roll_over_the_power_popover_steps_and_changes_the_volume(tmp_path):
 
 def test_a_step_is_two_pulses_of_one_roll(tmp_path):
     ws, drv = _drv(tmp_path)
-    ws.BALL_IDLE_MS = 10 ** 6                 # the test's frames are no pause
+    ws.router.BALL_IDLE_MS = 10 ** 6                 # the test's frames are no pause
     seen = []
     real = ws.input.add_steps
 
@@ -149,9 +149,9 @@ def _code_tab(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws._open_menu()
+    ws.text._open_menu()
     if ws.menu_view == "cards":
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     ws.editor.set_text("\n".join("r%02d" % i for i in range(20)))
     drv.frame(1 / 30)
     return ws, drv

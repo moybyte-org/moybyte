@@ -232,7 +232,7 @@ def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
     if cfg.get("console"):
-        ws.open_library()          # the desk's PLAY: console mode
+        ws.home.open_library()          # the desk's PLAY: console mode
     blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
@@ -283,11 +283,11 @@ def capture(cfg, carts_dir):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
     sl.close_page()
 
-    ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    ws.toggles.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
     sl.open_page("tz")
     out["tz_picker"] = page(sl._sub)
     sl.close_page()
-    ws.set_time_zone(None, persist=False)
+    ws.toggles.set_time_zone(None, persist=False)
 
     sl._draw_page()
 
@@ -312,9 +312,9 @@ def capture(cfg, carts_dir):
     ws.usb_drive = None
     sl._draw_page()
 
-    ws.go_home()
+    ws.home.go_home()
     if cfg["windowed"]:
-        ws.open_library()
+        ws.home.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
     for sel in range(len(m.items)):
@@ -349,13 +349,13 @@ def capture(cfg, carts_dir):
     sl.open_page("licences")
     out["licences"] = page(sl._sub)
     sl.close_page()
-    ws.go_home()
+    ws.home.go_home()
     ws.ach.award("konami")
     settle_badges(ws)
     ws._toast_at -= 10000
-    out["banner"] = _shot(ws, lambda: ws._draw_toast())
+    out["banner"] = _shot(ws, lambda: ws.notices._draw_toast())
     ws._notice = ("Moybyte updated", "Now 0.8", "ok")
-    out["notice"] = _shot(ws, lambda: ws._draw_notice())
+    out["notice"] = _shot(ws, lambda: ws.notices._draw_notice())
     ws._notice = None
 
     # The firmware-update screen: every phase it can be in.

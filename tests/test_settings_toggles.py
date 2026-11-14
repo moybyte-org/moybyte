@@ -33,6 +33,7 @@ from pathlib import Path
 
 from runtime.settings_layer import SETTINGS_TOGGLES
 from ws_helpers import build_ws
+from ws_services import services
 from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,10 +49,10 @@ SETTERS = [t[3] for t in SETTINGS_TOGGLES]
 # wiring, which is the failure `test_skin` was written after finding.
 OWNERS = {
     "settings_layer.py": "declares it, and draws the rows from it",
-    "console_spine.py": "the boot apply (load_system, the SpineVerbs mixin)",
-    "console_perf.py": "the flat defaults (_init_perf, the PerfMeters mixin)",
+    "console_spine.py": "the boot apply (load_system, `ws.spine`)",
+    "console_perf.py": "the flat defaults (_init_perf, `ws.perf`)",
     "console_settings.py": "the setters over the one _set_toggle tail (the "
-                           "SettingsToggles mixin) -- the persistence tail",
+                           "`ws.toggles`) -- the persistence tail",
     "dev_channel.py": "the serial words",
 }
 
@@ -71,21 +72,13 @@ def _class(path, name):
 
 
 def _workstation_ast():
-    """Workstation's methods -- its own AND its mixins' (the bases console.py
-    names, each parsed from the runtime module console.py imports it from) --
-    as one ClassDef, so a setter moved onto a mixin is still seen here."""
-    ws, tree = _class(CONSOLE, "Workstation")
-    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
-    modules = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                if alias.name in bases:
-                    modules.setdefault(alias.name, node.module.split(".")[-1])
-    assert set(modules) == bases, "a Workstation base is not imported by name"
+    """Workstation's methods -- its own AND its services' (each class its
+    `__init__` builds over the console, tests/ws_services.py) -- as one
+    ClassDef, so a setter moved onto a service is still seen here."""
+    ws = _class(CONSOLE, "Workstation")[0]
     body = list(ws.body)
-    for name in sorted(bases):
-        body.extend(_class(runtime_file(modules[name] + ".py"), name)[0].body)
+    for _attr, _name, _mod, cls in services():
+        body.extend(cls.body)
     return ast.ClassDef(name="Workstation", bases=[], keywords=[], body=body,
                         decorator_list=[])
 
@@ -136,7 +129,7 @@ def test_every_entry_resolves_on_a_real_console(tmp_path):
         assert hasattr(ws, key), key
         assert isinstance(getattr(ws, key), bool), key
         assert isinstance(default, bool)
-        verb = getattr(ws, setter, None)
+        verb = getattr(ws.toggles, setter, None)
         assert callable(verb), setter
         sig = inspect.signature(verb)
         assert list(sig.parameters) == ["on", "persist"], setter
@@ -329,8 +322,8 @@ def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
     row; the SETTER is what keeps a stale system/settings key from claiming two
     players nothing can drive."""
     ws = build_ws(tmp_path)
-    assert ws.second_keyboard() is None
-    ws.set_two_player(True, persist=False)
+    assert ws.toggles.second_keyboard() is None
+    ws.toggles.set_two_player(True, persist=False)
     assert ws.two_player is False
 
 
@@ -352,7 +345,7 @@ def test_every_toggle_persists_under_its_own_key_and_comes_back(tmp_path):
     for key, _l, default, setter, gate, _dev in SETTINGS_TOGGLES:
         if gate is not None:
             continue
-        getattr(ws, setter)(not default)
+        getattr(ws.toggles, setter)(not default)
         assert ws.system.get(key) is (not default), key
 
     ws2 = host_app.build_workstation(carts)
@@ -367,7 +360,7 @@ def test_the_boot_apply_writes_nothing_back(tmp_path):
     ws = build_ws(tmp_path)
     for key in KEYS:
         ws.system.delete(key)
-    ws.load_system()
+    ws.spine.load_system()
     assert not (set(ws.system.keys()) & set(KEYS)), sorted(
         set(ws.system.keys()) & set(KEYS))
 

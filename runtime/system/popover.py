@@ -390,7 +390,7 @@ class ControlCenter:
             it = _ITEMS.opening
             if it is not None:
                 _ITEMS.opening = None
-                ws.open_status_app(it)
+                ws.notices.open_status_app(it)
                 return
         _ui.group()
         _ui.scroll()

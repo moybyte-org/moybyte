@@ -37,7 +37,7 @@ default, verb, capability gate, serial word -- and console.py and
 dev_channel.py import it back rather than each keeping a hand copy (#209
 section 7). Wallpaper + panel-theme picking is the Appearance app's; Settings
 deep-links to it. The actions Settings hosts delegate OUT to other layers
-(ws.open_app / ws.update_ui.open_update);
+(ws.spine.open_app / ws.update_ui.open_update);
 ws.open_settings / _exit_settings (the lifecycle) stay on ws. The frame the
 verbs draw in is begun by the host side the console hands it
 (the AppHost a shipped app is handed as `ctx.ui`), fed the keys and the
@@ -105,10 +105,10 @@ _SET_ROW_H = 26
 
 
 def _gate_second_keyboard(ws):
-    """LOCAL 2P needs a SECOND keyboard -- see Workstation.second_keyboard: on
+    """LOCAL 2P needs a SECOND keyboard -- see SettingsToggles.second_keyboard: on
     the touch-only boards the paired Bluetooth keyboard IS ws.keyboard, so
     handing it to player two leaves player one with nothing to press."""
-    return ws.second_keyboard() is not None
+    return ws.toggles.second_keyboard() is not None
 
 
 def _gate_crisp_scale(ws):
@@ -240,7 +240,7 @@ _STEPPED = {"steps": True}    # a level row's slider: a segment a level, no numb
 NAME_MAX = 16                 # the Name row's bytes
 _NAME_HINT = {"hint": None}   # the empty Name field shows the default name
 # The caption under the read-only Name where nothing can type (D-24's
-# interim words, `Workstation.can_type`).
+# interim words, `Text.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
@@ -683,7 +683,7 @@ class SettingsLayer(Layer):
         popover): a fresh password field, the radio lease, a rescan."""
         self.wifi_pick = None
         self.wifi_pw = ""
-        self.ws.wifi_hold("settings")  # the radio lease: wifi_leave lets go
+        self.ws.spine.wifi_hold("settings")  # the radio lease: wifi_leave lets go
         self._wifi_rescan()
 
     def wifi_leave(self):
@@ -697,7 +697,7 @@ class SettingsLayer(Layer):
             self.wifi_scanning = False
             self.wifi_joining = None
             self._wifi_unwatch()
-            ws.wifi_release("settings")
+            ws.spine.wifi_release("settings")
 
     def _wifi_back(self, popover=False):
         """BACK out of the panel: to the Settings rows, or out of the popover
@@ -911,7 +911,7 @@ class SettingsLayer(Layer):
             self._wifi_popover(connected, ssid, scroll)
             return
         _ui.page("")
-        if self.wifi_pick is not None and not ws.can_type():
+        if self.wifi_pick is not None and not ws.text.can_type():
             _ui.hints(("back", "Cancel"))     # the prompt has no field and no Connect
         elif self.wifi_pick is not None:
             _ui.hints(("confirm", "Connect", "back", "Cancel"))
@@ -994,7 +994,7 @@ class SettingsLayer(Layer):
         the engine's field (focused as it opens: typing goes in) and Cancel
         and Connect side by side at its foot. Enter in the field connects."""
         title = ("Password for " + str(self.wifi_pick))[:30]
-        if not self.ws.can_type():
+        if not self.ws.text.can_type():
             # nothing in use can type: no field and no Connect a key can't
             # fill (#239 is the on-screen keyboard)
             if _ui.dialog(title, ("Cancel",)) == 0:
@@ -1063,7 +1063,7 @@ class SettingsLayer(Layer):
                 got = k
         _ui.group()
         if got is not None:
-            self.ws.set_time_zone(_wc.ZONES[got][1])
+            self.ws.toggles.set_time_zone(_wc.ZONES[got][1])
             self._drop("tz")
 
     # -- Paired browsers ---------------------------------------------------------------
@@ -1311,7 +1311,7 @@ class SettingsLayer(Layer):
         local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         ws = self.ws
         if key == "appearance":
-            ws.open_app(ws.appearance_app)   # the one appearance surface
+            ws.spine.open_app(ws.appearance_app)   # the one appearance surface
         elif key == "update":
             ws.update_ui.open_update()
         elif key == "update_online":
@@ -1330,7 +1330,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         for t in SETTINGS_TOGGLES:
             if t[0] == key:
-                getattr(ws, t[3])(not getattr(ws, key, False))
+                getattr(getattr(ws, "toggles", None), t[3])(not getattr(ws, key, False))
                 return
 
     def row_index(self, key):
@@ -1389,7 +1389,7 @@ class SettingsLayer(Layer):
             ws.idle_ladder.step(key, d)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
-            ws._cycle_channel(d)
+            ws.toggles._cycle_channel(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.look.cycle_font_scale(d)
@@ -1451,7 +1451,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         out = []
         u = ws.updater
-        v = version_words(u, ws._ota_channel() if u is not None else None)
+        v = version_words(u, ws.toggles._ota_channel() if u is not None else None)
         if v:
             out.append(("Version", v))
         board = board_name()
@@ -1564,10 +1564,10 @@ class SettingsLayer(Layer):
             v = lad.value(key)
             return steps.index(v) if v in steps else 0
         if kind == "channel":
-            return 1 if ws._ota_channel() == "unstable" else 0
+            return 1 if ws.toggles._ota_channel() == "unstable" else 0
         if kind == "level":
             return self.level(key)
-        if kind == "name" and not ws.can_type():
+        if kind == "name" and not ws.text.can_type():
             return _ssh.name(ws)
         return None
 
@@ -1594,10 +1594,10 @@ class SettingsLayer(Layer):
         t = ws.ach.total()
         if (lvl != self._lvl or a != self._ach_n or t != self._ach_t
                 or self._about is not self._about_was
-                or ws.can_type() != self._could_type):
+                or ws.text.can_type() != self._could_type):
             self._lvl = lvl
             self._about_was = self._about
-            self._could_type = ws.can_type()
+            self._could_type = ws.text.can_type()
             moved = True
         if a != self._ach_n or t != self._ach_t:
             self._ach_n = a
@@ -1678,7 +1678,7 @@ class SettingsLayer(Layer):
             cur = v
             got = _ui.seg(s, _STABLE_BETA, cur)
             if got != cur:
-                ws._cycle_channel(got - cur)
+                ws.toggles._cycle_channel(got - cur)
         elif kind == "level":
             self._kinds[s] = "slider"
             cur, lo, hi = v
@@ -1793,7 +1793,7 @@ class SettingsLayer(Layer):
                 i.pressed("home") or i.pressed("b") or i.pressed("stop")):
             return True                   # the page holds while the drive is on
         if i.pressed("home"):
-            ws.home_key()
+            ws.home.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
             ws.input_policy.back(leave=True)

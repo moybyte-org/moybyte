@@ -193,7 +193,7 @@ class _PlayerLayer(Layer):
         ws = self.ws
         if (ws.cart is not None and ws.cart.get("type") == "script"
                 and ws.script_console.reading()):
-            ws._exit_to_caller()
+            ws.spine._exit_to_caller()
             return True
         return ws.run.player.cancel()
 
@@ -224,7 +224,7 @@ class _BlocksLayer(Layer):
 
     def at_top(self):
         """Up goes on to the bar from the outline's first row
-        (Workstation._bar_keys)."""
+        (InputRouter._bar_keys)."""
         bu = self.ws.block_ui
         be = bu.blocks_ed
         return (be is not None and be.cur == 0 and bu.blk_menu is None
@@ -317,7 +317,7 @@ class _MapLayer(Layer):
         ws.map_ui._draw_map()
 
     def at_top(self):
-        """Up goes on to the bar from the map's top row (Workstation._bar_keys)."""
+        """Up goes on to the bar from the map's top row (InputRouter._bar_keys)."""
         return self.ws.map_ui.at_top()
 
     def handle_input(self, i):
@@ -423,7 +423,7 @@ class _MusicLayer(Layer):
         mu._draw_music()
 
     def at_top(self):
-        """Up goes on to the bar from the first step (Workstation._bar_keys)."""
+        """Up goes on to the bar from the first step (InputRouter._bar_keys)."""
         return self.ws.music_ui.at_top()
 
     def handle_input(self, i):
