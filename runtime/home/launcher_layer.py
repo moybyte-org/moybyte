@@ -125,8 +125,6 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         self._beside_drew = []
         # what the hint strip's key was made of, and the key (`_outside_key`)
         self._ok = [None, None, None, None, None, None, None, None]
-        self._search_kprev = 0        # keyboard edge detect while typing a search query
-        self._kprev = 0               # ...and for the carousel home's hint keys
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
         # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
         # shelf granularity): the last full home frame, captured at the END of

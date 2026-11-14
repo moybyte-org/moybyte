@@ -30,7 +30,7 @@ def _keys():
 class _Key:
     """A frame's keys: `n` stepped `k` times (a press, or a held key's
     repeats and a roll's steps beside it)."""
-    last_key = 0
+    last_key = typed = 0
 
     def __init__(self, n, k=1):
         self.n = n

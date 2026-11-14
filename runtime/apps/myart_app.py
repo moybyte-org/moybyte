@@ -139,7 +139,6 @@ class MyArtAppLayer(AppLayer):
         self.toast = None             # (text, icon, until ms)
         self._focus = None
         self._focused = None
-        self._key = 0
         self._cards = None            # (drawings, wallpaper, [card]) as `_cards_of` made them
         self._built = {}              # a drawing's name -> the pictures made for it
         self._pic_wh = None           # a card's picture's size, as the grid drew it
@@ -254,11 +253,8 @@ class MyArtAppLayer(AppLayer):
     # -- input ------------------------------------------------------------------
 
     def handle_input(self, inp):
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(inp, "typed", 0)
+        typed = k != 0
         if self.toast is not None and (typed or inp.any_pressed()):
             self.toast = None
             self._damage.all()

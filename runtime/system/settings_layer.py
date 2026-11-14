@@ -340,7 +340,6 @@ class SettingsLayer(Layer):
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
         self.wifi_pick = None         # ssid being typed for (password mode)
-        self._wifi_seed = None        # the byte held as the prompt opened
         self.wifi_pw = TextEntry(WIFI_PW_MAX)  # the password being typed (its .text)
         self.wifi_msg = ""
         self.wifi_known = []
@@ -829,9 +828,8 @@ class SettingsLayer(Layer):
         ws = self.ws
         self.wifi_pick = ssid
         self.wifi_pw.open("")
-        # the byte that opened the prompt is held: its field never types it
-        self._wifi_seed = getattr(ws.input, "last_key", 0) or 0
         self.wifi_msg = ""
+        ws.input.spend_key()          # the key that picked the net types nothing
         ws._dirty = True
 
     def _wifi_connect(self, ssid, pw, locked=False):
@@ -900,9 +898,6 @@ class SettingsLayer(Layer):
         key, spec §9) and ESC, or B, cancels; in LIST mode the page takes
         the keys and B backs out. True when the panel took them."""
         if self.wifi_pick is not None:
-            if self._wifi_seed is not None:
-                host.key = self._wifi_seed      # the held byte types nothing
-                self._wifi_seed = None
             host.keys(i)
             if host.inp[5] == 27 or i.pressed("b") or i.pressed("stop"):
                 host.inp[5] = 0

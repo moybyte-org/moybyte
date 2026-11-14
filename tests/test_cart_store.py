@@ -1130,7 +1130,7 @@ def _tap(ws, app, verb, arg=None):
 
 def _key(ws, app, k):
     i = _In()
-    i.last_key = k
+    i.last_key = i.typed = k
     app.handle_input(i)
     ws._dirty = True
     ws.frame(1 / 30)

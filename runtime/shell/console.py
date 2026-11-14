@@ -890,7 +890,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # The cart PLAYER (Stage 2, player.py): the run-loop object. Built idle here
         # (BEFORE anything can set the forwarded cart-run fields below), reused across
         # runs (start() re-inits it). The fields it owns -- ns/_update/_draw,
-        # cart_error/crash_line, _cart_start_ms/_cart_key_prev + the Stage-5 exit-gesture
+        # cart_error/crash_line, _cart_start_ms + the Stage-5 exit-gesture
         # state -- live on it now and the cart-run ones are exposed back as forwarding
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
@@ -965,7 +965,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.history = HistoryRouter(self, self.store)
         self.input_policy = InputPolicy(self)
         # (cart/config/sheet/tilemap/images/pmem live on self.run.project now -- Stage 1;
-        # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
+        # ns/_update/_draw/cart_error/crash_line/_cart_start_ms live on
         # self.run.player now -- Stage 2; both exposed as forwarding properties, so
         # ws.sheet/ws.cart_error/... are unchanged.)
         self.paint = None             # PaintEditor while menu_view == "paint"
@@ -2204,7 +2204,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     #
     # The Player owns the running cart's live state now; these forwarding properties
     # delegate reads AND writes to it, so every surface file + test that touches
-    # ws.cart_error / ws.crash_line / ws.ns / ws._update / ws._draw / ws._cart_key_prev
+    # ws.cart_error / ws.crash_line / ws.ns / ws._update / ws._draw
     # is byte-for-byte unchanged (the exact mirror of the Stage-1 project.* forwards
     # above). (_cart_start_ms + the Stage-5 exit-gesture state have no external reader --
     # they stay private on the Player, no forward. cart_paused was retired in Stage 5.)
@@ -2247,14 +2247,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     @_draw.setter
     def _draw(self, value):
         self.run.player._draw = value
-
-    @property
-    def _cart_key_prev(self):
-        return self.run.player._cart_key_prev
-
-    @_cart_key_prev.setter
-    def _cart_key_prev(self, value):
-        self.run.player._cart_key_prev = value
 
     # -- active-tab forward (Stage 3, editor_app.py) --------------------------
     #
@@ -2531,7 +2523,6 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
-        self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.run.textmode = False     # a fresh cart is a game until textmode(True)
         self.input.cart_quit = False  # clear any prior cart's quit() flag so it can't
                                       # immediately pop the freshly opened cart (make_api)
@@ -2743,7 +2734,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         player._draw = con.draw
         player._update = con.driver(player._update)
         self.run.textmode = True       # a script TYPES (`Player.typing`)
-        con.seed_key(getattr(self.input, "last_key", 0) or 0)
+        self.input.spend_key()         # the key that ran it types nothing
         self.play(caller)
         return (True, "")
 

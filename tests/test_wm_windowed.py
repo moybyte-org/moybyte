@@ -3164,7 +3164,7 @@ def test_b_esc_and_home_close_the_popover(tmp_path):
         assert not ws.sysmenu.open, key
     ws.widget_tap("battery")
     esc = _Key(None)
-    esc.last_key = 27
+    esc.last_key = esc.typed = 27
     ws._sysmenu_layer.handle_input(esc)
     assert not ws.sysmenu.open
     assert ws.wm.mode == "desktop"                    # HOME did not show the desk

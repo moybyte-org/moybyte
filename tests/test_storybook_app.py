@@ -19,7 +19,7 @@ _DT = 1 / 30
 class _In:
     def __init__(self, *names, key=0):
         self.names = set(names)
-        self.last_key = key
+        self.last_key = self.typed = key
 
     def steps(self, n):
         return int(bool(self.pressed(n)))

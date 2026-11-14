@@ -458,6 +458,7 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
     drv.frame(1 / 30)
     app = ws.terminal_app
     kinds = ui_draw.input_kind(), ui_draw.hint_kind()
+    ws.use_inputs([("local", "tdeck")])     # the keys typed below are the T-Deck's
     ui_draw.input_kind("tdeck")
     ui_draw.hint_kind("tdeck")
 

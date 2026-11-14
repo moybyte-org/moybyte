@@ -42,7 +42,6 @@ import ui_draw as _ui_draw
 from layers import Layer
 from editor_map import checker as _checker, checker_quads as _checker_quads
 from editors_paint_map import PaintEditor, _pe_line
-from editors_base import KeyEdge
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from array import array
 
@@ -348,7 +347,6 @@ class PaintLayer(Layer):
         self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
         self._shape_start = None      # RECT/LINE/OVAL/SELECT drag origin cell (#90)
         self._shape_end = None        # ...and its current (clamped) end cell, for preview
-        self._ekey = KeyEdge()        # Ctrl+Z/Y edge tracker (undo-shortcut, #90)
         # The grid's cursor (lx, ly): the cell the pointer last pressed or
         # dragged over, moved by the arrows; `a` acts there as a tap would.
         self._cur = [0, 0]
@@ -462,19 +460,15 @@ class PaintLayer(Layer):
             self._cur[0], self._cur[1] = cell
 
     def handle_key(self, i):
-        """The typed keys, edge-tracked so a held key fires once: Ctrl+Z (0x1A)
-        / Ctrl+Y (0x19) undo and redo (#90), and PICO-8's sprite keys
-        (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
+        """The typed keys, a press each (the input table's `typed`, so a held
+        key fires once): PICO-8's sprite keys (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
         Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps, M opens the more menu, and
         Q and W (PICO-8's) or E step to the sprite before and after -- Q and
         E on the T-Deck, where W moves the cursor (moy_kbd.c, THE MOVE KEYS).
         Each has its place on the screen too, so touch reaches every one."""
         pe = self.ws.paint
-        k = getattr(i, "last_key", 0) or 0
-        if pe is None:
-            self._ekey.hit(k)          # keep the edge in sync even with no editor
-            return
-        if not self._ekey.hit(k):
+        k = getattr(i, "typed", 0)
+        if pe is None or not k:
             return
         if k in (0x71, 0x51, 0x77, 0x57, 0x65, 0x45):   # Q, and W or E: the sprite before, after
             pe.select(-1 if k in (0x71, 0x51) else 1)

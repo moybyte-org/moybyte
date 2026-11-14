@@ -340,7 +340,6 @@ class StorybookAppLayer(ListShellApp):
         self.ed = None                # the desk's editor (runtime/apps/story_edit.py)
         self._focus = None
         self._focused = None
-        self._key = 0
         self._edited_at = None
         self._scanned = False
         self._rows = []               # the stories' cards (`_cards`)
@@ -508,12 +507,7 @@ class StorybookAppLayer(ListShellApp):
 
     def _typed(self, inp):
         """The key typed this frame (each press once), or 0."""
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k if k != 0 and k != self._key else 0
-        self._key = k
-        return typed
+        return getattr(inp, "typed", 0)
 
     def handle_input(self, inp):
         k = self._typed(inp)

@@ -273,11 +273,6 @@ def test_ctrl_z_and_y_on_every_editor_tab_are_the_bars(tmp_path, tab, key, monke
 
 OWNER = {"runtime/shell/input_policy.py"}
 INPUT_LAYER = {"runtime/host/moy_input.py", "runtime/shell/web_input.py"}
-# The typed-key edges S3 folds into one published by the input table
-# (docs/refactor_2026-11.md, phase 5) and not yet folded: the code editor's,
-# Paint's shortcuts', the script console's and the prompts' TextEntry.
-KEY_EDGES = {"runtime/editors/editors_base.py", "runtime/editors/code_layer.py",
-             "runtime/editors/paint_layer.py", "runtime/apps/text_console.py"}
 # The board's own keyboard check, which drives the C3 by hand.
 SMOKE = {"firmware/lilygo_t_deck_plus_mainline/modules/tdeck_smoke.py"}
 
@@ -285,7 +280,10 @@ PATTERNS = {
     "the mode setter": (re.compile(r"(?<!\w)_set_text_mode\b|nav\.text_mode\("), set()),
     "a write of text_mode": (re.compile(r"\.text_mode\s*=[^=]"), OWNER | INPUT_LAYER),
     "set_game_mode(": (re.compile(r"\bset_game_mode\("), OWNER | INPUT_LAYER | SMOKE),
-    "KeyEdge(": (re.compile(r"\bKeyEdge\("), KEY_EDGES),
+    "KeyEdge(": (re.compile(r"\bKeyEdge\("), set()),
+    # One typed-key press, the input table's `typed`: a surface spends it
+    # (`spend_key`), it keeps no edge or seed of its own.
+    "a typed-key seed": (re.compile(r"\bseed_(cart_)?key\(|_wifi_seed\b|\.key = seed\b"), set()),
 }
 
 

@@ -98,10 +98,10 @@ class HomeSearch:
         the full grid. Grid nav is intentionally NOT handled here (mirrors the
         wifi panel: while typing, the d-pad doesn't drive anything else)."""
         ws = self.ws
-        k = ws.input.last_key
+        k = ws.input.typed
         if i.pressed("b"):                          # a gamepad's B: the strip's Close
             ws.close_search(clear=True)
-        elif k and k != self._search_kprev:
+        elif k:
             if k in (10, 13):                       # ENTER -> stop typing, keep results
                 ws.close_search(clear=False)
             elif k == 27:                           # ESC -> cancel back to the full grid
@@ -110,5 +110,4 @@ class HomeSearch:
                 ws.set_search_query(ws.search_query[:-1])
             elif 32 <= k <= 126 and len(ws.search_query) < 24:
                 ws.set_search_query(ws.search_query + chr(k))
-        self._search_kprev = k
         return True

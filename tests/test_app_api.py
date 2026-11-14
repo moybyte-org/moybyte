@@ -145,7 +145,7 @@ class _Key:
 
     def __init__(self, name=None, typed=0):
         self.name = name
-        self.last_key = typed
+        self.last_key = self.typed = typed
 
     def steps(self, n):
         return int(bool(self.pressed(n)))

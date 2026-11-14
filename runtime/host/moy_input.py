@@ -172,6 +172,7 @@ _SIGS = (
     ("moy_input_source_typing", [_P, _U32], _I32),
     ("moy_input_release_all", [_P], None),
     ("moy_input_spend_edges", [_P], None),
+    ("moy_input_spend_key", [_P], None),
     ("moy_input_clear_edges", [_P], None),
     ("moy_input_keep_edges", [_P], None),
     ("moy_input_tick_edges", [_P], None),
@@ -183,6 +184,7 @@ _SIGS = (
     ("moy_input_source_name", [_P, _U32, ctypes.c_char_p, ctypes.c_size_t], _I),
     ("moy_input_last_key", [_P], _I32),
     ("moy_input_key_event", [_P], _I32),
+    ("moy_input_key_press", [_P], _I32),
     ("moy_input_set_last_key", [_P, _I32], None),
     ("moy_input_typed", [_I32], _I32),
     ("moy_input_set_mods", [_P, _U32, _U8], _I),
@@ -534,9 +536,16 @@ class InputTable:
         _lib().moy_input_drop_edges(self._t)
 
     def spend_edges(self):
-        """A surface took this frame's edges and steps: none after it sees
-        them, and a held button keeps repeating on its schedule."""
+        """A surface took this frame's edges and steps, `typed` with them:
+        none after it sees them, and a held button keeps repeating on its
+        schedule."""
         _lib().moy_input_spend_edges(self._t)
+
+    def spend_key(self):
+        """A surface took the keyboard: this frame's `typed` is spent, and
+        the byte held now is not a press until it is let go and pressed
+        again."""
+        _lib().moy_input_spend_key(self._t)
 
     def clear_edges(self):
         """`spend_edges`, and every held repeat's delay starts over: the tap
@@ -561,6 +570,13 @@ class InputTable:
     @last_key.setter
     def last_key(self, value):
         _lib().moy_input_set_last_key(self._t, value or 0)
+
+    @property
+    def typed(self):
+        """The byte `last_key` types where it is a fresh press this frame,
+        else 0: the one typed-key edge every surface reads (THE PRESS,
+        native/moy_input/moy_input.h)."""
+        return _lib().moy_input_key_press(self._t)
 
     @property
     def key_event(self):

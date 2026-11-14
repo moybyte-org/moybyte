@@ -235,11 +235,8 @@ class HomeHints:
         """The hint strip's keys, typed (an edge: a held key acts once):
         C, /, N, Y, X and P the verbs it names, Q and E the tabs, F the
         selected card's favourite star."""
-        k = self.ws.input.last_key
-        prev = self._kprev
-        if k != prev:
-            self._kprev = k     # a store on the layer walks its classes: only on a change
-        if not k or k == prev or not (32 < k < 127):
+        k = self.ws.input.typed
+        if not (32 < k < 127):
             return False
         ch = chr(k).lower()
         if ch in ("q", "e"):

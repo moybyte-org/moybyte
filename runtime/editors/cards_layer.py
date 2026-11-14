@@ -75,10 +75,9 @@ class _Prompt:
             self.msg = msg
             self.o["gen"] += 1
 
-    def open(self, texts, seed):
+    def open(self, texts):
         for i in range(len(self.texts)):
             self.texts[i] = str(texts[i])[:self.caps[i]]
-        self.host.key = seed           # the byte that opened it types nothing
 
     def key(self, ch):
         """One typed byte: Tab moves the focus, Enter commits, Esc cancels,
@@ -698,7 +697,7 @@ class CardsLayer(Layer):
         ws = self.ws
         _arm_prompt(ws)
         self.prompt = _Prompt(kind, title, fields, sub, ok)
-        self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        self.prompt.open(texts)
         self.prompt.host.held = self._hold.ok
         ws._dirty = True
 

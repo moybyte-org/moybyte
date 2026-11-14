@@ -977,7 +977,6 @@ class MusicAppLayer(AppLayer):
         self._first = True          # a page or tab opened: its first draw is owed
         self._fresh = False         # this draw is its first
         self._r = array("i", [0] * 4)
-        self._key = 0
         self._load_stations()
 
     # -- the app protocol ------------------------------------------------------
@@ -1592,11 +1591,7 @@ class MusicAppLayer(AppLayer):
     # -- input -------------------------------------------------------------------
 
     def handle_input(self, i):
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        edge = k if k != self._key else 0
-        self._key = k
+        edge = getattr(i, "typed", 0)
         acted = False
         if self.page == "now" and self.stream.card is not None:
             acted = self._now_keys(i, edge)

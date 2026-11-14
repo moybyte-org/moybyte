@@ -453,6 +453,25 @@ class ConsoleDriver:
     def frame(self, dt):
         for name in self._pending:
             self.input.set_held(name, True)
+        # One queued byte per frame, written before the merge publishes its
+        # press (`typed`) -- and in TEXT MODE, never the same byte in two
+        # ADJACENT frames: the press is a byte that differs from the last
+        # merge's (it models the T-Deck's discrete press edges and a BLE
+        # keyboard's held level), so a queued repeat ("ll" in "hello",
+        # backspace-backspace, a soft keyboard's delete autorepeat) ships a
+        # 0 GAP frame between the two, or every second keystroke is dropped.
+        # GAME mode keeps the raw contiguous stream: there a repeated byte IS
+        # the held-key latch the key()/keyp() cart API reads.
+        nxt = 0
+        if self._typed:
+            if (self._typed[0] != self._key_prev
+                    or not getattr(self.input, "text_mode", False)):
+                nxt = self._typed.pop(0)
+        if (nxt == 0 and self._key_held
+                and not getattr(self.input, "text_mode", False)):
+            nxt = self._key_held     # game mode: a held key streams every frame
+        self._src.last_key = nxt
+        self._key_prev = nxt
         # The table's clock is the frames' injected one, so a held key
         # repeats on the same frames on every run.
         self._clock += max(0.0, dt) * 1000.0
@@ -467,25 +486,6 @@ class ConsoleDriver:
             took = self.ws.ball_frame(dx, dy, bc, self.pointer, _pan_px)
             if bc and not took & 2:
                 self._click = True
-        # One queued byte per frame -- and in TEXT MODE, never the same byte in
-        # two ADJACENT frames: the editors' KeyEdge dedups identical consecutive
-        # bytes (it models the T-Deck's discrete press edges + the P4 BLE
-        # keyboard's held level state), so a queued repeat ("ll" in "hello",
-        # backspace-backspace, a soft keyboard's delete autorepeat) must ship a
-        # 0 GAP frame between the two -- or every second keystroke is silently
-        # dropped (found via the phone's Backspace in the code editor). GAME
-        # mode keeps the raw contiguous stream: there a repeated byte IS the
-        # held-key latch the key()/keyp() cart API reads (v0.4 semantics).
-        nxt = 0
-        if self._typed:
-            if (self._typed[0] != self._key_prev
-                    or not getattr(self.input, "text_mode", False)):
-                nxt = self._typed.pop(0)
-        if (nxt == 0 and self._key_held
-                and not getattr(self.input, "text_mode", False)):
-            nxt = self._key_held     # game mode: a held key streams every frame
-        self._src.last_key = nxt
-        self._key_prev = nxt
         self.pointer.down = self._down
         self.pointer.click = self._click
         # The frame is the kernel's (native/moy_kernel/moy_loop.c) on this

@@ -39,7 +39,7 @@ class InputVerbs:
         mode; after, for what the keys moved, so the key that took a text
         surface is swallowed by the switch."""
         policy = self.input_policy
-        policy.begin(self.input)
+        policy.sync()
         self._route_keys()
         policy.sync()
 
@@ -157,7 +157,7 @@ class InputVerbs:
             self.history.edit_ms = _ticks_ms()
         # Ctrl+Z and Ctrl+Y are the bar's UNDO and REDO on every Editor tab:
         # its own steps, then the journal's (`history_router`).
-        k = policy.edge
+        k = i.typed
         if ((k == 0x1A or k == 0x19) and self.wm.input_kind() == "menu"
                 and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
                 and self._modal_layer() is None):

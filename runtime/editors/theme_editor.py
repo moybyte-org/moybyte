@@ -817,24 +817,21 @@ class ConfigLayer(CodeLayer):
         doc = self._doc()
         if doc is None:
             return True
-        k = getattr(i, "last_key", 0) or 0
+        k = i.typed
         app = self.ws.editor_app
-        if k and self._ekey.prev != k:
+        if k:
             mods = getattr(i, "mods", 0)
             if k == 0x09 and mods & _CTRL:
-                self._ekey.hit(k)
                 app.theme_tab(TAB_SPRITES)
                 return True
             if k == 27 and not (self._find_open or self._cmp_open or self._jump_open):
-                self._ekey.hit(k)
                 self.ws.defer(app.close_theme)
                 return True
         if _ui_draw.input_kind() == "pad" and i.pressed("b"):
             self.ws.defer(app.close_theme)          # a gamepad types nothing here
             return True
-        typed = k and self._ekey.prev != k
         got = self._with(CodeLayer.handle_input, self, i)
-        if typed and doc.ed.dirty:
+        if k and doc.ed.dirty:
             doc.saved = False
             doc.note = None
         return got if got is not None else True
@@ -964,7 +961,6 @@ class SpritesLayer(Layer):
         self._args = None
         self._drag = None
         self._shape0 = None
-        self._kprev = 0
 
     def relayout(self, w, h, fs, cs=None):
         self._args = (w, h, fs, cs)
@@ -1231,33 +1227,31 @@ class SpritesLayer(Layer):
         if doc is None:
             return True
         app = ws.editor_app
-        k = getattr(i, "last_key", 0) or 0
-        if k != self._kprev:
-            self._kprev = k
-            if k:
-                mods = getattr(i, "mods", 0)
-                if k == 0x09 and mods & _CTRL:
-                    app.theme_tab(TAB_CONFIG)
-                    return True
-                if k == 27:
-                    ws.defer(app.close_theme)
-                    return True
-                if k == 0x1A:
-                    ws.history.undo()
-                    return True
-                if k == 0x19:
-                    ws.history.redo()
-                    return True
-                if k in (0x71, 0x51):
-                    doc.select(doc.slot - 1)
-                    return True
-                if k in (0x77, 0x57, 0x65, 0x45):
-                    doc.select(doc.slot + 1)
-                    return True
-                op = _KEY_OPS.get(k)
-                if op is not None:
-                    self._op(doc, op)
-                    return True
+        k = i.typed
+        if k:
+            mods = getattr(i, "mods", 0)
+            if k == 0x09 and mods & _CTRL:
+                app.theme_tab(TAB_CONFIG)
+                return True
+            if k == 27:
+                ws.defer(app.close_theme)
+                return True
+            if k == 0x1A:
+                ws.history.undo()
+                return True
+            if k == 0x19:
+                ws.history.redo()
+                return True
+            if k in (0x71, 0x51):
+                doc.select(doc.slot - 1)
+                return True
+            if k in (0x77, 0x57, 0x65, 0x45):
+                doc.select(doc.slot + 1)
+                return True
+            op = _KEY_OPS.get(k)
+            if op is not None:
+                self._op(doc, op)
+                return True
         if i.pressed("b"):
             ws.defer(app.close_theme)
             return True

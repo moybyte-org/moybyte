@@ -433,7 +433,7 @@ class EditorApp:
             self._relayout_tab(view)
         if view == "code":
             # the key that entered the tab types nothing, a re-entry too
-            ws.code_layer.seed_key(getattr(ws.input, "last_key", 0) or 0)
+            ws.input.spend_key()
         ws.ach.used(view)               # Toolbox Master counts code, paint and map
 
     def focus_tab(self, view):
@@ -446,7 +446,7 @@ class EditorApp:
         self.build_tab(view)
         if view == "code":
             # the key that entered the tab types nothing, a re-entry too
-            ws.code_layer.seed_key(getattr(ws.input, "last_key", 0) or 0)
+            ws.input.spend_key()
         ws.ach.used(view)
 
     def _desk(self):

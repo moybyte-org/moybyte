@@ -261,7 +261,6 @@ class FilesAppLayer(ListShellApp):
         self.used_cur = -1
         self._focus = None            # the id focus moves to on the next frame
         self._focused = None          # the focused id as the last frame left it
-        self._key = 0
         # The lists' override tables and what their gens were moved for
         # (docs/history/scroll_and_text_2026-10.md §3.3): a gen moves exactly when
         # what its list draws does, so a frame that only scrolls or steps
@@ -660,14 +659,10 @@ class FilesAppLayer(ListShellApp):
     # -- input ----------------------------------------------------------------
 
     def handle_input(self, inp):
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        if k != self._key and k in (8, 127) and self.dialog is None \
+        if getattr(inp, "typed", 0) in (8, 127) and self.dialog is None \
                 and self._focused == "files" and self._row() is not None \
                 and "DEL" in self._action_labels():
             self._act("DEL")
-        self._key = k
         if inp.pressed("b"):
             self.back()
         if self._ui.keys(inp):

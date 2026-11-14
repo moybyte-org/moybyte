@@ -21,12 +21,13 @@ what its page has focused (the toolkit's `api_typing`, `api_cancel` and
   surface's own page step, then leaving the surface.
 - THE TRACKBALL: whether it steps the holder as W A S D do (`ball_steps`).
 
-THE SWITCH SWALLOWS THE BYTE THAT CAUSED IT. Taking the keyboard for a text
-surface is a screen change, and the key that made it is still in last_key
-when the surface's first frame reads it; `apply` seeds the text surfaces'
-edges with it, so it types nothing, and releasing it and pressing it again
-still types. It runs on a change only: a per-frame seed would swallow the
-keystroke of the frame it ran in.
+THE SWITCH SWALLOWS THE BYTE THAT CAUSED IT. Every surface reads one
+typed-key press, the table's `typed` (THE PRESS, native/moy_input/moy_input.h).
+Taking the keyboard for a text surface is a screen change, and the key that
+made it is still down when the surface's first frame reads it; `apply`
+spends the press (`spend_key`), so it types nothing, and releasing it and
+pressing it again still types. It runs on a change only: a per-frame spend
+would swallow the keystroke of the frame it ran in.
 """
 
 import ui_draw as _ui_draw
@@ -36,8 +37,6 @@ class InputPolicy:
 
     def __init__(self, ws):
         self.ws = ws
-        self._key = 0                 # the last key pass's typed byte
-        self.edge = 0                 # this key pass's byte where it is fresh (`begin`)
 
     # -- who holds the keys ------------------------------------------------------
 
@@ -71,15 +70,6 @@ class InputPolicy:
         s = self.holder()
         return s is not None and bool(s.typing())
 
-    def begin(self, i):
-        """The key pass starts: `edge` is the typed byte where it is a fresh
-        press (a BLE keyboard holds its byte as a level, the T-Deck's comes
-        for one frame), else 0 -- what a shortcut acts on once a press."""
-        k = i.last_key or 0
-        self.edge = k if k != self._key else 0
-        self._key = k
-        self.sync()
-
     def sync(self):
         """The mode the holder wants, applied on a change."""
         on = self.typing()
@@ -88,15 +78,13 @@ class InputPolicy:
 
     def apply(self, on):
         """Put the keyboard in text mode (`on`) or game mode: the table's flag
-        the drivers read, and the board keyboard's mode. A turn to text seeds
-        every typed-key edge with the byte down now, so the key that brought
-        the surface up types nothing into it."""
+        the drivers read, and the board keyboard's mode. A turn to text
+        spends the typed-key press, so the key that brought the surface up
+        types nothing into it."""
         ws = self.ws
         i = ws.input
         if on:
-            k = i.last_key or 0
-            ws.code_layer.seed_key(k)
-            ws.run.player.seed_cart_key(k)
+            i.spend_key()
         i.text_mode = on
         kb = ws.keyboard
         if kb is not None:
@@ -165,7 +153,7 @@ class InputPolicy:
         dialog -- is its back, as `stop` is elsewhere. True where it took it;
         a surface with no page keeps the byte (a game's `key()`, the code
         editor's find strip)."""
-        if self.edge != 27 or not i.text_mode:
+        if i.typed != 27 or not i.text_mode:
             return False
         ws = self.ws
         if ws._modal_layer() is not None or ws.sysmenu.open:

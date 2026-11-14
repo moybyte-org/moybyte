@@ -36,7 +36,7 @@ class T:
     """One typed byte (0 between bytes: the keyboard's edge)."""
 
     def __init__(self, k):
-        self.last_key = k
+        self.last_key = self.typed = k
 
     def steps(self, n):
         return int(bool(self.pressed(n)))

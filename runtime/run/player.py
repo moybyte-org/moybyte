@@ -214,7 +214,7 @@ class Player(PlayerDiag):
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
     injected NAMES like the other surfaces. The cart-run fields it owns
-    (ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev) are exposed
+    (ns/_update/_draw/cart_error/crash_line/_cart_start_ms) are exposed
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
     ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
@@ -267,7 +267,6 @@ class Player(PlayerDiag):
         self._paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
         self._audio_held = 0          # the session the pause took the mix from
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
-        self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
         # #75: the tool/app-vs-game decision is a per-run CONSTANT (the manifest type
@@ -429,19 +428,6 @@ class Player(PlayerDiag):
             m = getattr(self._lua, "mute", None)
             if m is not None and not self.detached:
                 m(on)
-
-    def seed_cart_key(self, code):
-        """Swallow the byte that took the keyboard, on the CART tier.
-
-        `b2ff7de`'s rule, one rung down: handing the keyboard to a text surface
-        is a screen change, and the key that caused it is still in `last_key`
-        when the surface's first frame reads it. The shell's own text surfaces
-        are seeded as the input policy applies text mode
-        (runtime/shell/input_policy.py); this is the same call for a cart's
-        editor handle, and it is a SEED and not a mute -- releasing the key and
-        pressing it again still types."""
-        self._cart_key_prev = code or 0
-        self._keyp_latch = 0
 
     def _keep_grant(self, ctx):
         """Hold the context `make_system_api` built for this run: its grant
@@ -2444,27 +2430,26 @@ class Player(PlayerDiag):
     def _tick_keys(self, ws):
         """The keyboard edge for the cart's key()/keyp(), or for the focused
         editor handle that owns the keyboard instead."""
-        # The keyboard edge for the cart's key()/keyp(): last_key is the
-        # byte held this loop frame (0 when nothing is down); keyp fires on
-        # the 0->key transition, and the edge LATCHES until a logic tick
-        # takes it (#217). Done here (not in InputState) so it is
-        # independent of whether the backend sets last_key before or after
-        # begin_frame().
-        k = ws.input.last_key
+        # key() is last_key, the byte held this loop frame (0 when nothing
+        # is down); keyp() is the table's press (`typed`), which LATCHES
+        # until a logic tick takes it (#217).
+        i = ws.input
+        k = i.last_key
+        e = i.typed
         if self._netplay is not None or self.deaf:
-            k = 0                       # no key() in a match (only buttons cross the air), nor deaf
+            k = e = 0                   # no key() in a match (only buttons cross the air), nor deaf
         fed = self._focus_editor
         if fed is None:
-            ws.input.cart_key = k
-            if k and k != self._cart_key_prev:
-                self._keyp_latch = k
+            i.cart_key = k
+            if e:
+                self._keyp_latch = e
         else:
             # A FOCUSED editor handle owns the keyboard: the byte goes to
             # it and the cart's own key()/keyp() read nothing, so a skin
             # never has to filter the text its editor is eating.
-            ws.input.cart_key = 0
-            if k and k != self._cart_key_prev and not fed.key(k):
-                self._keyp_latch = k    # a key it did not take (Esc) is the cart's
+            i.cart_key = 0
+            if e and not fed.key(e):
+                self._keyp_latch = e    # a key it did not take (Esc) is the cart's
             # a held key types again at the input table's repeat: the
             # handle's, never the cart's key()/keyp()
             n = 0 if self.deaf else getattr(ws.input, "key_repeats", 0)
@@ -2473,8 +2458,6 @@ class Player(PlayerDiag):
                 if r in (8, 9, 10, 13, 127) or 32 <= r < 127:
                     for _ in range(n):
                         fed.key(r)
-        if k != self._cart_key_prev:
-            self._cart_key_prev = k
 
     def _lockstep_step(self, ws, dt):
         """The #65 lockstep gate for this frame: (dt, stalled, session). With

@@ -1070,13 +1070,16 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
 
     ws.input.last_key = 0x1A                # Ctrl+Z held (level, not an edge)
     for _ in range(5):                      # ... across five frames
+        ws.input.begin_frame()
         ws.handle_input()
     assert len(me._undo) == 1               # exactly ONE undo fired
     assert me.cur_step()[0] == 40
 
     ws.input.last_key = 0                   # release ...
+    ws.input.begin_frame()
     ws.handle_input()
     ws.input.last_key = 0x1A                # ... and a fresh press is a new edge
+    ws.input.begin_frame()
     ws.handle_input()
     assert len(me._undo) == 0               # the second undo landed
     ws.input.last_key = 0

@@ -301,7 +301,7 @@ def test_no_property_forwards_to_a_collaborator():
 LEGACY_PROPERTY_FORWARDS = {
     "project": {"cart", "config", "images", "pmem", "scenes",
                 "sheet", "tilemap"},
-    "player": {"_cart_key_prev", "_draw", "_update",
+    "player": {"_draw", "_update",
                "cart_error", "crash_line", "ns"},
     "editor_app": {"menu_view"},
     "wm": {"screen"},

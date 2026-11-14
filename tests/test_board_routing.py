@@ -165,7 +165,7 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     the mode flip itself is executed in tests/test_cart_textmode.py and
     tests/test_tdeck_input.py."""
     src = runtime_file("console_input.py").read_text(encoding="utf-8")
-    assert "policy.begin(self.input)" in src and src.count("input_policy.sync()") >= 1
+    assert src.count("policy.sync()") >= 2 and src.count("input_policy.sync()") >= 1
 
 
 def test_kid_mode_gates_diag_frame_eaters():

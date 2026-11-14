@@ -29,15 +29,14 @@ path rather than a bar tap, #111; run_code stays PLAY's own explicit-run entry p
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
-code-UI state (the keyboard edge tracker _ekey, and the host whose page draws the
-rows through `ui.text_view`). ws.nav (the trackball-caret handler, called by both the host
+code-UI state (the host whose page draws the rows through `ui.text_view`); a
+typed byte is the input table's press (`typed`), one per physical press. ws.nav (the trackball-caret handler, called by both the host
 + device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
 + the MicroPython-safe syntax highlighter live here (single source; console.py imports
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
 injected.
 """
 from editors_code import CodeEditor
-from editors_base import KeyEdge
 from array import array as _array
 
 import ui as _ui
@@ -300,7 +299,6 @@ class CodeLayer(Layer):
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         # The code's rows: `ui.text_view` on this host's page (its context
         # keeps the view's scroll and record, docs/history/scroll_and_text_2026-10.md
         # §5), the buffer it shows, and the first line the view showed last,
@@ -350,25 +348,14 @@ class CodeLayer(Layer):
         self._files_sel = 0           # the highlighted row (opens on the current file)
         self._ov_host = _ui_draw.AppHost()   # the overlays' UI context (look step 33)
 
-    def seed_key(self, k):
-        """The byte that was live when this surface took the keyboard is NOT a
-        keystroke of its own. Called by the input policy on the switch into
-        text mode (`InputPolicy.apply`) -- the key that entered the Code tab is
-        still in last_key when the editor's first frame reads it, and a zeroed
-        edge tracker types it. Seeding, not resetting: an already-down byte
-        has to look like the PREVIOUS one, so releasing and pressing it again
-        still types."""
-        self._ekey.prev = k
-
     def reset(self):
-        """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
-        is (re)built) so the first key press after opening registers. Also drops the
+        """Called by ws.set_menu_view when the editor is (re)built: drops the
         transient #89 modes so a freshly-opened editor is in a clean state.
 
-        The tracker is seeded with the live byte, so a fresh editor does not
-        type the key that opened it, even where the keyboard was already in
-        text mode (re-entering the Code tab)."""
-        self._ekey.seed(getattr(self.ws.input, "last_key", 0) or 0)
+        The key down as it opens is spent (`spend_key`), so a fresh editor
+        does not type the key that opened it, even where the keyboard was
+        already in text mode (re-entering the Code tab)."""
+        self.ws.input.spend_key()
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
@@ -613,15 +600,14 @@ class CodeLayer(Layer):
     # -- input ---------------------------------------------------------------
 
     def _editor_input(self):
-        # Feed the typed key to the editor, one insert per physical press: the
-        # keyboard reports the byte for the frame it is down then 0, so acting on
-        # the 0->key edge (key != previous) avoids autorepeat.
+        # Feed the typed key to the editor, one insert per physical press (the
+        # input table's `typed`), its held repeats after.
         ws = self.ws
         ed = ws.editor
         if ed is None:
             return
-        k = ws.input.last_key
-        if self._ekey.hit(k):
+        k = ws.input.typed
+        if k:
             self._typed(ed, k)
         # A held key types again at the input table's repeat (a count beside
         # the frame, never a second edge): text keys only, never into a popup.

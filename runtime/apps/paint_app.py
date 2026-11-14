@@ -263,7 +263,6 @@ class PaintAppLayer(PaintDraw, AppLayer):
         self._down = False            # the pointer pressed on the drawing
         self._panning = None          # (x, y) a Move drag last stood at
         self._held = 0                # frames an arrow has been held
-        self._key = 0
         self._space = False
         self._drawing_key = False     # `a` held, drawing at the cursor
         self._rng = 0x5EED123
@@ -649,11 +648,8 @@ class PaintAppLayer(PaintDraw, AppLayer):
         return self.pop is not None
 
     def handle_input(self, inp):
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(inp, "typed", 0)
+        typed = k != 0
         if self.toast is not None and (typed or inp.any_pressed()):
             if typed and k == 0x1A and self.toast[3] is not None:
                 self.toast[3]()                 # Ctrl+Z on "Added as slide 6 ... Undo"
@@ -737,7 +733,7 @@ class PaintAppLayer(PaintDraw, AppLayer):
             y = max(0, min(7, c // 8 + dy))
             self.swatch = y * 8 + x
             self._damage.all()
-        if inp.pressed("a") or inp.pressed("run") or self._key == 0x0D:
+        if inp.pressed("a") or inp.pressed("run") or inp.last_key == 0x0D:
             self.color = self.swatch
             self.pop = None
             self._ui.reset()

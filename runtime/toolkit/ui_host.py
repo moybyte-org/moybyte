@@ -88,7 +88,6 @@ class AppHost:
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
         self.hold = False               # the pointer is down since the press
         self.owed = False
-        self.key = 0                    # the key typed last frame (a press is its change)
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
         # What the frames before left of the page in their buffers, the
@@ -133,7 +132,6 @@ class AppHost:
         self.tap = 0
         self.hold = False
         self.owed = False
-        self.key = 0
 
     def keys(self, i):
         """Take this frame's buttons and typed key from input state `i`."""
@@ -142,13 +140,10 @@ class AppHost:
         for n in range(len(_HOST_BUTTONS)):
             if i.pressed(_HOST_BUTTONS[n]):
                 b |= 1 << n
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
+        k = getattr(i, "typed", 0)      # the engine sees each press once
         a[0] = a[1] = b
-        typed = k != 0 and k != self.key
-        self.key = k
-        a[5] = k if typed else 0        # the engine sees each press once
+        typed = k != 0
+        a[5] = k
         a[6] = getattr(i, "mods", 0) or 0
         a[7] = getattr(i, "wheel_x", 0)
         a[8] = getattr(i, "wheel_y", 0)
@@ -840,7 +835,7 @@ def text_at(host, id, x, y):
 class _Wheel:
     """A frame's input carrying the wheel alone (`AppHost.wheel`)."""
 
-    last_key = mods = rep_word = key_repeats = repeat_key = pointer_buttons = 0
+    last_key = typed = mods = rep_word = key_repeats = repeat_key = pointer_buttons = 0
 
     def __init__(self):
         self.wheel_x = self.wheel_y = 0

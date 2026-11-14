@@ -121,7 +121,6 @@ class LicencesPage:
         self._gen = -1                # ... in this look
         self._top = 0                 # the first line shown
         self._rows = 0                # the lines that show
-        self._key = 0                 # the key typed last frame (a press is its change)
         self._foot_of = None          # the desk foot's entry, and what it says
         self._foot_status = ""
         self._focus = None
@@ -150,14 +149,10 @@ class LicencesPage:
     def keys(self, i):
         """The text's scroll: the arrows on a handheld's text page, PgUp and
         PgDn on the desk. True where it took the keys."""
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(i, "typed", 0)
         step = 0
         if _desk():
-            if typed and k in (KEY_PGUP, KEY_PGDN):
+            if k in (KEY_PGUP, KEY_PGDN):
                 step = (self._rows - 2) * (1 if k == KEY_PGDN else -1)
         elif self.entry is not None:
             if i.steps("down"):

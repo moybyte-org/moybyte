@@ -711,14 +711,12 @@ class BlockEditorUI:
         """Open an entry prompt as `self.blk_kbd`: `kind` routes the keypad
         (num / text / var / list / proc / param) and picks which characters
         its TextEntry accepts; `fields` are the prompt's own facts (the slot or
-        variable it edits). Opened through widgets.arm_prompt with a GUARDED
-        edge (#29): the tap/key that opened it is never its first keystroke."""
+        variable it edits). Opened through widgets.arm_prompt (#29): the
+        tap/key that opened it is never its first keystroke."""
         entry = TextEntry(16, _BLK_KBD_ALLOW.get(kind, _blk_name_allow))
         _arm_prompt(self.ws)
-        seed = getattr(self.ws.input, "last_key", 0) or 0
-        entry.open(text, seed, guard=True)
+        entry.open(text)
         host = _ui_draw.AppHost()
-        host.key = seed                # the byte that opened it types nothing
         host.held = self._hold.ok
         self._kbd_gen += 1
         fields["gen"] = self._kbd_gen

@@ -76,6 +76,7 @@ def test_undo_redo_keyboard_shortcut_in_code_editor(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     _open_code_and_commit(ws, V1)
     _open_code_and_commit(ws, V2)
+    drv.frame(1 / 30)                       # the Code tab takes the keyboard
 
     drv.type_char(0x1A)                     # Ctrl+Z
     drv.frame(1 / 30)

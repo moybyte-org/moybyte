@@ -276,9 +276,9 @@ class CalcAppLayer(AppLayer):
     # -- input -----------------------------------------------------------------
 
     def handle_input(self, i):
-        ch = i.last_key
+        ch = getattr(i, "typed", 0)
         if ch:
-            c = chr(ch) if isinstance(ch, int) else str(ch)
+            c = chr(ch)
             if c.isdigit() or c in "+-*/=%":
                 self._key(c)
             elif c in ("\b", "\x7f"):
