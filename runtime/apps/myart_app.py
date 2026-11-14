@@ -33,6 +33,7 @@ from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
 from picture_copies import PictureCopies
 from drawing_pages import GamePage, shown, dot
 from ticks import _ticks_ms, _ticks_diff
+import intents as _intents
 
 
 DRAWINGS = "drawings"
@@ -283,13 +284,18 @@ class MyArtAppLayer(AppLayer):
         self.toast = (text, icon, _ticks_ms() + TOAST_MS)
         self._damage.all()
 
+    def _open(self, name):
+        """A drawing to the app that opens pictures, by the intents' route
+        (runtime/system/intents.py), as Files' OPEN goes."""
+        _intents.INTENTS.open_with(_intents.SHELL, _intents.item_of(DRAWINGS, name), False)
+
     def _verb(self, verb, name=None):
         name = name or self.cur
         files = self._files
         if verb == "new":
             got, err = files.new_name(DRAWINGS)
             if err is None:
-                self._nav.open_image(got, DRAWINGS)
+                self._open(got)
             return
         if verb == "menu":
             if name is not None:
@@ -299,7 +305,7 @@ class MyArtAppLayer(AppLayer):
         if name is None:
             return
         if verb == "open":
-            self._nav.open_image(name, DRAWINGS)
+            self._open(name)
         elif verb == "wallpaper":
             if self.copies.set_wallpaper(name):
                 self.wallpaper = name
