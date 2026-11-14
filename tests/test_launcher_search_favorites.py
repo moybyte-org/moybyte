@@ -148,7 +148,7 @@ def _search_frame(ws, drv, kind, typed=""):
         return real_hints(c, th, rect, items, *a, **kw)
     cv.print, ui_draw.hints = spy_print, spy_hints
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         cv.print, ui_draw.hints = real_print, real_hints

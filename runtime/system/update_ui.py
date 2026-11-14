@@ -26,7 +26,7 @@ The split follows the same discipline as the console's other sub-UIs:
 
 Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
-  * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
+  * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws.frame_state.dirty,
                              ws.go_home,
                              ws._mini_btn, ws._ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
@@ -79,7 +79,7 @@ class UpdateUI:
         """Open the firmware-update screen: scan SD for an image to install. Lands on
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         u = self.ws.updater
@@ -104,7 +104,7 @@ class UpdateUI:
         the link's dial is polled there a frame at a time, so the screen keeps
         drawing and B cancels it."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         self._online_manifest = None
@@ -124,7 +124,7 @@ class UpdateUI:
         this is capability-gated on it). check -> confirm -> download -> flash
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         if getattr(self.ws, "c6_updater", None) is None:
@@ -160,7 +160,7 @@ class UpdateUI:
         u = self.ws.updater
         if u is None or not self._online_manifest:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         try:
             u.begin_download(self._online_manifest)
             self._upd_phase = "downloading"
@@ -190,7 +190,7 @@ class UpdateUI:
                 pass
         self.ws.wifi_release("update")        # the screen was the radio's reason
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _in_slot(self):
         """True when the image is already in the inactive slot (streamed there and
@@ -204,7 +204,7 @@ class UpdateUI:
         u = self.ws.updater
         if u is None or not self._upd_bin:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if self._in_slot():
             if u.finish():
                 self._upd_phase = "done"
@@ -274,7 +274,7 @@ class UpdateUI:
         cu = getattr(self.ws, "c6_updater", None)
         if cu is None or not cu.offer:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         try:
             cu.begin_download()
             self._upd_phase = "c6_downloading"

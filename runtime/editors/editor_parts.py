@@ -123,7 +123,7 @@ def actor(desk, r, u):
         changed = True
     if changed:
         su._sync_live()
-        ws._dirty = True
+        ws.mark_dirty()
         desk._owe_restart("scene")
 
 
@@ -174,7 +174,7 @@ def sounds(desk, r, u):
                 me.toggle_view()
             me.sfx_idx = got - 1
             me.step = 0
-        ws._dirty = True
+        ws.mark_dirty()
     if len(items) * rh > lr[3]:
         return                      # the list scrolls in its rect: no sketches over it
     t = me.cur_track()
@@ -197,7 +197,7 @@ def sounds(desk, r, u):
                     me.toggle_view()
                 me.sfx_idx = k
                 mu._play_music_preview()
-            ws._dirty = True
+            ws.mark_dirty()
 
 
 def _sketch(cv, th, s, x, y, w, h, u):
@@ -229,7 +229,7 @@ def sounds_header(desk, pid, tx, y, hh, u):
         if me.view != me.SFX_VIEW:
             me.toggle_view()
         me.select_sfx(len(me.bank.sfx) - me.sfx_idx)
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
     return tx
 
 
@@ -287,7 +287,7 @@ def song(desk, r, u):
             if not on:
                 me.toggle_view()
             me.select_cursor(k)
-            ws._dirty = True
+            ws.mark_dirty()
         heard = 0 <= sid < len(me.bank.sfx)
         ui.at(cx + 6 * u, cy + 4 * u, cw - 12 * u, lh)
         ui.label(Sound.row_label(me, sid) if heard else "-", _INK if heard else _DIM)
@@ -332,7 +332,7 @@ def song_do(desk, op):
         me.select_track(-1)
     elif op == "song+" and me.track_idx + 1 < len(me.bank.music):
         me.select_track(1)
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
 
 
 # -- the block palette ---------------------------------------------------------------
@@ -424,7 +424,7 @@ def palette(desk, r, u):
                       {"id": "block categories %d" % side})
         if got is not None and got >= 0 and got != cur:
             cat = st["block cat"] = part[got][0]
-            ws._dirty = True
+            ws.mark_dirty()
         for k, (key, _l) in enumerate(part):
             d = 8 * u
             cv.rrect(cx + 5 * u, y + 6 * u + k * rh + (rh - d) // 2, d, d, 2 * u,
@@ -477,7 +477,7 @@ def add_block(desk, item):
         bu._blk_insert_call(item[len(_CALL):])
     else:
         bu._blk_insert_chosen(item)
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
 
 
 # -- the code the blocks make ----------------------------------------------------------
@@ -520,7 +520,7 @@ def scroll(desk, c, d):
         cx, cy = st.get("ref cell", (0, 0))
         st["ref view"] = (vx, max(0, vy + 3 * d))
         st["ref cell"] = (cx, max(0, cy + 3 * d))
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
         return True
     return False
 
@@ -541,7 +541,7 @@ def _foot(desk, r, u, call, id):
     if ui.button("Insert", "normal", {"id": id}) and ws.editor is not None:
         ws.history.code_burst_open()
         ws.editor.insert_text(call)
-        ws._dirty = True
+        ws.mark_dirty()
 
 
 def ref_sounds(desk, r, u):
@@ -568,7 +568,7 @@ def ref_sounds(desk, r, u):
                   {"id": "ref sounds"})
     if got is not None and 0 <= got < n and got != cur:
         cur = st["ref sound"] = got
-        ws._dirty = True
+        ws.mark_dirty()
     if n * rh <= lr[3]:
         playing = mu.music_preview
         for k, s in enumerate(me.bank.sfx):
@@ -586,7 +586,7 @@ def ref_sounds(desk, r, u):
                         au.sound_stop()
                         au.sfx(k)
                         mu.music_preview = ("sfx", k)
-                ws._dirty = True
+                ws.mark_dirty()
     _foot(desk, r, u, "sfx(%d)" % cur, "insert sfx")
 
 
@@ -706,7 +706,7 @@ def goto(desk, name, row):
     for n, (pane, _r, _p) in enumerate(desk.panes()):
         if "code" in pane:
             desk.focus_pane(n)
-    ws._dirty = True
+    ws.mark_dirty()
 
 
 def pointer(desk, c, r, u, px, py, click, down):
@@ -720,7 +720,7 @@ def pointer(desk, c, r, u, px, py, click, down):
     st = desk.part_state
     vx, vy = st.get("ref view", (0, 0))
     st["ref cell"] = (vx + (px - mx) // tw, vy + (py - my) // tw)
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
     return True
 
 
@@ -736,5 +736,5 @@ def keys(desk, c, i):
     st = desk.part_state
     cx, cy = st.get("ref cell", (0, 0))
     st["ref cell"] = (cx + dx, cy + dy)
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
     return True

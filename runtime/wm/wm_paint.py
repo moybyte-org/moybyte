@@ -1249,7 +1249,7 @@ class WindowPaint:
 
         "Provably" is three facts together:
 
-        - Nothing marked the UI dirty. ws._dirty is still readable during the
+        - Nothing marked the UI dirty. ws.frame_state.dirty is still readable during the
           draw -- frame() clears it AFTER -- so a False here means no input or
           state handler reported a visible change this frame. MODE_MARK, the
           home's X bringing the desk back, is the WM's own and no change.
@@ -1294,7 +1294,7 @@ class WindowPaint:
                 return False
             if win.buf is None or win._buf_stale:
                 return False
-        d = ws._dirty
+        d = ws.frame_state.dirty
         if d and d is not MODE_MARK:
             return False
         if win._marked != self._marks_for(win):

@@ -1092,12 +1092,12 @@ def _app_ws(tmp_path, net, indexes=None):
 
 def _frames(ws, app, n=40):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         # ...and the covers the shelf fetches once it shows.
         if app.phase not in ("checking", "licence_fetch", "connecting", "getting") \
                 and not app._covers and app._tail is None:
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30)
             return
     raise AssertionError("the app is still busy: %s" % app.phase)
@@ -1113,7 +1113,7 @@ def _box(app, verb, arg=None):
 def _tap_at(ws, app, x, y):
     app.handle_pointer(x, y, True)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
 
 
@@ -1132,7 +1132,7 @@ def _key(ws, app, k):
     i = _In()
     i.last_key = i.typed = k
     app.handle_input(i)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     app.handle_input(_In())
 
@@ -1165,7 +1165,7 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
     _open(ws, app)
     app._tap_row(1)                               # Jet Pot
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.phase == "cart"
     _tap(ws, app, "btn", "GET")
@@ -1173,7 +1173,7 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     for _ in range(40):
         if app.phase == "getting" and not app.job.finished:
             held.append("carts" in ws.leases.holders())
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         if app.phase == "done":
             break
@@ -1195,13 +1195,13 @@ def test_a_cart_with_an_external_file_asks_first_and_no_is_no(tmp_path):
     _tap(ws, app, "btn", "GET")
     _frames(ws, app)
     assert app.phase == "licence"
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app._focused == "verb No", "No must have the focus on a licence"
     assert any("fun" in ln for ln in app.lic[1])
     assert "carts" in ws.leases.holders()            # held through the reading
     app.handle_input(_In("a"))                    # A on the focused No
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.phase == "cart" and app.toast[0] == "Not fetched"
     assert "carts" not in ws.leases.holders()
@@ -1251,7 +1251,7 @@ def _lic_open(ws, app):
 
 def _well(ws, app):
     """The licence's well as the last frame drew it: (x, y, w, h)."""
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     b = app._ui.box("Licence")
     assert b is not None, "no licence well drawn"
@@ -1266,11 +1266,11 @@ def _lic_drag(ws, app, x, y0, dy, steps=8):
     app.handle_pointer(x, y0, True)                # press edge
     for i in range(1, steps + 1):
         app.handle_pointer(x, y0 + dy * i // steps, False)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     ptr.down = False
     app.handle_pointer(x, y0 + dy, False)           # release
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
 
 
@@ -1335,7 +1335,7 @@ def test_a_cart_that_will_not_fit_offers_no_get(tmp_path):
     app._inst.free = lambda: (1000, 4096)
     _open(ws, app)
     app._tap_row(1)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert "Not enough room" in app.blocker(app.cur)
     assert _box(app, "btn", "GET") is None
@@ -1353,9 +1353,9 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     ws.frame(1 / 30)
     app.job = None
     app._press("GET")
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)                              # CONNECTING shows
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)                              # the job starts
     assert app.phase == "getting" and "carts" in ws.leases.holders()
     app.job.step_ms = 0
@@ -1414,7 +1414,7 @@ def test_a_key_during_opens_sweep_lands(tmp_path):
     for i in range(6):
         (stage / "jet.moy" / ("f%d" % i)).write_text("x")
     ws.open_app(app)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app._sweep is not None and app.phase == "checking"
     app.handle_input(_In("b"))                    # the check stopped, mid-sweep
@@ -1455,13 +1455,13 @@ def test_remove_asks_first(tmp_path, monkeypatch):
     _frames(ws, app)
     app.back()
     app._tap_row(0)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     _tap(ws, app, "btn", "REMOVE")
     assert app.asking and (tmp_path / "carts" / "jet.moy").exists()
     assert app._focused == "Cancel", "the dialog opens on its safe button"
     app.handle_input(_In("b"))                    # Esc: the dialog closes
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert not app.asking and app.phase == "cart"
     _tap(ws, app, "btn", "REMOVE")
@@ -1495,7 +1495,7 @@ def test_a_cart_too_big_to_run_is_refused_before_its_download(tmp_path):
     small = next(r for r in app.rows if r["cart"]["id"] == "jet")
     assert small["fit"] is None
     app._tap_row(app.rows.index(row))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.blocker(app.cur) == row["fit"]
     assert _box(app, "btn", "GET") is None
@@ -1541,9 +1541,9 @@ def test_the_archive_goes_to_a_file_where_memory_is_short(tmp_path):
     app._press("GET")
     _frames(ws, app)
     app._press("I AGREE")
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.job is not None and app.job.archive == "store"
     _frames(ws, app)
@@ -1555,7 +1555,7 @@ def test_the_archive_goes_to_a_file_where_memory_is_short(tmp_path):
 def _press_key(ws, app, name):
     app.handle_input(_In(name))
     for _ in range(2):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
 
 
@@ -1569,7 +1569,7 @@ def test_buttons_walk_the_screens_without_a_finger(tmp_path):
     _press_key(ws, app, "a")
     assert app.phase == "cart" and app.cur["cart"]["name"] == "Rock Run"
     app.handle_input(_In("b"))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.phase == "list"
     assert app._focused == app._card_id(app.rows[1]), "back lands on the card it left"
@@ -1580,7 +1580,7 @@ def test_buttons_walk_the_screens_without_a_finger(tmp_path):
     assert app.phase in ("connecting", "getting")
     _frames(ws, app)
     assert app.phase == "done"
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.toast[0] == "Jet Pot is on your shelf"
     assert app._focused == "verb Play", "a cart on the shelf opens on Play"
@@ -1593,7 +1593,7 @@ def test_b_stops_a_check_and_lets_the_radio_go(tmp_path):
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
     ws.open_app(app)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     assert app.phase == "checking" and "carts" in ws.leases.holders()
     app.handle_input(_In("b"))
@@ -1694,7 +1694,7 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
         _tap(ws, app, "btn", "GET")
         _frames(ws, app)
         assert app.phase == "licence"
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         for name in ("Licence", "verb No", "verb I agree"):
             rect = app._ui.box(name)
@@ -1797,7 +1797,7 @@ def test_the_shelf_shows_before_its_covers_come(tmp_path):
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
     ws.open_app(app)
     for _ in range(40):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         if app.phase != "checking":
             break
@@ -1826,7 +1826,7 @@ def test_an_installed_cart_brings_its_cover_to_the_shelf(tmp_path):
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
     _open(ws, app)
     app._tap_row([row["cart"]["name"] for row in app.rows].index("Jet Pot"))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     _tap(ws, app, "btn", "GET")
     _frames(ws, app)
@@ -1952,7 +1952,7 @@ def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
                     if c.get("type") == "theme"]
         app.back()
         app._tap_row(0)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         assert app._current_verbs() == ("REMOVE", "USE")
         _tap(ws, app, "btn", "USE")

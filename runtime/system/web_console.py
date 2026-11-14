@@ -111,7 +111,7 @@ class WebConsole:
         sl = getattr(self.ws, "settings_layer", None)
         if sl is not None:
             sl._read_paired()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def park(self):
         """Take the glass over with the connection screen (#197).
@@ -188,7 +188,7 @@ class WebConsole:
         everywhere else."""
         ws = self.ws
         self.parked = False
-        ws._dirty = True
+        ws.mark_dirty()
         ws.wm.goto("launcher")          # out of the screen, not over it
         if getattr(ws.wm, "has_desk", False):
             ws.open_desk()
@@ -203,7 +203,7 @@ class WebConsole:
 
     def on_serving(self):
         """The switch came up after a join: the glass goes to the screen."""
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if not self.parked:
             self.park()
 
@@ -211,7 +211,7 @@ class WebConsole:
         """The join ran out or the bind was refused: the row says why, the
         radio goes, and the glass (never parked by a join) stays where it is."""
         self.ws.wifi_release("web")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if self.parked:
             self.unpark()
 
@@ -282,7 +282,7 @@ class WebConsole:
         except Exception as exc:  # noqa: BLE001
             wh.error = "%s" % exc
             self.ws.wifi_release("web")      # a start that failed holds nothing
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if getattr(wh, "serving", False):
             if not self.parked:
                 self.park()

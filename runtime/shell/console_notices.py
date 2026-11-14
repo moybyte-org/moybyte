@@ -164,7 +164,7 @@ class Notices:
         just wanted to play is worse than the message is worth."""
         self._notice = (str(title), str(sub), kind)
         self._notice_until = _ticks_ms() + int(ms)
-        self._dirty = True
+        self.frame_state.dirty = True
         # The kernel's copy, which a run it drives draws over its frames.
         _ch._moy_play().chrome_notice(self._notice[0], self._notice[1], kind == "ok",
                                       self._notice_until)
@@ -428,7 +428,7 @@ class Notices:
             self.close_popover()
         if self.status_open is item:
             self.status_open = None
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def ask_stop_music(self, cart):
         """A compiled game that fits with the VM stopped only without the
@@ -503,7 +503,7 @@ class Notices:
             if sh[k] is item:
                 self.status_open_k = k
         self.toggle_popover("status")
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def _note_who(self, pid):
         return self.procs.who(pid)
@@ -520,7 +520,7 @@ class Notices:
         it drives draws over its frames, follows. The achievements process's
         banner is the unlock banner: its card with the kernel's words and a
         secret's burst, and the beep; the notification stays in the list."""
-        self._dirty = True
+        self.frame_state.dirty = True
         badge = self.ach.badge_of(n)
         if badge is not None:
             self._achievement_unlocked(badge)
@@ -540,7 +540,7 @@ class Notices:
         `moy_action(id, key)` runs; a service, which has no window, gets
         the call alone, and an app's own service's notification opens its
         app too (scheduler.as_service)."""
-        self._dirty = True
+        self.frame_state.dirty = True
         brought = self._bring(n.pid)
         if brought is not None:
             if brought:
@@ -569,7 +569,7 @@ class Notices:
         opens (an app's own service's, its app)."""
         if item is None or not item.pid:
             return
-        self._dirty = True
+        self.frame_state.dirty = True
         self.close_popover()
         if self._bring(item.pid) is not None:
             return
@@ -816,7 +816,7 @@ class PauseMenu:
         self._hold.drop()
         self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self.ws.pause_touch()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def choose_row(self, row):
         """A stop card's row: See why throws into the Code tab on the line,
@@ -867,7 +867,7 @@ class PauseMenu:
             self.close()
             ws._reset_canvas_state()
             ws._exit_to_caller()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _unwash_strip(self, cv):
         """The desk's PROJECTS window's hint strip names the dialog's keys
@@ -1194,7 +1194,7 @@ class DeleteConfirm:
             self._host = _ui_draw.AppHost()
         else:
             self._host.reset()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def choose(self, title, label, rows, icons, then):
         """Ask which of `rows` (their `icons` beside them), under `label`:
@@ -1268,7 +1268,7 @@ class DeleteConfirm:
         self.open = False
         self.cart = self._then = self._act = None
         self._drop_choice()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _delete(self):
         ws = self.ws
@@ -1279,7 +1279,7 @@ class DeleteConfirm:
         ws.carts.delete(cart)
         if then is not None and len(ws.carts.all) < before:
             then()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _unwash_strip(self, cv):
         """The desk's PROJECTS window's hint strip names the dialog's keys
@@ -1306,7 +1306,7 @@ class DeleteConfirm:
             self.cancel()
             return
         if self._host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
 
     def handle_pointer(self, px, py, click):
         host = self._host
@@ -1316,7 +1316,7 @@ class DeleteConfirm:
             self.cancel()             # a press outside the card: the cart stays
             return
         if host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
 
     def surface(self):
         """What the dialog dims and centres in: the content under the bars."""
@@ -1520,7 +1520,7 @@ class SystemMenuUI:
 
     def _menu_about(self):
         # About's card over the washed content (AboutCard).
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self.about.open()
         self.ws._about = True
 
@@ -1533,7 +1533,7 @@ class SystemMenuUI:
     def _menu_reboot(self):
         # Device: the injected reboot hook (machine.reset). Host / no hook: a safe
         # fallback to the home launcher (a hard reset would kill the sim window).
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self.ws.settings_layer.commit_name()   # a Name still being typed is kept
         hook = self.ws.reboot_hook
         if hook is not None:
@@ -2026,7 +2026,7 @@ class AboutCard:
         ws = self.ws
         ws._about = False
         self._words = None
-        ws._dirty = True
+        ws.mark_dirty()
 
 
 _WORDMARK = {"face": "title", "align": "center"}

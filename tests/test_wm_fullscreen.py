@@ -44,7 +44,7 @@ def _frames(ws, n=3):
         settle_badges(ws)
         ws._toast_until = 0
         ws.show_fps = False
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
 
 

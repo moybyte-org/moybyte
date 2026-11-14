@@ -270,7 +270,7 @@ class CodeLayer(Layer):
         ws = self.ws
         if ws.crash_popup is not None:
             ws.crash_popup = None
-            ws._dirty = True
+            ws.mark_dirty()
             return True
         return self.close_overlay()
 

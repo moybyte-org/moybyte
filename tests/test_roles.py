@@ -350,12 +350,12 @@ def test_each_apps_drawn_frame_keeps_its_role_budget(tmp_path, kind):
     app = ws._apps_by_id[kind]
     assert ws.open_app(app), kind + " has no identity cart"
     for _ in range(3):                       # the open's own settling frames
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     counts = _count_rows(ws, app)
     frames = 4
     for _ in range(frames):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     assert counts.get("surface.canvas", 0) >= frames, \
         "no canvas() read counted in %d frames: is the counter on the app?" % frames
@@ -422,12 +422,12 @@ def test_the_surface_and_theme_rows_follow_the_fullscreen_shell(tmp_path, monkey
     for kind in sorted(BUDGETS):
         assert ws.open_app(ws._apps_by_id[kind]), kind
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
         ws.look.set_theme("berry", variant="light")
         ws.look.cycle_font_scale(1)
         for _ in range(2):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
         ws.look.set_theme("night", variant="dark")
         ws.exit()
@@ -464,7 +464,7 @@ def test_the_surface_and_theme_rows_follow_the_desk(tmp_path, monkeypatch):
     ws.look.cycle_font_scale(1)
     ws.look.set_theme("forest")
     for _ in range(4):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert not bad, bad[:5]
 

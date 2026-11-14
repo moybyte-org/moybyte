@@ -289,13 +289,13 @@ class SceneEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.close()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
         if se is not None:
             g = 8
             if se.selected() is not None:
@@ -351,7 +351,7 @@ class SceneEditorUI:
                 se.begin_edit()
             else:
                 self._mode = "pan"
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _scene_drag(self, px, py):
         """Held-drag: a MOVE gesture tracks the actor under the finger (live,
@@ -366,7 +366,7 @@ class SceneEditorUI:
             wx = se.cam_x + (px - x0) // scale
             wy = se.cam_y + (py - y0) // scale
             se.move_sel(wx + self._grab[0], wy + self._grab[1])
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         if self._mode != "pan":
             return
@@ -402,7 +402,7 @@ class SceneEditorUI:
                 if w is not None:
                     se.place(w[0], w[1])
                     self._sync_live()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         self._press = None
         self._mode = None
         self._panning = False

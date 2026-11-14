@@ -960,7 +960,7 @@ def _getcarts(g, ws, state, window):
         ws.open_desk()
     ws.open_app(app)
     for _ in range(12):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
         if app.phase not in ("checking",):
             break
@@ -1534,7 +1534,7 @@ def _settle(g, ws, frames=8, probe=None):
     prev = None
     for _ in range(frames):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         if probe is not None:
             probe.begin()
         ws.frame(g._DT)

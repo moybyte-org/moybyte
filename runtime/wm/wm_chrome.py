@@ -516,7 +516,7 @@ class WindowChrome:
         finally:
             if win.ctx is not None:
                 self._install(self._root_ctx)
-        ws._dirty = True
+        ws.mark_dirty()
         return True
 
     def _strip_buttons(self, win):
@@ -791,7 +791,7 @@ class WindowChrome:
         win = self._wins.get(key)
         if win is None:
             return
-        ws._dirty = True
+        ws.mark_dirty()
         if win.minimized:
             self._minimize(win, False)
             self._move_focus(key)

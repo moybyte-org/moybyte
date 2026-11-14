@@ -195,13 +195,13 @@ def test_a_bar_without_the_clock_keeps_its_strip_on_the_tick(tmp_path):
     clock = ["12:34"]
     ws.bar_layer._clock_text = lambda: clock[0]
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
     drawn = []
     orig = ws.bar_layer._render_cart_bar
     ws.bar_layer._render_cart_bar = lambda cv, key, i=0: (drawn.append(i), orig(cv, key, i))
     clock[0] = "12:35"
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(DT)
     assert drawn == [0]                     # the top bar holds the clock; nothing else
 

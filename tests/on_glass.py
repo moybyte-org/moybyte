@@ -826,7 +826,7 @@ def shift_last_matches_the_reference(board, p4=False, rotated=False):
                                strict=True)
         got += board.pyval("ws._g['_sl_into']()", timeout=60.0, strict=True)
     finally:
-        board.pyexec("ws._dirty = True", strict=True)
+        board.pyexec("ws.mark_dirty()", strict=True)
         _home_desk(board)
     shifts, into = got[:len(cases)], got[len(cases):]
     assert [ok for ok, *_ in shifts] == [True] * len(cases), shifts
@@ -4284,7 +4284,7 @@ def _app_ui_host_pmem(look, tier):
     ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
     for _ in range(9):
         quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1.0 / 30.0)
     pm = list(ws.run.player._lua._run.pmem()[1])
     ws.exit()

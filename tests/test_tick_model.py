@@ -533,7 +533,7 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     assert ws.cart_error is not None
     assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
     drawn0 = ws.frame_state.frames_drawn
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 60)
     assert ws.frame_state.frames_drawn - drawn0 == 1
 
@@ -544,7 +544,7 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     assert ws.run.player.tick_ms == 33
     ws.go_home()
     assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
-    ws._dirty = True
+    ws.mark_dirty()
     drawn0 = ws.frame_state.frames_drawn
     ws.frame(1 / 60)
     assert ws.frame_state.frames_drawn - drawn0 == 1

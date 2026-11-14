@@ -212,6 +212,6 @@ def test_a_stuck_compiled_run_paints_its_stop_card_on_the_next_frame(tmp_path, w
         if ws.pause.open:
             break
     assert ws.pause.open and ws.pause.stopped, ws.run.player.cart_error
-    assert ws._dirty, "the frame that opened the stop card owes the next one"
+    assert ws.frame_state.dirty, "the frame that opened the stop card owes the next one"
     ws.frame(1 / 30)
     assert painted, "the next frame paints the stop card"

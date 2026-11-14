@@ -23,7 +23,7 @@ def _draw(ws, name, w=320, h=240, c=8):
 
 def _frames(ws, n=3):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 
@@ -245,7 +245,7 @@ def test_a_settled_page_paints_nothing(tmp_path):
     for _ in range(4):
         drv.frame(_DT)
     quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(4):
         drv.frame(_DT)
     drawn = ws.frame_state.frames_drawn

@@ -187,7 +187,7 @@ def test_the_foot_picks_the_tools_the_size_and_the_zoom(hh):
     _tap(drv, page.host.box("Tool Select"))
     assert page.host.box("Copy") is None, "no selection: Copy is off"
     mu.mapedit.set_selection(0, 0, 1, 1)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Copy"))
     assert mu.mapedit.has_clip
@@ -255,7 +255,7 @@ def test_the_actors_verbs_flip_and_remove_the_picked_actor(hh):
     se = su.sceneedit
     se.place(64, 64, "coin")
     n = len(se.rows)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Flip"))
     assert se.selected().get("flip")
@@ -267,7 +267,7 @@ def test_a_tag_is_typed_in_its_popover(hh):
     ws, drv, su, page = _scene(hh)
     se = su.sceneedit
     se.place(64, 64, "coin")
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Tag"))
     drv.frame(DT)

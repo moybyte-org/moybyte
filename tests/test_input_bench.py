@@ -205,7 +205,7 @@ def host(tmp_path, monkeypatch):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.pointer.visible = False
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 60)
     return HostBoard(ws, clock)
 

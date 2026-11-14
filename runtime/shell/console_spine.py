@@ -190,7 +190,7 @@ class SpineVerbs:
             if key in keys:
                 getattr(self, setter)(self.system.get(key, default),
                                       persist=False)
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def play(self, caller):
         """Show the front run's cart on the desktop, recording `caller` so the exit
@@ -276,13 +276,13 @@ class SpineVerbs:
         _cp = getattr(self.wm, "close_player", None)
         route = rt.route(_cp is not None and self.wm.desk_open())
         if route == ROUTE_WINDOW:
-            self._dirty = True
+            self.frame_state.dirty = True
             _cp()                          # reads the caller to refocus
             rt.spend()
             return
         caller = rt.spend()
         if route == ROUTE_EDITOR:
-            self._dirty = True             # screen change repaints (#44)
+            self.frame_state.dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
             return
         if route == ROUTE_APP and self._return_to_app(caller):
@@ -297,7 +297,7 @@ class SpineVerbs:
         app = self._apps_by_id.get(app_id)
         if app is None:
             return False
-        self._dirty = True
+        self.frame_state.dirty = True
         self.wm.goto(app_id)
         return True
 

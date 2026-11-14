@@ -1250,7 +1250,7 @@ class BarLayer:
             ws.open_desk()
         else:
             ws.input_policy.back()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _paint_back_title(self, cv, r, title, bar, game=False):
         """A page's place in the bar (DESIGN.md, Bar): the back chevron in
@@ -2044,7 +2044,7 @@ class BarLayer:
         self.focus = k
         self.focus_item = items[k]
         _ui_draw.on_bar(True)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def focus_leave(self):
         """The keys come off the bar, back where they came from."""
@@ -2052,7 +2052,7 @@ class BarLayer:
         self.focus = self.focus_where = self.focus_from = self.focus_item = None
         _ui_draw.on_bar(False)
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if where == "home":
             ws.launcher_layer.bar_focus(False)
         if came == "tabs":
@@ -2098,7 +2098,7 @@ class BarLayer:
                 owner.zone_opened = False
             self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
             ws = self.ws
-            ws._dirty = True
+            ws.mark_dirty()
             if ws.bar_where() != where or getattr(owner, "zone_opened", False):
                 # the tap left the surface (back, a door), or opened one of
                 # the zone's tabs, which takes the keys down into it as the
@@ -2207,7 +2207,7 @@ class BarLayer:
                 if _in(px, py, hit):
                     if not off:
                         _ui_draw.bar_tap(self._lent_ctx(where), i)
-                        ws._dirty = True
+                        ws.mark_dirty()
                     return True
             if owner is not None and not getattr(owner, "back_title", None):
                 zone = self.past_back(zone, game)

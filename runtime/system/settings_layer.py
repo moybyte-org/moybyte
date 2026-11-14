@@ -451,7 +451,7 @@ class SettingsLayer(Layer):
         if enter is not None:
             enter(self, pid)
         self._name_bar(self.page_title() or "Settings")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def close_page(self):
         """Back from the page shown to what is under it."""
@@ -469,7 +469,7 @@ class SettingsLayer(Layer):
             leave(self)
         self._want = _PAGES[page][4]
         self._name_bar(self.page_title() or "Settings")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _name_bar(self, title):
         """The bar's title for the page shown, its zone drawn again when it
@@ -517,7 +517,7 @@ class SettingsLayer(Layer):
         rows = self._settings_rows()
         if rows:
             self._want = say(rows[i % len(rows)][1])
-            self.ws._dirty = True
+            self.ws.mark_dirty()
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated) ------------------------------
 
@@ -625,7 +625,7 @@ class SettingsLayer(Layer):
         except Exception as exc:  # noqa: BLE001
             self.bt_msg = ("Keyboard error: " + str(exc))[:40]
         self._bt_state = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def bluetooth_animating(self):
         """Keep a quiet Settings window repainting while async BLE state moves."""
@@ -744,7 +744,7 @@ class SettingsLayer(Layer):
         self.wifi_scanning = False
         if self.wifi_sel >= len(self.wifi_nets):
             self.wifi_sel = max(0, len(self.wifi_nets) - 1)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_watch(self):
         """Poll the running scan or join every WIFI_POLL_MS, as the shell's
@@ -807,7 +807,7 @@ class SettingsLayer(Layer):
             # saved password) reopens the prompt as the join settles, so the
             # kid can retype it (on-glass P4).
             self._wifi_connect(ssid, "", locked)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_ask(self, ssid):
         ws = self.ws
@@ -815,7 +815,7 @@ class SettingsLayer(Layer):
         self.wifi_pw = ""
         self.wifi_msg = ""
         ws.input.spend_key()          # the key that picked the net types nothing
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_connect(self, ssid, pw, locked=False):
         """Ask the service to join `ssid` and return at once: the verdict is
@@ -829,13 +829,13 @@ class SettingsLayer(Layer):
                 if w is not None else False
         except Exception as exc:  # noqa: BLE001
             self.wifi_msg = ("Can't connect: " + str(exc))[:34]
-            ws._dirty = True
+            ws.mark_dirty()
             return False
         self.wifi_joining = (ssid, pw, locked)
         if ok is None:
             self.wifi_msg = ("Connecting to " + str(ssid) + "...")[:34]
             self._wifi_watch()
-            ws._dirty = True
+            ws.mark_dirty()
             return None
         return self._wifi_settle(bool(ok))
 
@@ -856,7 +856,7 @@ class SettingsLayer(Layer):
                 pass
         if not ok and locked and not pw:
             self._wifi_ask(ssid)
-        ws._dirty = True
+        ws.mark_dirty()
         return ok
 
     def _wifi_forget(self):
@@ -870,11 +870,11 @@ class SettingsLayer(Layer):
             self.wifi_msg = ("Forgot " + str(ssid))[:34]
         except Exception as exc:  # noqa: BLE001
             self.wifi_msg = ("Forget failed: " + str(exc))[:34]
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_cancel(self):
         self.wifi_pick = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def wifi_input(self, i, host, popover=False):
         """Keys for the wifi panel held by `host`. In PASSWORD mode the
@@ -938,7 +938,7 @@ class SettingsLayer(Layer):
         _ui.group("Options")
         if _ui.link("Scan again"):
             self._wifi_rescan()
-            ws._dirty = True
+            ws.mark_dirty()
         sel = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0] if self.wifi_nets else None
         if sel is not None and str(sel) in self.wifi_known:
             if _ui.link("Forget", str(sel)[:16]):
@@ -981,7 +981,7 @@ class SettingsLayer(Layer):
             return
         if got == len(names) - 1:
             self._wifi_rescan()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif got >= 0:
             self.wifi_sel = got
             self._wifi_activate()
@@ -1027,7 +1027,7 @@ class SettingsLayer(Layer):
                 _ui.label(part)
         if dump and _ui.button("Clear core dump"):
             clear_core_dump()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         if _ui.button("Back"):
             self._drop("crash")
         _ui.group()
@@ -1091,7 +1091,7 @@ class SettingsLayer(Layer):
         if web is not None:
             web.forget(kid)
         self._read_paired()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _paired_page(self):
         """Each browser this console paired, by its name and the day it was
@@ -1879,8 +1879,8 @@ class SettingsLayer(Layer):
             self.syslog.aim(host)
         host.begin(ws.sys_canvas, ws.theme_colors, self._content(),
                    _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
-        was = ws._dirty
-        ws._dirty = False             # what the rows' answers change marks it again
+        was = ws.frame_state.dirty
+        ws.frame_state.dirty = False             # what the rows' answers change marks it again
         if view is None:
             if want is not None and _ui.focus() != want:
                 _ui.focus(want)       # a page not drawn yet: from this frame on
@@ -1894,9 +1894,9 @@ class SettingsLayer(Layer):
             _PAGES[view][3](self)
             self._sub_focused = _ui.focus()
         _ui.end()                     # the fade where the rows run on below
-        if ws._dirty or self.page != view or host.owed or host.tap == 2:
+        if ws.frame_state.dirty or self.page != view or host.owed or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
-        ws._dirty = was or ws._dirty
+        ws.frame_state.dirty = was or ws.frame_state.dirty
 
     # -- the pages' own halves (`_PAGES`) ------------------------------------------
 

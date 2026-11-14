@@ -30,6 +30,11 @@ class FrameState:
     MicroPython."""
 
     def __init__(self):
+        # "Redraw this frame": True at the start so the first frame paints,
+        # set by `Workstation.mark_dirty` whenever a visible change could
+        # have happened, cleared by the frame's gate.
+        self.dirty = True
+        self.dirty_in = True        # a change reported before this input (handle_input)
         self.frames_drawn = 0       # frames that drew and flushed (test witness)
         self.since_draw = 0.0       # seconds since the last drawn frame
         self.fps = 0.0              # smoothed frames/sec DRAWN (EMA, #217)
@@ -51,7 +56,6 @@ class PerfMeters:
         # at boot.
         for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
             setattr(self, _key, _default)
-        self.frame_state = FrameState()
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
         # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
         # records the per-frame split in ms -- _flush_ms is the compositor's panel

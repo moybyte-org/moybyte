@@ -69,7 +69,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
         return held[-1]
 
     for _ in range(40):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     return ws, drv, frame, stats
 
@@ -226,7 +226,7 @@ def test_coming_back_settles_every_buffer(tmp_path, monkeypatch, bufs):
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
     ws.open_settings()
     for _ in range(10):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     ws.open_library()
     shots = [s for s in (frame() for _ in range(10)) if s is not None]

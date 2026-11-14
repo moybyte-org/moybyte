@@ -130,7 +130,7 @@ class Pair:
         ui_draw._PF[:] = st[3]
         ui_draw._EDGE[0] = st[2]
         try:
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(DT)
         finally:
             st[0] = ui_draw._KEYS_HOST[0]

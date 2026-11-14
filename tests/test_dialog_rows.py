@@ -78,7 +78,7 @@ class Pair:
         for _ in range(n):
             for ws, drv in ((self.a, self.da), (self.b, self.db)):
                 if force:
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.pointer.visible = False
                 k = ws.frame_state.frames_drawn
                 drv.frame(1 / 30)

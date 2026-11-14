@@ -57,7 +57,7 @@ class MusicEditorUI:
         page's."""
         ws = self.ws
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
@@ -104,7 +104,7 @@ class MusicEditorUI:
         else:
             au.sfx(me.sfx_idx)
             self.music_preview = ("sfx", me.sfx_idx)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _stop_music_preview(self):
         """Stop any music-editor preview + clear the preview flag."""
@@ -113,7 +113,7 @@ class MusicEditorUI:
             ws.run.audio.sound_stop()
             ws.run.audio.music_stop()
         self.music_preview = None
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _music_preview_active(self):
         """True while a music-editor preview is still producing sound (so the frame
@@ -148,10 +148,10 @@ class MusicEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.pop = None
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
                 changed = True
@@ -178,7 +178,7 @@ class MusicEditorUI:
             changed = True
         ws._leave_or_home(ws.exit)
         if changed:
-            ws._dirty = True
+            ws.mark_dirty()
 
     # -- drawing -------------------------------------------------------------------
 

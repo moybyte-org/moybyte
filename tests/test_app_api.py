@@ -235,7 +235,7 @@ def test_calc_keeps_a_tape(tmp_path):
         if blank is None:
             ws.frame(1 / 30)
             blank = _region(ws, calc)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert calc.tape == [(48, "+", 72, "120"), (120, "-", 36, "84"),
                          (84, "/", 7, "12"), (12, "*", 7, "84")]
@@ -268,7 +268,7 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
         return real(label, kind, o)
 
     monkeypatch.setattr(calc_app.ui, "button", button)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert drawn["="] == "primary"
     assert drawn["C"] == "danger"
@@ -298,7 +298,7 @@ def test_calc_backspace_is_the_icon_sets_key_in_every_theme(tmp_path, monkeypatc
 
     monkeypatch.setattr(calc_app.ui, "icon", icon)
     monkeypatch.setattr(calc_app.ui, "button", button)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert ("", "<") in seen, seen
 
@@ -325,12 +325,12 @@ def test_calc_draws_in_the_faces_its_theme_names(tmp_path, monkeypatch, variant)
     monkeypatch.setattr(calc_app.ui, "face", face)
     for ch in "12*7=":
         calc.handle_input(_Key(typed=ord(ch)))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert faces[-1] == ("result", "84", True)
     assert ui_draw.print_font() == ui_draw.font("ui")[0], "the ui face is put back"
     calc.entry = "OOPS"
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert faces[-1] == ("result", "OOPS", False), "the result face has digits alone"
 
@@ -462,7 +462,7 @@ def _settle(ws):
     prev = None
     for _ in range(_MAX_FRAMES):
         _quiesce_frame(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
         cur = bytes(ws.sys_canvas._buf)
         if cur == prev:

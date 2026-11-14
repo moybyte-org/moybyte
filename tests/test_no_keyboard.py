@@ -70,7 +70,7 @@ def _printed(ws, drv):
         return real(text, *a, **kw)
     cv.print = spy
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         cv.print = real
@@ -97,7 +97,7 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
     ui.group = lambda caption="", o=None: (rows.append((caption,)), real[1](caption, o))
     try:
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         ui.info, ui.group = real
@@ -133,7 +133,7 @@ def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, k
     ui_api.hints = spy
     try:
         for _ in range(2):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         ui_api.hints = real

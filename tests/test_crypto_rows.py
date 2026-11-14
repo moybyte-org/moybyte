@@ -266,7 +266,7 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
     open_cart(ws, "Crypto Wasm")
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     pid = ws.run.player.pid
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     lines = [t for _s, _t, _l, q, t in os_log.records(since, 256)

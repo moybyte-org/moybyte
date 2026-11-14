@@ -195,5 +195,5 @@ class TextVerbs:
         self.code_err = None
         self.code_err_row = None
         self.set_menu_view("code")
-        self._dirty = True
+        self.frame_state.dirty = True
         return True

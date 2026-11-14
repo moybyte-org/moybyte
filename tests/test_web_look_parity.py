@@ -213,7 +213,7 @@ def _host_frame(tmp_path, arrangement, src):
                                     panel_diagonal_in=glass)
     device_frames(ws, 30)
     exec(src, {"_ws": ws})
-    ws._dirty = True
+    ws.mark_dirty()
     device_frames(ws, 20)
     cv = ws.glass if ws.glass is not None else ws.run.canvas
     assert (cv.w, cv.h) == (w, h)
@@ -225,7 +225,7 @@ def _host_frame(tmp_path, arrangement, src):
 
 def _web_frame(tmp_path, arrangement, src):
     w, h = SIZES[arrangement]
-    steps = [{"frames": 30}, {"py": src + "_ws._dirty = True\n"}, {"frames": 20},
+    steps = [{"frames": 30}, {"py": src + "_ws.mark_dirty()\n"}, {"frames": 20},
              {"shot": "frame"}]
     tmp_path.mkdir(parents=True, exist_ok=True)
     scenario = tmp_path / "scene.json"

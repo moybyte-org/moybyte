@@ -570,7 +570,7 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
     ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
     try:
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(_DT)
     finally:
         ui.info = real

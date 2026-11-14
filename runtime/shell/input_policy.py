@@ -115,7 +115,7 @@ class InputPolicy:
             s = self.holder()
             took = s is not None and s.cancel()
         if took:
-            ws._dirty = True
+            ws.mark_dirty()
         return bool(took)
 
     # -- back ------------------------------------------------------------------
@@ -128,7 +128,7 @@ class InputPolicy:
         ws = self.ws
         if leave is None:
             leave = not ws.windowed_chrome
-        ws._dirty = True
+        ws.mark_dirty()
         if ws.pause.open and not ws.sysmenu.open:
             ws.pause.back()
         elif ws.confirm.open:
@@ -186,7 +186,7 @@ class InputPolicy:
         h = s.ui_host()
         if h is not None and _ui_draw.app_back(h.ctx, True):
             h.owed = True
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return True
         return bool(s.back())
 

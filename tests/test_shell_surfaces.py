@@ -52,7 +52,7 @@ def test_settings_strip_is_the_frames_and_drawn_once(tmp_path):
     got = []
     real = ws.bar_layer._draw_status_strip
     ws.bar_layer._draw_status_strip = lambda where: (got.append(where), real(where))
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     assert got == ["settings"]
 

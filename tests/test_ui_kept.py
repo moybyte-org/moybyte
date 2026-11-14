@@ -577,7 +577,7 @@ def test_the_lua_face_answers_the_floor_and_held(tmp_path):
     open_cart(ws, "Kept Lua")
     drv = make_drv(ws)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     lua = ws.run.player._lua
@@ -639,7 +639,7 @@ def test_the_lua_face_keeps_faces(tmp_path):
     ws.pointer.visible = False
     open_cart(ws, "Faces Lua")
     drv = make_drv(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     lua = ws.run.player._lua

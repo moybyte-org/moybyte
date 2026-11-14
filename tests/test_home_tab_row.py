@@ -168,7 +168,7 @@ def test_the_rows_strip_names_its_keys(tmp_path):
     try:
         _press(drv, "up")
         ws.launcher_layer._full_streak = 0
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         ui_draw.hints = real

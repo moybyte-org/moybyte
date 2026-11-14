@@ -83,7 +83,7 @@ class Pair:
         for ws in (self.a, self.b):
             settle_badges(ws)
             ws._toast_until = 0
-            ws._dirty = True
+            ws.mark_dirty()
         for _ in range(3):
             self.frame()
         del self.own[:]
@@ -198,7 +198,7 @@ def test_an_edit_in_the_blocks_pane_reaches_the_made_code(tmp_path, bufs):
     p.key(mi.KEY_DOWN, 2)
     for ws in (p.a, p.b):
         ws.block_ui.page().act("down")
-        ws._dirty = True
+        ws.mark_dirty()
     p.frame()
     p.frame()
     p.key(mi.KEY_UP, 2)

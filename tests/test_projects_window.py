@@ -28,7 +28,7 @@ def _ws(tmp_path, theme="moy", mode="dark"):
 def _frame(ws, n=3):
     for _ in range(n):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
 
 

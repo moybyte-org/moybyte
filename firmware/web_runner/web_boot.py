@@ -522,7 +522,7 @@ def _worker_link(ws, mode):
         return None
 
     def _wake():
-        ws._dirty = True
+        ws.mark_dirty()
     link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
     _S["carts"] = link
     return link
@@ -729,7 +729,7 @@ def _rescan():
     blanking it, which is its deliberate failure direction and now this one's."""
     ws = _S["ws"]
     ws.carts.apply(moy_catalogue.catalogue(_S["root"]))
-    ws._dirty = True
+    ws.mark_dirty()
 
 
 def rescan_store():
@@ -933,7 +933,7 @@ def assets_json():
     show, and how this build orders the bytes of a 565 pixel (below).
     """
     ws = _S["ws"]
-    ws._dirty = True                 # the reloaded page wants a full frame
+    ws.mark_dirty()                 # the reloaded page wants a full frame
     cv = _S["canvas"]
     return json.dumps({
         "v": 3,

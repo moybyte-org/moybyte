@@ -120,7 +120,7 @@ class IdleLadder:
             if k == key:
                 self.loop.idle(rung, secs)
                 self.ws.system.set(key, secs)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return secs
 
 

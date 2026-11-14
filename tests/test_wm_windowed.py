@@ -761,13 +761,13 @@ def test_drag_backdrop_cache_engages(tmp_path):
     # frame, which put a 120ms frame on every release (#155, measured on glass:
     # layer:launcher=77ms of which wallpaper=37ms, for a STATIC wallpaper).
     drv.touch_up()
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert ws.wm._backdrop_valid
     assert calls[0] == 0
     # ...and it does re-render as soon as the desk really changes.
     ws.look.set_theme("berry" if ws.look.theme_name != "berry" else "forest", persist=False)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert calls[0] == 1
     backdrop._draw_desktop = real_draw
@@ -788,7 +788,7 @@ def test_drag_backdrop_cache_matches_live_render(tmp_path):
     cached = bytes(ws.sys_canvas._buf)
     # Force a live re-render of the identical frame (cache off), no window move.
     ws.wm._backdrop_valid = False
-    ws._dirty = True
+    ws.mark_dirty()
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
     live = bytes(ws.sys_canvas._buf)
@@ -854,7 +854,7 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     ws._leave_menu()                       # PLAY
     drv.frame(1 / 30)
     ws.wm._focus = "menu"                  # focus the editor beside it
-    ws._dirty = True
+    ws.mark_dirty()
     before = ws.run.player.frames if hasattr(ws.run.player, "frames") else None
     ticks = [0]
     real_tick = ws.run.player.tick
@@ -1049,7 +1049,7 @@ def _two_apps(tmp_path):
     ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
     _quiesce(ws)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.wm._order == ["files", "calc"]
     return ws, drv, files, calc
@@ -1171,10 +1171,10 @@ def test_a_window_over_the_game_takes_the_game_off_the_quiet_stack(tmp_path):
     game, st = wm._wins["desktop"], wm._wins["settings"]
     ring = _Ring(ws, 1)
     wm._move_window(st, game.x + 40, game.y + 40)
-    ws._dirty = True
+    ws.mark_dirty()
     assert "quiet" not in ring.settle(drv, 6)
     wm._move_window(st, game.x + game.w + 60, st.y)
-    ws._dirty = True
+    ws.mark_dirty()
     if wm._covers_player():
         pytest.skip("no room on this desk beside the game window")
     assert ring.settle(drv, 6)[-1] == "quiet"
@@ -1692,12 +1692,12 @@ def _held_key_frame(ws, key=ord("q")):
     """One router pass with a held/typed key; report whether it dirtied the
     shell. Mimics a BLE keyboard: last_key is LEVEL state (a held byte every
     frame), unlike the T-Deck's one-shot press edge."""
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.input._pressed = set()
     ws.input.last_key = key
     ws.handle_input()
     ws.input.last_key = 0
-    return ws._dirty
+    return ws.frame_state.dirty
 
 
 def test_held_key_to_focused_playtest_stays_quiet(tmp_path):
@@ -2314,7 +2314,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
     lay = ws.layout
     # Settle the desk past the skip streak, then baseline the pixels below the bar.
     for _ in range(6):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     base = bytes(ws.sys_canvas._buf)
     ws.open_settings()
@@ -2413,10 +2413,10 @@ def test_a_shelf_tap_marks_dirty_inside_the_projects_window(tmp_path):
     tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
     p.x, p.y, p.down = tx, ty, True
     ws.wm._route_pointer(tx, ty, True)
-    ws._dirty = False
+    ws.frame_state.dirty = False
     p.down = False
     ws.wm._route_pointer(tx, ty, False)
-    assert ws._dirty, "a shelf tap must mark dirty or the window never repaints"
+    assert ws.frame_state.dirty, "a shelf tap must mark dirty or the window never repaints"
     for _ in range(30):                            # the glide settles on it
         drv.frame(1 / 30)
     assert ws.projects_grid.sel == 2
@@ -2678,7 +2678,7 @@ def test_the_x_back_is_a_full_repaint_in_every_buffer(tmp_path):
     _desk_with_three(ws, drv)
     ring = _Ring(ws, 3)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ws.open_library()
     ring.settle(drv, 4)
@@ -3093,7 +3093,7 @@ class _Ring:
             wm._win_sig = None
             wm._desk_painted = True
             wm._backdrop_valid = False
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             self.frame(drv)
         return list(self.bufs)
 
@@ -3251,7 +3251,7 @@ def test_a_component_popovers_card_repaints_over_what_it_covers(tmp_path):
     ws, drv = _popover_desk(tmp_path)
     ring = _Ring(ws, 3)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv)
     ws.widget_tap("clock")
@@ -3276,7 +3276,7 @@ def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
         ws, drv = _popover_desk(tmp_path / name)
         ring = _Ring(ws, 3)
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ring.frame(drv)
         ring.settle(drv)
         ws.widget_tap(name)
@@ -3296,7 +3296,7 @@ def _ring_desk(tmp_path, n):
     ws, drv = _popover_desk(tmp_path)
     ring = _Ring(ws, n)
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv)
     return ws, drv, ring
@@ -3379,7 +3379,7 @@ def test_the_wifi_card_that_grows_is_a_full_repaint_in_every_buffer(tmp_path):
     ws, drv = _popover_desk(tmp_path)
     ring = _Ring(ws, 3)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv)
     ws.widget_tap("wifi")
@@ -3427,7 +3427,7 @@ def test_under_touch_a_menu_leaves_the_focused_window_as_it_is(tmp_path, monkeyp
     try:
         ring = _Ring(ws, 3)
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ring.frame(drv)
         ring.settle(drv)
         calc = ws.wm._content_for("calc")
@@ -3522,7 +3522,7 @@ def test_a_playtests_debt_frames_copy_the_last_frame(tmp_path):
     assert set(ring.settle(drv, 4)) == {"quiet"}
     owed = _differ(ring.bufs[0], ring.full(drv)[0])
     ring.settle(drv, 4)
-    ws._dirty = True
+    ws.mark_dirty()
     assert ring.settle(drv, 4) == ["full", "lquiet", "lquiet", "quiet"]
     seen = list(ring.bufs)
     for a, b in zip(seen, ring.full(drv)):
@@ -4329,7 +4329,7 @@ def _scrim_desk(tmp_path, ride=True, windows=False):
         del ws.sys_canvas.copy_last       # the reference paints every frame
     ring = _Ring(ws, 3)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv)
     assert ws.wm._full_debt <= 0
@@ -4430,7 +4430,7 @@ def test_a_full_frame_under_the_menu_makes_its_close_repaint_whole(tmp_path):
     for w, d, r in ((ws, drv, ring), (ref, rdrv, rring)):
         w.widget_tap("menu")
         r.settle(d)
-        w._dirty = True
+        w.mark_dirty()
         r.settle(d)
         w.widget_tap("menu")
     assert "full" in ring.settle(drv)
@@ -4482,9 +4482,9 @@ def test_a_repeated_frame_counts_for_the_desk_and_window_streaks(tmp_path):
     wm = ws.wm
     wm.close_window_kind("calc")              # a shape change: the desk anew
     assert ring.settle(drv) == ["full", "repeat", "repeat"]
-    ws._dirty = True
+    ws.mark_dirty()
     assert ring.settle(drv) == ["full", "repeat", "repeat"]
-    ws._dirty = True
+    ws.mark_dirty()
     assert ring.frame(drv) == "full"
     assert wm._desk_painted is False
     seen = list(ring.bufs)
@@ -4497,7 +4497,7 @@ def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
     so the next popover finds them current -- then no frame at all. A
     visible cursor is never calm: it asks for nothing."""
     ws, drv, ring = _scrim_desk(tmp_path)
-    ws._dirty = True
+    ws.mark_dirty()
     assert ring.settle(drv) == ["full", "repeat", "repeat"]
     assert ring.settle(drv) == []
     assert len(set(ring.bufs)) == 1
@@ -4506,7 +4506,7 @@ def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
     ws.widget_tap("battery")
     ring.settle(drv)
     ws.pointer.visible = True
-    ws._dirty = True
+    ws.mark_dirty()
     assert len(ring.settle(drv)) <= 2
 
 
@@ -4539,7 +4539,7 @@ def _pause_desk(tmp_path, ride=True, window=True):
         del ws.sys_canvas.copy_last       # the reference paints every frame
     ring = _Ring(ws, 3)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv, 4)
     return ws, drv, ring
@@ -4572,7 +4572,7 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path, window):
              + (lambda w: _pause_key(w, "a"),          # Options: a card of its own size
                 lambda w: _pause_key(w, "b"),          # back to the menu
                 lambda w: _pause_key(w, "up"),
-                lambda w: setattr(w, "_dirty", True),  # a whole frame under it...
+                lambda w: w.mark_dirty(),  # a whole frame under it...
                 lambda w: _pause_key(w, "down")))      # ...and the next move still rides
     whole = len(steps) - 2
     for i, step in enumerate(steps):
@@ -4607,7 +4607,7 @@ def test_a_running_playtest_leaves_the_desk_to_its_cache(tmp_path):
     renders = []
     draw = desk._draw_desktop
     desk._draw_desktop = lambda dt: renders.append(1) or draw(dt)
-    steps = (lambda w: setattr(w, "_dirty", True),
+    steps = (lambda w: w.mark_dirty(),
              lambda w: w.widget_tap("menu"),
              lambda w: w.widget_tap("menu"))
     for i, step in enumerate(steps):
@@ -4728,7 +4728,7 @@ def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
     ws.open_projects()
     g = ws.projects_grid
     g.sel = next(i for i, it in enumerate(g.items) if it.get("title") == "Star Catcher")
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(3):
         drv.frame(1 / 30)
     lay = ws._content_layers["projects"]
@@ -4802,7 +4802,7 @@ def test_a_snapshot_with_no_room_repaints_whole_instead_of_failing_every_frame(t
     _no_room_over(ref, ref.sys_canvas.w * ref.sys_canvas.h)
     steps = (lambda w: w.pause.show(),
              lambda w: _pause_key(w, "down"),
-             lambda w: setattr(w, "_dirty", True),
+             lambda w: w.mark_dirty(),
              lambda w: _pause_key(w, "up"))
     for i, step in enumerate(steps):
         step(ws)

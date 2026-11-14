@@ -284,7 +284,7 @@ class HistoryRouter:
         committed gesture calls, `scene_editor_ui._sync_live`), so a bar-driven
         undo/redo must call it too."""
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         ws.bar_layer.invalidate()
         if ws.menu_view == "code" and ws.editor is not None:
             ws.editor.dirty = True
@@ -466,7 +466,7 @@ class HistoryRouter:
         if not changed:
             return False           # at a floor/ceiling -- nothing to restore
         self._reload_after_walk(changed)
-        ws._dirty = True
+        ws.mark_dirty()
         # The walk just moved the journal cursor, flipping can_undo()/can_redo() --
         # invalidate so the bar's UNDO/REDO icons re-check + repaint their dimmed
         # state on the NEXT frame (#88) instead of showing a stale enabled/disabled

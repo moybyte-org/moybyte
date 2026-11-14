@@ -108,7 +108,7 @@ def _quiesce(ws):
 def _frames(ws, n):
     for _ in range(n):
         _quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 
@@ -210,7 +210,7 @@ def test_the_tier_cart_streams_and_traps_on_the_host(tmp_path):
     ws.input.set_held("a", True)
     for _ in range(3):
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
     assert "unreachable" in (ws.run.player.cart_error or ""), ws.run.player.cart_error
 

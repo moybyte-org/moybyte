@@ -72,7 +72,7 @@ def _settle_home(tmp_path):
     drv.frame(0.0)
     _settle_covers(ws, drv)
     _quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert ws.launcher_layer._lib_key is not None    # capture landed
     return ws, drv
@@ -100,7 +100,7 @@ def test_stamped_frame_matches_live_render(tmp_path):
     stamped = bytes(ws.sys_canvas._buf)
     gen = ws.covers.gen
     ws.launcher_layer._lib_key = None                # force the live path
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     live = bytes(ws.sys_canvas._buf)
     assert ws.covers.gen == gen, "a cover landed between the two renders"
@@ -122,7 +122,7 @@ def test_selection_change_invalidates(tmp_path):
     ws.launcher.repaint_band = lambda *a, **k: (band.__setitem__(0, band[0] + 1),
                                                 real(*a, **k))[1]
     ws.launcher.sel = nxt
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert calls[0] + band[0] == 1                   # live: a whole paint or the band's
 
@@ -142,7 +142,7 @@ def test_title_change_invalidates(tmp_path):
     band = [0]
     real = ws.launcher.repaint_band
     ws.launcher.repaint_band = lambda *a: (band.__setitem__(0, band[0] + 1), real(*a))[1]
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert calls[0] + band[0] == 1
 
@@ -169,7 +169,7 @@ def test_foreign_paints_void_the_band(tmp_path):
     drv.frame(0.0)                                   # the re-entry paint
     assert calls[0] == 1 and not any(took)
     for _ in range(4):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(0.0)
     assert calls[0] < 5                              # the home's own paints: band frames
 
@@ -188,7 +188,7 @@ def test_a_frame_that_deferred_a_cover_is_not_stamped_back(tmp_path, monkeypatch
     ws.covers._drop_payloads(0)
     la.sel = len(la.items) - 1
     la._scroll_to_sel()
-    ws._dirty = True
+    ws.mark_dirty()
     shown = set((la.items[i].get("path")) for i, _r in la._visible())
     want = [(it["path"], div) for it, div in la.cover_specs() if it["path"] in shown]
     assert want, "no covered card on the last screenful"

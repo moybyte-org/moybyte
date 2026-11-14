@@ -312,7 +312,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     assert ws.open_app(app)
     del built[:]
     for _ in range(24):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     assert built == [], \
         "%d role object(s) allocated in 24 frames: %s" % (len(built),
@@ -321,7 +321,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
 
 @pytest.mark.parametrize("kind", ("calc", "files", "storybook"))
 def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
-    """The redraw gate, per app. `ctx.damage.all()` replaced ~90 `ws._dirty =
+    """The redraw gate, per app. `ctx.damage.all()` replaced ~90 `ws.frame_state.dirty =
     True` assignments, and a role verb called where a bare assignment was not
     would dirty the shell every frame -- invisible except as a flat battery.
     ui_refactor_2026-08 Section 7 names an idle scenario that starts capturing
@@ -602,7 +602,7 @@ def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
     assert inside[2][0] is None and inside[2][1]
     files.begin()
     files.begin()
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30.0)
     assert ws.app_abi.files_end_all() == 0, "a frame left the sessions open"
     files.begin()
@@ -645,7 +645,7 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     assert carts.images({"path": str(tmp_path / "nope.moy")}) == ({}, None)
     before = ws.frame_state.frames_drawn
     for _ in range(4):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     assert ws.frame_state.frames_drawn - before == 4, "the panel stopped presenting"
     assert held_at_present and set(held_at_present) == {0}, held_at_present

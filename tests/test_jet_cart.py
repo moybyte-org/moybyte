@@ -116,7 +116,7 @@ def _frames(ws, n, hold=(), dt=DT):
         for b in CART_BUTTONS:
             ws.input.set_held(b, b in hold)
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(dt)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
 

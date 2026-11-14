@@ -381,12 +381,12 @@ def get_carts_taps(n=3):
         app = ws._apps_by_id["getcarts"]
         ws.open_app(app)
         for _ in range(60):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30)
             if app.phase == "list":
                 break
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30)
         assert app.phase == "list" and len(app.rows) == n, app.phase
         lay = app.layout

@@ -31,7 +31,7 @@ TITLES = {"python": "Layout Py", "lua": "Layout Lua", "wasm": "Layout Wasm",
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 

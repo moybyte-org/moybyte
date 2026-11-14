@@ -1,5 +1,5 @@
 // Tier-0 hover-flip baseline on the wasm desktop (the ui_widgets_2026-08 W1
-// number, measured early per the perf review's B3): a hover flip == ws._dirty
+// number, measured early per the perf review's B3): a hover flip == ws.mark_dirty()
 // + a full repaint, so forced-dirty frames time the exact cost class without
 // coordinate archaeology.
 //
@@ -32,7 +32,7 @@ function bench(label, n, { dirty = false, pre = null } = {}) {
     let drawn = 0, skipped = 0;
     for (let i = 0; i < n; i++) {
         if (pre) mp.runPython(pre);
-        if (dirty) mp.runPython(`_ws._dirty = True`);
+        if (dirty) mp.runPython(`_ws.mark_dirty()`);
         const t0 = process.hrtime.bigint();
         mp.runPython(`_f = step_frame_json(1/60, -1.0)`);
         const t1 = process.hrtime.bigint();

@@ -446,7 +446,7 @@ def r_settings(d, a):
         return 0
     if verb == "reload" and len(a) == 1:
         ws.load_system()
-        ws._dirty = True
+        ws.mark_dirty()
         return 0
     return _usage(d, "settings", "[list] | get KEY | set KEY VALUE... | unset KEY | reload")
 

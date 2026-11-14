@@ -46,7 +46,7 @@ def _ws(tmp_path, net, urls, **kw):
 
 def _frames(ws, n=3):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 
@@ -180,7 +180,7 @@ def test_a_settled_shelf_paints_nothing(tmp_path):
     for _ in range(4):
         drv.frame(_DT)
     quiesce(ws)                                   # the first open's achievement toast
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(4):
         drv.frame(_DT)
     drawn = ws.frame_state.frames_drawn
@@ -273,6 +273,6 @@ def test_a_press_in_the_draw_owes_the_next_frame_a_repaint(tmp_path):
     _press(ws, app, "a")
     assert app.phase == "cart"
     app.handle_input(_In("a"))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(_DT)
-    assert app.phase != "cart" and app._ui.owed and ws._dirty
+    assert app.phase != "cart" and app._ui.owed and ws.frame_state.dirty

@@ -763,7 +763,7 @@ class Hold:
         (`last`), where that frame drew it (`shown`) and no change was
         reported since (the console's `_dirty_in`)."""
         f = ws.frame_state.frames_drawn
-        self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
+        self._over = f if self._shown == f - 1 and not ws.frame_state.dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
         """Whether this frame, the first of the dialog `opened` over the

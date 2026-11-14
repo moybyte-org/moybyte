@@ -100,7 +100,7 @@ def test_a_shell_apps_field_types_and_mic_gives_it_back(tmp_path, app_id):
 
 def _focus_name(ws, drv):
     ws.settings_layer._want = "Name"
-    ws._dirty = True                  # the next frame draws, and focuses it
+    ws.mark_dirty()                  # the next frame draws, and focuses it
     _frames(drv)
 
 

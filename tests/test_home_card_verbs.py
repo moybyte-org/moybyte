@@ -316,7 +316,7 @@ def test_the_desk_says_when_last_played_once(tmp_path, monkeypatch):
     ws.launcher_layer._lib_unsupported = True
     for _ in range(2):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
     assert "Last" in said and "Today" in said
     assert not any(s.startswith("Played ") for s in said), said
@@ -343,7 +343,7 @@ def _marks(ws):
     """The focus marks one full home frame draws."""
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     return ui_draw.marks(None, False)[1]
 

@@ -1393,7 +1393,7 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     ws._splash_until = None                  # the boot logo animates on its own
     settle_badges(ws)
     ws._toast_until = 0
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.pointer.visible = False
     ws._last_ptr = ws._ptr_state()
     assert ws._animating(1 / 30.0) is False, "the connection screen animates"
@@ -1419,12 +1419,12 @@ def _turn_off_by_its_button(ws):
     ui = ws.web.ui
     ui_draw.input_kind("touch")
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
         x, y, w, h = ui.host.box("Turn off")
         ui.handle_pointer(x + 2, y + 2, True)
         for _ in range(2):                   # the press, then its release
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
     finally:
         ui_draw.input_kind("keys")
@@ -1441,7 +1441,7 @@ def test_the_page_always_shows_the_address_and_how_to_sign_in(tmp_path, monkeypa
     real = ui.label
     monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append((t, (o or {}).get("face"))),
                                                          real(t, o))[1])
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30.0)
     url = ws.web_console_url()
     host = url.replace("http://", "").split("#")[0]

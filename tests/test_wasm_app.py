@@ -65,7 +65,7 @@ def _store(tmp_path, perms=None):
 
 def _frames(ws, n):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 

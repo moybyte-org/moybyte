@@ -124,9 +124,9 @@ def test_rescan_adopts_what_landed_on_the_store_and_marks_dirty(tmp_path):
     paint -- without it the new cart sits on a store nothing repaints."""
     ws = build_ws(tmp_path)
     _mk(str(ws.carts_root), "Synced")
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.carts.rescan()
-    assert ws._dirty is True
+    assert ws.frame_state.dirty is True
     ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Synced" in _titles(ws.launcher)
 
@@ -205,10 +205,10 @@ def test_a_folder_rescan_reads_one_entry_and_matches_a_whole_scan(tmp_path, monk
     before = list(ws.carts.all)
     made = _mk(root, "Middling")
     reads = _Reads(monkeypatch)
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.carts.rescan([made["path"]])
     assert reads.scans == 0 and reads.entries == [made["path"]]
-    assert ws._dirty is True
+    assert ws.frame_state.dirty is True
     whole = shelf(root)
     assert _paths(ws.carts.all) == _paths(whole)
     assert all(moy_catalogue.valid(c["h"]) for c in ws.carts.all if c.get("path"))

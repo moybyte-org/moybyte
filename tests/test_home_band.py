@@ -98,7 +98,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     root = ws.wm._root_canvas if tier == "desk" else ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.wallpaper.restore_key(True)[0] == {"moy": "bg", "blocks": "bd",
                                                   "picture": "pic"}[theme]
@@ -118,7 +118,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         return held[-1]
 
     for _ in range(40):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     if not ref:                            # the faces an idle second draws
         for _ in range(4):

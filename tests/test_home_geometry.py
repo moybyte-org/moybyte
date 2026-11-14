@@ -29,7 +29,7 @@ def _ws(tmp_path, config, theme, mode):
 def _frame(ws, n=3):
     for _ in range(n):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
 
 
@@ -198,7 +198,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1, \
         "the home behind the system menu still draws its focus"
@@ -207,7 +207,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1, "the closed menu left the focus off"
 
@@ -224,7 +224,7 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1
 
@@ -307,7 +307,7 @@ def test_the_desk_shelf_marks_its_selected_card_under_every_input(tmp_path, monk
                 got.append(rect[0])
             return real(cv, th, rect, item, r, after, **kw)
         monkeypatch.setattr(launcher_layer._ui_draw, "focus", focus)
-        ws._dirty = True
+        ws.mark_dirty()
         _frame(ws, 1)
         monkeypatch.setattr(launcher_layer._ui_draw, "focus", real)
         assert len(set(got)) == 1, "one card wears the mark: %s" % got

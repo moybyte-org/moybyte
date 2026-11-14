@@ -71,7 +71,7 @@ def _editor(tmp_path, tab, **kw):
 
 def _frame(ws):
     quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(_DT)
 
 

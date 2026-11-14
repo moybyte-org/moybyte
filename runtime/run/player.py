@@ -1002,7 +1002,7 @@ class Player(PlayerDiag):
     def _begin_run(self, ws, project, t0):
         """Reset the previous run's world and stamp this run's per-run flags.
         Returns the cart."""
-        ws._dirty = True               # a (re)started cart paints its first frame (#44)
+        ws.mark_dirty()               # a (re)started cart paints its first frame (#44)
         self._reset_stage_meters()     # #210: this run's misses are its own
         self.us_upd = self.us_draw = 0
         self.cpu = self.mem = None

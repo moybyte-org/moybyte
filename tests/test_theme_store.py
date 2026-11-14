@@ -176,7 +176,7 @@ def test_the_desk_draws_a_package(tmp_path):
     ws.look.set_theme(NAME)
     ws.open_desk()
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     assert ws.look.theme_name == NAME
 

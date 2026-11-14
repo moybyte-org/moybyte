@@ -78,7 +78,7 @@ def _settle(ws, force=True):
     for _ in range(12):
         _quiet(ws)
         if force:
-            ws._dirty = True
+            ws.mark_dirty()
         ws.frame(1 / 30)
         cur = bytes(cv._buf)
         if cur == prev:
@@ -124,7 +124,7 @@ def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, 
     assert ws.look.install_theme(edited)[0] == 0
     assert ws.look.look_gen > gen
     assert ws.look.theme_name == THEME
-    assert ws._dirty                      # the edit is one Class A dirty
+    assert ws.frame_state.dirty                      # the edit is one Class A dirty
     after = _settle(ws, force=False)      # no forced repaint: the edit's own
     assert ws.frame_state.frames_drawn > drawn
     assert after != before, "the edited role shows nowhere on this world"

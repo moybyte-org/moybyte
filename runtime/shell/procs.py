@@ -664,7 +664,7 @@ class Procs:
         self._pace_front()
         if ws.run.audio is not None:
             ws.run.audio.focus()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def close(self, p, window=True):
         """End Proc `p`: its run released as an exit releases one and
@@ -688,7 +688,7 @@ class Procs:
         self.gen += 1
         if window and not self.handheld():
             self.ws.wm._remove_kind(p.key)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def close_key(self, key):
         """Close the run `key` names: a Proc, the front's by its exit, or a

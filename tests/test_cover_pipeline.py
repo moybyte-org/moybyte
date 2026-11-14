@@ -577,7 +577,7 @@ def test_the_frame_loops_idle_branch_swallows_a_surprise(tmp_path):
 
     ws.covers.prefetch_tick = boom
     ws._quiet_frames = 20
-    ws._dirty = False
+    ws.frame_state.dirty = False
     for _ in range(5):
         ws.frame(0.05)                     # must not raise
     assert ws._idle_warned

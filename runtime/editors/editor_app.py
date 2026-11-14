@@ -342,7 +342,7 @@ class EditorApp:
         doc = self.theme
         if doc is None:
             return
-        ws._dirty = True
+        ws.mark_dirty()
         if tab != self.tab and self.tab in THEME_TABS:
             doc.save_tab(self.tab, soft=True)
         self.tab = tab
@@ -362,7 +362,7 @@ class EditorApp:
         back = self._theme_back
         self._drop_theme()
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if back is not None and back != "menu":
             ws.wm.goto(back)
         else:
@@ -395,7 +395,7 @@ class EditorApp:
         keyboard between game (raw) and text (ASCII) modes. `EditorApp.tab` is the
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
-        ws._dirty = True             # sub-view change always repaints (#44)
+        ws.mark_dirty()             # sub-view change always repaints (#44)
         if view in THEME_TABS:
             self.theme_tab(view)
             return
@@ -549,7 +549,7 @@ class EditorApp:
         if self.theme is not None:
             return                   # the theme mode runs nothing
         ws = self.ws
-        ws._dirty = True             # back to the desktop repaints (#44)
+        ws.mark_dirty()             # back to the desktop repaints (#44)
         if self.tab == "music":
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
         # (#111) PLAY is a hard-commit trigger too -- autosave is the only model now
@@ -1409,7 +1409,7 @@ class EditorApp:
             if self.save_tab(self._pending.pop(0)):
                 wrote = True
         if wrote:
-            self.ws._dirty = True      # a commit may move what the Editor shows
+            self.ws.mark_dirty()      # a commit may move what the Editor shows
 
     def close(self):
         """Leaving the Editor, by any route (`Workstation.leave_surface`): the

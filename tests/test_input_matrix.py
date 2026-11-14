@@ -388,7 +388,7 @@ class Rig:
             self.kbd.pass_()
             self.ble.frame()
             quiesce(self.ws)
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             self.drv.frame(DT)
 
     def state(self):

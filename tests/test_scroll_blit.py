@@ -392,11 +392,11 @@ def test_set_layout_keeps_the_bands_record(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.set_home_arrangement("grid")
     for _ in range(60):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     grid = ws.launcher
     grid.set_layout(grid.layout)             # the per-frame context swap
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert grid.floor == [], "set_layout voided the band's record"
     key = ws.launcher_layer._statics_key(ws.sys_canvas)

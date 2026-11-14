@@ -28,7 +28,7 @@ def test_the_kernel_epoch_reads_as_dirty_for_every_retained_frame(tmp_path):
     retained = max(1, getattr(ws._sys_canvas or ws.run.canvas, "RETAINED_FRAMES", 1))
     for _ in range(retained):
         assert ws._needs_redraw(1 / 60)
-        ws._dirty = False
+        ws.frame_state.dirty = False
     assert not ws._needs_redraw(1 / 60)
 
 

@@ -350,7 +350,7 @@ def test_a_relayout_keeps_one_base_per_cover(tmp_path):
     first = _cover_sync(ws, covered)
     for scale in (2, 1, 3, 1):              # each one a relayout of both grids
         ws.look.set_font_scale(scale, persist=False)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         assert _cover_sync(ws, covered) is first
     divs = sorted(k[1] for k in ws.covers._cache

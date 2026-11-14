@@ -283,7 +283,7 @@ def capture(slug):
                 ws.pointer.visible = False
             ws.frame(1 / 30)
         ws._toast_until = 0
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)                 # one clean frame after the last toast clear
         if ws.cart_error:
             print("skip (crashed during capture):", slug, ws.cart_error)

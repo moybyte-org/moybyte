@@ -1017,13 +1017,13 @@ class BlockEditorUI:
         page = self._page
         if page is not None:
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
             if self.blk_kbd is None and self.blk_menu is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     self._blk_menu_back()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
         if self.blk_kbd is not None:
             # The entry prompt owns input: its dialog's engine takes the typed
@@ -1032,7 +1032,7 @@ class BlockEditorUI:
             # opened it types nothing (its host's seed, #29).
             host = self.blk_kbd["host"]
             if host.keys(i):
-                ws._dirty = True
+                ws.mark_dirty()
             if host.inp[5] == 27 or i.pressed("stop"):
                 host.inp[5] = 0
                 self._blk_kbd_cancel()
@@ -1113,12 +1113,12 @@ class BlockEditorUI:
         ws = self.ws
         if self.blk_kbd is not None:
             if self.blk_kbd["host"].point(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
             return
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _blk_tap_row(self, ridx, px, again):
         """A tap on outline row `ridx` at x `px` (the page's table answers
@@ -1146,7 +1146,7 @@ class BlockEditorUI:
                 self.blk_slot = si
         if again:
             self._blk_a()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _blk_num_to_block(self):
         """From the number pad, switch to dropping a reporter BLOCK into the slot

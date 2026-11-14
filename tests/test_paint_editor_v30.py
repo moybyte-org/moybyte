@@ -463,7 +463,7 @@ def _tap(drv, x, y):
 
 def _stop(ws, drv, stop):
     """The centre of the handheld Map page's stop `stop`, drawn afresh."""
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     return _btn_center(ws.map_ui.page().host.box(stop))
 

@@ -27,7 +27,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
   * `ws.<name> = ...` on the BOOT PATH of the target's wiring function.
     Assignments inside a loop are excluded: on the P4 the whole frame loop is
     inside `run_desktop`, and its serial dev commands mutate `ws.perf_capture`,
-    `ws.show_fps`, `ws._psave_ms` and `ws._dirty` per keystroke. Those are
+    `ws.show_fps`, `ws._psave_ms` and `ws.frame_state.dirty` per keystroke. Those are
     per-frame STATE, not services -- a board that offers `diag 0|1` over serial
     is not thereby a board that has an FPS preference the others lack.
 

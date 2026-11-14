@@ -438,7 +438,7 @@ def wasm_trace(tmp_path):
     ws = host_app.build_workstation(root)
     open_cart(ws, "Every Row Wasm")
     for _ in range(2):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1.0 / 30)
     path = os.path.join(os.path.dirname(root), "apps", "every_row", "trace")
     assert os.path.exists(path), ws.run.player.cart_error

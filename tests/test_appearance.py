@@ -120,7 +120,7 @@ def test_set_theme_swaps_the_tokens_pushes_the_grids_and_persists(tmp_path):
     assert ws.launcher.theme is ws.theme_colors          # the selection accent
     assert ws.look.look_gen > gen                        # the look moved
     assert ws.bar_layer._cart_bar_key("home") != key     # the cached strip repaints
-    assert ws._dirty
+    assert ws.frame_state.dirty
     assert _stored(ws)["theme"] == "blocks"
 
 

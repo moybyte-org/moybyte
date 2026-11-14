@@ -63,7 +63,7 @@ def _settled_settings(tmp_path):
     ws.open_settings()
     drv.frame(0.0)
     _quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)                    # settle: buf filled, _buf_stale cleared
     return ws, drv, ws.wm._wins["settings"]
 
@@ -88,7 +88,7 @@ def test_frozen_frame_matches_live_render(tmp_path):
     drv.frame(0.0)                    # frozen paint (content stamped from buf)
     drv.pan(0, 0)
     frozen = bytes(ws.sys_canvas._buf)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)                    # live re-render, identical pointer state
     live = bytes(ws.sys_canvas._buf)
     assert frozen == live
@@ -118,7 +118,7 @@ def test_pointer_down_and_release_edge_rerender(tmp_path):
     drv.frame(0.0)                         # release edge: last frame was down
     assert calls[0] > down_calls
     _quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)                         # settle whatever the tap changed:
     for _ in range(8):                     # a tapped stop's page may owe frames
         if not ws.settings_layer._host.owed:
@@ -177,7 +177,7 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     ws.editor_app.set_tab("music")
     drv.frame(0.0)
     _quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)                         # settle
     win = ws.wm._wins["menu"]
     assert win.kind == "menu"
@@ -243,7 +243,7 @@ def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
     wm = ws.wm
     wm._toggle_max(win)
     ws.input_used("touch")                       # the input a finger's press is
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     drv.frame(0.0)
     assert win.saved is not None and win._buf_stale is False
@@ -301,7 +301,7 @@ def _settings_beside_a_throttled_game(tmp_path):
     win = ws.wm._wins["settings"]
     ws.wm._move_window(win, 20, win.y)    # clear of both games
     _quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     return ws, drv, win, proc

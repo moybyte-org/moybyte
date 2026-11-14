@@ -29,7 +29,7 @@ class SettingsToggles:
         attribute everywhere, and must -- both WMs read show_fps on every
         painted game frame on all three boards."""
         setattr(self, key, on)
-        self._dirty = True
+        self.frame_state.dirty = True
         if persist:
             self.system.set(key, on)
 
@@ -135,7 +135,7 @@ class SettingsToggles:
             tz = _wc.UTC
         _wc.set_server(self.system.get("ntp_server"))
         self.bar_layer._clock_at = -1
-        self._dirty = True
+        self.frame_state.dirty = True
         if persist and self.system.get("tz") != tz:
             self.system.set("tz", tz)
 

@@ -15,7 +15,7 @@ NOTE = ("story_ideas", "# Story ideas\n\n- [x] A dragon\n")
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 

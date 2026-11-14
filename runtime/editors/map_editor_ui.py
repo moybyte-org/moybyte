@@ -289,13 +289,13 @@ class MapEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.pop = None
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
         if me is not None:
             if i.steps("up"):
                 self._map_pan(0, -1)

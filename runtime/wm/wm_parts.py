@@ -208,7 +208,7 @@ class _WindowStackLayer(Layer):
             # never under it.
             wm._relayout_owed = False
             self.ws._relayout()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         if _perf:
             self.ws._pf_wm_windows = _ticks_ms() - _t0
 

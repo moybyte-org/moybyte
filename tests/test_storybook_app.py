@@ -30,7 +30,7 @@ class _In:
 
 def _frames(ws, n=2):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 

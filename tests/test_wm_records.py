@@ -97,7 +97,7 @@ def _open(ws, root, app):
         if d is not None and d() is not None:
             d().switch("code")
         ws.editor_app.set_tab("blocks")
-        ws._dirty = True
+        ws.mark_dirty()
     elif app == "getcarts":
         repo = Repo("https://mit.example/carts", "Test carts")
         for i in range(24):
@@ -194,7 +194,7 @@ class Pair:
                     a.covers.get(name, w, h)
             del a._owed[:]
             a._gens_due = True
-            ws._dirty = True
+            ws.mark_dirty()
         self.settle(check=False)
 
     def _drive(self, ws, drv):
@@ -362,7 +362,7 @@ def _files_list(p):
             ws.covers.begin_frame()
             if all(f._nav.cover(r[4]) is not False for r in f.rows):
                 break
-        ws._dirty = True
+        ws.mark_dirty()
     p.settle()
 
 
@@ -609,7 +609,7 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
     c = p.win("calc")
     for ws in (p.a, p.b):
         ws.wm._move_window(ws.wm._wins["settings"], 4, ws.wm._wins["settings"].y)
-        ws._dirty = True
+        ws.mark_dirty()
     p.settle()
     s = p.win("settings")
     sx, sy, sw, sh = s.content_rect()

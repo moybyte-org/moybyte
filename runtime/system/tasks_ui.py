@@ -183,7 +183,7 @@ class TasksLayer(Layer):
             ws.input_policy.back(leave=True)
             return True
         if self.host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -191,7 +191,7 @@ class TasksLayer(Layer):
         if click and ws.bar_layer.handle_bar_tap("tasks", px, py):
             return True
         if self.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- draw ---------------------------------------------------------------
@@ -327,7 +327,7 @@ class TasksLayer(Layer):
 
     def _do(self, verb, row):
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if verb == HOME:
             ws.close_tasks(home=True)
             return

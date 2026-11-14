@@ -198,7 +198,7 @@ def _settle(ws, n=6):
         settle_badges(ws)
         ws._toast_until = 0
         ws.bar_layer._clock_text = lambda: "12:34"
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
         cur = bytes(ws.sys_canvas._buf)
         if cur == prev:

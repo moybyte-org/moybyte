@@ -95,7 +95,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     pkg = {"format": 2, "name": "boxed", "inherits": "moy", "frame": {"style": "win9x"}}
     assert ui_draw._C.theme_install(json.dumps(pkg).encode())[0] == 0
     ws.look.set_theme("boxed", persist=False, variant="light")
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     win = ws.wm._wins["settings"]
     assert win.foot == 0 and win.buf.h == win.h - 2 - win.title_h
@@ -131,7 +131,7 @@ def test_a_drag_frame_is_its_live_render(tmp_path):
     assert ws.wm._backdrop_valid
     cached = _below_bar(ws)
     ws.wm._backdrop_valid = False
-    ws._dirty = True
+    ws.mark_dirty()
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
     assert _below_bar(ws) == cached
@@ -145,15 +145,15 @@ def test_a_released_window_settles_to_its_full_shadow(tmp_path):
         drv.frame(0.0)
     drv.touch_up()
     for _ in range(4):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(0.0)
     settled = _below_bar(ws)
     for _ in range(3):                       # more frames: no darkening
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(0.0)
     assert _below_bar(ws) == settled
     ws.wm._backdrop_valid = False            # and a live render agrees
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(0.0)
     assert _below_bar(ws) == settled
 
@@ -291,7 +291,7 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
     win.x, win.y = 60, 560 - win.h
     ws.wm.dirty = True
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     now = bytes(drv.rgb888())
     x, y = win.x + 40, win.y + win.h + 2
@@ -319,7 +319,7 @@ def _overlapping(tmp_path, variant):
     ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
     _quiet(ws)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(0.0)
     return ws, drv, files, calc
 
@@ -340,7 +340,7 @@ def test_a_window_casts_its_shadow_on_the_window_under_it(tmp_path, variant):
     shaded = at()
     ws.wm._move_window(calc, calc.x, files.y + files.h + 40)   # off Files
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(0.0)
     bare = at()
     assert shaded != bare
@@ -390,7 +390,7 @@ def _frames(ws, ring, drv, n, pointer=False):
     """`n` drawn frames (the console stays dirty), then the still ones."""
     for _ in range(n):
         ws.pointer.visible = pointer
-        ws._dirty = True
+        ws.mark_dirty()
         ring.frame(drv)
     ring.settle(drv, 6)
 
@@ -456,7 +456,7 @@ def test_an_apps_page_in_a_window_lies_on_the_windows_body(tmp_path, variant):
         else:
             ws.open_app(ws._apps_by_id[app])
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
         cx, cy, cw, ch = ws.wm._wins[app].content_rect()
         # the page's ground: under its last row (Calc's keys reach its foot,

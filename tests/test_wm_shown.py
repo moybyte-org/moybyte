@@ -54,7 +54,7 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
     app.tool = paint_app.BRUSH
     app.size_i = 0
     for _ in range(3 + bufs):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     win = ws.wm._wins["artwork"]
     was = app.layout

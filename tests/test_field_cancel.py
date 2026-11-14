@@ -77,7 +77,7 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
     _type(drv, "q")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(_DT)
     assert drawn[-1] != settings_layer._HINT_TYPE, drawn[-1]
 

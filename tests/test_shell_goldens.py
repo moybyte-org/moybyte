@@ -597,7 +597,7 @@ def _render(ws, surface, config_name):
     marked = 0
     for _ in range(_MAX_FRAMES):
         _quiesce(ws)
-        ws._dirty = True                 # defeat the #44 redraw gate
+        ws.mark_dirty()                 # defeat the #44 redraw gate
         cv.gate_counts_reset()
         _ui().marks(None, True)
         ws.frame(_DT)
@@ -1953,7 +1953,7 @@ def _open_get_carts(ws):
             if app.phase != "checking":
                 break
             _quiesce(ws)
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(_DT)
     return enter
 

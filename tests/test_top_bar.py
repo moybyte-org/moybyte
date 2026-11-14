@@ -37,7 +37,7 @@ def _pin_clock(ws, drv):
     the redraw-on-change tests are already isolated for). The settle frame
     absorbs the one legitimate rebuild the pin itself causes."""
     ws.bar_layer._clock_text = lambda: "12:00"
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
 
 
@@ -264,7 +264,7 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 0                        # unchanged state -> cache reused
     ws.wifi.connect("Home WiFi", "pw")          # link comes up -> the wifi glyph changes
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert calls[0] == 1, "a wifi status change must re-render the bar once"
 
@@ -333,7 +333,7 @@ def _run_a_cart(tmp_path):
     ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
     ws.play(ws.launcher_layer)
     assert ws.screen == "desktop"
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     return ws, drv
 
@@ -388,7 +388,7 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):
-        ws._dirty = True                          # force repaints; crashed frames are otherwise static
+        ws.mark_dirty()                          # force repaints; crashed frames are otherwise static
         drv.frame(1 / 30)
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
@@ -408,7 +408,7 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
     ws.bar_layer._clock_text = lambda: "99:99"              # the clock "ticked"
-    ws._dirty = True                              # crashed screens are static: force a repaint
+    ws.mark_dirty()                              # crashed screens are static: force a repaint
     drv.frame(1 / 30)
     assert calls[0] == 1, "a clock change must re-render the bar"
 
@@ -425,7 +425,7 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
         return orig(layer, dx, dy)
     ws.run.canvas.blit_strip = counting
     for _ in range(4):
-        ws._dirty = True                          # crashed frames are static unless dirty
+        ws.mark_dirty()                          # crashed frames are static unless dirty
         drv.frame(1 / 30)
     assert calls[0] == 4, "the bar should blit its cached strip once per frame"
 
@@ -453,7 +453,7 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
         return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     for _ in range(5):
-        ws._dirty = True            # force a screen repaint (#44's own gate is not
+        ws.mark_dirty()            # force a screen repaint (#44's own gate is not
                                      # what we're testing -- the BAR's cache is)
         drv.frame(1 / 30)
     assert calls[0] == 0, "an unchanged zoned bar should reuse its cached strip"
@@ -477,7 +477,7 @@ def test_a_warm_bar_frame_fills_one_key_with_only_what_it_shows(tmp_path):
         return 0
     ws.history.bar_undo_bits = undo_bits
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert bl._keys["home"] is key
     assert asked[0] == 0
@@ -500,11 +500,11 @@ def test_zoned_bar_rerenders_on_app_switch(tmp_path):
     ws.bar_layer._render_cart_bar = counting
     ws.launcher.sel = 0
     ws.open_in_editor()              # maker landing -> screen "menu"
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert calls[0] == 1, "switching from the launcher to the Editor must re-render once"
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
@@ -537,12 +537,12 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     ws.bar_layer._render_cart_part = counting
     ws.bar_layer._render_cart_bar = counting_whole
     ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert calls[0] == 1, "switching Editor tabs must draw the zoned bar's zone once"
     assert whole[0] == 0, "...and not the strip whole"
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
@@ -570,7 +570,7 @@ def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
     ws.bar_layer._render_cart_part = counting
     ws.bar_layer._render_cart_bar = counting_whole
     ws.launcher.nav2d(1, 0)
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(60):
         drv.frame(1 / 30)
     assert not ws.launcher.moving and ws.launcher.sel == 1
@@ -583,13 +583,13 @@ def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
                 for y in range(bar[1], bar[1] + bar[3])]
     kept = strip()
     ws.bar_layer.invalidate()
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert strip() == kept
     calls[0] = 0
     ws.set_home_tab("apps")
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls[0] == 1, "a tab switch must re-render the zoned bar once"
 
@@ -1033,11 +1033,11 @@ def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
     ws.open()                      # PLAY landing: straight to the running "desktop"
     assert ws.screen == "desktop"
     for _ in range(5):             # playing
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     ws.cart_error = "boom"
     for _ in range(5):             # crash chrome (the untouched desktop crash bar)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls == [], (
         "the zoned bar's draw_zone must never fire while a Player is top-of-stack "
@@ -1143,7 +1143,7 @@ def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
     def frame(text):
         ws.bar_layer._clock_text = lambda: text
         ws.bar_layer.invalidate()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         return bytes(cv._buf[:cv.w * bh * 2])
 
@@ -1221,17 +1221,17 @@ def test_the_keys_stepping_on_the_bar_draw_the_pill_alone(tmp_path):
     bl._render_cart_bar = counting_whole
     bl.focus_where = "home"
     bl.focus_item = items[0]
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     bl.focus_item = items[1]
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert parts[0] == 2 and whole[0] == 0
     bl.focus_item = None
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert parts[0] == 3 and whole[0] == 0
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert parts[0] == 3 and whole[0] == 0, "nothing moved: the strip is reused"

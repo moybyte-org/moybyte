@@ -570,7 +570,7 @@ def _goldens_ws(tmp_path, theme, mode, inputs):
 def _settle(ws, n=6):
     for _ in range(n):
         _g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_g._DT)
 
 

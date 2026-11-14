@@ -1329,7 +1329,7 @@ def test_tilemap_resize_preserves_content_and_roundtrips():
 
 def _map_tap(ws, drv, stop):
     """Tap stop `stop` of the handheld Map page where it drew last."""
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     x, y, w, h = ws.map_ui.page().host.box(stop)
     drv.click(x + w // 2, y + h // 2)

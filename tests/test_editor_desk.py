@@ -262,7 +262,7 @@ def _shows_what_a_whole_repaint_shows(ws, drv):
     for _ in range(4):
         drv.frame(DT)
     got = _glass(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.wm._win_sig = None                        # every window and the desk drawn again
     for _ in range(3):
         drv.frame(DT)
@@ -671,7 +671,7 @@ def test_the_actor_pane_flips_and_removes_the_picked_actor(desk):
     a = se.selected()
     flip = bool(a.get("flip"))
     n = len(se.rows)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     box = d._host.box("actor flip")
     _click(drv, box[0] + box[2] - 8, box[1] + box[3] // 2)
@@ -705,7 +705,7 @@ def test_a_stamp_pick_sets_the_scenes_brush(desk):
     _tap(drv, ord("4"), 1)
     pane = ("actor", "stamps")
     d._tabs[pane] = 1
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     (_pg, (x, y, w, h)) = d._sheet_rects[0]
     tw = w // 16
@@ -734,14 +734,14 @@ def test_a_reference_pick_inserts_its_call_at_the_caret(desk):
     ws, drv = desk
     d = ws.editor_desk
     _tap(drv, ord("2"), 1)                       # Code: the Reference's Sprites
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     (_pg, (x, y, w, h)) = d._sheet_rects[0]
     tw = w // 16
     _click(drv, x + 6 * tw + 1, y + 1)
     assert d._cur_sprite() == 6
     ws.editor.row, ws.editor.col = 0, 0
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("insert call")
     _click(drv, bx + bw // 2, by + bh // 2)
@@ -756,7 +756,7 @@ def _sound(desk):
     _tap(drv, ord("5"), 1)                       # Sound
     me = ws.music_ui.musicedit
     d.focus_pane(1)                              # the Sound pane
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     from runtime import editor_sound as S
     return ws, drv, d, me, S
@@ -766,7 +766,7 @@ def test_the_sound_pane_is_drawn_on_the_verbs_not_the_music_tab(desk, monkeypatc
     ws, drv, d, me, S = _sound(desk)
     drew = []
     monkeypatch.setattr(ws.layer_of("music"), "draw", lambda dt: drew.append(dt))
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     assert drew == []
     assert ws.editor_app.tab == "music"
@@ -965,7 +965,7 @@ def test_a_palette_pick_puts_its_block_at_the_cursor_and_the_made_code_follows(b
     be = ws.block_ui.blocks_ed
     before = list(Parts.made_lines(be))
     d.part_state["block cat"] = "looks"
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     items = Parts.palette_items(be, "looks")
     bx, by, bw, bh = d._host.box("palette blocks")
@@ -1036,7 +1036,7 @@ def _reference(desk, tab):
     pane = ("sprites", "sounds", "maps", "log")
     d._tabs[pane] = pane.index(tab)
     ws.editor.row, ws.editor.col = 0, 0
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     return ws, drv, d
 
@@ -1073,7 +1073,7 @@ def test_the_log_names_an_error_and_takes_the_caret_to_its_line(desk):
     ws, drv, d = _reference(desk, "log")
     ws.run.player.cart_error = "NameError: foo"
     ws.run.player.crash_line = 12
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("log")
     _click(drv, bx + 20, by + 14)
@@ -1131,7 +1131,7 @@ def test_the_code_panes_file_tabs_switch_the_script(desk, monkeypatch):
     monkeypatch.setattr(ws, "code_sources", lambda: ["main.py", "enemies.py"])
     opened = []
     monkeypatch.setattr(ws, "open_code_file", lambda name: opened.append(name) or True)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     bx, by, bw, bh = d._host.box("pane 0 files")
     _click(drv, bx + 110, by + bh // 2)          # the second tab
@@ -1202,7 +1202,7 @@ def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
         drv.frame(DT)
     shown = bytes(ws.glass_canvas._buf)
     d._surround = None                          # the next frame draws whole
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     assert d.changed() == [0, 0, ws.sys_canvas.w, ws.sys_canvas.h]
     assert bytes(ws.glass_canvas._buf) == shown
@@ -1256,7 +1256,7 @@ def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_fram
             root._buf[:] = held[-2]
     for ws in (a, b):
         ws.editor_desk._surround = None         # a whole frame
-        ws._dirty = True
+        ws.mark_dirty()
     frame()
     got = []
     for code in b"keys typed\nand more":
@@ -1430,7 +1430,7 @@ def test_a_press_held_on_the_sheet_shows_its_tile_in_a_3x_loupe(desk):
         finally:
             del cv.sspr
     d._draw_loupe = spy
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     del d._draw_loupe
     assert [y for y, s in calls if s == 6 and y + 48 < ly], "no 3x loupe over the finger"

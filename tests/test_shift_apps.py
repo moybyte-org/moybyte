@@ -219,7 +219,7 @@ class Pair:
         _NOW[0] += 33
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             if not idle:
-                ws._dirty = True
+                ws.mark_dirty()
             ws.pointer.visible = False
             k = ws.frame_state.frames_drawn
             self._drive(ws, drv)

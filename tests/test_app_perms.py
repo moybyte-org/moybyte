@@ -378,7 +378,7 @@ def _store_ws(tmp_path, repo):
 
 def _frames(ws, n=3):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
 
 

@@ -177,7 +177,7 @@ class HomeVerbs:
                         sel = i
                         break
             self.launcher.sel = max(0, min(sel, len(items) - 1))
-            self._dirty = True
+            self.frame_state.dirty = True
             svc = rec.get("svc")
             if isinstance(svc, list):
                 _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
@@ -194,7 +194,7 @@ class HomeVerbs:
         console mode it is the home's X (`wm.leave_console`), which brings the
         parked windows back; on the desk it closes every window. The boot's
         landing on the windowed tier; fullscreen tiers never call this."""
-        self._dirty = True
+        self.frame_state.dirty = True
         self.search_typing = False     # leaving the home ends any query typing
         # Re-derive the shelf under the desk-tier filter (system apps are
         # desk icons here): the first call runs before the WM swap finished
@@ -241,7 +241,7 @@ class HomeVerbs:
             self.go_home()
             self.set_home_tab("make")
             return
-        self._dirty = True             # screen change repaints (#44)
+        self.frame_state.dirty = True             # screen change repaints (#44)
         self.search_typing = False     # the query is the fullscreen home's
         g = self.projects_grid
         if g is None:
@@ -280,7 +280,7 @@ class HomeVerbs:
         wm = self.wm
         if wm.mode == "desktop":
             wm.show_desk()
-            self._dirty = True
+            self.frame_state.dirty = True
         elif not wm.top_is("launcher"):
             self.go_home()
         elif self.bar_layer._show_x("home"):
@@ -292,7 +292,7 @@ class HomeVerbs:
         surface is persisted first. In console mode a parked Editor that still
         holds the workspace is not torn down -- go_home touches no parked
         window (docs/theme_and_shell_2026-11.md §8.1)."""
-        self._dirty = True             # screen change repaints (#44)
+        self.frame_state.dirty = True             # screen change repaints (#44)
         self.close_popover()
         # The launcher root ends every return path: an app-to-app return that
         # outlived its journey here would drag an unrelated later exit into
@@ -507,7 +507,7 @@ class HomeVerbs:
         g._scroll_to_sel()
         old.release_faces()
         self.launcher = g
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def set_home_tab(self, tab, grid=None):
         """Switch the home (`grid`, ws.launcher by default) to `tab`, back on
@@ -527,7 +527,7 @@ class HomeVerbs:
                 break
         lw.sel = i
         lw._scroll_to_sel()
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def step_home_tab(self, d, grid=None):
         """The tab `d` steps from the active one, clamped (the keys' tab row)."""
@@ -574,7 +574,7 @@ class HomeVerbs:
         printable range only, so it works on the T-Deck's keyboard with no
         `=[]{}<>%` keys."""
         self.search_typing = True
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def close_search(self, clear=True):
         """Leave the search box (ENTER/ESC while typing, or the sysmenu CLEAR
@@ -585,7 +585,7 @@ class HomeVerbs:
         if clear:
             self.search_query = ""
             self.launcher.set_items(self._launcher_view_items())
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def toggle_search(self):
         """The sysmenu SEARCH row's action: open the box if idle, else close (and
@@ -602,7 +602,7 @@ class HomeVerbs:
         grid."""
         self.search_query = q
         self.launcher.set_items(self._launcher_view_items())
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def _make_items(self, carts):
         """The Make tab's entries: the "+ New" card first (create a game + open

@@ -118,7 +118,7 @@ class Sheet(AppLayer):
         if self.keys:
             b = _BTN[self.keys.pop(0)]
             inp[0] = inp[1] = b
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif self.press is not None:
             box = ui_draw._C.api_box(self.ctx, self.press)
             if box is not None:

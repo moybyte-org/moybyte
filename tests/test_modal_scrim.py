@@ -31,7 +31,7 @@ def _frames(ws, n, dirty=True):
     for _ in range(n):
         g._quiesce(ws)
         if dirty:
-            ws._dirty = True
+            ws.mark_dirty()
         ws.frame(g._DT)
         out.append(bytes(ws.glass_canvas._buf))
     return out

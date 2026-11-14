@@ -89,7 +89,7 @@ def _app(ws):
 
 def _settle(ws, n=4):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         ws.input_policy.sync()          # the next key pass's mode (handle_input's)
 

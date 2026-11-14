@@ -52,7 +52,7 @@ def _ws(tmp_path, **kw):
 def _frame(ws, n=2):
     for _ in range(n):
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
         ws.input_policy.sync()          # the next key pass's mode (handle_input's)
 
@@ -465,7 +465,7 @@ def test_the_page_is_idle_once_drawn(tmp_path):
     app._theme.choices = lambda *a: calls.append(1) or real(*a)
     for _ in range(3):
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     assert not calls                            # read once per generation
 

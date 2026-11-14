@@ -916,7 +916,7 @@ def _pmem(ws):
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(_DT)
 
 

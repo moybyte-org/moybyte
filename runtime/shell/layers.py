@@ -242,7 +242,7 @@ class _BlocksLayer(Layer):
         """Mic, Esc or B in an entry prompt: it closes, as its Cancel does."""
         if not self.ws.block_ui.cancel_prompt():
             return False
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return True
 
     back = cancel
@@ -332,7 +332,7 @@ class _MapLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.map_ui.layout.verbs:
             if ws.map_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.map_ui._map_click(px, py)
         elif ws.pointer.down:
@@ -389,7 +389,7 @@ class _SceneLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.scene_ui.layout.verbs:
             if ws.scene_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.scene_ui._scene_click(px, py)
         elif ws.pointer.down:
@@ -539,12 +539,12 @@ class _SysMenuLayer(Layer):
         popover's (whatever dirty mark the handler left), one outside it
         marks the frame."""
         ws = self.ws
-        was = ws._dirty
+        was = ws.frame_state.dirty
         got = fn(*args)
         if got == "global":
-            ws._dirty = True
+            ws.mark_dirty()
         elif got == "local":
-            ws._dirty = was
+            ws.frame_state.dirty = was
             ws.popover_touch()
 
     def handle_input(self, i):
@@ -568,7 +568,7 @@ class _SysMenuLayer(Layer):
         elif i.pressed("a") or i.pressed("run"):
             m.activate()
             ws.popover_touch()
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -593,7 +593,7 @@ class _SysMenuLayer(Layer):
                 elif hit >= 0:
                     m.sel = hit           # a row: move+select
                     m.activate()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.popover_touch()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
@@ -617,13 +617,13 @@ class _AboutLayer(Layer):
         if i.pressed("b") or i.pressed("stop"):
             card.close()
         elif card.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if ws.menu_ui.about.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

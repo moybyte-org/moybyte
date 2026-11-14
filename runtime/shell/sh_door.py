@@ -402,7 +402,7 @@ class ShellDoor:
             self.ws.procs.stop_service(pid)
         else:
             self.ws.tasks_close(row[0])
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return 0
 
     def v_read(self, path):

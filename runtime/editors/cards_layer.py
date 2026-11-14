@@ -302,7 +302,7 @@ class CardsLayer(Layer):
                 self._hold.opened(ws)  # Cart info over the page as it was
             return True
         if page.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         ws._leave_or_home(ws.exit)
         return True
 
@@ -316,10 +316,10 @@ class CardsLayer(Layer):
             return self._files_pointer(px, py, click)
         if self._broken():
             if self._fix_host.point(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- the cards' helpers: a field's check, a picker's pictures -------------
@@ -444,7 +444,7 @@ class CardsLayer(Layer):
             self._open_files()
             return True
         if self._fix_host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         ws._leave_or_home(ws.exit)
         return True
 
@@ -529,7 +529,7 @@ class CardsLayer(Layer):
             rows = tuple(rows) + (_NEW_ROW,)
         self.files = self._listing(rows, msg)
         self._files_host.reset()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _listing(self, rows, msg):
         """The file list over the store's `rows`: `names` in the order the
@@ -575,7 +575,7 @@ class CardsLayer(Layer):
         self.files = None
         if self._page is not None:
             self._page.recount()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _files_open(self, name):
         """Route one project file. A script is the Code tab (that is where
@@ -615,7 +615,7 @@ class CardsLayer(Layer):
             # Anything else in a subfolder no tab claims. Saying so beats
             # opening a blob as text.
             self.files["msg"] = "Nothing on this console opens that file."
-            ws._dirty = True
+            ws.mark_dirty()
             return
         mode = _modes.mode_for(name)
         self._close_files()
@@ -630,12 +630,12 @@ class CardsLayer(Layer):
                 ws.home_key()
             return True
         if self._files_host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def _files_pointer(self, px, py, click):
         if self._files_host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_files(self, rect, desk):
@@ -699,7 +699,7 @@ class CardsLayer(Layer):
         self.prompt = _Prompt(kind, title, fields, sub, ok)
         self.prompt.open(texts)
         self.prompt.host.held = self._hold.ok
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _open_meta(self):
         cart = self.ws.run.project.cart
@@ -719,7 +719,7 @@ class CardsLayer(Layer):
 
     def _close_prompt(self):
         self.prompt = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def typing(self):
         """A dialog's fields type (Cart info, New script)."""
@@ -749,11 +749,11 @@ class CardsLayer(Layer):
         author = p.texts[1].strip()
         if not title:
             p.say("Give it a title.")
-            ws._dirty = True
+            ws.mark_dirty()
             return                          # stay open: never persist a blank title
         if not ws.run.project.commit_manifest(title=title, author=author):
             p.say("It didn't save. Try again.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
 
@@ -789,13 +789,13 @@ class CardsLayer(Layer):
         name = self._newf_filename(p.texts[0])
         if name is None:
             p.say("Start its name with a letter.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
             p.say("There's a file with that name.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
         self._close_files()
@@ -815,7 +815,7 @@ class CardsLayer(Layer):
     def _prompt_input(self, i):
         p = self.prompt
         if p.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         ch = p.host.inp[5]
         if ch == 27 or i.pressed("stop"):
             p.host.inp[5] = 0
@@ -826,7 +826,7 @@ class CardsLayer(Layer):
 
     def _prompt_pointer(self, px, py, click):
         if self.prompt.host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_prompt(self, held, dt):

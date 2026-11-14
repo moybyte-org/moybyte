@@ -1292,7 +1292,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
                 grid.sel = i
                 # A selection move MARKS DIRTY (#177): in a window the content
                 # freeze reuses the retained buffer on position-only frames.
-                ws._dirty = True
+                ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):

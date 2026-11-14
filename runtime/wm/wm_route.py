@@ -171,7 +171,7 @@ class WindowRoute:
             win = self._wins[key]
             if key != self._focus:
                 self._move_focus(key)
-                ws._dirty = True
+                ws.mark_dirty()
             self._grab = 1
             self._held_in = None
             self._resize = (key, px, py, win.w, win.h, win.w, win.h, edges,
@@ -194,7 +194,7 @@ class WindowRoute:
             if (click and self._focus is not None
                     and not ws.bar_layer.bar_at("desk", px, py)):
                 self._move_focus(None)
-                ws._dirty = True
+                ws.mark_dirty()
             return bool(self._backdrop_layer.handle_pointer(px, py, click))
         win = self._wins[key]
         # A click FOCUSES the window it lands in -- and never pops anything (the
@@ -203,14 +203,14 @@ class WindowRoute:
         # or an app's own exit verb.
         if click and key != self._focus:
             self._move_focus(key)
-            ws._dirty = True
+            ws.mark_dirty()
         focused = (key == self._focus)
         self._held_in = key if focused and held else None
         if click and win.docked is None:
             name = self._strip_button_hit(win, px, py)
             if name is not None:
                 self._grab = 1
-                ws._dirty = True
+                ws.mark_dirty()
                 if name == "close":
                     self._close_window(win.kind)
                 elif name == "back":

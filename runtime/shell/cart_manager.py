@@ -197,7 +197,7 @@ class CartManager:
             print("Moybyte rescan failed:", exc)
             return
         finally:
-            ws._dirty = True
+            ws.mark_dirty()
         self.apply(items, paths)
 
     def synced(self, folders=None):
@@ -450,7 +450,7 @@ class CartManager:
         else:
             favs.append(path)
         ws.system.set("favorites", favs)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of

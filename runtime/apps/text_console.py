@@ -412,7 +412,7 @@ class TextConsole:
     # -- the surface ----------------------------------------------------------
 
     def _dirty(self):
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _fs(self):
         return max(1, int(getattr(self.ws.run.canvas, "font_scale", 1) or 1))

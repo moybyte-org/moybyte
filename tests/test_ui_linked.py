@@ -35,7 +35,7 @@ STEADY = 4
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 

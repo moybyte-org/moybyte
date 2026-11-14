@@ -510,7 +510,7 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     from runtime import ui_draw
     ui_draw._C.moy_use(None, 0)
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         _frames(drv, 2)
         assert slot() != with_moy, "Moy draws in the title row's icon slot"
     finally:

@@ -112,7 +112,7 @@ def test_a_share_from_a_carts_load_opens_notes_at_the_frame_boundary(tmp_path, m
         assert ws.cart["title"] == "Sharer", "nothing opens inside the cart's call"
         assert runs and player._lua is runs[0] and not closed
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(_DT)
         player = ws.run.player
         assert closed == runs, "the asking run was closed"

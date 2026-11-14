@@ -60,7 +60,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
         return held[-1]
 
     for _ in range(20):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     ws.pause.prealloc()            # the idle frame's mint of the held layer
     return ws, frame

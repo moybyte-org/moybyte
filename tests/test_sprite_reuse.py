@@ -243,7 +243,7 @@ def _look_tab(tmp_path, theme="moy", variant="light"):
 
 def _frames(drv, n=1):
     for _ in range(n):
-        drv.ws._dirty = True
+        drv.ws.mark_dirty()
         drv.frame(1 / 30)
 
 

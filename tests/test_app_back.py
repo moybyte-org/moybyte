@@ -169,7 +169,7 @@ def test_a_desk_window_shows_its_back_only_on_a_page(tmp_path, theme):
     assert "back" not in _strip(ws, win), "the rows are the app's first page"
     icon = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h)
     app.view = "walls"
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     btns = ws.wm._frame_buttons(win)
     assert btns[0][0] == "back" and not btns[0][2], "the chevron heads the strip"
@@ -200,11 +200,11 @@ def test_the_window_chrome_repaints_when_its_back_comes_and_goes(tmp_path):
 
     rest = strip()
     app.view = "walls"
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     assert strip() != rest, "the chevron drew"
     app.back()
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     assert strip() == rest, "and went with the page"
 

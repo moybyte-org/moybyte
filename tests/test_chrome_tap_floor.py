@@ -327,7 +327,7 @@ def _desk(path, **kw):
 def _frames(ws, n=3):
     for _ in range(n):
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
 
 

@@ -56,14 +56,14 @@ class WindowOverlays:
         rect to every retained buffer -- a paint while it is open, the
         snapshot put back once it is closed. Otherwise the frame repaints."""
         if not self._pop_rides():
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         self._pop_seq += 1
         m = self.ws.sysmenu
         n = self._pop_n()
         self._pop_face_ok = False
         if not self._pop_wash_changed(n):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         slots = self._pop_slots
         cur = self._pop_cur
         rect = self.ws.menu_ui.panel_rect() if m.open else None
@@ -76,12 +76,12 @@ class WindowOverlays:
         if cur is None:
             j = 0 if slots[0][1] is None or slots[0][2] <= 0 else 1
             if slots[j][1] is not None and slots[j][2] > 0:
-                self.ws._dirty = True     # both slots owed: repaint whole
+                self.ws.mark_dirty()     # both slots owed: repaint whole
                 self._pop_reset()
                 j = 0
             s = slots[j]
             if not self._room(s, rect):
-                self.ws._dirty = True     # no room for its snapshot: repaint whole
+                self.ws.mark_dirty()     # no room for its snapshot: repaint whole
                 self._pop_reset()
                 return
             s[1] = rect
@@ -109,7 +109,7 @@ class WindowOverlays:
         if self._wash_win[0] is win and not self._mark_kept:
             return
         if self._order[-1] != self._focus:
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         self._mark_owed = n
 
@@ -147,21 +147,21 @@ class WindowOverlays:
         its card is owed to every retained buffer, its scrim as the system
         menu's is; otherwise the frame repaints."""
         if not self._pop_rides():
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         self._pop_seq += 1
         w = self._pop_wash
         was = w[4]
         n = self._pop_n()
         if not self._pop_wash_changed(n):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif self._pause_rides():
             if w[3] or w[2] > 0:
                 self._pause_owed = n      # its card, in every buffer
             else:
-                self.ws._dirty = True     # a whole frame since: no snapshot
+                self.ws.mark_dirty()     # a whole frame since: no snapshot
         elif not (was and w[2] > 0):
-            self.ws._dirty = True         # not its riding close
+            self.ws.mark_dirty()         # not its riding close
 
     def _wash_rects(self):
         """The rects the riding scrim washes: the pause menu's, or the
@@ -376,7 +376,7 @@ class WindowOverlays:
         them. An overlay's next change asks again: a failed ask costs that
         change, never every frame after it."""
         self._pop_reset()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self.ws._frame_requested = True   # asked from within a draw (request_frame)
 
     def _pop_capture(self, s):

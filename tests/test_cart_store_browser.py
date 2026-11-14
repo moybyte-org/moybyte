@@ -703,7 +703,7 @@ def _app_ws(tmp_path, net, indexes, keep=None, pick=None, home=None):
 
 
 def _frame(ws, net=None):
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     if net is not None and hasattr(net, "tick"):
         net.tick()

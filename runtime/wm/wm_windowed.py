@@ -590,7 +590,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self.mode = "console"
         self.stack.goto("launcher")
         self._on_nav()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def leave_console(self, game=False):
         """The home's X: put the parked kinds back above the desk with the
@@ -640,7 +640,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 self._prewarm(win)
         self._win_sig = None
         self._desk_streak = 0             # every buffer holds the home
-        ws._dirty = MODE_MARK
+        ws.frame_state.dirty = MODE_MARK
 
     def show_desk(self):
         """The HOME key in desktop mode (owner, 2026-10-13), Win+D's shape:
@@ -1065,7 +1065,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         win.w = max(min_w, min(w, max_w))
         win.h = max(min_h, min(h, max_h))
         self._build_content(win)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _min_size(self, win, max_w, max_h):
         """The smallest outer size `win` takes. Min-size convention (ui.py +
@@ -1213,7 +1213,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             win.x, win.y = x, y
             self._resize_window(win, w, h)
         self._remember_full(win)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def full_key(self):
         """F11 (a keyboard's `full` button, the host's and the page's F11):
@@ -1313,7 +1313,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                     win.x, win.y, win.w, win.h = win.undock
                     win.undock = None
                 self._build_content(win)
-                self.ws._dirty = True
+                self.ws.mark_dirty()
             if rect is False and not win.minimized:
                 self._dock_hide(win, True)
             elif rect is None and win.minimized:
@@ -1333,7 +1333,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             win.saved = None
             win.x, win.y, win.w, win.h = rect
             self._build_content(win)
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         order = self._order
         if order and order[-1] != kind and kind in order:
             order.remove(kind)
@@ -1380,7 +1380,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         win.own = True
         self._editor_again()              # its workspaces without the game
         self._bring_forward("desktop")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return True
 
     def game_full(self):
@@ -1491,7 +1491,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return
         order.remove(key)
         order.append(key)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _bring_forward(self, key):
         """Window `key` shown, focused and in front: what opening a process
@@ -1501,7 +1501,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return
         if win.minimized:
             self._minimize(win, False)
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         self._move_focus(key)
 
     def _minimize(self, win, on):
@@ -1566,7 +1566,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         wa.proc = procs.by_key.get(b)
         wb.proc = procs.by_key.get(a)
         self._win_sig = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def game_shown(self, key):
         """A running set's game window shows: on the desk, not hidden to
@@ -1613,7 +1613,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._minimize(win, True)
         if self._focus == kind:
             self._move_focus(None)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return True
 
     def bring_forward(self, kind):
@@ -1624,7 +1624,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 or self._slots() != self._kinds):
             return False
         self._bring_forward(kind)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return True
 
     def player_has_pointer(self):
@@ -1887,21 +1887,21 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._wash_all = False
         if w[4] and not self._wash_rides():
             self._pop_reset()             # what it rides over changed (a playtest came)
-            ws._dirty = True
+            ws.mark_dirty()
         if up != self._scrim_was:
             self._scrim_was = up
             if w[1] is None or up != w[4]:
                 self._win_sig = None
                 self._desk_streak = 0
-                if (up and not ws._dirty and follows and self._scrim_rides()
+                if (up and not ws.frame_state.dirty and follows and self._scrim_rides()
                         and hasattr(self._root_canvas, "copy_last")):
                     self._wash_all = True
                 else:
-                    ws._dirty = True
+                    ws.mark_dirty()
         # NOTE deliberately NO pointer-state condition: a finger playing a touch
         # cart moves the (hidden) pointer every frame, and the desktop shows no
         # hover feedback while the cursor is hidden -- real UI reactions all set
-        # ws._dirty. Requiring a still pointer would forfeit the fast path for
+        # ws.frame_state.dirty. Requiring a still pointer would forfeit the fast path for
         # exactly the games that need it.
         # The popover (bit 64) rides the quiet stack too: its rect is the
         # frame's damage, never a reason to repaint the desk.
@@ -1919,7 +1919,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 self._full_debt = self._retained_n() - 1
                 return self._lead_pop_stack
             self._wash_all = False
-            ws._dirty = True
+            ws.mark_dirty()
             still = quiet = False
         self._pop_game_next = quiet and pop
         if quiet and self._full_debt <= 0:
@@ -1968,7 +1968,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         anything but a running game and the popover (the riding pause menu
         one, or a stopped run's riding card)."""
         ws = self.ws
-        return (not ws._dirty
+        return (not ws.frame_state.dirty
                 and (self._cache_sig & ~(578 if self._pause_rides() else 66)) == 0
                 # FPS chip (bit 2), popover (64), the riding pause menu (512)
                 and (ws.cart_error is None or self._pause_rides())
@@ -2044,7 +2044,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if (ws.returns.caller() == EDITOR
                 and "menu" in self._order):
             self._move_focus("menu")
-        ws._dirty = True
+        ws.mark_dirty()
 
     def close_window_kind(self, kind):
         """Close one window by its process kind -- the console's windowed exit
@@ -2057,7 +2057,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         than using the app's own CLOSE/context-X) would silently lose the last
         edit."""
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         ws.leave_surface(kind)
         if kind == "menu" and not ws._editing_icons:
             self._end_playtest()              # its playtest goes with it
@@ -2074,7 +2074,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self.close_window_kind(kind)
 
     def _move_window(self, win, nx, ny):
-        # No ws._dirty here: the repaint is guaranteed by keeps_animating's
+        # No ws.frame_state.dirty here: the repaint is guaranteed by keeps_animating's
         # gesture leg + the pointer leg.
         # The content rect clamps it: a window may hang off the glass's left
         # or right edge with 40 columns still on the desk, and never crosses

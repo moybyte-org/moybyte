@@ -1312,7 +1312,7 @@ since the face's preview ring holds four looks and would thrash.
   stays the cart's. That is the "don't theme our apps" lesson turned around: the
   chrome is fully themeable, game pixels are not.
 - **A switch is one Class A dirty plus one integer.** A theme load, switch,
-  install or in-place edit is an un-attributed Class A dirty (`ws._dirty`, the
+  install or in-place edit is an un-attributed Class A dirty (`ws.mark_dirty()`, the
   global epoch; `docs/surface_model_v1.md` §3) and moves one monotonic
   integer, `ws.look.look_gen`: a plain attribute `publish()` sets from
   native/moy_app's token-table generation (`theme_write` answers it), which
@@ -2050,7 +2050,7 @@ edited through Appearance's Edit theme…, the Editor's theme mode
 resolves, else the active theme's, else the default; then §8.8's per-element
 rule and §8.7's rule for the current mode. It runs at boot's `load_system`
 cascade, at the end of `set_theme`, at the Settings write, and at a mode
-switch (the catalogue changes), and on a change marks `ws._dirty` and runs
+switch (the catalogue changes), and on a change calls `ws.mark_dirty()` and runs
 `_relayout()` (§8.11). It is never read per frame.
 
 **Settings.** One row after FONT SIZE, `LAYOUT: THEME / <package names>`,

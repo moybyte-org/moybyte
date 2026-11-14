@@ -71,7 +71,7 @@ class SettingsPage:
             return
         ws.run.project.config[f["key"]] = v
         ws.run.project.record_config(f["key"], old, v)
-        ws._dirty = True
+        ws.mark_dirty()
 
     # -- drawing -----------------------------------------------------------------
 

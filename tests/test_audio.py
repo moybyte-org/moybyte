@@ -1345,10 +1345,10 @@ def test_the_music_tab_repaints_on_input_and_never_at_rest(tmp_path):
         ws.input = real
         ws._open_music()
         ws.frame(1 / 30)
-        ws._dirty = False
+        ws.frame_state.dirty = False
         ws.input = inp
         ws.music_ui._music_input()
-        dirty = ws._dirty
+        dirty = ws.frame_state.dirty
         ws.input = real
         ws.music_ui._stop_music_preview()
         return dirty

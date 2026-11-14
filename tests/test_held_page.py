@@ -111,7 +111,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
         for _ in range(n):
             k = ws.frame_state.frames_drawn
             if force:
-                ws._dirty = True
+                ws.mark_dirty()
             drv.frame(1 / 30)
             if ws.frame_state.frames_drawn == k:
                 continue
@@ -219,7 +219,7 @@ def _keyed(ws, frame):
             drv.press("up")
         elif case == "unpainted":
             bu._blk_move_cursor(-1)
-            ws._dirty = True
+            ws.mark_dirty()
         else:
             drv.press("up")
             frame(3)
@@ -237,7 +237,7 @@ def _keyed(ws, frame):
         bu._blk_kbd_cancel()
         frame(3)
     ws.pointer.visible = False
-    ws._dirty = True
+    ws.mark_dirty()
     frame(2)
     ws.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
@@ -397,7 +397,7 @@ def test_a_held_layer_with_no_room_is_asked_once_a_modal(tmp_path, monkeypatch):
     opened = len(asks)
     assert opened == 1, asks           # the card's first frame
     frame(4)
-    ws._dirty = True
+    ws.mark_dirty()
     frame(4)
     for _ in range(10):
         frame.drv.frame(1 / 30)        # idle frames: the card's mint asks on them

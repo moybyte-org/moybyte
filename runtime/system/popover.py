@@ -196,7 +196,7 @@ class WifiPanel:
         self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk(), "panel")
         ws.settings_layer.wifi_page(popover=True, scroll=rect[3] < self.need)
         if self._radio() != before:
-            ws._dirty = True          # the radio's state shows outside the panel
+            ws.mark_dirty()          # the radio's state shows outside the panel
         elif self.host.owed or self.host.tap == 2 or self.host.moved:
             ws.popover_touch()        # a tap's release, next frame
 
@@ -275,7 +275,7 @@ class PowerRows:
             got = _ui.slider(self._LABELS[k], cur, lo, hi)
             if got != cur:
                 sl.set_level(key, got)
-                ws._dirty = True
+                ws.mark_dirty()
         if desk:
             _ui.hints(("change", "Change", "back", "Close"))
         if self.host.owed or self.host.tap == 2 or self.host.moved:
@@ -378,7 +378,7 @@ class ControlCenter:
             got = _ui.slider(self._LABELS[k], cur, lo, hi, {"steps": True})
             if got != cur:
                 sl.set_level(key, got)
-                ws._dirty = True
+                ws.mark_dirty()
         _ui.icon("wifi" if ws._wifi_icon_kind() == "wifi" else "wifi_off")
         if _ui.link("Wi-Fi", self._network()):
             ws.close_popover()

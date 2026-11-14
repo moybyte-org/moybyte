@@ -531,7 +531,7 @@ class Appearance:
                 ws.wallpaper.compile(cart)   # compile into the backdrop component (#28)
                 if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
-        ws._dirty = True
+        ws.mark_dirty()
 
     # -- custom: a change to the theme (docs/history/theming_2026-09.md §9 phase 6
     #    step 5, §4.10) -----------------------------------------------------
@@ -1204,7 +1204,7 @@ class Appearance:
         ws.launcher.theme = ws.theme_colors
         if getattr(ws, "projects_grid", None) is not None:
             ws.projects_grid.theme = ws.theme_colors
-        ws._dirty = True
+        ws.mark_dirty()
         self._apply_wallpaper()
 
     # -- the icon sheets ---------------------------------------------------------
@@ -1219,7 +1219,7 @@ class Appearance:
         # shared draw toolkit, and a stale entry would keep blitting old pixels.
         self.ws._bar_img_cache = {}
         self.publish()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def load_icon_sheet(self):
         """Bake the shell's IconSheet from `chrome._ICON_ART` (Stage 1): what the
@@ -1276,7 +1276,7 @@ class Appearance:
         bl = getattr(ws, "bar_layer", None)
         if bl is not None:
             bl.invalidate()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def save_icons(self):
         """The Editor's theme mode's hard commit (an exit, a window's X, going
@@ -1443,7 +1443,7 @@ class Appearance:
             if target is not None:
                 target.set_font_scale(self.effective_font_scale())
             ws._relayout()
-        ws._dirty = True
+        ws.mark_dirty()
         if persist:
             ws.system.set("theme", self.theme_name, persist=False)
             ws.system.set("theme_variant", self.theme_variant)
@@ -1717,7 +1717,7 @@ class Appearance:
             ws.set_home_arrangement(home)
         if bars != self.bars:
             self.bars = bars
-            ws._dirty = True
+            ws.mark_dirty()
         if bars != _layout_base.bars_in_force():
             ws.place_bars(bars)
             return True

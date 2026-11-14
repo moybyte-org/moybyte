@@ -751,7 +751,7 @@ def test_the_desk_window_is_titled_with_the_drawing(tmp_path):
     ws.open_desk()
     app = _open_paint(ws)
     for _ in range(2):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     win = ws.wm._wins["artwork"]
     assert ws.wm._win_title(win).startswith("Paint")
@@ -766,7 +766,7 @@ def _idle_paints(ws):
     for _ in range(4):
         drv.frame(1 / 30)
     quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(4):
         drv.frame(1 / 30)
     drawn = ws.frame_state.frames_drawn
@@ -791,7 +791,7 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
     bl = ws.bar_layer
     edge, rect, _dy, _cells = bl._packed("app")[0]
@@ -803,7 +803,7 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
     was = app.zoom
     x, y, w, h = chip[0]
     assert bl.handle_bar_tap("app", rect[0] + x + w // 2, rect[1] + y + h // 2)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert app.zoom != was
 
@@ -844,7 +844,7 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
             root._buf[:] = held[-bufs] if len(held) >= bufs else held[0]
     # chosen: frames enough that every buffer holds the page
     for _ in range(3 + (bufs if chosen else 0)):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     app.tool = tool
     app.shape = shape

@@ -69,7 +69,7 @@ def test_static_code_editor_skips_idle_frames(tmp_path):
         drv.frame(DT)
     assert ws.frame_state.frames_drawn == base, (
         "static code editor redrew %d of 100 idle frames" % (ws.frame_state.frames_drawn - base))
-    assert ws._dirty is False
+    assert ws.frame_state.dirty is False
 
 
 def test_static_launcher_skips_idle_frames(tmp_path):

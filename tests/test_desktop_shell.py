@@ -301,14 +301,14 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
     monkeypatch.setattr(S._ui, "icon", icon)
     monkeypatch.setattr(S._ui, "slider", slider)
     ws.settings_layer.set_level("volume", 0)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert ("mute", True) in icons, "the theme's set draws the muted speaker"
     assert sliders["Volume"] == (0, 7, {"steps": True})
     assert sliders["Brightness"] == (0, 7, {"steps": True})
     ws.settings_layer.set_level("volume", 4)
     icons.clear()
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert not any(n == "mute" for n, _ok in icons)
 
@@ -677,7 +677,7 @@ def test_a_game_shows_no_bar_playing_or_stopped(tmp_path):
     drv.frame(1 / 30)
     assert seen["incart"] == 0        # playing: NO bar over the game
     ws.cart_error = "boom"            # a crash brings up the stop card
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert seen["incart"] == 0
@@ -831,7 +831,7 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
             return _orig(cv, rect)
         owner.draw_zone = spy
     for _ in range(5):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
@@ -1169,20 +1169,20 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     ws.open()
     assert ws.screen == "desktop"
     assert ws.wm.keys_to_cart()
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.input.clear_edges()
     ws.input.last_key = ord("q")
     ws.handle_input()
-    assert not ws._dirty, "cart-bound key dirtied the shell"
+    assert not ws.frame_state.dirty, "cart-bound key dirtied the shell"
     ws.input.last_key = 0
     ws._exit_to_caller()
     assert ws.screen == "launcher"
     assert not ws.wm.keys_to_cart()
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.input.set_held("right", True)
     ws.input.begin_frame()
     ws.handle_input()
-    assert ws._dirty, "launcher nav key must repaint"
+    assert ws.frame_state.dirty, "launcher nav key must repaint"
 
 
 def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path):

@@ -65,7 +65,7 @@ def _ws(tmp_path, config, theme, inputs):
 def _frames(ws, drv, n=4):
     for _ in range(n):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(g._DT)
 
 

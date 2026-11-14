@@ -85,7 +85,7 @@ def test_the_saver_cycles_covers_on_a_fullscreen_console(tmp_path):
     ws.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 1                      # held until its period ends
     ws.saver_state(False)
-    assert ws._saver is None and ws._dirty
+    assert ws._saver is None and ws.frame_state.dirty
     ws.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 2                      # the console repaints
 

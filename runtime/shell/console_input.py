@@ -54,9 +54,9 @@ class InputVerbs:
         # this input's own (`Hold.opened`). Stored only on a change: a store
         # on the Workstation looks through all its classes for a property,
         # about 60 us on a T-Deck.
-        d = self._dirty or self._press_owed
-        if d != self._dirty_in:
-            self._dirty_in = d
+        d = self.frame_state.dirty or self._press_owed
+        if d != self.frame_state.dirty_in:
+            self.frame_state.dirty_in = d
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
         # ran. A no-op (empty loop) with no extra controllers registered, so the
@@ -137,7 +137,7 @@ class InputVerbs:
             if not kc and not self.wm.popover_takes_keys():
                 if pressed or i.last_key or getattr(i, "wheel_y", 0) \
                         or getattr(i, "wheel_x", 0):
-                    self._dirty = True
+                    self.frame_state.dirty = True
                 else:
                     # A pointer press alone: frame() marks it, unless what
                     # it pressed was a popover's change the WM paints alone
@@ -165,7 +165,7 @@ class InputVerbs:
                 self.history.undo()
             else:
                 self.history.redo()
-            self._dirty = True
+            self.frame_state.dirty = True
             return
         bl = self.bar_layer
         edge = _ui_draw.edge_take()
@@ -430,15 +430,15 @@ class InputVerbs:
             cl = self.code_layer if view == "code" else self.theme_config_layer
             cl.stop_autoscroll()
             if dy and cl.overlay_step(dy):
-                self._dirty = True         # a row of an open overlay picked
+                self.frame_state.dirty = True         # a row of an open overlay picked
                 return True
             self.editor.move(dy, dx, select)
-            self._dirty = True             # caret moved -> redraw (#44)
+            self.frame_state.dirty = True             # caret moved -> redraw (#44)
             return True
         handle = self.focused_cart_editor()
         if handle is not None:
             handle.nav(dx, dy, select)
-            self._dirty = True
+            self.frame_state.dirty = True
             return True
         return False
 
@@ -491,7 +491,7 @@ class InputVerbs:
                     p.click = False
                 if p.visible:
                     p.visible = False
-                    self._dirty = True
+                    self.frame_state.dirty = True
         src = self._ball_src
         if self._ball_down is not None:
             src.set_button(self._ball_down, False)

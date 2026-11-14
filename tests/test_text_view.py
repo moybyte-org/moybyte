@@ -231,7 +231,7 @@ class Pair:
         for _ in range(n):
             for ws, drv in ((self.a, self.da), (self.b, self.db)):
                 if force:
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.pointer.visible = False
                 k = ws.frame_state.frames_drawn
                 ws.code_layer._host.shifting = ws.theme_config_layer._host.shifting = False
@@ -701,7 +701,7 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
             elif k == 77:
                 drv.touch_up()
             quiesce(ws)
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
             assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
             shots.append((_cart_pixels(ws), _cart_pmem(ws)))

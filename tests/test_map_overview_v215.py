@@ -225,7 +225,7 @@ def _paint(ws, drv):
     achievement, and its toast covers a third of the map view."""
     import ws_helpers
     ws_helpers.quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
 
 

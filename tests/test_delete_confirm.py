@@ -302,7 +302,7 @@ def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
         return [bytes(cv._buf[2 * (yy * cv.w + x):2 * (yy * cv.w + x + w)])
                 for yy in range(y, y + h)]
 
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     home = strip()
     monkeypatch.setattr(launcher_layer._ui_draw, "hints", spy)

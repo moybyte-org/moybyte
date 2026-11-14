@@ -20,7 +20,7 @@ def _clean():
 
 
 def _marks_drawn(ws, drv):
-    ws._dirty = True
+    ws.mark_dirty()
     ui_draw.marks(None, True)
     _frames(drv, 2)
     return ui_draw.marks()[1]

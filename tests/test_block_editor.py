@@ -218,7 +218,7 @@ def _menu_focus(ws, item):
 
 def _tap_stop(ws, drv, stop):
     """Tap stop `stop` of the handheld Blocks page where it drew last."""
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     x, y, w, h = ws.block_ui.page().host.box(stop)
@@ -632,7 +632,7 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     ws.block_ui._blk_menu_select()
     assert ws.block_ui.blk_menu["mode"] == "blk"
     # tap the "+ new variable" row (index 0) to select it -> opens the name prompt
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)                                  # the popover settles in place
     x, y, w, h = ws.block_ui.page().host.box(ws.block_ui.page().menu_word(0))

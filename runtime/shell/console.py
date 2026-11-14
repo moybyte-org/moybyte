@@ -400,7 +400,7 @@ from console_input import InputVerbs
 from console_home import HomeVerbs
 from console_text import TextVerbs
 from console_canvas import CanvasBinding
-from console_perf import PerfMeters, _ema
+from console_perf import FrameState, PerfMeters, _ema
 from console_settings import SettingsToggles
 from console_saves import SaveVerbs
 from console_notices import Notices
@@ -581,6 +581,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # before anything reads/writes `screen`, Project/Player/EditorApp before
         # anything sets their forwarded fields, and the layer stack last.
         self.shell_grants = set()      # the system apps' grants (app_context)
+        self.frame_state = FrameState()
         self._init_canvases(comp, canvas, sys_canvas, font_scale,
                             panel_diagonal_in)
         self._init_components(input, carts)
@@ -1145,29 +1146,26 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # bar's title, whatever project the console holds open.
         self.app_carts = {}
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
-        # redraws + flushes when something visible changed. `_dirty` is the "redraw
-        # this frame" flag; it starts True so the very first frame always paints, and
-        # is set whenever input/state could have changed the picture (mark_dirty()).
+        # redraws + flushes when something visible changed (`frame_state.dirty`,
+        # set by mark_dirty()).
         # `_last_ptr` snapshots the pointer state actually drawn so a cursor move/hide/
         # click triggers exactly one redraw. A running cart and a live wallpaper /
         # overlay effect animate every frame -> always dirty -> unchanged full-redraw
         # behaviour for them. `frame_state.frames_drawn` counts the frames that
         # actually painted (idle frames are skipped) -- a host-testable witness
         # of the win.
-        self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self.ui_moving = False        # a verbs page the last painted frame drew moves on its own
         # what the last painted frame's change was, as its shift frames said:
         # "shift", "rows", None (whole, or nothing spoke); tools/input_bench.py
         self.frame_change = None
-        self._dirty_in = True         # a change reported before this input (handle_input)
         self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
         self._services_due = True     # the services start at the first drawn frame
         self._press_taken = False     # ...unless a popover's change took it (popover_touch)
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
                                       # covers.take_deferred way -- set DURING a draw,
-                                      # consumed after the gate cleared _dirty)
+                                      # consumed after the gate cleared the dirty flag)
 
     # -- the layer stack (compositor / router) -------------------------------
 
@@ -1395,7 +1393,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             drop()
         if n == 1:
             glass.cls(0)
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def _present_half(self):
         """The half-size surface, doubled onto the glass: the frame's one
@@ -1505,7 +1503,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.open_in_editor(cart)
         if self.run.project is not None and self.run.project.cart is cart:
             self.editor_app.set_tab("cards")
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def app_content_rect(self):
         """What the exitable "tool" strip leaves of a running app cart's
@@ -1639,7 +1637,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self._saver = Saver(self)
         else:
             self._saver = None
-            self._dirty = True
+            self.frame_state.dirty = True
 
     def park_web_console(self):
         """`web.park()` -- the layers.py contract comment and the tests."""
@@ -1723,7 +1721,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             return                     # the desk's Settings window, as it was
         if not self.wm.top_is("settings"):        # Stage 6d: ask the stack top
             self._settings_return = self.wm.top_kind()  # resume here on exit (cart vs home)
-        self._dirty = True             # screen change repaints (#44)
+        self.frame_state.dirty = True             # screen change repaints (#44)
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
         self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
@@ -1746,7 +1744,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.pause.close()
         if self.confirm.open:
             self.confirm.cancel()
-        self._dirty = True
+        self.frame_state.dirty = True
         layer = self.tasks_layer
         note = _NOTES.up()
         if note is not None:
@@ -1773,7 +1771,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
     def close_tasks(self, home=False):
         """The task manager goes: back where it was opened from (a held
         game resumed), or `home`."""
-        self._dirty = True
+        self.frame_state.dirty = True
         layer = self.tasks_layer
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
@@ -1814,7 +1812,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.wm.bring_forward("desktop")
         elif p is not None:
             self.wm._bring_forward(key)
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def tasks_close(self, key):
         """The task manager's Close on run `key`, the task manager staying."""
@@ -1846,7 +1844,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.settings_layer.close()   # a Name being typed is kept; the Wi-Fi lease ends
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
-            self._dirty = True
+            self.frame_state.dirty = True
             _ck("settings")
             return
         # Close Settings back to wherever it was opened from: resume the running cart
@@ -1855,7 +1853,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self.settings_layer.wifi_return = None
         if back is not None and back in self._apps_by_id:
             self.wm.goto(back)         # the app that opened the Wi-Fi page, as it was
-            self._dirty = True
+            self.frame_state.dirty = True
         elif getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
             # Resume the running cart WITHOUT clobbering the run's caller (the Stage-3
             # review fix): Settings was opened OVER a cart the Editor may have launched via
@@ -1863,7 +1861,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # not be reset to the launcher here. run() would overwrite it; popping
             # Settings off the stack reveals the cart below + preserves who it pops to.
             self.wm.goto("desktop")    # Stage 6e: pop Settings, resume the cart below
-            self._dirty = True
+            self.frame_state.dirty = True
         else:
             self.go_home()
 
@@ -1882,7 +1880,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         self._news = None if kinds is None else getattr(self.input, "news", None)
         if kinds:
             _ui_draw.input_kind(kinds[0][1])
-            self._dirty = True
+            self.frame_state.dirty = True
 
     def input_used(self, source):
         """Input source `source` was used: the input in use becomes its kind
@@ -1900,7 +1898,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 if self.bar_layer.focus is not None:
                     self.bar_layer.focus_leave()
                 self.launcher_layer._tab_focus = False
-            self._dirty = True
+            self.frame_state.dirty = True
 
     # -- top-bar system menu (#52) -------------------------------------------
     #
@@ -1942,14 +1940,14 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             p.show()
         else:
             self.toggle_sysmenu()
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def full_key(self):
         """F11 -- the `full` button of a keyboard, the host's and the page's
         F11: the focused desk window full screen, and back
         (`WindowedWM.full_key`)."""
         if self.wm.full_key():
-            self._dirty = True
+            self.frame_state.dirty = True
 
     def plays_fullscreen(self):
         """A game runs fullscreen, live: what Super pauses -- in console
@@ -2306,7 +2304,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         which marks dirty itself when it writes): the drain then owes no
         frame for it, where a transition's result must paint."""
         self._deferred.append((fn, bool(toast), bool(paints)))
-        self._dirty = True             # the acknowledgment frame must paint
+        self.frame_state.dirty = True             # the acknowledgment frame must paint
 
     def _toast_owed(self):
         """Does a queued transition want the LOADING pill? A loop, because a
@@ -2333,8 +2331,8 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 print("DEFER ms=%d fn=%s"
                       % (_ticks_diff(_ticks_ms(), _t0),
                          getattr(fn, "__name__", "?")))
-        if paint and not self._dirty:
-            self._dirty = True         # the transition's result must paint
+        if paint and not self.frame_state.dirty:
+            self.frame_state.dirty = True         # the transition's result must paint
 
     def _crash_to_code(self):
         """The stop card's See why (docs/history/look_2026-10.md step 33): the code
@@ -2389,7 +2387,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             # PLAY needs the explicit jump).
             self._mark_code_error(line - 1, err[:32])
         self.crash_popup = err
-        self._dirty = True
+        self.frame_state.dirty = True
         return True
 
     def _running_cart_shows_bar(self):
@@ -3045,7 +3043,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
 
     def request_frame(self):
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
-        mark_dirty() would be lost here -- the gate clears _dirty right after
+        mark_dirty() would be lost here -- the gate clears the dirty flag right after
         the draw -- so this sets a flag consumed AFTER that clear (the
         covers.take_deferred pattern)."""
         self._frame_requested = True
@@ -3055,7 +3053,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         could have happened (input that mutates state, scrolls, edits, screen/menu
         switches, selection moves). Cheap + idempotent -- the actual draw is
         coalesced to one in frame()."""
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def _ptr_state(self):
         """The pointer state that affects what's drawn: position, visibility, the
@@ -3168,13 +3166,13 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                                            "RETAINED_FRAMES", 1))
         if self._kframes:
             self._kframes -= 1
-            self._dirty = True
+            self.frame_state.dirty = True
             return True
         if self._damage_take():
             # The app ABI's damage flags (native/moy_app): an app's `all` or
             # `again`, folded into the one dirty flag here.
-            self._dirty = True
-        if self._dirty:
+            self.frame_state.dirty = True
+        if self.frame_state.dirty:
             return True
         if self.wm.popover_owed():
             return True               # the popover's rect, owed to a buffer
@@ -3271,7 +3269,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         if self._press_owed:
             self._press_owed = False
             if not self._press_taken:
-                self._dirty = True        # the press handle_input left owed
+                self.frame_state.dirty = True        # the press handle_input left owed
         # A store on the Workstation looks through all its classes for a
         # property (about 57 us on a T-Deck), so the frame path stores a
         # per-frame flag only when it changes, and what changes every frame
@@ -3338,7 +3336,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.
         if self._splash_until is not None and _ticks_diff(self._splash_until, _ticks_ms()) <= 0:
             self._splash_until = None
-            self._dirty = True
+            self.frame_state.dirty = True
         # The tick model (#217): while a GAME plays, the Player's scheduler
         # decides what this loop frame is -- which logic ticks run, and whether
         # it draws. A frame that does not draw ticks logic only and presents
@@ -3639,27 +3637,27 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
-        if self._dirty:
-            self._dirty = False
+        if self.frame_state.dirty:
+            self.frame_state.dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
         mv = _ui_draw.moving_take()
         if mv != self.ui_moving:
             self.ui_moving = mv
         if _ui_draw.again_take():
-            self._dirty = True        # a pass owes the frame after it (`AppHost.again`)
+            self.frame_state.dirty = True        # a pass owes the frame after it (`AppHost.again`)
         ch = _ui_draw.change_take()
         if ch != self.frame_change:
             self.frame_change = ch
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the
-            # flag is set during the draw, AFTER the gate consumed _dirty).
-            self._dirty = True
+            # flag is set during the draw, AFTER the gate consumed the dirty flag).
+            self.frame_state.dirty = True
         if self._frame_requested:
             # A draw asked for a follow-up frame (a coasting kinetic fling,
             # #113) -- same pattern as the covers re-arm above.
             self._frame_requested = False
-            self._dirty = True
+            self.frame_state.dirty = True
         if self._ptr_changed():          # rebuilt only when it moved: no tuple
             self._last_ptr = self._ptr_state()   # on a static-pointer frame
         fs.frames_drawn += 1
@@ -3681,7 +3679,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         host), NOT by construction -- so unit tests that drive frame() see the launcher
         on the first frame."""
         self._splash_until = _ticks_ms() + (int(ms) if ms else _SPLASH_MS)
-        self._dirty = True
+        self.frame_state.dirty = True
 
     def _draw_splash(self):
         """Paint the boot logo on the system canvas (see draw_splash)."""

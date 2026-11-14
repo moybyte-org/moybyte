@@ -1851,7 +1851,7 @@ class DevChannel:
             except Exception:  # noqa: BLE001 -- older console: flag only
                 ws.diag_live = on
             ws.show_fps = on
-            ws._dirty = True
+            ws.mark_dirty()
             print("REMOTE diag %s" % ("on" if on else "off"))
             return
         if cmd == "verbs":
