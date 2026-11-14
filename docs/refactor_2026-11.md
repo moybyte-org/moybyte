@@ -570,7 +570,7 @@ and the guard names it with the reason.
 `tests/test_content_rect.py`. P4: a frame-cost spot check, because the desk's
 repaint path moves (#58).
 
-**Guard.** `+tests/test_shell_surfaces.py`: the strip is drawn from the
+**Guard.** `tests/test_shell_surfaces.py`: the strip is drawn from the
 frame loop only; Settings keeps no per-page flag; OPEN and a single-candidate
 "Open with" land in one app; no surface under `runtime/system`,
 `runtime/apps` or `runtime/editors` keeps a scroll offset of its own, the
