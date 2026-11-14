@@ -443,7 +443,7 @@ def show(ui, lines):
     """The install prompt's body, drawn into the dialog the public UI API
     `ui` has open: "It can:" over the prompt's `lines`, TRUSTED in the
     danger tone. Get Carts' install prompt and the shell's first-run one
-    (`console_notices.DeleteConfirm`) both draw it."""
+    (`shell_cards.DeleteConfirm`) both draw it."""
     if any(ln != TRUSTED for ln in lines):
         ui.label("It can:", {"tone": "dim"})
     for ln in lines:

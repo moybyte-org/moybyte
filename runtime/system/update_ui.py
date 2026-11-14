@@ -10,7 +10,7 @@
 
 It is KERNEL CHROME, not an app (owner decision 2026-11-01): it drives the
 updater, firmware update is not a role (docs/app_api_v1.md), so it keeps the
-console like the About card in console_notices and takes no AppContext.
+console like the About card in shell_cards and takes no AppContext.
 
 The split follows the same discipline as the console's other sub-UIs:
   * The update *queries* + channel config -- Workstation._update_available /

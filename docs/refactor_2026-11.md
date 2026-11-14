@@ -674,7 +674,7 @@ decision 3.
   owning object in any case, and the rest of their sites are outside callers
   and tests the carve does not need to touch (§7).
 - **S10.** `console_notices.py` splits: the intents glue to its service, the
-  pause, confirm and system-menu cards to `+runtime/shell/shell_cards.py`,
+  pause, confirm and system-menu cards to `runtime/shell/shell_cards.py`,
   the pre-toolkit draw trio beside `bar_layer`. New modules are added to git
   before the first board build (the stager prunes untracked files) and to
   the Zero's allowlist.

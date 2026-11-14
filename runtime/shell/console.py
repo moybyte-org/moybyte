@@ -202,7 +202,7 @@ from history_router import HistoryRouter
 from input_policy import InputPolicy
 
 # The ≡ system menu's rows and actions (#52); its drawing is the kernel's chrome
-# (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
+# (shell_cards.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 from notifications import NOTES as _NOTES
 from front import FRONT as _FRONT
@@ -210,7 +210,7 @@ from front import FRONT as _FRONT
 # frame starts with its check for a run a compiled program's handle started.
 _MEDIA = [None]
 from procs import Procs, Run
-from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
+from shell_cards import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
 # badges are the achievements process's (`ach`, its link); starting it and the
@@ -404,6 +404,7 @@ from console_perf import FrameState, PerfMeters, _ema
 from console_settings import SettingsToggles
 from console_saves import SaveVerbs
 from console_notices import Notices
+from console_intents import IntentVerbs
 from console_spine import SpineVerbs
 from moy_spine import AppRegistry, Returns
 from moy_lease import Wifi, wifi_reset
@@ -552,7 +553,7 @@ def draw_splash(cv, frac=None, status=None, pal=None):
 
 
 class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
-                  SpineVerbs, HomeVerbs, TextVerbs, CanvasBinding):
+                  IntentVerbs, SpineVerbs, HomeVerbs, TextVerbs, CanvasBinding):
     # The editor surfaces, built at their first use (_LAZY_MODULES above).
     block_ui = _first_use("block_ui", _build_block_ui)
     map_ui = _first_use("map_ui", _build_map_ui)

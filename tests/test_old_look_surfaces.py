@@ -294,7 +294,8 @@ def test_the_dialog_caps_say_real_tdeck_keys():
     Esc or Ctrl (ACT_KEYS in native/moy_ui/moy_ui_parts.c)."""
     from tools.board_config import runtime_file
     for name in ("cards_layer.py", "block_editor_ui.py", "popover.py", "text_console.py",
-                 "web_console_ui.py", "code_layer.py", "console_notices.py"):
+                 "web_console_ui.py", "code_layer.py", "console_notices.py",
+                 "shell_cards.py"):
         src = runtime_file(name).read_text()
         for word in ('"Tab"', '"Esc"', '"Ctrl', '"Mic"', '"K"'):
             assert word not in src, "%s spells %s: name the action" % (name, word)

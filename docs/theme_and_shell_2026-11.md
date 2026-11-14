@@ -235,7 +235,7 @@ Nothing is pending the owner.
   menu's "Delete cart" all open one `ui.dialog`, "Delete <title>?" over
   "This can't be undone.", Cancel (where focus opens) and Delete (the
   danger button), dimming what is behind it (D-01;
-  `console_notices.DeleteConfirm`).
+  `shell_cards.DeleteConfirm`).
 
 ### 1.4 Scrolling and text editing (2026-10-27)
 

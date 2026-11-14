@@ -785,7 +785,7 @@ def test_the_system_menu_over_projects_leads_with_its_card(tmp_path, theme, mode
     card = ws.menu_ui.card_rows(ws.projects_layer)
     assert card and [it[-1] for it in m.items[:len(card)]] == [it[-1] for it in card]
     assert m.items[len(card)] == ("sep",)
-    from runtime.console_notices import _DANGER_ICON
+    from runtime.shell_cards import _DANGER_ICON
     assert m.items[m.sel][0] == "item" and m.items[m.sel][3] != _DANGER_ICON, m.items[m.sel]
 
 

@@ -2131,11 +2131,11 @@ def _menu_opens_safe(how):
     """The check that the system menu opened on a row that destroys
     nothing (design review R4-01), with its rows."""
     def check(ws):
-        from runtime import console_notices
+        from runtime import shell_cards
         m = ws.sysmenu
         got = m.open and m.widget == "menu"
         row = m.items[m.sel] if got and 0 <= m.sel < len(m.items) else None
-        ok = bool(got) and row is not None and row[3] != console_notices._DANGER_ICON
+        ok = bool(got) and row is not None and row[3] != shell_cards._DANGER_ICON
         return [("menu opens safe", ok, "the menu %s opens on %s" % (
             how, row[4] if row is not None else "nothing"))]
     return check
@@ -2222,13 +2222,13 @@ def _projects_own(size=None, menu=None, editor=False):
                 grid.sel = i
         _settle(g, ws, 2)
         if menu is not None:
-            from runtime import console_notices
+            from runtime import shell_cards
             ws._golden_popover = True
             ws.projects_layer.open_card_menu()
             m = ws.sysmenu
             if menu == "delete" and m.open:
                 m.sel = next((i for i, it in enumerate(m.items) if it[0] == "item"
-                              and it[3] == console_notices._DANGER_ICON), m.sel)
+                              and it[3] == shell_cards._DANGER_ICON), m.sel)
             _EXPECT[0] = _card_menu_open("the PROJECTS card")
         if editor:
             ws.launch_selected(grid)
@@ -3481,7 +3481,7 @@ def _menu_pairs(ws, img):
     mu = getattr(ws, "menu_ui", None)
     if mu is None or not (m.open and mu.looked()):
         return []
-    from runtime import console_notices
+    from runtime import shell_cards
     out = []
     card = mu._host.box("System")
     if card is not None:
@@ -3495,7 +3495,7 @@ def _menu_pairs(ws, img):
             out.append(_measure("menu card over its anchor", int(over), 0, not over))
         body = _popover_body(ws, card)
         for row in m.items:
-            if row[0] == "item" and row[3] == console_notices._DANGER_ICON:
+            if row[0] == "item" and row[3] == shell_cards._DANGER_ICON:
                 b = mu._host.box(row[4])
                 # a row the body's cut peeks under its fade is the fade's
                 # measure (`_fade_pairs`), not its words'
@@ -3581,9 +3581,9 @@ FADE_RULE_SHARE = 0.6
 def _popover_body(ws, card, origin=(0, 0)):
     """A popover's body on the glass: its card less the modal band
     (`moy_ui_modal_band`) all round."""
-    from runtime import console_notices, ui_draw
+    from runtime import shell_cards, ui_draw
     fs = ws.sys_canvas.font_scale
-    d = 1 if console_notices._desk_class() else 0
+    d = 1 if shell_cards._desk_class() else 0
     pad = ui_draw.metrics("value_row")[28 + d] * fs
     ox, oy = origin
     return (ox + card[0] + pad, oy + card[1] + pad, card[2] - 2 * pad, card[3] - 2 * pad)

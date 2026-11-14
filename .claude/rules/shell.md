@@ -73,7 +73,7 @@ to whoever called it.
   on the Editor's bar (its X pops back to where it was opened from); Make's
   verbs are ＋New / CHANGE / Duplicate / DEL, and in the desk's Projects window PLAY
   (third, in a desk window) (DEL, like every Delete of a cart, asks first:
-  `console_notices.DeleteConfirm`). The desk's
+  `shell_cards.DeleteConfirm`). The desk's
   PROJECTS is the same home in a window (`HomeWindowLayer`): the console
   home's design (hero, details, shelf) in the window's content rect whatever
   the theme's home arrangement, on Make; a pick there opens its window above

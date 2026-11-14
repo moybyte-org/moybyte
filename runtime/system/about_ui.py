@@ -5,7 +5,7 @@
 """About on the console (docs/history/look_2026-10.md step 32): Settings'
 Licences page on the public UI API's verbs, and the words About says (the
 version, the board) that the system menu's About card
-(`console_notices.AboutCard`) and Settings' About rows share.
+(`shell_cards.AboutCard`) and Settings' About rows share.
 
 * Licences is a page of Settings (its About group's last row): Moybyte's
   licence in a line, then `ui.group`s of `ui.link` rows -- Moybyte's parts,

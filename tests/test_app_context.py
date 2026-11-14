@@ -1004,8 +1004,8 @@ MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
 # Kernel chrome: screens the console draws as itself, never apps, so they keep
 # the console and get no AppContext. The update screen drives the updater, and
 # firmware update is not a role at all (docs/app_api_v1.md); the About card
-# lives in console_notices beside the system menu that owns it.
-KERNEL_CHROME = ("update_ui", "console_notices")
+# lives in shell_cards beside the system menu that owns it.
+KERNEL_CHROME = ("update_ui", "console_notices", "shell_cards")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)

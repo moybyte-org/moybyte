@@ -203,7 +203,7 @@ STRIP_SELF = {
     "wm_desk.py": "the windows paint over the desk's bar",
     "console.py": ("a running tool's strip is on the game canvas inside the Player's"
                    " tick, or after the composite"),
-    "console_notices.py": "the pause card is an overlay: its bar over its scrim",
+    "shell_cards.py": "the pause card is an overlay: its bar over its scrim",
 }
 
 class BarLayer:

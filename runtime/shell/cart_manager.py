@@ -393,7 +393,7 @@ class CartManager:
         and `pkg remove` take (`pkg.removed`): the folder, its install-record
         entry, the files it wrote, its consent and its keys all go, and no
         Trash holds a cart. Every route asks first
-        (`console_notices.DeleteConfirm`) and calls this on its Delete, which
+        (`shell_cards.DeleteConfirm`) and calls this on its Delete, which
         is done when this returns. Keeps at least one real cart on the
         device."""
         ws = self.ws

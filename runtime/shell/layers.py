@@ -484,7 +484,7 @@ class _PauseLayer(Layer):
 
 
 class _ConfirmLayer(Layer):
-    """The delete confirm's layer (`console_notices.DeleteConfirm`): its
+    """The delete confirm's layer (`shell_cards.DeleteConfirm`): its
     dialog over the content, drawn on the system canvas; it takes every key
     and tap while it shows, and clears the game pointer's tap so a cart
     underneath never sees one."""
@@ -601,7 +601,7 @@ class _SysMenuLayer(Layer):
 
 
 class _AboutLayer(Layer):
-    """About's card (console_notices.AboutCard) over the washed content: its rows
+    """About's card (shell_cards.AboutCard) over the washed content: its rows
     take the keys and taps; Esc, B or a tap outside closes it. Modal --
     always consumes + clears the game pointer's tap."""
 

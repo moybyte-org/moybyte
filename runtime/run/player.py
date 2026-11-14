@@ -28,7 +28,7 @@ What the Player owns (moved verbatim from Workstation):
     opens the pause menu (`pause`/`resume` below); a cart ends itself with `quit()`,
     and a tool/app exits through its bar's context-X.
   * a stopped run's notice (`notice`, `newer`), which the console's stop card
-    shows (`console_notices.PauseMenu.stop`).
+    shows (`shell_cards.PauseMenu.stop`).
 
 The BUNDLE the Player reaches (spec Section 2): the open `Project` (its live data),
 plus the RAW canvas / input / audio / `make_api` / wifi through its `ws` back-ref --

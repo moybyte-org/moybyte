@@ -13,7 +13,7 @@ stop."""
 
 import pytest
 
-from runtime import console_notices, host_app
+from runtime import shell_cards, host_app
 from ws_helpers import no_unlock_banner, quiesce
 
 
@@ -32,7 +32,7 @@ class _Key:
 
 def _home(tmp_path, monkeypatch, bufs, ref, theme):
     if ref:
-        UI = console_notices.SystemMenuUI
+        UI = shell_cards.SystemMenuUI
         monkeypatch.setattr(UI, "holds_home", lambda self: False)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     if theme is not None:

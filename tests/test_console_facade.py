@@ -201,6 +201,7 @@ MIXINS = {
     "SettingsToggles": "console_settings",
     "SaveVerbs": "console_saves",
     "Notices": "console_notices",
+    "IntentVerbs": "console_intents",
     "SpineVerbs": "console_spine",
 }
 
