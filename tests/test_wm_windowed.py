@@ -1420,10 +1420,10 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
     drv.frame(1 / 30)
     cart_title = ws.cart.get("title")
     ws.open_settings()
-    ws.settings_layer.open_wifi()
+    ws.settings_layer.open_page("wifi")
     drv.frame(1 / 30)
     sl = ws.settings_layer
-    assert sl.wifi_view and sl.wifi_nets       # FakeWifi's canned networks
+    assert sl.showing("wifi") and sl.wifi_nets       # FakeWifi's canned networks
     # Pick the locked "Home WiFi" (row 0) -> password mode.
     sl.wifi_sel = 0
     sl._wifi_activate()

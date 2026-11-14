@@ -120,7 +120,7 @@ def test_mic_cancels_the_wifi_password_prompt(tmp_path):
     ws.wifi = _Wifi()
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl._wifi_ask("Cafe")
     for _ in range(3):
         drv.frame(_DT)

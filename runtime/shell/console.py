@@ -1843,9 +1843,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
         # open (a running game, the Make window) stays. Desktop mode only:
         # console-mode Settings is fullscreen and takes the resume-or-home rules.
-        self.settings_layer.commit_name()     # a Name still being typed is kept
-        if self.settings_layer.wifi_view:
-            self.settings_layer.close_wifi()   # its radio lease ends with the visit
+        self.settings_layer.close()   # a Name being typed is kept; the Wi-Fi lease ends
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
             self._dirty = True
@@ -2096,7 +2094,7 @@ class Workstation(InputVerbs, PerfMeters, SettingsToggles, SaveVerbs, Notices,
                 self.toggle_popover("wifi")
             return
         self.open_settings()
-        self.settings_layer.open_wifi()
+        self.settings_layer.open_page("wifi")
 
     def battery_level(self):
         """The battery's charge in percent, or None where the board reads none

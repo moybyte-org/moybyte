@@ -234,30 +234,30 @@ def test_settings_turns_it_on_and_holds_the_page_until_it_is_off(ws):
     assert sl._settings_rows()[-1:] != () and \
         ("usb_drive", "USB DRIVE", "action") in sl._settings_rows()
     sl._activate_settings_action("usb_drive")
-    assert sl._page_of() == "usb"
+    assert sl.page == "usb"
     sl._draw_page()
     d.turn_on(ws)
     sl.handle_input(_keys("b"))
     sl.handle_input(_keys("home"))
     sl.back()
-    assert sl._page_of() == "usb" and d.on          # held while it is on
+    assert sl.page == "usb" and d.on          # held while it is on
     assert sl.usb_moved()                            # the page follows the drive
     sl._draw_page()
     assert not sl.usb_moved()
     d.lever.st = usb_drive.MOUNTED
     assert sl.usb_moved()
     sl.reset()                                       # Settings opened again
-    assert sl._page_of() == "usb"
+    assert sl.page == "usb"
     d.turn_off(ws)
     sl.back()
-    assert sl._page_of() is None and sl._want == say("USB DRIVE")
+    assert sl.page is None and sl._want == say("USB DRIVE")
 
 
 def test_a_computer_that_ejects_the_card_gives_it_back(ws):
     sl, _say = _settings(ws)
     log = []
     d = _drive(ws, log)
-    sl.open_usb()
+    sl.open_page("usb")
     d.turn_on(ws)
     sl._draw_page()
     d.lever.st = usb_drive.EJECTED
@@ -271,7 +271,7 @@ def test_a_driver_that_gave_the_port_back_by_itself_reopens_the_store(ws):
     sl, _say = _settings(ws)
     log = []
     d = _drive(ws, log)
-    sl.open_usb()
+    sl.open_page("usb")
     d.turn_on(ws)
     sl._draw_page()
     d.lever.st = usb_drive.STOPPED

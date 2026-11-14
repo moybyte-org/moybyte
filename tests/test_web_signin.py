@@ -826,7 +826,7 @@ def test_settings_lists_the_paired_browsers_and_forgets_one(tmp_path, monkeypatc
     ws.open_settings()
     sl = ws.settings_layer
     assert sl._paired_words == "2"
-    sl.open_paired()
+    sl.open_page("paired")
     said, links = [], []
     real_label, real_link = ui.label, ui.link
     monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append(t), real_label(t, o))[1])

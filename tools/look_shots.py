@@ -2007,7 +2007,7 @@ def _wifi_password(g, ws):
     ws.wifi = _CafeWifi()
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl._wifi_ask("Cafe")
     _settle(g, ws, 2)
     _typed(g, ws, WIFI_TYPED)

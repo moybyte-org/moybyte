@@ -180,7 +180,7 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_nets = [("Locked", 80, True)]
     sl.wifi_known = []
     sl.wifi_sel = 0
@@ -203,11 +203,11 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
         sl._draw_page()
     for ch in "pw":
         key(ord(ch))
-    assert sl.wifi_pw.text == "pw"
+    assert sl.wifi_pw == "pw"
     key(127)                                      # Delete: the caret is the end
-    assert sl.wifi_pw.text == "pw"
+    assert sl.wifi_pw == "pw"
     key(8)
-    assert sl.wifi_pw.text == "p"
+    assert sl.wifi_pw == "p"
     key(27)
     ws.input_policy.sync()
     assert sl.wifi_pick is None and not ws.input.text_mode

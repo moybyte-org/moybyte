@@ -36,7 +36,7 @@ def _prompt(tmp_path, theme=("moy", "dark")):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     drv.frame(_DT)
     ws.input.last_key = 0x0D                      # the Enter that picked the row
     sl._wifi_ask("Home WiFi")
@@ -66,11 +66,11 @@ def test_the_prompt_types_into_its_field_and_enter_connects(tmp_path):
         "the Enter that opened the prompt connects nothing"
     assert sl._sub.box("password") is not None, "the prompt is the engine's field"
     _type(drv, "hunter2")
-    assert sl.wifi_pw.text == "hunter2"
+    assert sl.wifi_pw == "hunter2"
     drv.type_char(8)                               # Backspace takes a character
     drv.frame(_DT)
     drv.frame(_DT)
-    assert sl.wifi_pw.text == "hunter"
+    assert sl.wifi_pw == "hunter"
     drv.type_char(13)
     drv.frame(_DT)
     assert ws.wifi.tried == [("Home WiFi", "hunter")] and sl.wifi_pick is None

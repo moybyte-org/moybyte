@@ -122,7 +122,7 @@ def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, k
     ws.open_settings()
     ws.use_inputs([("local", kind)])
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_pick = "Cafe"
     got = []
     real = ui_api.hints

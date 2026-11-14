@@ -778,10 +778,10 @@ def _remote_state(ws):
             "sel": sl.set_msel, "rows": len(sl._settings_rows()),
             # the focused row and where it drew (the page's scroll moves it)
             "focus": f, "focus_box": None if box is None else list(box),
-            "wifi_view": bool(sl.wifi_view),
-            "bt_view": bool(getattr(sl, "bt_view", False)),
+            "wifi_view": sl.showing("wifi"),
+            "bt_view": sl.showing("bt"),
             # the kernel's last-crash panel is up (Settings -> LAST CRASH)
-            "crash_view": bool(getattr(sl, "crash_view", False)),
+            "crash_view": sl.showing("crash"),
         }
         win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
         if win is not None and win.ctx is not None:
