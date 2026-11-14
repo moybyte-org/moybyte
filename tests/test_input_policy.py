@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from ws_helpers import build_ws, build_desktop_ws, make_drv, open_cart
+from ws_helpers import build_ws, build_desktop_ws, make_drv, open_cart, select_on_home
 from runtime import app_decls
 from runtime import layers
 from runtime.editor_app import COMMIT_TABS
@@ -309,3 +309,21 @@ def test_the_policies_are_written_in_one_place(what):
             if pat.search(code):
                 hits.append("%s:%d: %s" % (rel, n, line.strip()))
     assert not hits, "%s outside the input owner:\n%s" % (what, "\n".join(hits))
+
+
+def test_esc_on_the_code_tab_closes_its_find_strip_then_leaves(tmp_path):
+    """The Code tab types always, so a keyboard's Esc arrives there as the
+    byte 27: the first closes the find strip, the next leaves the Editor
+    (the browser's handheld start option leaves to the launcher by it)."""
+    ws = build_ws(tmp_path)
+    drv = make_drv(ws)
+    _frames(drv)
+    ws.open_in_editor(select_on_home(ws, "Star Catcher"))
+    _frames(drv)
+    ws.editor_app.focus_tab("code")
+    _frames(drv)
+    ws.code_layer._find_open = True
+    _esc(ws, drv)
+    assert not ws.code_layer._find_open and ws.wm.top_kind() == "menu"
+    _esc(ws, drv)
+    assert ws.wm.top_kind() == "launcher"

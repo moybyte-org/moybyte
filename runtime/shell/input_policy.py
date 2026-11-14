@@ -150,16 +150,17 @@ class InputPolicy:
         """Esc on a text surface arrives as the byte 27, not `stop` (a board
         keyboard types it there, native/moy_input/moy_hid.c): a fresh one
         over a surface with a view of its own open -- a field's edit, a
-        dialog -- is its back, as `stop` is elsewhere. True where it took it;
-        a surface with no page keeps the byte (a game's `key()`, the code
-        editor's find strip)."""
+        dialog -- or one whose Esc leaves it (`ESC_LEAVES`: the Editor's
+        Code tab, whose back closes its find strip or popups first) is its
+        back, as `stop` is elsewhere. True where it took it; a running app
+        and a game keep the byte (a terminal's Esc, a game's `key()`)."""
         if i.typed != 27 or not i.text_mode:
             return False
         ws = self.ws
         if ws._modal_layer() is not None or ws.sysmenu.open:
             return False
         s = self.holder()
-        if s is None or not self.has_page(s):
+        if s is None or not (self.has_page(s) or getattr(s, "ESC_LEAVES", False)):
             return False
         self.back()
         return True

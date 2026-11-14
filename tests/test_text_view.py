@@ -354,8 +354,7 @@ def _session(p):
     p.type("pr")
     p.key(0x05)                                 # completion over the rows
     p.key(moy_input.KEY_DOWN)
-    p.type("i")
-    p.key(_ESC)
+    p.type("i")                                 # (the completion closes as it types)
     p.run("ws.code_err_row = ws.editor.row; ws.code_err = 'NameError: x'\n"
           "ws.crash_popup = 'NameError: x is not defined'")
     p.frame(3)

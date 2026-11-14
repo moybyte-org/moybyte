@@ -710,6 +710,9 @@ class ConfigLayer(CodeLayer):
     language JSON, the theme's status line under it. The buffer is the open
     ThemeDoc's (`ws.editor` while the theme mode is open), its keys the Code
     tab's less what JSON has no use for (completion, Go to, the scripts)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
 
     id = TAB_CONFIG
 
@@ -947,6 +950,9 @@ class SpritesLayout:
 
 class SpritesLayer(Layer):
     """The Sprites tab's content layer (system domain, as the sprite tab's)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
 
     id = TAB_SPRITES
     domain = "system"
