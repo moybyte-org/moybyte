@@ -980,10 +980,10 @@ class Wallpaper:
         size`, injected by all four heads (runtime/host/host_app.py, web_boot.py and
         both boards' moy_runtime.py) and pinned as a service by
         tests/test_board_service_parity.py. Each head hands back a canvas over
-        ITS OWN compositor -- HostCompositor, WebCompositor, an moy_alloc-backed
-        _LayerComp in board PSRAM -- so there is nothing left to choose between
-        and no per-tier name in this file at all. It is the same factory
-        `Workstation.bind_run_canvas` uses to give a cart with a small raster
+        ITS OWN compositor -- the one-buffer compositor on the host and in the
+        browser, an moy_alloc-backed _LayerComp in board PSRAM -- so there is
+        nothing left to choose between and no per-tier name in this file at
+        all. It is the same factory `Workstation.bind_run_canvas` uses to give a cart with a small raster
         (SPEC.md 3.1) a canvas to play on, which is the same request: an
         offscreen surface the size of a cart frame.
 

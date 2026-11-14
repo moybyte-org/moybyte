@@ -227,6 +227,14 @@ InputState/Pointer. It survived the 2026-08 streaming sunset because the plan's
 RPC is not built, and today the only importer is the wasm head's `web_boot.py`.
 FLIP THIS the day a board grows a consumer."""
 
+[[modules.shared.deny]]
+file = "one_buffer.py"
+kind = "tier"
+why  = """
+The one-buffer compositor: the browser's and the host's presentation tier,
+one RGB565 buffer and no flush. A board's compositor is its panel's
+(native/moy_glass), so nothing on a board constructs this class."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]

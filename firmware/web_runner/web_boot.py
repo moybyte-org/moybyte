@@ -5,7 +5,7 @@ the system canvas was a `web_view.CommandCanvas` that recorded draw commands for
 a JS replayer in the page, so the console never touched a pixel ("the browser is
 the GPU"). That thesis is retired: the same `moy_gfx` + libmoy kernel the boards
 run is compiled into this build, the canvas is literally `device_canvas.
-DeviceCanvas` over `web_canvas.WebCompositor`, and the page's only job is to
+DeviceCanvas` over the one-buffer compositor (`web_canvas.compositor`), and the page's only job is to
 blit the finished RGB565 framebuffer. See web_canvas.py for why the boards'
 class runs unmodified in a browser.
 
@@ -309,7 +309,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
         # placement bracket (#175) for the page to honour, and a genuine
         # rasterizer here was unaffordable at ~85ms/frame interpreted.
         sysc = web_canvas.make_canvas(width, height, font_scale=font_scale)
-        game = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(320, 240))
+        game = web_canvas.WebSystemCanvas(web_canvas.compositor(320, 240))
         ws = console.Workstation(host_api._NullComp(), game, inp, carts,
                                  sys_canvas=sysc, font_scale=font_scale,
                                  panel_diagonal_in=DESK_DIAGONAL_IN)
@@ -320,7 +320,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # raster (celeste's view(128, 120)) plays on its own off-screen canvas and
     # blit_game upscales it, same as both boards.
     ws.make_game_canvas = lambda w, h, owner=None: web_canvas.WebSystemCanvas(
-        web_canvas.WebCompositor(int(w), int(h)))
+        web_canvas.compositor(int(w), int(h)))
     # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
     # (a lua cart opens the Player's runtime-missing panel). A compiled cart

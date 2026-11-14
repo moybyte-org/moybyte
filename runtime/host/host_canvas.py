@@ -6,10 +6,10 @@ second one: a compositor to draw into, the two MicroPython modules it imports by
 name, and (`HostSystemCanvas`, below) the system-surface contract the shared
 console draws its chrome through.
 
-The wasm head did this first and is the proof the shape works -- `web_canvas.py`
-supplies a `WebCompositor` (one RGB565 buffer, no flush) and stages the same
-canvas class. `HostCompositor` is that class's twin; the difference is only that
-a browser's MicroPython already HAS `framebuf`, and CPython does not.
+The wasm head did this first and is the proof the shape works: the browser and
+the host draw over the same one-buffer compositor (`runtime/toolkit/one_buffer.py`,
+the raster module handed in). The difference is only that a browser's
+MicroPython already HAS `framebuf`, and CPython does not.
 
 WHAT THE TWO SHIMS ARE FOR
 
@@ -33,6 +33,7 @@ import os
 import sys
 
 from . import gfx_binding
+from .one_buffer import OneBufferCompositor
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
@@ -138,74 +139,25 @@ def install():
         sys.path.append(_TDECK_MODULES)
 
 
-class HostCompositor:
-    """What a desktop has instead of a panel: one RGB565 buffer and no flush.
+class HostCompositor(OneBufferCompositor):
+    """The one-buffer compositor (`runtime/toolkit/one_buffer.py`) over the
+    host's raster binding, with a test's ring of buffers: `last` is the
+    picture the last frame presented where it is not this buffer, as a
+    board's rotation would hold it. None: the one buffer is the last
+    frame's."""
 
-    The four methods DeviceCanvas asks for. Deliberately ABSENT, each one a
-    `getattr` probe that must fail here: `pump_if_pending` (the T-Deck's
-    SRAM-bounce flush pump), `fold_supported`/`fold_fence`/`arm_scale_fold`
-    (the #190 S3 composite fold), and any `_fbs` list (the P4's DPI buffer
-    rotation, which is what sets RETAINED_FRAMES > 1 there).
-    """
+    last = None
 
     def __init__(self, w, h):
-        self._w = int(w)
-        self._h = int(h)
-        self._buf = bytearray(self._w * self._h * 2)
+        OneBufferCompositor.__init__(self, w, h, gfx_binding)
 
-    def size(self):
-        return (self._w, self._h)
-
-    def framebuffer(self):
-        return self._buf
-
-    def back_buffer(self):
-        return self._buf
-
-    def gfx(self):
-        return gfx_binding
-
-    # The picture the last frame presented, where it is not this buffer: a
-    # test's ring of buffers presented in turn sets it, as a board's
-    # rotation would hold it. None: the one buffer is the last frame's.
-    last = None
+    def _last(self):
+        return self._buf if self.last is None else self.last
 
     def last_buffer(self):
         """The buffer the last frame drew into where it is not this one
         (a test's ring), else None."""
         return self.last
-
-    def copy_last(self, x, y, w, h):
-        """The rect of the buffer the last frame drew into, into the one
-        this frame draws into (docs/surface_model_v1.md §14.5)."""
-        src = self.last
-        if src is None:
-            return True
-        W, H = self._w, self._h
-        x0, y0 = max(0, x), max(0, y)
-        x1, y1 = min(W, x + w), min(H, y + h)
-        buf = self._buf
-        for r in range(y0, y1):
-            a = (r * W + x0) * 2
-            b = (r * W + x1) * 2
-            buf[a:b] = src[a:b]
-        return True
-
-    def shift_last(self, x, y, w, h, dx, dy):
-        """The rect of the buffer the last frame drew into, moved by (dx, dy)
-        inside it, into the one this frame draws into (moy_gfx's shift_rect);
-        in place on the one buffer (docs/theme_and_shell_2026-11.md §9.6)."""
-        src = self.last
-        gfx_binding.shift_rect(self._buf, self._buf if src is None else src, self._w,
-                               x, y, w, h, dx, dy)
-        return True
-
-    def copy_last_into(self, buf, stride, x, y, w, h, lx=0, ly=0):
-        """The rect of the buffer the last frame drew into, at (lx, ly) of
-        `buf` (a layer `stride` px a row), clipped to both."""
-        src = self._buf if self.last is None else self.last
-        gfx_binding.copy_block(buf, stride, src, self._w, lx, ly, x, y, w, h)
-        return True
 
 
 class DeskCompositor(HostCompositor):

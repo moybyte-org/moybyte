@@ -185,7 +185,7 @@ def test_the_wasm_head_shares_the_same_two_meanings(tmp_path):
     assert web_canvas.WebSystemCanvas.letterbox_composite is True
 
     sc = web_canvas.make_canvas(200, 120)
-    gc = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(40, 30))
+    gc = web_canvas.WebSystemCanvas(web_canvas.compositor(40, 30))
     gc.cls(8)
 
     sc.cls(12)                                   # "the desk", in one colour

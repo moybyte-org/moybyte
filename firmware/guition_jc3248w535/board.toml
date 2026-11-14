@@ -199,6 +199,14 @@ Browser event batches -> InputState/Pointer; today's only importer is the wasm
 head's web_boot.py. This board SERVES the wasm console (moy_webhost) -- it
 does not decode its input. Flip this the day it does."""
 
+[[modules.shared.deny]]
+file = "one_buffer.py"
+kind = "tier"
+why  = """
+The one-buffer compositor: the browser's and the host's presentation tier,
+one RGB565 buffer and no flush. A board's compositor is its panel's
+(native/moy_glass), so nothing on a board constructs this class."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]
