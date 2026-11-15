@@ -36,10 +36,9 @@ DRIVER = r'''
 import sys, json
 sys.path.insert(0, @RUNTIME@)
 import moy_carts
-try:
-    import moy_store
-except ImportError:
-    moy_store = None
+import moy_store
+if not hasattr(moy_store, "loads"):
+    moy_store = None                    # CPython: its own json
 
 def ser(o):
     if isinstance(o, dict):
@@ -829,11 +828,9 @@ print("packed", moy_carts.pack(D + "/src/doom.moy", D + "/@TAG@.moy"))
 for name in ("@TAG@.moy", "deflated.zip"):
     n, top = moy_carts.unpack(D + "/" + name, D + "/@TAG@-" + name.replace(".", "-"))
     print("unpacked", name, n, repr(top))
-try:
-    import moy_store
+import moy_store
+if hasattr(moy_store, "mem"):
     print("peak", moy_store.mem()[1])
-except ImportError:
-    pass
 '''
 
 

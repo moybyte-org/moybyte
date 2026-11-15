@@ -13,7 +13,15 @@
 #define MOY_PACK_INFLATE 1
 #endif
 #if MOY_PACK_INFLATE
+#if defined(__has_include)
+#if __has_include("lib/uzlib/uzlib.h")
 #include "lib/uzlib/uzlib.h"
+#else
+#include "uzlib.h"
+#endif
+#else
+#include "lib/uzlib/uzlib.h"
+#endif
 #endif
 
 #define DEPTH 6

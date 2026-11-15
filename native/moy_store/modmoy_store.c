@@ -1,6 +1,7 @@
 // moy_store's MicroPython binding: the store's crash-safe write and file verbs
-// (moy_fs.h) as the module runtime/carts/moy_fs.py delegates to wherever it imports
-// -- every board, the browser and the desktop MicroPython. Names follow
+// (moy_fs.h) as the module runtime/carts/moy_fs.py names -- every board, the
+// browser and the desktop MicroPython; CPython's face of the same module is
+// runtime/host/moy_store_binding.py. Names follow
 // moy_fs.py's: publish is its _write_atomic, read_recover its _read_recover,
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
@@ -634,7 +635,7 @@ static mp_obj_t mod_unmark(mp_obj_t path) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_unmark_obj, mod_unmark);
 
-// _remove and _mkdir: an error is the caller's to ignore, as the twin does.
+// _remove and _mkdir: an error is the caller's to ignore.
 static mp_obj_t mod_remove(mp_obj_t path) {
     const char *p = path_arg(path);
     GUARD_BEGIN

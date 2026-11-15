@@ -565,20 +565,20 @@ def test_a_no_op_commit_answers_from_the_stamp_without_reading_the_snapshot(tmp_
 def test_one_cursor_read_per_commit(tmp_path):
     """cursor.json holds two things a commit needs -- the per-file map and the
     running byte total -- and the card charges a full file open for a second
-    read of it (#154). Counted at the moy_fs leaf, which is where BOTH the
-    journal's own reads and _read_recover's land."""
-    from runtime import moy_fs, moy_journal
+    read of it (#154). Counted at the journal's two readers, the store's
+    `read` and `read_recover`."""
+    from runtime import moy_journal
     store, path = _cart(tmp_path)
     _commit(store, path, "v1\n")
 
     reads = []
-    real_fs, real_j = moy_fs._read, moy_journal._read
-    moy_fs._read = lambda p: (reads.append(p), real_fs(p))[1]
-    moy_journal._read = lambda p: (reads.append(p), real_j(p))[1]
+    real_r, real_rr = moy_journal._read, moy_journal._read_recover
+    moy_journal._read = lambda p: (reads.append(p), real_r(p))[1]
+    moy_journal._read_recover = lambda p, at=None: (reads.append(p), real_rr(p, at))[1]
     try:
         _commit(store, path, "v2\n")
     finally:
-        moy_fs._read, moy_journal._read = real_fs, real_j
+        moy_journal._read, moy_journal._read_recover = real_r, real_rr
     assert len([p for p in reads if p.endswith("cursor.json")]) == 1
 
 

@@ -470,7 +470,7 @@ int32_t moy_files_read_written(moy_files_t *f, const uint8_t *path, size_t n, ui
 }
 
 // The folder made, with its two parents: 0, or MOY_ENOSPC when it is not there
-// after (cart_files.py raises ENOSPC for the same).
+// after.
 static int ensure(moy_files_t *f) {
     if (f->made) {
         return 0;

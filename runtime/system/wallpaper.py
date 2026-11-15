@@ -62,7 +62,7 @@ try:
     import moybuf as _moybuf
 except ImportError:
     _moybuf = None
-from moyimg import cover_stream, file_sig, text_sig
+from moyimg import file_sig, text_sig
 from moy_image import (load_picture_bake, load_wallpaper_preview,
                        save_picture_bake, save_wallpaper_preview)
 
@@ -327,15 +327,8 @@ class Wallpaper:
         sig = file_sig(f)
         if folder and load_picture_bake(folder, cw, ch, sig, pix):
             return True
-        cover = getattr(self.ws.carts_store, "cover_image", None)
-        got = None
-        try:
-            if cover is None:
-                raise ImportError("no cover_image")
-            got = cover(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
-        except ImportError:    # the host without its C library: the reference
-            f.seek(0)
-            got = cover_stream(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
+        got = self.ws.carts_store.cover_image(f, pix, cw, ch, self.PIC_MAX_W,
+                                              self.PIC_MAX_H)
         if got is None:
             return False
         if folder:

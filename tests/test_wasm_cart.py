@@ -483,7 +483,7 @@ def test_a_write_cut_short_leaves_the_last_whole_copy(tmp_path):
     """A power loss mid-write leaves "<key>~part" (torn) or "<key>~done"
     (whole, not yet in place): the next session drops the first and puts the
     second in place, and only whole copies are ever read."""
-    from runtime import cart_files
+    from runtime import moy_play
     cart = tmp_path / "carts" / "wasm_files.moy"
     cart.mkdir(parents=True)
     d = tmp_path / "apps" / "wasm_files"
@@ -491,7 +491,7 @@ def test_a_write_cut_short_leaves_the_last_whole_copy(tmp_path):
     (d / "options.cfg").write_bytes(b"old")
     (d / "options.cfg~done").write_bytes(b"new")
     (d / "saves%2fslot1.sav~part").write_bytes(b"to")
-    f = cart_files.CartFiles(str(cart))
+    f = moy_play.Files(str(cart))
     assert sorted(os.listdir(d)) == ["options.cfg"]
     assert f.read(b"options.cfg", 0, 16) == b"new"
     assert f.read(b"saves/slot1.sav", 0, 0) is None
@@ -499,20 +499,21 @@ def test_a_write_cut_short_leaves_the_last_whole_copy(tmp_path):
     assert sorted(os.listdir(d)) == ["options.cfg", "saves%2fslot1.sav"]
     assert f.name(b"saves/", 0) == b"saves/slot1.sav" and f.name(b"saves/", 1) is None
     assert f.erase(b"saves/slot1.sav") == 0 and f.erase(b"saves/slot1.sav") == -1
+    f.close()
 
 
 def test_the_key_is_the_desktop_players(tmp_path):
     """One rule names a written file on every host: moy-spec's
     libmoy/port/moy_files.c, whose own test pins these same names."""
-    from runtime import cart_files
+    from runtime import cart_files, moy_play
     for path, want in ((b"saves/slot1.sav", "saves%2fslot1.sav"),
                        (b"saves/Case.sav", "saves%2f%43ase.sav"),
                        (b".hidden", "%2ehidden"), (b"trail.", "trail%2e"),
                        (b"a b%c~d", "a%20b%25c%7ed"), (b"con.cfg", "%63on.cfg"),
                        (b"com1", "%63om1"), (b"console.cfg", "console.cfg")):
         assert cart_files.key(path) == want
-        assert cart_files.path_of(want) == path
-    assert cart_files.path_of("x~done") is None
+        assert moy_play.files_path_of(want) == path
+    assert moy_play.files_path_of("x~done") is None
 
 
 def test_par_leaves_what_running_the_items_in_order_leaves(tmp_path):

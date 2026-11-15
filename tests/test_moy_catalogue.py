@@ -171,6 +171,7 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
     with nothing to write opens no file; one that writes reads back only the
     folders it wrote, and its shelf is the one a catalogue would read."""
     import builtins
+    import sys
 
     root = str(tmp_path / "carts")
     cat.ensure_dirs(root)
@@ -181,10 +182,20 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
     assert ([(e["path"], e["h"]) for e in shelf]
             == [(e["path"], e["h"]) for e in cat.catalogue(root)])
 
+    # Every open: CPython's own, and the store's reads (native/moy_store) by
+    # the names runtime/carts' modules hold them under.
     opened = []
     real = builtins.open
     monkeypatch.setattr(builtins, "open", lambda p, *a, **k: (
         opened.append(str(p)), real(p, *a, **k))[1])
+    for m in list(sys.modules.values()):
+        if "/runtime/carts/" not in (getattr(m, "__file__", None) or ""):
+            continue
+        for n in ("_read", "_read_recover", "_read_bytes", "_read_stamped"):
+            f = getattr(m, n, None)
+            if f is not None:
+                monkeypatch.setattr(m, n, (lambda f: lambda p, *a: (
+                    opened.append(str(p)), f(p, *a))[1])(f))
     assert cat.seed(seed, root, shelf) is shelf
     assert opened == []
 

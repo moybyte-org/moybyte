@@ -37,10 +37,11 @@ _ENOMEM = 12
 _NAMES = ("moy_ufiles.h", "moy_ufiles.c", "moy_fs.h", "moy_fs.c", "moy_vol.h",
           "moy_vol.c", "moy_journal.h", "moy_journal.c", "moy_cat.h", "moy_cat.c",
           "moy_load.h", "moy_arena.h", "moy_img.h", "moy_img.c", "moy_json.h",
+          "moy_pack.h", "moy_pack.c",
           "moy_json.c", "moy_png.h", "moy_png.c", "uzlib.h", "uzlib_conf.h",
           "tinflate.c", "header.c", "adler32.c", "crc32.c")
 _COMPILE = ("moy_store_host.c", "moy_ufiles.c", "moy_fs.c", "moy_vol.c",
-            "moy_journal.c", "moy_cat.c", "moy_img.c", "moy_json.c", "moy_png.c",
+            "moy_journal.c", "moy_cat.c", "moy_img.c", "moy_pack.c", "moy_json.c", "moy_png.c",
             "tinflate.c", "header.c", "adler32.c", "crc32.c")
 
 

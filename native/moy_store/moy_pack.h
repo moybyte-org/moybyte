@@ -11,8 +11,8 @@
 // or names what the wire skips. Both ways a file passes through a chunk
 // buffer (and the deflate window), so a member of any size -- a compiled
 // cart's module, its game data -- costs neither its size nor a cap.
-// runtime/carts/moy_pack.py's pack/unpack/adopt are
-// the twins; tests/test_store_native.py pins the two and a zip reader.
+// runtime/carts/moy_pack.py's pack/unpack/adopt are faces of these on every
+// tier; tests/test_store_native.py pins them and a zip reader.
 
 #ifndef MOY_PACK_H
 #define MOY_PACK_H

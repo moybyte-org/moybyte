@@ -18,8 +18,6 @@ except ImportError:  # pragma: no cover
     os = None
 
 from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
-if _store is not None and not hasattr(_store, "rmtree"):
-    _store = None
 
 
 CARTS_DIR = "/sd/moybyte/carts"
@@ -483,23 +481,6 @@ def _leave(here):
 
 
 def _rmtree(path):
-    if _store is not None:
-        _store.rmtree(path)
-        return
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return
-    for n in names:
-        p = path + "/" + n
-        if _is_dir(p):
-            _rmtree(p)
-        else:
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-    try:
-        os.rmdir(path)
-    except OSError:
-        pass
+    """The folder at `path` and everything in it removed (the store's
+    moy_cat_rmtree); a file or an absent path is left as it is."""
+    _store.rmtree(path)

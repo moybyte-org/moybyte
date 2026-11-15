@@ -739,7 +739,7 @@ int moy_fs_claim(const char *path, const char *dest, uint32_t chars,
     if (bak == NULL) {
         return 0;
     }
-    // `dest` is replaced, as the twin's os.rename replaces it on every VFS: a
+    // `dest` is replaced, as os.rename replaces it on every VFS: a
     // snapshot left by a journal line a power cut tore is an orphan.
     int rc = rename2(bak, dest, 1);
     moy_store_free(bak, bn);

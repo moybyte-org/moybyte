@@ -153,7 +153,8 @@ def test_a_vm_driver_sees_runtime_as_a_board_stages_it():
             if not board_config.host_only(ROOT / "runtime", p)}
     # Only the module links: an interpreter that imported from the tree may
     # have left its own __pycache__ beside them.
-    mods = [p for p in tree.iterdir() if p.suffix == ".py"]
+    # The tree's one file of its own is CPython's moy_store (unix_mp._host_store).
+    mods = [p for p in tree.iterdir() if p.suffix == ".py" and p.name != "moy_store.py"]
     assert {p.name for p in mods} == want
     assert all(p.resolve() == sources[p.name].resolve() for p in mods)
 

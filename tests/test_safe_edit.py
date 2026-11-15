@@ -6,6 +6,7 @@ These exercise the SOFTWARE hardening only; the underlying SD/SPI bus-sharing
 hang is a hardware-only concern (see .claude/rules/boards.md) and is
 out of scope here."""
 
+import os
 from pathlib import Path
 
 from ws_helpers import build_ws_with_cart
@@ -411,27 +412,14 @@ def test_crash_before_the_publish_keeps_the_previous_save(tmp_path, monkeypatch)
     # new source, main.py still holds the old one and is not a prefix of it. The
     # PREVIOUS save is what survives -- the guarantee the rename dance gave -- and
     # the cart is readable, which is the part that matters.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     c = moy_carts.create("Crashy", root, src="def _draw():\n    cls(1)  # OLD\n",
                          type="app")
     path = c["path"]
     main = Path(path) / "main.py"
-
-    real_write = moy_fs._write
-
-    def crash_on_publish(p, data):
-        if p.endswith("main.py"):
-            raise KeyboardInterrupt("power lost")   # the backup already landed
-        return real_write(p, data)
-
-    monkeypatch.setattr(moy_fs, "_write", crash_on_publish)
-    try:
-        moy_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
-    except KeyboardInterrupt:
-        pass
-    monkeypatch.setattr(moy_fs, "_write", real_write)
+    _cut_after_the_backup(str(main), "def _draw():\n    cls(2)  # NEW\n")
 
     assert "OLD" in main.read_text()               # the publish never ran
     loaded = moy_carts.load(path)
@@ -440,27 +428,34 @@ def test_crash_before_the_publish_keeps_the_previous_save(tmp_path, monkeypatch)
     assert not (Path(path) / "main.py.bak").exists()   # the stale stamp is retired
 
 
+def _cut_after_the_backup(path, new, landed=""):
+    """What a power loss after a save's backup leaves (moy_fs.h): the marker
+    naming `path` with `new`'s stamp, the stamped backup whole, and `path`
+    holding `landed` of the publish (nothing: the previous save), read by a
+    process that starts over."""
+    import moy_store
+    from runtime import moy_fs
+    root = str(Path(path).parent.parent.parent)
+    n, crc = moy_fs._stamp_of(new)
+    Path(root, moy_fs._PUBLISH).write_text("#moyfs1 %d %d %s\n" % (n, crc, path))
+    Path(path + ".bak").write_text(moy_fs._stamp_line(new) + new)
+    if landed:
+        Path(path).write_text(landed)
+    moy_store._reboot()
+
+
 def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):
     # The window the old rename dance could not see: `path` is present but SHORT.
     # _read_recover checked only for a MISSING file, so a truncated main.py read as
     # good source. The stamp beside it says otherwise.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     c = moy_carts.create("Torn", root, src="def _draw():\n    cls(1)\n", type="app")
     path = c["path"]
     main = Path(path) / "main.py"
-
-    real_write = moy_fs._write
-
-    def torn_publish(p, data):
-        if p.endswith("main.py"):
-            return real_write(p, data[: len(data) // 2])   # half the bytes land
-        return real_write(p, data)
-
-    monkeypatch.setattr(moy_fs, "_write", torn_publish)
-    moy_carts.save_code(c, "def _draw():\n    cls(2)  # WHOLE\n")
-    monkeypatch.setattr(moy_fs, "_write", real_write)
+    whole = "def _draw():\n    cls(2)  # WHOLE\n"
+    _cut_after_the_backup(str(main), whole, whole[:len(whole) // 2])
 
     assert "WHOLE" not in main.read_text()         # torn on disk
     assert "WHOLE" in moy_carts.load(path)["src"]  # ...and whole to every reader
@@ -472,26 +467,21 @@ def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):
 def test_failed_bak_write_keeps_the_published_file(tmp_path, monkeypatch):
     # ENOSPC on the backup (the FIRST write) must leave the good file untouched and
     # no half-written backup behind to be mistaken for one.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     good = "def _draw():\n    cls(1)  # KEEPME\n"
     c = moy_carts.create("Keep", root, src=good, type="app")
     main = Path(c["path"]) / "main.py"
 
-    real_open = open
-
-    def failing_open(p, mode="r"):
-        if p.endswith("main.py.bak") and mode == "w":
-            raise OSError("ENOSPC")
-        return real_open(p, mode)
-    monkeypatch.setattr(moy_fs, "open", failing_open, raising=False)
-
+    # The cart's folder takes no new file: the backup's open fails, as ENOSPC.
+    os.chmod(c["path"], 0o555)
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
     except OSError:
         pass
-    monkeypatch.delattr(moy_fs, "open", raising=False)
+    finally:
+        os.chmod(c["path"], 0o755)
 
     assert "KEEPME" in main.read_text()
     assert not (Path(c["path"]) / "main.py.bak").exists()
