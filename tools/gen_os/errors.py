@@ -1,6 +1,8 @@
 """The app ABI's answer codes: the C enum and what each face makes of a code,
 for the C faces (MicroPython's and Lua's) and the CPython host's."""
 
+import errno as _errno
+
 from . import TableError, header
 from .cproto import HEAD
 
@@ -118,11 +120,11 @@ def gen_face_errors(src):
          "servers do; `exception(code)` is what a refused call raises,",
          "ERR[code] the text a storage row answers as its err instead of raising (IO's",
          'formats the store\'s errno and its strerror). A code not here answers as',
-         '%s."""' % FALLBACK, "", "import errno as _errno", ""]
+         '%s. An errno is its number (MicroPython\'s errno module names a few)."""' % FALLBACK, ""]
     o += ["%s = %d" % (e["code"], e["n"]) for e in rows]
     o += ["", "# code: (exception, errno, message)", "RAISES = {"]
     for e in rows[1:]:
-        eno = "_errno." + e["errno"] if "errno" in e else "None"
+        eno = "%d" % getattr(_errno, e["errno"]) if "errno" in e else "None"
         o.append("    %s: (%s, %s, %r)," % (e["code"], e["py"], eno, e.get("msg")))
     o += ["}", "", "ERR = {"]
     o += ["    %s: %r," % (e["code"], e["err"]) for e in rows if "err" in e]

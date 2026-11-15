@@ -4,9 +4,7 @@ Python faces make of one: a row answers -code, as the console's own
 servers do; `exception(code)` is what a refused call raises,
 ERR[code] the text a storage row answers as its err instead of raising (IO's
 formats the store's errno and its strerror). A code not here answers as
-BAD."""
-
-import errno as _errno
+BAD. An errno is its number (MicroPython's errno module names a few)."""
 
 OK = 0
 STALE = 1
@@ -24,7 +22,7 @@ BUSY = 11
 # code: (exception, errno, message)
 RAISES = {
     STALE: (ValueError, None, 'a grant that ended'),
-    FULL: (OSError, _errno.ENOSPC, 'no room'),
+    FULL: (OSError, 28, 'no room'),
     NOMEM: (MemoryError, None, None),
     DENIED: (ValueError, None, 'a role the grant does not hold'),
     NOSTORE: (ValueError, None, 'an argument the role refuses'),
