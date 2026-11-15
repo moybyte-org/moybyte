@@ -121,6 +121,7 @@ python tools/simulate_desktop.py [--cart system_carts/moybyte.star_catcher.moy]
 tools/board.py ports       # which board is on which port, and who holds it
 tools/board.py pass tdeck p4  # from a worktree: build, flash, boot, suite, perf -- one table
 tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; `rm NAME` removes it
+tools/worktree.py prune       # removes every worktree whose work is on dev and nobody works in
 ```
 
 - **Attached boards are test resources, not a permission gate**: drive, flash
@@ -131,6 +132,12 @@ tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; 
   landed outcome. No model identifiers in commits or files.
 - Comments and docs state what IS; the story of a change goes in its commit
   message.
+- **A worktree goes once its work lands** (owner, 2026-11-15): each is ~700 MB
+  before its board builds, and 35 left behind filled the disk. A push runs
+  `tools/worktree.py prune` (`.claude/settings.json`'s hook); it keeps a tree
+  with changes, unlanded commits, a process working in it or running its
+  tools, or one made in the last two hours (a worker between commands holds
+  no process).
 - **Every turn re-reads the whole conversation**, so a session's cost is turns ×
   context. Find code with `grep -n`, then read the range you need; never read a
   file over ~20 KB whole, and never read session transcripts under `~/.claude`.

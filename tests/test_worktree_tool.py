@@ -146,3 +146,85 @@ def test_rm_leaves_what_the_links_point_at(repo):
 def test_rm_refuses_what_is_not_one_of_its_worktrees(repo, capsys):
     assert rm(repo, "nothing") == 2
     assert "is not a worktree" in capsys.readouterr().err
+
+
+def prune(main, *more):
+    return worktree.main(["prune", "--min-age", "0"] + list(more),
+                         start=str(main))
+
+
+def test_rm_counts_a_landing_rebased_through_a_conflict_as_merged(repo, capsys):
+    new(repo)
+    commit(wt_path(repo), "README", "theirs\n", "the change")
+    commit(repo, "README", "ours\n", "dev moved")
+    commit(repo, "README", "ours and theirs\n", "the change")
+    assert rm(repo) == 0
+    assert "branch wt deleted" in capsys.readouterr().out
+
+
+def test_rm_reads_dev_as_the_remote_branch_when_there_is_one(repo, capsys):
+    """A worktree pushes dev without moving the main checkout's dev."""
+    remote = repo.parent / "remote.git"
+    git(repo.parent, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "dev")
+    new(repo)
+    commit(wt_path(repo), "new.txt", "work\n", "work")
+    git(wt_path(repo), "push", "-q", "origin", "HEAD:dev")
+    assert rm(repo) == 0
+    assert "branch wt deleted" in capsys.readouterr().out
+
+
+def test_prune_removes_landed_worktrees_and_keeps_the_rest(repo, capsys):
+    for name in ("landed", "changed", "ahead"):
+        new(repo, name)
+    (wt_path(repo, "changed") / "README").write_text("changed\n")
+    commit(wt_path(repo, "ahead"), "new.txt", "work\n", "work")
+    capsys.readouterr()
+    assert prune(repo, "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert "would remove landed" in out
+    assert "kept changed: 1 tracked file(s) changed" in out
+    assert "kept ahead: 1 commit(s) not on dev" in out
+    assert os.path.isdir(wt_path(repo, "landed"))
+    assert prune(repo) == 0
+    assert not os.path.lexists(wt_path(repo, "landed"))
+    assert os.path.isdir(wt_path(repo, "changed"))
+    assert os.path.isdir(wt_path(repo, "ahead"))
+
+
+def test_prune_keeps_a_worktree_a_process_works_in(repo, capsys):
+    new(repo, "live")
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                         cwd=str(wt_path(repo, "live")))
+    try:
+        capsys.readouterr()
+        assert prune(repo) == 0
+        assert "kept live: in use by pid %d" % p.pid in capsys.readouterr().out
+        assert os.path.isdir(wt_path(repo, "live"))
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_prune_keeps_a_worktree_whose_tools_a_process_runs(repo, capsys):
+    new(repo, "tools")
+    script = wt_path(repo, "tools") / "wait.py"
+    script.write_text("import time; time.sleep(30)\n")
+    p = subprocess.Popen([sys.executable, str(script)], cwd=str(repo))
+    try:
+        capsys.readouterr()
+        assert prune(repo) == 0
+        assert "in use by pid %d" % p.pid in capsys.readouterr().out
+        assert os.path.isdir(wt_path(repo, "tools"))
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_prune_keeps_a_worktree_made_moments_ago(repo, capsys):
+    new(repo, "fresh")
+    capsys.readouterr()
+    assert worktree.main(["prune"], start=str(repo)) == 0
+    assert "kept fresh: made 0 min ago" in capsys.readouterr().out
+    assert os.path.isdir(wt_path(repo, "fresh"))
