@@ -391,6 +391,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
     ("moy_ui_api_audit", [c.c_void_p, _I], c.c_uint32),
     ("moy_ui_api_fades", [c.c_void_p, _I], c.c_uint32),
+    ("moy_ui_api_owed", [c.c_void_p, _I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),

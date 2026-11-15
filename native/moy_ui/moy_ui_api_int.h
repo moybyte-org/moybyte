@@ -102,7 +102,12 @@ const moy_ui_over_t *mua_over(const moy_ui_over_t *o);
 int mua_find(const moy_ui_stop_t *v, int n, uint32_t id);
 int mua_page_at(const moy_ui_stop_t *v, int n, int x, int y);
 int mua_gap(int a0, int a1, int b0, int b1);
-moy_ui_keep_t *mua_keep(moy_ui_ctx_t *c, uint32_t id, int make);
+// The kept state of `id`; a fresh one of kind `kind` (MOY_UI_KEEP_*) where
+// it has none and `kind` is not 0, counted as lost where every id is taken.
+moy_ui_keep_t *mua_keep(moy_ui_ctx_t *c, uint32_t id, int kind);
+// The edits' starts of context c in its instance given back: every one, or
+// (id not 0) field id's (moy_ui_api_table.c).
+void mua_edits_drop(moy_ui_inst_t *I, const moy_ui_ctx_t *c, uint32_t id);
 moy_ui_keep_t *mua_keep_of(moy_ui_ctx_t *c, uint32_t id);
 const moy_ui_stop_t *mua_page_of_keep(const moy_ui_stop_t *v, int n,
                                       const moy_ui_keep_t *k);

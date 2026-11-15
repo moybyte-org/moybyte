@@ -264,7 +264,7 @@ void moy_ui_run_bar_tap(int i) {
 static int32_t s_tp_in[4];
 
 static void run_in_part(run_t *r, const moy_ui_ctx_t *c) {
-    if (c->tp_open) {
+    if (c->tp.open) {
         memcpy(&r->row.st[MOY_ST_CX0], s_tp_in, sizeof(s_tp_in));
     }
 }

@@ -418,6 +418,9 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     def api_fades(reset):
         return int(lib.moy_ui_api_fades(None, 1 if reset else 0))
 
+    def api_owed(reset):
+        return int(lib.moy_ui_api_owed(None, 1 if reset else 0))
+
     def api_shift_plan(ctx, out):
         p, _k = _ctx(ctx)
         w = (c.c_int32 * 8).from_buffer(out)
@@ -811,7 +814,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
+              api_owes, api_moved, api_moving, api_busy, api_offset, api_fades, api_owed,
               api_shift_plan, api_shift_break,
               api_shift_drawn, api_band, api_floor_box, api_change_box,
               api_lag_note, api_lag, api_host_begin, api_host_arm,

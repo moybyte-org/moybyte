@@ -1356,10 +1356,7 @@ class Player(PlayerDiag):
         else:
             ed.aim(host)                # a caret's step lands as this frame's shift
         self._over[2] = 0
-        lost = _ui_draw._C.api_lost(ctx)
-        if lost:
-            print("ui: a frame drew %d stops past the ones it records; they take no focus or "
-                  "input (a long list is one ui.list or ui.table)" % lost)
+        _ui_draw.say_lost(ctx)
         # On a desk the run's canvas is its window's own, which only the run
         # draws (`holds`): it holds the page as the run's last frame left it.
         own = self.holds(cv)

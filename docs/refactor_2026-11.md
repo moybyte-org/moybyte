@@ -612,7 +612,7 @@ Closes T7, G2, T2, I3, I4.
   layout from a stale measure. Owed frames are counted with the engine's
   other counts.
 - The run face moves from `moy_ui_wasm.c` to
-  `+native/moy_ui/moy_ui_run.c`.
+  `native/moy_ui/moy_ui_run.c`.
 - T2: the `ui.*` rows gain what the faces need (the Python signature, enum
   arguments, index base per tier, list arguments, the shape of an answer,
   the end form), and `+native/moy_ui/over.json` lists every override key.
@@ -633,7 +633,7 @@ frame, so none should move; one that does is reviewed under this name.
 and `tests/test_ui_opts_seq.py` (the boards' dict path still allocates
 nothing). T-Deck and P4 pass. Goldens unchanged, which here is the proof.
 
-**Guards.** `+tests/test_ui_ctx_groups.py`: each engine file touches only
+**Guards.** `tests/test_ui_ctx_groups.py`: each engine file touches only
 the sub-struct it owns, and 17 kept ids in one context raise `keep_lost`.
 `tests/test_ui_opts_seq.py` drives every key of `over.json`. T3 and the
 parity test hold the names. Phase 4's matrix has no failing cell left, and

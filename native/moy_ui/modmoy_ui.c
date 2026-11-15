@@ -3856,6 +3856,12 @@ static mp_obj_t ui_api_fades(mp_obj_t reset) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_fades_obj, ui_api_fades);
 
+// api_owed(reset) -> the frames owed for a widget with no size kept to show at
+static mp_obj_t ui_api_owed(mp_obj_t reset) {
+    return mp_obj_new_int_from_uint(moy_ui_api_owed(NULL, mp_obj_is_true(reset)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owed_obj, ui_api_owed);
+
 // api_focus(ctx, id=None) -> the focused id, or None
 static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     moy_ui_ctx_t *c = ctx_of(ctx);
@@ -4153,7 +4159,7 @@ static mp_obj_t ui_api_dup(mp_obj_t ctx) {
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_dup_obj, ui_api_dup);
 
 // api_lost(ctx) -> the stops the last frame drew past the ones it records,
-// once per count, else 0
+// and from bit 16 the widgets past the kept ids, once per answer, else 0
 static mp_obj_t ui_api_lost(mp_obj_t ctx) {
     return MP_OBJ_NEW_SMALL_INT(moy_ui_api_lost(ctx_of(ctx)));
 }
@@ -4292,6 +4298,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_busy), MP_ROM_PTR(&ui_api_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_offset), MP_ROM_PTR(&ui_api_offset_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_owed), MP_ROM_PTR(&ui_api_owed_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_dist), MP_ROM_PTR(&ui_api_table_dist_obj) },

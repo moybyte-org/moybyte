@@ -1881,10 +1881,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     dup = _C.api_dup(ctx)
     if dup is not None:
         print("ui: two stops share the id %r; the later is no stop" % dup)
-    lost = _C.api_lost(ctx)
-    if lost:
-        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
-              "input (a long list is one ui.list or ui.table)" % lost)
+    say_lost(ctx)
     if rect is None:
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
@@ -1959,6 +1956,19 @@ def paste(ctx, text):
         _C.api_run_paste(text)
     else:
         _C.api_paste(ctx, text)
+
+
+def say_lost(ctx):
+    """Log, once each, the stops the frame `ctx` drew last drew past the ones
+    it records and the widgets that asked for kept state past the ids it
+    keeps (native/moy_ui's api_lost)."""
+    lost = _C.api_lost(ctx)
+    if lost & 0xFFFF:
+        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
+              "input (a long list is one ui.list or ui.table)" % (lost & 0xFFFF))
+    if lost >> 16:
+        print("ui: %d widgets asked for kept state past the ids a frame keeps; they draw "
+              "with none (no scroll, no row, no edit to cancel)" % (lost >> 16))
 
 
 def app_back(ctx, take=True):

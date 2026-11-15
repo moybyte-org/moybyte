@@ -682,3 +682,95 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
             "%s: %s by %s: %r -> %r" % (layer, what, col, before, after))
     finally:
         rig.ws.spine.exit()
+
+
+# -- widget state (phase 8): a field's edit and a popover's size are its own ----------
+
+STACK_PY = """
+a = "aa"
+b = "bb"
+pop = 0
+want = ""
+focus = ""
+
+
+def _draw():
+    global a, b, pop, want, focus
+    cls(0)
+    ui.page("Stack")
+    a, _ = ui.field("Name", a, 11)
+    ui.button("Open")
+    if pop:
+        if not ui.popover("pop", 160):
+            pop = 0
+        b, _ = ui.field("Note", b, 11)
+        ui.popover()
+    if want:
+        ui.focus(want)
+        want = ""
+    focus = ui.focus()
+"""
+
+class _Stack:
+    """A Python app's page whose field a popover with a field of its own
+    stacks over; the engine and its records are the one every runtime
+    draws through."""
+
+    def __init__(self, tmp_path):
+        from test_app_field_typing import _open
+        self.ws, self.drv = _open(tmp_path, "Stack", STACK_PY, "python")
+        self.ns = self.ws.run.player.ns
+
+    def set(self, name, v):
+        self.ns[name] = v
+        for _ in range(3):
+            self.drv.frame(DT)
+
+
+def test_a_stacked_fields_cancel_gives_each_field_its_own_text(tmp_path):
+    """A field with an edit in progress under a popover whose field takes an
+    edit of its own: each field's record keeps the text its edit began
+    from, so the popover's cancel gives its field its text, and the page's,
+    focused again, cancels to its own."""
+    from test_app_field_typing import _mic, _type
+    from runtime import ui_draw
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("tdeck")
+    try:
+        st = _Stack(tmp_path)
+        st.set("want", "Name")
+        _type(st.drv, "x")
+        st.set("pop", 1)
+        st.set("want", "Note")
+        _type(st.drv, "y")
+        assert (st.ns["a"], st.ns["b"]) == ("aax", "bby")
+        _mic(st.ws, st.drv)
+        assert (st.ns["a"], st.ns["b"]) == ("aax", "bb")
+        st.set("pop", 0)
+        st.set("want", "Name")
+        _mic(st.ws, st.drv)
+        assert (st.ns["a"], st.ns["b"]) == ("aa", "bb")
+        assert not st.ws.sysmenu.open, "the page's field had its own edit to cancel"
+    finally:
+        ui_draw.input_kind(was)
+
+
+def test_a_popover_first_shows_at_its_settled_box(tmp_path):
+    """A popover with no size kept lays its body out and draws nothing, owing
+    the next frame: the first frame it shows on is the frame after it, and
+    the one after that draws the same."""
+    from test_ui_linked import _pixels
+    st = _Stack(tmp_path)
+    base = _pixels(st.ws)
+    st.ns["pop"] = 1
+    shots = []
+    for _ in range(4):
+        st.ws.mark_dirty()
+        st.drv.frame(DT)
+        shots.append(_pixels(st.ws))
+    shown = [i for i, s in enumerate(shots) if s != base]
+    assert shown, "the popover never showed"
+    first = shown[0]
+    assert first >= 1, "it showed on its first frame, at a size it had not measured"
+    same = shots[first] == shots[first + 1]
+    assert same, "the popover's box moved after it first showed"
