@@ -772,7 +772,7 @@ traces that record wake order; no pixels.
 One S3: a Lua service's timers through a VM stop. One P4: a Lua app's
 `every` beside a Python app's.
 
-**Guard.** `+tests/test_one_scheduler.py`: a timer made on any tier is a
+**Guard.** `tests/test_one_scheduler.py`: a timer made on any tier is a
 row of the kernel's table; a Lua app's and a Lua service's `moybyte` names
 are one set; a service and a cart see one set of banned globals; no timer
 table in `moycore_svc.c` and no due-list in `Wakes`.

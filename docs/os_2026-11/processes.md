@@ -135,8 +135,10 @@ tick.** It declares its wake sources and sleeps between them: timers
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`) and events
 (`moybyte.on(source, fn)`: a UART, a socket readable, a pin edge, a LoRa
 packet, a message). Events are read from the C rings of `hardware.md` §2, so nothing is
-lost and a record keeps its real timestamp; timers are deadlines on
-`ticks_ms` in the wake registry (`runtime/system/moybyte.py`). An idle process costs nothing, the
+lost and a record keeps its real timestamp; timers are rows of the kernel's
+one table on every tier (`native/moy_kernel/moy_evq.h`, TIMERS; decided
+2026-11-11, `docs/refactor_2026-11.md` §6), which the wake registry
+(`runtime/system/moybyte.py`) maps to a Python process's functions. An idle process costs nothing, the
 idle ladder can still dim and sleep (§5), and it is one model on every tier:
 the service model below. A timer means "no earlier than"; jitter of up
 to a frame is normal, and precise timing belongs to C, the wasm lanes and the
@@ -249,8 +251,9 @@ the shell's one VM (§3): its callbacks run in the shell loop's slack after
 a frame is presented and before the next. Services run on core 0 on the P4s
 and on core 1 on the S3s, their task stacks in PSRAM there. As built for Lua
 (`native/moycore/moycore_svc.h`, P5.3): a Lua service is a state of its own
-on a task of its own, which blocks in the one wait until its next timer, a
-message or a stop and runs what is due; the host and the desktop
+on a task of its own, which runs the kernel's timers itself and blocks in
+the one wait until the next deadline they answer, a message or a stop, and
+runs what is due; the host and the desktop
 MicroPython, which have no task to give, step their services at the
 scheduler's poll
 (`runtime/system/scheduler.py`, LUA SERVICES). Its state runs the

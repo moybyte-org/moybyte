@@ -869,9 +869,9 @@ every tier: a board's `time.time()` and Lua's `os.time()` count from 2000;
 an id `moybyte.cancel` takes, refuses without the permission (Python's
 `OSError`, a Lua error), and lights the screen if the console had gone dark,
 so a background app can wake its player
-(`docs/os_2026-11/between_apps.md` §3). A Lua service's alarm is the
-kernel's, heard as the system's message `"moybyte.at"`
-(`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
+(`docs/os_2026-11/between_apps.md` §3). A Lua program's alarm is the
+kernel's, heard as the system's message `"moybyte.at"` and handed to its
+function (`native/moycore/moycore_moybyte.h`), and so is a compiled program's
 on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
 program's `moy_at`): the call answers the alarm's id on the program's own
 task, with or without the VM (`native/moy_kernel/moy_evq.h`, `moy_evq_at`,
@@ -886,23 +886,25 @@ program's own task with or without the VM (`native/moy_app/moy_app.c`,
 Python half holds, ABSENT (a WASI or C program's `ENOENT`) while NTP has not
 answered.
 
-**Timers** need no permission. A Python and a Lua program pass a function
+**Timers** need no permission. Every program's timers and alarms are the
+kernel's (`native/moy_kernel/moy_evq.h`, TIMERS), one table and one id
+space for every tier. A Python and a Lua program pass a function
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program
 asks for the timer (`moybyte_every(ms)` and `moybyte_after(ms)` in a wasm
 app, `moy_every` and `moy_after` in a WASI or C program), which answers its
 id, and hears each time it goes off as the system's message
 `"moybyte.timer"` carrying that id. `cancel` (`moybyte_cancel(id)`,
 `moy_cancel(id)`) ends a timer or an alarm of the program's own, answering 1,
-or 0 where it has none of that id. A compiled program's timers and alarms
-are the kernel's (`native/moy_kernel/moy_evq.h`, TIMERS), sixteen at once:
-they go off, and are set and cancelled, with no console, so a service's run
-on through an S3's VM stop. The program listens on those two names for
-itself while it holds one, two of the eight names a process may listen on
-(`moy_evq.h`, `MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped. A compiled
-program holds 16 timers and alarms at once (`moybyte.TIMERS_MAX`, a Lua
-service's alarms counted the same): one more answers FULL (`-2` to a wasm
-app, `ERANGE` to a WASI or C program, as a short buffer reads). Each is its
-process's, and the process's end cancels what it left.
+or 0 where it has none of that id. A compiled program's and a Lua service's
+go off, and are set and cancelled, with no console, so a service's run on
+through an S3's VM stop. A program outside the VM listens on those two
+names for itself while it holds one, two of the eight names a process may
+listen on (`moy_evq.h`, `MOY_EVQ_LISTEN`); a tick its queue cannot take is
+dropped. A program holds 16 timers and alarms at once
+(`moybyte.TIMERS_MAX`): one more answers FULL (`-2` to a wasm app, `ERANGE`
+to a WASI or C program, as a short buffer reads; an OSError in Python, an
+error in Lua). Each is its process's, and the process's end cancels what it
+left.
 
 ```python
 import moybyte, time
@@ -1079,10 +1081,11 @@ service's alike, each name under the permission a Python app's is under
 In a Lua app the console calls (`notify`, `open_with`, `share`, `send`,
 `award`, `progress`, `pick`, `status_panel`) are the moybyte module's own functions run as
 the app's process, their arguments any values JSON carries; a wake
-(`on`, `every`, `after`, `at`) calls its function in the app's state at the
-start of a frame, as a Python app's, and `moybyte.log(level, text)` writes
-the OS log with `moybyte.ERR`, `WARNING` and `INFO` (`runtime/run/lua_ext.py`,
-PRELUDE_MOYBYTE). The theme's reads (`theme.token(role)`, `gen`, `light`,
+(`on`, `every`, `after`, `at`) is the kernel's under the app's process and
+calls its function in the app's state as each of its frames starts, and
+`moybyte.log(level, text)` writes the OS log with `moybyte.ERR`, `WARNING`
+and `INFO`: the one C table a Lua service holds too
+(`native/moycore/moycore_moybyte.h`). The theme's reads (`theme.token(role)`, `gen`, `light`,
 `name`, `variant`) are every Lua app's, as Python's `theme()` is; a Lua app
 hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
 the item a table whose `read()` answers its text and whose `write(text)`

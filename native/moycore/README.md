@@ -40,8 +40,10 @@ compiled games run side by side the same way; the speaker's `snd` stream and
 the timed lanes, which a board holds one of, are the newest compiled run's.
 
 **A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
-verbs): no console, no row of the runs, its timers, message wakes and
-`moybyte` names, its own counting allocator in PSRAM. Its start runs the
+verbs): no console, no row of the runs, the `moybyte` table a Lua app's
+run holds too (`moycore_moybyte.h`: its timers the kernel's, its message
+wakes on its event queue) over the tier's one sandbox
+(`moycore_lua_sandbox`), its own counting allocator in PSRAM. Its start runs the
 scripts it is handed in order, each its own chunk (`moycore_svc_chunk_t`),
 sharing through globals as a window's scripts do. On a board each runs on
 its own task (pinned to the P4s' core 0, or to the S3s' core 1 with its stack
