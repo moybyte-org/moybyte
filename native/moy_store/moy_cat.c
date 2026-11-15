@@ -107,6 +107,52 @@ int moy_cat_plain(const char *name, size_t n) {
     return 1;
 }
 
+// One byte of a name the caller sizes: written while it fits beside the NUL.
+static size_t put(char *out, size_t cap, size_t k, char c) {
+    if (k + 1u < cap) {
+        out[k] = c;
+    }
+    return k + 1u;
+}
+
+static size_t put_str(char *out, size_t cap, size_t k, const char *s) {
+    for (; *s; s++) {
+        k = put(out, cap, k, *s);
+    }
+    return k;
+}
+
+// A name's slug (moy_store_base.slug) put at `k`: letters lower-cased, digits
+// kept, a space, '-' or '_' as '_', anything else dropped, and "cart" for a
+// name left empty.
+static size_t put_slug(const char *s, size_t n, char *out, size_t cap, size_t k) {
+    size_t start = k;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char u = (unsigned char)s[i];
+        if (u >= 'A' && u <= 'Z') {
+            k = put(out, cap, k, (char)(u + 32));
+        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
+            k = put(out, cap, k, (char)u);
+        } else if (u == ' ' || u == '-' || u == '_') {
+            k = put(out, cap, k, '_');
+        }
+    }
+    return k == start ? put_str(out, cap, k, "cart") : k;
+}
+
+size_t moy_cat_folder(const char *title, size_t n, const char *ns, char *out,
+                      size_t cap) {
+    size_t k = 0;
+    if (ns != NULL && ns[0]) {
+        k = put(out, cap, put_slug(ns, strlen(ns), out, cap, k), '.');
+    }
+    k = put_str(out, cap, put_slug(title, n, out, cap, k), MOY_CAT_EXT);
+    if (cap) {
+        out[k < cap ? k : cap - 1u] = 0;
+    }
+    return k;
+}
+
 // `_absent`: the listing proves `name` is not in its folder.
 static int absent(const lst_t *l, const char *name) {
     size_t n = strlen(name);

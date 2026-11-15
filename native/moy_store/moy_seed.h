@@ -21,12 +21,6 @@
 #define MOY_SEED_WBITS 15
 #define MOY_SEED_MAX (4u << 20)     // what one cart may inflate to
 
-// The folder a cart titled `title` is seeded into: `<ns>.<slug>.moy`
-// (moy_store_base.cart_folder is its call, the `folder` row). Writes up to
-// `cap` bytes and a NUL, returns the length the whole needs.
-size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
-                       size_t cap);
-
 // The roster blob `blob` inflated: 0 and its JSON text, or an errno value
 // (EINVAL for a stream that is not one cart).
 int moy_seed_inflate(const uint8_t *blob, size_t n, moy_buf_t *out);

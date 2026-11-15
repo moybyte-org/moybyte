@@ -31,59 +31,6 @@
 // What a builder here grows in: the store's call scratch.
 static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
-size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
-                       size_t cap) {
-    size_t k = 0;
-    char c;
-#define PUT(ch) do { c = (ch); if (k + 1u < cap) { out[k] = c; } k++; } while (0)
-    size_t start = 0;
-    if (ns != NULL && ns[0]) {
-        for (const char *p = ns; *p; p++) {
-            unsigned char u = (unsigned char)*p;
-            if (u >= 'A' && u <= 'Z') {
-                PUT((char)(u + 32));
-            } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-                PUT((char)u);
-            } else if (u == ' ' || u == '-' || u == '_') {
-                PUT('_');
-            }
-        }
-        if (k == 0) {
-            PUT('c');
-            PUT('a');
-            PUT('r');
-            PUT('t');
-        }
-        PUT('.');
-    }
-    start = k;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char u = (unsigned char)title[i];
-        if (u >= 'A' && u <= 'Z') {
-            PUT((char)(u + 32));
-        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-            PUT((char)u);
-        } else if (u == ' ' || u == '-' || u == '_') {
-            PUT('_');
-        }
-    }
-    if (k == start) {
-        PUT('c');
-        PUT('a');
-        PUT('r');
-        PUT('t');
-    }
-    PUT('.');
-    PUT('m');
-    PUT('o');
-    PUT('y');
-#undef PUT
-    if (cap) {
-        out[k < cap ? k : cap - 1u] = 0;
-    }
-    return k;
-}
-
 int moy_seed_inflate(const uint8_t *blob, size_t n, moy_buf_t *out) {
     out->p = NULL;
     out->n = 0;

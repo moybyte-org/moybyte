@@ -76,7 +76,7 @@ _SIGS = (
     ("moy_cat_entry", [_P, _CATFN, _NOTE, c.c_void_p], c.c_int),
     ("moy_cat_load", [_P, _LOADFN, _NOTE, c.c_void_p], c.c_int),
     ("moy_cat_copy", [_P, _P, _P], c.c_int),
-    ("moy_seed_folder", [_P, _S, _P, _P, _S], _S),
+    ("moy_cat_folder", [_P, _S, _P, _P, _S], _S),
     ("moy_json_ws", [c.c_void_p, c.c_void_p], c.c_void_p),
     ("moy_json_value", [c.c_void_p, c.c_void_p, _U32], c.c_void_p),
     ("moy_json_canon", [c.c_void_p, c.c_void_p, c.c_void_p, _S], _S),
@@ -508,9 +508,9 @@ def binding():
     def folder(title, ns):
         t = title.encode("utf-8")
         n = None if ns is None else ns.encode("utf-8")
-        size = _lib().moy_seed_folder(t, len(t), n, None, 0)
+        size = _lib().moy_cat_folder(t, len(t), n, None, 0)
         out = c.create_string_buffer(size + 1)
-        _lib().moy_seed_folder(t, len(t), n, out, size + 1)
+        _lib().moy_cat_folder(t, len(t), n, out, size + 1)
         return out.value.decode("utf-8")
 
     def seed(root, roster, present, progress=None, ns=None):

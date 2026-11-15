@@ -138,6 +138,12 @@ void moy_cat_rmtree(const char *path);
 // An unreadable entry is skipped; only ENOSPC is returned.
 int moy_cat_copy(const char *src, const char *dst, const char *main);
 
+// The folder a cart named `title` (a title, or a slug already) is stored in:
+// `<ns>.<slug>.moy`, or `<slug>.moy` with no `ns` (moy_store_base.cart_folder
+// is its call, the `folder` row). Writes up to `cap` bytes and a NUL, returns
+// the length the whole needs.
+size_t moy_cat_folder(const char *title, size_t n, const char *ns, char *out,
+                      size_t cap);
 // Python's `_plain` and the listing's case rule, for the binding's tests.
 int moy_cat_plain(const char *name, size_t n);
 
