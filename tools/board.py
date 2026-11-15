@@ -40,8 +40,9 @@
                                                 (tools/board_pass.py; --all,
                                                 --skip-build, --no-flash, --shot,
                                                 --no-perf)
-    tools/board.py perf-baseline tdeck          the pass's perf stage alone, on the
-                                                image the board has: recorded and
+    tools/board.py perf-baseline tdeck --image COMMIT  the pass's perf stage
+                                                alone, on the image the board has
+                                                (built from COMMIT): recorded and
                                                 set beside the last run
                                                 (tools/perf_pass.py)
 

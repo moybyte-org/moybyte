@@ -12,11 +12,13 @@ so an issue number in a commit or a chat resolves with no network.
 hand-edit it.
 
 - **Sync at the start of any session that reasons about issues, and after EVERY
-  issue you open, close, comment on or edit.** A living-body issue like #66 goes
-  stale locally the moment it is edited on GitHub.
-- **#66 keeps its current state in the BODY; comments are its changelog.**
-  When new hardware numbers land, edit the body (per-cart fps, frame budgets,
-  levers), then sync.
+  issue you open, close, comment on or edit.** An issue goes stale locally the
+  moment it is edited on GitHub.
+- **#66 keeps no current state in its body (2026-11-15).** The per-cart numbers
+  are `docs/perf/ledger.md`, generated from the board pass's records, and the
+  levers are `docs/perf/levers.md`; the body is pointers and an index of the
+  sections moved out of it. A measurement's story (a bisect, an A/B, a deep
+  dive) is a new comment on #66, never a body edit.
 - **An open issue is not evidence the problem still exists.** Grep the code
   before planning or reporting work on one.
 - Labels: one or more `area:*` and exactly one maturity rung, bumped as the

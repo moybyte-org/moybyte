@@ -3,7 +3,8 @@
 Each gap gives the capability, its shape, its cost in developer days
 (excluding golden re-bakes, which come with each step) and its frame-time
 risk. Frame figures here are estimates of what to measure; the measurements
-go to **#66** for the S3 boards and **#58** for the P4 boards.
+go to `docs/perf/ledger.md` (generated from the board pass) and its stories
+to **#66** for the S3 boards and **#58** for the P4 boards.
 "Owner call" marks a choice that is the owner's.
 
 **Frame-time risk in one line per tier.** P4 desk: bandwidth-bound, so

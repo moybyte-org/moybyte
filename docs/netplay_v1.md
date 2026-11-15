@@ -367,7 +367,7 @@ keyboard is five centimetres wide.
 
 ## 7. Where the numbers live
 
-Per-cart fps and frame budgets in **#66**, P4 figures in **#58**; both win over
-any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
+Per-cart fps and frame ms in `docs/perf/ledger.md` (generated; the stories in
+**#66**), P4 figures in **#58**; both win over any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
 refuted avenues, the unbuilt levers (beaming a cart, more players, range, power)
 — stay in the campaigns above.

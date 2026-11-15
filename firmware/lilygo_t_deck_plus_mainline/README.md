@@ -22,7 +22,7 @@ inside the frame; stage 7's flush overlap fixed it. Two `pump=` fields look
 alike and are not one instrument: HITCH's `pump=%.1f`, and the `PUMP` line,
 which `_diag_pump` emits only when `comp.bounce_flush` is set, so **the `PUMP`
 line appearing at all is the proof the overlap is in an image.** The frame
-rates are #66's; "the compositor" below says what to watch if it regresses.
+rates are `docs/perf/ledger.md`'s; "the compositor" below says what to watch if it regresses.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration every board uses, and the whole shared console
@@ -913,7 +913,7 @@ The three readings any future flush change is read against:
   "closed the gap, bought no fps", and it retired the core-1 feeder unbuilt;
   #66's ledger carries it, so read that before repeating it). A `pump=` near
   the whole transfer would mean the no-acquire patch is not in the image.
-* **fps**, against the per-cart ledger in #66.
+* **fps**, against the per-cart ledger, `docs/perf/ledger.md`.
 
 If the serial dev channel is alive on this board (see the RX section — that is
 its own open question), the cheapest check needs no diag tick and no hitch:

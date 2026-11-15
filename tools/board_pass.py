@@ -31,7 +31,9 @@ tier, the #66 roster's fps and frame ms, a compiled cart). Its record goes to
 `<board>.perf.json` in the log directory and to the machine's history
 (`~/.cache/moybyte-perf/<board>.jsonl`), and its block sets each metric beside
 the board's last run at another commit, a move past its noise band marked.
-It is a report: the pass's exit code stays its suites'. The boards take the
+It is a report: the pass's exit code stays its suites'. The pass then prints
+the command that writes the committed ledger (`docs/perf/ledger.md`,
+tools/perf_ledger.py) from these records; it never writes it itself. The boards take the
 stage one at a time, because two consoles in the same two-player cart form a
 match and measure its shared tick.
 
@@ -79,6 +81,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import board                                                       # noqa: E402
+import perf_ledger                                                 # noqa: E402
 import perf_pass                                                   # noqa: E402
 import timings                                                     # noqa: E402
 
@@ -425,10 +428,10 @@ def perf_stage(row, a, ctx, path):
         os.remove(out)
     cmd = [sys.executable, PERF_PY, name, "--port", ctx["ports"][name],
            "--out", out]
-    if row.image not in ("-", "?"):
-        cmd += ["--image", row.image]
-    if not a.no_flash:
-        cmd.append("--flashed")
+    if not a.no_flash and row.image not in ("-", "?"):
+        # dist/ names the board's image only when this pass flashed it; under
+        # --no-flash the stage refuses to guess, and the row has no record
+        cmd += ["--image", row.image, "--flashed"]
     # One board's stage at a time: two boards in the same two-player cart
     # at once form a match and measure its shared tick, not the cart.
     with ctx["perf_lock"]:
@@ -593,6 +596,9 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
     blocks = perf_blocks(ordered)
     if blocks:
         print(blocks)
+    if any(r.perf is not None for r in ordered):
+        print("perf ledger: `%s` writes docs/perf/ledger.md from these "
+              "records; commit it when you choose" % perf_ledger.regen_command())
     print("board pass: wall %s%s" % (
         timings.dur(wall),
         "" if web is None else ", browser console build %s" % timings.dur(web)))

@@ -24,7 +24,12 @@ paths:
   when the build reported eight times that. State the decision and point at the
   number's home (CLAUDE.md's table). Numbers that are CONFIGURATION — a chunk
   size, a timeout, a headroom floor, a gesture's hold time — may stay, because
-  they are the design, not a measurement of it.
+  they are the design, not a measurement of it. The one exception is a
+  GENERATED ledger (owner, 2026-11-15): `docs/perf/ledger.md` carries measured
+  numbers because a program writes it whole from the board pass's records
+  (`tools/perf_ledger.py`), says so in its first line, and is regenerated,
+  never edited; `--check` catches a hand edit. Prose that wants one of its
+  numbers points at it.
 
 - **Every doc in the tree is held to this, and the rules here hardest**,
   because they load exactly when somebody is about to act on them. On

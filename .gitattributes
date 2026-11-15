@@ -28,3 +28,6 @@ sdk/src/moyos_stubs.c linguist-generated=true
 sdk/moybyte_sdk/os_table.py linguist-generated=true
 sdk/moybyte_sdk/stubs/* linguist-generated=true
 tests/fixtures/elf/elf_wild.moy/src/rows.h linguist-generated=true
+
+# Written whole by tools/perf_ledger.py from the board pass's perf records.
+docs/perf/ledger.md linguist-generated=true

@@ -102,7 +102,7 @@ tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the
 tools/board.py pass --all --build-only    # every image, the Zero's too, no board: preflight's firmware lane
 tools/board.py pass --all --shot      # ...and a screenshot of each at the end
 tools/board.py pass tdeck --no-perf   # no perf stage after the suite
-tools/board.py perf-baseline tdeck    # the perf stage alone, on the image the board has
+tools/board.py perf-baseline tdeck --image COMMIT   # the perf stage alone, on the image the board has (built from COMMIT)
 ```
 
 It is one job, however many boards: run it in the background and take its
@@ -117,7 +117,7 @@ name; every step's log is a file under the directory it prints.
 after each suite, one board at a time (two consoles in one two-player cart
 form a match, and a LINKED cart is not measured): the desk idle (drawn fps, the collector's stops, loop ms),
 the heap, a window drag on a windowed tier, the #66 roster's drawn fps (PERF
-DIAG off, as #66 records it) and frame ms (the kernel's LOOP work behind one
+DIAG off, as the ledger records it) and frame ms (the kernel's LOOP work behind one
 drawn frame, under PERF DIAG), and Jet
 Teapot uncapped. Each run is one JSON record, in the log directory as
 `<board>.perf.json` and appended to `~/.cache/moybyte-perf/<board>.jsonl`; the
@@ -125,7 +125,8 @@ block under the table sets each metric beside the board's last run at another
 commit and marks `<<< WORSE` a move past its noise band (the module header has
 the rule). It is a report, never a gate: the exit code stays the suites'.
 `perf-baseline` records a board without a suite, the first run on a board has
-nothing to compare with, and #66 is still where a number is published. A
+nothing to compare with, and a number is published by regenerating
+`docs/perf/ledger.md` with the command the pass prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
 check). Run it

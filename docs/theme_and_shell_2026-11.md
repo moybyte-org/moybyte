@@ -22,7 +22,7 @@ model and each theme's fields, `GAPS.md` what the engine lacked, and
 is `docs/app_api_v1.md`; the shell's process model is `docs/shell_ux_v1.md`;
 the dirty protocol every cache here obeys is `docs/surface_model_v1.md` §3,
 and its §14.6-§14.7 state the copy and shift frames §9 relies on. Numbers
-that measure any of this live in **#66** (frames, per board), **#58** (the
+that measure any of this live in `docs/perf/ledger.md` and **#66** (frames, per board), **#58** (the
 P4 port), **#113** (the shift costs) and `docs/perf_native_gap_v1.md`
 (**#77**); this doc cites them and copies none.
 

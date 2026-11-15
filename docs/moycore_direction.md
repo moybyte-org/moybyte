@@ -6,7 +6,9 @@ because its ladder is walked and an agent reading it inherits a month of dead
 sequencing. **The tracker is #192.** This file is what is still binding: the
 contract a future crossing must honour, the decisions that outlive the stages,
 the rows still open, and the gates that can still kill a claim. Numbers live in
-**#66** (and **#58** for the P4); #66 wins on conflict, always.
+`docs/perf/ledger.md` (generated from the board pass's records) and the
+stories behind them in **#66** (and **#58** for the P4); the ledger wins on
+conflict, always.
 
 ## 1. What the engine IS now
 

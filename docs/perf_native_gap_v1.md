@@ -2,8 +2,9 @@
 
 Synthesis of the 2026-07-09 performance investigation (the ESP32-P4 bring-up plus
 the "are we behind a NES?" thread). This doc is the **reasoning + the lever
-roadmap**; the living per-cart NUMBERS stay in the issues — **#66** (T-Deck /
-ESP32-S3 ledger) and **#58** (P4 port status). Grounding predecessors:
+roadmap**; the per-cart NUMBERS are `docs/perf/ledger.md` (generated from the
+board pass's records), their stories **#66** and **#58** (P4 port status), and
+the shipped and reverted levers `docs/perf/levers.md`. Grounding predecessors:
 `docs/history/perf_60fps_architecture.md` (how consoles hit 60fps),
 `docs/history/spi_flush_80mhz.md`, `docs/history/fast_by_default_drawing.md`.
 

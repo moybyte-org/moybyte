@@ -1,16 +1,20 @@
 ---
 name: perf
-description: Measure a Moybyte cart's frame rate or frame cost on a board, pick the meter that answers the question (PERF, VERBS, LUAPROF, PERFCNT, moy_prof), and record the result where numbers live. Use before measuring, optimizing, or proposing a performance lever -- it lists the levers already settled.
+description: Measure a Moybyte cart's frame rate or frame cost on a board, pick the meter that answers the question (PERF, VERBS, LUAPROF, PERFCNT, moy_prof), and record the result where numbers live (the generated ledger in docs/perf/). Use before measuring, optimizing, or proposing a performance lever -- it points at the levers already settled (docs/perf/levers.md).
 ---
 
 # Performance
 
-Numbers live in issues: **#66** is the ledger (per-cart fps, the frame-budget
-model, shipped/reverted/open levers, how to measure), **#58** the P4, and
-`docs/perf_native_gap_v1.md` (**#77**) the cross-board strategy — why the boards
-trail native emulators, the frame-budget taxes, the PPA verdict, the ranked
-levers. When hardware numbers land, edit #66's BODY (comments are its
-changelog), then `make sync-issues`. Never paste a number into a doc.
+The numbers are generated ledgers in `docs/perf/` (owner, 2026-11-15):
+`docs/perf/ledger.md` is each board's per-cart fps and frame ms and its desk,
+written by `tools/perf_ledger.py` from the board pass's perf records and never
+edited by hand. The decisions are `docs/perf/levers.md`: the frame budget
+model, the shipped levers, the tried-and-reverted list and the open ones —
+read it before proposing a lever. The story behind a number (a bisect, an A/B,
+a deep dive) is a comment on its issue: **#66** for the carts, **#58** for the
+P4, **#67** the Lua tier, **#158** the compiled tier.
+`docs/perf_native_gap_v1.md` (**#77**) is the cross-board strategy. Never
+paste a measured number into a doc.
 
 ## Measure
 
@@ -25,7 +29,7 @@ python3 tools/shell_bench.py --board p4 --out DIR --report --against OLD   # its
 python3 tools/input_bench.py --board p4 --out DIR --only Code      # scrolling and text surfaces, presented-frame p90 per input
 python3 tools/input_gate.py gate --board tdeck,p4 --dev WT --cand WT --out DIR   # a surface's move gate: the boards at once, fresh-flash candidate runs against dev's newest stored runs (--fresh-dev benches dev beside it), p90 verdicts; a stale image is built first
 python3 tools/input_gate.py iter --board tdeck --cand WT --rows "Code:fling"      # one run of a few rows against the stored dev baseline
-tools/board.py perf-baseline tdeck                   # the board pass's perf stage alone, beside its last run
+tools/board.py perf-baseline tdeck --image COMMIT    # the board pass's perf stage alone, beside its last run
 ```
 
 Every `tools/board.py pass` ends each board with that perf stage
@@ -34,8 +38,11 @@ drag where there are windows, this roster's drawn fps and frame ms, Jet
 Teapot uncapped. Its records stay on the machine
 (`~/.cache/moybyte-perf/<board>.jsonl`) and its block marks a move past the
 noise band against the board's last run at another commit, so a drop shows in
-the pass that made it. It is a tripwire, not a ledger: what it flags is
-measured again with the tool for the question before it reaches #66.
+the pass that made it. The pass then prints the `tools/perf_ledger.py` command
+that rewrites `docs/perf/ledger.md` from those records; commit the ledger when
+a pass is worth publishing (`--baseline COMMIT` sets each board beside a
+chosen run). What the block flags is measured again with the tool for the
+question, and that story goes to the issue as a comment.
 
 `perf` drops the first 4 s (caches, cold flash), takes only samples naming the
 cart it started, medians the drawn fps (a GC spike lands in one sample), ends
@@ -86,50 +93,7 @@ at install so an unarmed frame carries no wrapper.
 
 ## Settled — do not re-attempt
 
-- **Per-board verdicts do not transfer.** The `-O3` `moy_gfx` pragma is
-  A/B-confirmed on the compute-bound S3 and NULL on the dispatch-bound P4.
-- **The FEED/DISPATCH/GC chain was worked through**: shipped — auto-native carts
-  (#67), the live-set diet, the pal-state variant cache (#72), the layer pool,
-  `background()`; reverted with verdicts — Fold-2's auto map cache, the third
-  bounce slot (which retired the core-1 feeder unbuilt). That is where people
-  LOOKED, not a wall: the tick model's own pin found a free lever on 2026-09-10
-  (a tick-only frame must beat a DRAWING frame, not the period — dank tomb ran
-  its logic at 23 Hz of 60, #217), and on 2026-09-20 the cart VM's collector
-  turned out never to have left Lua's default schedule, spending a whole cycle
-  inside one frame (#107).
-- **Fixed engine-side, kid API untouched**: per-draw-call dispatch (#43/#63),
-  call-frame heap spill (#63), float boxing (the REPR_C build patch; the
-  REPR_A heap-wrap collect was the old micro-stutter), banding (the SRAM-bounce
-  flush: panel DMA reads only internal SRAM).
-- **The map-lookup cache (2026-09-21)**: its index re-aimed for REPR_C in the
-  shared build half, and 512 slots per console board, A/B'd on three boards.
-  Neither half moves a frame alone and 1024 buys nothing over 512 — do not
-  re-propose either on its own (`docs/perf_native_gap_v1.md` §6).
-- **Size-class run hints for `gc_alloc` (2026-09-23,
-  `tools/patch_gc_run_hints.py`, every console board)** took `gc_alloc` out of
-  all four profiles. Allocations over 32 blocks still walk, by design. What is
-  left in `mp_map_lookup` is the kid idiom's miss-before-hit, a VM question —
-  do not re-price it as a cache size.
-- **A play frame allocates nothing on the Python heap (2026-09-30).** The
-  collector's cost is per COLLECTION -- a whole-heap mark and sweep that stops
-  the frame and a compiled cart's sound with it -- so the lever is how often
-  one comes, which is the console's own garbage rate: the loop, inputs, dev
-  channel, Player, glue and compositor hand-off allocate zero bytes a frame,
-  and the periodic diag text is written only under PERF DIAG.
-  `tests/test_frame_alloc.py` pins it on the desktop MicroPython
-  built in the boards' model (32-bit, REPR_C, threads under one GIL). What allocates on a
-  board and reads as free: set arithmetic, a `getattr` that finds a method (a
-  bound method), a tuple returned to be unpacked, `str()` of a str (a copy), a
-  function holding a generator or closure (its cells are made on EVERY call,
-  early return or not), `select.poll()`'s list, I2C `readfrom`, `"%d" %`, and
-  `id()` of a pointer above the 30-bit small int (a P4's PSRAM). On glass,
-  `gc.mem_alloc()` walks the whole heap -- tens of ms a call on a T-Deck --
-  so take it over a window of seconds, never per frame.
-- **FRAMESKIP and `FPS_GOVERNOR` are deleted**; the tick model (#217,
-  `native/moy_play/moy_tick.c`) is the one scheduler.
-- The launcher's live wallpaper defeats the redraw-on-change gate, so the tile
-  grid re-renders at wallpaper rate: #66 sizes it, #73's per-surface
-  compositing is the architectural fix.
-- Board-specific verdicts (the PPA scale-only verdict, the double game canvas
-  reverted in `26e1f9f`, sprite batching on the PPA) are in
-  `.claude/rules/boards.md` and §6 of the strategy doc.
+`docs/perf/levers.md` is the list: the frame budget model, what shipped (with
+its commit), what was tried and reverted, what was retired and what is still
+open. Board-specific verdicts (the PPA scale-only verdict, sprite batching on
+the PPA) are in `.claude/rules/boards.md` and §6 of the strategy doc.

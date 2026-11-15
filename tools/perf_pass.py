@@ -3,6 +3,7 @@
 #   -- the record           metric, record, history_path, append, history, previous
 #   -- the comparison       band, compare, block
 #   -- the measurement      measure (desk idle, heap, window drag, the roster, the compiled cart)
+#   Stage                   one board's stage: its phases, metrics and errors
 #   -- the command line     main (`tools/board.py perf-baseline` and the pass's perf stage)
 """A board pass's perf stage: one board's fixed measurement, recorded every
 run and set beside the run before it.
@@ -29,8 +30,8 @@ WHAT IT MEASURES, with the meters the `perf` skill names and nothing new:
     the roster      `tools/p4_perf.py`'s DEFAULT_ROSTER, the carts #66 tracks
                     on every console board: each run from the launcher, its
                     drawn fps as `p4_perf.measure` takes it (PERF DIAG off,
-                    the shipping number #66 records), then PERF DIAG switched
-                    on in the same run for its frame ms: LOOP's mean loop
+                    the shipping number the ledger records), then PERF DIAG
+                    switched on in the same run for its frame ms: LOOP's mean loop
                     frame work times PERF's loop frames per drawn frame, the
                     work behind one frame on the glass (a paced cart's
                     tick-only frames included), absent where the loop spins
@@ -62,8 +63,9 @@ absolute deviation in either run, and only when it also moves by more than the
 unit's absolute floor (MIN_MOVE), so a 3 ms frame cannot flag on a 10%
 swing of 0.3 ms. The block is a report: the pass's exit code stays its suites'.
 
-Numbers live in issues (#66 for the carts' fps, #58 for the P4); this tool
-measures and remembers them for the next pass, it does not publish them.
+The committed numbers are `docs/perf/ledger.md`, which tools/perf_ledger.py
+writes from these records when someone chooses; this tool measures and
+remembers them for the next pass, it does not publish them.
 """
 
 from __future__ import annotations
@@ -673,8 +675,8 @@ def parser():
                     help="open a port another process holds (your own stale one)")
     ap.add_argument("--out", help="also write the record to this file")
     ap.add_argument("--image", help="the commit the board's image was built "
-                                    "from (default: the stamp of this "
-                                    "checkout's image in dist/)")
+                                    "from; required unless --flashed, since "
+                                    "the image carries no commit")
     ap.add_argument("--flashed", action="store_true",
                     help="this pass flashed the image in dist/")
     ap.add_argument("--carts", help="comma-separated titles in place of the "
@@ -700,8 +702,15 @@ def main(argv=None):
               file=sys.stderr)
         return 2
     d = dirs[a.board]
+    if not a.flashed and not a.image:
+        # The image carries no commit (tools/esp32_build_lib.sh stamps it beside
+        # the build, not into it), so dist/ names what the board holds only
+        # when this pass just flashed it.
+        print("perf: say which image %s holds: --image COMMIT (dist/ is this "
+              "tree's build, not necessarily the board's)" % a.board, file=sys.stderr)
+        return 2
     image = board_pass.image_path(d)
-    sha, size = image_facts(image)
+    sha, size = image_facts(image) if a.flashed else (None, None)
     commit = a.image or board_pass.image_stamp(d)
     roster = ([t.strip() for t in a.carts.split(",") if t.strip()]
               if a.carts else list(p4_perf.DEFAULT_ROSTER))
