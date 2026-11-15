@@ -4,6 +4,21 @@
 
 #include "py/runtime.h"
 
+static mp_obj_t face_moy_net_sync_path(mp_obj_t a0, mp_obj_t a1) {
+    size_t p_n;
+    const char *p = mp_obj_str_get_data(a0, &p_n);
+    int history = mp_obj_is_true(a1);
+    return mp_obj_new_int(moy_sync_path(p, (size_t)p_n, history));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_net_sync_path_obj, face_moy_net_sync_path);
+
+static mp_obj_t face_moy_net_sync_song(mp_obj_t a0) {
+    size_t name_n;
+    const char *name = mp_obj_str_get_data(a0, &name_n);
+    return mp_obj_new_bool(moy_sync_song(name, (size_t)name_n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_sync_song_obj, face_moy_net_sync_song);
+
 #if MOY_NET_SERVE
 
 static mp_obj_t face_moy_net_web_stop(size_t n_args, const mp_obj_t *argv) {
@@ -23,6 +38,30 @@ static mp_obj_t face_moy_net_web_signout(void) {
     return mp_obj_new_int(moy_web_signout());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_signout_obj, face_moy_net_web_signout);
+
+static mp_obj_t face_moy_net_web_poll(void) {
+    int r_ = 0;
+    WEB_GUARD_BEGIN
+    r_ = moy_web_poll();
+    WEB_GUARD_END
+    return mp_obj_new_bool(r_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_poll_obj, face_moy_net_web_poll);
+
+static mp_obj_t face_moy_net_web_state(void) {
+    moy_web_state_t out;
+    moy_web_state(&out);
+    mp_obj_t t_[6] = {
+        mp_obj_new_bool(out.serving),
+        mp_obj_new_bool(out.closing),
+        mp_obj_new_bool(out.parked),
+        mp_obj_new_int_from_uint(out.port),
+        mp_obj_new_int_from_uint(out.requests),
+        mp_obj_new_int(out.err),
+    };
+    return mp_obj_new_tuple(6, t_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_state_obj, face_moy_net_web_state);
 
 static mp_obj_t face_moy_net_web_events(void) {
     return mp_obj_new_int_from_uint(moy_web_events());
@@ -114,6 +153,22 @@ static mp_obj_t face_moy_net_ota_c6_commit(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_c6_commit_obj, face_moy_net_ota_c6_commit);
 
+static mp_obj_t face_moy_net_ota_state(void) {
+    moy_ota_state_t out;
+    moy_ota_state(&out);
+    mp_obj_t t_[7] = {
+        mp_obj_new_int_from_uint(out.phase),
+        mp_obj_new_int_from_uint(out.sink),
+        mp_obj_new_int_from_uint(out.dl_done),
+        mp_obj_new_int_from_uint(out.dl_total),
+        mp_obj_new_int_from_uint(out.done),
+        mp_obj_new_int_from_uint(out.total),
+        mp_obj_new_str(out.err, strlen(out.err)),
+    };
+    return mp_obj_new_tuple(7, t_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_state_obj, face_moy_net_ota_state);
+
 static mp_obj_t face_moy_net_http_close(mp_obj_t a0) {
     int h = (int)mp_obj_get_int(a0);
     moy_httpc_close(h);
@@ -125,6 +180,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_http_close_obj, face_moy_net_http_
     { MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&face_moy_net_web_stop_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&face_moy_net_web_key_drop_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&face_moy_net_web_signout_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&face_moy_net_web_poll_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&face_moy_net_web_state_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&face_moy_net_web_events_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&face_moy_net_web_answer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&face_moy_net_web_stamp_obj) }, \
@@ -140,6 +197,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_http_close_obj, face_moy_net_http_
     { MP_ROM_QSTR(MP_QSTR_ota_slot_write), MP_ROM_PTR(&face_moy_net_ota_slot_write_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ota_slot_close), MP_ROM_PTR(&face_moy_net_ota_slot_close_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ota_c6_commit), MP_ROM_PTR(&face_moy_net_ota_c6_commit_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_state), MP_ROM_PTR(&face_moy_net_ota_state_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&face_moy_net_http_close_obj) },
 #else
 #define MOY_FACE_MOY_NET_ROWS_SERVE
@@ -175,6 +233,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_wifi_forget_obj, face_moy_net_wifi
 #endif
 
 #define MOY_FACE_MOY_NET_ROWS \
+    { MP_ROM_QSTR(MP_QSTR_sync_path), MP_ROM_PTR(&face_moy_net_sync_path_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_sync_song), MP_ROM_PTR(&face_moy_net_sync_song_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_PW_ITER), MP_ROM_INT(MOY_SEAL_PW_ITER) }, \
     MOY_FACE_MOY_NET_ROWS_SERVE \
     MOY_FACE_MOY_NET_ROWS_WIFI

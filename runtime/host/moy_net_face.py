@@ -7,10 +7,10 @@ import ctypes as _c
 import face_ctypes as _f
 
 __all__ = (
-    "web_stop", "web_key_drop", "web_signout", "web_events", "web_answer", "web_stamp",
-    "wc_off", "wc_poll", "dns_port", "dns_poll", "dns_stop", "wc_park", "ota_dl_step",
-    "ota_dl_finish", "ota_cancel", "ota_slot_write", "ota_slot_close", "ota_c6_commit",
-    "http_close", "PW_ITER",
+    "sync_path", "sync_song", "web_stop", "web_key_drop", "web_signout", "web_poll",
+    "web_state", "web_events", "web_answer", "web_stamp", "wc_off", "wc_poll", "dns_port",
+    "dns_poll", "dns_stop", "wc_park", "ota_dl_step", "ota_dl_finish", "ota_cancel",
+    "ota_slot_write", "ota_slot_close", "ota_c6_commit", "ota_state", "http_close", "PW_ITER",
 )
 
 PW_ITER = 32768
@@ -125,9 +125,13 @@ class moy_sync_env_t(_c.Structure):
 
 
 _SIGS = (
+    ("moy_sync_path", [_c.c_char_p, _c.c_size_t, _c.c_int], _c.c_int),
+    ("moy_sync_song", [_c.c_char_p, _c.c_size_t], _c.c_int),
     ("moy_web_stop", [_c.c_char_p], None),
     ("moy_web_key_drop", [_c.c_char_p], _c.c_int),
     ("moy_web_signout", [], _c.c_int),
+    ("moy_web_poll", [], _c.c_int),
+    ("moy_web_state", [_c.POINTER(moy_web_state_t)], None),
     ("moy_web_events", [], _c.c_uint32),
     ("moy_web_answer", [_c.c_void_p, _c.c_size_t], None),
     ("moy_web_stamp_text", [], _c.c_char_p),
@@ -143,12 +147,23 @@ _SIGS = (
     ("moy_ota_slot_write", [_c.c_void_p, _c.c_size_t], _c.c_int),
     ("moy_ota_slot_close", [], _c.c_int),
     ("moy_ota_c6_commit", [], _c.c_int),
+    ("moy_ota_state", [_c.POINTER(moy_ota_state_t)], None),
     ("moy_httpc_close", [_c.c_int], None),
 )
 
 
 def _lib():
     return _f.lib(_SIGS)
+
+
+def sync_path(rel, history):
+    rel_b = _f.span(rel)
+    return _lib().moy_sync_path(rel_b, len(rel_b), 1 if history else 0)
+
+
+def sync_song(name):
+    name_b = _f.span(name)
+    return bool(_lib().moy_sync_song(name_b, len(name_b)))
 
 
 def web_stop(why=None):
@@ -161,6 +176,17 @@ def web_key_drop(kid):
 
 def web_signout():
     return _lib().moy_web_signout()
+
+
+def web_poll():
+    return bool(_lib().moy_web_poll())
+
+
+def web_state():
+    out = moy_web_state_t()
+    _lib().moy_web_state(_c.byref(out))
+    return (bool(out.serving), bool(out.closing), bool(out.parked), out.port, out.requests,
+            out.err)
 
 
 def web_events():
@@ -223,6 +249,13 @@ def ota_slot_close():
 
 def ota_c6_commit():
     return _lib().moy_ota_c6_commit() == 0
+
+
+def ota_state():
+    out = moy_ota_state_t()
+    _lib().moy_ota_state(_c.byref(out))
+    return (out.phase, out.sink, out.dl_done, out.dl_total, out.done, out.total,
+            out.err.decode("utf-8"))
 
 
 def http_close(h):

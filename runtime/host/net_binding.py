@@ -50,9 +50,9 @@ from . import host_native, native_build
 from .moy_net_face import *  # noqa: F401,F403
 from .moy_net_face import PW_ITER
 from .moy_net_face import (
-    moy_http_req_t as _Req, moy_ota_state_t as _OtaState, moy_sync_batch_t as _Batch,
+    moy_http_req_t as _Req, moy_sync_batch_t as _Batch,
     moy_sync_env_t as _Env, moy_sync_result_t as _Result, moy_sync_store_t as _Store,
-    moy_wc_state_t as _WcState, moy_web_cfg_t as _WebCfg, moy_web_state_t as _WebState)
+    moy_wc_state_t as _WcState, moy_web_cfg_t as _WebCfg)
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -82,8 +82,6 @@ _SIGS = (
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),
-    ("moy_sync_path", [_P, _Z, _I], _I),
-    ("moy_sync_song", [_P, _Z], _I),
     ("moy_sync_apply", [ctypes.POINTER(_Store), _I, ctypes.c_void_p,
                         ctypes.c_void_p, ctypes.POINTER(_Result)], None),
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
@@ -102,8 +100,6 @@ _SIGS = (
     ("moy_seal_spake_verifier", [ctypes.c_void_p, _P, _P, _P], _I),
     ("moy_seal_spake_keys", [ctypes.c_void_p, _P, _Z, _P, _Z, _P, _Z, _P, ctypes.c_char_p,
                              ctypes.c_char_p, ctypes.c_char_p], _I),
-    ("moy_web_poll", [], _I),
-    ("moy_web_state", [ctypes.POINTER(_WebState)], None),
     ("moy_web_events", [], ctypes.c_uint32),
     ("moy_web_shelf", [ctypes.c_void_p, _Z], _Z),
     ("moy_web_take", [ctypes.POINTER(ctypes.c_void_p), _PZ,
@@ -144,7 +140,6 @@ _SIGS = (
     ("moy_ota_slot_close", [], _I),
     ("moy_ota_activate", [ctypes.c_void_p, _Z], _I),
     ("moy_ota_c6_commit", [], _I),
-    ("moy_ota_state", [ctypes.c_void_p], None),
     ("moy_httpc_open", [_P, _P, ctypes.POINTER(_I),
                         ctypes.POINTER(ctypes.c_uint32)], _I),
     ("moy_httpc_read", [_I, ctypes.c_void_p, _Z], _I),
@@ -327,19 +322,6 @@ def sync_batch(body):
     return (_ROOT_NAMES[b.root], ops)
 
 
-def sync_path(rel, history):
-    """The segments of a store path the receiver takes, 0 for one it
-    refuses (moy_net.h's moy_sync_path)."""
-    raw = _bytes(rel)
-    return _lib().moy_sync_path(raw, len(raw), 1 if history else 0)
-
-
-def sync_song(name):
-    """Whether `name` is a song of the music folder (moy_sync_song)."""
-    raw = _bytes(name)
-    return bool(_lib().moy_sync_song(raw, len(raw)))
-
-
 def _names(names):
     if names is None:
         return None
@@ -484,18 +466,6 @@ def pw_check(password, record):
     """Whether `password` is the one `record` was made from (moy_seal_pw_check)."""
     p, r = _bytes(password), _bytes(record)
     return bool(_lib().moy_seal_pw_check(p, len(p), r, len(r)))
-
-
-def web_poll():
-    return bool(_lib().moy_web_poll())
-
-
-def web_state():
-    """(serving, closing, parked, port, requests, err)"""
-    st = _WebState()
-    _lib().moy_web_state(ctypes.byref(st))
-    return (bool(st.serving), bool(st.closing), bool(st.parked), st.port,
-            st.requests, st.err)
 
 
 _SHELF_BYTES = 256
@@ -726,14 +696,6 @@ def ota_activate():
 def ota_c6_version():
     v = _lib().moy_c6_version()
     return None if v < 0 else v
-
-
-def ota_state():
-    """(phase, sink, dl_done, dl_total, done, total, error)"""
-    st = _OtaState()
-    _lib().moy_ota_state(ctypes.byref(st))
-    return (st.phase, st.sink, st.dl_done, st.dl_total, st.done, st.total,
-            st.err.decode("utf-8"))
 
 
 def http_open(url, agent):

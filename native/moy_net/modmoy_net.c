@@ -30,8 +30,6 @@
 #define MOY_NET_SERVE 1
 #endif
 
-#include "modmoy_net_face.h"
-
 #if MOY_NET_SERVE
 
 // A str of the bytes: as they stand when they are UTF-8, else each byte as
@@ -565,6 +563,9 @@ void moy_store_unwind(void);
 #define WEB_GUARD_END nlr_pop(); } else { WEB_ABORT(); moy_store_unwind(); \
     nlr_jump(nlr_.ret_val); } }
 
+// The rows face.json generates; web_poll runs under WEB_GUARD.
+#include "modmoy_net_face.h"
+
 // A tuple of str (or None) as a NUL-separated list ending in "": in `buf`.
 static const char *names_of(mp_obj_t o, char *buf, size_t cap) {
     if (o == mp_const_none) {
@@ -608,23 +609,6 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_batch_obj, mod_sync_batch);
-
-// sync_path(rel, history) -> the segments of a store path the receiver
-// takes, 0 for one it refuses (moy_net.h's moy_sync_path).
-static mp_obj_t mod_sync_path(mp_obj_t rel, mp_obj_t history) {
-    size_t n;
-    const char *p = mp_obj_str_get_data(rel, &n);
-    return MP_OBJ_NEW_SMALL_INT(moy_sync_path(p, n, mp_obj_is_true(history)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_sync_path_obj, mod_sync_path);
-
-// sync_song(name) -> whether `name` is a song of the music folder.
-static mp_obj_t mod_sync_song(mp_obj_t name) {
-    size_t n;
-    const char *p = mp_obj_str_get_data(name, &n);
-    return mp_obj_new_bool(moy_sync_song(p, n));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_sync_song_obj, mod_sync_song);
 
 // sync_apply(carts, files, kinds, root id, ops JSON, journal[, apps])
 //   -> (applied, [(index, reason)], shelf, refused)
@@ -793,26 +777,6 @@ static mp_obj_t mod_web_keys(void) {
     return out;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_keys_obj, mod_web_keys);
-
-static mp_obj_t mod_web_poll(void) {
-    int did = 0;
-    WEB_GUARD_BEGIN
-    did = moy_web_poll();
-    WEB_GUARD_END
-    return mp_obj_new_bool(did);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_poll_obj, mod_web_poll);
-
-// (serving, closing, parked, port, requests, err)
-static mp_obj_t mod_web_state(void) {
-    moy_web_state_t st;
-    moy_web_state(&st);
-    mp_obj_t t[6] = {mp_obj_new_bool(st.serving), mp_obj_new_bool(st.closing),
-                     mp_obj_new_bool(st.parked), MP_OBJ_NEW_SMALL_INT(st.port),
-                     mp_obj_new_int_from_uint(st.requests), MP_OBJ_NEW_SMALL_INT(st.err)};
-    return mp_obj_new_tuple(6, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_state_obj, mod_web_state);
 
 // web_shelf() -> the cart folders the batches since the last call changed on
 // the shelf (a tuple of names), or None for every folder; cleared.
@@ -1045,20 +1009,6 @@ static mp_obj_t mod_ota_c6_version(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_c6_version_obj, mod_ota_c6_version);
 
-// ota_state() -> (phase, sink, dl_done, dl_total, done, total, error)
-static mp_obj_t mod_ota_state(void) {
-    moy_ota_state_t st;
-    moy_ota_state(&st);
-    mp_obj_t o[7] = {
-        MP_OBJ_NEW_SMALL_INT(st.phase), MP_OBJ_NEW_SMALL_INT(st.sink),
-        mp_obj_new_int_from_uint(st.dl_done), mp_obj_new_int_from_uint(st.dl_total),
-        mp_obj_new_int_from_uint(st.done), mp_obj_new_int_from_uint(st.total),
-        ota_text(st.err),
-    };
-    return mp_obj_new_tuple(7, o);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_state_obj, mod_ota_state);
-
 // http_open(url, agent) -> (handle, status, content_length); OSError(errno).
 static mp_obj_t mod_http_open(mp_obj_t url, mp_obj_t agent) {
     int status = 0;
@@ -1109,8 +1059,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
-    {MP_ROM_QSTR(MP_QSTR_sync_path), MP_ROM_PTR(&mod_sync_path_obj)},
-    {MP_ROM_QSTR(MP_QSTR_sync_song), MP_ROM_PTR(&mod_sync_song_obj)},
     {MP_ROM_QSTR(MP_QSTR_pw_hash), MP_ROM_PTR(&mod_pw_hash_obj)},
     #if MOY_NET_SERVE
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
@@ -1121,8 +1069,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_auth), MP_ROM_PTR(&mod_web_auth_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_shelf), MP_ROM_PTR(&mod_web_shelf_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
@@ -1143,7 +1089,6 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_ota_slot_begin), MP_ROM_PTR(&mod_ota_slot_begin_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_activate), MP_ROM_PTR(&mod_ota_activate_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_c6_version), MP_ROM_PTR(&mod_ota_c6_version_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_state), MP_ROM_PTR(&mod_ota_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_open), MP_ROM_PTR(&mod_http_open_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
     #endif
