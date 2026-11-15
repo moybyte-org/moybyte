@@ -363,3 +363,30 @@ def test_mic_cancels_a_shell_apps_field(tmp_path, app_id):
     assert draft() == was, "Mic gives the field back the text the edit began from"
     assert not ws.sysmenu.open, "a cancel is not the console's key"
     assert ws.wm.top_kind() == app_id, "and the app stays"
+
+
+# -- a cart app: Notes ------------------------------------------------------------
+#
+# Notes' list and its new-note dialog are an app's page like any other: the
+# keyboard is in text mode while the dialog's field holds focus, and back in
+# game mode on the list and after Mic cancels the field.
+
+def test_notes_holds_text_mode_only_while_its_field_does(tmp_path):
+    ws = build_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    for _ in range(3):
+        drv.frame(DT)
+    ns = ws.run.player.ns
+    assert ns["ed"] is None and ws.screen == "desktop"
+    assert not ws.input.text_mode, "the list steps with the move keys"
+    _type(drv, "n")
+    assert ns["asking"] == "new", "N opens the new-note dialog"
+    assert ws.input.text_mode, "its field types"
+    _type(drv, "ab")
+    assert ns["typed"] == "ab"
+    _mic(ws, drv)
+    assert ns["asking"] is None or ns["typed"] == "", "Mic gives back the empty draft"
+    assert not ws.input.text_mode, "off the field the keyboard is the page's again"
+    assert not ws.sysmenu.open, "a cancel is not the console's key"

@@ -148,6 +148,7 @@ def test_the_t_deck_keyboard_types_into_the_focused_handle(tmp_path):
     _dframe(ws, 2)
     ed = ws.run.player.ns["open_editor"]("typed")
     ed.focus()
+    _dframe(ws)
     assert ws.input.text_mode is True          # the keyboard went to ASCII
     for ch in "hi":
         src.last_key = ord(ch)
@@ -182,12 +183,13 @@ def test_a_focused_handle_owns_the_keyboard_and_the_cart_reads_nothing(tmp_path)
     _dframe(ws, 2)
     ed = ws.run.player.ns["open_editor"]("owned")
     ed.focus()
+    _dframe(ws)
     src.last_key = ord("q")
     _dframe(ws)
     assert ws.input.cart_key == 0 and ws.input.cart_keyp == 0
     assert ed.text() == "q"
     # ...and releasing focus hands it back, keyboard mode included: the
-    # cart's own (Notes keeps `textmode(True)` for its list).
+    # cart's own (Notes' list is in game mode).
     ed.focus(False)
     src.last_key = 0
     _dframe(ws)
