@@ -13,3 +13,125 @@ class moy_buf_t(_c.Structure):
         ("p", _c.c_void_p),
         ("n", _c.c_size_t),
     ]
+
+
+class moy_cat_json_t(_c.Structure):
+    _fields_ = [
+        ("v", _c.c_void_p),
+        ("e", _c.c_void_p),
+    ]
+
+
+class moy_cat_int_t(_c.Structure):
+    _fields_ = [
+        ("kind", _c.c_int),
+        ("value", _c.c_int64),
+        ("json", moy_cat_json_t),
+    ]
+
+
+class moy_cat_entry_t(_c.Structure):
+    _fields_ = [
+        ("folder", _c.c_void_p),
+        ("folder_n", _c.c_size_t),
+        ("id", _c.c_void_p),
+        ("id_n", _c.c_size_t),
+        ("broken", _c.c_char_p),
+        ("man", _c.c_void_p),
+        ("man_n", _c.c_size_t),
+        ("spec", _c.c_int),
+        ("compiled", _c.c_int),
+        ("main", _c.c_void_p),
+        ("main_n", _c.c_size_t),
+        ("title", moy_cat_json_t),
+        ("author", moy_cat_json_t),
+        ("type", moy_cat_json_t),
+        ("runtime", moy_cat_json_t),
+        ("format", moy_cat_json_t),
+        ("fps", moy_cat_json_t),
+        ("palette", moy_cat_json_t),
+        ("extensions", moy_cat_json_t),
+        ("edit", moy_cat_json_t),
+        ("permissions", moy_cat_json_t),
+        ("required", moy_cat_json_t),
+        ("handles", moy_cat_json_t),
+        ("receives", moy_cat_json_t),
+        ("achievements", moy_cat_json_t),
+        ("writable", moy_cat_json_t),
+        ("pictures", moy_cat_json_t),
+        ("entries", moy_cat_json_t),
+        ("native", moy_cat_json_t),
+        ("writable_ok", _c.c_int),
+        ("version", moy_cat_int_t),
+        ("memory", moy_cat_int_t),
+        ("audio_ring", moy_cat_int_t),
+        ("graduated", _c.c_int),
+        ("glass", _c.c_int),
+        ("animates", _c.c_int),
+        ("wasi", _c.c_int),
+        ("icon_ok", _c.c_int),
+        ("icon", _c.c_int64 * 3),
+        ("input_n", _c.c_size_t),
+        ("input", _c.c_void_p),
+        ("canvas", _c.c_int),
+        ("canvas_w", _c.c_uint16),
+        ("canvas_h", _c.c_uint16),
+        ("canvas_raw", moy_cat_json_t),
+        ("desc", _c.c_void_p),
+        ("desc_n", _c.c_size_t),
+        ("genre", _c.c_char_p),
+        ("tags_n", _c.c_size_t),
+        ("tags", (_c.c_char * 17) * 8),
+        ("has", _c.c_uint32),
+        ("cover_size", _c.c_uint32),
+        ("scenes_n", _c.c_size_t),
+        ("scenes", _c.c_void_p),
+        ("scene_n", _c.c_void_p),
+        ("rows", _c.c_int),
+        ("pw", _c.c_uint16),
+        ("ph", _c.c_uint16),
+        ("want", _c.c_void_p),
+        ("want_n", _c.c_void_p),
+    ]
+
+
+class moy_load_file_t(_c.Structure):
+    _fields_ = [
+        ("name", _c.c_void_p),
+        ("name_n", _c.c_size_t),
+        ("text", _c.c_void_p),
+        ("n", _c.c_size_t),
+    ]
+
+
+class moy_load_json_t(_c.Structure):
+    _fields_ = [
+        ("p", _c.c_void_p),
+        ("e", _c.c_void_p),
+    ]
+
+
+class moy_cart_t(_c.Structure):
+    _fields_ = [
+        ("e", moy_cat_entry_t),
+        ("src", _c.c_void_p),
+        ("src_n", _c.c_size_t),
+        ("before", _c.POINTER(moy_load_file_t)),
+        ("after", _c.POINTER(moy_load_file_t)),
+        ("before_n", _c.c_size_t),
+        ("after_n", _c.c_size_t),
+        ("cfg_manifest", moy_load_json_t),
+        ("cfg_file", moy_load_json_t),
+        ("flags", _c.c_void_p),
+        ("sprites", _c.c_void_p),
+        ("map", _c.c_void_p),
+        ("flags_n", _c.c_size_t),
+        ("sprites_n", _c.c_size_t),
+        ("map_n", _c.c_size_t),
+        ("sounds", moy_load_json_t),
+        ("blocks", moy_load_json_t),
+        ("images", _c.POINTER(moy_load_file_t)),
+        ("scenes", _c.POINTER(moy_load_file_t)),
+        ("images_n", _c.c_size_t),
+        ("scenes_n", _c.c_size_t),
+    ]

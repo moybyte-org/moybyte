@@ -845,6 +845,9 @@ Closes N15, X1, E1. Decided: §6, decision 4.
   held each pair to one answer become plain tests of the one body. The test
   oracles (`tests/spine_twin.py`, the Python index, `tests/app_twin.py`)
   stay.
+  The owner's decision (2026-11-15): the C store runs on every tier, the
+  CPython host included, so the catalogue, the whole-cart load, the seed and
+  the journal are host parts too and their Python bodies go.
 - X1: the store carries a format stamp, written when a
   store is made and read by its strict readers. A fixture store in the
   trial's format is committed. `sweep_store`'s generation-gated pass is the

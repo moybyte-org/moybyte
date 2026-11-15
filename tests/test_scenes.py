@@ -9,6 +9,7 @@ editor) is out of scope here.
 """
 
 import json
+from tests import journal_files as jf
 from pathlib import Path
 from ws_helpers import select_on_home  # noqa: E402
 
@@ -211,7 +212,7 @@ def _open_scene_cart(tmp_path, scenes=None, src="def _draw():\n    cls(0)\n"):
 
 def _entries(cart_path):
     from runtime import moy_carts
-    return moy_carts._journal_load_entries(cart_path + "/journal/journal.jsonl")
+    return jf.entries(cart_path + "/journal/journal.jsonl")
 
 
 def test_commit_scene_journals_and_undo_restores(tmp_path):
@@ -228,7 +229,7 @@ def test_commit_scene_journals_and_undo_restores(tmp_path):
     snap = ents[-1]["snap"]
     assert "/" not in snap[len("s/"):]
     from runtime import moy_journal
-    assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == LEVEL2_SCENE
+    assert jf.read_snap(path + "/journal", ents[-1]) == LEVEL2_SCENE
 
     live = Path(path) / "scenes" / "main.moyscene"
     assert live.read_text() == LEVEL2_SCENE

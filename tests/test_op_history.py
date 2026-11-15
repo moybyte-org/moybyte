@@ -4,6 +4,8 @@ persistence adapter's additive `ops` field. Same shared modules the device
 freezes -- MicroPython-safe (plain classes, json-able ops)."""
 
 import json
+import os
+from tests import journal_files as jf
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -263,8 +265,8 @@ def test_journal_ops_field_roundtrips(tmp_path):
     ops = [["set", 0, 0, 5], ["set", 1, 0, 7]]
     seq = mc.journal_append(path, "main.py", "v1\n", ops=ops)
     assert seq is not None
-    entries = moy_journal._journal_load_entries(
-        moy_journal._journal_paths(path)[1])
+    entries = jf.entries(
+        jf.paths(path)[1])
     entry = [e for e in entries if e["seq"] == seq][0]
     assert entry["ops"] == ops
     assert moy_journal.journal_entry_ops(entry) == ops
@@ -274,8 +276,8 @@ def test_journal_without_ops_writes_no_key(tmp_path):
     from runtime import moy_journal
     mc, path = _cart(tmp_path)
     seq = mc.journal_append(path, "main.py", "v1\n")     # no ops -> additive absence
-    entries = moy_journal._journal_load_entries(
-        moy_journal._journal_paths(path)[1])
+    entries = jf.entries(
+        jf.paths(path)[1])
     entry = [e for e in entries if e["seq"] == seq][0]
     assert "ops" not in entry
     assert moy_journal.journal_entry_ops(entry) == []     # accessor tolerates absence
@@ -285,12 +287,12 @@ def test_old_journal_line_without_ops_loads_unchanged(tmp_path):
     # A pre-#111 journal line (no `ops` key) must load + walk exactly as before.
     from runtime import moy_journal
     mc, path = _cart(tmp_path)
-    jdir, log, _cur, _snap = moy_journal._journal_paths(path)
+    jdir, log, _cur, _snap = jf.paths(path)
     legacy = {"seq": 1, "ts": 0, "file": "main.py", "snap": "s/0001-main.py", "len": 3}
-    moy_journal._mkdir(jdir)
+    os.makedirs(jdir)
     with open(log, "w") as f:
         f.write(json.dumps(legacy) + "\n")
-    entries = moy_journal._journal_load_entries(log)
+    entries = jf.entries(log)
     assert entries[0]["seq"] == 1
     assert moy_journal.journal_entry_ops(entries[0]) == []
 

@@ -1,11 +1,9 @@
 """The store on the boards' file systems, under the boards' MicroPython (#224).
 
-The shelf scan reads each cart folder from ONE listing of it, from inside it:
-`os.ilistdir` for what is there, `os.chdir` into the folder, names opened
-relative to it (`moy_store_base._enter`). CPython runs the same code over a
+The shelf scan (native/moy_store/moy_cat.c) reads each cart folder from ONE
+listing of it, from inside it (moy_vol_enter). CPython runs the same C over a
 POSIX directory, which says nothing about FatFS's relative paths, littlefs's
-(MicroPython joins them onto the working directory itself) or MicroPython's
-VFS working directory. And every board's card is the store's own volume
+or the VM's volume table. And every board's card is the store's own volume
 (native/moy_store/moy_card.c): a FATFS over a C block device that keeps a
 cache of sectors, which is only correct if every write the store makes drops
 what it covers.

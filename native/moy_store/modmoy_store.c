@@ -859,6 +859,9 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
         mp_obj_list_append(tg, new_str(e->tags[i], strlen(e->tags[i])));
     }
     put(d, MP_QSTR_tags, tg);
+    if (e->animates) {
+        put(d, MP_QSTR_animates, mp_const_true);
+    }
     if (e->broken != NULL) {
         put(d, MP_QSTR_broken, mp_obj_new_str(e->broken, strlen(e->broken)));
     }

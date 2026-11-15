@@ -13,6 +13,7 @@ network reaching a file that is none of the browser's business.
 """
 
 import json
+from tests import journal_files as jf
 import socket
 import sys
 import threading
@@ -685,7 +686,7 @@ def test_a_push_extends_the_carts_own_journal(tmp_path):
         r = h.handle_http("POST", "/sync",
                           _batch({"p": "hop.moy/main.py", "t": src}))
         assert b"200" in r.split(b"\r\n")[0]
-    entries = moy_journal._journal_load_entries(
+    entries = jf.entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert [e["seq"] for e in entries] == [1, 2, 3], entries
     # ...and they are real commits: the console's UNDO walks one back.

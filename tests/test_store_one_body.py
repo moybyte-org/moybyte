@@ -2,8 +2,8 @@
 on every tier, CPython included (runtime/host/moy_store_binding.py).
 
   * no module under runtime/carts defines a body for a function the C store
-    exports to CPython: a def named after one of its rows (or the name
-    runtime/carts' store modules call it by) only calls the row;
+    exports: a def named after one of its rows (or the name runtime/carts'
+    store modules call it by) only calls the row;
   * the trial's store (tests/fixtures/store_trial/, STORE_FORMAT 1) opens,
     unchanged, on the current tree, and a format step goes through the one
     door with the export before it and the warm bar after it;
@@ -34,10 +34,11 @@ ROSTER = [{"title": "Bench", "type": "game", "src": body, "cfg": {"speed": 2},
            "version": 1}]
 
 
-def _host_rows():
+def _rows():
+    """Every row of the C store's face, whichever tiers carry it."""
     with open(os.path.join(ROOT, "native", "moy_store", "face.json")) as f:
         rows = json.load(f)["moy_store"]["rows"]
-    return {r["py"].split("(")[0] for r in rows if "host" not in r.get("absent", ())}
+    return {r["py"].split("(")[0] for r in rows}
 
 
 def _aliases(tree):
@@ -70,9 +71,8 @@ def _fallback(node, alias):
 def test_no_store_module_keeps_a_body_of_a_row_the_c_exports():
     """A twin is a def that reaches a row through the store AND branches on
     whether the store is there, a name bound to a row that is also def'd, or a
-    hasattr gate on a row: none is left for a row CPython reaches (face.json's
-    host rows)."""
-    rows = _host_rows()
+    hasattr gate on a row: none is left for any row of the store's face."""
+    rows = _rows()
     bodies = []
     folder = os.path.dirname(os.path.abspath(moy_seed.__file__))
     for f in sorted(os.listdir(folder)):

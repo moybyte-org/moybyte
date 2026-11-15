@@ -1,5 +1,5 @@
-// The journal (moy_journal.h has the contract; runtime/carts/moy_journal.py is the
-// reference every branch below follows).
+// The journal (moy_journal.h has the contract; runtime/carts/moy_journal.py's
+// header documents the format).
 
 #include <stdio.h>
 #include <string.h>

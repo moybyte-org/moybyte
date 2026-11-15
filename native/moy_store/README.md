@@ -3,14 +3,14 @@
 The store in C (`docs/history/kernel_store_2026-10.md`; #224), linked by every image:
 the boards, the browser and the desktop MicroPython; CPython (the simulator, the
 tools, the tests) reaches it over ctypes as the same module
-(`runtime/host/moy_store_binding.py`, face.json's host rows). Its file verbs and
-crash-safe write, the archive and adopt, the tree removal and the shelf are
-the one body on every tier (`runtime/carts/moy_fs.py`, `moy_pack.py`,
-`moy_store_base.py` and `cart_index.py` call them; `tests/test_store_one_body.py`
-fails a Python body of one). The catalogue, the seed and the journal keep
-CPython bodies of their own, the reference the C is held to
-(`docs/refactor_2026-11.md` §7), which `moy_carts`, `moy_seed` and
-`moy_journal` take where the module has no such row.
+(`runtime/host/moy_store_binding.py`, face.json's host rows). It is the one
+body on every tier: the file verbs and crash-safe write, the catalogue and the
+whole-cart load, the seed, the journal, the archive and adopt, the tree
+removal and the shelf (`runtime/carts/moy_fs.py`, `moy_carts.py`, `moy_seed.py`,
+`moy_journal.py`, `moy_pack.py`, `moy_store_base.py` and `cart_index.py` call
+them; `tests/test_store_one_body.py` fails a Python body of one). The rows the
+host leaves out are a VM's own: the card, the internal volume, the store task,
+the lock meter and the heap meter.
 
 | file | what it is |
 |---|---|
@@ -43,8 +43,9 @@ folder's other entries).
 The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the user-files layer's writes among the cut ones, the C over POSIX
 through ctypes and on the desktop MicroPython), `tests/test_moy_fs_publish.py` (each state a cut leaves, read),
 `tests/test_store_one_body.py` (the one body, the trial's store and its door, the backup),
-`tests/test_store_native.py` (the shelf and moy_json on the desktop MicroPython
-against CPython over every cart and generated ones) and
+`tests/test_store_native.py` (the shelf, the seed and the journal read alike by
+the VM's face and CPython's over every cart and generated ones, and moy_json
+against CPython's json) and
 `tests/test_store_on_vfs.py` (the store on FAT and littlefs volumes under the
 desktop MicroPython, every write the C store's) and `tests/test_store_tasks.py`
 (a task of no VM and the VM's Python working one volume at once, on the

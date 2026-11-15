@@ -2,11 +2,10 @@
 // a store root, one cart's entry read again, and the cart verbs that work on a
 // whole folder.
 //
-// runtime/carts/moy_carts.py's `_load(path, whole=False)` and `_each` are the
-// reference: the scan keeps their access pattern -- one listing of the root,
-// then per `.moy` folder one enter (moy_vol_enter), one listing, and an open
-// of each file the listing shows -- and reads each manifest through moy_fs's
-// recovering reader, normalised as `_load` normalises it. An entry is handed
+// The scan's access pattern: one listing of the root, then per `.moy` folder
+// one enter (moy_vol_enter), one listing, and an open of each file the
+// listing shows; each manifest is read through moy_fs's recovering reader and
+// normalised as runtime/carts/moy_carts.py's `entry` documents. An entry is handed
 // to the caller's function whole and freed after it; the binding builds the
 // dict the shelf takes. Fields the store does not interpret cross as the JSON
 // text of their value. A folder that will not read is no entry, never an
@@ -84,6 +83,7 @@ typedef struct {
     moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth
     int graduated;
     int glass;                  // a per-glass wallpaper: moybyte.glass is JSON true
+    int animates;               // an app drawn every frame: moybyte.animates is JSON true
     int wasi;                   // a WASI app the Player runs: moybyte.wasi is JSON true
     int icon_ok;                // the normalised icon: tile, w, h
     int64_t icon[3];

@@ -9,6 +9,7 @@ CLEAN one: in-RAM op steps until exhausted, THEN whole-commit journal steps (a
 commit re-baselines the History, so the two never double-count a stroke)."""
 
 from pathlib import Path
+from tests import journal_files as jf
 
 from blocks_helpers import go_to_insert
 from ws_helpers import build_ws_with_cart, select_on_home, step_card
@@ -23,7 +24,7 @@ def _make_ws_with_cart(tmp_path, src="def _draw():\n    cls(1)\n", title="Ops"):
 
 def _entries(cart_path, file=None):
     from runtime import moy_carts
-    ents = moy_carts._journal_load_entries(cart_path + "/journal/journal.jsonl")
+    ents = jf.entries(cart_path + "/journal/journal.jsonl")
     return [e for e in ents if file is None or e["file"] == file]
 
 

@@ -1,5 +1,5 @@
-// The catalogue (moy_cat.h has the contract; runtime/carts/moy_carts.py's `_load`
-// and `_each` are the reference every branch below follows).
+// The catalogue (moy_cat.h has the contract; runtime/carts/moy_carts.py's
+// `entry` and `load` document what a cart reads as).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -377,7 +377,9 @@ static void norm_tags(moy_cat_json_t f, moy_cat_entry_t *e) {
     }
 }
 
-// _normalize_icon: (tile, w, h), or 0.
+// A manifest "icon" (SPEC.md 3.4: a bare tile id, or [tile, w, h] of at most
+// 4x4 tiles) normalised: 1 and (tile, w, h), or 0 when absent, malformed or
+// out of range -- an icon is cosmetic, so a bad one costs the picture only.
 static int norm_icon(moy_cat_json_t f, int64_t out[3]) {
     if (f.v == NULL) {
         return 0;
@@ -525,8 +527,9 @@ static void sort_names(const char **nm, size_t *nn, size_t len) {
     }
 }
 
-// `_scene_files` then `scene_names`: 0, MOY_ENOMEM, or 1 when the manifest's
-// order holds a value `in` cannot hash (the twin raises, and drops the cart).
+// The scene names, the manifest's order then the scenes/ listing's: 0,
+// MOY_ENOMEM, or 1 when the manifest's order holds a value a dict key cannot
+// be (the cart is dropped).
 static int scene_names(rd_t *r, const char *man, const char *mend,
                        moy_cat_entry_t *e, const names_t *given) {
     names_t blobs = { &r->a, NULL, NULL, 0, 0 };
@@ -745,11 +748,11 @@ static int sheet_icon(rd_t *r, moy_cat_entry_t *e) {
 static const char *const known[] = { "sprites.moygfx", "map.moymap",
                                      "flags.moyflags", "config.json" };
 
-// `_load(path, False, folder)`: 1 and the entry, or 0 for no cart.
+// The payloads of a whole load: 1 and the cart, or 0 for no cart.
 static int load_payloads(rd_t *r, moy_cart_t *c, const char *man,
                          const char *mend, moy_cat_note_fn note, void *ctx);
 
-// `_load(path, whole, folder)`: 1 and the entry -- the cart whole into `c`
+// One folder read: 1 and the entry -- the cart whole into `c`
 // when it is not NULL -- or 0 for no cart.
 static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
                       moy_cat_note_fn note, void *ctx) {
@@ -962,6 +965,8 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     e->graduated = g.v != NULL && moy_json_truthy(g.v, g.e);
     moy_cat_json_t gl = vfield(man, mend, "glass");
     e->glass = gl.v != NULL && gl.e - gl.v == 4 && memcmp(gl.v, "true", 4) == 0;
+    moy_cat_json_t an = vfield(man, mend, "animates");
+    e->animates = an.v != NULL && an.e - an.v == 4 && memcmp(an.v, "true", 4) == 0;
     moy_cat_json_t wa = vfield(man, mend, "wasi");
     e->wasi = wa.v != NULL && wa.e - wa.v == 4 && memcmp(wa.v, "true", 4) == 0;
     e->icon_ok = norm_icon(field(man, mend, "icon"), e->icon);

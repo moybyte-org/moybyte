@@ -1,5 +1,5 @@
 // The seed (moy_seed.h has the contract; runtime/carts/moy_seed.py's seed_builtins
-// is the reference every branch below follows).
+// documents its rules).
 
 #include <stdio.h>
 #include <string.h>
@@ -17,7 +17,15 @@
 #define MOY_SEED_INFLATE 1
 #endif
 #if MOY_SEED_INFLATE
+#if defined(__has_include)
+#if __has_include("lib/uzlib/uzlib.h")
 #include "lib/uzlib/uzlib.h"
+#else
+#include "uzlib.h"
+#endif
+#else
+#include "lib/uzlib/uzlib.h"
+#endif
 #endif
 
 // What a builder here grows in: the store's call scratch.
@@ -318,7 +326,7 @@ static const char *i64(int64_t v, char *buf) {
     return p;
 }
 
-// The manifest seed_builtins writes, in its key order: the spec's fields, then
+// The manifest a seed writes, in its key order: the spec's fields, then
 // Moybyte's own under "moybyte". `folder` is the cart's folder, whose name
 // without the extension is its id.
 static void manifest(moy_sb_t *b, const char *c, const char *ce, int64_t ver,
@@ -486,6 +494,10 @@ static void manifest(moy_sb_t *b, const char *c, const char *ce, int64_t ver,
     f = get(c, ce, "glass");                // a per-glass wallpaper
     if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
         moy_sb_str(b, ", \"glass\": true");
+    }
+    f = get(c, ce, "animates");             // an app drawn every frame
+    if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
+        moy_sb_str(b, ", \"animates\": true");
     }
     f = get(c, ce, "pictures");             // a picture wallpaper
     if (f.v != NULL && *f.v != 'n') {
