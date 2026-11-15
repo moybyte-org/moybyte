@@ -241,12 +241,14 @@ static const char *moycore_ui_items(lua_State *L, int i, size_t *len)
     return lua_tolstring(L, -1, len);
 }
 
-/* ui.swatches(label, colours, cur, o): the colours 0xRRGGBB, a word each. */
+static int moycore_ui_choice_of(lua_State *L, int32_t kind);
+
+/* ui.swatches(label, colours, cur, o): the colours 0xRRGGBB, a word each,
+ * through the choice verbs' one body. Its options are the packed words, so
+ * they stand in for the colours as a list of one: moycore_ui_items joins a
+ * single item as it is. */
 static int moycore_ui_swatches(lua_State *L)
 {
-    int32_t cur = lua_isnoneornil(L, 3) ? -1 : moycore_ui_int(L, 3) - 1;
-    moy_ui_over_t o;
-    moycore_ui_over(L, 4, &o);
     luaL_checktype(L, 2, LUA_TTABLE);
     luaL_Buffer b;
     luaL_buffinit(L, &b);
@@ -259,13 +261,11 @@ static int moycore_ui_swatches(lua_State *L)
         luaL_addlstring(&b, w, 4);
     }
     luaL_pushresult(&b);
-    size_t len = 0;
-    const char *opts = lua_tolstring(L, -1, &len);
-    int32_t got = cur;
-    moy_ui_run_choice(moycore_ui_canvas(), MOY_UI_V_SWATCH, moycore_ui_span(L, 1),
-                      (const uint8_t *)opts, len, cur, &o, &got);
-    lua_pushinteger(L, (lua_Integer)got + 1);
-    return 1;
+    lua_createtable(L, 1, 0);
+    lua_insert(L, -2);
+    lua_rawseti(L, -2, 1);
+    lua_replace(L, 2);
+    return moycore_ui_choice_of(L, MOY_UI_V_SWATCH);
 }
 
 /* The strings of the table at stack index `i`, each ending in a NUL, appended to b. */
