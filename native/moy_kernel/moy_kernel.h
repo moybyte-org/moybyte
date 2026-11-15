@@ -12,6 +12,17 @@
 // client's cache aliased a recreated surface; here the table's owner checks
 // every use and there is no remote cache.)
 //
+// RESULT CODES. 0 is OK: every module's MOY_<M>_OK is 0
+// (tests/test_os_table.py holds it), and a code is the module's own, in its
+// own enum. A function that answers only how it went answers its code; one
+// that answers a value (a count, a length, a handle) answers it, or a
+// refusal below 0, and its header says which: the app ABI's rows answer
+// -MOY_APP_<code> (moy_app.h), moy_crypto.h's bodies their MOY_CRYPTO_E*.
+// What a compiled program reads for the app ABI's and the event queue's
+// codes is a column of native/os_calls.json (its errors and evq_errors),
+// generated into moy_app_err.h and moy_evq_codes.h for both tiers'
+// numberings: no tier maps a code by hand.
+//
 // KERNEL DATA IS PSRAM. Moving state out of the GC heap into C can be a net
 // internal SRAM loss (.bss, task stacks and small mallocs land internal, and
 // the S3's internal budget is shared with WiFi, BLE and the panel's DMA), so

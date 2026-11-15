@@ -77,10 +77,10 @@ static mp_obj_t ev_send(size_t n, const mp_obj_t *a) {
     (void)n;
     size_t len;
     const char *args = mp_obj_str_get_data(a[3], &len);
-    uint32_t denied = 0;
-    int took = moy_evq_send(mp_obj_get_int(a[0]), mp_obj_str_get_str(a[1]),
-                            mp_obj_str_get_str(a[2]), args, len, &denied);
-    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(took),
+    uint32_t took = 0, denied = 0;
+    int rc = moy_evq_send(mp_obj_get_int(a[0]), mp_obj_str_get_str(a[1]),
+                          mp_obj_str_get_str(a[2]), args, len, &took, &denied);
+    mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc == MOY_EVQ_OK ? (mp_int_t)took : -rc),
                       MP_OBJ_NEW_SMALL_INT(denied) };
     return mp_obj_new_tuple(2, t);
 }

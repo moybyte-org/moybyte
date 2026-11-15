@@ -4,7 +4,8 @@ for the C faces (MicroPython's and Lua's) and the CPython host's."""
 from . import TableError, header
 from .cproto import HEAD
 
-ERROR_FIELDS = {"code", "n", "doc", "py", "errno", "msg", "lua", "err"}
+ERROR_FIELDS = {"code", "n", "doc", "py", "errno", "msg", "lua", "err", "os"}
+EVQ_FIELDS = {"code", "os", "app"}
 EXCEPTIONS = ("ValueError", "OSError", "MemoryError")
 # What an unknown code answers as.
 FALLBACK = "BAD"
@@ -12,6 +13,10 @@ FALLBACK = "BAD"
 
 def errors(src):
     return src.get("errors", [])
+
+
+def evq_errors(src):
+    return src.get("evq_errors", [])
 
 
 def check_errors(src):
@@ -32,6 +37,8 @@ def check_errors(src):
             if set(e) != {"code", "n", "doc"}:
                 raise TableError("OK raises nothing")
             continue
+        if not e.get("os", "").isupper():
+            raise TableError("error %s: no os, the errno a compiled program reads" % e["code"])
         if e.get("py") not in EXCEPTIONS or not e.get("lua"):
             raise TableError("error %s: py is one of %s, and lua its text" % (e["code"], EXCEPTIONS))
         if (e["py"] == "OSError") != ("errno" in e):
@@ -41,6 +48,13 @@ def check_errors(src):
         for k in ("msg", "lua", "err"):
             if '"' in e.get(k, "") or "\\" in e.get(k, ""):
                 raise TableError("error %s: %s is plain text" % (e["code"], k))
+    seen = set()
+    for e in evq_errors(src):
+        if set(e) != EVQ_FIELDS or not e["os"].isupper() or e["code"] in seen:
+            raise TableError("evq error %s's fields: %s" % (e.get("code"), sorted(e)))
+        if e["app"] not in codes or e["app"] == "OK":
+            raise TableError("evq error %s: app %s is no app code" % (e["code"], e["app"]))
+        seen.add(e["code"])
 
 
 def _c(s):
@@ -67,6 +81,11 @@ def gen_err_h(src):
                                           _c(e.get("msg")), _c(e["lua"]))
             for e in rows[1:]]
     o += [b + " \\" for b in body[:-1]] + [body[-1], ""]
+    o += ["", "// The errno a compiled program reads for each code but OK, without its E:",
+          "// X(code, ACCES) is an ELF module's EACCES and a WASI program's ACCES.",
+          "#define MOY_APP_ERRNO(X) \\"]
+    body = ["    X(%s, %s)" % (e["code"], e["os"]) for e in rows[1:]]
+    o += [b + " \\" for b in body[:-1]] + [body[-1], ""]
     for e in rows:
         if "err" in e:
             o.append("#define MOY_APP_ERR_%s %s" % (e["code"], _c(e["err"])))
@@ -74,11 +93,26 @@ def gen_err_h(src):
     return "\n".join(o)
 
 
+def gen_evq_codes_h(src):
+    rows = evq_errors(src)
+    o = [HEAD, "// What each tier makes of the event queue's codes (moy_evq.h numbers them):",
+         "// MOY_EVQ_CODES(X) expands X(code, errno, app) for every code but OK, the",
+         "// errno a compiled program reads for it without its E (an ELF module's",
+         "// EBADF, a WASI program's BADF) and the app ABI's code a row answers for it",
+         "// (MOY_APP_<app>, negated).", "",
+         "#ifndef MOY_EVQ_CODES_H", "#define MOY_EVQ_CODES_H", "",
+         "#define MOY_EVQ_CODES(X) \\"]
+    body = ["    X(%s, %s, %s)" % (e["code"], e["os"], e["app"]) for e in rows]
+    o += [b + " \\" for b in body[:-1]] + [body[-1], "", "#endif", ""]
+    return "\n".join(o)
+
+
 def gen_face_errors(src):
     rows = errors(src)
     o = [header("native/os_calls.json", "#"),
          '"""The app ABI\'s answer codes (native/moy_app/moy_app_err.h) and what the',
-         "host's faces make of one: `exception(code)` is what a refused call raises,",
+         "Python faces make of one: a row answers -code, as the console's own",
+         "servers do; `exception(code)` is what a refused call raises,",
          "ERR[code] the text a storage row answers as its err instead of raising (IO's",
          'formats the store\'s errno and its strerror). A code not here answers as',
          '%s."""' % FALLBACK, "", "import errno as _errno", ""]

@@ -703,18 +703,25 @@ static void put32(uint8_t *q, uint32_t v) {
     q[3] = (uint8_t)(v >> 24);
 }
 
+// The errno of a door's negative answer (native/os_calls.json's errors).
 static int role_errno(int32_t r) {
     switch (-r) {
-        case MOY_APP_DENIED: case MOY_APP_STALE: return EACCES;
-        case MOY_APP_FULL: return ERANGE;
-        case MOY_APP_NOMEM: return ENOMEM;
-        case MOY_APP_ABSENT: return ENOENT;
-        case MOY_APP_NOSTORE: return ENODEV;
-        case MOY_APP_IO: return EIO;
-        case MOY_APP_NEEDS_VM: return EAGAIN;
-        case MOY_APP_FORGED: return EBADMSG;
-        case MOY_APP_BUSY: return EBUSY;
-        default: return EINVAL;
+#define X(code, eno) case MOY_APP_##code: return E##eno;
+        MOY_APP_ERRNO(X)
+#undef X
+        default:
+            return role_errno(-MOY_APP_FALLBACK);
+    }
+}
+
+// The errno of an event queue's code (native/os_calls.json's evq_errors).
+static int evq_errno(int rc) {
+    switch (rc) {
+#define X(code, eno, app) case MOY_EVQ_##code: return E##eno;
+        MOY_EVQ_CODES(X)
+#undef X
+        default:
+            return EINVAL;
     }
 }
 
@@ -1296,71 +1303,36 @@ long moy_os_evq_read(moy_os_proc_t *p, void *buf, size_t n) {
         return 0;
     }
     size_t len = 0;
-    switch (moy_evq_read(p->pid, buf, n, &len)) {
-    case MOY_EVQ_OK:
-        p->events++;
-        return (long)len;
-    case MOY_EVQ_EMPTY:
-        moy_os_errno_set(EAGAIN);
-        return -1;
-    case MOY_EVQ_RANGE:
-        moy_os_errno_set(EMSGSIZE);
-        return -1;
-    default:
-        moy_os_errno_set(EBADF);
+    int rc = moy_evq_read(p->pid, buf, n, &len);
+    if (rc != MOY_EVQ_OK) {
+        moy_os_errno_set(evq_errno(rc));
         return -1;
     }
+    p->events++;
+    return (long)len;
 }
 
-static int evq_errno(int rc) {
-    switch (rc) {
-    case MOY_EVQ_STALE: return EBADF;
-    case MOY_EVQ_FULL: return EMFILE;
-    case MOY_EVQ_NOMEM: return ENOMEM;
-    default: return EINVAL;
-    }
-}
-
-// A send no listener took for BACKPRESSURE (moy_evq.h) is EAGAIN: try later.
 int moy_os_moy_send(const char *app, const char *name, const char *args) {
     thr_t *t = moy_os_enter();
     int r = -1;
-    // The names are copied and the arguments measured inside their region:
-    // the module's other threads may rewrite them meanwhile.
-    char app_in[MOY_EVQ_APP], name_in[MOY_EVQ_NAME];
+    // The texts are measured inside the module's region and the kernel copies
+    // them: the module's other threads may rewrite them meanwhile.
     size_t an = app != NULL ? moy_os_text_len(t, app, MOY_EVQ_APP) : MOY_EVQ_APP;
     size_t nn = name != NULL ? moy_os_text_len(t, name, MOY_EVQ_NAME) : MOY_EVQ_NAME;
-    if (an < MOY_EVQ_APP) {
-        memcpy(app_in, app, an);
-        app_in[an] = 0;
+    size_t n = args != NULL ? moy_os_text_len(t, args, SIZE_MAX) : 0;
+    if (n == SIZE_MAX) {
+        an = MOY_EVQ_APP;           // no end inside its memory: refused
+        n = 0;
     }
-    if (nn < MOY_EVQ_NAME) {
-        memcpy(name_in, name, nn);
-        name_in[nn] = 0;
-    }
-    size_t room = args != NULL ? moy_os_text_len(t, args, SIZE_MAX) : 0;
-    const char *a = room != 0 && room != SIZE_MAX ? args : "[]";
-    if (room == SIZE_MAX) {
-        an = MOY_EVQ_APP;           // no end inside its memory: refused below
-        room = 0;
-    }
-    while (room > 1 && (*a == ' ' || *a == '\t' || *a == '\n')) {
-        a++;
-        room--;
-    }
-    if (room == 0) {
-        room = 2;
-    }
+    uint32_t took = 0;
+    int rc = t == NULL ? MOY_EVQ_OK
+             : moy_evq_send_text(t->p->pid, app, an, name, nn, args, n, &took);
     if (t == NULL) {
         moy_os_errno_set(EPERM);
-    } else if (an >= MOY_EVQ_APP || nn == 0 || nn >= MOY_EVQ_NAME || *a != '[') {
-        moy_os_errno_set(EINVAL);
+    } else if (rc != MOY_EVQ_OK) {
+        moy_os_errno_set(evq_errno(rc));
     } else {
-        r = moy_evq_send(t->p->pid, app_in, name_in, a, room, NULL);
-        if (r < 0) {
-            moy_os_errno_set(-r == MOY_EVQ_FULL ? EAGAIN : evq_errno(-r));
-            r = -1;
-        }
+        r = (int)took;
     }
     moy_os_leave(t);
     return r;

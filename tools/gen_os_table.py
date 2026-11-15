@@ -25,13 +25,14 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     native/moy_app/moy_app_lua_rows.h   the names a Lua run and a Lua service hold
     native/moy_app/moy_app_err.h    the answer codes and what each face makes of one
                                     (the errors)
+  native/moy_kernel/moy_evq_codes.h what each tier makes of the event queue's codes
   the Python console, between GENERATED markers
     runtime/shell/app_context.py    ROLES
     runtime/shell/app_perms.py      TABLE, each permission's tiers derived
     runtime/shell/shell_servers.py  DOOR_ARGS
     runtime/system/scheduler.py     _CALLS
     runtime/run/lua_ext.py          the Lua run's role names and console calls
-  runtime/host/face_errors.py       the host faces' answer codes, exceptions and err texts
+  runtime/system/face_errors.py     the Python faces' answer codes, exceptions and err texts
   docs/app_api_v1.md                the permission table, the call table and
                                     the role table (three regions)
   the binding faces, from each native/<dir>/face.json (tools/gen_os/face.py)
@@ -71,11 +72,11 @@ from gen_os.table import *  # noqa: E402,F401,F403
 from gen_os.table import (APP_CONTEXT, APP_DOC, APP_H, APP_PERMS, APP_WASM_SDK_H, CHECK_C,  # noqa: E402
                           KERNEL_C, KERNEL_H, LUA_EXT, LUA_H, LUA_STUB, PLUGIN_TABLE, PY_STUBS, ROOT,
                           ROWS_H, SCHEDULER, SDK_H, SHELL_SERVERS, STUBS_C, UI_H, UI_SDK_H, WASI_OS_H,
-                          WASM_H, WILD_H, ERR_H, FACE_ERRORS, check, elf, load)
+                          WASM_H, WILD_H, ERR_H, EVQ_CODES_H, FACE_ERRORS, check, elf, load)
 from gen_os.elf import (evq_block, gen_check_c, gen_kernel_c, gen_kernel_h, gen_rows_h,  # noqa: E402,F401
                         gen_sdk_h, gen_stubs_c, gen_wild_h)
 from gen_os.wasi import gen_wasi_h  # noqa: E402
-from gen_os.errors import check_errors, gen_err_h, gen_face_errors  # noqa: E402
+from gen_os.errors import check_errors, gen_err_h, gen_evq_codes_h, gen_face_errors  # noqa: E402
 from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
@@ -115,7 +116,8 @@ def outputs(src=None):
             (WILD_H, gen_wild_h(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
             (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
-            (ERR_H, gen_err_h(src)), (FACE_ERRORS, gen_face_errors(src)),
+            (ERR_H, gen_err_h(src)), (EVQ_CODES_H, gen_evq_codes_h(src)),
+            (FACE_ERRORS, gen_face_errors(src)),
             (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),
             (SHELL_SERVERS, gen_door_args(src)), (SCHEDULER, gen_calls(src)),
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),

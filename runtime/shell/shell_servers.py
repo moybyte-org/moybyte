@@ -53,6 +53,7 @@ door copies back.
 from app_context import NO_STORE
 from achievements import NotifyRole
 from front import FRONT as _FRONT
+import face_errors
 import moybyte as _moybyte
 
 try:
@@ -854,7 +855,8 @@ def _dev_handles():
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
-_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -7, -8
+_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = (
+    -face_errors.STALE, -face_errors.FULL, -face_errors.BAD, -face_errors.ABSENT)
 # The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
 # MOY_SH_DOOR, runtime/shell/sh_door.py).
 SH_DOOR = 0x7368

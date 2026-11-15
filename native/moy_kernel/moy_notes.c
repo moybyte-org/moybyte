@@ -170,8 +170,9 @@ static int32_t send(uint32_t pid, const char *id, size_t n, bool award, int32_t 
     }
     j[k++] = ']';
     j[k] = 0;
-    int took = moy_evq_send(pid, MOY_NOTES_TO, award ? "award" : "progress", j, k, NULL);
-    return took >= 0 ? took : took == -MOY_EVQ_FULL ? -MOY_EVQ_FULL : 0;
+    uint32_t took = 0;
+    int rc = moy_evq_send(pid, MOY_NOTES_TO, award ? "award" : "progress", j, k, &took, NULL);
+    return rc == MOY_EVQ_OK ? (int32_t)took : rc == MOY_EVQ_FULL ? -MOY_EVQ_FULL : 0;
 }
 
 static bool run_job(void *arg) {

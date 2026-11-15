@@ -72,10 +72,12 @@ of its own), so a device's records never ride the event queue, whose
 messages are text for the console's events. Python's callbacks (`irq`, a
 face's `on`) stay Python's."""
 
+import face_errors as _C
 import moybyte as _moybyte
 
 # moy_app.h's codes, negated: what a row answers when it fails.
-STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, -11
+STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = (
+    -_C.STALE, -_C.FULL, -_C.NOMEM, -_C.DENIED, -_C.BAD, -_C.ABSENT, -_C.IO, -_C.BUSY)
 
 EPERM, ENOENT, EIO, EBADF, ENOMEM, EACCES, EBUSY, ENODEV, EINVAL, ENOSPC = (
     1, 2, 5, 9, 12, 13, 16, 19, 22, 28)

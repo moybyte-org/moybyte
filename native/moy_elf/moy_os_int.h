@@ -19,6 +19,7 @@
 
 #include "moy_app.h"
 #include "moy_evq.h"
+#include "moy_evq_codes.h"
 #include "moy_os.h"
 #include "moy_os_rows.h"
 #include "moy_proc.h"

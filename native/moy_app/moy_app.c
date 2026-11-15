@@ -12,9 +12,10 @@
 // TIMERS and THE RULE; moy_log.h): weak, for a build of the layer alone,
 // where a timer, message or log row answers STALE.
 #include "moy_evq.h"
+#include "moy_evq_codes.h"
 #pragma weak moy_evq_timer
 #pragma weak moy_evq_timer_cancel
-#pragma weak moy_evq_send
+#pragma weak moy_evq_send_text
 #pragma weak moy_evq_read
 #pragma weak moy_evq_listen
 #pragma weak moy_evq_at
@@ -56,10 +57,18 @@
 #pragma weak moy_dev_perm_bit
 #define DEV_PASS (-1000)            // moy_dev.h's MOY_DEV_PASS
 
-// moy_evq.h's and moy_log.h's numbers, which this layer does not include.
-enum { EVQ_STALE = 1, EVQ_FULL = 2, EVQ_NOMEM = 3, EVQ_DENIED = 4, EVQ_RANGE = 7 };
-#define EVQ_NAME 24u
-#define EVQ_APP 48u
+// What a row answers for an event queue's code (moy_evq_codes.h).
+static int32_t evq_answer(int rc) {
+    switch (rc) {
+        case MOY_EVQ_OK:
+            return 0;
+#define X(code, eno, app) case MOY_EVQ_##code: return -MOY_APP_##app;
+        MOY_EVQ_CODES(X)
+#undef X
+        default:
+            return -MOY_APP_STALE;
+    }
+}
 #define LOG_INFO 6
 #define LOG_LEVELS 8
 #define LOG_TEXT_MAX 2048u
@@ -1837,7 +1846,7 @@ static int32_t timer_row(moy_appabi_t *a, uint32_t h, int row, int32_t v) {
     }
     uint32_t id = 0;
     int rc = moy_evq_timer(g->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
-    return rc == 0 ? (int32_t)id : rc == 2 ? -MOY_APP_FULL : -MOY_APP_STALE;  // MOY_EVQ_OK, FULL
+    return rc == MOY_EVQ_OK ? (int32_t)id : evq_answer(rc);
 }
 
 // A compiled process's messages (moybyte.send, recv) and its log lines
@@ -1865,33 +1874,13 @@ static int32_t send_row(moy_appabi_t *a, uint32_t h, args_t *f) {
         return -MOY_APP_BAD;
     }
     uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_SEND);
-    if (pid == 0u || moy_evq_send == NULL) {
+    if (pid == 0u || moy_evq_send_text == NULL) {
         return -MOY_APP_STALE;
     }
-    char app[EVQ_APP], name[EVQ_NAME];
-    if (an >= sizeof app || nn == 0u || nn >= sizeof name || memchr(ap, 0, an) != NULL
-        || memchr(np, 0, nn) != NULL) {
-        return -MOY_APP_BAD;
-    }
-    memcpy(app, ap, an);
-    app[an] = 0;
-    memcpy(name, np, nn);
-    name[nn] = 0;
-    const char *j = jn ? (const char *)jp : "[]";
-    if (!jn) {
-        jn = 2u;
-    }
-    while (jn && (*j == ' ' || *j == '\t' || *j == '\n' || *j == '\r')) {
-        j++;
-        jn--;
-    }
-    if (!jn || *j != '[') {
-        return -MOY_APP_BAD;
-    }
-    int took = moy_evq_send(pid, app, name, j, jn, NULL);
-    return took >= 0 ? took : took == -EVQ_FULL ? -MOY_APP_FULL
-           : took == -EVQ_STALE ? -MOY_APP_STALE : took == -EVQ_NOMEM ? -MOY_APP_NOMEM
-           : -MOY_APP_BAD;
+    uint32_t took = 0;
+    int rc = moy_evq_send_text(pid, (const char *)ap, an, (const char *)np, nn,
+                               (const char *)jp, jn, &took);
+    return rc == MOY_EVQ_OK ? (int32_t)took : evq_answer(rc);
 }
 
 static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
@@ -1901,7 +1890,7 @@ static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
     }
     size_t len = 0;
     int rc = moy_evq_read(pid, ans, cap, &len);
-    return rc == 0 ? (int32_t)len : rc == EVQ_RANGE ? -MOY_APP_FULL : 0;
+    return rc == MOY_EVQ_OK ? (int32_t)len : rc == MOY_EVQ_RANGE ? -MOY_APP_FULL : 0;
 }
 
 // A compiled process's listens and alarms (moybyte.on, at): the kernel's
@@ -1920,14 +1909,14 @@ static int32_t on_row(moy_appabi_t *a, uint32_t h, args_t *f) {
     if (pid == 0u || moy_evq_listen == NULL) {
         return -MOY_APP_STALE;
     }
-    char name[EVQ_NAME];
+    char name[MOY_EVQ_NAME];
     if (nn == 0u || nn >= sizeof name || memchr(np, 0, nn) != NULL) {
         return -MOY_APP_BAD;
     }
     memcpy(name, np, nn);
     name[nn] = 0;
     int rc = moy_evq_listen(pid, name, on != 0);
-    return rc == 0 ? 0 : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+    return evq_answer(rc);
 }
 
 static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
@@ -1941,8 +1930,7 @@ static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
     }
     uint32_t id = 0;
     int rc = moy_evq_at(pid, t, &id);
-    return rc == 0 ? (int32_t)id : rc == EVQ_DENIED ? -MOY_APP_DENIED
-           : rc == EVQ_FULL ? -MOY_APP_FULL : -MOY_APP_STALE;
+    return rc == MOY_EVQ_OK ? (int32_t)id : evq_answer(rc);
 }
 
 // A compiled process's status item (moybyte.status_show, status_state,

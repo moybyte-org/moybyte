@@ -504,8 +504,11 @@ static int fan(uint32_t from, const char *app, const char *to_app, const char *n
 }
 
 int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
-                 uint32_t *denied) {
+                 uint32_t *took, uint32_t *denied) {
     char me[MOY_EVQ_APP];
+    if (took != NULL) {
+        *took = 0;
+    }
     MOY_SYNC_LOCK(&s_lock);
     bool ok = sender(from, me);
     MOY_SYNC_UNLOCK(&s_lock);
@@ -513,11 +516,47 @@ int moy_evq_send(uint32_t from, const char *app, const char *name, const char *a
         if (denied != NULL) {
             *denied = 0;
         }
-        return -MOY_EVQ_STALE;
+        return MOY_EVQ_STALE;
     }
     uint32_t full = 0;
-    int took = fan(from, me, app != NULL ? app : "", name, args, n, denied, &full);
-    return took == 0 && full != 0u ? -MOY_EVQ_FULL : took;
+    int got = fan(from, me, app != NULL ? app : "", name, args, n, denied, &full);
+    if (took != NULL) {
+        *took = (uint32_t)got;
+    }
+    return got == 0 && full != 0u ? MOY_EVQ_FULL : MOY_EVQ_OK;
+}
+
+static bool is_ws(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+int moy_evq_send_text(uint32_t from, const char *app, size_t an, const char *name, size_t nn,
+                      const char *args, size_t n, uint32_t *took) {
+    char a[MOY_EVQ_APP], nm[MOY_EVQ_NAME];
+    if (took != NULL) {
+        *took = 0;
+    }
+    if (an >= sizeof a || nn == 0u || nn >= sizeof nm || (an && memchr(app, 0, an) != NULL)
+        || memchr(name, 0, nn) != NULL || (n && args == NULL)) {
+        return MOY_EVQ_BAD;
+    }
+    memcpy(a, app, an);
+    a[an] = 0;
+    memcpy(nm, name, nn);
+    nm[nn] = 0;
+    if (n == 0u) {
+        args = "[]";
+        n = 2u;
+    }
+    while (n && is_ws(*args)) {
+        args++;
+        n--;
+    }
+    if (n == 0u || *args != '[') {
+        return MOY_EVQ_BAD;
+    }
+    int rc = moy_evq_send(from, a, nm, args, n, took, NULL);
+    return rc == MOY_EVQ_FULL ? MOY_EVQ_AGAIN : rc;
 }
 
 int moy_evq_route(const char *name, const char *args, size_t n) {

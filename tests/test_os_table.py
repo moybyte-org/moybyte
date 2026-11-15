@@ -217,7 +217,7 @@ def test_a_service_s_device_permissions_are_the_handle_rows():
 def test_one_error_table():
     """native/os_calls.json's errors are the app ABI's codes and every face's
     answer to one: the C enum and the texts are generated (moy_app_err.h,
-    runtime/host/face_errors.py), so no face restates a message by hand, and
+    runtime/system/face_errors.py), so no face restates a message by hand, and
     the console's NO_STORE says the table's text."""
     from runtime import face_errors
     from runtime.shell import app_context

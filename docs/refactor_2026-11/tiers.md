@@ -265,7 +265,7 @@ So the console demonstrably runs off-board on MicroPython.
   - Per-module `_check`/`check` copies: 4 in `runtime/host`, 5 in `native/*/modmoy_*.c`, each with its own errno table (for example `moy_lease.py:98`).
 - **Do:**
   - One `errors` section in the table: code → (Python exception, errno, message, Lua message).
-  - Generate `moy_app_err.h` (C plus Lua) and `runtime/host/face_errors.py`.
+  - Generate `moy_app_err.h` (C plus Lua) and `runtime/system/face_errors.py`.
   - Decide FULL's meaning once: it means two different things today.
 - **Lines:** about −150.
 - **Risk:** low. Make the FULL decision explicit in the commit.

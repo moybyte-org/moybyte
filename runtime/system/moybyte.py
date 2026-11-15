@@ -282,6 +282,7 @@ except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
 import moy_evq as _E
+import face_errors as _C
 
 try:
     import json as _json
@@ -310,7 +311,7 @@ _RADIO_KINDS = (1 << NET) | (1 << BLE)
 
 SHELL = 1
 FULL = -_E.FULL             # send's answer under BACKPRESSURE (moy_evq.h)
-ABSENT = -8                 # service_*'s answer where the app declares no service
+ABSENT = -_C.ABSENT         # service_*'s answer where the app declares no service
 ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
 EMFILE = 24
@@ -860,7 +861,7 @@ def status(icon, section, order=0):
     return _items().add(_pid(), icon, section, order)
 
 
-STALE, BAD = -1, -7         # moy_app.h's codes a status row answers, negated
+STALE, BAD = -_C.STALE, -_C.BAD     # moy_app.h's codes a status row answers, negated
 
 
 def panel_of(pid, h, rows=None):

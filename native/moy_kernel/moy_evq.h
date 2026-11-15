@@ -106,7 +106,11 @@ enum {
     MOY_EVQ_DEAF = 5,           // the receiver does not listen on that name
     MOY_EVQ_EMPTY = 6,          // nothing queued
     MOY_EVQ_RANGE = 7,          // the caller's buffer is too small; the event stays
+    MOY_EVQ_AGAIN = 8,          // a send none took, a listener full (BACKPRESSURE): later
+    MOY_EVQ_BAD = 9,            // a send's app, name or arguments refused
 };
+// native/os_calls.json's evq_errors says what each tier makes of a code
+// (moy_evq_codes.h).
 
 #define MOY_EVQ_PROCS 24u           // queues at once
 #define MOY_EVQ_DEPTH 64u           // events a queue holds
@@ -155,12 +159,20 @@ bool moy_evq_hears(uint32_t pid, const char *name);
 // need none to send), DEAF, DENIED, FULL (BACKPRESSURE), NOMEM.
 int moy_evq_post(uint32_t to, uint32_t from, const char *name, const char *args, size_t n);
 // Message `name` from process `from` to every process of app `app` that
-// listens on it, the sender apart, under the rule: how many took it (0 or
-// more), -MOY_EVQ_STALE where the sender has no queue, -MOY_EVQ_FULL where
-// none took it and a listener was full (BACKPRESSURE). *denied (may be NULL)
-// counts the listeners the rule refused.
+// listens on it, the sender apart, under the rule: OK and how many took it in
+// *took (0 or more; may be NULL), STALE where the sender has no queue, FULL
+// where none took it and a listener was full (BACKPRESSURE). *denied (may be
+// NULL) counts the listeners the rule refused.
 int moy_evq_send(uint32_t from, const char *app, const char *name, const char *args, size_t n,
-                 uint32_t *denied);
+                 uint32_t *took, uint32_t *denied);
+// A compiled program's send (moybyte.send on every tier): moy_evq_send over
+// `an` bytes of app id, `nn` of name and `n` of arguments as the program
+// handed them. The arguments are a JSON array, whitespace before it skipped,
+// none "[]". BAD for an app id of MOY_EVQ_APP bytes or more, an empty name or
+// one of MOY_EVQ_NAME or more, either holding a NUL, or arguments that are no
+// array; AGAIN where moy_evq_send answers FULL; else moy_evq_send's code.
+int moy_evq_send_text(uint32_t from, const char *app, size_t an, const char *name, size_t nn,
+                      const char *args, size_t n, uint32_t *took);
 // An OS event: message `name` from the system (the kernel, pid 0) to every
 // process that listens on it, the shell included. How many took it.
 int moy_evq_route(const char *name, const char *args, size_t n);

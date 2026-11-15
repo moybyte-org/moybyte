@@ -4,7 +4,8 @@
 native/*/modmoy_*_face.c linguist-generated=true
 runtime/host/*_face.py linguist-generated=true
 runtime/host/faces.py linguist-generated=true
-runtime/host/face_errors.py linguist-generated=true
+runtime/system/face_errors.py linguist-generated=true
+native/moy_kernel/moy_evq_codes.h linguist-generated=true
 native/moy_elf/moy_os_table.h linguist-generated=true
 native/moy_elf/moy_os_table.c linguist-generated=true
 native/moy_elf/moy_os_rows.h linguist-generated=true

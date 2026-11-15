@@ -538,13 +538,14 @@ static int l_send(lua_State *L) {
     lua_concat(L, n >= 3 ? 2 * (n - 2) + 1 : 2);
     size_t len;
     const char *text = lua_tolstring(L, -1, &len);
-    int took = moy_evq_send(s->pid, app, name, text, len, NULL);
-    if (took >= 0) {
+    uint32_t took = 0;
+    int rc = moy_evq_send(s->pid, app, name, text, len, &took, NULL);
+    if (rc == MOY_EVQ_OK) {
         lua_pushinteger(L, took);
         return 1;
     }
     lua_pushnil(L);
-    lua_pushstring(L, took == -MOY_EVQ_FULL ? "full" : "no queue");
+    lua_pushstring(L, rc == MOY_EVQ_FULL ? "full" : "no queue");
     return 2;
 }
 

@@ -24,9 +24,9 @@
 // -- HTTP ----------------------------------------------------------------------
 
 enum {
-    MOY_HTTP_PARTIAL = 0,   // the head's blank line has not arrived
-    MOY_HTTP_OK = 1,
-    MOY_HTTP_BAD = -1,      // a head whose request line has no target
+    MOY_HTTP_OK = 0,
+    MOY_HTTP_PARTIAL = 1,   // the head's blank line has not arrived
+    MOY_HTTP_BAD = 2,       // a head whose request line has no target
 };
 
 // The largest Content-Length a request is believed about; beyond it the

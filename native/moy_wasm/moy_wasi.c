@@ -18,6 +18,7 @@
 
 #include "moy_wasi.h"
 #include "moy_evq.h"
+#include "moy_evq_codes.h"
 #include "moy_screen_slot.h"
 #include "moy_sh_board.h"
 #include "moy_log.h"
@@ -54,6 +55,29 @@ enum {
     W_NOTSUP = 58, W_PERM = 63, W_PIPE = 64, W_RANGE = 68, W_ROFS = 69, W_SPIPE = 70, W_XDEV = 75,
     W_NOTCAPABLE = 76,
 };
+
+// The WASI errno of a door's negative answer (native/os_calls.json's errors),
+// which a console call's verb answers too (shell_servers' _DOOR_*).
+static int32_t role_errno(int32_t r) {
+    switch (-r) {
+#define X(code, eno) case MOY_APP_##code: return W_##eno;
+        MOY_APP_ERRNO(X)
+#undef X
+        default:
+            return role_errno(-MOY_APP_FALLBACK);
+    }
+}
+
+// The WASI errno of an event queue's code (native/os_calls.json's evq_errors).
+static int32_t evq_errno(int rc) {
+    switch (rc) {
+#define X(code, eno, app) case MOY_EVQ_##code: return W_##eno;
+        MOY_EVQ_CODES(X)
+#undef X
+        default:
+            return W_INVAL;
+    }
+}
 
 enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 
@@ -718,7 +742,7 @@ static void b_evq_read(call_t *c) {
     size_t got = 0;
     int rc = moy_evq_read(w->pid, p, len, &got);
     c->r = rc == MOY_EVQ_OK ? (put32(c, c->a[3], (uint32_t)got) ? W_OK : W_FAULT)
-           : rc == MOY_EVQ_EMPTY ? W_AGAIN : rc == MOY_EVQ_RANGE ? W_MSGSIZE : W_BADF;
+           : (uint32_t)evq_errno(rc);
 }
 
 // The moybyte.os imports (moy_wasi_os_rows.h): the kernel's calls on the
@@ -740,32 +764,15 @@ static int os_text(const char *p, uint32_t n, char *out, size_t cap) {
     return memchr(out, 0, n) != NULL ? -1 : (int)n;
 }
 
-static int32_t os_errno(int rc) {
-    return -(int32_t)(rc == MOY_EVQ_STALE ? W_BADF : rc == MOY_EVQ_FULL ? W_MFILE
-                      : rc == MOY_EVQ_NOMEM ? W_NOMEM : W_INVAL);
-}
-
 static int32_t w_os_send(wasm_exec_env_t e, const char *app, uint32_t app_n, const char *name,
                          uint32_t name_n, const char *args, uint32_t args_n) {
     moy_wasi_t *w = os_run(e);
-    char a[MOY_EVQ_APP], nm[MOY_EVQ_NAME];
     if (w == NULL || w->pid == 0) {
         return -(int32_t)W_BADF;
     }
-    if (os_text(app, app_n, a, sizeof a) < 0 || os_text(name, name_n, nm, sizeof nm) <= 0) {
-        return -(int32_t)W_INVAL;
-    }
-    const char *j = args_n ? args : "[]";
-    size_t jn = args_n ? args_n : 2u;
-    while (jn && (*j == ' ' || *j == '\t' || *j == '\n')) {
-        j++;
-        jn--;
-    }
-    if (!jn || *j != '[') {
-        return -(int32_t)W_INVAL;
-    }
-    int took = moy_evq_send(w->pid, a, nm, j, jn, NULL);
-    return took == -MOY_EVQ_FULL ? -(int32_t)W_AGAIN : took < 0 ? os_errno(-took) : took;
+    uint32_t took = 0;
+    int rc = moy_evq_send_text(w->pid, app, app_n, name, name_n, args, args_n, &took);
+    return rc == MOY_EVQ_OK ? (int32_t)took : -evq_errno(rc);
 }
 
 static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int32_t on) {
@@ -778,7 +785,7 @@ static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int
         return -(int32_t)W_INVAL;
     }
     int rc = moy_evq_listen(w->pid, nm, on != 0);
-    return rc == MOY_EVQ_OK ? 0 : os_errno(rc);
+    return rc == MOY_EVQ_OK ? 0 : -evq_errno(rc);
 }
 
 static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint32_t text_n) {
@@ -904,24 +911,6 @@ static bool json_str(char *out, size_t cap, size_t *at, const char *p, uint32_t 
     out[k++] = '"';
     *at = k;
     return true;
-}
-
-// The errno of a door's negative answer (moy_app.h's codes), which a
-// console call's verb answers too (shell_servers' _DOOR_*, moybyte.ABSENT):
-// WASI's numbering of the errno an ELF module reads for it.
-static int32_t role_errno(int32_t r) {
-    switch (-r) {
-        case MOY_APP_DENIED: case MOY_APP_STALE: return W_ACCES;
-        case MOY_APP_FULL: return W_RANGE;
-        case MOY_APP_NOMEM: return W_NOMEM;
-        case MOY_APP_ABSENT: return W_NOENT;
-        case MOY_APP_NOSTORE: return W_NODEV;
-        case MOY_APP_IO: return W_IO;
-        case MOY_APP_NEEDS_VM: return W_AGAIN;
-        case MOY_APP_FORGED: return W_BADMSG;
-        case MOY_APP_BUSY: return W_BUSY;
-        default: return W_INVAL;
-    }
 }
 
 static int32_t call_wait(moy_wasi_t *w, uint32_t ticket, int64_t t0);
