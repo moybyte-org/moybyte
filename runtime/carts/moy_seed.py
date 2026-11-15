@@ -5,6 +5,7 @@
 #   adopt_bundle            a served bundle taken whole on a first visit
 #   seed_packed             the packed roster, one cart inflated at a time
 #   prune_retired           the folders of seeds that no longer ship, once per store
+#   sweep_store             the store's format stamp (STORE_FORMAT) and its one door
 #   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
@@ -550,39 +551,88 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # folder, never its title, whose bare folder (mesh.moy) is the installed one.
 # It also takes RETIRED_SIBLINGS, folders beside the carts folder: `written/`
 # held a compiled cart's written files until they moved to `apps/<id>/`
-# (bd4d890a9, 2026-11-08), and nothing reads it.
+# (bd4d890a9, 2026-11-08), and nothing reads it. The generation lives in the
+# store's stamp (`store.ver`, below); `retired.ver`, which held it alone
+# before the stamp, is a sibling the sweep takes.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
     "wallpaper_space", "wifi", "mesh"))
-RETIRED_SIBLINGS = ("written",)
+RETIRED_SIBLINGS = ("written", "retired.ver")
 RETIRED_GEN = 8
-RETIRED_VER_NAME = "retired.ver"
+# -- the store's format and its one door (docs/refactor_2026-11.md, phase 13) --
+#
+# A store carries a FORMAT STAMP: the sidecar `store.ver` beside the carts
+# folder, one line "moystore <format> <generation>\n", the format the store's
+# layout and files are in and the RETIRED generation it was swept at. One file,
+# so the warm path of the door below stays one small read. It is written the
+# first time a store opens (`sweep_store` on a store with none: a new store, at
+# STORE_FORMAT) and after every sweep or step; its reader is strict, and a line
+# it does not read is no stamp.
+#
+# STORE_FORMAT 1 is the trial's (2026-11-15): tests/fixtures/store_trial/ is a
+# store in it, and tests/test_store_one_body.py opens it on every tree.
+#
+# THE DOOR. A format change ships as a STEP in FORMAT_STEPS -- `step(root)`
+# takes the store at `root` from its key's format to the next -- and a bumped
+# STORE_FORMAT, in the same commit as a test that takes the fixture through it.
+# `sweep_store` runs the steps of a store behind this firmware, in order, each
+# stamped as it lands, and BEFORE THE FIRST, the export of a kid's work: the
+# backup archive (runtime/carts/moy_backup.py) in the user files. An export
+# that cannot be written runs no step: the store stays in its format, readable
+# by nothing that changed, and the next boot tries again. A store AHEAD of this
+# firmware (a newer image's, then a downgrade) is not touched. No step exists:
+# none is written until a format changes (CLAUDE.md, "No store migrations
+# until there are users", of which this door is the one exception).
+STORE_FORMAT = 1
+STORE_VER_NAME = "store.ver"
+FORMAT_STEPS = {}
+_VER_HEAD = "moystore "
 
 
-def retired_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like shared.moygfx) holding the
-    RETIRED generation this store has already been swept for."""
-    return _sibling_path(root, RETIRED_VER_NAME)
+def store_version_path(root=CARTS_DIR):
+    """The store's stamp: a sibling of the carts folder."""
+    return _sibling_path(root, STORE_VER_NAME)
+
+
+def load_store_version(root=CARTS_DIR):
+    """The store's (format, generation), or None when it has no stamp this
+    reads: absent, unreadable, or any other line."""
+    try:
+        line = _read(store_version_path(root))
+    except (OSError, ValueError):
+        return None
+    if not line.startswith(_VER_HEAD) or not line.endswith("\n"):
+        return None
+    bits = line[len(_VER_HEAD):-1].split(" ")
+    if len(bits) != 2 or not all(b.isdigit() for b in bits):
+        return None
+    fmt, gen = int(bits[0]), int(bits[1])
+    return (fmt, gen) if fmt > 0 else None
+
+
+def _save_store_version(root, fmt, gen):
+    _write(store_version_path(root), "%s%d %d\n" % (_VER_HEAD, fmt, gen))
 
 
 def load_retired_version(root=CARTS_DIR):
-    """The generation the store was swept at -- 0 when absent/unreadable, so a
-    store that predates this sweeps once."""
-    try:
-        return int(_read(retired_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
+    """The generation the store was swept at -- 0 with no stamp, so a store
+    that has none sweeps once."""
+    v = load_store_version(root)
+    return 0 if v is None else v[1]
 
 
 def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
-                  folders=(), siblings=()):
+                  folders=(), siblings=(), ver=None):
     """Remove the folders of seeds that no longer ship, once per store: each
     title's bare folder, each of `folders` by name, and each of `siblings`
-    beside the carts folder.
+    beside the carts folder. `ver` is the stamp the caller already read.
 
     Returns the number of folders removed (0 when the store is already at this
     generation, which is the warm-boot path and costs one small file read)."""
-    if load_retired_version(root) >= generation:
+    if ver is None:
+        ver = load_store_version(root)
+    fmt, gen = ver if ver is not None else (STORE_FORMAT, 0)
+    if gen >= generation:
         return 0
     gone = 0
     names = [cart_folder(t) for t in titles] + list(folders)
@@ -590,28 +640,60 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
     for d in paths:
         if _exists(d):
             _rmtree(d)
+            _remove(d)
             gone += 1
     try:
-        _write(retired_version_path(root), str(int(generation)))
+        _save_store_version(root, fmt, generation)
     except OSError:
         return gone          # a read-only store: sweep again next boot, harmless
     return gone
 
 
-def sweep_store(root=CARTS_DIR, seed=None):
+def _export(root, fmt):
+    """The export before a step: the backup archive, named for the format the
+    store leaves."""
+    import moy_backup
+    return moy_backup.archive(root, name="moybyte-format-%d.zip" % fmt)
+
+
+def step_store(root, ver, export=_export):
+    """The store at `root`, stamped `ver`, taken to STORE_FORMAT through
+    FORMAT_STEPS, each step stamped as it lands; `export(root, format)` runs
+    before the first (None skips it: a restore's stage, whose archive is the
+    export). Returns the stamp it leaves."""
+    fmt, gen = ver
+    if export is not None and fmt < STORE_FORMAT:
+        export(root, fmt)
+    while fmt < STORE_FORMAT:
+        FORMAT_STEPS[fmt](root)
+        fmt += 1
+        _save_store_version(root, fmt, gen)
+    return (fmt, gen)
+
+
+def sweep_store(root=CARTS_DIR, seed=None, export=_export):
     """The one-shot pass a store OPENING runs, behind one door. Returns the
     number of retired folders removed. `seed` is the roster the store is
     seeded from, whose titles' bare folders generation 5 takes.
 
-    The door is kept for the next sweep that earns it, and the bar it has to
-    clear is `prune_retired`'s: gated on a generation sidecar, so the warm path
-    is one small read and the cold one is bounded. A FORMAT change does not
-    clear it and does not belong here -- readers are strict and a bumped seed
-    version re-seeds the content (CLAUDE.md, 2026-09-07)."""
+    The door is gated on the store's stamp, so the warm path is one small
+    read: a store behind STORE_FORMAT is stepped (the format door above, its
+    export first), one ahead of it is left alone, and a store behind
+    RETIRED_GEN is swept (`prune_retired`)."""
+    ver = load_store_version(root)
+    if ver is not None and ver[0] > STORE_FORMAT:
+        return 0
+    if ver is not None and ver[0] < STORE_FORMAT:
+        try:
+            ver = step_store(root, ver, export)
+        except OSError as exc:
+            print("store: format %d kept, no export (%r)" % (ver[0], exc))
+            return 0
     titles = list(RETIRED)
     if seed:
         titles += [item[0] if is_packed(seed) else item["title"] for item in seed]
-    return prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS)
+    return prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS,
+                         ver=ver)
 
 
 def seed_any(seed, root, present, progress=None):

@@ -26,10 +26,21 @@
 // under `folder`: the number of files, or a negative errno value.
 int moy_pack(const char *cart, const char *folder, const char *dest, int history);
 
+// The members `rels` (each a folder or a file, a path relative to `base`; ""
+// is `base` itself) written to `dest` as one archive whose entries sit under
+// `folder`, each member's own path kept: the number of files, or a negative
+// errno value. An absent member is left out. The store's backup archive
+// (runtime/carts/moy_backup.py) is this over the store's layout.
+int moy_pack_paths(const char *base, const char *const *rels, size_t n, const char *folder,
+                   const char *dest, int history);
+
 // The archive at `archive` unpacked into the folder `dest` (made): the number
 // of files, or a negative errno value (EINVAL: no archive). `top` gets the
 // folder its entries sat under ("" for none), cut at `cap`.
 int moy_unpack(const char *archive, const char *dest, char *top, size_t cap);
+// moy_unpack, the journal let through with `history` (a backup's restore).
+int moy_unpack_all(const char *archive, const char *dest, char *top, size_t cap,
+                   int history);
 
 // The staged cart folder `stage` moved to `target` by one rename; a cart
 // already there goes aside to `<stage>.old` first and is removed after, so a

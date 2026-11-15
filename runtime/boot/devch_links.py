@@ -1,4 +1,5 @@
-"""The dev channel's link words: `link`, `web`, `recv` and the tier-1
+"""The dev channel's link words: `link`, `web`, `recv`, the store's
+`backup` and `restore` (runtime/carts/moy_backup.py), and the tier-1
 sideload lines `moy?`, `moy-put`, `moy-del`, `moy-rescan` and `moy-run` (see
 runtime/boot/devch_input.py for the shape of a word). `recv` and `moy-put` leave
 the line discipline, so the byte readers they hand the stream to stay the
@@ -82,5 +83,40 @@ def moy(chan, ws, parts, line):
     return chan._moy(ws, parts[0], parts, line) or False
 
 
-WORDS = {"link": link, "web": web, "recv": recv, "moy?": moy, "moy-put": moy,
-         "moy-del": moy, "moy-rescan": moy, "moy-run": moy}
+def backup(chan, ws, parts, line):
+    # `backup` writes the store's archive into the user files' Backups/ and
+    # names it: `REMOTE backup <path> <files>` (tools/console_backup.py reads it).
+    root = getattr(ws, "carts_root", None)
+    if root is None:
+        print("REMOTE backup: no store")
+        return
+    import moy_backup
+    try:
+        path, n = moy_backup.archive(root)
+    except (OSError, MemoryError) as exc:
+        print("REMOTE backup: failed %r" % (exc,))
+        return
+    print("REMOTE backup %s %d" % (path, n))
+
+
+def restore(chan, ws, parts, line):
+    # `restore <path>`: the archive at `path` on the console restored into its
+    # store, then the shelf read again.
+    root = getattr(ws, "carts_root", None)
+    if root is None or len(parts) < 2:
+        print("REMOTE restore: needs a store and an archive's path")
+        return
+    import moy_backup
+    try:
+        n = moy_backup.restore(line.split(None, 1)[1].strip(), root)
+    except (OSError, ValueError, MemoryError) as exc:
+        print("REMOTE restore: failed %r" % (exc,))
+        return
+    print("REMOTE restore %d" % n)
+    rescan = getattr(getattr(ws, "carts", None), "synced", None)
+    if rescan is not None:
+        rescan()
+
+
+WORDS = {"link": link, "web": web, "recv": recv, "backup": backup, "restore": restore,
+         "moy?": moy, "moy-put": moy, "moy-del": moy, "moy-rescan": moy, "moy-run": moy}

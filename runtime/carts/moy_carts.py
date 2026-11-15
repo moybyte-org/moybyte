@@ -1760,8 +1760,9 @@ from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, ado
 from moy_seed import (
     seed_builtins, seed_folders,
     _SEED_WBITS, unpack_seed, seed_packed, is_packed,
-    RETIRED, RETIRED_GEN, retired_version_path,
-    load_retired_version, prune_retired, sweep_store, seed_any,
+    RETIRED, RETIRED_GEN, STORE_FORMAT, FORMAT_STEPS, store_version_path,
+    load_store_version, load_retired_version, prune_retired, step_store, sweep_store,
+    seed_any,
     embedded_floor)
 
 

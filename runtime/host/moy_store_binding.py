@@ -68,8 +68,8 @@ _SIGS = (
 )
 # The archive's rows: the part the inflater builds (moy_ufiles_binding.part).
 _PACK_SIGS = (
-    ("moy_pack", [_P, _P, _P, c.c_int], c.c_int),
-    ("moy_unpack", [_P, _P, _P, _S], c.c_int),
+    ("moy_pack_paths", [_P, c.POINTER(_P), _S, _P, _P, c.c_int], c.c_int),
+    ("moy_unpack_all", [_P, _P, _P, _S, c.c_int], c.c_int),
     ("moy_adopt", [_P, _P], c.c_int),
 )
 
@@ -97,7 +97,7 @@ def _lib():
 def _pack_lib():
     if _PACK[0] is None:
         lib = _lib()
-        if not hasattr(lib, "moy_pack"):
+        if not hasattr(lib, "moy_pack_paths"):
             raise ImportError("moy_store: no MicroPython tree for the archive's "
                               "inflater (make unix-micropython)")
         for name, args, res in _PACK_SIGS:
@@ -252,16 +252,22 @@ def binding():
         b = name.encode("utf-8", "surrogateescape")
         return bool(_lib().moy_store_skip(b, len(b), 1 if history else 0))
 
-    def pack(cart, folder, dest, history):
-        rc = _pack_lib().moy_pack(_path(cart), folder.encode(), _path(dest),
-                                  1 if history else 0)
+    def pack_paths(base, rels, folder, dest, history):
+        rels = [r.encode("utf-8", "surrogateescape") for r in rels]
+        arr = (_P * max(1, len(rels)))(*rels)
+        rc = _pack_lib().moy_pack_paths(_path(base), arr, len(rels), folder.encode(),
+                                        _path(dest), 1 if history else 0)
         if rc < 0:
             _raise(-rc)
         return rc
 
-    def unpack(archive, dest):
+    def pack(cart, folder, dest, history):
+        return pack_paths(cart, [""], folder, dest, history)
+
+    def unpack(archive, dest, history=False):
         top = c.create_string_buffer(128)
-        rc = _pack_lib().moy_unpack(_path(archive), _path(dest), top, len(top))
+        rc = _pack_lib().moy_unpack_all(_path(archive), _path(dest), top, len(top),
+                                        1 if history else 0)
         if rc < 0:
             _raise(-rc)
         return (rc, top.value.decode())

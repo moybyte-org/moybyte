@@ -835,7 +835,7 @@ Closes N15, X1, E1. Decided: §6, decision 4.
     the door above.
   - The archive lands in the user files, where the USB drive and SFTP
     already reach it; no new transport.
-  - `+tools/console_backup.py` pulls and pushes an archive from a host, and
+  - `tools/console_backup.py` pulls and pushes an archive from a host, and
     the dev channel has the two calls as commands.
   - The on-device action, a row in Settings with its confirm and its restore
     picker, is not in the sprint (§6's rule, §7).
@@ -851,7 +851,7 @@ store sweep costs what it did; an archive of a full card is written without
 running the heap out. P4: the same archive restored onto its internal
 flash.
 
-**Guard.** `+tests/test_store_one_body.py`: no module under `runtime/carts`
+**Guard.** `tests/test_store_one_body.py`: no module under `runtime/carts`
 defines a body for a function the C store exports; the fixture store opens,
 unchanged, on the current tree; a store archived and restored into an empty
 root reads back equal, file for file, thumbnails aside, and a re-seed after
