@@ -123,7 +123,7 @@ Its limits in short: the page itself crosses plain HTTP, so an active attacker o
 typed into it; a paired browser can write and run any cart, one that arrives as files
 being asked on the glass at its first run (§3); the password pairs against the record's PBKDF2 cost
 (above) and the backoff. The Zero's setup network is open
-while it is unconfigured (`firmware/seeed_xiao_esp32s3_zero/modules/zero_setup.py`).
+while it is unconfigured (`device/zero_setup.py`).
 
 **Fetches.** The kernel's client (`native/moy_net/moy_net_port.c`) verifies an
 https server against the image's CA bundle, with the host's name, and a build

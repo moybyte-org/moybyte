@@ -43,6 +43,7 @@ cart format and its verbs.
 | **Guition JC8012P4A1C** (ESP32-P4) | 10.1″ 1280×800 touch screen, the same desktop as the Waveshare |
 | **Guition JC3248W535** (ESP32-S3) | 3.5″ 480×320 touch screen |
 | **Seeed XIAO ESP32-S3** | no screen: it stores carts and serves the browser console over WiFi |
+| **ESP32-C3** (4 MB, e.g. Super Mini) | the same screenless store on the smallest chip, updated by cable |
 | **PC simulator** | `tools/simulate_desktop.py`, running the same `runtime/` modules as the boards |
 | **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) |
 
@@ -188,6 +189,7 @@ make firmware-build-p4             && make firmware-flash-p4             PORT=/d
 make firmware-build-guition-s3     && make firmware-flash-guition-s3     PORT=/dev/ttyACM0
 make firmware-build-guition-p4     && make firmware-flash-guition-p4     PORT=/dev/ttyACM0
 make firmware-build-zero           && make firmware-flash-zero           PORT=/dev/ttyACM0
+make firmware-build-c3-zero        && make firmware-flash-c3-zero        PORT=/dev/ttyACM0
 ```
 
 `master` is the tested branch: its builds go to `firmware-latest` and the stable

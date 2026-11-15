@@ -104,6 +104,9 @@ OTA_IMAGES = {
     # Waveshare.
     "guition_p4": "moybyte_guition_p4_app.bin",
 }
+# Boards whose partition table has ONE app slot, so no OTA payload can install
+# on them: their build is no miss in OTA_IMAGES. The C3 Zero (its board.toml).
+NO_OTA = {"c3_zero"}
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
 
@@ -255,7 +258,8 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None):
     prefix = "moybyte-firmware-"
     if os.path.isdir(artifacts):
         for entry in sorted(os.listdir(artifacts)):
-            if entry.startswith(prefix) and entry[len(prefix):] not in OTA_IMAGES:
+            if (entry.startswith(prefix) and entry[len(prefix):] not in OTA_IMAGES
+                    and entry[len(prefix):] not in NO_OTA):
                 print("::warning::%s built images but has no OTA_IMAGES entry "
                       "-- no OTA manifest will be published for it"
                       % entry[len(prefix):])

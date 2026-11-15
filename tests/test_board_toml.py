@@ -39,9 +39,10 @@ GUITION = ROOT / "firmware" / "guition_jc3248w535"
 # flash facts -- and none of that cares whether a board has a screen. The two
 # tests that do care about a console say so where they narrow.
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
+C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION, "zero": ZERO,
-          "guition-p4": GUITION_P4}
+          "guition-p4": GUITION_P4, "c3-zero": C3_ZERO}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -155,13 +156,14 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
     assert (dest / "moy_runtime.py").exists(), (
         "prune ate a TRACKED board-authored module -- the one outcome that "
         "must be impossible, since modules/ holds the board's own sources too")
-    if board != "zero":
+    headless = board_config.load(src)["board"]["tier"] == "headless"
+    if not headless:
         # The console tier: every board that HAS a console stages it, and stages
-        # the font under the name device_canvas imports. The Zero stages neither
-        # -- it has no console at all -- which its own row below pins instead.
+        # the font under the name device_canvas imports. The Zeros stage neither
+        # -- they have no console at all -- which their own rows below pin instead.
         assert (dest / "console.py").exists() and (dest / "moy_font.py").exists()
     assert not (dest / "font.py").exists(), "font.py must stage RENAMED only"
-    if board in ("tdeck", "guition-s3", "zero"):
+    if board in ("tdeck", "guition-s3") or headless:
         assert not (dest / "wm_windowed.py").exists()      # no desktop to window
     else:
         assert (dest / "wm_windowed.py").exists()          # the two P4 desks
@@ -647,21 +649,40 @@ def test_the_p4_denies_exactly_its_missing_hardware():
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------
 
 
+def _table_has_otadata(board_dir):
+    """True when the board's own partition table (its sdkconfig.board names
+    the CSV) has an otadata row."""
+    for frag in board_dir.glob("boards/*/sdkconfig.board"):
+        m = re.search(r'^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="([^"]+)"',
+                      frag.read_text(), re.M)
+        if m:
+            rows = (frag.parent / m.group(1)).read_text().splitlines()
+            return any(r.split(",")[0].strip() == "otadata" for r in rows)
+    return True
+
+
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_flash_facts_are_declared_and_shaped(board):
     """Every board declares its cable-flash facts; tools/board_flash.py reads
     them and the Makefile targets are two lines. The shapes matter: offsets are
     hex strings an esptool command takes verbatim, the image path is
     repo-relative, and the otadata pair exists because skipping that erase on
-    an OTA'd board makes a flash look like it did nothing."""
+    an OTA'd board makes a flash look like it did nothing. A board whose table
+    has no otadata (the C3 Zero's one slot) declares no pair: there is nothing
+    to erase."""
     cfg = board_config.load(BOARDS[board])
     fl = cfg.get("flash")
     assert fl, "%s has no [flash] section" % board
-    for key in ("image", "offset", "baud", "otadata_offset", "otadata_size"):
+    for key in ("image", "offset", "baud"):
         assert key in fl, "%s [flash] lacks %s" % (board, key)
     int(str(fl["offset"]), 16)
-    int(str(fl["otadata_offset"]), 16)
-    int(str(fl["otadata_size"]), 16)
+    if _table_has_otadata(BOARDS[board]):
+        for key in ("otadata_offset", "otadata_size"):
+            assert key in fl, "%s [flash] lacks %s" % (board, key)
+        int(str(fl["otadata_offset"]), 16)
+        int(str(fl["otadata_size"]), 16)
+    else:
+        assert "otadata_offset" not in fl, "%s has no otadata to erase" % board
     assert not str(fl["image"]).startswith("/")
     assert fl.get("stub", 2) in (1, 2), "%s [flash] stub is 1 or 2" % board
     assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
@@ -677,9 +698,10 @@ def test_the_way_out_of_the_loader_is_declared_where_it_is_not_hard_reset():
     This is pinned because the fact was already written in that board's own
     toml prose while board_flash.py hardcoded the opposite, which is the shape
     of bug this repo keeps turning declarations into data to avoid."""
-    zero = board_config.load(ZERO)["flash"]
-    assert zero.get("after") == "watchdog_reset"
-    for name in ("tdeck", "p4", "guition-s3", "guition-p4"):
+    assert board_config.load(ZERO)["flash"].get("after") == "watchdog_reset"
+    # The C3 Zero takes the default: an RTS pulse boots its app and keeps its
+    # USB device, where a watchdog reset re-enumerates it (its board.toml).
+    for name in ("tdeck", "p4", "guition-s3", "guition-p4", "c3-zero"):
         fl = board_config.load(BOARDS[name])["flash"]
         assert fl.get("after", "hard_reset") == "hard_reset", name
 
@@ -751,7 +773,7 @@ def test_every_target_the_makefile_suggests_exists():
 # exactly as much of as the others (it is the module STAGING checks that care
 # whether a board has a console, and they use BOARDS above).
 _DEVICE_BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION,
-                  "zero": ZERO, "guition-p4": GUITION_P4}
+                  "zero": ZERO, "guition-p4": GUITION_P4, "c3-zero": C3_ZERO}
 
 
 @pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
@@ -807,6 +829,11 @@ def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
     # and this board has no dev channel to answer an identity probe.
     assert zero["usb"] == board_config.load(
         str(_DEVICE_BOARDS["guition-s3"]))["serial"]["usb"]
+    # The C3 Zero opens as the XIAO does: its USB-Serial/JTAG is on the chip.
+    c3 = board_config.load(str(C3_ZERO))["serial"]
+    assert c3["dtr"] is True and c3["rts"] is True
+    assert c3["attach_only"] is False
+    assert c3["usb"] == "303a:1001"
 
 
 def test_the_p4s_chunk_and_window_fit_the_ring_its_build_gives_it():
@@ -1119,12 +1146,13 @@ def test_no_board_header_hand_writes_a_pin(board):
 
 
 def test_the_zeros_pin_allowlist_is_its_lease_row():
-    """The Zero's `/gpio` route serves its `gpio` lease row, emitted as
+    """A Zero's `/gpio` route serves its `gpio` lease row, emitted as
     MOY_LEASE_GPIO_PINS; a console's lease rows are leases, not a route."""
     assert board_config.lease_defines(ZERO) == [("MOY_LEASE_GPIO_PINS", "1,2,4,5,6,21")]
+    assert board_config.lease_defines(C3_ZERO) == [("MOY_LEASE_GPIO_PINS", "0,1,3,4,5,6,7,10")]
     for board, d in BOARDS.items():
         text = "".join(h.read_text() for h in (d / "boards").glob("*/mpconfigboard.h"))
-        assert ("#define MOY_NET_GPIO_ROUTE" in text) == (board == "zero"), board
+        assert ("#define MOY_NET_GPIO_ROUTE" in text) == (board in ("zero", "c3-zero")), board
 
 
 @pytest.mark.parametrize("board", ("p4", "guition-p4"))
