@@ -45,7 +45,6 @@ _SIGS = (
      ctypes.c_int),
     ("moy_lease_wifi_mask", [], _U32),
     ("moy_lease_wifi_holder", [_U32, ctypes.POINTER(_U32), ctypes.POINTER(_U32)], ctypes.c_int),
-    ("moy_lease_wifi_reset", [], None),
 )
 
 
@@ -148,5 +147,3 @@ class Wifi:
         return out
 
 
-def wifi_reset():
-    _lib().moy_lease_wifi_reset()

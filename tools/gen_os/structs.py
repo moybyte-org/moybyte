@@ -313,7 +313,8 @@ class Mirrors:
                 end = _close(decl, sm.end() - 1)
                 inner = decl[sm.end():end - 1]
                 rest = decl[end:].strip()
-                sub = "%s_%s" % (name, rest or "u%d" % len(fields))
+                sub = "%s_%s" % (name, re.sub(r"\[.*", "", rest).split(",")[0].strip()
+                                   or "u%d" % len(fields))
                 sub = re.sub(r"\W", "_", sub)
                 self._mirror(sub, (sm.group(1), inner), owner or name)
                 if not rest:

@@ -18,7 +18,6 @@
 #include "moy_seal.h"
 #include "moy_ota.h"
 
-#include "modmoy_net_face.h"
 #pragma weak moy_c6_version
 
 // The board's network halves: the HTTP server's parser and its responses, the
@@ -30,6 +29,8 @@
 #ifndef MOY_NET_SERVE
 #define MOY_NET_SERVE 1
 #endif
+
+#include "modmoy_net_face.h"
 
 #if MOY_NET_SERVE
 
@@ -427,24 +428,12 @@ static mp_obj_t mod_wifi_on(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_on_obj, mod_wifi_on);
 
-static mp_obj_t mod_wifi_off(void) {
-    moy_wifi_off();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_off_obj, mod_wifi_off);
-
 static mp_obj_t mod_wifi_connect(mp_obj_t ssid, mp_obj_t password) {
     wcheck(moy_wifi_connect(mp_obj_str_get_str(ssid),
                             password == mp_const_none ? "" : mp_obj_str_get_str(password)));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_wifi_connect_obj, mod_wifi_connect);
-
-static mp_obj_t mod_wifi_forget(mp_obj_t ssid) {
-    moy_wifi_forget_kept(mp_obj_str_get_str(ssid));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_forget_obj, mod_wifi_forget);
 
 // wifi_ap(ssid) -> the access point's address; OSError on a refusal.
 static mp_obj_t mod_wifi_ap(mp_obj_t ssid) {
@@ -470,12 +459,6 @@ static mp_obj_t mod_wifi_mdns(mp_obj_t host) {
     return mp_obj_new_bool(moy_wifi_mdns(mp_obj_str_get_str(host)) == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_mdns_obj, mod_wifi_mdns);
-
-static mp_obj_t mod_wifi_disconnect(void) {
-    moy_wifi_disconnect();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_disconnect_obj, mod_wifi_disconnect);
 
 // (driver, on, connected, ssid or None, ip or None, last disconnect reason)
 static mp_obj_t mod_wifi_status(void) {
@@ -727,17 +710,6 @@ static mp_obj_t mod_wc_on(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_on_obj, 7, 8, mod_wc_on);
 
-static mp_obj_t mod_wc_off(size_t n_args, const mp_obj_t *args) {
-    moy_wc_off(n_args ? str_or_null(args[0]) : NULL);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_wc_off_obj, 0, 1, mod_wc_off);
-
-static mp_obj_t mod_wc_poll(void) {
-    return mp_obj_new_bool(moy_wc_poll());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_wc_poll_obj, mod_wc_poll);
-
 // (state, parked, dialled, port, ip or None, err)
 static mp_obj_t mod_wc_state(void) {
     moy_wc_state_t st;
@@ -759,11 +731,6 @@ static mp_obj_t mod_dns_start(mp_obj_t ip, mp_obj_t port) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_dns_start_obj, mod_dns_start);
 
-static mp_obj_t mod_dns_port(void) {
-    return MP_OBJ_NEW_SMALL_INT(moy_dns_port());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_port_obj, mod_dns_port);
-
 static mp_obj_t mod_dns_reply(mp_obj_t query, mp_obj_t ip) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(query, &b, MP_BUFFER_READ);
@@ -773,17 +740,6 @@ static mp_obj_t mod_dns_reply(mp_obj_t query, mp_obj_t ip) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_dns_reply_obj, mod_dns_reply);
 
-static mp_obj_t mod_dns_poll(void) {
-    return MP_OBJ_NEW_SMALL_INT(moy_dns_poll());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_poll_obj, mod_dns_poll);
-
-static mp_obj_t mod_dns_stop(void) {
-    moy_dns_stop();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_dns_stop_obj, mod_dns_stop);
-
 static mp_obj_t mod_wc_phase(mp_obj_t port) {
     moy_wc_state_t st;
     moy_wc_state(&st);
@@ -791,24 +747,12 @@ static mp_obj_t mod_wc_phase(mp_obj_t port) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_phase_obj, mod_wc_phase);
 
-static mp_obj_t mod_wc_park(mp_obj_t on) {
-    moy_wc_park(mp_obj_is_true(on));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_park_obj, mod_wc_park);
-
 static mp_obj_t mod_wc_url(mp_obj_t paired) {
     char b[160];
     size_t n = moy_wc_url(b, sizeof(b), mp_obj_is_true(paired));
     return mp_obj_new_str(b, n < sizeof(b) ? n : sizeof(b) - 1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wc_url_obj, mod_wc_url);
-
-static mp_obj_t mod_web_stop(size_t n_args, const mp_obj_t *args) {
-    moy_web_stop(n_args ? str_or_null(args[0]) : NULL);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_stop_obj, 0, 1, mod_web_stop);
 
 // web_auth(system) -> the board's id ("" with no folder): the sign-in set up
 // over the system folder, serving or not.
@@ -850,17 +794,6 @@ static mp_obj_t mod_web_keys(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_keys_obj, mod_web_keys);
 
-static mp_obj_t mod_web_key_drop(mp_obj_t kid) {
-    return MP_OBJ_NEW_SMALL_INT(moy_web_key_drop(mp_obj_str_get_str(kid)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_key_drop_obj, mod_web_key_drop);
-
-// web_signout() -> the sessions ended: a password changed or removed.
-static mp_obj_t mod_web_signout(void) {
-    return MP_OBJ_NEW_SMALL_INT(moy_web_signout());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_signout_obj, mod_web_signout);
-
 static mp_obj_t mod_web_poll(void) {
     int did = 0;
     WEB_GUARD_BEGIN
@@ -880,11 +813,6 @@ static mp_obj_t mod_web_state(void) {
     return mp_obj_new_tuple(6, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_state_obj, mod_web_state);
-
-static mp_obj_t mod_web_events(void) {
-    return mp_obj_new_int_from_uint(moy_web_events());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_events_obj, mod_web_events);
 
 // web_shelf() -> the cart folders the batches since the last call changed on
 // the shelf (a tuple of names), or None for every folder; cleared.
@@ -917,14 +845,6 @@ static mp_obj_t mod_web_take(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_take_obj, mod_web_take);
 
-static mp_obj_t mod_web_answer(mp_obj_t resp) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(resp, &b, MP_BUFFER_READ);
-    moy_web_answer(b.buf, b.len);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_web_answer_obj, mod_web_answer);
-
 // web_pack(root, kinds[, bytes]) -> the store under `root` as the pull's JSON
 // text, every file as bytes where `bytes` is true.
 static mp_obj_t mod_web_pack(size_t n_args, const mp_obj_t *args) {
@@ -947,12 +867,6 @@ static mp_obj_t mod_web_pack(size_t n_args, const mp_obj_t *args) {
     return s;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_web_pack_obj, 2, 3, mod_web_pack);
-
-static mp_obj_t mod_web_stamp(void) {
-    const char *s = moy_web_stamp_text();
-    return s ? mp_obj_new_str(s, strlen(s)) : mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_web_stamp_obj, mod_web_stamp);
 
 // -- the updater and its client (moy_ota.h) -----------------------------------------
 
@@ -1107,22 +1021,6 @@ static mp_obj_t mod_ota_dl_begin(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_ota_dl_begin_obj, 4, 4, mod_ota_dl_begin);
 
-static mp_obj_t mod_ota_dl_step(mp_obj_t max) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ota_dl_step((uint32_t)mp_obj_get_int(max)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_dl_step_obj, mod_ota_dl_step);
-
-static mp_obj_t mod_ota_dl_finish(void) {
-    return mp_obj_new_bool(moy_ota_dl_finish() == 0);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_dl_finish_obj, mod_ota_dl_finish);
-
-static mp_obj_t mod_ota_cancel(void) {
-    moy_ota_cancel();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_cancel_obj, mod_ota_cancel);
-
 static mp_obj_t mod_ota_slot_begin(mp_obj_t size) {
     if (moy_ota_slot_begin((uint32_t)mp_obj_get_int(size)) != 0) {
         ota_raise();
@@ -1130,18 +1028,6 @@ static mp_obj_t mod_ota_slot_begin(mp_obj_t size) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_slot_begin_obj, mod_ota_slot_begin);
-
-static mp_obj_t mod_ota_slot_write(mp_obj_t data) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
-    return mp_obj_new_bool(moy_ota_slot_write(b.buf, b.len) == 0);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_ota_slot_write_obj, mod_ota_slot_write);
-
-static mp_obj_t mod_ota_slot_close(void) {
-    return mp_obj_new_bool(moy_ota_slot_close() == 0);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_slot_close_obj, mod_ota_slot_close);
 
 // ota_activate() -> the slot's label, or None (the reason in ota_state).
 static mp_obj_t mod_ota_activate(void) {
@@ -1152,11 +1038,6 @@ static mp_obj_t mod_ota_activate(void) {
     return ota_text(label);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_activate_obj, mod_ota_activate);
-
-static mp_obj_t mod_ota_c6_commit(void) {
-    return mp_obj_new_bool(moy_ota_c6_commit() == 0);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_ota_c6_commit_obj, mod_ota_c6_commit);
 
 static mp_obj_t mod_ota_c6_version(void) {
     int v = moy_c6_version != NULL ? moy_c6_version() : -1;
@@ -1203,12 +1084,6 @@ static mp_obj_t mod_http_readinto(mp_obj_t h, mp_obj_t buf) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_http_readinto_obj, mod_http_readinto);
 
-static mp_obj_t mod_http_close(mp_obj_t h) {
-    moy_httpc_close(mp_obj_get_int(h));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_http_close_obj, mod_http_close);
-
 #endif // MOY_NET_SERVE
 
 // pw_hash(password, salt) -> the console password's record, "$moy2$ITER$SALT$
@@ -1244,30 +1119,18 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_wifi_password), MP_ROM_PTR(&mod_wifi_password_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&mod_web_stop_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_auth), MP_ROM_PTR(&mod_web_auth_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_keys), MP_ROM_PTR(&mod_web_keys_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&mod_web_key_drop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&mod_web_signout_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_poll), MP_ROM_PTR(&mod_web_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_state), MP_ROM_PTR(&mod_web_state_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&mod_web_events_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_shelf), MP_ROM_PTR(&mod_web_shelf_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_take), MP_ROM_PTR(&mod_web_take_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&mod_web_answer_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_pack), MP_ROM_PTR(&mod_web_pack_obj)},
-    {MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&mod_web_stamp_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_on), MP_ROM_PTR(&mod_wc_on_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wc_off), MP_ROM_PTR(&mod_wc_off_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&mod_wc_poll_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_state), MP_ROM_PTR(&mod_wc_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_phase), MP_ROM_PTR(&mod_wc_phase_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_start), MP_ROM_PTR(&mod_dns_start_obj)},
-    {MP_ROM_QSTR(MP_QSTR_dns_port), MP_ROM_PTR(&mod_dns_port_obj)},
     {MP_ROM_QSTR(MP_QSTR_dns_reply), MP_ROM_PTR(&mod_dns_reply_obj)},
-    {MP_ROM_QSTR(MP_QSTR_dns_poll), MP_ROM_PTR(&mod_dns_poll_obj)},
-    {MP_ROM_QSTR(MP_QSTR_dns_stop), MP_ROM_PTR(&mod_dns_stop_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&mod_wc_park_obj)},
     {MP_ROM_QSTR(MP_QSTR_wc_url), MP_ROM_PTR(&mod_wc_url_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_keys), MP_ROM_PTR(&mod_ota_keys_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_verify), MP_ROM_PTR(&mod_ota_verify_obj)},
@@ -1277,28 +1140,18 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_ota_check), MP_ROM_PTR(&mod_ota_check_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_judge_c6), MP_ROM_PTR(&mod_ota_judge_c6_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_dl_begin), MP_ROM_PTR(&mod_ota_dl_begin_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_dl_step), MP_ROM_PTR(&mod_ota_dl_step_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_dl_finish), MP_ROM_PTR(&mod_ota_dl_finish_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_cancel), MP_ROM_PTR(&mod_ota_cancel_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_slot_begin), MP_ROM_PTR(&mod_ota_slot_begin_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_slot_write), MP_ROM_PTR(&mod_ota_slot_write_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_slot_close), MP_ROM_PTR(&mod_ota_slot_close_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_activate), MP_ROM_PTR(&mod_ota_activate_obj)},
-    {MP_ROM_QSTR(MP_QSTR_ota_c6_commit), MP_ROM_PTR(&mod_ota_c6_commit_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_c6_version), MP_ROM_PTR(&mod_ota_c6_version_obj)},
     {MP_ROM_QSTR(MP_QSTR_ota_state), MP_ROM_PTR(&mod_ota_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_open), MP_ROM_PTR(&mod_http_open_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
-    {MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&mod_http_close_obj)},
     #endif
     {MP_ROM_QSTR(MP_QSTR_clock_state), MP_ROM_PTR(&mod_clock_state_obj)},
     {MP_ROM_QSTR(MP_QSTR_clock_server), MP_ROM_PTR(&mod_clock_server_obj)},
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_connect), MP_ROM_PTR(&mod_wifi_connect_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wifi_disconnect), MP_ROM_PTR(&mod_wifi_disconnect_obj)},
-    {MP_ROM_QSTR(MP_QSTR_wifi_forget), MP_ROM_PTR(&mod_wifi_forget_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_ap), MP_ROM_PTR(&mod_wifi_ap_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_ap_mac), MP_ROM_PTR(&mod_wifi_ap_mac_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_mdns), MP_ROM_PTR(&mod_wifi_mdns_obj)},

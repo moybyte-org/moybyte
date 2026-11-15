@@ -8,8 +8,9 @@ import face_ctypes as _f
 
 __all__ = (
     "open", "close", "sweep", "owner", "source", "port", "unport", "uart", "ports", "feed",
-    "usb_in", "ble_in", "ble_state", "ble_send", "usb_pack", "ble_pack", "reset", "UART",
-    "USB", "BLE", "BLE_CONNECTING", "BLE_FINDING", "BLE_READY", "BLE_FAILED", "BLE_GONE",
+    "usb_in", "ble_in", "ble", "ble_state", "ble_send", "usb_pack", "ble_pack", "reset",
+    "UART", "USB", "BLE", "BLE_CONNECTING", "BLE_FINDING", "BLE_READY", "BLE_FAILED",
+    "BLE_GONE",
 )
 
 UART = 1
@@ -35,6 +36,7 @@ _SIGS = (
     ("moy_midi_feed", [_c.c_int, _c.c_void_p, _c.c_size_t], None),
     ("moy_midi_usb_in", [_c.c_uint8, _c.c_void_p, _c.c_size_t], None),
     ("moy_midi_ble_in", [_c.c_uint32, _c.c_int, _c.c_void_p, _c.c_size_t], _c.c_int),
+    ("moy_midi_ble", [_c.c_uint32, _c.c_int, _c.c_void_p, _c.c_uint8], _c.c_int),
     ("moy_midi_ble_state", [_c.c_uint32, _c.c_int], _c.c_int),
     ("moy_midi_ble_send", [_c.c_uint32, _c.c_int, _c.c_void_p, _c.c_size_t, _c.c_uint32], _c.c_int),
     ("moy_midi_usb_pack", [_c.c_void_p, _c.c_size_t, _c.c_void_p, _c.c_size_t], _c.c_int),
@@ -96,6 +98,13 @@ def usb_in(addr, buf):
 def ble_in(owner, port, buf):
     buf_b = _f.span(buf)
     return _lib().moy_midi_ble_in(int(owner), int(port), buf_b, len(buf_b))
+
+
+def ble(owner, port, addr, type):
+    addr_b = _f.span(addr)
+    if len(addr_b) != 6:
+        raise ValueError("addr is 6 bytes")
+    return _lib().moy_midi_ble(int(owner), int(port), addr_b, int(type))
 
 
 def ble_state(owner, port):

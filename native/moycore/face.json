@@ -2,7 +2,7 @@
   "moycore": {
     "about": "the Lua tier: its runs and services",
     "host": "moycore",
-    "registered": false,
+    "lazy": true,
     "structs": ["moycore_svc_chunk_t", "moycore_svc_info_t"]
   }
 }

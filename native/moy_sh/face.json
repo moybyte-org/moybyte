@@ -2,7 +2,7 @@
   "moy_sh": {
     "about": "the C shell (dash) and its face",
     "host": "moy_sh",
-    "registered": false,
+    "lazy": true,
     "structs": ["moy_sh_face_frame_t"]
   }
 }

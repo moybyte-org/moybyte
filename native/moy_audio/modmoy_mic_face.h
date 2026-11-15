@@ -36,6 +36,15 @@ static mp_obj_t face_moy_mic_read(mp_obj_t a0, mp_obj_t a1) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_mic_read_obj, face_moy_mic_read);
 
+static mp_obj_t face_moy_mic_push(mp_obj_t a0) {
+    mp_buffer_info_t s_b;
+    mp_get_buffer_raise(a0, &s_b, MP_BUFFER_READ);
+    size_t s_n = s_b.len / 2;
+    moy_mic_push((const int16_t *)s_b.buf, (uint32_t)s_n);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_mic_push_obj, face_moy_mic_push);
+
 static mp_obj_t face_moy_mic_rate(void) {
     return mp_obj_new_int_from_uint(moy_mic_rate());
 }
@@ -75,6 +84,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_mic_reset_obj, face_moy_mic_reset);
     { MP_ROM_QSTR(MP_QSTR_sweep), MP_ROM_PTR(&face_moy_mic_sweep_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_owner), MP_ROM_PTR(&face_moy_mic_owner_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&face_moy_mic_read_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_push), MP_ROM_PTR(&face_moy_mic_push_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_rate), MP_ROM_PTR(&face_moy_mic_rate_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_drops), MP_ROM_PTR(&face_moy_mic_drops_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&face_moy_mic_pending_obj) }, \

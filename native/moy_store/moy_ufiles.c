@@ -24,7 +24,7 @@ static const struct {
     uint8_t folder;
 } KINDS[MOY_UF_KINDS] = {
     { "drawings", ".moyimg", "drawing", "Pictures", 0 },
-    { "docs", ".md", "doc", "Documents", 0 },
+    { "docs", MOY_UF_DOC_EXT, "doc", "Documents", 0 },
     { "sprites", ".moygfx", "sheet", "Pictures/Sprites", 0 },
     { "music", ".moysong", "song", "Music", 0 },
     { "recordings", "", "recording", "Recordings", 1 },
@@ -36,11 +36,11 @@ static const char *const VAULT_EXTS[] = { ".py", ".lua", ".txt", ".json" };
 #define NSCRIPT 2u
 #define NVAULT 4u
 
-static const char FILES_DIR[] = "files";
-static const char TRASH_DIR[] = ".Trash";
-static const char HISTORY_DIR[] = ".history";
-static const char HISTORY_EXT[] = ".jsonl";
-static const char PROJECT[] = "project:";
+static const char FILES_DIR[] = MOY_UF_FILES_DIR;
+static const char TRASH_DIR[] = MOY_UF_TRASH_DIR;
+static const char HISTORY_DIR[] = MOY_UF_HISTORY_DIR;
+static const char HISTORY_EXT[] = MOY_UF_HISTORY_EXT;
+static const char PROJECT[] = MOY_UF_PROJECT_KIND;
 static const char COVER[] = "cover.png";
 static const char ARTWORK[] = "artwork.moyimg";
 

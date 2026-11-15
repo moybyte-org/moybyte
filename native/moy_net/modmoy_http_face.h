@@ -14,6 +14,20 @@ static mp_obj_t face_moy_http_open(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(face_moy_http_open_obj, face_moy_http_open);
 
+static mp_obj_t face_moy_http_state(mp_obj_t a0) {
+    uint32_t h = (uint32_t)mp_obj_get_int(a0);
+    int status = 0;
+    uint32_t n = 0;
+    int err = 0;
+    int rc_ = moy_fetch_state(h, &status, &n, &err);
+    if (rc_ < 0) {
+        return MP_OBJ_NEW_SMALL_INT(rc_);
+    }
+    mp_obj_t t_[4] = { MP_OBJ_NEW_SMALL_INT(rc_), mp_obj_new_int(status), mp_obj_new_int_from_uint(n), mp_obj_new_int(err) };
+    return mp_obj_new_tuple(4, t_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_http_state_obj, face_moy_http_state);
+
 static mp_obj_t face_moy_http_read(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
     uint32_t h = (uint32_t)mp_obj_get_int(a0);
     uint32_t off = (uint32_t)mp_obj_get_int(a1);
@@ -90,6 +104,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_http_reset_obj, face_moy_http_reset);
 
 #define MOY_FACE_MOY_HTTP_ROWS \
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&face_moy_http_open_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&face_moy_http_state_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&face_moy_http_read_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_stream), MP_ROM_PTR(&face_moy_http_stream_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&face_moy_http_take_obj) }, \

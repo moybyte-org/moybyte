@@ -1,5 +1,4 @@
 # Map (grep -n a name to jump there):
-#   _Buf             moy_fs.h's buffer: an answer the user-files layer allocated
 #   _raise           the ABI's codes as the exceptions the roles raise
 #   _crypto          the crypto rows (native/moy_net/moy_crypto.h)
 #   binding          the module: App, kernel, the role types, the policy

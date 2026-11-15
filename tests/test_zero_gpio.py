@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "device"))
 sys.path.append(str(ROOT / "firmware" / "web_runner"))
 
 from runtime import net_binding as nb                          # noqa: E402
-nb.install()
+sys.modules["moy_net"] = nb
 import moy_webhost                                             # noqa: E402
 from gpio_link import GpioLink                                 # noqa: E402
 

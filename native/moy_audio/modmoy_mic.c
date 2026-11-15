@@ -1,6 +1,6 @@
 // moy_mic's MicroPython binding: the `mic` device API's driver (moy_mic.h) as
-// the module `moy_mic`, its names those face.json lists: the row here is the
-// hand one, the rest are generated into modmoy_mic_face.h. A refusal is a
+// the module `moy_mic`, its names those face.json lists, every row generated
+// into modmoy_mic_face.h. A refusal is a
 // negative errno (Linux's numbers), which the Python face
 // (runtime/system/dev_mic.py) raises.
 //
@@ -14,18 +14,9 @@
 
 #include "modmoy_mic_face.h"
 
-static mp_obj_t mic_push(mp_obj_t buf) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(buf, &b, MP_BUFFER_READ);
-    moy_mic_push((const int16_t *)b.buf, (uint32_t)(b.len / sizeof(int16_t)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mic_push_obj, mic_push);
-
 static const mp_rom_map_elem_t mic_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_mic) },
     MOY_FACE_MOY_MIC_ROWS
-    { MP_ROM_QSTR(MP_QSTR_push), MP_ROM_PTR(&mic_push_obj) },
 };
 static MP_DEFINE_CONST_DICT(mic_globals, mic_globals_table);
 

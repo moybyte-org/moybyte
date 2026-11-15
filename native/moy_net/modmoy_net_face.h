@@ -4,5 +4,177 @@
 
 #include "py/runtime.h"
 
+#if MOY_NET_SERVE
+
+static mp_obj_t face_moy_net_web_stop(size_t n_args, const mp_obj_t *argv) {
+    const char *why = n_args > 0 ? argv[0] == mp_const_none ? NULL : mp_obj_str_get_str(argv[0]) : NULL;
+    moy_web_stop(why);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_net_web_stop_obj, 0, 1, face_moy_net_web_stop);
+
+static mp_obj_t face_moy_net_web_key_drop(mp_obj_t a0) {
+    const char *kid = mp_obj_str_get_str(a0);
+    return mp_obj_new_int(moy_web_key_drop(kid));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_web_key_drop_obj, face_moy_net_web_key_drop);
+
+static mp_obj_t face_moy_net_web_signout(void) {
+    return mp_obj_new_int(moy_web_signout());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_signout_obj, face_moy_net_web_signout);
+
+static mp_obj_t face_moy_net_web_events(void) {
+    return mp_obj_new_int_from_uint(moy_web_events());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_events_obj, face_moy_net_web_events);
+
+static mp_obj_t face_moy_net_web_answer(mp_obj_t a0) {
+    mp_buffer_info_t resp_b;
+    mp_get_buffer_raise(a0, &resp_b, MP_BUFFER_READ);
+    size_t resp_n = resp_b.len;
+    moy_web_answer((const void *)resp_b.buf, (size_t)resp_n);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_web_answer_obj, face_moy_net_web_answer);
+
+static mp_obj_t face_moy_net_web_stamp(void) {
+    const char *r_ = moy_web_stamp_text();
+    return r_ ? mp_obj_new_str_from_cstr(r_) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_stamp_obj, face_moy_net_web_stamp);
+
+static mp_obj_t face_moy_net_wc_off(size_t n_args, const mp_obj_t *argv) {
+    const char *why = n_args > 0 ? argv[0] == mp_const_none ? NULL : mp_obj_str_get_str(argv[0]) : NULL;
+    moy_wc_off(why);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_net_wc_off_obj, 0, 1, face_moy_net_wc_off);
+
+static mp_obj_t face_moy_net_wc_poll(void) {
+    return mp_obj_new_bool(moy_wc_poll());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_wc_poll_obj, face_moy_net_wc_poll);
+
+static mp_obj_t face_moy_net_dns_port(void) {
+    return mp_obj_new_int_from_uint(moy_dns_port());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_dns_port_obj, face_moy_net_dns_port);
+
+static mp_obj_t face_moy_net_dns_poll(void) {
+    return mp_obj_new_int(moy_dns_poll());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_dns_poll_obj, face_moy_net_dns_poll);
+
+static mp_obj_t face_moy_net_dns_stop(void) {
+    moy_dns_stop();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_dns_stop_obj, face_moy_net_dns_stop);
+
+static mp_obj_t face_moy_net_wc_park(mp_obj_t a0) {
+    int on = (int)mp_obj_get_int(a0);
+    moy_wc_park(on);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_wc_park_obj, face_moy_net_wc_park);
+
+static mp_obj_t face_moy_net_ota_dl_step(mp_obj_t a0) {
+    uint32_t max = (uint32_t)mp_obj_get_int(a0);
+    return mp_obj_new_int(moy_ota_dl_step(max));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_ota_dl_step_obj, face_moy_net_ota_dl_step);
+
+static mp_obj_t face_moy_net_ota_dl_finish(void) {
+    return mp_obj_new_bool(moy_ota_dl_finish() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_dl_finish_obj, face_moy_net_ota_dl_finish);
+
+static mp_obj_t face_moy_net_ota_cancel(void) {
+    moy_ota_cancel();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_cancel_obj, face_moy_net_ota_cancel);
+
+static mp_obj_t face_moy_net_ota_slot_write(mp_obj_t a0) {
+    mp_buffer_info_t p_b;
+    mp_get_buffer_raise(a0, &p_b, MP_BUFFER_READ);
+    size_t p_n = p_b.len;
+    return mp_obj_new_bool(moy_ota_slot_write((const void *)p_b.buf, (size_t)p_n) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_ota_slot_write_obj, face_moy_net_ota_slot_write);
+
+static mp_obj_t face_moy_net_ota_slot_close(void) {
+    return mp_obj_new_bool(moy_ota_slot_close() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_slot_close_obj, face_moy_net_ota_slot_close);
+
+static mp_obj_t face_moy_net_ota_c6_commit(void) {
+    return mp_obj_new_bool(moy_ota_c6_commit() == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_ota_c6_commit_obj, face_moy_net_ota_c6_commit);
+
+static mp_obj_t face_moy_net_http_close(mp_obj_t a0) {
+    int h = (int)mp_obj_get_int(a0);
+    moy_httpc_close(h);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_http_close_obj, face_moy_net_http_close);
+
+#define MOY_FACE_MOY_NET_ROWS_SERVE \
+    { MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&face_moy_net_web_stop_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_key_drop), MP_ROM_PTR(&face_moy_net_web_key_drop_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_signout), MP_ROM_PTR(&face_moy_net_web_signout_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&face_moy_net_web_events_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&face_moy_net_web_answer_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&face_moy_net_web_stamp_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wc_off), MP_ROM_PTR(&face_moy_net_wc_off_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&face_moy_net_wc_poll_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_dns_port), MP_ROM_PTR(&face_moy_net_dns_port_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_dns_poll), MP_ROM_PTR(&face_moy_net_dns_poll_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_dns_stop), MP_ROM_PTR(&face_moy_net_dns_stop_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wc_park), MP_ROM_PTR(&face_moy_net_wc_park_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_dl_step), MP_ROM_PTR(&face_moy_net_ota_dl_step_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_dl_finish), MP_ROM_PTR(&face_moy_net_ota_dl_finish_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_cancel), MP_ROM_PTR(&face_moy_net_ota_cancel_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_slot_write), MP_ROM_PTR(&face_moy_net_ota_slot_write_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_slot_close), MP_ROM_PTR(&face_moy_net_ota_slot_close_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ota_c6_commit), MP_ROM_PTR(&face_moy_net_ota_c6_commit_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&face_moy_net_http_close_obj) },
+#else
+#define MOY_FACE_MOY_NET_ROWS_SERVE
+#endif
+
+#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
+
+static mp_obj_t face_moy_net_wifi_off(void) {
+    moy_wifi_off();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_wifi_off_obj, face_moy_net_wifi_off);
+
+static mp_obj_t face_moy_net_wifi_disconnect(void) {
+    moy_wifi_disconnect();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_wifi_disconnect_obj, face_moy_net_wifi_disconnect);
+
+static mp_obj_t face_moy_net_wifi_forget(mp_obj_t a0) {
+    const char *ssid = mp_obj_str_get_str(a0);
+    moy_wifi_forget_kept(ssid);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_wifi_forget_obj, face_moy_net_wifi_forget);
+
+#define MOY_FACE_MOY_NET_ROWS_WIFI \
+    { MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&face_moy_net_wifi_off_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wifi_disconnect), MP_ROM_PTR(&face_moy_net_wifi_disconnect_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wifi_forget), MP_ROM_PTR(&face_moy_net_wifi_forget_obj) },
+#else
+#define MOY_FACE_MOY_NET_ROWS_WIFI
+#endif
+
 #define MOY_FACE_MOY_NET_ROWS \
-    { MP_ROM_QSTR(MP_QSTR_PW_ITER), MP_ROM_INT(MOY_SEAL_PW_ITER) },
+    { MP_ROM_QSTR(MP_QSTR_PW_ITER), MP_ROM_INT(MOY_SEAL_PW_ITER) }, \
+    MOY_FACE_MOY_NET_ROWS_SERVE \
+    MOY_FACE_MOY_NET_ROWS_WIFI

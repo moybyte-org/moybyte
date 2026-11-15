@@ -20,6 +20,7 @@
 #include "py/stream.h"
 
 #include "moy_ufiles.h"
+#include "modmoy_ufiles_face.h"
 
 void moy_store_unwind(void);
 
@@ -28,7 +29,7 @@ void moy_store_unwind(void);
 #define GUARD_END nlr_pop(); moy_store_unlock(); } else { moy_store_unwind(); \
     nlr_jump(nlr_.ret_val); } }
 
-static const char CARTS_DIR[] = "/sd/moybyte/carts";
+static const char CARTS_DIR[] = MOY_UF_CARTS_DIR;
 
 static MP_NORETURN void raise_rc(int rc) {
     if (rc == MOY_UF_BAD) {
@@ -134,7 +135,7 @@ static mp_obj_t mod_project_kind(mp_obj_t path) {
     }
     vstr_t v;
     vstr_init(&v, 8u + n - cut);
-    vstr_add_str(&v, "project:");
+    vstr_add_str(&v, MOY_UF_PROJECT_KIND);
     vstr_add_strn(&v, p + cut, n - cut);
     return mp_obj_new_str_from_vstr(&v);
 }
@@ -720,24 +721,9 @@ static mp_obj_t mod_clock_fix(mp_obj_t ts) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_clock_fix_obj, mod_clock_fix);
 
-static MP_DEFINE_STR_OBJ(carts_dir_obj, "/sd/moybyte/carts");
-static MP_DEFINE_STR_OBJ(trash_dir_obj, ".Trash");
-static MP_DEFINE_STR_OBJ(history_dir_obj, ".history");
-static MP_DEFINE_STR_OBJ(history_ext_obj, ".jsonl");
-static MP_DEFINE_STR_OBJ(doc_ext_obj, ".md");
-static MP_DEFINE_STR_OBJ(project_kind_obj, "project:");
-
 static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ufiles) },
-    { MP_ROM_QSTR(MP_QSTR_CARTS_DIR), MP_ROM_PTR(&carts_dir_obj) },
-    { MP_ROM_QSTR(MP_QSTR_FILES_DIR), MP_ROM_QSTR(MP_QSTR_files) },
-    { MP_ROM_QSTR(MP_QSTR_TRASH_DIR), MP_ROM_PTR(&trash_dir_obj) },
-    { MP_ROM_QSTR(MP_QSTR_TRASH_KEEP), MP_ROM_INT(MOY_UF_TRASH_KEEP) },
-    { MP_ROM_QSTR(MP_QSTR_HISTORY_DIR), MP_ROM_PTR(&history_dir_obj) },
-    { MP_ROM_QSTR(MP_QSTR_HISTORY_EXT), MP_ROM_PTR(&history_ext_obj) },
-    { MP_ROM_QSTR(MP_QSTR_HISTORY_KEEP), MP_ROM_INT(MOY_UF_HISTORY_KEEP) },
-    { MP_ROM_QSTR(MP_QSTR_DOC_EXT), MP_ROM_PTR(&doc_ext_obj) },
-    { MP_ROM_QSTR(MP_QSTR_PROJECT_KIND), MP_ROM_PTR(&project_kind_obj) },
+    MOY_FACE_MOY_UFILES_ROWS
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&mod_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_script_ext), MP_ROM_PTR(&mod_script_ext_obj) },
     { MP_ROM_QSTR(MP_QSTR_vault_ext), MP_ROM_PTR(&mod_vault_ext_obj) },

@@ -121,6 +121,12 @@ static mp_obj_t face_moy_lease_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_lease_reset_obj, face_moy_lease_reset);
 
+static mp_obj_t face_moy_lease_wifi_reset(void) {
+    moy_lease_wifi_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_lease_wifi_reset_obj, face_moy_lease_wifi_reset);
+
 #define MOY_FACE_MOY_LEASE_ROWS \
     { MP_ROM_QSTR(MP_QSTR_offer), MP_ROM_PTR(&face_moy_lease_offer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&face_moy_lease_drop_obj) }, \
@@ -137,6 +143,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_lease_reset_obj, face_moy_lease_reset)
     { MP_ROM_QSTR(MP_QSTR_sim_level), MP_ROM_PTR(&face_moy_lease_sim_level_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_sim_get), MP_ROM_PTR(&face_moy_lease_sim_get_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&face_moy_lease_reset_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wifi_reset), MP_ROM_PTR(&face_moy_lease_wifi_reset_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_WIFI), MP_ROM_INT(MOY_LEASE_WIFI) }, \
     { MP_ROM_QSTR(MP_QSTR_GPIO), MP_ROM_INT(MOY_LEASE_GPIO) }, \
     { MP_ROM_QSTR(MP_QSTR_UART), MP_ROM_INT(MOY_LEASE_UART) }, \

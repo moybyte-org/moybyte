@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   load            every face.json, by module
+#   Headers         a face's headers: prototypes, structures, constants
+#   Row             one row: its C parameters, the kinds the faces convert
+#   check           the rules a face.json is refused by
+#   mirrors         a face's ctypes structure mirrors (tools/gen_os/structs.py)
+#   gen_mp          the MicroPython face, modmoy_<m>_face.h
+#   gen_host        the ctypes face, runtime/host/<m>_face.py
+#   gen_faces_py    the host faces' registration table
+#   outputs         every file this writes
+#   parity_script   the script both runtimes run for test_face_parity
 """The binding faces: every native/<dir>/face.json, its rows' C prototypes
 read from the module's headers, and what the faces are made of (the
 MicroPython face, the ctypes face, the host faces' registration table).
@@ -9,13 +20,17 @@ A face.json maps a module's name to its face:
             (its dir's modmoy_<m>.c by default)
   host      the module's host face as runtime/host names it (null: the module
             exists only on a board); `binding: true` when that file's
-            binding() builds the module, `registered: false` when the
-            host's console must not find it by the module's name (the face
-            is imported by its file's)
+            binding() builds the module, `lazy: true` when the face is built
+            at the module's first import rather than at `import runtime`,
+            `registered: false` when the host's console must not find it by
+            the module's name (the face is imported by its file's)
   headers   the headers the rows' prototypes, structures and constants are
             read from, beside the face.json or under native/
-  consts    "C_NAME" or "C_NAME as PY_NAME": a constant of the headers, on
-            both faces under its Python name
+  consts    "C_NAME" or "C_NAME as PY_NAME": a constant of the headers, an
+            integer or a string literal, on both faces under its Python name
+  when      {NAME: "C condition"}: the board builds a row whose `when` is NAME
+            holds only where the condition holds (MOY_FACE_<M>_ROWS carries
+            the group inside #if); the host face holds it unless it is absent
   structs   C structures the host's hand rows read: their ctypes mirrors,
             read from the native headers (tools/gen_os/structs.py)
   errors    {name: {"codes": {rc: "Exxx"}, "other": "Exxx"}}: a C answer code
@@ -26,12 +41,22 @@ A face.json maps a module's name to its face:
             hand (its name and arity are still checked); otherwise `c` is the
             C function and the row adds only what its prototype cannot say:
               span     [param]: a (pointer, size_t) pair, one str or bytes
+              wbuf     [param]: a (pointer, size_t) pair the C writes, a bytearray
+            An array parameter (`const uint8_t addr[6]`) takes a buffer of
+            exactly that many bytes.
               trunc    [param]: an integer taken modulo its width (handles)
               null     [param]: a const char * None passes as NULL
               out      {param: [field, ...] | null}: a structure answered as
                        the tuple of its fields, or a scalar answered as itself
+              neg_out  a negative int answer is answered as itself, else the
+                       one out parameter; "tuple": else (answer, out, ...)
               err      an `errors` name: the C's int answer raises
+              ret      the answer's type where the prototype's is not it
+                       ("bool"), or "ok": an int answer, True where it is 0
+              when     a `when` name: the row exists on the boards where its
+                       condition holds
               noalloc  the MicroPython face allocates nothing (checked)
+              doc      the row's docstring
               example  the arguments the parity script calls the row with
               absent   ["host"] or ["mp"]: the faces the row is not on
 
@@ -53,10 +78,10 @@ FACES_PY = os.path.join(HOST, "faces.py")
 # Registered before any other: everything else's imports may reach it.
 FIRST = ("moy_spine",)
 
-MOD_FIELDS = {"about", "c", "host", "binding", "registered", "headers", "consts", "structs", "errors", "rows",
-              "api"}
+MOD_FIELDS = {"about", "c", "host", "binding", "lazy", "registered", "headers", "consts", "structs", "errors",
+              "rows", "api", "when"}
 ROW_FIELDS = {"py", "hand", "c", "span", "wbuf", "ret", "neg_out", "trunc", "null", "out", "err", "noalloc", "example",
-              "absent", "doc"}
+              "absent", "doc", "when"}
 FACES = ("host", "mp")
 
 _UNSIGNED = {"uint8_t": 8, "uint16_t": 16, "uint32_t": 32, "unsigned": 32, "unsigned int": 32,
@@ -127,7 +152,7 @@ class Headers:
         self.text = ""
         for h in face.get("headers", []):
             with open(_header(face, h)) as f:
-                self.text += _strip(f.read()) + "\n"
+                self.text += _strip(f.read()).replace("\\\n", " ") + "\n"
         self.flat = re.sub(r"\s+", " ", re.sub(r"^\s*#[^\n]*$", " ", self.text, flags=re.M))
         self._values = None
 
@@ -160,8 +185,15 @@ class Headers:
         """{name: int} of the headers' integer #defines and enum members."""
         if self._values is None:
             raw = {}
+            self._strings = {}
+            self._fn = {m.group(1): ([p.strip() for p in m.group(2).split(",")], m.group(3))
+                        for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+([A-Z_][A-Z0-9_]*)"
+                                             r"\(([^)]*)\)[ \t]+([^\n]+)$", self.text, re.M)}
             for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+([A-Z_][A-Z0-9_]*)[ \t]+([^\n]+)$", self.text, re.M):
                 raw[m.group(1)] = m.group(2).strip()
+                lit = re.match(r'^"((?:[^"\\]|\\.)*)"$', raw[m.group(1)])
+                if lit:
+                    self._strings[m.group(1)] = lit.group(1)
             for m in re.finditer(r"\benum\s*\w*\s*\{([^}]*)\}", self.flat):
                 prev = None
                 for item in m.group(1).split(","):
@@ -181,6 +213,11 @@ class Headers:
                     pass
         return self._values
 
+    def strings(self):
+        """{name: text} of the headers' string-literal #defines."""
+        self.values()
+        return self._strings
+
     def value(self, name, depth=0):
         if depth > 32:
             raise TableError("%s does not resolve" % name)
@@ -189,6 +226,15 @@ class Headers:
     def expr(self, expr, name="", depth=0):
         """The integer C expression `expr` over the headers' constants."""
         self.values()
+        for _ in range(8):           # a function-like macro, its arguments substituted
+            call = re.search(r"\b(%s)\s*\(([^()]*)\)" % "|".join(self._fn), expr) if self._fn else None
+            if not call:
+                break
+            params, body = self._fn[call.group(1)]
+            args = dict(zip(params, [x.strip() for x in call.group(2).split(",")]))
+            body = re.sub(r"\b\w+\b", lambda w: "(%s)" % args[w.group(0)] if w.group(0) in args
+                          else w.group(0), body)
+            expr = expr[:call.start()] + "(%s)" % body + expr[call.end():]
         expr = re.sub(r"\((?:u?int\d+_t|unsigned|int|size_t)\)", "", expr)
         expr = re.sub(r"\b(0x[0-9a-fA-F]+|\d+)[uUlL]+\b", r"\1", expr)
 
@@ -241,6 +287,7 @@ class Row:
         span = set(row.get("span", ())) | set(row.get("wbuf", ()))
         out = row.get("out", {})
         self.c = []        # (kind, cname, ctype, py index or None)
+        self.fixed = {}    # cname: the length of an array parameter (`addr[6]`)
         i, k = 0, 0
         while i < len(cps):
             p = cps[i]
@@ -252,6 +299,13 @@ class Row:
                 self.c.append(("len", param_name(ln), ln[:ln.rfind(param_name(ln))].strip(), k))
                 k += 1
                 i += 2
+                continue
+            fixed = re.search(r"\[(\d+)\]\s*$", p)
+            if fixed:
+                self.fixed[cn] = int(fixed.group(1))
+                self.c.append(("fixed", cn, ct + " *", k))
+                k += 1
+                i += 1
                 continue
             if cn in out:
                 self.c.append(("out", cn, ct, None))
@@ -353,7 +407,14 @@ def check(faces=None):
             if r.row.get("err") and r.row["err"] not in face.get("errors", {}):
                 raise TableError("%s.%s: no errors %s" % (m, r.name, r.row["err"]))
         vals = hdr.values()
+        for r in rs:
+            if r.row.get("when") and r.row["when"] not in face.get("when", {}):
+                raise TableError("%s.%s: no when %s" % (m, r.name, r.row["when"]))
         for cn, pn in consts(face):
+            if cn in hdr.strings():
+                if pn in seen:
+                    raise TableError("%s: %s is a row and a constant" % (m, pn))
+                continue
             if cn not in vals:
                 raise TableError("%s: no integer constant %s in its headers" % (m, cn))
             if not -(1 << 30) <= vals[cn] < (1 << 30):
@@ -428,6 +489,13 @@ def _mp_row(m, face, hdr, r):
             o.append("    size_t %s_n;" % cn)
             o.append("    const char *%s = mp_obj_str_get_data(%s, &%s_n);" % (cn, arg[k], cn))
             call.append(cn)
+        elif kind == "fixed":
+            o.append("    mp_buffer_info_t %s_b;" % cn)
+            o.append("    mp_get_buffer_raise(%s, &%s_b, MP_BUFFER_READ);" % (arg[k], cn))
+            o.append("    if (%s_b.len != %d) {" % (cn, r.fixed[cn]))
+            o.append('        mp_raise_ValueError(MP_ERROR_TEXT("%s is %d bytes"));' % (cn, r.fixed[cn]))
+            o.append("    }")
+            call.append("(%s)%s_b.buf" % (ct, cn))
         elif kind in ("span", "wbuf"):
             o.append("    mp_buffer_info_t %s_b;" % cn)
             o.append("    mp_get_buffer_raise(%s, &%s_b, MP_BUFFER_%s);"
@@ -456,6 +524,17 @@ def _mp_row(m, face, hdr, r):
     err = r.row.get("err")
     if err:
         o.append("    face_raise_%s(%s);" % (err, callx))
+    elif ret == "ok":
+        o.append("    return mp_obj_new_bool(%s == 0);" % callx)
+    elif r.row.get("neg_out") == "tuple":
+        o.append("    int rc_ = %s;" % callx)
+        o.append("    if (rc_ < 0) {")
+        o.append("        return MP_OBJ_NEW_SMALL_INT(rc_);")
+        o.append("    }")
+        o.append("    mp_obj_t t_[%d] = { MP_OBJ_NEW_SMALL_INT(rc_), %s };" % (
+            len(r.outs) + 1, ", ".join(_mp_val(_base(ct).rstrip("*").strip(), cn)
+                                       for cn, ct in r.outs)))
+        o.append("    return mp_obj_new_tuple(%d, t_);" % (len(r.outs) + 1))
     elif r.row.get("neg_out"):
         o.append("    int rc_ = %s;" % callx)
         o.append("    return mp_obj_new_int(rc_ < 0 ? rc_ : (mp_int_t)%s);" % r.outs[0][0])
@@ -521,21 +600,46 @@ def gen_mp(m, face):
         o.append("    }")
         o.append("}")
         o.append("")
-    for r in rs:
-        if r.row.get("hand") or "mp" in r.row.get("absent", ()):
-            continue
-        o += _mp_row(m, face, hdr, r)
-        o.append("")
-    o.append("#define MOY_FACE_%s_ROWS \\" % m.upper())
-    ent = []
-    for r in rs:
-        if r.row.get("hand") or "mp" in r.row.get("absent", ()):
-            continue
-        ent.append("    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_PTR(&face_%s_%s_obj) }"
-                   % (r.name, m, r.name))
+    mp = [r for r in rs if not r.row.get("hand") and "mp" not in r.row.get("absent", ())]
+    strs = hdr.strings()
     for cn, pn in consts(face):
-        ent.append("    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_INT(%s) }" % (pn, cn))
-    o += [e + ", \\" for e in ent[:-1]] + [ent[-1] + ",", ""]
+        if cn in strs:
+            o.append("static MP_DEFINE_STR_OBJ(face_%s_%s_obj, %s);" % (m, pn, cn))
+    if any(cn in strs for cn, _ in consts(face)):
+        o.append("")
+    for r in mp:
+        if not r.row.get("when"):
+            o += _mp_row(m, face, hdr, r)
+            o.append("")
+    ent = []
+    for r in mp:
+        if not r.row.get("when"):
+            ent.append("    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_PTR(&face_%s_%s_obj) }"
+                       % (r.name, m, r.name))
+    for cn, pn in consts(face):
+        if cn in strs:
+            ent.append("    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_PTR(&face_%s_%s_obj) }" % (pn, m, pn))
+        else:
+            ent.append("    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_INT(%s) }" % (pn, cn))
+    for name, cond in face.get("when", {}).items():
+        group = [r for r in mp if r.row.get("when") == name]
+        macro = "MOY_FACE_%s_ROWS_%s" % (m.upper(), name.upper())
+        o.append("#if %s" % cond)
+        o.append("")
+        for r in group:
+            o += _mp_row(m, face, hdr, r)
+            o.append("")
+        o.append("#define %s \\" % macro)
+        rows_ = ["    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_PTR(&face_%s_%s_obj) }"
+                 % (r.name, m, r.name) for r in group]
+        o += [e + ", \\" for e in rows_[:-1]] + [rows_[-1] + ","]
+        o += ["#else", "#define %s" % macro, "#endif", ""]
+        ent.append("    " + macro)
+    o.append("#define MOY_FACE_%s_ROWS \\" % m.upper())
+    # A group's macro brings its own commas.
+    tail = ["" if e.strip().startswith("MOY_FACE_") else "," for e in ent]
+    o += ["%s%s \\" % (e, t) for e, t in zip(ent[:-1], tail[:-1])]
+    o += [ent[-1] + tail[-1], ""]
     return "\n".join(o)
 
 
@@ -607,6 +711,11 @@ def _py_row(m, face, hdr, r, structs):
             o.append("    %s_b = _f.span(%s)" % (v, v))
             call.append("%s_b" % v)
             size = "len(%s_b)" % v
+        elif kind == "fixed":
+            o.append("    %s_b = _f.span(%s)" % (v, v))
+            o.append("    if len(%s_b) != %d:" % (v, r.fixed[cn]))
+            o.append('        raise ValueError("%s is %d bytes")' % (cn, r.fixed[cn]))
+            call.append("%s_b" % v)
         elif kind == "wbuf":
             o.append("    %s_b = _f.wbuf(%s)" % (v, v))
             call.append("%s_b" % v)
@@ -624,6 +733,12 @@ def _py_row(m, face, hdr, r, structs):
     ret = r.row.get("ret") or _base(r.ret)
     if r.row.get("err"):
         o.append("    _raise_%s(%s)" % (r.row["err"], callx))
+    elif ret == "ok":
+        o.append("    return %s == 0" % callx)
+    elif r.row.get("neg_out") == "tuple":
+        o.append("    rc_ = %s" % callx)
+        o.append("    return rc_ if rc_ < 0 else (rc_, %s)" % ", ".join("%s.value" % cn for cn, _ in r.outs))
+        return o
     elif r.row.get("neg_out"):
         o.append("    rc_ = %s" % callx)
         o.append("    return rc_ if rc_ < 0 else %s.value" % r.outs[0][0])
@@ -665,11 +780,15 @@ def gen_host(m, face):
     o = [header("native/%s/face.json" % face["dir"], "#"),
          '"""%s\'s generated %s over ctypes: %s.' % (m, what, face["about"]),
          'The module `%s` is runtime/host/%s.py."""' % (m, face["host"]),
-         "", "import ctypes as _c"] + (["import errno as _errno"] if face.get("errors") else []) + (
+         ""] + (["import ctypes as _c"] if gen or structs else []) + (
+         ["import errno as _errno"] if face.get("errors") else []) + (
          ["", "import face_ctypes as _f"] if gen or face.get("errors") else []) + [
          "", "__all__ = ("] + wrap(['"%s"' % n for n in public]) + [")", ""]
     for cn, pn in consts(face):
-        o.append("%s = %d" % (pn, vals[cn]))
+        if cn in hdr.strings():
+            o.append("%s = \"%s\"" % (pn, hdr.strings()[cn]))
+        else:
+            o.append("%s = %d" % (pn, vals[cn]))
     if consts(face):
         o.append("")
     o.append("")
@@ -694,7 +813,7 @@ def gen_host(m, face):
         seen.add(r.fn)
         args = []
         for kind, cn, ct, k in r.c:
-            args.append(_ctype(ct, structs, kind in ("span", "wbuf")))
+            args.append(_ctype(ct, structs, kind in ("span", "wbuf", "fixed")))
         ret = "_c.c_int" if r.row.get("err") else _ctype(r.ret, structs)
         o.append('    ("%s", [%s], %s),' % (r.fn, ", ".join(args), ret))
     o += [")", "", "", "def _lib():", "    return _f.lib(_SIGS)", "", ""]
@@ -714,11 +833,14 @@ def gen_faces_py(faces):
     order = [m for m in FIRST if m in reg] + sorted(m for m in reg if m not in FIRST)
     o = [header("native/*/face.json", "#"),
          '"""The host\'s face of each native module: (module, runtime/host file,',
-         "binding), in registration order. runtime/__init__.py registers each as",
-         "`module` and `runtime.module`; a binding face's binding() builds the",
-         'module, any other face is the module."""', "", "FACES = ("]
+         "binding, lazy), in registration order. runtime/__init__.py registers each as",
+         "`module` and `runtime.module`, a lazy one at its first import; a binding",
+         'face\'s binding() builds the module, any other face is the module."""', "",
+         "FACES = ("]
     for m in order:
-        o.append('    ("%s", "%s", %s),' % (m, faces[m]["host"], bool(faces[m].get("binding"))))
+        f = faces[m]
+        o.append('    ("%s", "%s", %s, %s),' % (m, f["host"], bool(f.get("binding")),
+                                              bool(f.get("lazy"))))
     o += [")", ""]
     return "\n".join(o)
 
@@ -785,7 +907,7 @@ def parity_script(m, face):
     for _, pn in consts(face):
         o.append("print(json.dumps([%r, getattr(M, %r, 'ABSENT')]))" % (pn, pn))
     for r in face.get("rows", []):
-        if r.get("hand") or "example" not in r or r.get("absent"):
+        if r.get("hand") or "example" not in r or r.get("absent") or r.get("when"):
             continue
         o.append("_call(%r, [%s], %s)" % (r_name(r), ", ".join(_lit(a) for a in r["example"]),
                                           bool(r.get("noalloc"))))

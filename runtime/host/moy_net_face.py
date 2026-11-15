@@ -4,8 +4,13 @@ The module `moy_net` is runtime/host/net_binding.py."""
 
 import ctypes as _c
 
+import face_ctypes as _f
+
 __all__ = (
-    "PW_ITER",
+    "web_stop", "web_key_drop", "web_signout", "web_events", "web_answer", "web_stamp",
+    "wc_off", "wc_poll", "dns_port", "dns_poll", "dns_stop", "wc_park", "ota_dl_step",
+    "ota_dl_finish", "ota_cancel", "ota_slot_write", "ota_slot_close", "ota_c6_commit",
+    "http_close", "PW_ITER",
 )
 
 PW_ITER = 32768
@@ -43,7 +48,7 @@ class moy_sync_store_t(_c.Structure):
     ]
 
 
-class moy_sync_result_t_err_MOY_SYNC_ERRS_(_c.Structure):
+class moy_sync_result_t_err(_c.Structure):
     _fields_ = [
         ("index", _c.c_uint32),
         ("why", _c.c_char * 40),
@@ -56,7 +61,7 @@ class moy_sync_result_t(_c.Structure):
         ("refused", _c.c_uint32),
         ("shelf", _c.c_int),
         ("nerr", _c.c_uint32),
-        ("err", moy_sync_result_t_err_MOY_SYNC_ERRS_ * 8),
+        ("err", moy_sync_result_t_err * 8),
     ]
 
 
@@ -117,3 +122,108 @@ class moy_sync_env_t(_c.Structure):
         ("ops", _c.c_void_p),
         ("ops_end", _c.c_void_p),
     ]
+
+
+_SIGS = (
+    ("moy_web_stop", [_c.c_char_p], None),
+    ("moy_web_key_drop", [_c.c_char_p], _c.c_int),
+    ("moy_web_signout", [], _c.c_int),
+    ("moy_web_events", [], _c.c_uint32),
+    ("moy_web_answer", [_c.c_void_p, _c.c_size_t], None),
+    ("moy_web_stamp_text", [], _c.c_char_p),
+    ("moy_wc_off", [_c.c_char_p], None),
+    ("moy_wc_poll", [], _c.c_int),
+    ("moy_dns_port", [], _c.c_uint16),
+    ("moy_dns_poll", [], _c.c_int),
+    ("moy_dns_stop", [], None),
+    ("moy_wc_park", [_c.c_int], None),
+    ("moy_ota_dl_step", [_c.c_uint32], _c.c_int),
+    ("moy_ota_dl_finish", [], _c.c_int),
+    ("moy_ota_cancel", [], None),
+    ("moy_ota_slot_write", [_c.c_void_p, _c.c_size_t], _c.c_int),
+    ("moy_ota_slot_close", [], _c.c_int),
+    ("moy_ota_c6_commit", [], _c.c_int),
+    ("moy_httpc_close", [_c.c_int], None),
+)
+
+
+def _lib():
+    return _f.lib(_SIGS)
+
+
+def web_stop(why=None):
+    _lib().moy_web_stop(None if why is None else _f.cstr(why))
+
+
+def web_key_drop(kid):
+    return _lib().moy_web_key_drop(_f.cstr(kid))
+
+
+def web_signout():
+    return _lib().moy_web_signout()
+
+
+def web_events():
+    return _lib().moy_web_events()
+
+
+def web_answer(resp):
+    resp_b = _f.span(resp)
+    _lib().moy_web_answer(resp_b, len(resp_b))
+
+
+def web_stamp():
+    return _f.text(_lib().moy_web_stamp_text())
+
+
+def wc_off(why=None):
+    _lib().moy_wc_off(None if why is None else _f.cstr(why))
+
+
+def wc_poll():
+    return bool(_lib().moy_wc_poll())
+
+
+def dns_port():
+    return _lib().moy_dns_port()
+
+
+def dns_poll():
+    return _lib().moy_dns_poll()
+
+
+def dns_stop():
+    _lib().moy_dns_stop()
+
+
+def wc_park(on):
+    _lib().moy_wc_park(int(on))
+
+
+def ota_dl_step(max_bytes):
+    return _lib().moy_ota_dl_step(int(max_bytes))
+
+
+def ota_dl_finish():
+    return _lib().moy_ota_dl_finish() == 0
+
+
+def ota_cancel():
+    _lib().moy_ota_cancel()
+
+
+def ota_slot_write(data):
+    data_b = _f.span(data)
+    return _lib().moy_ota_slot_write(data_b, len(data_b)) == 0
+
+
+def ota_slot_close():
+    return _lib().moy_ota_slot_close() == 0
+
+
+def ota_c6_commit():
+    return _lib().moy_ota_c6_commit() == 0
+
+
+def http_close(h):
+    _lib().moy_httpc_close(int(h))

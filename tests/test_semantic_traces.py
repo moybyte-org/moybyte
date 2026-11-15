@@ -1616,7 +1616,7 @@ try:
 except ImportError:                         # CPython: the C over ctypes
     sys.path.insert(0, @REPO@)
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     import moy_net
 import moy_sync
 import moy_ota_health
@@ -1805,8 +1805,8 @@ try:
     import moy_audio as na                  # the usermod, on a VM
 except ImportError:                         # CPython: the same C over ctypes
     sys.path.insert(0, @REPO@)
-    from runtime import audio_binding
-    na = audio_binding.install()
+    import runtime                          # noqa: F401  (faces.py registers it)
+    import moy_audio as na
 import json
 
 from audio import AudioBank

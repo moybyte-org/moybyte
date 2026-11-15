@@ -934,6 +934,9 @@ def test_the_web_build_reaches_no_board_only_name_unprobed():
             "the web variant no longer sets %s=0" % flag)
         assert flag in (path.parent / "micropython.mk").read_text(encoding="utf-8")
         absent[mod] = _gated_table_names(path.read_text(encoding="utf-8"), flag)
+        face = path.with_name(path.stem + "_face.h")       # its generated rows
+        if face.exists():
+            absent[mod] |= _gated_table_names(face.read_text(encoding="utf-8"), flag)
     assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
     assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
     assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}

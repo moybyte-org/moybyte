@@ -2,7 +2,7 @@
   "moy_play": {
     "about": "the Player: a cart run, its tick model, multiplayer and chrome",
     "host": "moy_play",
-    "registered": false,
+    "lazy": true,
     "structs": [
       "moy_play_info_t", "moy_tick_t", "moy_proc_row_t", "moy_front_ops_t", "moy_match_peer_t",
       "moy_lockstep_t", "moy_match_budget_t", "moy_match_port_t", "moy_match_t", "moy_match_io_t",

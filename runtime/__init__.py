@@ -85,10 +85,10 @@ _sys.meta_path.insert(0, FlatFinder())
 def _register(name, face, binding):
     """The native module `name` on the CPython host: its face in
     runtime/host (`face`), or what that face's binding() builds, registered
-    as `name` and `runtime.<name>` before anything imports either."""
+    as `name` and `runtime.<name>`."""
     mod = _sys.modules.get(name)
     if mod is None:
-        mod = _importlib.import_module(face)
+        mod = _importlib.import_module("." + face, __name__)
         if binding:
             mod = mod.binding()
             if mod is None:
@@ -96,14 +96,53 @@ def _register(name, face, binding):
         _sys.modules[name] = mod
     _sys.modules["runtime." + name] = mod
     globals()[name] = mod
+    return mod
+
+
+class _LazyFace:
+    """Registers a lazy face (`_register`) when its module is first
+    imported, by either name."""
+
+    def __init__(self, name, face, binding):
+        self._args = (name, face, binding)
+        self._spec = None
+
+    def create_module(self, spec):
+        module = _register(*self._args)
+        self._spec = getattr(module, "__spec__", None)
+        return module
+
+    def exec_module(self, module):
+        if self._spec is not None:
+            module.__spec__ = self._spec      # a face file stays `runtime.<file>`
+
+
+class FaceFinder:
+    """The lazy faces of runtime/host/faces.py: `import moy_audio` (or
+    `runtime.moy_audio`) builds the face then, not at `import runtime`."""
+
+    lazy = {}
+
+    def find_spec(self, fullname, path=None, target=None):
+        name = fullname[len("runtime."):] if fullname.startswith("runtime.") else fullname
+        if name not in self.lazy or (path is not None and name == fullname):
+            return None
+        if name != fullname and self.lazy[name][0] == name:
+            return None             # runtime.<file>: the face file itself
+        return _ModuleSpec(fullname, _LazyFace(name, *self.lazy[name]))
 
 
 # The host faces, from native/*/face.json (runtime/host/faces.py, generated):
-# the spine first, which every other's imports may reach.
+# the spine first, which every other's imports may reach; a lazy face at its
+# first import.
 from .faces import FACES as _FACES  # noqa: E402
 
-for _face in _FACES:
-    _register(*_face)
+FaceFinder.lazy = {name: (face, binding) for name, face, binding, lazy in _FACES if lazy}
+_sys.meta_path[:] = [f for f in _sys.meta_path if type(f).__qualname__ != "FaceFinder"]
+_sys.meta_path.insert(0, FaceFinder())
+for _name, _face, _binding, _lazy in _FACES:
+    if not _lazy:
+        _register(_name, _face, _binding)
 
 
 from .editors_code import CodeEditor  # noqa: E402

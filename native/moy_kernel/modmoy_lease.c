@@ -217,12 +217,6 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &wifi_locals
     );
 
-static mp_obj_t lease_wifi_reset(void) {
-    moy_lease_wifi_reset();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(lease_wifi_reset_obj, lease_wifi_reset);
-
 static const mp_rom_obj_tuple_t wifi_tags_tuple = {
     { &mp_type_tuple }, MOY_LEASE_WIFI_TAGS, {
         MP_ROM_QSTR(MP_QSTR_web), MP_ROM_QSTR(MP_QSTR_update), MP_ROM_QSTR(MP_QSTR_settings),
@@ -241,7 +235,6 @@ static const mp_rom_map_elem_t lease_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_leases), MP_ROM_PTR(&lease_leases_obj) },
     { MP_ROM_QSTR(MP_QSTR_get), MP_ROM_PTR(&lease_get_obj) },
     { MP_ROM_QSTR(MP_QSTR_Wifi), MP_ROM_PTR(&wifi_type) },
-    { MP_ROM_QSTR(MP_QSTR_wifi_reset), MP_ROM_PTR(&lease_wifi_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_WIFI_TAGS), MP_ROM_PTR(&wifi_tags_tuple) },
 };
 static MP_DEFINE_CONST_DICT(lease_globals, lease_globals_table);

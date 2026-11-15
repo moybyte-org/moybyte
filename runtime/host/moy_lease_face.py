@@ -9,9 +9,9 @@ import face_ctypes as _f
 
 __all__ = (
     "offer", "drop", "sweep", "vm_stop", "live", "held", "of_pin", "edge", "edge_close",
-    "pin_state", "device_name", "sim_pin", "sim_level", "sim_get", "reset", "WIFI", "GPIO",
-    "UART", "SPI", "VM", "PINS", "PIN_IN", "PIN_OUT", "PIN_PU", "PIN_PD", "PIN_PERIPH",
-    "PIN_SAFE", "ROWS_MAX", "EDGES", "PIN_MAX", "SHELL",
+    "pin_state", "device_name", "sim_pin", "sim_level", "sim_get", "reset", "wifi_reset",
+    "WIFI", "GPIO", "UART", "SPI", "VM", "PINS", "PIN_IN", "PIN_OUT", "PIN_PU", "PIN_PD",
+    "PIN_PERIPH", "PIN_SAFE", "ROWS_MAX", "EDGES", "PIN_MAX", "SHELL",
 )
 
 WIFI = 8
@@ -82,6 +82,7 @@ _SIGS = (
     ("moy_lease_sim_level", [_c.c_int, _c.c_int], None),
     ("moy_lease_sim_get", [_c.c_int], _c.c_int),
     ("moy_lease_reset", [], None),
+    ("moy_lease_wifi_reset", [], None),
 )
 
 
@@ -149,3 +150,7 @@ def sim_get(pin):
 
 def reset():
     _lib().moy_lease_reset()
+
+
+def wifi_reset():
+    _lib().moy_lease_wifi_reset()

@@ -47,6 +47,9 @@ import os
 import host_native
 import native_build
 from moy_input_face import *  # noqa: F401,F403
+from moy_input_face import (
+    SOURCES, UNION, CURSOR_IDLE_MS, P_NONE, P_LIVE, P_HELD, P_CLICK, MODS_AT, EV_FIELDS,
+    EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B, EV_ALL, PROV_ISR, EV_DEPTH)
 from ticks import _ticks_ms, _ticks_us
 from moy_input_face import (
     moy_event_t as _Event, moy_hid_addr_t as _Addr, moy_hid_ops_t as _HidOps,
@@ -66,50 +69,9 @@ NAMES = ("left", "right", "up", "down", "a", "b", "run", "home",
 HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 
-SOURCES = 8
-RING_SOURCES = 8              # sources that are a ring alone (moy_input.h)
-PLAYERS = 8
-UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
 _TICKS_US_MASK = (1 << 30) - 1  # and its ticks_us period: an event's stamp
 OK, STALE, FULL, NOMEM, BAD = range(5)
-
-CURSOR_IDLE_MS = 2000   # hide the trackball cursor after this long with no movement
-# How long a touchscreen pointer OUTLIVES the finger that made it: a cart wants
-# a mouse, and a released drag must not read as "no pointer" on the next frame.
-POINTER_LINGER_MS = 1500
-
-# A key event (moy_input.h): the code in the low 16 bits, the modifiers held
-# with it above MODS_AT; `typed` is the byte it types.
-MODS_AT = 16
-CTRL, SHIFT, ALT, SUPER = 1, 2, 4, 8
-KEY_F1 = 0x101                  # ... KEY_F1 + 11 is F12
-KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
-KEY_PGUP, KEY_PGDN = 0x114, 0x115
-# The pointer's buttons, a bit each.
-PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
-
-# The event records (native/moy_input/moy_event.h): a record's fields in an
-# events() buffer, its kinds, the kind masks a reader takes, its provenance.
-EV_VERSION = 1
-EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = range(7)
-EV_FIELDS = 7
-(EV_KEY_DOWN, EV_KEY_UP, EV_TEXT, EV_BTN, EV_TOUCH_DOWN, EV_TOUCH_MOVE, EV_TOUCH_UP,
- EV_EDGE, EV_UART, EV_LINK, EV_MEDIA, EV_NET, EV_BLE, EV_LORA, EV_WINCH, EV_USB,
- EV_MIDI) = range(1, 18)
-EV_LOST = 18
-EV_KEYS = (1 << EV_KEY_DOWN) | (1 << EV_KEY_UP) | (1 << EV_TEXT)
-EV_TOUCH = (1 << EV_TOUCH_DOWN) | (1 << EV_TOUCH_MOVE) | (1 << EV_TOUCH_UP)
-EV_PAD = 1 << EV_BTN
-EV_ALL = (1 << 17) - 2
-PROV_ISR, PROV_FIFO, PROV_POLL = 0, 1, 2
-EV_DEPTH = 32
-EV_ISR_DEPTH_MAX = 64         # an ISR ring's ceiling unless a board raises it
-
-P_NONE = 0
-P_LIVE = 1                     # there is a pointer at all
-P_HELD = 2                     # the finger/button is down this frame
-P_CLICK = 4                    # ...and it went down THIS frame (the press edge)
 
 _U8 = ctypes.c_uint8
 _U32 = ctypes.c_uint32

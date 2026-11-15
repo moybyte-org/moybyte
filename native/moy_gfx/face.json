@@ -2,7 +2,7 @@
   "moy_gfx": {
     "about": "the drawing kernels: shapes, paths, text, backdrops",
     "host": "gfx_binding",
-    "registered": false,
+    "lazy": true,
     "structs": ["moy_shape_paint_t", "moy_shape_hole_t", "moy_text_line_t"]
   }
 }

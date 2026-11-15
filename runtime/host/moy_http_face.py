@@ -7,9 +7,9 @@ import ctypes as _c
 import face_ctypes as _f
 
 __all__ = (
-    "open", "read", "stream", "take", "tls", "close", "sweep", "count", "source", "run",
-    "present", "reset", "QUEUED", "RUNNING", "DONE", "FAILED", "STREAM", "CAP_MAX", "ETLS",
-    "ECERT",
+    "open", "state", "read", "stream", "take", "tls", "close", "sweep", "count", "source",
+    "run", "present", "reset", "QUEUED", "RUNNING", "DONE", "FAILED", "STREAM", "CAP_MAX",
+    "ETLS", "ECERT",
 )
 
 QUEUED = 1
@@ -24,6 +24,7 @@ ECERT = 129
 
 _SIGS = (
     ("moy_fetch_open", [_c.c_uint32, _c.c_char_p, _c.c_uint32, _c.POINTER(_c.c_uint32)], _c.c_int),
+    ("moy_fetch_state", [_c.c_uint32, _c.POINTER(_c.c_int), _c.POINTER(_c.c_uint32), _c.POINTER(_c.c_int)], _c.c_int),
     ("moy_fetch_read", [_c.c_uint32, _c.c_uint32, _c.c_void_p, _c.c_uint32], _c.c_int),
     ("moy_fetch_stream", [_c.c_uint32, _c.c_char_p, _c.c_uint32, _c.POINTER(_c.c_uint32)], _c.c_int),
     ("moy_fetch_take", [_c.c_uint32, _c.c_void_p, _c.c_uint32], _c.c_int),
@@ -46,6 +47,14 @@ def open(owner, url, cap):
     h = _c.c_uint32()
     rc_ = _lib().moy_fetch_open(int(owner), _f.cstr(url), int(cap), _c.byref(h))
     return rc_ if rc_ < 0 else h.value
+
+
+def state(h):
+    status = _c.c_int()
+    n = _c.c_uint32()
+    err = _c.c_int()
+    rc_ = _lib().moy_fetch_state(int(h), _c.byref(status), _c.byref(n), _c.byref(err))
+    return rc_ if rc_ < 0 else (rc_, status.value, n.value, err.value)
 
 
 def read(h, off, buf):

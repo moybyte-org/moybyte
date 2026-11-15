@@ -1,6 +1,5 @@
 # Map (grep -n a name to jump there):
 #   build            the C built for the host (the one library)
-#   install          this module as `moy_net`
 #   encode_batch     a sync batch's wire JSON (and decode_batch, sync_batch)
 #   sync_apply       one batch's ops applied into a store
 #   web_start        the webhost: started, polled, its parked request answered
@@ -32,7 +31,9 @@ same C built for the host.
   http_*           the streaming client Get Carts and the updater fetch through
   clock_*          the wall clock's state and the NTP server it asks
 
-`install()` puts this module where `import moy_net` finds it. What it adds to
+The module is not registered as `moy_net` on the host (faces.py): host
+code that tells a board by `import moy_net` stays on its host path, and a test
+that drives the board half puts it in `sys.modules` itself. What it adds to
 the C is what ctypes cannot do by itself: JSON text for a batch's ops (the
 boards' module prints them with the port's own printer) and Python values from
 the spans the C returns. The rules each function keeps are moy_net.h's.
@@ -43,7 +44,6 @@ from __future__ import annotations
 import ctypes
 import json
 import os
-import sys
 import threading
 
 from . import host_native, native_build
@@ -186,12 +186,6 @@ def _lib():
             raise ImportError("moy_net: no C compiler for the host build")
         _LIB[0] = native_build.load_cdll(path, _SIGS)
     return _LIB[0]
-
-
-def install():
-    """Make `import moy_net` reach this module, as a board's import reaches
-    the usermod."""
-    sys.modules.setdefault("moy_net", sys.modules[__name__])
 
 
 def _bytes(x):
@@ -407,14 +401,6 @@ def wc_on(port, carts, files, kinds, system, defer, ip, apps=None):
         raise OSError(rc, os.strerror(rc))
 
 
-def wc_off(why=None):
-    _lib().moy_wc_off(None if why is None else _bytes(why))
-
-
-def wc_poll():
-    return bool(_lib().moy_wc_poll())
-
-
 def wc_state():
     """(state, parked, dialled, port, ip or None, err)"""
     st = _WcState()
@@ -445,30 +431,10 @@ def dns_start(ip, port):
     return 0 <= port <= 65535 and _lib().moy_dns_start(_ip_of(ip), port) == 0
 
 
-def dns_port():
-    return _lib().moy_dns_port()
-
-
-def dns_poll():
-    return _lib().moy_dns_poll()
-
-
-def dns_stop():
-    _lib().moy_dns_stop()
-
-
-def wc_park(on):
-    _lib().moy_wc_park(1 if on else 0)
-
-
 def wc_url(paired):
     out = ctypes.create_string_buffer(160)
     n = _lib().moy_wc_url(out, 160, 1 if paired else 0)
     return out.raw[:min(n, 159)].decode("utf-8")
-
-
-def web_stop(why=None):
-    _lib().moy_web_stop(None if why is None else _bytes(why))
 
 
 def web_auth(system):
@@ -503,18 +469,6 @@ def web_keys():
     return rows
 
 
-def web_key_drop(kid):
-    return _lib().moy_web_key_drop(_bytes(kid))
-
-
-def web_signout():
-    """Every session ended and a web terminal cut (the password changed):
-    how many sessions went. The paired browsers stay."""
-    return _lib().moy_web_signout()
-
-
-
-
 def pw_hash(password, salt):
     """The console password's record, `$moy2$ITER$SALT$W0$L`
     (moy_seal_pw_record, moy_seal.h's THE PASSWORD)."""
@@ -544,10 +498,6 @@ def web_state():
             st.requests, st.err)
 
 
-def web_events():
-    return _lib().moy_web_events()
-
-
 _SHELF_BYTES = 256
 _SHELF_ALL = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 
@@ -573,11 +523,6 @@ def web_take():
     got = [ctypes.string_at(p[i].value, n[i].value) if n[i].value else b""
            for i in range(3)]
     return (_text(got[0]), _text(got[1]), got[2])
-
-
-def web_answer(resp):
-    raw = _bytes(resp)
-    _lib().moy_web_answer(raw, len(raw))
 
 
 def _taken(out, n):
@@ -643,11 +588,6 @@ def web_pack(root, kinds, binary=False):
     if rc:
         raise OSError(rc, os.strerror(rc))
     return raw.decode("utf-8")
-
-
-def web_stamp():
-    s = _lib().moy_web_stamp_text()
-    return None if s is None else s.decode("utf-8")
 
 
 # -- the updater and its client (moy_ota.h) -------------------------------------
@@ -771,30 +711,9 @@ def ota_dl_begin(url, size, sha256, sink):
         raise ValueError(_ota_err())
 
 
-def ota_dl_step(max_bytes):
-    return _lib().moy_ota_dl_step(int(max_bytes))
-
-
-def ota_dl_finish():
-    return _lib().moy_ota_dl_finish() == 0
-
-
-def ota_cancel():
-    _lib().moy_ota_cancel()
-
-
 def ota_slot_begin(size):
     if _lib().moy_ota_slot_begin(int(size)) != 0:
         raise ValueError(_ota_err())
-
-
-def ota_slot_write(data):
-    raw = bytes(data)
-    return _lib().moy_ota_slot_write(raw, len(raw)) == 0
-
-
-def ota_slot_close():
-    return _lib().moy_ota_slot_close() == 0
 
 
 def ota_activate():
@@ -802,10 +721,6 @@ def ota_activate():
     if _lib().moy_ota_activate(out, 24) != 0:
         return None
     return out.value.decode("utf-8")
-
-
-def ota_c6_commit():
-    return _lib().moy_ota_c6_commit() == 0
 
 
 def ota_c6_version():
@@ -841,10 +756,6 @@ def http_readinto(h, buf):
         raise OSError(-k, os.strerror(-k))
     buf[:k] = tmp.raw[:k]
     return k
-
-
-def http_close(h):
-    _lib().moy_httpc_close(int(h))
 
 
 def net_vm_stop():

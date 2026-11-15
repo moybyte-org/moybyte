@@ -1002,7 +1002,7 @@ def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
 
 def _wire_links():
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     if str(ROOT / "device") not in sys.path:
         sys.path.insert(0, str(ROOT / "device"))
     import wire_links

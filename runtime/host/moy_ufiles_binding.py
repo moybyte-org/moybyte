@@ -21,6 +21,7 @@ import errno
 import json
 import os
 import types
+import moy_ufiles_face as _face
 from moy_store_face import moy_buf_t as _Buf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +33,7 @@ UZLIB = os.path.join(ROOT, ".build", "unix_micropython", "micropython", "lib", "
 
 NONE, BAD = -1, -2
 NAME_MAX = 255
-CARTS_DIR = "/sd/moybyte/carts"
+CARTS_DIR = _face.CARTS_DIR
 _ENOMEM = 12
 
 _NAMES = ("moy_ufiles.h", "moy_ufiles.c", "moy_fs.h", "moy_fs.c", "moy_vol.h",
@@ -169,17 +170,10 @@ def binding():
     """The `moy_ufiles` module's names, the library built at their first use."""
     m = types.ModuleType("moy_ufiles")
     m.__doc__ = __doc__
-    m.CARTS_DIR = CARTS_DIR
-    m.FILES_DIR = "files"
-    m.TRASH_DIR = ".Trash"
-    m.TRASH_KEEP = 50
-    m.HISTORY_DIR = ".history"
-    m.HISTORY_EXT = ".jsonl"
-    m.HISTORY_KEEP = 32
-    m.DOC_EXT = ".md"
+    for name in _face.__all__:
+        setattr(m, name, getattr(_face, name))
     m.SCRIPT_EXTS = (".py", ".lua")
     m.VAULT_EXTS = (".py", ".lua", ".txt", ".json")
-    m.PROJECT_KIND = "project:"
     roots = set()
 
     def lib():

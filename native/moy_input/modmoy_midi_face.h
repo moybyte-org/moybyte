@@ -80,6 +80,19 @@ static mp_obj_t face_moy_midi_ble_in(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(face_moy_midi_ble_in_obj, face_moy_midi_ble_in);
 
+static mp_obj_t face_moy_midi_ble(size_t n_args, const mp_obj_t *argv) {
+    uint32_t owner = (uint32_t)mp_obj_get_int(argv[0]);
+    int port = (int)mp_obj_get_int(argv[1]);
+    mp_buffer_info_t addr_b;
+    mp_get_buffer_raise(argv[2], &addr_b, MP_BUFFER_READ);
+    if (addr_b.len != 6) {
+        mp_raise_ValueError(MP_ERROR_TEXT("addr is 6 bytes"));
+    }
+    uint8_t type = (uint8_t)mp_obj_get_int(argv[3]);
+    return mp_obj_new_int(moy_midi_ble(owner, port, (const uint8_t *)addr_b.buf, type));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_midi_ble_obj, 4, 4, face_moy_midi_ble);
+
 static mp_obj_t face_moy_midi_ble_state(mp_obj_t a0, mp_obj_t a1) {
     uint32_t owner = (uint32_t)mp_obj_get_int(a0);
     int port = (int)mp_obj_get_int(a1);
@@ -139,6 +152,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_midi_reset_obj, face_moy_midi_reset);
     { MP_ROM_QSTR(MP_QSTR_ports), MP_ROM_PTR(&face_moy_midi_ports_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_feed), MP_ROM_PTR(&face_moy_midi_feed_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ble_in), MP_ROM_PTR(&face_moy_midi_ble_in_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_ble), MP_ROM_PTR(&face_moy_midi_ble_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ble_state), MP_ROM_PTR(&face_moy_midi_ble_state_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ble_send), MP_ROM_PTR(&face_moy_midi_ble_send_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_usb_pack), MP_ROM_PTR(&face_moy_midi_usb_pack_obj) }, \

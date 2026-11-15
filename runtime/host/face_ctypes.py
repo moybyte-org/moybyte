@@ -65,12 +65,14 @@ def cstr(v):
 
 
 def span(v):
-    """A str or a bytes-like as the bytes a (pointer, size) pair reads."""
+    """A str or any buffer (bytes, a bytearray, an array) as the bytes a
+    (pointer, size) pair reads."""
     if isinstance(v, str):
         return v.encode("utf-8")
-    if isinstance(v, (bytes, bytearray, memoryview)):
-        return bytes(v)
-    raise TypeError("object with buffer protocol required")
+    try:
+        return bytes(memoryview(v).cast("B"))
+    except TypeError:
+        raise TypeError("object with buffer protocol required") from None
 
 
 def text(p):
