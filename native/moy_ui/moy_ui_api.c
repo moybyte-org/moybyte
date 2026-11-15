@@ -169,15 +169,107 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->flags2 = 0;
 }
 
+const moy_ui_over_key_t moy_ui_over_keys[MOY_UI_OV_COUNT] = MOY_UI_OVER_KEYS;
+
+static int16_t clamp16(int32_t v, int32_t lo, int32_t hi) {
+    return (int16_t)(v < lo ? lo : v > hi ? hi : v);
+}
+
+void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v) {
+    switch (k) {
+        case MOY_UI_OV_FILL: o->fill = v[0]; break;
+        case MOY_UI_OV_INK: o->ink = v[0]; break;
+        case MOY_UI_OV_BORDER: o->border = v[0]; break;
+        case MOY_UI_OV_CURRENT: o->current = (int8_t)v[0]; break;
+        case MOY_UI_OV_DISABLED: o->disabled = (int8_t)v[0]; break;
+        case MOY_UI_OV_NAV: o->nav = (int8_t)v[0]; break;
+        case MOY_UI_OV_MARK: o->mark = (int8_t)v[0]; break;
+        case MOY_UI_OV_STEPS: o->steps = (int8_t)v[0]; break;
+        case MOY_UI_OV_WASH: o->wash = (int8_t)v[0]; break;
+        case MOY_UI_OV_LEAD: o->lead = (int8_t)v[0]; break;
+        case MOY_UI_OV_GEN:
+            o->has_gen = 1;
+            o->gen = v[0];
+            break;
+        case MOY_UI_OV_PART:
+            o->has_part = 1;
+            o->part_w = (int16_t)v[0];
+            o->part_h = (int16_t)v[1];
+            break;
+        case MOY_UI_OV_BAR: o->bar = (int8_t)v[0]; break;
+        case MOY_UI_OV_AXIS: o->axis_x = (int8_t)v[0]; break;
+        case MOY_UI_OV_SNAP: o->snap = (int8_t)v[0]; break;
+        case MOY_UI_OV_OFFSET:
+            o->has_offset = 1;
+            o->offset = v[0];
+            break;
+        case MOY_UI_OV_SPILL: o->spill = clamp16(v[0], 0, 4096); break;
+        case MOY_UI_OV_KEEP:
+            o->has_keep = 1;
+            o->keep = v[0];
+            break;
+        case MOY_UI_OV_OVER:
+            if (v[2] > 0 && v[3] > 0) {
+                o->over_x = (int16_t)v[0];
+                o->over_y = (int16_t)v[1];
+                o->over_w = clamp16(v[2], 0, 0x7fff);
+                o->over_h = clamp16(v[3], 0, 0x7fff);
+            }
+            break;
+        case MOY_UI_OV_WHOLE: o->whole = (int8_t)v[0]; break;
+        case MOY_UI_OV_ACROSS:
+            o->has_across = 1;
+            o->across_first = (int16_t)v[0];
+            o->across_pitch = (int16_t)v[1];
+            break;
+        case MOY_UI_OV_AT: o->at = (int16_t)v[0]; break;
+        case MOY_UI_OV_SHIFT: o->shift = (int8_t)v[0]; break;
+        case MOY_UI_OV_FADE: o->fade = clamp16(v[0], 0, 4096); break;
+        case MOY_UI_OV_SIGNAL: o->signal = (int8_t)(v[0] < 0 ? 0 : v[0] > 4 ? 5 : v[0] + 1); break;
+        case MOY_UI_OV_CHECK: o->check = (int8_t)v[0]; break;
+        case MOY_UI_OV_CARD: o->card = (int8_t)v[0]; break;
+        case MOY_UI_OV_FOLLOW:
+            o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_FOLLOW : o->flags2 & ~MOY_UI_O2_FOLLOW;
+            break;
+        default: break;
+    }
+}
+
+void moy_ui_over_text(moy_ui_over_t *o, int k, moy_ui_span_t s) {
+    moy_ui_span_t *at = k == MOY_UI_OV_ID ? &o->id : k == MOY_UI_OV_HINT ? &o->hint
+        : k == MOY_UI_OV_VALUES ? &o->values : k == MOY_UI_OV_SUBS ? &o->subs
+        : k == MOY_UI_OV_ICONS ? &o->icons : k == MOY_UI_OV_COUNTS ? &o->counts
+        : k == MOY_UI_OV_TAGS ? &o->tags : k == MOY_UI_OV_MARKS ? &o->marks
+        : k == MOY_UI_OV_TAG ? &o->tag : k == MOY_UI_OV_FOCUS ? &o->focus : NULL;
+    if (at != NULL) {
+        *at = s;
+    }
+}
+
 int32_t mua_word(const uint8_t *w, int i) {
     int32_t v;
     memcpy(&v, w + 4 * i, 4);      // the app's block need not be aligned
     return v;
 }
 
-static int8_t flag(int32_t v) {
-    return v < 0 ? -1 : (int8_t)(v != 0);
+// A text's length word at `*at` and its text into key `k`; MOY_UI_BAD where
+// the word is missing or below 0, or the text overruns the block.
+static int block_text(moy_ui_over_t *o, int k, const uint8_t *w, size_t n, size_t *at) {
+    int32_t tn = n - *at >= 4u ? mua_word(w + *at, 0) : -1;
+    *at += 4u;
+    if (tn < 0 || (size_t)tn > n - *at || tn > 0xffff) {
+        return MOY_UI_BAD;
+    }
+    moy_ui_span_t s = {w + *at, (uint16_t)tn};
+    moy_ui_over_text(o, k, s);
+    *at += (size_t)tn;
+    return MOY_UI_OK;
 }
+
+static const uint8_t kind_words[] = {
+    [MOY_UI_KIND_INT] = 1, [MOY_UI_KIND_INDEX] = 1, [MOY_UI_KIND_PAIR] = 2, [MOY_UI_KIND_QUAD] = 4,
+    [MOY_UI_KIND_TEXTS] = 0,
+};
 
 int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
     moy_ui_over_none(o);
@@ -187,167 +279,99 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
     if (n < 4u * MOY_UI_O_WORDS) {
         return MOY_UI_BAD;
     }
-    o->fill = mua_word(w, MOY_UI_O_FILL);
-    o->ink = mua_word(w, MOY_UI_O_INK);
-    o->border = mua_word(w, MOY_UI_O_BORDER);
-    int32_t idn = mua_word(w, MOY_UI_O_ID);
     size_t at = 4u * MOY_UI_O_WORDS;
-    if (idn >= 0) {
-        if ((size_t)idn > n - at || idn > 0xffff) {
-            return MOY_UI_BAD;
+    int32_t fl = -1, rows = -1;
+    for (int k = 0; k < MOY_UI_OV_COUNT; k++) {
+        const moy_ui_over_key_t *key = &moy_ui_over_keys[k];
+        int32_t v[4] = {1, 0, 0, 0};
+        if (key->where == MOY_UI_AT_HEAD) {
+            v[0] = mua_word(w, k);
+            if (key->kind == MOY_UI_KIND_TEXT) {
+                if (v[0] >= 0) {
+                    if ((size_t)v[0] > n - at || v[0] > 0xffff) {
+                        return MOY_UI_BAD;
+                    }
+                    moy_ui_span_t s = {w + at, (uint16_t)v[0]};
+                    moy_ui_over_text(o, k, s);
+                    at += (size_t)v[0];
+                }
+                continue;
+            }
+            if (key->kind == MOY_UI_KIND_TRI) {
+                v[0] = v[0] < 0 ? -1 : v[0] != 0;
+            }
+            moy_ui_over_put(o, k, v);
+            continue;
         }
-        o->id.p = w + at;
-        o->id.n = (uint16_t)idn;
-        at += (size_t)idn;
-    }
-    // the block may go on: the hint's length as a word, then its text
-    if (n - at >= 4u) {
-        int32_t hn;
-        memcpy(&hn, w + at, 4);
-        at += 4u;
-        if (hn >= 0) {
-            if ((size_t)hn > n - at || hn > 0xffff) {
+        if (key->where == MOY_UI_AT_HINT) {
+            // the block may go on: the hint's length as a word and its text,
+            // then a word of flags
+            if (n - at < 4u) {
+                return MOY_UI_OK;
+            }
+            if (mua_word(w + at, 0) < 0) {
+                at += 4u;
+            } else if (block_text(o, k, w, n, &at) != MOY_UI_OK) {
                 return MOY_UI_BAD;
             }
-            o->hint.p = w + at;
-            o->hint.n = (uint16_t)hn;
-            at += (size_t)hn;
-        }
-        // then a word of flags, and the gen's word where they say so
-        if (n - at >= 4u) {
-            int32_t fl;
-            memcpy(&fl, w + at, 4);
+            if (n - at < 4u) {
+                return MOY_UI_OK;
+            }
+            fl = mua_word(w + at, 0);
             at += 4u;
-            if (fl >= 0) {
-                o->wash = (int8_t)((fl & MOY_UI_O_NO_WASH) ? -1 : (fl & MOY_UI_O_WASH) != 0);
-                if (o->wash == 1 && (fl & MOY_UI_O_WASH_VIEW)) {
-                    o->wash = 2;
-                }
-                o->lead = (int8_t)((fl & MOY_UI_O_LEAD) != 0);
-                if ((fl & MOY_UI_O_GEN) && n - at >= 4u) {
-                    memcpy(&o->gen, w + at, 4);
-                    o->has_gen = 1;
-                    at += 4u;
-                }
-                if ((fl & MOY_UI_O_PART) && n - at >= 8u) {
-                    o->has_part = 1;
-                    o->part_w = (int16_t)mua_word(w + at, 0);
-                    o->part_h = (int16_t)mua_word(w + at, 1);
-                    at += 8u;
-                }
-                o->bar = (int8_t)((fl & MOY_UI_O_BAR) != 0 ? 1 : -1);
-                o->axis_x = (int8_t)((fl & MOY_UI_O_AXIS_X) != 0);
-                o->snap = (int8_t)((fl & MOY_UI_O_SNAP) != 0);
-                if ((fl & MOY_UI_O_OFFSET) && n - at >= 4u) {
-                    o->has_offset = 1;
-                    o->offset = mua_word(w + at, 0);
-                    at += 4u;
-                }
-                if ((fl & MOY_UI_O_SPILL) && n - at >= 4u) {
-                    int32_t sp = mua_word(w + at, 0);
-                    o->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
-                    at += 4u;
-                }
-                o->whole = (int8_t)((fl & MOY_UI_O_WHOLE) != 0);
-                if ((fl & MOY_UI_O_KEEP) && n - at >= 4u) {
-                    o->has_keep = 1;
-                    o->keep = mua_word(w + at, 0);
-                    at += 4u;
-                }
-                if ((fl & MOY_UI_O_OVER) && n - at >= 16u) {
-                    int32_t ow = mua_word(w + at, 2), oh = mua_word(w + at, 3);
-                    if (ow > 0 && oh > 0) {
-                        o->over_x = (int16_t)mua_word(w + at, 0);
-                        o->over_y = (int16_t)mua_word(w + at, 1);
-                        o->over_w = (int16_t)(ow > 0x7fff ? 0x7fff : ow);
-                        o->over_h = (int16_t)(oh > 0x7fff ? 0x7fff : oh);
-                    }
-                    at += 16u;
-                }
-                if ((fl & MOY_UI_O_ACROSS) && n - at >= 8u) {
-                    o->has_across = 1;
-                    o->across_first = (int16_t)mua_word(w + at, 0);
-                    o->across_pitch = (int16_t)mua_word(w + at, 1);
-                    at += 8u;
-                }
-                if ((fl & MOY_UI_O_AT) && n - at >= 4u) {
-                    o->at = (int16_t)mua_word(w + at, 0);
-                    at += 4u;
-                }
-                o->shift = (int8_t)((fl & MOY_UI_O_SHIFT) != 0);
-                if ((fl & MOY_UI_O_FADE) && n - at >= 4u) {
-                    int32_t fh = mua_word(w + at, 0);
-                    o->fade = (int16_t)(fh < 0 ? 0 : fh > 4096 ? 4096 : fh);
-                    at += 4u;
-                }
-                if ((fl & MOY_UI_O_SIGNAL) && n - at >= 4u) {
-                    int32_t sg = mua_word(w + at, 0);
-                    o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
-                    at += 4u;
-                }
-                if ((fl & MOY_UI_O_VALUES) && n - at >= 4u) {
-                    int32_t vn = mua_word(w + at, 0);
-                    at += 4u;
-                    if (vn < 0 || (size_t)vn > n - at || vn > 0xffff) {
-                        return MOY_UI_BAD;
-                    }
-                    o->values.p = w + at;
-                    o->values.n = (uint16_t)vn;
-                    at += (size_t)vn;
-                }
-                o->check = (int8_t)((fl & MOY_UI_O_CHECK) != 0);
-                o->card = (int8_t)((fl & MOY_UI_O_CARD) != 0);
+            if (fl < 0) {
+                return MOY_UI_OK;
+            }
+            continue;
+        }
+        if (key->where == MOY_UI_AT_FLAGS2) {
+            continue;                   // the second word is o->flags2, read after
+        }
+        if (key->where == MOY_UI_AT_ROWS) {
+            if (rows < 0) {
+                rows = 0;
                 if ((fl & MOY_UI_O_ROWS) && n - at >= 4u) {
-                    int32_t m = mua_word(w + at, 0);
+                    rows = mua_word(w + at, 0);
                     at += 4u;
-                    moy_ui_span_t *rows[] = {&o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
-                    for (int i = 0; i < 5; i++) {
-                        if (!(m & (1 << i))) {
-                            continue;
-                        }
-                        int32_t rn = n - at >= 4u ? mua_word(w + at, 0) : -1;
-                        at += 4u;
-                        if (rn < 0 || (size_t)rn > n - at || rn > 0xffff) {
-                            return MOY_UI_BAD;
-                        }
-                        rows[i]->p = w + at;
-                        rows[i]->n = (uint16_t)rn;
-                        at += (size_t)rn;
-                    }
-                }
-                if ((fl & MOY_UI_O_TAG) && n - at >= 4u) {
-                    int32_t tn = mua_word(w + at, 0);
-                    at += 4u;
-                    if (tn < 0 || (size_t)tn > n - at || tn > 0xffff) {
-                        return MOY_UI_BAD;
-                    }
-                    o->tag.p = w + at;
-                    o->tag.n = (uint16_t)tn;
-                    at += (size_t)tn;
-                }
-                if ((fl & MOY_UI_O_FOCUS) && n - at >= 4u) {
-                    int32_t fn = mua_word(w + at, 0);
-                    at += 4u;
-                    if (fn < 0 || (size_t)fn > n - at || fn > 0xffff) {
-                        return MOY_UI_BAD;
-                    }
-                    o->focus.p = w + at;
-                    o->focus.n = (uint16_t)fn;
-                    at += (size_t)fn;
-                }
-                if ((fl & MOY_UI_O_MORE) && n - at >= 4u) {
-                    int32_t fl2 = mua_word(w + at, 0);
-                    at += 4u;
-                    o->flags2 = fl2 < 0 ? 0 : fl2;
                 }
             }
+            if ((rows & (1 << key->bit)) && block_text(o, k, w, n, &at) != MOY_UI_OK) {
+                return MOY_UI_BAD;
+            }
+            continue;
         }
+        if (key->kind == MOY_UI_KIND_WASH) {
+            if (!(fl & MOY_UI_O_NO_WASH)) {
+                v[0] = !(fl & (1 << key->bit)) ? 0 : (fl & MOY_UI_O_WASH_VIEW) ? 2 : 1;
+                moy_ui_over_put(o, k, v);
+            }
+            continue;
+        }
+        if (!(fl & (1 << key->bit))) {
+            continue;
+        }
+        if (key->kind == MOY_UI_KIND_TEXT || key->kind == MOY_UI_KIND_TEXTS) {
+            if (n - at >= 4u && block_text(o, k, w, n, &at) != MOY_UI_OK) {
+                return MOY_UI_BAD;
+            }
+            continue;
+        }
+        size_t nw = key->kind < sizeof(kind_words) ? kind_words[key->kind] : 0;
+        if (nw > 0) {
+            if (n - at < 4u * nw) {
+                continue;
+            }
+            for (size_t i = 0; i < nw; i++) {
+                v[i] = mua_word(w + at, (int)i);
+            }
+            at += 4u * nw;
+        }
+        moy_ui_over_put(o, k, v);
     }
-    o->current = flag(mua_word(w, MOY_UI_O_CURRENT));
-    o->disabled = flag(mua_word(w, MOY_UI_O_DISABLED));
-    o->nav = flag(mua_word(w, MOY_UI_O_NAV));
-    o->mark = flag(mua_word(w, MOY_UI_O_MARK));
-    o->steps = flag(mua_word(w, MOY_UI_O_STEPS));
+    if (fl >= 0 && (fl & MOY_UI_O_MORE) && n - at >= 4u) {
+        int32_t fl2 = mua_word(w + at, 0);
+        o->flags2 = fl2 < 0 ? 0 : fl2;
+    }
     return MOY_UI_OK;
 }
 

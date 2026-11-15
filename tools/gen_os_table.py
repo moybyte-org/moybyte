@@ -41,6 +41,12 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     runtime/host/<m>_face.py        the same rows over ctypes, with the
                                     structures and constants they name
     runtime/host/faces.py           each host face, in registration order
+  the override table's readers, from native/moy_ui/over.json (tools/gen_os/over.py)
+    native/moy_ui/moy_ui_over_keys.h  the keys, the block's bits, the table every
+                                    tier's reader walks
+    native/moy_ui/modmoy_ui_over.h  the board module's dict keys by qstr
+    runtime/toolkit/ui.py           _OVER_KEYS, the host's block (a GENERATED region)
+    docs/ui_api_2026-10.md          the keys' table and the block's (two regions)
   the moy-app plugin (sdk/moybyte_sdk, `moy app`)
     sdk/moybyte_sdk/os_table.py         what each tier's module or script reaches, with
                                     the permissions each answers under
@@ -81,14 +87,15 @@ from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
-from gen_os import face  # noqa: E402
+from gen_os import face, over  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
 
 # The files a GENERATED region is spliced into; every other output is the
 # generator's whole, and opens with gen_os.header's line.
-SPLICED = (APP_CONTEXT, APP_PERMS, SHELL_SERVERS, SCHEDULER, LUA_EXT, APP_DOC)
+SPLICED = (APP_CONTEXT, APP_PERMS, SHELL_SERVERS, SCHEDULER, LUA_EXT, APP_DOC, over.UI_PY,
+           over.DOC)
 
 
 def whole(outs):
@@ -123,7 +130,8 @@ def outputs(src=None):
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
             (UI_SDK_H, gen_sdk_ui_h(src)),
-            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src))) + face.outputs()
+            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
+    outs += face.outputs() + over.outputs()
     whole(outs)
     return outs
 

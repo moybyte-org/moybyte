@@ -148,21 +148,15 @@ enum {
 // A part's state bits (§5).
 enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_UI_ST_HOVER = 8 };
 
-// The override block (§3) as words, in its order: fill, ink, border (a role
-// as MOY_UI_O_ROLE + its index in the token row, moy_ui_token_names; an RGB
-// colour 0xRRGGBB; -1 absent), the id's length in bytes (its text follows
-// the nine words; -1 absent), current, disabled, nav, mark, steps (0 or 1;
-// -1 absent); then, where the block goes on, the hint's length as a word and
-// its text (a field's placeholder), and then a word of flags (bit 0: wash, a
-// popover washing what it covers, a dialog over a page washed already where
-// clear; bit 1: lead, a table whose first row is a verb; bit 2: gen, a word
-// follows: the stop's content generation, §3.3 of
-// docs/theme_and_shell_2026-11.md; bit 3: wash not given, bit 0 then
-// ignored). A wasm app hands it over as a pointer and its length.
-enum {
-    MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
-    MOY_UI_O_DISABLED, MOY_UI_O_NAV, MOY_UI_O_MARK, MOY_UI_O_STEPS, MOY_UI_O_WORDS
-};
+// The override table (§3): its keys, their kinds and the block's bits are
+// native/moy_ui/over.json's (moy_ui_over_keys.h, generated). A wasm app
+// hands it over as a block, a pointer and its length: the nine words (a
+// colour a role as MOY_UI_O_ROLE + its index in the token row,
+// moy_ui_token_names, or 0xRRGGBB; the id's text's length; a flag 0 or 1;
+// -1 absent), the id's text, then, where it goes on, the hint's length as a
+// word and its text, a word of flags and each key's words it names in its
+// bits' order (docs/ui_api_2026-10.md §3).
+#include "moy_ui_over_keys.h"
 #define MOY_UI_O_ROLE 0x1000000
 #define MOY_UI_O_NONE (-1)
 
@@ -237,46 +231,6 @@ typedef struct {
     // keys past the first word's read.
     int32_t flags2;
 } moy_ui_over_t;
-#define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
-#define MOY_UI_O_LEAD 2             // and `lead`
-#define MOY_UI_O_GEN 4              // and `gen`, whose word follows
-#define MOY_UI_O_NO_WASH 8          // and `wash` not given (it stays absent)
-#define MOY_UI_O_PART 16            // and `part`, whose two words (w, h) follow the gen's
-#define MOY_UI_O_BAR 32             // and `bar`
-#define MOY_UI_O_AXIS_X 1024        // and `axis` "x"
-#define MOY_UI_O_SNAP 2048          // and `snap`
-#define MOY_UI_O_OFFSET 4096        // and `offset`, its word after the part's
-#define MOY_UI_O_SPILL 8192         // and `spill`, its word after the offset's
-#define MOY_UI_O_KEEP 16384         // and `keep`, its word after the spill's
-#define MOY_UI_O_OVER 32768         // and `over`, its four words (x, y, w, h) after the keep's
-#define MOY_UI_O_WHOLE 65536        // and `whole`
-#define MOY_UI_O_ACROSS 131072      // and `across`, its two words (first, pitch) after the over's
-#define MOY_UI_O_AT 262144          // and `at`, its word after the across's
-#define MOY_UI_O_SHIFT 524288       // and `shift`
-#define MOY_UI_O_FADE 1048576       // and `fade`, its word after the at's
-#define MOY_UI_O_SIGNAL 2097152     // and `signal` (0..4 bars lit), its word after the fade's
-#define MOY_UI_O_VALUES 4194304     // and `values`, its length's word and its text after the signal's
-#define MOY_UI_O_CHECK 8388608      // and `check`
-#define MOY_UI_O_WASH_VIEW 16777216 // and `wash` "view" (with MOY_UI_O_WASH)
-#define MOY_UI_O_ROWS 33554432      // and a list's two-line rows: a word of MOY_UI_OR_* after
-                                    // the values', then each list it names, its length's word
-                                    // and its text, in the bits' order
-#define MOY_UI_O_CARD 67108864      // and `card`
-#define MOY_UI_O_FOCUS 268435456    // and `focus`, its length's word and its text after the tag's
-#define MOY_UI_O_TAG 134217728      // and `tag`, its length's word and its text after the rows'
-// and a second word of flags (MOY_UI_O2_*) after the focus's text, each key
-// it names its words after it in its bits' order: the door every key past
-// the first word's takes. Bit 30 is the first word's last free one; bit 31
-// is its sign (a word below 0 is no flags).
-#define MOY_UI_O_MORE 536870912
-// The second word's bits: `follow` (a page or scroll region rests on its
-// foot: it opens there, and stays there as its rows grow while it rests).
-#define MOY_UI_O2_FOLLOW 1
-#define MOY_UI_OR_SUBS 1
-#define MOY_UI_OR_ICONS 2
-#define MOY_UI_OR_COUNTS 4
-#define MOY_UI_OR_TAGS 8
-#define MOY_UI_OR_MARKS 16
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -285,6 +239,13 @@ size_t moy_ui_over_size(void);
 // The block of `n` bytes at `w` (NULL or 0: every key absent) into *o, its id
 // pointing into the block. MOY_UI_BAD where it is short or its id overruns.
 int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n);
+// Every key, in the block's order: what each tier's reader walks.
+extern const moy_ui_over_key_t moy_ui_over_keys[MOY_UI_OV_COUNT];
+// Key `k` (MOY_UI_OV_*) given: its words `v` (a colour, 0 or 1, a wash's 0, 1
+// or 2, a number, a pair, a quad; a tier's reader resolves a role's name and
+// a Lua index) into *o, as every tier reads it; a text's key takes its span.
+void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v);
+void moy_ui_over_text(moy_ui_over_t *o, int k, moy_ui_span_t s);
 
 typedef struct {
     uint32_t id;

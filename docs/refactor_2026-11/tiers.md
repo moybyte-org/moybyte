@@ -87,13 +87,10 @@ App-ABI rows (crypto, clipboard, theme, files) have the same shape: `modmoy_app.
 
 **Callbacks** (`moy_evq` handlers, `moycore.register`, `moy_input` sinks) are rows marked `hand: true`. The generator only checks that the hand function exists in both faces.
 
-**Override schema.** `+native/moy_ui/over.json` lists each key: name, kind (flag, colour, int, int2, int4, text, text list, enum), its flag bit and word order. It generates:
-- the `MOY_UI_O_*` defines;
-- `moy_ui_over_block` (the decoder);
-- `ui.py`'s `_block` (the encoder);
-- `modmoy_ui.c`'s `over_slot`/`over_dict`, still a single walk of the dict map, so it still allocates nothing;
-- `moycore_ui_over`;
-- the docs' key table.
+**Override schema.** `native/moy_ui/over.json` lists each key: name, kind (flag, colour, int, int2, int4, text, text list, enum), its flag bit and word order. It generates:
+- the `MOY_UI_O_*` defines and the key table (`moy_ui_over_keys.h`), which every reader walks as one loop: `moy_ui_over_block` (the decoder), `ui.py`'s `_block` (the encoder, over `_OVER_KEYS`), `modmoy_ui.c`'s `over_dict` (still a single walk of the dict map, so it still allocates nothing) and `moycore_ui_over`, each handing a key's words to `moy_ui_over_put`, the one place a key's meaning lives;
+- `modmoy_ui.c`'s `over_slot` (`modmoy_ui_over.h`);
+- the docs' key table and the block's.
 
 ### 2.3 What stays hand-written
 
@@ -199,7 +196,7 @@ So the console demonstrably runs off-board on MicroPython.
   - Override codecs: `ui.py:187`, `modmoy_ui.c:2380-2632`, `moycore_ui.h:137`, `moy_ui_over_block`, and the defines in `moy_ui_api.h:262-300`.
   - Enum lookup by hand on two tiers: `ui.py:349` and `moycore_ui.h:308`.
 - **Do:**
-  - Extend the `ui.*` rows with §2.2's fields and add `+native/moy_ui/over.json`.
+  - Extend the `ui.*` rows with §2.2's fields and add `native/moy_ui/over.json`.
   - Generate the `ui_api_*` MicroPython functions, the ctypes `api_*` and argtypes, `moy_ui_run_*`, `moy_ui_wasm_*`, `moycore_ui_*` plus its `luaL_Reg`, and the `ui.py` bodies between markers.
   - Keep `label_text` and the verbs marked `hand`.
 - **Lines:** about −2.5k (46 verbs × ~55 glue lines) and −600 (the codecs).

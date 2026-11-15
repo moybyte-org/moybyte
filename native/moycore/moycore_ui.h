@@ -103,25 +103,6 @@ static moy_ui_span_t moycore_ui_span(lua_State *L, int i)
     return t;
 }
 
-static int32_t moycore_ui_colour(lua_State *L, int t, const char *key)
-{
-    int32_t v = MOY_UI_O_NONE;
-    lua_getfield(L, t, key);
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        const char *name = lua_tostring(L, -1);
-        for (int i = 0; i < MOY_UI_TOKENS; i++) {
-            if (strcmp(name, moy_ui_token_names[i]) == 0) {
-                v = MOY_UI_O_ROLE + i;
-                break;
-            }
-        }
-    } else if (lua_isinteger(L, -1)) {
-        v = (int32_t)(lua_tointeger(L, -1) & 0xffffff);
-    }
-    lua_pop(L, 1);
-    return v;
-}
-
 static int8_t moycore_ui_flag(lua_State *L, int t, const char *key)
 {
     lua_getfield(L, t, key);
@@ -130,150 +111,75 @@ static int8_t moycore_ui_flag(lua_State *L, int t, const char *key)
     return v;
 }
 
-/* The override table at stack index `i` into *o. An `id` and a `hint` string
- * are left on the stack, so the spans stay valid for the call. */
+/* The override table at stack index `i` into *o, a key at a time in
+ * moy_ui_over_keys' order. A text, and a list's texts joined, stay on the
+ * stack while the verb runs, so their spans stay valid for the call. */
 static const char *moycore_ui_items(lua_State *L, int i, size_t *len);
 
 static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *o)
 {
     moy_ui_over_none(o);
     if (lua_type(L, i) != LUA_TTABLE) return o;
-    o->fill = moycore_ui_colour(L, i, "fill");
-    o->ink = moycore_ui_colour(L, i, "ink");
-    o->border = moycore_ui_colour(L, i, "border");
-    o->current = moycore_ui_flag(L, i, "current");
-    o->disabled = moycore_ui_flag(L, i, "disabled");
-    o->nav = moycore_ui_flag(L, i, "nav");
-    o->mark = moycore_ui_flag(L, i, "mark");
-    o->steps = moycore_ui_flag(L, i, "steps");
-    o->wash = moycore_ui_flag(L, i, "wash");
-    lua_getfield(L, i, "wash");
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        o->wash = 2;                /* "view": its anchor's view alone */
-    }
-    lua_pop(L, 1);
-    o->lead = moycore_ui_flag(L, i, "lead");
-    o->bar = moycore_ui_flag(L, i, "bar");
-    o->snap = (int8_t)(moycore_ui_flag(L, i, "snap") == 1);
-    o->flags2 = moycore_ui_flag(L, i, "follow") == 1 ? MOY_UI_O2_FOLLOW : 0;
-    o->whole = (int8_t)(moycore_ui_flag(L, i, "whole") == 1);
-    lua_getfield(L, i, "axis");
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        size_t n = 0;
-        const char *a = lua_tolstring(L, -1, &n);
-        o->axis_x = (int8_t)(n == 1 && a[0] == 'x');
-    }
-    lua_pop(L, 1);
-    o->check = (int8_t)(moycore_ui_flag(L, i, "check") == 1);
-    o->card = (int8_t)(moycore_ui_flag(L, i, "card") == 1);
-    /* a tag's and a dialog's focus's text stay on the stack while the verb runs */
-    static const char *const texts[] = {"tag", "focus"};
-    moy_ui_span_t *tspans[] = {&o->tag, &o->focus};
-    for (int k = 0; k < 2; k++) {
-        lua_getfield(L, i, texts[k]);
-        if (lua_type(L, -1) == LUA_TSTRING) {
-            size_t tn = 0;
-            const char *t = lua_tolstring(L, -1, &tn);
-            tspans[k]->p = (const uint8_t *)t;
-            tspans[k]->n = (uint16_t)(tn > 0xFFFFu ? 0xFFFFu : tn);
-        } else {
+    i = lua_absindex(L, i);
+    luaL_checkstack(L, 2 * MOY_UI_OV_COUNT, "ui options");
+    for (int k = 0; k < MOY_UI_OV_COUNT; k++) {
+        int kind = moy_ui_over_keys[k].kind;
+        int t = lua_getfield(L, i, moy_ui_over_keys[k].name);
+        int32_t w[4] = {0, 0, 0, 0};
+        if (t == LUA_TNIL) {
             lua_pop(L, 1);
+            continue;
         }
-    }
-    /* a list's texts a row: each joined text stays on the stack over its
-     * table while the verb runs */
-    static const char *const rows[] = {"values", "subs", "icons", "counts", "tags", "marks"};
-    moy_ui_span_t *spans[] = {&o->values, &o->subs, &o->icons, &o->counts, &o->tags, &o->marks};
-    luaL_checkstack(L, 12, "ui options");
-    for (int k = 0; k < 6; k++) {
-        lua_getfield(L, i, rows[k]);
-        if (lua_type(L, -1) == LUA_TTABLE) {
-            size_t vn = 0;
-            const char *v = moycore_ui_items(L, lua_absindex(L, -1), &vn);
-            spans[k]->p = (const uint8_t *)v;
-            spans[k]->n = (uint16_t)(vn > 0xFFFFu ? 0xFFFFu : vn);
+        if (kind == MOY_UI_KIND_TEXT || kind == MOY_UI_KIND_TEXTS) {
+            size_t n = 0;
+            const char *s = NULL;
+            if (kind == MOY_UI_KIND_TEXT && (t == LUA_TSTRING || t == LUA_TNUMBER)) {
+                s = lua_tolstring(L, -1, &n);
+            } else if (kind == MOY_UI_KIND_TEXTS && t == LUA_TTABLE) {
+                s = moycore_ui_items(L, lua_absindex(L, -1), &n);
+            }
+            if (s == NULL) {
+                lua_pop(L, 1);
+                continue;
+            }
+            moy_ui_span_t sp = { (const uint8_t *)s, (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n) };
+            moy_ui_over_text(o, k, sp);
+            continue;
+        }
+        int ok = 1;
+        if (kind == MOY_UI_KIND_COLOUR) {
+            w[0] = MOY_UI_O_NONE;
+            if (t == LUA_TSTRING) {
+                const char *name = lua_tostring(L, -1);
+                for (int j = 0; j < MOY_UI_TOKENS; j++) {
+                    if (strcmp(name, moy_ui_token_names[j]) == 0) {
+                        w[0] = MOY_UI_O_ROLE + j;
+                        break;
+                    }
+                }
+            } else if (lua_isinteger(L, -1)) {
+                w[0] = (int32_t)(lua_tointeger(L, -1) & 0xffffff);
+            }
+        } else if (kind == MOY_UI_KIND_INT || kind == MOY_UI_KIND_INDEX) {
+            ok = lua_isnumber(L, -1);
+            /* an index from 1, as every Lua index */
+            w[0] = (int32_t)lua_tointeger(L, -1) - (kind == MOY_UI_KIND_INDEX);
+        } else if (kind == MOY_UI_KIND_PAIR || kind == MOY_UI_KIND_QUAD) {
+            ok = t == LUA_TTABLE;
+            for (int j = 0; ok && j < (kind == MOY_UI_KIND_PAIR ? 2 : 4); j++) {
+                lua_geti(L, -1, j + 1);
+                w[j] = (int32_t)lua_tointeger(L, -1);
+                lua_pop(L, 1);
+            }
+        } else if (kind == MOY_UI_KIND_AXIS || kind == MOY_UI_KIND_WASH) {
+            const char *is = kind == MOY_UI_KIND_AXIS ? "x" : "view";
+            int named = t == LUA_TSTRING && strcmp(lua_tostring(L, -1), is) == 0;
+            w[0] = kind == MOY_UI_KIND_AXIS ? named : named ? 2 : lua_toboolean(L, -1);
         } else {
-            lua_pop(L, 1);
+            w[0] = lua_toboolean(L, -1);
         }
-    }
-    lua_getfield(L, i, "signal");
-    if (lua_isnumber(L, -1)) {
-        lua_Integer sg = lua_tointeger(L, -1);
-        o->signal = (int8_t)(sg < 0 ? 0 : sg > 4 ? 5 : sg + 1);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "offset");
-    if (lua_isnumber(L, -1)) {
-        o->has_offset = 1;
-        o->offset = (int32_t)lua_tointeger(L, -1);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "spill");
-    if (lua_isnumber(L, -1)) {
-        lua_Integer sp = lua_tointeger(L, -1);
-        o->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "part");
-    if (lua_type(L, -1) == LUA_TTABLE) {
-        lua_geti(L, -1, 1);
-        lua_geti(L, -2, 2);
-        o->has_part = 1;
-        o->part_w = (int16_t)lua_tointeger(L, -2);
-        o->part_h = (int16_t)lua_tointeger(L, -1);
-        lua_pop(L, 2);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "across");
-    if (lua_type(L, -1) == LUA_TTABLE) {
-        lua_geti(L, -1, 1);
-        lua_geti(L, -2, 2);
-        o->has_across = 1;
-        o->across_first = (int16_t)lua_tointeger(L, -2);
-        o->across_pitch = (int16_t)lua_tointeger(L, -1);
-        lua_pop(L, 2);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "at");
-    if (lua_isnumber(L, -1)) {
-        o->at = (int16_t)(lua_tointeger(L, -1) - 1);   /* (from 1, as every Lua index) */
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "keep");
-    if (lua_isnumber(L, -1)) {
-        o->has_keep = 1;
-        o->keep = (int32_t)lua_tointeger(L, -1);
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "over");
-    if (lua_type(L, -1) == LUA_TTABLE) {
-        lua_Integer r[4];
-        for (int k = 0; k < 4; k++) {
-            lua_geti(L, -1 - k, k + 1);
-            r[k] = lua_tointeger(L, -1);
-        }
-        lua_pop(L, 4);
-        if (r[2] > 0 && r[3] > 0) {
-            o->over_x = (int16_t)r[0];
-            o->over_y = (int16_t)r[1];
-            o->over_w = (int16_t)(r[2] > 0x7fff ? 0x7fff : r[2]);
-            o->over_h = (int16_t)(r[3] > 0x7fff ? 0x7fff : r[3]);
-        }
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, i, "id");
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        size_t n = 0;
-        const char *s = lua_tolstring(L, -1, &n);
-        o->id.p = (const uint8_t *)s;
-        o->id.n = (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n);
-    }
-    lua_getfield(L, i, "hint");
-    if (lua_type(L, -1) == LUA_TSTRING) {
-        size_t n = 0;
-        const char *s = lua_tolstring(L, -1, &n);
-        o->hint.p = (const uint8_t *)s;
-        o->hint.n = (uint16_t)(n > 0xFFFFu ? 0xFFFFu : n);
+        lua_pop(L, 1);
+        if (ok) moy_ui_over_put(o, k, w);
     }
     return o;
 }

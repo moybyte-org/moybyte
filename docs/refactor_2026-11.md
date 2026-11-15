@@ -615,7 +615,7 @@ Closes T7, G2, T2, I3, I4.
   `native/moy_ui/moy_ui_run.c`.
 - T2: the `ui.*` rows gain what the faces need (the Python signature, enum
   arguments, index base per tier, list arguments, the shape of an answer,
-  the end form), and `+native/moy_ui/over.json` lists every override key.
+  the end form), and `native/moy_ui/over.json` lists every override key.
   The generator emits the MicroPython verbs, the ctypes verbs, the run face,
   the wasm imports, the Lua verbs and `runtime/toolkit/ui.py`'s bodies
   between markers, and all five override codecs.

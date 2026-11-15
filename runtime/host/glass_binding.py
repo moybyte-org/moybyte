@@ -43,7 +43,7 @@ _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")   # an edited s
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_present_game.c", "moy_htab.h", "moy_htab.c",
             "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
-            "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api_int.h", "moy_ui_api.c", "moy_ui_api_text.c",
+            "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_over_keys.h", "moy_ui_api_int.h", "moy_ui_api.c", "moy_ui_api_text.c",
             "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c", "moy_ui_api_host.c",
             "moy_ui_text.h", "moy_ui_text.c",
             "moy_ui_sink.c", "moy_theme.h", "moy_theme.c", "moy_json.h", "moy_json.c",
