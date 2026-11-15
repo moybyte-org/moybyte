@@ -711,7 +711,9 @@ static void *kernel_psram(size_t n) {
 // The small-block pool (moy_kernel.h).
 static uint8_t *s_kpool;
 static multi_heap_handle_t s_kpool_heap;
+#ifdef MOY_HAS_PSRAM
 static portMUX_TYPE s_kpool_mux = portMUX_INITIALIZER_UNLOCKED;
+#endif
 static uint32_t s_kpool_misses;
 
 void *moy_kpool_alloc(size_t n) {
