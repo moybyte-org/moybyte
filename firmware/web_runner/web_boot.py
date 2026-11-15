@@ -1086,7 +1086,7 @@ def state_json():
     st["sync"] = {"acked": _S.get("sync_acked", 0),
                   "busy": any(w.busy() for w in _watchers())}
     st["edit"] = _edit_state(_S["ws"])
-    term = getattr(getattr(_S["ws"], "terminal_app", None), "face", None)
+    term = getattr(_S["ws"].app("terminal"), "face", None)
     st["term"] = term.lines() if term is not None else None
     try:
         import moy_audio
