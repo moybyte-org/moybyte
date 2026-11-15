@@ -72,7 +72,10 @@ A `ui.*` row (native/os_calls.json) adds:
             `init` (*out's value before the call), `wret` ("in:<param>": a
             failed call answers that argument), `wput` ("always" or "pos":
             when the out words are written; on success by default),
-            `wnull` ([param]: an empty text crosses as NULL)."""
+            `wnull` ([param]: an empty text crosses as NULL), `pack`
+            ({param: packer}: a sequence on Python and Lua packed by another
+            converter than a list's, "words": 0xRRGGBB colours, a
+            little-endian word each; wasm takes the packed bytes)."""
 
 import json
 import os
@@ -103,7 +106,10 @@ HAND_LUA = os.path.join(NATIVE, "moycore", "moycore_ui.h")
 
 API_FIELDS = {"api", "c", "hand", "ret", "out", "buf", "opts", "wspan", "flag", "trunc", "dflt",
               "run", "run_ret", "run_fix", "doc"}
-ROW_UI = {"api", "fix", "hand", "lua_in", "lua_opt", "init", "wret", "wput", "wnull"}
+ROW_UI = {"api", "fix", "hand", "lua_in", "lua_opt", "init", "wret", "wput", "wnull", "pack"}
+# A packer: what a sequence on Python and Lua crosses to the engine as, by name
+# (Python's _<name>, Lua's moycore_ui_<name>); a `list` packs with `items`.
+UI_PACKS = ("words",)
 UI_LUA_RETS = ("nil", "bool", "value", "index", "words")
 # Python names a C parameter cannot keep on the host: the face calls these.
 _PY_TAKEN = {"len", "int", "bytes", "bool", "tuple", "in", "c", "lib", "m"}
@@ -890,6 +896,7 @@ def _lua_row(p, fix=None):
     base = p.r.get("base", {})
     enum = p.r.get("enum", {})
     lists = set(p.r.get("list", ()))
+    pack = p.u.get("pack", {})
     call, outs = ["moycore_ui_canvas()"], []
     for a in p.run_params():
         if a.cn in fix:
@@ -919,13 +926,14 @@ def _lua_row(p, fix=None):
         elif a.kind == "span":
             o.append("    moy_ui_span_t %s = moycore_ui_span(L, %d);" % (a.cn, i))
             call.append(a.cn)
-        elif a.kind in ("opts", "bytes") and a.cn in lists:
+        elif a.kind in ("opts", "bytes") and (a.cn in lists or a.cn in pack):
+            fn = "moycore_ui_" + pack.get(a.cn, "items")
             o.append("    size_t %s_n = 0;" % a.cn)
             if a.cn in lua_opt:
                 o.append("    const char *%s = lua_isnoneornil(L, %d) ? \"\" : "
-                         "moycore_ui_items(L, %d, &%s_n);" % (a.cn, i, i, a.cn))
+                         "%s(L, %d, &%s_n);" % (a.cn, i, fn, i, a.cn))
             else:
-                o.append("    const char *%s = moycore_ui_items(L, %d, &%s_n);" % (a.cn, i, a.cn))
+                o.append("    const char *%s = %s(L, %d, &%s_n);" % (a.cn, fn, i, a.cn))
             call += ["(const uint8_t *)%s" % a.cn, "%s_n" % a.cn]
         elif a.cn in enum:
             e = enum[a.cn]
@@ -1071,7 +1079,7 @@ def _py_body(p):
         if a.kind == "over":
             args.append("_over(%s)" % n)
         elif a.kind in ("opts", "bytes"):
-            args.append("_opts(%s)" % n)
+            args.append("_%s(%s)" % (p.u.get("pack", {}).get(a.cn, "opts"), n))
         elif a.cn in p.r.get("enum", {}):
             args.append(_enum_py(p, a.cn, n))
         elif base.get(a.cn) is not None:
@@ -1172,6 +1180,10 @@ def check(vs, ps):
     for p in ps:
         if p.r.get("lua_ret", "nil") not in UI_LUA_RETS:
             raise TableError("%s: lua_ret is one of %s" % (p.r["name"], UI_LUA_RETS))
+        for cn, k in p.u.get("pack", {}).items():
+            if k not in UI_PACKS or cn in p.r.get("list", ()):
+                raise TableError("%s: pack %s is one of %s, on no list"
+                                 % (p.r["name"], cn, UI_PACKS))
     with open(HAND_MP) as f:
         mp = f.read()
     with open(HAND_HOST) as f:

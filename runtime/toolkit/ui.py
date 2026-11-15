@@ -521,9 +521,11 @@ def swatches(label, colours, cur, o=None):
     """A row of colour dots (each 0xRRGGBB), `colours[cur]` wearing the
     current mark; left and right move it while focused, a tap picks: the new
     `cur`."""
+    # GENERATED from native/os_calls.json's ui.swatches. Do not edit.
     t = _T
     return _C.api_choice(t[0], t[1], t[2], 5, label, _words(colours), -1 if cur is None else cur,
                          _over(o))
+    # END GENERATED
 
 
 def hints(items, o=None):

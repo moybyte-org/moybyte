@@ -168,6 +168,21 @@ static int moycore_ui_tabs(lua_State *L)
     return moycore_ui_choice_of(L, MOY_UI_V_TABS);
 }
 
+static int moycore_ui_swatches(lua_State *L)
+{
+    moy_ui_span_t label = moycore_ui_span(L, 1);
+    size_t opts_n = 0;
+    const char *opts = moycore_ui_words(L, 2, &opts_n);
+    int32_t cur = lua_isnoneornil(L, 3) ? -1 : moycore_ui_int(L, 3) - 1;
+    moy_ui_over_t o;
+    moycore_ui_over(L, 4, &o);
+    int32_t got = cur;
+    moy_ui_run_choice(moycore_ui_canvas(), MOY_UI_V_SWATCH, label, (const uint8_t *)opts, opts_n,
+                      cur, &o, &got);
+    lua_pushinteger(L, (lua_Integer)got + 1);
+    return 1;
+}
+
 static int moycore_ui_hints(lua_State *L)
 {
     size_t items_n = 0;
