@@ -88,7 +88,7 @@ def gen_lua_ext(src):
     heads = []
     for _role, tbl, fn, _c, _row, _read in lua_names(src):
         h = tbl or fn
-        if h not in heads and h != "moybyte":     # the run's moybyte table: PRELUDE_MOYBYTE
+        if h not in heads and h != "moybyte":     # the run's moybyte table: moycore_moybyte.c
             heads.append(h)
     return splice(LUA_EXT, "LUA_ROLE_NAMES = %s\nLUA_RUN_CALLS = %s\nLUA_OWN = %s\n"
                    % (_tup(heads), _tup(lua_run_calls(src)), _tup(lua_own(src))))

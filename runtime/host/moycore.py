@@ -151,8 +151,8 @@ def svc_tasks():
     return bool(_lb.play_lib().moycore_svc_tasks())
 
 
-def svc_step(now_ms):
-    return _lb.play_lib().moycore_svc_step(now_ms & 0xFFFFFFFF)
+def svc_step():
+    return _lb.play_lib().moycore_svc_step()
 
 
 def svc_reset():
@@ -181,6 +181,14 @@ def layer_restore(state):
 
 def exec(src, name):  # noqa: A001 -- the module's verb is named exec on a board
     return _run().exec(src, name)
+
+
+def own(pid):
+    return _run().own(pid)
+
+
+def call(fn, args):
+    return _run().call(fn, args)
 
 
 def load(chunks, layout=None):

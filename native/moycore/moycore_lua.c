@@ -12,6 +12,7 @@
 
 #include "lua.h"
 #include "lauxlib.h"
+#include "lualib.h"
 
 #include "moy.h"
 #include "moycore_layers.h"
@@ -1249,6 +1250,58 @@ int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
 #endif
 #pragma weak moy_app_lua_open
 
+static const char *const SANDBOX_BANNED[] = {
+    "load", "loadstring", "dofile", "loadfile", "require", "collectgarbage",
+    "io", "os", "debug", "package", NULL
+};
+
+void moycore_lua_sandbox(lua_State *L)
+{
+    static const luaL_Reg libs[] = {
+        { LUA_GNAME, luaopen_base }, { LUA_COLIBNAME, luaopen_coroutine },
+        { LUA_TABLIBNAME, luaopen_table }, { LUA_STRLIBNAME, luaopen_string },
+        { LUA_MATHLIBNAME, luaopen_math }, { NULL, NULL },
+    };
+    for (const luaL_Reg *v = libs; v->name; v++) {
+        luaL_requiref(L, v->name, v->func, 1);
+        lua_pop(L, 1);
+    }
+    for (const char *const *b = SANDBOX_BANNED; *b; b++) {
+        lua_pushnil(L);
+        lua_setglobal(L, *b);
+    }
+}
+
+static int l_own(lua_State *L)
+{
+    moycore_mb_open(L, &RUN.mb, (uint32_t)lua_tointeger(L, 1), moycore_mb_call);
+    RUN.mb_open = 1;
+    return 0;
+}
+
+int moycore_lua_own(uint32_t pid, char *err, size_t n)
+{
+    if (RUN.L == NULL) {
+        put_err(err, n, "moycore: no VM");
+        return -1;
+    }
+    lua_pushcfunction(RUN.L, l_own);
+    lua_pushinteger(RUN.L, (lua_Integer)pid);
+    if (lua_pcall(RUN.L, 1, 0, 0) != LUA_OK) {
+        const char *m = lua_tostring(RUN.L, -1);
+        put_err(err, n, m != NULL ? m : "moycore: no moybyte table");
+        lua_pop(RUN.L, 1);
+        return -1;
+    }
+    return 0;
+}
+
+int moycore_lua_call(const char *fn, const char *json, size_t len, char *err, size_t n)
+{
+    if (RUN.L == NULL) return 0;
+    return moycore_mb_global(RUN.L, fn, json, len, err, n);
+}
+
 int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
 {
     RUN.L = lua_newstate(l_alloc, NULL);
@@ -1256,6 +1309,7 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
         put_err(err, n, "moycore: no VM");
         return -1;
     }
+    moycore_lua_sandbox(RUN.L);
     if (moy_lua_open(RUN.L, &RUN.c.con) != 0) {
         lua_close(RUN.L);
         RUN.L = NULL;
@@ -1465,6 +1519,11 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n)
     // errors out never reaches frame_end, because half a tick would move the
     // profilers' ratios without being a tick.
     uint32_t pm[4];
+    // The run's wakes gone off since its last frame (moycore_moybyte.h),
+    // before its _update: what one raises is the frame's error.
+    if (RUN.mb_open && moycore_mb_serve(RUN.L, &RUN.mb, err, n) < 0) {
+        return -1;
+    }
     HOOK(frame_begin, pm);
     uint32_t t0 = moycore_run_now_us();
     if (moy_lua_update(RUN.L, dt, err, n) != 0) {
@@ -1522,6 +1581,11 @@ void moycore_lua_unstuck(void)
 
 void moycore_lua_close(void)
 {
+    if (RUN.L && RUN.mb_open) {
+        lua_settop(RUN.L, 0);
+        moycore_mb_end(RUN.L, &RUN.mb);
+    }
+    RUN.mb_open = 0;
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
     media_release();                 // after the VM: its canvases point at the layers

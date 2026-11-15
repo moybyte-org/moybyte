@@ -297,7 +297,14 @@ class MoycoreRun:
                 if isinstance(blob, (str, bytes)):
                     _moycore.image_put(name, blob)
             put_scenes(ns, _moycore.scene_put)
-            self._pins = install_handles(ns, _moycore.register, self.exec)
+            self._pins = install_handles(ns, _moycore.register, self.call)
+            pid = ns.get("_moy_pid") if hasattr(ns, "get") else None
+            if pid:
+                # The run's `moybyte` table, its wakes the kernel's under
+                # its process (native/moycore/moycore_moybyte.h).
+                err = _moycore.own(pid)
+                if err:
+                    raise RuntimeError(err)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
@@ -618,6 +625,13 @@ class MoycoreRun:
         if not _moycore.use(self._h):
             return "the run has closed"
         return _moycore.exec(src, name)
+
+    def call(self, fn, args):
+        """The state's global `fn` called with the values of `args`, a JSON
+        array: None, or the error text."""
+        if not _moycore.use(self._h):
+            return "the run has closed"
+        return _moycore.call(fn, args)
 
     def heap(self):
         """The run's Lua heap in bytes, Lua's own count, or None: a run with

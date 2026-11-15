@@ -66,22 +66,33 @@
 // the program's nearest deadline as its timeout. sdk/include/moybyte/os.h
 // carries the record, MOY_EVQ_FD and MOY_EVQ_VERSION from here.
 //
-// TIMERS. A process on a task of its own (a compiled program's moy_every and
-// moy_after; docs/os_2026-11/processes.md section 1) holds its timers on its
-// queue, MOY_EVQ_TIMERS at most: each posts it MOY_EVQ_TIMER from the system,
-// its one argument the timer's id, when it is due, and again every `every`
-// ms after (a tick its queue cannot take is dropped). They are the kernel's,
-// so they run on through a VM stop, and they go with the queue. The kernel's
-// frame runs them (moy_evq_timers_run, a loop job while one is set); a
-// harness with no frames, and the host's scheduler, call it. An ALARM
-// (moy_at, a Lua service's moybyte.at: the console turns its wall time into
-// ms from now) is a timer of the same table that goes off once, posts
-// MOY_EVQ_AT instead and names its process to the console's screen wake
-// (moy_evq_woke), so a kept service's alarm goes off through a VM stop too.
-// moy_evq_at sets one at a wall time, on the caller's own task, for a
-// process whose queue was opened MOY_EVQ_ALARMS (its `alarms` permission):
-// every tier's alarm but a Python process's (moy_app's moybyte.at row, a Lua
-// service's moybyte.at).
+// TIMERS. The kernel's timers are the one scheduler of every tier
+// (docs/refactor_2026-11.md, decision 1): a Python process's every, after
+// and alarm (runtime/system/moybyte.py's Wakes), a Lua app's and a Lua
+// service's (native/moycore/moycore_moybyte.h), a compiled program's moy_every
+// and moy_after (docs/os_2026-11/processes.md section 1). A queue holds
+// MOY_EVQ_TIMERS at most. A due timer of a queue that is not the VM's posts
+// it MOY_EVQ_TIMER from the system, its one argument the timer's id, and
+// again every `every` ms after (a tick its queue cannot take is dropped). A
+// due timer of a VM queue posts nothing: it is marked fired, and the VM's
+// scheduler, which runs every frame while one of its processes holds a wake,
+// takes it with moy_evq_fired, which allocates nothing (a fired `every`
+// fires once however many ticks it missed). They are the
+// kernel's, so they run on through a VM stop, and they go with the queue.
+// The kernel's frame runs them (moy_evq_timers_run, a loop job while one is
+// set), and so do a service's task before it waits (its deadline the one
+// the run answers, so a service's timer is not quantised to the frame), a
+// harness with no frames and the host's scheduler. An ALARM (moy_at, a Lua
+// program's moybyte.at, a Python process's: the console turns its wall
+// time into ms from now) is a timer of the same table that goes off once,
+// posts MOY_EVQ_AT instead and, unless it is quiet, names its process to
+// the console's screen wake (moy_evq_woke), so a kept service's alarm goes
+// off through a VM stop too. moy_evq_at sets one at a wall time, on the
+// caller's own task, for a process whose queue was opened MOY_EVQ_ALARMS
+// (its `alarms` permission): a compiled program's and a Lua program's.
+// EVERY WAKE'S ID, a timer's, a Python process's reader and message wakes'
+// and a Lua program's `on`, is one counter's (moy_evq_id): no two wakes of
+// any tier share one while both live, and each fits a VM's small int.
 // An alarm keeps its wall time: where the wall clock steps (an NTP answer,
 // the first one too: native/moy_net/moy_wifi.c, sntp_sync_time) its due moves
 // by the step (moy_evq_clock), one the step passed going off at the next run.
@@ -124,7 +135,7 @@ enum {
 #define MOY_EVQ_TIMERS 16u          // timers a queue holds
 #define MOY_EVQ_TIMER "moybyte.timer"   // a timer's message
 #define MOY_EVQ_AT "moybyte.at"         // an alarm's message
-#define MOY_EVQ_TIMER_ID 0x40000000u    // a timer's id has this bit: apart from the console's wakes
+#define MOY_EVQ_ID_MAX 0x3FFFFFFFu      // a wake's id is 1 to this: a small int on every VM
 
 #define MOY_EVQ_VM 0x01u            // the VM's task serves it (a Python process)
 #define MOY_EVQ_ALARMS 0x02u        // its process holds `alarms` (moy_evq_at)
@@ -235,15 +246,16 @@ uint32_t moy_evq_wanted(uint32_t mask);
 uint32_t moy_evq_listening(const char *name);
 
 // TIMERS: a timer of `pid`'s queue, due `ms` from now and then every `every`
-// ms (0: once), the queue made to listen on MOY_EVQ_TIMER: OK with *id,
-// STALE (no queue), FULL (MOY_EVQ_TIMERS held, or no name left to listen
-// on). Cancel: whether `pid` held timer `id`. How many it holds.
+// ms (0: once), a queue not the VM's made to listen on MOY_EVQ_TIMER: OK with
+// *id, STALE (no queue), FULL (MOY_EVQ_TIMERS held, or no name left to
+// listen on). Cancel: whether `pid` held timer `id`. How many it holds.
 int moy_evq_timer(uint32_t pid, uint32_t ms, uint32_t every, uint32_t *id);
-// An alarm: a timer due once, `ms` from now, posting MOY_EVQ_AT (listened on).
-int moy_evq_alarm(uint32_t pid, uint32_t ms, uint32_t *id);
+// An alarm: a timer due once, `ms` from now, posting MOY_EVQ_AT (listened on);
+// one that `wakes` names its process to moy_evq_woke as it goes off.
+int moy_evq_alarm(uint32_t pid, uint32_t ms, bool wakes, uint32_t *id);
 // An alarm at wall time `t`, Unix seconds (the clock time() reads; one already
-// past is due now): moy_evq_alarm's answers, and DENIED where `pid`'s queue
-// was not opened MOY_EVQ_ALARMS.
+// past is due now), that wakes: moy_evq_alarm's answers, and DENIED where
+// `pid`'s queue was not opened MOY_EVQ_ALARMS.
 int moy_evq_at(uint32_t pid, int64_t t, uint32_t *id);
 // The wall clock stepped by `step_ms` (later: positive): each alarm's due
 // moved by as much, so it keeps its wall time.
@@ -252,9 +264,21 @@ void moy_evq_clock(int64_t step_ms);
 // eight kept at most), 0 for none.
 uint32_t moy_evq_woke(void);
 bool moy_evq_timer_cancel(uint32_t pid, uint32_t id);
+// Timer `id` of `pid`'s due `ms` from now, its period kept: whether it held one.
+bool moy_evq_timer_set(uint32_t pid, uint32_t id, uint32_t ms);
 uint32_t moy_evq_timers(uint32_t pid);
-// The due timers posted: the ms to the next one, UINT32_MAX for none.
+// The due timers posted or marked fired: the ms to the next one, UINT32_MAX
+// for none.
 uint32_t moy_evq_timers_run(void);
+// The next fired timer of a VM queue whose process is not suspended
+// (moy_super_held), taken: its id (a once timer's row freed by the take), 0
+// for none.
+uint32_t moy_evq_fired(void);
+// A wake's id from the counter every timer's comes from (EVERY WAKE'S ID).
+uint32_t moy_evq_id(void);
+// The timers' clock: moy_now_ms, or `now_ms` (NULL: moy_now_ms again), which
+// the host sets to the console's tick clock, the one its tests hold.
+void moy_evq_clock_source(uint64_t (*now_ms)(void));
 
 // THE STOPS ASKED: a service another process's `service_stop` hung up on
 // that process's own task (moy_app's service_stop row), its TERM given with

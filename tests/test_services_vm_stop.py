@@ -137,7 +137,7 @@ def _polled(s, cond, secs=5.0):
 
 
 def _lua_step():
-    moycore.svc_step(int(time.monotonic() * 1000) & 0x3FFFFFFF)
+    moycore.svc_step()
 
 
 @pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
@@ -949,7 +949,7 @@ def test_a_program_s_prefs_and_the_console_s_settings_writes_interleave_and_both
 # -- on the VM a board runs ---------------------------------------------------------
 
 VM_STOP = """
-import moycore, moy_evq
+import moycore, moy_evq, time
 src = '''
 n = 0
 moybyte.every(5, function() n = n + 1 end)
@@ -960,14 +960,15 @@ h = moycore.svc_start(9, "t.tick", src, '[{}, ["day"]]')
 print(moy_evq.open(8, "t.tick", "", False), moy_evq.listen(8, "counted", True))
 moy_evq.vm(False)
 rc, tid = moy_evq.timer(8, 0)
-print(moy_evq.vm(), rc, tid & moy_evq.TIMER_ID != 0, moy_evq.timers(8))
+print(moy_evq.vm(), rc, 0 < tid <= 0x3FFFFFFF, moy_evq.timers(8))
 moy_evq.timers_run()
 m = moy_evq.take(8)
 print(m[2], m[3] == "[%d]" % tid, moy_evq.timers(8))
 for t in range(0, 50, 5):
-    moycore.svc_step(t)
+    time.sleep_ms(6)
+    moycore.svc_step()
 print(moy_evq.send(8, "t.tick", "count", "[]")[0])
-moycore.svc_step(55)
+moycore.svc_step()
 m = moy_evq.take(8)
 print(m[2], int(m[3][1:-1]) >= 9)
 import moy_app
@@ -976,13 +977,13 @@ g = a.grant("t.tick", [], run=True, owner=8)
 print(a.role(g, moy_app.table().index("moybyte.service_running"), b"", 0)[0])
 a.end(g)
 moy_evq.send(8, "t.tick", "ask", "[]")
-moycore.svc_step(60)
+moycore.svc_step()
 t = moy_evq.next_call()
-moycore.svc_step(65)
+moycore.svc_step()
 print(t[1:], moycore.svc_info(h)[:2])
 moy_evq.vm(True)
 moy_evq.answer(t[0], "7")
-moycore.svc_step(70)
+moycore.svc_step()
 print(moycore.svc_info(h)[:2], moy_evq.vm())
 moycore.svc_reap(h)
 """

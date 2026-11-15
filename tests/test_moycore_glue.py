@@ -1027,12 +1027,11 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
 
     w.run()
     # Fields, a metamethod and the prelude's own functions, not handles: a
-    # layer's id, canvas and edited mark, an image's id, and the `moybyte`
-    # table's fire, event and grant, which the console's chunks call. And the layer and scene natives are the RUNTIME's
+    # layer's id, canvas and edited mark, an image's id, and the window
+    # events' entry, which the console calls (moycore.call). And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index",
-              "__moybyte_fire", "__moybyte_event", "__moybyte_grant"}
+    fields = {"__id", "__img", "__c", "__e", "__index", "__moybyte_event"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
@@ -1040,7 +1039,9 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     gated = {n for n in wanted
              if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
     assert gated, "the editor handles vanished from the prelude"
-    got = {n for n in w.core.registered if n.startswith("__")}
+    # `__moybyte_call` is the run's `moybyte` table's, which its C takes
+    # (moycore.own, native/moycore/moycore_moybyte.h), never the prelude's.
+    got = {n for n in w.core.registered if n.startswith("__")} - {"__moybyte_call"}
     assert wanted - gated == got, "an UNGATED handle is missing"
 
 

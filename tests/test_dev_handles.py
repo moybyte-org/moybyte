@@ -878,7 +878,7 @@ def midi():
 
 def _wakes(pid):
     out = [0] * 8
-    for wid in out[:moybyte.WAKES.due(0, out)]:
+    for wid in out[:moybyte.WAKES.pending(out)]:
         _as(pid, lambda: moybyte.WAKES.call(wid))
 
 

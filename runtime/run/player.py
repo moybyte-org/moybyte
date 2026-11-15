@@ -1522,6 +1522,12 @@ class Player(PlayerDiag):
             if runtime == "wasm" and APP_EXT in ((ws.cart or {}).get("extensions") or ()):
                 # A compiled app hears its window events as messages.
                 _moybyte._compiled_events(ns, self.pid)
+            elif runtime == "lua" and self.pid:
+                # A Lua run's `moybyte` wakes are the kernel's under its
+                # process, which its run serves as each of its frames starts
+                # (native/moycore/moycore_moybyte.h).
+                _moybyte.own_queue(self.pid)
+                ns["_moy_pid"] = self.pid
             # The cart's code loads and inits inside the app-cart boundary, as
             # a Python cart's exec and _init do (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(True)

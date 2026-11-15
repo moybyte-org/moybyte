@@ -70,7 +70,6 @@ except ImportError:  # MicroPython's takes anything with send
 SHELL = 1
 POLL_MS = 50                    # the loop's wake, at least this often while a task lives
 _MP = _sys.implementation.name == "micropython"
-_AT = _moybyte._AT
 
 TASKS = []
 
@@ -164,7 +163,7 @@ class _Loop:
         if w is None or s.wakes.by_id.get(w[0]) is not w:
             wid = s.plain_every(1, self._drive)
             w = self.w = s.wakes.by_id[wid]
-        w[_AT] = _ticks_ms()
+        s.wakes.set(w[0], 0)
 
     def unwake(self):
         w = self.w
@@ -187,7 +186,7 @@ class _Loop:
         if at is None:
             self.unwake()
             return
-        w[_AT] = at
+        self.sched.wakes.set(w[0], max(0, _ticks_diff(at, now)))
 
     # -- one step -------------------------------------------------------------
 

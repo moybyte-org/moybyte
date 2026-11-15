@@ -102,9 +102,8 @@ def lua_run_calls(src):
 
 def lua_own(src):
     """The moybyte.<verb> names every Lua program holds that are no console
-    call: its wakes and the log, each a service's own C
-    (native/moycore/moycore_svc.c) and an app run's prelude over the moybyte
-    module (runtime/run/lua_ext.py). A row served in C is the run's role
+    call: its wakes and the log, the one C table a service and an app run
+    hold (native/moycore/moycore_moybyte.c). A row served in C is the run's role
     binding's (lua_names), but a lua_own one's: Lua's name for it is its own
     form (a function where the C row posts a message)."""
     calls = set(lua_calls(src))
@@ -132,8 +131,8 @@ def gen_lua_h(src):
          "// The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role\n"
          "// binding, opened for the roles the run's permissions name, a read (how\n"
          "// \"seq\") for the roles its grant holds; and the console calls a Lua\n"
-         "// service's `moybyte` table holds (native/moycore/moycore_svc.c), each\n"
-         "// answered by the console's Python as the service's process.\n"
+         "// program's `moybyte` table holds (native/moycore/moycore_moybyte.c),\n"
+         "// each answered by the console's Python as the program's process.\n"
          "//\n"
          "// MOY_APP_LUA_NAMES(X) expands X(role, its table or NULL for a global, its\n"
          "// name, 1 for a read, its own C function (LR_HAND's) or NULL for the one\n"

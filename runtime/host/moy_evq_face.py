@@ -9,12 +9,13 @@ import face_ctypes as _f
 __all__ = (
     "close", "has", "app", "listen", "hears", "post", "route", "queued", "screen_open",
     "screen_close", "screen_told", "ready", "step", "held", "forget", "serve", "timer_cancel",
-    "clock", "woke", "termed", "items_hand", "items_end", "items_reset", "notes_id",
-    "notes_waiting", "notes_goal", "notes_award", "notes_progress", "notes_end", "notes_reset",
-    "status_add", "status_show", "status_remove", "status_sweep", "status_reset", "timers",
-    "drop", "vm_stop", "live", "want", "wanted", "wants", "listening", "OK", "STALE", "FULL",
-    "NOMEM", "DENIED", "DEAF", "EMPTY", "RANGE", "FINE", "WARNED", "STRUCK", "SUSPENDED",
-    "SLICE_US", "ABORT_US", "STRIKES", "DEPTH", "SENDER", "BATCH", "WANT_MAIL", "WANT_POLL",
+    "timer_set", "clock", "woke", "termed", "items_hand", "items_end", "items_reset",
+    "notes_id", "notes_waiting", "notes_post", "notes_system", "notes_goal", "notes_award",
+    "notes_progress", "notes_end", "notes_reset", "status_add", "status_show", "status_remove",
+    "status_sweep", "status_reset", "timers", "fired", "wake_id", "drop", "vm_stop", "live",
+    "want", "wanted", "wants", "listening", "OK", "STALE", "FULL", "NOMEM", "DENIED", "DEAF",
+    "EMPTY", "RANGE", "FINE", "WARNED", "STRUCK", "SUSPENDED", "SLICE_US", "ABORT_US",
+    "STRIKES", "DEPTH", "SENDER", "BATCH", "WANT_MAIL", "WANT_POLL",
 )
 
 OK = 0
@@ -79,6 +80,7 @@ _SIGS = (
     ("moy_super_forget", [_c.c_uint32], None),
     ("moy_vmq_serve", [], _c.c_uint32),
     ("moy_evq_timer_cancel", [_c.c_uint32, _c.c_uint32], _c.c_bool),
+    ("moy_evq_timer_set", [_c.c_uint32, _c.c_uint32, _c.c_uint32], _c.c_bool),
     ("moy_evq_clock", [_c.c_int64], None),
     ("moy_evq_woke", [], _c.c_uint32),
     ("moy_evq_termed", [], _c.c_uint32),
@@ -87,6 +89,8 @@ _SIGS = (
     ("moy_items_reset", [], None),
     ("moy_notes_id", [], _c.c_uint32),
     ("moy_notes_waiting", [], _c.c_uint32),
+    ("moy_notes_post", [_c.c_uint32, _c.c_char_p, _c.c_size_t, _c.c_char_p, _c.c_size_t], _c.c_int32),
+    ("moy_notes_system", [_c.c_char_p, _c.c_size_t, _c.c_char_p, _c.c_size_t], _c.c_int32),
     ("moy_notes_goal", [_c.c_uint32, _c.c_char_p, _c.c_size_t, _c.c_int32], _c.c_int),
     ("moy_notes_award", [_c.c_uint32, _c.c_char_p, _c.c_size_t], _c.c_int32),
     ("moy_notes_progress", [_c.c_uint32, _c.c_char_p, _c.c_size_t, _c.c_int32], _c.c_int32),
@@ -98,6 +102,8 @@ _SIGS = (
     ("moy_status_sweep", [_c.c_uint32], _c.c_uint32),
     ("moy_status_reset", [], None),
     ("moy_evq_timers", [_c.c_uint32], _c.c_uint32),
+    ("moy_evq_fired", [], _c.c_uint32),
+    ("moy_evq_id", [], _c.c_uint32),
     ("moy_vmq_drop", [_c.c_uint32], None),
     ("moy_evq_vm_stop", [], _c.c_uint32),
     ("moy_evq_live", [], _c.c_uint32),
@@ -182,6 +188,10 @@ def timer_cancel(pid, tid):
     return bool(_lib().moy_evq_timer_cancel(int(pid), int(tid)))
 
 
+def timer_set(pid, tid, ms):
+    return bool(_lib().moy_evq_timer_set(int(pid), int(tid), int(ms)))
+
+
 def clock(step_ms):
     _lib().moy_evq_clock(int(step_ms))
 
@@ -214,6 +224,18 @@ def notes_id():
 
 def notes_waiting():
     return _lib().moy_notes_waiting()
+
+
+def notes_post(pid, summary, body):
+    summary_b = _f.span(summary)
+    body_b = _f.span(body)
+    return _lib().moy_notes_post(int(pid), summary_b, len(summary_b), body_b, len(body_b))
+
+
+def notes_system(summary, body):
+    summary_b = _f.span(summary)
+    body_b = _f.span(body)
+    return _lib().moy_notes_system(summary_b, len(summary_b), body_b, len(body_b))
 
 
 def notes_goal(pid, ach_id, goal):
@@ -262,6 +284,14 @@ def status_reset():
 
 def timers(pid):
     return _lib().moy_evq_timers(int(pid))
+
+
+def fired():
+    return _lib().moy_evq_fired()
+
+
+def wake_id():
+    return _lib().moy_evq_id()
 
 
 def drop(pid):

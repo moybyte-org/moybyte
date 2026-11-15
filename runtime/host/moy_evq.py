@@ -24,7 +24,6 @@ PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq_codes.h", "
                          (_KERNEL,))
 
 SYSTEM = "system"
-TIMER_ID = 0x40000000
 _VM = 0x01
 _ALARMS = 0x02
 _NOTIFY = 0x04
@@ -58,7 +57,7 @@ _SIGS = (
     ("moy_vmq_answer", [_U32, _P, _SZ], _I),
     ("moy_vmq_vm", [ctypes.c_bool], None),
     ("moy_evq_timer", [_U32, _U32, _U32, ctypes.POINTER(_U32)], _I),
-    ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_evq_alarm", [_U32, _U32, _B, ctypes.POINTER(_U32)], _I),
     ("moy_status_gen", [], _U32),
     ("moy_status_get", [_I, ctypes.c_void_p], _B),
     ("moy_notes_take", [ctypes.c_void_p], _B),
@@ -154,10 +153,11 @@ def timer(pid, ms, every=0):
     return rc, t.value
 
 
-def alarm(pid, ms):
-    """An alarm of `pid`'s queue (moy_evq.h, TIMERS): (rc, its id)."""
+def alarm(pid, ms, wakes=True):
+    """An alarm of `pid`'s queue (moy_evq.h, TIMERS), naming its process to
+    `woke` as it goes off where it `wakes`: (rc, its id)."""
     t = _U32(0)
-    rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), ctypes.byref(t))
+    rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), bool(wakes), ctypes.byref(t))
     return rc, t.value
 
 

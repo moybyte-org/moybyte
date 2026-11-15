@@ -11,6 +11,7 @@ import pytest
 
 from runtime import cron as C
 from runtime import devices
+from runtime import moy_evq
 from runtime import moy_log as L
 from runtime import moybyte
 from runtime import scheduler as S
@@ -25,11 +26,22 @@ def _at(*ymdhms):
 
 
 class _Clock:
-    """The wall clock the alarms read: Unix seconds a test moves."""
+    """The wall clock the alarms read: Unix seconds a test moves, each move a
+    step of the wall clock the kernel's alarms keep their wall time through
+    (moy_evq_clock)."""
 
     def __init__(self, monkeypatch, t):
-        self.t = t
-        monkeypatch.setattr(wc, "_now", lambda: self.t)
+        self._t = t
+        monkeypatch.setattr(wc, "_now", lambda: self._t)
+
+    @property
+    def t(self):
+        return self._t
+
+    @t.setter
+    def t(self, v):
+        moy_evq.clock(int((v - self._t) * 1000))
+        self._t = v
 
 
 @pytest.fixture(autouse=True)
@@ -174,13 +186,14 @@ def test_moybyte_at_is_an_alarm_on_the_wall_clock_that_wakes(monkeypatch):
     monkeypatch.setattr(moybyte, "_pid", lambda: 5)
     wid = moybyte.at(clock.t + 60.5, lambda: fired.append(clock.t))
     assert moybyte.WAKES.count(5) == 1
-    out = [0] * 8
+    assert moybyte.WAKES.by_id[wid][moybyte._HOW] == moybyte._TIMER   # the kernel's
     clock.t += 60
-    assert moybyte.WAKES.due(0, out) == 0                 # no earlier than t
+    _tick()
+    assert fired == [] and woke == []                     # no earlier than t
     clock.t += 1
-    assert moybyte.WAKES.due(0, out) == 1 and out[0] == wid and woke == [(5, clock.t)]
-    moybyte.WAKES.call(wid)
-    assert fired == [clock.t] and moybyte.WAKES.count(5) == 0
+    _tick()
+    assert woke == [(5, clock.t)] and fired == [clock.t]
+    assert moybyte.WAKES.count(5) == 0
 
 
 def test_moybyte_at_needs_alarms(monkeypatch):

@@ -200,7 +200,7 @@ def test_a_join_round_trips_in_rx1_and_an_uplink_reaches_the_network():
         _join(pid, net)
         assert _as(pid, moybyte.lora.joined) == (net.dev_addr, 0)
         out = [0] * 8
-        for wid in out[:moybyte.WAKES.due(0, out)]:
+        for wid in out[:moybyte.WAKES.pending(out)]:
             _as(pid, lambda: moybyte.WAKES.call(wid))
         assert seen and seen[-1][0] == moybyte.lora.EV_JOINED
 
@@ -306,7 +306,7 @@ def test_a_host_console_on_the_kernel_s_table_wakes_a_python_face(tmp_path):
         assert lora_sim.air(b"hello", 868100000, 7, rssi=-80, snr=20)
         N.step(0)
         out = [0] * 8
-        for wid in out[:moybyte.WAKES.due(0, out)]:
+        for wid in out[:moybyte.WAKES.pending(out)]:
             _as(pid, lambda: moybyte.WAKES.call(wid))
         assert seen == [(moybyte.lora.EV_RX, 5, -80, 5.0)]
     finally:

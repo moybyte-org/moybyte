@@ -3,8 +3,8 @@
 // The names a Lua program holds (native/moy_app/moy_app_lua.h): a run's role
 // binding, opened for the roles the run's permissions name, a read (how
 // "seq") for the roles its grant holds; and the console calls a Lua
-// service's `moybyte` table holds (native/moycore/moycore_svc.c), each
-// answered by the console's Python as the service's process.
+// program's `moybyte` table holds (native/moycore/moycore_moybyte.c),
+// each answered by the console's Python as the program's process.
 //
 // MOY_APP_LUA_NAMES(X) expands X(role, its table or NULL for a global, its
 // name, 1 for a read, its own C function (LR_HAND's) or NULL for the one

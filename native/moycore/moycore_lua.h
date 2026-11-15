@@ -33,6 +33,7 @@
 
 #include "moy.h"
 #include "moycore_layers.h"
+#include "moycore_moybyte.h"
 #include "moycore_run.h"
 
 // MOYCORE_POOL=0 compiles the small-object pool out (the A/B; per-board
@@ -64,6 +65,8 @@ typedef struct moycore_run {
     void       *scenes;          // the .moyscene texts (moycore_scenes_t)
     uint32_t    owner;           // its OWNER row (moycore_lua_owner), or 0
     uint32_t    proc;            // its process row's handle (the binding's), or 0
+    moycore_mb_t mb;             // an app run's `moybyte` table (moycore_lua_own)
+    uint8_t     mb_open;
     uint16_t    gen;             // its run's number, which its handle carries
     uint8_t     gc_gen;          // the collector is generational
     uint8_t     slot;            // its index, 0 .. MOYCORE_RUNS - 1
@@ -116,6 +119,19 @@ extern const moycore_lua_hooks_t moycore_lua_hooks;
 // NULL for a run with none (a game).
 struct moy_app_run;
 int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n);
+// The tier's one sandbox, which a Lua service's state opens with and a cart's
+// run before libmoy's cart layer (moy_lua_open, whose own agrees with it):
+// base, coroutine, table, string and math, and SPEC.md 4.1's banned names nil.
+void moycore_lua_sandbox(lua_State *L);
+// An app run's `moybyte` table (moycore_moybyte.h), its wakes and calls
+// process `pid`'s, its console calls through the global `__moybyte_call`
+// (verb, args) the binding registered, which it takes: 0, or -1 with `err`.
+// Its wakes are served as each of the run's frames starts (moycore_lua_tick,
+// moycore_mb_serve), before its _update.
+int moycore_lua_own(uint32_t pid, char *err, size_t n);
+// The run's global `fn` called with the values of `json` (len bytes, a JSON
+// array), protected: 0, or -1 with `err` (the window's events).
+int moycore_lua_call(const char *fn, const char *json, size_t len, char *err, size_t n);
 // One chunk, as TEXT only (a binary chunk can reach outside the VM): 0, or -1
 // with Lua's message in `err`.
 int moycore_lua_exec(const char *src, size_t len, const char *name, char *err, size_t n);

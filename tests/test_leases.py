@@ -214,7 +214,7 @@ def test_an_irq_wakes_its_process_on_each_edge_the_trigger_names():
         for v in (1, 0, 1, 0):
             N.sim_level(5, v)
         out = [0] * 8
-        n = moybyte.WAKES.due(0, out)
+        n = moybyte.WAKES.pending(out)
         for wid in out[:n]:
             _as(pid, lambda: moybyte.WAKES.call(wid))
         assert len(seen) == 2

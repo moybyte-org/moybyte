@@ -481,13 +481,13 @@ def test_an_idle_message_wake_costs_a_frame_nothing():
         L.current(was)
     out = [0] * 4
     assert w.list == [] and w.queued == 0
-    assert w.due(0, out) == 0
+    assert w.pending(out) == 0
     assert s.tick(0) == 0                   # nothing to run: returns at once
     assert w.post(pid, "ping", ("run", None)) and w.queued == 1
     assert not w.post(pid, "pong", ("konami",))     # it does not listen on it
     assert not w.post(pid + 99, "ping", ("run", None))
     assert upcalls == []                    # neither the wake nor the post asks for one
-    assert w.due(0, out) == 0               # a message is no due wake: the frame's start serves it
+    assert w.pending(out) == 0               # a message is no due wake: the frame's start serves it
     s.mail()
     assert got == [("system", "run", None)] and w.queued == 0
     for i in range(moy_evq.SENDER + 3):

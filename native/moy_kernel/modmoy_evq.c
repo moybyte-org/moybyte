@@ -190,14 +190,15 @@ static mp_obj_t ev_timer(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_timer_obj, 2, 3, ev_timer);
 
-static mp_obj_t ev_alarm(mp_obj_t pid, mp_obj_t ms) {
+static mp_obj_t ev_alarm(size_t n_args, const mp_obj_t *args) {
     uint32_t id = 0;
-    mp_int_t m = mp_obj_get_int(ms);
-    int rc = moy_evq_alarm((uint32_t)mp_obj_get_int(pid), m > 0 ? (uint32_t)m : 0u, &id);
+    mp_int_t m = mp_obj_get_int(args[1]);
+    int rc = moy_evq_alarm((uint32_t)mp_obj_get_int(args[0]), m > 0 ? (uint32_t)m : 0u,
+                           n_args < 3 || mp_obj_is_true(args[2]), &id);
     mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc), mp_obj_new_int_from_uint(id) };
     return mp_obj_new_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(ev_alarm_obj, ev_alarm);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ev_alarm_obj, 2, 3, ev_alarm);
 
 static mp_obj_t ev_status_gen(void) {
     return MP_OBJ_NEW_SMALL_INT(moy_status_gen() & 0x3FFFFFFFu);    // compared, never counted
@@ -284,7 +285,6 @@ static const mp_rom_map_elem_t ev_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_next_call), MP_ROM_PTR(&ev_next_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_answer), MP_ROM_PTR(&ev_answer_obj) },
     { MP_ROM_QSTR(MP_QSTR_reset), MP_ROM_PTR(&ev_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_TIMER_ID), MP_ROM_INT(MOY_EVQ_TIMER_ID) },
     { MP_ROM_QSTR(MP_QSTR_SYSTEM), MP_ROM_QSTR(MP_QSTR_system) },
 };
 static MP_DEFINE_CONST_DICT(ev_globals, ev_globals_table);
