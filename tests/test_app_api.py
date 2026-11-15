@@ -38,7 +38,7 @@ def _select(ws, title):
 
 def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
-    kinds = [app.id for app in ws._apps]
+    kinds = [app.id for app in ws.app_layers]
     assert kinds == ["artwork", "myart", "appearance", "storybook",
                      "files", "calc", "getcarts", "jukebox", "terminal"]
     for kind in kinds:
@@ -102,7 +102,7 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
     demo = Demo()
     ws.spine.register_app(demo)
     assert ws.spine.app_min_size(demo.id) == (210, 130)
-    assert ws.wm._root_ctx.app_layouts[demo.id] is demo.layout
+    assert ws.wm.root_ctx.app_layouts[demo.id] is demo.layout
     win = type("Win", (), {"kind": demo.id})()
     assert ws.wm._win_title(win) == "Story Editor"
 
@@ -115,12 +115,12 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
     ws.home.launch_selected()
     assert ws.screen == "files"
     assert not ws.input.text_mode
-    ws.files_app.dialog = "rename"
+    ws.app("files").dialog = "rename"
     ws.frame(1 / 30)                  # the dialog draws, its field focused
     ws.frame(1 / 30)
     ws.input_policy.sync()            # and the input policy reads it
     assert ws.input.text_mode
-    ws.files_app.dialog = None
+    ws.app("files").dialog = None
     ws.frame(1 / 30)
     ws.input_policy.sync()
     assert not ws.input.text_mode
@@ -419,7 +419,7 @@ def _quiesce_frame(ws):
     if ws.pointer is not None:
         ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
     ws.show_achievements = False
@@ -427,10 +427,10 @@ def _quiesce_frame(ws):
     ws.perf_hud = False
     ws.perf_capture = False
     ws.sysmenu.open = False
-    ws._about = False
-    ws._notice = None
+    ws.about = False
+    ws.notice_up = None
     ws._notice_until = 0
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer.clock_text = lambda: "00:00"
 
 
 _SENTINEL = b"\x5a"      # a colour no surface paints, to prove nothing drew
@@ -455,7 +455,7 @@ def _settle(ws):
     # ...and so is what a content's context vouches its last frame left there
     # (a verbs page's next frame would move those pixels, docs/surface_model_v1.md
     # §14.7): its next frame draws whole
-    for app in ws._apps:
+    for app in ws.app_layers:
         host = getattr(getattr(app, "_inst", app), "_ui", None)
         if host is not None and hasattr(host, "whole"):
             host.whole()
@@ -476,14 +476,14 @@ def _mute_app_strip(ws):
     alone -- the desk, launcher, picker, editor-menu, Settings and tool-cart
     bars must keep drawing, so a pixel difference here names the app bar and
     nothing else."""
-    orig = ws.bar_layer._draw_status_strip
+    orig = ws.bar_layer.draw_status_strip
 
     def muted(where):
         if where == "app":
             return
         return orig(where)
 
-    ws.bar_layer._draw_status_strip = muted
+    ws.bar_layer.draw_status_strip = muted
 
 
 def _band(ws, frame):
@@ -504,7 +504,7 @@ def _open_app_kind(ws, kind):
         ws.spine.register_app(app)
         ws.spine.open_app(app, cart=ws.carts.all[0])
         return app
-    app = ws._apps_by_id[kind]
+    app = ws.app(kind)
     assert ws.spine.open_app(app), kind + " has no identity cart"
     return app
 
@@ -553,7 +553,7 @@ def test_the_windowed_tier_still_suppresses_the_app_bar(tmp_path):
     """In the desk world the WM's title strip carries the close, so the host
     must draw NO app strip -- muting it may not change a single pixel."""
     ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     assert ws.windowed_chrome                     # the make world is open
     with_bar = _settle(ws)
     _mute_app_strip(ws)

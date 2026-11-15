@@ -29,7 +29,7 @@ class _LayoutCtx:
     @classmethod
     def capture(cls, ws):
         ctx = cls()
-        ctx.sys_canvas = ws._sys_canvas
+        ctx.sys_canvas = ws.bound_sys_canvas
         ctx.layout = ws.layout
         ctx.code_layout = ws.code_layout
         ctx.block_layout = ws.block_ui.block_layout
@@ -42,7 +42,7 @@ class _LayoutCtx:
         # generically, so a new register_app'd app reflows per window with no WM
         # edits. (The legacy per-app attrs remain as views for the pinned tests.)
         ctx.app_layouts = {}
-        for _app in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "app_layers", ()):
             _lay = getattr(_app, "layout", None)
             if _lay is not None:
                 ctx.app_layouts[_app.id] = _lay
@@ -53,7 +53,7 @@ class _LayoutCtx:
         """Swap this context in, and write it into every surface grant's row
         (native/moy_app) with `origin`, where the window's content sits on the
         glass: an app reads its own row, which is the installing window's."""
-        ws._sys_canvas = self.sys_canvas
+        ws.bound_sys_canvas = self.sys_canvas
         ws.layout = self.layout
         ws.code_layout = self.code_layout
         ws.block_ui.block_layout = self.block_layout
@@ -62,14 +62,14 @@ class _LayoutCtx:
         ws.scene_ui.layout = self.scene_layout
         ws.music_ui.layout = self.music_layout
         ws.cards_layer.layout = self.cards_layout
-        for _app in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "app_layers", ()):
             _lay = self.app_layouts.get(_app.id)
             if _lay is not None:
                 _app.layout = _lay
         ws.launcher.set_layout(self.layout)
         if ws.projects_grid is not None:
             ws.projects_grid.set_layout(self.layout)
-        ws._surface_write(origin[0], origin[1])
+        ws.surface_write(origin[0], origin[1])
 
 class _Win:
     """One open window: the back-stack kind it presents, its outer rect on the
@@ -207,10 +207,10 @@ class _WindowStackLayer(Layer):
             # (a theme, a chrome size) runs here, after the windows' draw,
             # never under it.
             wm._relayout_owed = False
-            self.ws._relayout()
+            self.ws.relayout()
             self.ws.mark_dirty()
         if _perf:
-            self.ws._pf_wm_windows = _ticks_ms() - _t0
+            self.ws.pf_wm_windows = _ticks_ms() - _t0
 
     def handle_input(self, i):
         return self.wm._route_key(i)
@@ -234,7 +234,7 @@ class _RepeatLayer(Layer):
 
     def draw(self, dt):
         wm = self.wm
-        root = wm._root_canvas
+        root = wm.root_canvas
         # A debt frame copies the rows the frames since its buffer was
         # painted changed (`_debt_rows`); a lead copy, under a playtest's
         # frame, the whole glass.
@@ -285,14 +285,14 @@ class _PlayerWindowLayer(Layer):
         if wm.ws.procs.list:
             # The running set's games under the front, bottom to top: each
             # window its last frame owes (none overlaps another here).
-            order = wm._order
+            order = wm.z_order
             for i in range(len(order)):
                 k = order[i]
                 if k != "desktop":
-                    w = wm._wins[k]
+                    w = wm.windows[k]
                     if w.kind == "desktop" and wm.game_shown(k):
                         wm._proc_paint(w, k, False, dt, full=False)
-        win = wm._wins.get("desktop")
+        win = wm.windows.get("desktop")
         if win is not None and not win.minimized and not wm._lead_refused:
             # full=False: the letterbox bezel + strip/shadow chrome are static and
             # already present in BOTH ping-pong buffers (the two full paints any
@@ -300,7 +300,7 @@ class _PlayerWindowLayer(Layer):
             # Under the system menu's scrim the frame is washed after its
             # composite, which therefore lands now, not at the present.
             up = wm._scrim_up()
-            wm._draw_player_window(win, True, wm._focus == "desktop", dt,
+            wm._draw_player_window(win, True, wm.focus_key == "desktop", dt,
                                    full=False, defer=not up)
             if up and wm._wash_all:
                 # The scrim's first frame: every rect it covers washed once,
@@ -398,4 +398,4 @@ class _PopoverOverLayer(Layer):
 
     def draw(self, dt):
         if not self.wm._lead_refused:
-            self.wm._pop_paint(True)
+            self.wm.pop_paint(True)

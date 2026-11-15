@@ -32,13 +32,13 @@ def _idle(ws, n=40):
     makes the pictures its cards owe (an unlock banner on a wall clock
     would hold the frames painting)."""
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(n):
         ws.frame(_DT)
 
 
 def _open(ws):
-    app = ws._apps_by_id["myart"]
+    app = ws.app("myart")
     assert ws.spine.open_app(app)
     _frames(ws)
     assert ws.wm.top_kind() == "myart"
@@ -56,7 +56,7 @@ def _key(ws, k):
 
 def test_my_art_is_a_registered_app_the_desk_and_home_leave_out(tmp_path):
     ws = _ws(tmp_path)
-    assert "myart" in ws._apps_by_id
+    assert ws.app("myart") is not None
     assert "myart" in ws.wm.HIDDEN_APPS
     wall = [c for c in ws.carts.all if c.get("type") == "wallpaper"
             and c.get("title") == "Wallpaper"]
@@ -117,7 +117,7 @@ def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
         _draw(ws, "pic%d" % i, c=c)
     made = []
     real = artwork.read_cover
-    app = ws._apps_by_id["myart"]
+    app = ws.app("myart")
     draw = app.draw
 
     def drawing(dt):
@@ -215,7 +215,7 @@ def test_open_takes_the_drawing_to_paint(tmp_path):
     _frames(ws)
     assert ws.wm.top_kind() == "artwork"
     assert ws.artwork.doc_name() == "rocket"
-    assert ws.artwork_app.doc.pix[0] == 3
+    assert ws.app("artwork").doc.pix[0] == 3
 
 
 def test_new_drawing_opens_paint_on_a_fresh_drawing(tmp_path):
@@ -226,7 +226,7 @@ def test_new_drawing_opens_paint_on_a_fresh_drawing(tmp_path):
     _frames(ws)
     assert ws.wm.top_kind() == "artwork"
     assert ws.artwork.doc_name() not in (None, "rocket")
-    assert (ws.artwork_app.doc.W, ws.artwork_app.doc.H) == (320, 240)
+    assert (ws.app("artwork").doc.W, ws.app("artwork").doc.H) == (320, 240)
 
 
 def test_the_desk_window_opens_at_its_designed_size(tmp_path):

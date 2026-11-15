@@ -114,7 +114,7 @@ def main():
         # -- the projects window ---------------------------------------------
         b.open("projects")
         b.drain(10.0)
-        g = b.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+        g = b.pyval("ws.wm.windows['projects'].ctx.layout.lib_grid")
         st = b.state()
         w = st["wins"]["projects"]
         ox, oy = w[0] + 1, w[1] + 1 + w[4]
@@ -135,7 +135,7 @@ def main():
 
         print("\n=== projects window drag-scroll  font_scale=%s ==="
               % b.pyval("ws.look.font_scale"))
-        buf = "ws.wm._wins['projects'].buf"
+        buf = "ws.wm.windows['projects'].buf"
         # Interleaved A/B/A/B: a single ordered pass drifts (cover cache warms,
         # heap fragments), and the first run of this A/B disagreed with itself
         # by more than the effect being measured.

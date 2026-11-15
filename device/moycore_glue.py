@@ -1282,7 +1282,7 @@ class WasmRuntime:
             return None
         main = cart.get("main", "main.wasm")
         import os
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
 
         def _size(p):
             return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
@@ -1314,7 +1314,7 @@ class WasmRuntime:
         if table is None or not path:
             return []
         p = path + "/" + cart.get("main", "main.wasm")
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
         try:
             head = gate(lambda: wasm_head(p)) if gate is not None else wasm_head(p)
         except OSError:
@@ -1323,7 +1323,7 @@ class WasmRuntime:
 
     def wants_layout(self, cart):
         """Whether the cart's module exports `_layout` (`wasm_wants_layout`)."""
-        return wasm_wants_layout(cart, getattr(self.ws, "_with_sd", None))
+        return wasm_wants_layout(cart, getattr(self.ws, "with_sd", None))
 
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and

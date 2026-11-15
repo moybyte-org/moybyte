@@ -125,15 +125,15 @@ def test_bar_icons_get_plateless_light_variants(tmp_path):
     transparent and white strokes flip to ink-black, so wifi/batt never draw a
     black plate on the light bar (owner report 2026-07-23)."""
     ws = _ws(tmp_path)
-    dark = ws._bar_image("wifi")
+    dark = ws.bar_image("wifi")
     assert dark.transparent == -1                   # dark bar: opaque tile
     ws.look.set_theme_variant("light")
-    light = ws._bar_image("wifi")
+    light = ws.bar_image("wifi")
     assert light is not dark
     assert light.transparent == 63                  # the plate is keyed out...
     assert 0 in light.pix and 7 not in light.pix    # ...and strokes DRAW as ink
     # (the key must never be 0: black strokes would erase themselves)
-    moy = ws._bar_image("moy")
+    moy = ws.bar_image("moy")
     if moy is not None:                             # mascot keeps its cream pixels
         assert moy.transparent == 0 and 7 in moy.pix
 
@@ -182,7 +182,7 @@ def test_player_exit_returns_to_library(tmp_path):
     _select_real_cart(ws)
     ws.home.launch_selected()
     assert ws.screen == "desktop"
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.screen == "launcher"                # Library is Home (Section 1.1)
 
 
@@ -195,7 +195,7 @@ def test_studio_play_returns_to_same_tab(tmp_path):
     ws.menu_view = "code"
     ws.saves.run_code()
     assert ws.screen == "desktop"
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.screen == "menu"
     assert ws.editor_app.tab == "code"            # the SAME tab
     assert ws.cart["path"] == cart["path"]
@@ -246,7 +246,7 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     ws.frame(1 / 30)
     assert ws.screen == "desktop"
     # On Make's "+ New" card the one chip is NEW: no PLAY to tap.
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     ws.home.set_home_tab("make")
     ws.launcher.sel = 0
     assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}

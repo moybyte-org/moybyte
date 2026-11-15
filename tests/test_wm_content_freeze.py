@@ -65,7 +65,7 @@ def _settled_settings(tmp_path):
     _quiesce(ws)
     ws.mark_dirty()
     drv.frame(0.0)                    # settle: buf filled, _buf_stale cleared
-    return ws, drv, ws.wm._wins["settings"]
+    return ws, drv, ws.wm.windows["settings"]
 
 
 def test_cursor_move_skips_focused_content_render(tmp_path):
@@ -179,7 +179,7 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     _quiesce(ws)
     ws.mark_dirty()
     drv.frame(0.0)                         # settle
-    win = ws.wm._wins["menu"]
+    win = ws.wm.windows["menu"]
     assert win.kind == "menu"
     assert ws.wm._content_static(win) is True
     ws.music_ui.music_preview = object()
@@ -221,7 +221,7 @@ def test_drag_release_restarts_the_backdrop_restore(tmp_path):
         ws.pointer.x, ws.pointer.y = x0 - step, y0 + step // 2
         ws.router.handle_pointer()
     assert wm._drag is not None, "the title-strip grab did not start a drag"
-    wm._desk_streak = wm._retained_n()           # a drag saturates the streak
+    wm._desk_streak = wm.retained_n()           # a drag saturates the streak
 
     ws.pointer.down = False                      # let go
     ws.router.handle_pointer()
@@ -241,7 +241,7 @@ def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
     from runtime import moy_input as _mi
     ws, drv, win = _settled_settings(tmp_path)
     wm = ws.wm
-    wm._toggle_max(win)
+    wm.toggle_max(win)
     ws.input_used("touch")                       # the input a finger's press is
     ws.mark_dirty()
     drv.frame(0.0)
@@ -291,14 +291,14 @@ def _settings_beside_a_throttled_game(tmp_path):
     for title in ("Star Catcher", "Brick Siege"):
         open_cart(ws, title)
         drv.frame(1 / 30)
-        game = ws.wm._wins["desktop"]
+        game = ws.wm.windows["desktop"]
         if game.saved is not None:
-            ws.wm._toggle_max(game)
+            ws.wm.toggle_max(game)
         drv.frame(1 / 30)
     proc = ws.procs.list[0]
     ws.open_settings()
     drv.frame(1 / 30)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     ws.wm._move_window(win, 20, win.y)    # clear of both games
     _quiesce(ws)
     ws.mark_dirty()
@@ -314,7 +314,7 @@ def test_a_throttled_game_beside_leaves_the_freeze_as_it_was(tmp_path):
     window's retained content, while the throttled game takes its update
     every frame and its draw every Nth."""
     ws, drv, win, proc = _settings_beside_a_throttled_game(tmp_path)
-    assert ws.wm._focus == "settings" and proc.state == "throttled"
+    assert ws.wm.focus_key == "settings" and proc.state == "throttled"
     assert win._buf_stale is False
     calls = _count_draws(ws, "settings")
     ups, draws = proc.ups, proc.draws

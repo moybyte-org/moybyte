@@ -68,7 +68,7 @@ def test_paint_edit_survives_immediate_context_x_close(tmp_path):
     title = ws.launcher.items[ws.launcher.sel]["title"]
     path = _cart_path_by_title(ws, title)
     ws.open_in_editor()
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     pe.color = 11
@@ -133,8 +133,8 @@ def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
     """Same #111 gap, the Paint app (#108 user drawings): closing its window via
     the strip X must flush the open drawing (artwork_app._save)."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.spine.open_app(ws.artwork_app)
-    app = ws.artwork_app
+    ws.spine.open_app(ws.app("artwork"))
+    app = ws.app("artwork")
     app.doc.put(0, 0, 5)
     app._mark_changed()
     assert app._unsaved is True
@@ -294,13 +294,13 @@ def test_a_workspace_swap_pays_the_outgoing_project_s_debt(tmp_path):
     ws = _ws(tmp_path)
     carts = [c for c in ws.launcher.items if c.get("path")]
     first, second = carts[0], carts[1]
-    ws._open_workspace(first)
+    ws.open_workspace(first)
     ws.editor_app.open(ws.run.project)
     ws.editor_app.set_tab("paint")
     ws.frame(1 / 30)
     ws.sheet.pset(0, 0, 7)
     ws.editor_app.set_tab("code")      # owes a sprite commit
-    ws._open_workspace(second)         # PROJECTS -> a different project
+    ws.open_workspace(second)         # PROJECTS -> a different project
     assert ws.editor_app._pending == [], ws.editor_app._pending
     from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet.from_hex(moy_carts.load(first["path"])["sprites"])

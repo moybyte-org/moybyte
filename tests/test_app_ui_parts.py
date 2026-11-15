@@ -114,11 +114,11 @@ def _open(tier, base, console):
         ws = host_app.build_workstation(root)
     ws.look.set_theme("moy", persist=False, variant="light" if console == "tdeck" else "dark")
     ws.pointer.visible = False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     if desk:
         ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c["title"] == _TITLE[tier])
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     ws.spine.play(ws.launcher_layer)
     if ws.confirm.open:             # a copied app's consent: Open
         act = ws.confirm._act
@@ -130,7 +130,7 @@ def _open(tier, base, console):
 
 def _set_page(ws, n):
     p = ws.run.player
-    lua = getattr(p, "_lua", None)
+    lua = getattr(p, "lua", None)
     if lua is None:
         p.ns["pmem"](0, n)
         return
@@ -143,7 +143,7 @@ def _set_page(ws, n):
 
 def _pmem1(ws):
     p = ws.run.player
-    lua = getattr(p, "_lua", None)
+    lua = getattr(p, "lua", None)
     if lua is None:
         return p.ns["pmem"](1)
     run = getattr(lua, "_run", None)
@@ -181,8 +181,8 @@ def _shot(name, size, px):
 
 def _offset(ws, x, y):
     """The scroll of the page under (x, y), a Python app's (None elsewhere)."""
-    ui = getattr(ws.run.player, "_ui", None)
-    if getattr(ws.run.player, "_lua", None) is not None or not ui:
+    ui = getattr(ws.run.player, "ui", None)
+    if getattr(ws.run.player, "lua", None) is not None or not ui:
         return None
     from runtime import ui_draw
     return ui_draw._C.api_offset(ui[0], x, y)
@@ -236,7 +236,7 @@ def pages(tmp_path_factory):
                     _frame(drv)
                 assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
                 out[(console, tier, page)] = _pixels(ws)
-                lent = ws.bar_layer._lent("tool")
+                lent = ws.bar_layer.lent("tool")
                 out[(console, tier, page, "bar")] = lent and lent[0]
                 if SHOTS:
                     _shot("%s_%d_%s" % (console, page, tier), *out[(console, tier, page)])

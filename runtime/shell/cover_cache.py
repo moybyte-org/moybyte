@@ -758,7 +758,7 @@ class CoverCache:
         # glyph, `_none` stops it being re-probed every idle frame, and a store
         # re-scan clears that and tries again.
         try:
-            data = ws._with_sd(
+            data = ws.with_sd(
                 lambda: loader(path)) if loader is not None else None
             if data and cover_png.structure(data) is None:
                 data = None

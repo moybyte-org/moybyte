@@ -137,7 +137,7 @@ def test_toast_renders(tmp_path):
     ws.open()                                # raises the "First Steps" banner
     settle_badges(ws)                        # ...through the achievements process
     assert ws.ach.toast is not None
-    assert ws._toast_until                   # the unlock armed the shell overlay
+    assert ws.toast_until                   # the unlock armed the shell overlay
     drv.frame(1 / 30)                        # frame() draws the banner
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4        # not a blank frame
 
@@ -203,8 +203,8 @@ def test_konami_egg_fires_and_awards(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     armed = []
-    hook = ws.notices._achievement_unlocked
-    ws.notices._achievement_unlocked = lambda b: (armed.append(b), hook(b))
+    hook = ws.notices.achievement_unlocked
+    ws.notices.achievement_unlocked = lambda b: (armed.append(b), hook(b))
     for b in ws.ach_ui._KONAMI:
         _press(drv, b)
     assert ws.ach.has(A.SYSTEM, "konami")    # hidden "Secret Coder" awarded
@@ -249,7 +249,7 @@ def test_secret_door_egg_in_settings(tmp_path):
     drv.frame(1 / 30)
     bar = ws.bar_layer
     bx, by = bar.cell("settings", "zone")[0][1][:2]
-    x, y, w, h = bar._zone_rect("settings")
+    x, y, w, h = bar.zone_rect("settings")
     title = (bx + x + h + 4, by + y, w - h - 4, h)     # the zone past the chevron
     for _ in range(ws.ach_ui._SECRET_TAP_GOAL):
         _tap(drv, title)
@@ -311,7 +311,7 @@ def test_the_unlock_banner_over_a_game_sits_at_the_glass_top(tmp_path):
         ws.open()
         for _ in range(3):
             ws.frame(1 / 30)
-        assert not ws._running_cart_shows_bar() and ws.wm.top_is_player()
+        assert not ws.running_cart_shows_bar() and ws.wm.top_is_player()
         ws.notices._draw_toast()
         assert got[-1] == (ws.sys_canvas.w // 2, 6)
     finally:

@@ -699,7 +699,7 @@ def _app_ws(tmp_path, net, indexes, keep=None, pick=None, home=None):
     ws.cart_keep = keep
     ws.cart_pick = pick
     ws.cart_home = home
-    return ws, ws._apps_by_id["getcarts"]
+    return ws, ws.app("getcarts")
 
 
 def _frame(ws, net=None):

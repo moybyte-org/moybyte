@@ -8,7 +8,7 @@
 
 It edits the cart's SpriteSheet (ws.run.project.sheet) through `ws.paint` (a PaintEditor).
 SAVE is GONE (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the
-editor -- CLOSE hard-commits the sheet on its way out (ws.text._leave_menu, which is
+editor -- CLOSE hard-commits the sheet on its way out (ws.text.leave_menu, which is
 EditorApp.leave -- PLAY, a hard-commit trigger now), and the idle-typing autosave-commit +
 every other tab-leaving exit path (a tab switch, PROJECTS, a window/context-X, a workspace
 swap, going home) commit it too. A theme's icons are the Editor's theme mode's
@@ -373,7 +373,7 @@ class PaintLayer(Layer):
         return _ui_draw.hint_kind() != "touch"
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
+        """Rebuild the responsive geometry (#39) -- called by ws.relayout on a
         font-scale change (and, later, a window resize)."""
         self._lay_args = (w, h, fs, cs)
         self.layout = PaintLayout(w, h, fs, chrome_scale=cs, keys=self._keys())
@@ -393,7 +393,7 @@ class PaintLayer(Layer):
         # fill + the bar cover every pixel it ever painted, so the pixels are
         # identical and the cart's _draw() no longer runs on editor frames. The game
         # canvas still gets its state reset (degradation shares one canvas).
-        self.ws._reset_canvas_state()
+        self.ws.reset_canvas_state()
         self._dt = dt
         self._draw_paint()
 

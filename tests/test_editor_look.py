@@ -76,9 +76,9 @@ def _ink_left(px, x0, x1, y0, y1, ground=None):
 
 
 def _place(ws, key, rect):
-    win = ws.wm._wins[key]
+    win = ws.wm.windows[key]
     win.x, win.y = rect[0], rect[1]
-    ws.wm._resize_window(win, rect[2], rect[3])
+    ws.wm.resize_window(win, rect[2], rect[3])
     return win
 
 
@@ -148,13 +148,13 @@ def _files(ws, cur=3):
     """The desk's Files window on Projects, file row `cur` current. (the
     app, its window)."""
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     _frame(ws, 2)
-    app = ws._apps_by_id["files"]
+    app = ws.app("files")
     app = getattr(app, "app", app)
     app.cur = cur
     _frame(ws)
-    return app, ws.wm._wins["files"]
+    return app, ws.wm.windows["files"]
 
 
 @pytest.mark.parametrize("theme,mode", THEMES)
@@ -295,11 +295,11 @@ APPEARANCE_WIN = (226, 65, 680, 510)
 
 def _desk_appearance(ws):
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws.app("appearance"))
     _frame(ws, 2)
     win = _place(ws, "appearance", APPEARANCE_WIN)
     _frame(ws)
-    app = ws._apps_by_id["appearance"]
+    app = ws.app("appearance")
     return getattr(app, "app", app), win
 
 
@@ -346,7 +346,7 @@ def test_under_touch_a_handheld_app_keeps_no_hint_band(tmp_path, app_id, theme, 
     review R3-07); a key input brings the hints back."""
     ws = _ws(tmp_path, HANDHELD, theme, mode)
     ws.use_inputs([("local", "touch")])
-    ws.spine.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws.app(app_id))
     _frame(ws)
     lay = ws.layout
     px = _px(ws)
@@ -377,9 +377,9 @@ def test_the_desk_calcs_backspace_stands_as_tall_as_its_digits(tmp_path, theme, 
     (design review R3-09: a 12 px icon beside 15 px digits)."""
     ws = _ws(tmp_path, DESK, theme, mode)
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     _frame(ws)
-    win = ws.wm._wins["calc"]
+    win = ws.wm.windows["calc"]
     lay = win.ctx.app_layouts["calc"]
     cx, cy, _cw, _ch = win.content_rect()
     px = _px(ws)

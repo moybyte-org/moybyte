@@ -59,7 +59,7 @@ def test_the_player_hands_a_vm_free_game_to_the_front(front):
     ws, buf, presents = front
     open_cart(ws, "Bullet Storm")
     assert ws.run.player.cart_error is None
-    assert ws.run.player._front is True, "the Player did not take the front"
+    assert ws.run.player.front is True, "the Player did not take the front"
     assert mp.front_live()
     st = json.loads(mp.state_json())
     assert st["front"] is True and st["cart"] == "Bullet Storm"
@@ -69,7 +69,7 @@ def test_the_player_hands_a_vm_free_game_to_the_front(front):
     # A console frame while the kernel has the front (one in the same loop
     # frame that took it, as a link's re-run does) leaves the run alone.
     ws.frame(1 / 30)
-    assert ws.run.player._front is True and mp.front_live()
+    assert ws.run.player.front is True and mp.front_live()
     assert json.loads(mp.state_json())["play"]["frames"] == st["play"]["frames"]
     f0, t0 = st["play"]["frames"], st["play"]["ticks"]
     for i in range(1, 11):
@@ -90,7 +90,7 @@ def test_no_held_button_ends_a_front_run(front):
     (and Backspace, which no longer maps to it) leaves the run playing."""
     ws, buf, presents = front
     open_cart(ws, "Bullet Storm")
-    assert ws.run.player._front is True
+    assert ws.run.player.front is True
     inp = mp._BOUND[0]
     now = 5000
     assert mp.front_frame(now, 33333) == 1
@@ -115,7 +115,7 @@ def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):
     ws, buf, presents = front
     ws.input = InputTable()           # a board's table: it carries `start`
     open_cart(ws, "Bullet Storm")
-    assert ws.run.player._front is True
+    assert ws.run.player.front is True
     inp = mp._BOUND[0]
     assert mp.front_frame(7000, 33333) == 1
     src = inp.source("kbd")
@@ -131,7 +131,7 @@ def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):
     assert ws.pause.open and ws.run.player.paused
     ws.frame(1 / 30)
     ws.pause.close()
-    assert ws.run.player._front is True and mp.front_live(), "Resume gives the front back"
+    assert ws.run.player.front is True and mp.front_live(), "Resume gives the front back"
 
 
 def test_the_dev_channels_end_closes_a_run_in_front(front):
@@ -160,7 +160,7 @@ def test_a_canvas_the_run_does_not_draw_at_keeps_the_console_front(tmp_path):
     try:
         open_cart(ws, "Bullet Storm")
         assert ws.run.player.cart_error is None
-        assert ws.run.player._front is False
+        assert ws.run.player.front is False
         assert not mp.front_live()
         assert mp.front_frame(0, 33333) == -1
     finally:

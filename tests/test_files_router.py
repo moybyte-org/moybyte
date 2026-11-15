@@ -24,11 +24,11 @@ def _open_files(ws):
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    return ws.files_app
+    return ws.app("files")
 
 
 def _a_project(ws):
-    return ws.files_app._nav.projects()[0]
+    return ws.app("files")._nav.projects()[0]
 
 
 def _seed_drawing(carts, name):
@@ -343,7 +343,7 @@ def _key(ws, app, name):
 
 def _page(ws, place=files_app.PROJECTS):
     """The handheld's page of `place`'s files, focus on its rows."""
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place(place)
     app.level = "files"
     app._focus = "files"

@@ -42,7 +42,7 @@ SURFACES = {"blocks": ("Coin Quest", "code", "blocks"),
 def _desk(path, cart, key, tab, ships, window=False):
     ws = host_app.build_workstation(str(path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.home.open_desk()
@@ -53,10 +53,10 @@ def _desk(path, cart, key, tab, ships, window=False):
     if window:
         # a window short of the glass: the WM asks HELD in the root's layout,
         # whose arrangement of the panes is not the window's
-        win = ws.wm._wins["menu"]
+        win = ws.wm.windows["menu"]
         if win.saved is None:
             win.saved = (120, 70, 892, 509)
-        ws.wm._toggle_max(win)
+        ws.wm.toggle_max(win)
         drv.frame(DT)
     d = ws.editor_desk
     d.switch(key)
@@ -74,7 +74,7 @@ class Pair:
         self.b, self.db = _desk(tmp_path / "b", cart, key, tab, False, window)
         self.d = self.a.editor_desk
         self.bufs = bufs
-        root = self.a.wm._root_canvas
+        root = self.a.wm.root_canvas
         root.RETAINED_FRAMES = bufs
         self.held = [bytes(root._buf)]
         self.own = []                   # each painted frame: the pane's alone
@@ -82,7 +82,7 @@ class Pair:
             self.frame(check=False)
         for ws in (self.a, self.b):
             settle_badges(ws)
-            ws._toast_until = 0
+            ws.toast_until = 0
             ws.mark_dirty()
         for _ in range(3):
             self.frame()
@@ -96,10 +96,10 @@ class Pair:
         self.db.frame(DT)
         if a.frame_state.frames_drawn == n:
             return
-        root = a.wm._root_canvas
+        root = a.wm.root_canvas
         shot = bytes(root._buf)
         if check:
-            want = bytes(b.wm._root_canvas._buf)
+            want = bytes(b.wm.root_canvas._buf)
             if shot != want:
                 w = root.w
                 px = [i // 2 for i in range(0, len(shot), 2) if shot[i:i + 2] != want[i:i + 2]]
@@ -165,7 +165,7 @@ def test_a_panes_key_frames_are_its_own_and_a_whole_draws(tmp_path, surface, buf
 @pytest.mark.parametrize("surface", ("blocks", "cards", "music"))
 def test_a_window_short_of_the_glass_keeps_the_panes_frames_its_own(tmp_path, surface):
     p = Pair(tmp_path, surface, 2, window=True)
-    assert p.a.wm._wins["menu"].content_rect()[2] < p.a.wm._root_canvas.w
+    assert p.a.wm.windows["menu"].content_rect()[2] < p.a.wm.root_canvas.w
     p.key(mi.KEY_RIGHT if surface == "music" else mi.KEY_DOWN, 6)
     assert sum(p.own) >= len(p.own) // 2, p.own
 

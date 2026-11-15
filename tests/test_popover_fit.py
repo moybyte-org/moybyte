@@ -85,7 +85,7 @@ def test_every_desk_popover_lies_within_the_glass(tmp_path, glass, fs, bar):
     ws = build_desktop_ws(tmp_path, sys_size=size, panel_diagonal_in=diag, font_scale=fs)
     if bar == "bottom":
         _bottom_bar(ws)
-    ws.bar_layer._today = lambda: (2026, 11, 9)          # six weeks
+    ws.bar_layer.today = lambda: (2026, 11, 9)          # six weeks
     ws.home.open_desk()
     drv = make_drv(ws)
     drv.frame(1 / 30)

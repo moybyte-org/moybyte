@@ -189,9 +189,9 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
     assert "scene" in [t for t, _g in EA._ZONE_TABS]
     assert "scene" in [t for t, _l, _i in EA._TAB_CHIPS]
     ws = _open_ws(tmp_path)
-    ws.text._open_scene()
+    ws.text.open_scene()
     assert ws.menu_view == "scene" and ws.editor_app.tab == "scene"
-    assert ws._content_layer() is ws._content_layers["scene"]
+    assert ws.content_layer() is ws._content_layers["scene"]
     ws.frame(0.016)                                  # the tab draws headlessly
     # The bar SAVE routes to the scene persist verb on this tab.
     ws.scene_ui.sceneedit.place(10, 10)
@@ -201,7 +201,7 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
 
 def test_tap_places_selects_and_drag_moves(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     ws.scene_ui.page().set_tool("stamp")
     se = ws.scene_ui.sceneedit
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
@@ -228,7 +228,7 @@ def test_tap_places_selects_and_drag_moves(tmp_path):
 
 def test_drag_on_empty_world_pans_and_never_places(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     se = ws.scene_ui.sceneedit
     count = len(se.rows)
     layer = ws._content_layers["scene"]
@@ -256,11 +256,11 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
         "    n = len(scene())\n"
         "def _draw():\n    cls(0)\n"))
     assert ws.ns["n"] == 2
-    ws.text._open_scene()
+    ws.text.open_scene()
     ws.scene_ui.page().set_tool("stamp")
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     _tap(ws, x0 + 120, y0 + 40)                       # place actor #3
-    ws.text._leave_menu()                                  # PLAY re-runs _init AND commits
+    ws.text.leave_menu()                                  # PLAY re-runs _init AND commits
     assert ws.ns["n"] == 3
     # The placement is durably persisted too -- PLAY hard-commits (#111).
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
@@ -269,7 +269,7 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
 
 def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     se = ws.scene_ui.sceneedit
     se.place(80, 80)
     ws.saves.save_scene()
@@ -290,7 +290,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
 
 def test_props_row_tag_typing_and_flip(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     ui = ws.scene_ui
     se = ui.sceneedit
     page = ui.page()
@@ -317,7 +317,7 @@ def test_props_row_tag_typing_and_flip(tmp_path):
 
 def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
     ws = _open_ws(tmp_path)                           # no scenes at all
-    ws.text._open_scene()
+    ws.text.open_scene()
     ui = ws.scene_ui
     assert ui.scene_name == "main" and ui.sceneedit.rows == []
     ui.sceneedit.place(24, 24)
@@ -330,7 +330,7 @@ def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
 
 def test_zoom_cycles_and_camera_clamps(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     ui = ws.scene_ui
     assert ui._sv_metrics()[2] == 1
     ui._cycle_zoom()
@@ -347,7 +347,7 @@ def test_zoom_cycles_and_camera_clamps(tmp_path):
 
 def test_editor_resets_between_carts(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
-    ws.text._open_scene()
+    ws.text.open_scene()
     assert ws.scene_ui.sceneedit is not None
     ws.home.go_home()
     assert ws.scene_ui.sceneedit is None              # no stale editor leaks

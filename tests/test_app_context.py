@@ -153,7 +153,7 @@ def test_an_app_declares_nothing_it_does_not_use(mod, cls):
 def test_the_context_carries_only_the_declared_roles(tmp_path):
     ws = _ws(tmp_path)
     for _mod, cls in APP_TARGETS:
-        app = next(a for a in ws._apps if type(a).__name__ == cls)
+        app = next(a for a in ws.app_layers if type(a).__name__ == cls)
         ctx = app.ctx
         declared = set(_declared(_mod, cls))
         for role in _ac.ROLES:
@@ -169,7 +169,7 @@ def test_an_app_on_the_verbs_gets_a_host_that_reads_its_pointer(tmp_path):
     `handle_pointer` that names no `down` still drags its pages and tables
     (the Music lists once took every drag as a tap)."""
     ws = _ws(tmp_path)
-    apps = [a for a in ws._apps if getattr(type(a), "UI", False)]
+    apps = [a for a in ws.app_layers if getattr(type(a), "UI", False)]
     assert len(apps) >= 9
     for app in apps:
         host = app.ctx.ui
@@ -238,7 +238,7 @@ def _quiesce_frame(ws):
     if ws.pointer is not None:
         ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
     ws.show_achievements = False
@@ -246,10 +246,10 @@ def _quiesce_frame(ws):
     ws.perf_hud = False
     ws.perf_capture = False
     ws.sysmenu.open = False
-    ws._about = False
-    ws._notice = None
+    ws.about = False
+    ws.notice_up = None
     ws._notice_until = 0
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer.clock_text = lambda: "00:00"
 
 
 def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
@@ -269,8 +269,8 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     ws.carts_store = None
     ws.store.bind()
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
-    assert ws.files_app._persist((None, err)) is False
-    assert ws.files_app.status == "CAN'T SAVE HERE"
+    assert ws.app("files")._persist((None, err)) is False
+    assert ws.app("files").status == "CAN'T SAVE HERE"
 
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
@@ -308,7 +308,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     # on the construction path any more.
     assert boot >= 7, "no role construction counted at boot (%d)" % boot
 
-    app = ws._apps_by_id["files"]
+    app = ws.app("files")
     assert ws.spine.open_app(app)
     del built[:]
     for _ in range(24):
@@ -334,7 +334,7 @@ def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
     is also how this test was caught being vacuous before the handlers were
     added."""
     ws = _ws(tmp_path)
-    app = ws._apps_by_id[kind]
+    app = ws.app(kind)
     assert ws.spine.open_app(app), kind + " has no identity cart"
 
     def quiet_loop():
@@ -399,7 +399,7 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     CAN'T SAVE <why>. Those strings are DRAWN, so this pins the seam that used
     to be three hand-rolled try/excepts."""
     ws = _ws(tmp_path)
-    app = ws.files_app
+    app = ws.app("files")
     ws.carts_store = None
     ws.store.bind()
     assert app._persist((None, _ac.NO_STORE)) is False
@@ -614,7 +614,7 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     """The bus rule (native/moy_app/README.md): on the
     T-Deck the card shares the panel's SPI host, and the gate that drains the
     flush is held only around one store op. This is the host's model of it: a
-    gate held while `_with_sd` runs a cart-store op (the files rows take the
+    gate held while `with_sd` runs a cart-store op (the files rows take the
     kernel's gate, moy_vol_gate_enter, which the T-Deck's suite holds them to
     and the host has none of), and a present that cannot flush while it is
     held. A session of either role leaked across frames must present every
@@ -631,7 +631,7 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
         finally:
             gate[0] -= 1
 
-    ws._with_sd = with_sd
+    ws.with_sd = with_sd
     real_flush = ws.comp.flush
 
     def flush(*a, **kw):
@@ -779,8 +779,8 @@ def test_notify_reads_the_badges_live_across_a_store_load(tmp_path):
     settle_badges(ws)                                  # the achievements process takes it
     assert notify.award("konami") is False             # a repeat is no find
     shell = {b[0]: b for b in notify.groups()[0][2]}
-    assert shell["konami"][6] == ws.notices._today_ymd() and shell["decorator"][6] is None
-    assert notify.today() == ws.notices._today_ymd()
+    assert shell["konami"][6] == ws.notices.today_ymd() and shell["decorator"][6] is None
+    assert notify.today() == ws.notices.today_ymd()
     ws.notices.load_achievements()
     assert notify.groups() is ws.ach.groups()
 
@@ -986,7 +986,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
 @pytest.mark.parametrize("kind", ("storybook", "artwork"))
 def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
     ws = _ws(tmp_path)
-    app = ws._apps_by_id[kind]
+    app = ws.app(kind)
     assert callable(getattr(app, "close", None)), \
         kind + " persists on a debounce but has no close() -- see go_home()"
 

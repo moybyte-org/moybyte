@@ -45,9 +45,9 @@ def _projects(ws, size=None):
     ws.home.open_desk()
     ws.home.open_projects()
     _frame(ws)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     if size is not None:
-        ws.wm._resize_window(win, *size)
+        ws.wm.resize_window(win, *size)
         _frame(ws)
     grid = ws.projects_grid
     grid.sel = next(i for i, it in enumerate(grid.items) if it.get("path"))
@@ -72,14 +72,14 @@ def test_the_window_draws_the_console_homes_design(tmp_path):
     win, grid = _projects(ws)
     assert isinstance(grid, home_carousel.Carousel) and grid is not ws.launcher
     assert grid.tab == "make"
-    ws.wm._install(win.ctx)
+    ws.wm.install_window(win.ctx)
     try:
         assert grid.desk(), "the window lays out the desk home, not the handheld's"
         verbs = [v for v, _r, _k in ws.projects_layer._desk_buttons()]
         assert verbs[:2] == ["change", "copy"]
         assert ws.bar_layer._zone_owner("projects") is ws.projects_layer
     finally:
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
 
 
 @pytest.mark.parametrize("size", [None, (640, 528), (420, 500), (360, 534), (520, 340), (700, 400)])
@@ -88,7 +88,7 @@ def test_the_window_lays_out_in_its_content_rect_at_any_size(tmp_path, size):
     lie inside the window's content rect and apart from one another."""
     ws = _ws(tmp_path)
     win, grid = _projects(ws, size)
-    ws.wm._install(win.ctx)
+    ws.wm.install_window(win.ctx)
     try:
         lay = ws.layout
         content = (lay.cx, lay.cy, lay.cw, lay.ch)
@@ -107,7 +107,7 @@ def test_the_window_lays_out_in_its_content_rect_at_any_size(tmp_path, size):
         for _v, r, _k in buttons:
             assert _inside(r, pane), (r, pane)
     finally:
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
 
 
 def _geom(cw, ch):
@@ -155,7 +155,7 @@ def test_the_window_lies_on_its_panel_never_the_wallpaper(tmp_path):
     assert bytes(win.buf._buf) == plain
     ws.look.select_wallpaper(None, persist=False)
     _frame(ws)
-    assert not ws._animating(g._DT)
+    assert not ws.animating(g._DT)
 
 
 def test_a_short_window_drops_the_facts_then_the_metadata():
@@ -193,7 +193,7 @@ def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
     ws = _ws(tmp_path)
     win, grid = _projects(ws, size)
     _own(ws, grid)
-    ws.wm._install(win.ctx)
+    ws.wm.install_window(win.ctx)
     was = ui_draw.input_kind()
     try:
         lay = ws.layout
@@ -215,7 +215,7 @@ def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
         assert [(v, k) for v, _r, k in home._desk_buttons()] == [("new", "primary")]
     finally:
         ui_draw.input_kind(was)
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
 
 
 def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
@@ -224,7 +224,7 @@ def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
     ws = _ws(tmp_path)
     win, grid = _projects(ws, (360, 534))
     _own(ws, grid)
-    ws.wm._install(win.ctx)
+    ws.wm.install_window(win.ctx)
     try:
         home = ws.projects_layer
         buttons = home._desk_buttons()
@@ -232,7 +232,7 @@ def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
         assert home._button_rows_apart(buttons, 0) == (None, 1)
         assert home._button_rows_apart(buttons, 1) == (0, 2)
     finally:
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
 
 
 def test_delete_stands_a_groups_gap_apart(tmp_path):
@@ -242,7 +242,7 @@ def test_delete_stands_a_groups_gap_apart(tmp_path):
     ws = _ws(tmp_path)
     win, grid = _projects(ws)
     _own(ws, grid)
-    ws.wm._install(win.ctx)
+    ws.wm.install_window(win.ctx)
     try:
         (_c, a, _k1), (_y, b, _k2), (_p, p, _k3), (_d, c, kind) = \
             ws.projects_layer._desk_buttons()
@@ -250,7 +250,7 @@ def test_delete_stands_a_groups_gap_apart(tmp_path):
         assert p[0] - (b[0] + b[2]) == b[0] - (a[0] + a[2]) > 0
         assert c[0] - (p[0] + p[2]) > b[0] - (a[0] + a[2])
     finally:
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
 
 
 @pytest.mark.parametrize("where", ["projects", "play"])
@@ -269,16 +269,16 @@ def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where)
         ws.home.open_library()
         ws.home.set_home_arrangement("carousel")
         ws.home.set_home_tab("games")
-        grid, cv, ctx = ws.launcher, ws.wm._root_canvas, ws.wm._root_ctx
+        grid, cv, ctx = ws.launcher, ws.wm.root_canvas, ws.wm.root_ctx
     grid.sel = len(grid.items) - 1         # far past the card it looks at
     _frame(ws)
 
     def at(fn):
-        ws.wm._install(ctx)
+        ws.wm.install_window(ctx)
         try:
             return fn()
         finally:
-            ws.wm._install(ws.wm._root_ctx)
+            ws.wm.install_window(ws.wm.root_ctx)
 
     g = at(grid._geom)
     left, pitch, side = g[1][0] + g[9][4] - g[5], g[3], g[2]

@@ -147,7 +147,7 @@ def open_cart(ws, title):
         return
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     ws.spine.play(ws.launcher_layer)
 
 
@@ -184,7 +184,7 @@ def quiesce(ws):
     deadline is up. The badges' queued events run first (`settle_badges`)."""
     settle_badges(ws)
     ws.pointer.visible = False
-    ws._toast_until = 0
+    ws.toast_until = 0
 
 
 def no_unlock_banner(ws):
@@ -328,7 +328,7 @@ def settings_back(ws, drv):
     look draws it, else the bar's context X."""
     bl = ws.bar_layer
     if bl.draws_back("settings"):
-        x, y, w, h = bl._zone_rect("settings")
+        x, y, w, h = bl.zone_rect("settings")
         bx, by = bl.cell("settings", "zone")[0][1][:2]
         drv.click(bx + x + h // 2, by + y + h // 2)
         return

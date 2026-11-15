@@ -35,7 +35,7 @@ def test_boot_lands_on_the_desk(tmp_path):
     drv = _drv(ws)
     assert ws.wm.stack.kinds() == ["launcher", "desk"]
     assert ws.wm.desk_open() and ws.windowed_chrome
-    assert ws.wm._order == []                     # a floor, not a window
+    assert ws.wm.z_order == []                     # a floor, not a window
     # The desk draws its icon column: PLAY + PROJECTS + the system apps.
     keys = [k for k, _b, _p, _l, _c in ws.wm._backdrop_layer._icon_rects()]
     assert keys[:2] == ["play", "projects"]
@@ -75,7 +75,7 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     ws.home.open_desk()
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     drv.frame(1 / 30)
@@ -168,12 +168,12 @@ def test_play_icon_enters_console_mode(tmp_path):
     drv = _drv(ws)
     ws.open_settings()                            # an open desk window
     drv.frame(1 / 30)
-    assert ws.wm._order == ["settings"]
+    assert ws.wm.z_order == ["settings"]
     ws.wm._backdrop_layer._open_icon("play")
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]    # the route at its root
     assert not ws.windowed_chrome
-    assert ws.wm._order == [] and ws.wm._parked.order == ["settings"]
+    assert ws.wm.z_order == [] and ws.wm.parked.order == ["settings"]
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
 
@@ -201,7 +201,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     drv.frame(1 / 30)
     assert ws.cart_error is None
     assert ws.wm.stack.kinds() == ["launcher", "desktop"]
-    assert ws.wm._order == []                     # fullscreen: no player window
+    assert ws.wm.z_order == []                     # fullscreen: no player window
     # The fullscreen composite paints the game onto the big system canvas
     # (probe a mid-viewport pixel -- corners can carry overlay stamps).
     ox, oy, scale = ws.wm.viewport()
@@ -211,7 +211,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     game_px = ws.run.canvas.pix(160, 100)
     sys_px = ws.sys_canvas.pix(ox + 160 * scale, oy + 100 * scale)
     assert sys_px == game_px
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]           # back in the Library
     assert ws.cart is None                        # full go_home cleanup ran
@@ -236,7 +236,7 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
     assert _select(ws, "Star Catcher")
     ws.open()
     drv.frame(1 / 30)
-    assert ws.wm._order == []                     # fullscreen -> composite_game
+    assert ws.wm.z_order == []                     # fullscreen -> composite_game
 
     blits, bezels = [], []
 
@@ -256,9 +256,9 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
         def cls(self, color):
             bezels.append(color)
 
-    real_game, real_sys = ws.run.canvas, ws._sys_canvas
+    real_game, real_sys = ws.run.canvas, ws.bound_sys_canvas
     ws.run.canvas = _NoBufGame(real_game)
-    ws._sys_canvas = _RasterSys(real_sys)
+    ws.bound_sys_canvas = _RasterSys(real_sys)
     ws.wm.composite_game()
     assert blits, "the fullscreen composite bailed on a device-shaped canvas"
     ox, oy, scale = blits[0]
@@ -268,7 +268,7 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
     # still bails BEFORE the letterbox cls -- the #175 property this relaxed
     # guard must keep: that fill would wipe the frame already in the stream.
     bezels.clear()
-    ws._sys_canvas = _CommandSys(real_sys)
+    ws.bound_sys_canvas = _CommandSys(real_sys)
     ws.wm.composite_game()
     assert bezels == []
 
@@ -292,11 +292,11 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     for _ in range(3):                            # saturate the paint latch
         drv.frame(1 / 30)
     wm = ws.wm
-    assert wm._bezel_paints >= wm._retained_n()
+    assert wm._bezel_paints >= wm.retained_n()
     ox, oy, _scale = wm.viewport()
     assert ox > 0 and oy > 0                      # there IS a letterbox here
 
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     for _ in range(2):
         drv.frame(1 / 30)
 
@@ -321,7 +321,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     to the console-mode home, on the tab and the card it came from (R5-05)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     drv.frame(1 / 30)
     ws.home.open_library()
     drv.frame(1 / 30)
@@ -331,7 +331,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     ws.home.launch_selected()                          # Make's tap edits
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and ws.wm.desk_open()
-    assert ws.wm._order == ["calc", "menu"] and ws.screen == "menu"
+    assert ws.wm.z_order == ["calc", "menu"] and ws.screen == "menu"
     assert ws.cart.get("path") == want
     ws.wm.close_window_kind("menu")               # the Editor's X
     drv.frame(1 / 30)
@@ -342,7 +342,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     assert _select(ws, "Star Catcher")
     ws.home.change_selected()                          # CHANGE = the Editor, a window
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["calc", "menu"]
     ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.launcher.tab == "games"
@@ -353,7 +353,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     ws.home.launch_selected()
     drv.frame(1 / 30)
     assert len(ws.carts.all) == n0 + 1
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["calc", "menu"]
     assert ws.cart.get("type") == "game"
     made = ws.cart.get("path")
     ws.wm.close_window_kind("menu")
@@ -363,7 +363,7 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     # The parked windows came through the trip untouched.
     ws.home.open_desk()
     drv.frame(1 / 30)
-    assert ws.wm._order == ["calc"]
+    assert ws.wm.z_order == ["calc"]
 
 
 def test_closing_the_editor_stays_on_the_desk_once_another_window_opened(tmp_path):
@@ -377,12 +377,12 @@ def test_closing_the_editor_stays_on_the_desk_once_another_window_opened(tmp_pat
     assert _select(ws, "Star Catcher")
     ws.home.launch_selected()
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["menu"]
     ws.wm._backdrop_layer._open_icon("files")
     drv.frame(1 / 30)
     ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["files"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["files"]
 
 
 def test_an_editor_opened_on_the_desk_closes_onto_the_desk(tmp_path):
@@ -396,10 +396,10 @@ def test_an_editor_opened_on_the_desk_closes_onto_the_desk(tmp_path):
     g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
     ws.home.launch_selected(g)
     drv.frame(1 / 30)
-    assert ws.wm._order == ["projects", "menu"]
+    assert ws.wm.z_order == ["projects", "menu"]
     ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["projects"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["projects"]
 
 
 def test_desk_icons_open_windows(tmp_path):
@@ -407,10 +407,10 @@ def test_desk_icons_open_windows(tmp_path):
     drv = _drv(ws)
     ws.wm._backdrop_layer._open_icon("files")
     drv.frame(1 / 30)
-    assert ws.wm._order == ["files"]
+    assert ws.wm.z_order == ["files"]
     ws.wm._backdrop_layer._open_icon("projects")
     drv.frame(1 / 30)
-    assert ws.wm._order == ["files", "projects"]
+    assert ws.wm.z_order == ["files", "projects"]
     # Pointer path: a tap on the PLAY icon box through the desk root layer.
     for key, box, _pill, _label, _cart in ws.wm._backdrop_layer._icon_rects():
         if key == "play":
@@ -434,7 +434,7 @@ def test_font_scale_flip_inside_desk_never_leaks_chrome(tmp_path):
     ws.open()
     drv.frame(1 / 30)
     assert ws.cart_error is None                  # console mode renders cleanly
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     drv.frame(1 / 30)
     assert ws.wm.stack.kinds() == ["launcher"]
 

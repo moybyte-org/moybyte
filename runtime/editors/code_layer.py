@@ -414,7 +414,7 @@ class CodeLayer(Layer):
         # the SAME bar every other tab does. System canvas + responsive layout, like the
         # launcher/Settings bar. This replaces the code editor's old title + RUN/SAVE/
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
-        self.ws.bar_layer._draw_status_strip("menu")
+        self.ws.bar_layer.draw_status_strip("menu")
         if self.ws.crash_popup:
             self._draw_crash_popup()       # the stop card's See why: what stopped
                                            # the run, hung under its line
@@ -721,7 +721,7 @@ class CodeLayer(Layer):
             self._clear_err()
         else:
             ws.run.player.crash_line = None       # superseded by the live syntax position
-            ws.saves._set_code_error(msg, move=False)
+            ws.saves.set_code_error(msg, move=False)
 
     def _feed_char(self, code):
         # One typed/tapped character: into the find field while it's focused, else
@@ -1156,7 +1156,7 @@ class CodeLayer(Layer):
         if ws.code_layout.symbols != self.wants_symbols():
             # The last input moved between touch and keys: the symbol keys
             # come or go, and the code takes their rows (D-17).
-            ws._relayout_code()
+            ws.relayout_code()
         lay = ws.code_layout
         ed = ws.editor
         t = self._t = self._tones()
@@ -1309,7 +1309,7 @@ class CodeLayer(Layer):
         if t is not None:
             ink = t["sym_ink"]
         if _glyph_known(spec):
-            self.ws._glyph(spec, rect, ink, cv)
+            self.ws.glyph(spec, rect, ink, cv)
             return
         if not spec:
             return

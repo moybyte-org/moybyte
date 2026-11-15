@@ -352,7 +352,7 @@ class Rig:
                        ("local", "keys"), ("touch", "touch")))
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
-        ws.bar_layer._clock_text = lambda: "10:30"
+        ws.bar_layer.clock_text = lambda: "10:30"
         self.drv = host_app.ConsoleDriver(ws)
         self.kbd_bus = Kbd()
         self.kbd_bus.frames = [b"\x00"]
@@ -396,7 +396,7 @@ class Rig:
         if self.layer == "py_shell":
             return dict(self.app.S)
         if self.layer == "lua_app":
-            g = p._lua.get_global
+            g = p.lua.get_global
             return {"t": g("T"), "c": g("C"), "n": g("N"), "open": g("OPEN"), "first": g("FIRST"),
                     "r": PAGE_RECT.get(self.row)}
         if self.layer == "py_app":

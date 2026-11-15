@@ -413,7 +413,7 @@ def test_the_desktop_says_the_update_landed(tmp_path):
     ws = _ws_with(tmp_path, ("ok", "v2 -> v3"))
     assert ws.notices.announce_update() is True
     assert ws.notices.notice_active() is True
-    title, sub, kind = ws._notice
+    title, sub, kind = ws.notice_up
     assert "updated" in title
     assert "v2" in sub                    # the stub's version_label
     assert kind == "ok"
@@ -422,7 +422,7 @@ def test_the_desktop_says_the_update_landed(tmp_path):
 def test_the_desktop_says_when_the_update_was_undone(tmp_path):
     ws = _ws_with(tmp_path, ("rolled_back", "put v2 back"))
     ws.notices.announce_update()
-    assert ws._notice[2] == "warn"
+    assert ws.notice_up[2] == "warn"
 
 
 def test_the_banner_leaves_the_verdict_for_the_update_screen(tmp_path):
@@ -449,7 +449,7 @@ def test_the_banner_expires_on_its_own(tmp_path):
     ws.notices.notice("HELLO", "there", "ok", ms=100)
     assert ws.notices.notice_active(now=ws._notice_until - 1) is True
     assert ws.notices.notice_active(now=ws._notice_until + 1) is False
-    assert ws._notice is None
+    assert ws.notice_up is None
 
 
 def test_the_banner_joins_the_overlay_stack_and_keeps_the_screen_alive(tmp_path):
@@ -458,10 +458,10 @@ def test_the_banner_joins_the_overlay_stack_and_keeps_the_screen_alive(tmp_path)
     # be painted once and then sit there frozen past its own expiry.
     ws = _ws_with(tmp_path, ("ok", "v2 -> v3"))
     ws.notices.announce_update()
-    assert ws._notice_layer in ws._overlay_stack()
-    assert ws._animating(1.0 / 30) is True
-    ws._notice = None
-    assert ws._notice_layer not in ws._overlay_stack()
+    assert ws.notice_layer in ws._overlay_stack()
+    assert ws.animating(1.0 / 30) is True
+    ws.notice_up = None
+    assert ws.notice_layer not in ws._overlay_stack()
 
 
 def test_the_banner_draws_at_both_tiers(tmp_path):
@@ -566,12 +566,12 @@ def test_the_default_channel_is_the_one_this_firmware_was_built_on(tmp_path):
             return "unstable"
 
     ws.updater = _Beta()
-    assert ws.toggles._ota_channel() == "unstable"
+    assert ws.toggles.ota_channel() == "unstable"
 
 
 def test_a_stable_build_still_defaults_to_stable(tmp_path):
     ws = _ws_with(tmp_path, None)
-    assert ws.toggles._ota_channel() == "stable"
+    assert ws.toggles.ota_channel() == "stable"
 
 
 def test_a_deliberate_choice_beats_the_running_channel(tmp_path):
@@ -585,14 +585,14 @@ def test_a_deliberate_choice_beats_the_running_channel(tmp_path):
 
     ws.updater = _Beta()
     ws.system.set("ota_channel", "stable")
-    assert ws.toggles._ota_channel() == "stable"
+    assert ws.toggles.ota_channel() == "stable"
 
 
 def test_no_updater_at_all_defaults_to_stable(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert ws.updater is None                 # the host injects none
-    assert ws.toggles._ota_channel() == "stable"
+    assert ws.toggles.ota_channel() == "stable"
 
 
 # -- both boards are wired to it ---------------------------------------------

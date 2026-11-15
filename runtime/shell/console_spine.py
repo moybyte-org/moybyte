@@ -17,7 +17,7 @@ The state these verbs keep lives in C -- the spine's components
 `self.returns` (Returns) and `self.prefs.rows` (Settings), and the lease
 table's radio row (native/moy_kernel/moy_lease.h): `self.leases` (Wifi) --
 which hold ids, kinds, tags and JSON text, never a Python object. What stays here is the
-Python side of each verb: the app objects (`_apps`, `_apps_by_id`), the
+Python side of each verb: the app objects (`app_layers`, `_apps_by_id`), the
 surfaces a route lands on, and the radio service the lease powers.
 """
 
@@ -209,7 +209,7 @@ class Spine:
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
         ws = self.ws
-        if ws.cart_error is not None and ws.web.parked and ws._crash_to_code():
+        if ws.cart_error is not None and ws.web.parked and ws.crash_to_code():
             return                     # a parked console goes home; else the stop card
         if ws.run.player.notice is not None:
             ws.pause.stop()          # a cart this console cannot run: its card over
@@ -240,7 +240,7 @@ class Spine:
             return kind
         return None
 
-    def _exit_to_caller(self):
+    def exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
         spec Section 2's launch-and-return). The pause menu's Quit, quit()
         and a tool's bar X call this. The Editor is the second caller
@@ -306,7 +306,7 @@ class Spine:
         the app's `open()`, which resets it to its root -- and coming back to a
         different screen than you left is exactly what a return must not do."""
         ws = self.ws
-        app = ws._apps_by_id.get(app_id)
+        app = ws.app(app_id)
         if app is None:
             return False
         ws.frame_state.dirty = True
@@ -331,7 +331,7 @@ class Spine:
         if back is not None and ws.wm.top_is("launcher"):
             self._return_to_app(back)
 
-    def _note_app_caller(self):
+    def note_app_caller(self):
         """Record the registered APP this navigation is leaving, so whatever it
         opens comes back to it. Called at the app-to-app jumps -- `open_app`
         and the two `ctx.nav` editor doors.
@@ -355,7 +355,7 @@ class Spine:
         Files shelf, not to the launcher)."""
         ws = self.ws
         if ws.wm.top_is("settings"):            # Stage 6d: ask the stack top
-            ws._exit_settings()
+            ws.exit_settings()
         elif not ws.wm.top_is("launcher"):
             self._go_home_or_back()
 
@@ -365,9 +365,8 @@ class Spine:
         There is no per-app line in this file. `app_decls.APPS` is GENERATED
         from the `app` blocks in `system_carts/*/manifest.json`, so adding an
         app is a manifest plus a module -- never an edit here
-        (docs/app_api_v1.md). The `<id>_app` attributes are kept because the
-        shell and the apps address each other by them (`settings_layer` opens
-        `ws.appearance_app`), and because 100+ call sites use them.
+        (docs/app_api_v1.md). The shell addresses an app as `ws.app(id)`
+        (`settings_layer` opens `ws.app("appearance")`).
 
         Declaration order IS dispatch precedence, which is why `order` lives in
         the manifest rather than being implied by a dict.
@@ -382,7 +381,6 @@ class Spine:
                 ctx.ui = AppHost(d["id"], getattr(ctx, "surface", None))
                 ws._app_hosts[d["id"]] = ctx.ui
             app = cls(ctx, NAMES)
-            setattr(ws, str(d["id"]) + "_app", app)
             # Paint's document model is the console's reach into Paint (the
             # backdrop's My Art, the image door, the Paint cart's identity).
             service = getattr(app, "service", None)
@@ -416,7 +414,7 @@ class Spine:
         if not isinstance(app, Layer):
             raise TypeError("an app is a layers.AppLayer: " + str(app.id))
         ws.apps.register(app.id, getattr(app, "TITLE", app.id.upper()), min_size)
-        ws._apps.append(app)
+        ws.app_layers.append(app)
         ws._apps_by_id[app.id] = app
         ws._content_layers[app.id] = app
         hook = getattr(ws.wm, "on_app_registered", None)
@@ -427,7 +425,7 @@ class Spine:
         # derive it, or it keeps the app carts it was built without knowing about.
         _g = getattr(ws, "projects_grid", None)
         if _g is not None:
-            _g.set_items(ws.home._launcher_view_items(_g))
+            _g.set_items(ws.home.launcher_view_items(_g))
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None.
@@ -470,7 +468,7 @@ class Spine:
                 return False
         if not ws.windowed_chrome:
             ws.leave_surface(ws.wm.top_kind())   # an app switch is an exit
-        self._note_app_caller()        # a jump OUT of an app comes back to it
+        self.note_app_caller()        # a jump OUT of an app comes back to it
         ws.app_carts[app.id] = cart
         if not self._project_held():
             ws.cart = cart
@@ -491,12 +489,12 @@ class Spine:
             return True
         pl = ws.run.player
         if (wm.is_parked("desktop") and pl.cart_error is None
-                and (pl._update is not None or pl._draw is not None)):
+                and (pl.update is not None or pl.draw is not None)):
             return True
         ed = getattr(ws, "editor_app", None)
         if ed is None or ed.project is not ws.run.project:
             return False
-        wins = getattr(wm, "_wins", None)
+        wins = getattr(wm, "windows", None)
         return (("menu" in wins) if wins is not None else wm.stack.has("menu")) \
             or wm.is_parked("menu")
 
@@ -508,7 +506,7 @@ class Spine:
         ws = self.ws
         if _is_ach_proc(cart):
             return True
-        for app in getattr(ws, "_apps", ()):
+        for app in getattr(ws, "app_layers", ()):
             if app.is_app(cart):
                 return True
         return False

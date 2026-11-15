@@ -634,7 +634,7 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
 
     ws.open_settings()
     sl.open_page("wifi")
-    ws._exit_settings()
+    ws.exit_settings()
     assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 

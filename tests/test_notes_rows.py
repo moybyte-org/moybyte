@@ -75,7 +75,7 @@ def _console(tmp_path, name, ships, desk):
     root = tmp_path / name
     kw = {"sys_size": (1024, 600), "font_scale": 2, "windowed": True} if desk else {}
     ws = host_app.build_workstation(str(root / "carts"), **kw)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     ws.show_fps = False
     no_unlock_banner(ws)
     quiesce(ws)
@@ -119,7 +119,7 @@ class Pair:
                 ns["_open"]("alpha")
         if desk:
             # the mouse rests on the note, over no stop
-            cx, cy, cw, ch = self.a.wm._wins["desktop"].content_rect()
+            cx, cy, cw, ch = self.a.wm.windows["desktop"].content_rect()
             self.both("hover", cx + cw * 3 // 4, cy + ch // 2)
         for _ in range(6):
             self.frame(check=False)
@@ -278,12 +278,12 @@ def test_a_cart_that_clears_draws_whole(tmp_path):
     p = Pair(tmp_path, 1)
     for ws in (p.a, p.b):
         pl = ws.run.player
-        draw, cls = pl._draw, pl.ns["cls"]
+        draw, cls = pl.draw, pl.ns["cls"]
 
         def cleared(draw=draw, cls=cls):
             cls(0)
             draw()
-        pl._draw = cleared
+        pl.draw = cleared
     p.typed("hi")
     p.keys("down", 2)
     p.settle()
@@ -301,7 +301,7 @@ def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
 
         def alone(ed=ed, sheet=sheet):
             ed.draw(*sheet)
-        pl._draw = alone
+        pl.draw = alone
     p.settle(2)
     del p.kinds[:]
     p.typed("hello")
@@ -318,7 +318,7 @@ def _at(p, desk, fx, fy):
     sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     ox = oy = 0
     if desk:
-        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+        ox, oy, _w, _h = p.a.wm.windows["desktop"].content_rect()
     return ox + sx + int(sw * fx), oy + sy + int(sh * fy)
 
 
@@ -476,7 +476,7 @@ def _chip(p):
         def counted(ws=ws, draw=draw):
             n = ws.frame_state.frames_drawn
             ws.frame_state.fps = (n * 7) % 120
-            ws._upd_ms = ws._draw_ms = ws._flush_ms = 1.0
+            ws.upd_ms = ws.draw_ms = ws.flush_ms = 1.0
             draw()
         hud.draw = counted
 
@@ -507,6 +507,6 @@ def test_a_second_note_keeps_the_rows(tmp_path, bufs):
     p.settle(3)
     del p.kinds[:]
     _session(p)
-    assert [e.live for e in p.a.run.player._editors] == [False, True]
+    assert [e.live for e in p.a.run.player.editors] == [False, True]
     moved = p.kinds.count("rows") + p.kinds.count("shift")
     assert moved > len(p.kinds) * 2 // 3, p.kinds

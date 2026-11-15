@@ -296,7 +296,7 @@ def test_graduated_blocks_tab_is_read_only_and_celebrates(tmp_path):
     renders the celebration banner without error."""
     ws, _ = _block_cart(tmp_path)
     _graduate(ws)
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     assert ws.menu_view == "blocks"
     assert ws.block_ui.blk_graduated is True
     assert ws.block_ui.blocks_ed is not None            # frozen program still renders
@@ -316,7 +316,7 @@ def test_graduated_graduate_button_opens_diverged_code(tmp_path):
     recompiles the frozen blocks over it)."""
     ws, _ = _block_cart(tmp_path)
     _graduate(ws)
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     assert ws.block_ui.blk_graduated is True
     ws.block_ui.graduate_to_code()
     assert ws.menu_view == "code" and ws.editor is not None
@@ -327,7 +327,7 @@ def test_non_graduated_block_cart_stays_editable(tmp_path):
     """Regression: a block cart that has NOT graduated is neither protected nor
     graduated -- blocks stay fully editable + saveable (the round trip is intact)."""
     ws, _ = _block_cart(tmp_path)
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     assert ws.block_ui.blk_graduated is False
     assert ws.block_ui.blk_protect is False
     assert ws.block_ui.save_blocks() is True

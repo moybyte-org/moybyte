@@ -25,12 +25,12 @@ class _Ws:
 
 def _player():
     pl = Player.__new__(Player)
-    pl._is_tool = False
+    pl.is_tool = False
     pl._free = False
     pl.sched = TickScheduler()
     pl.tick_ms = 0
-    pl._n_ticks = 1
-    pl._netplay = None
+    pl.n_ticks = 1
+    pl.netplay = None
     pl.ws = _Ws()
     return pl
 
@@ -41,7 +41,7 @@ def test_a_free_cart_is_not_paced_and_draws_every_frame():
     assert pl.tick_ms == 0 and pl._free is True
     for _ in range(10):
         assert pl.frame_plan(1 / 45) is True     # every loop frame draws
-        assert pl._n_ticks == 1                  # one real-dt tick each
+        assert pl.n_ticks == 1                  # one real-dt tick each
 
 
 def test_a_numbered_cart_keeps_its_tick():
@@ -59,7 +59,7 @@ def test_free_dt_is_the_real_one_up_to_a_stall():
     assert pl._loop_dt(1 / 45) == 1 / 45
     assert pl._loop_dt(0.7) == FREE_DT_MAX       # a radio scan slows time, never jumps it
     pl2 = _player()                              # a tool: the loop's own dt, unclamped
-    pl2._is_tool = True
+    pl2.is_tool = True
     pl2._arm_pacing({})
     assert pl2._loop_dt(0.7) == 0.7
 

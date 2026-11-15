@@ -214,9 +214,9 @@ def test_the_backdrop_rasters_once_per_theme_load_on_the_desk(tmp_path):
     assert ws.screen == "desk" and ws.look.wallpaper_id is None
     assert ws.wallpaper.rasters == 1
     assert _at(drv, 200, 595) == M.q("#e5e3f1")       # Day's left disc
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     drv.frame(1 / 30)
-    win = ws.wm._wins["calc"]
+    win = ws.wm.windows["calc"]
     for i in range(12):                                # a window moving over it
         win.x += 9
         ws.wm.dirty = True
@@ -272,15 +272,15 @@ def test_the_desk_comes_back_from_console_mode_out_of_its_cache(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True, panel_diagonal_in=7.0)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
     ws.look.set_theme("moy", variant="light")
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     for _ in range(6):
         drv.frame(1 / 30)
-    assert not ws._animating(1 / 30)
+    assert not ws.animating(1 / 30)
     desk = ws.wm._backdrop_layer
     renders = []
     draw = desk._draw_desktop
@@ -292,7 +292,7 @@ def test_the_desk_comes_back_from_console_mode_out_of_its_cache(tmp_path):
     ws.home.open_desk()
     for _ in range(6):
         drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and "calc" in ws.wm._wins
+    assert ws.wm.mode == "desktop" and "calc" in ws.wm.windows
     assert renders == []
     kept = drv.rgb888()
     ws.wm._desk_sig = None                          # the desk rendered afresh

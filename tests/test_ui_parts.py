@@ -902,7 +902,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.run.player, "_lua", None)
+    lua = getattr(ws.run.player, "lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:N_PMEM]
     if lua is not None:
@@ -1862,7 +1862,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         if name == "python":
             assert seen and set(seen) == {desk}, seen
         else:
-            run = ws.run.player._lua
+            run = ws.run.player.lua
             snap = getattr(run, "snap", None)
             if snap is None:
                 snap = run._run.snap

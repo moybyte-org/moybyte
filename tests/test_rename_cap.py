@@ -38,7 +38,7 @@ def _files(tmp_path):
     moy_carts.save_file("docs", LONG, "x", carts)
     ws = host_app.build_workstation(carts)
     _open(ws, "Files")
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place("documents")
     app._act("NAME", LONG)
     drv = host_app.ConsoleDriver(ws)

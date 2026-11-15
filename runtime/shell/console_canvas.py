@@ -7,7 +7,7 @@ its own (`_bind_window_canvas`) -- and `release_run_canvas` undoes either at
 the run's death. `release_held` frees one of the layers a modal holds the
 surface under it in. The console's `ws.binding`; the composite and the
 coordinates the frame reads every frame (`_composite_game`, `game_view`,
-`_game_xy`, `app_window_size`) stay on the class.
+`game_xy`, `app_window_size`) stay on the class.
 """
 
 from chrome import _err_text
@@ -48,10 +48,10 @@ class CanvasBinding:
             return False
         run.bound = small
         run.stock = stock
-        run.promoted = ws._sys_canvas is None
+        run.promoted = ws.bound_sys_canvas is None
         if run.promoted:
-            ws._sys_canvas = stock    # promote: the boot canvas is the glass
-            ws._surface_write()
+            ws.bound_sys_canvas = stock    # promote: the boot canvas is the glass
+            ws.surface_write()
         run.canvas = small
         return True
 
@@ -80,7 +80,7 @@ class CanvasBinding:
         (`_bind_window_canvas`). In console mode (`windowed_chrome` False) it
         gets the whole system surface."""
         ws = self.ws
-        sc = ws._sys_canvas
+        sc = ws.bound_sys_canvas
         if ws.windowed_chrome:
             return self._bind_window_canvas()
         run = ws.run
@@ -94,7 +94,7 @@ class CanvasBinding:
         run.promoted = False
         run.canvas = sc
         run.app_full_canvas = True
-        ws._surface_write()             # the strip is the responsive one now
+        ws.surface_write()             # the strip is the responsive one now
         return True
 
     def _bind_window_canvas(self):
@@ -122,7 +122,7 @@ class CanvasBinding:
         run.canvas = cv
         run.app_full_canvas = True
         run.app_window_canvas = True
-        ws._surface_write()
+        ws.surface_write()
         return True
 
     def release_run_canvas(self):
@@ -136,15 +136,15 @@ class CanvasBinding:
         run.app_window_canvas = False
         stock = run.stock
         if stock is None:
-            ws._surface_write()
+            ws.surface_write()
             return
         if run.canvas is run.bound:
             run.canvas = stock
-        if run.promoted and ws._sys_canvas is stock:
-            ws._sys_canvas = None     # back to the shared-canvas degradation
+        if run.promoted and ws.bound_sys_canvas is stock:
+            ws.bound_sys_canvas = None     # back to the shared-canvas degradation
         run.bound = run.stock = None
         run.promoted = False
-        ws._surface_write()
+        ws.surface_write()
 
     def release_held(self):
         """Free one of the layers a modal holds what is under it in -- a

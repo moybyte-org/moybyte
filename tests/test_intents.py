@@ -420,7 +420,7 @@ def test_files_open_with_asks_and_the_pick_becomes_the_choice(tmp_path):
     files = next(c for c in ws.carts.all if c.get("title") == "Files")
     ws.open(files)
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     from runtime import files_app
     app.open_place(files_app.DOCUMENTS, keep="todo")
     assert "WITH" in app._action_labels()
@@ -437,7 +437,7 @@ def test_files_open_with_says_so_where_no_app_opens_it(tmp_path):
     ws.carts_store.save_file("music", "tune", "{}", ws.carts_root)
     ws.open(next(c for c in ws.carts.all if c.get("title") == "Files"))
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     from runtime import files_app
     app.open_place(files_app.MUSIC, keep="tune")
     app._act("WITH")

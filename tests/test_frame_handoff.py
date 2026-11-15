@@ -83,14 +83,14 @@ def _playing(tmp_path, **kw):
     drv = host_app.ConsoleDriver(ws)
     select_first_game(ws)
     ws.open()
-    ws._splash_until = None
+    ws.splash_until = None
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.show_fps = False
     for _ in range(3):
         drv.frame(DT)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     return ws, drv
 
 
@@ -367,12 +367,12 @@ def _desk_playing(tmp_path):
     ws.home.open_desk()
     open_cart(ws, "Star Catcher")
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.show_fps = False
     ws.pointer.visible = False
     for _ in range(4):
         drv.frame(DT)
-    assert ws.wm._order == ["desktop"]
+    assert ws.wm.z_order == ["desktop"]
     return ws, drv
 
 
@@ -406,7 +406,7 @@ def test_the_player_window_shows_the_frame_where_the_cart_made_it(tmp_path):
     calls = _window_spy(ws)
     _frame(ws, drv, cf)
     _frame(ws, drv, cf)
-    ox, oy, scale = ws.wm._player_view(ws.wm._wins["desktop"])
+    ox, oy, scale = ws.wm._player_view(ws.wm.windows["desktop"])
     assert calls[-1] == ("present", ox, oy, scale, None, True, 2 * 320 * 240, 0)
     assert ("blit_game",) not in calls
     assert "settle" not in cf.log and cf.log[-2:] == ["take", "presented"]
@@ -467,11 +467,11 @@ def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
     ws.home.open_library()
     open_cart(ws, "Star Catcher")
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.show_fps = False
     for _ in range(3):
         drv.frame(DT)
-    assert not ws.wm._order
+    assert not ws.wm.z_order
     cf = ws.run.cart_frame = KeptCartFrame()
     calls = []
     sc = ws.sys_canvas

@@ -41,7 +41,7 @@ def _ws(tmp_path, net, urls, **kw):
     ci.save_sources(str(tmp_path / "carts"), urls)
     ws.cart_net = net
     ws.pointer.visible = False
-    return ws, ws._apps_by_id["getcarts"]
+    return ws, ws.app("getcarts")
 
 
 def _frames(ws, n=3):
@@ -107,7 +107,7 @@ def test_wifi_off_offers_the_wifi_page_and_looks_again_on_the_way_back(tmp_path)
     assert app.phase == "nowifi"
     assert app._current_verbs() == ("TRY AGAIN", "WIFI")
     assert app._focused == gc.vid("WIFI"), "Wi-Fi is the verb that goes on"
-    assert ws._wifi_icon_kind() == "wifi_off"
+    assert ws.wifi_icon_kind() == "wifi_off"
     _press(ws, app, "a")
     assert app._away and app._inst.wifi_open()
     assert ws.settings_layer.showing("wifi")
@@ -201,9 +201,9 @@ def test_the_desk_shows_the_focused_card_in_the_pane(tmp_path):
                   panel_diagonal_in=7.0, windowed=True)
     ws.home.open_desk()
     _open(ws, app)
-    win = ws.wm._wins["getcarts"]
+    win = ws.wm.windows["getcarts"]
     win.x, win.y = 112, 52
-    ws.wm._resize_window(win, 900, 536)           # the target's window
+    ws.wm.resize_window(win, 900, 536)           # the target's window
     _frames(ws)
     assert app.layout.desk and app.layout.cols == 4
     _press(ws, app, "right")

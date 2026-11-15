@@ -211,9 +211,9 @@ def test_a_wallpaper_that_raises_strikes_out_after_three_boots(tmp_path, capsys)
     assert "wallpaper always broken" not in capsys.readouterr().out, \
         "the struck-out wallpaper RAN again"
     assert ws.look.wallpaper_id == "boom"          # the choice is kept
-    assert ws._notice is not None
-    assert ws._notice[0] == "WALLPAPER OFF"
-    assert "Boom" in ws._notice[1]
+    assert ws.notice_up is not None
+    assert ws.notice_up[0] == "WALLPAPER OFF"
+    assert "Boom" in ws.notice_up[1]
 
 
 def test_a_wallpaper_that_takes_the_board_down_strikes_out_across_reboots(
@@ -235,7 +235,7 @@ def test_a_wallpaper_that_takes_the_board_down_strikes_out_across_reboots(
     assert ws.wallpaper._wp_update is None
     assert ws.wallpaper._wp_draw is None
     _paint(ws)
-    assert ws._notice is not None and ws._notice[0] == "WALLPAPER OFF"
+    assert ws.notice_up is not None and ws.notice_up[0] == "WALLPAPER OFF"
     assert ws.screen == "launcher"
 
 

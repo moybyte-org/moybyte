@@ -84,7 +84,7 @@ def face():
 
 
 def _app(ws):
-    return ws._apps_by_id["jukebox"]
+    return ws.app("jukebox")
 
 
 def _settle(ws, n=4):
@@ -306,10 +306,10 @@ def test_back_on_the_desk_minimises_the_window(tmp_path, face):
     ws.home.open_desk()
     ws.spine.open_app(app)
     _settle(ws)
-    assert "jukebox" in ws.wm._wins and not ws.wm._wins["jukebox"].minimized
+    assert "jukebox" in ws.wm.windows and not ws.wm.windows["jukebox"].minimized
     ws.input_policy.back(leave=True)
-    assert ws.wm._wins["jukebox"].minimized and ws.wm._focus != "jukebox"
-    assert ws.spine.open_app(app) and not ws.wm._wins["jukebox"].minimized
+    assert ws.wm.windows["jukebox"].minimized and ws.wm.focus_key != "jukebox"
+    assert ws.spine.open_app(app) and not ws.wm.windows["jukebox"].minimized
 
 
 def test_a_console_without_media_shows_the_no_audio_page(tmp_path, monkeypatch):
@@ -471,7 +471,7 @@ def _list_on(tmp_path, desk):
     x, y, w, h = views[-1]
     rh = app._row_h()
     view = (x, y, w, h // rh * rh)          # the table ends on a whole row
-    at = ws.wm._wins["jukebox"].content_rect()[:2] if desk else (0, 0)
+    at = ws.wm.windows["jukebox"].content_rect()[:2] if desk else (0, 0)
     return ws, drv, app, view, at
 
 

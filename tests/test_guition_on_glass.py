@@ -688,7 +688,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"
-            ".endswith('pytest_sync.moy') for c in ws.home._runnable_items())))",
+            ".endswith('pytest_sync.moy') for c in ws.home.runnable_items())))",
             wait_for="SYNCED=", timeout=8.0)
         assert line is not None and "SYNCED=True" in line, line
         # ...and the dc op takes it back off the card AND the shelf.
@@ -703,7 +703,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         line = board.cmd(
             "py import os; print('GONE=' + repr("
             "any((c.get('path') or '').endswith('pytest_sync.moy') "
-            "for c in ws.home._runnable_items()) is False "
+            "for c in ws.home.runnable_items()) is False "
             "and 'pytest_sync.moy' not in os.listdir(ws.carts_root)))",
             wait_for="GONE=", timeout=8.0)
         assert line is not None and "GONE=True" in line, line

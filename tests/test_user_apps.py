@@ -312,7 +312,7 @@ def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
     _write_cart(carts, "Sneaky", NOTES_SRC, perms=["graphics", "input", "prefs"])
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c["title"] == "Sneaky")
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     # Player.start directly, because the launcher path throws a failed start
     # straight into the code editor (crash-to-code) and RELEASES the world --
     # which is correct product behaviour and would take the namespace with it.
@@ -569,7 +569,7 @@ def test_a_responsive_app_cart_draws_on_the_system_canvas(tmp_path):
     # The composite degrades on the identity check it has always had, so the
     # pointer arrives in the coordinates the app drew in.
     assert ws.wm.viewport() == (0, 0, 1)
-    assert ws._game_xy(11, 22) == (11, 22)
+    assert ws.game_xy(11, 22) == (11, 22)
 
 
 def test_a_responsive_app_cart_is_told_when_the_surface_changes(tmp_path):
@@ -596,7 +596,7 @@ def test_a_responsive_run_gives_the_bar_back_the_responsive_geometry(tmp_path):
     ws = build_ws(tmp_path, sys_size=(800, 480), font_scale=2)
     _open(ws, "Flexy")
     _frames(ws)
-    assert ws.bar_layer._zone_is_game("tool") is False
+    assert ws.bar_layer.zone_is_game("tool") is False
     assert ws.app_bar_h() == ws.layout.status_h
     # The back is where the RESPONSIVE layout puts it (the head of its zone,
     # past the Moy tile), in the responsive bar's rows.
@@ -614,7 +614,7 @@ def test_the_run_canvas_is_given_back_on_exit(tmp_path):
     _open(ws, "Flexy")
     _frames(ws)
     assert ws.run.canvas is ws.sys_canvas
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     _frames(ws)
     assert ws.run.canvas is stock
     assert ws.run.app_full_canvas is False
@@ -634,7 +634,7 @@ def test_the_desk_world_gives_a_responsive_cart_its_window(tmp_path):
     ws.home.open_desk()
     assert ws.windowed_chrome is True
     cart = next(c for c in ws.carts.all if c["title"] == "Flexy")
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     ws.spine.play(ws.launcher_layer)
     assert ws.run.player.start(ws.run.project) is True
     _frames(ws)
@@ -643,7 +643,7 @@ def test_the_desk_world_gives_a_responsive_cart_its_window(tmp_path):
     assert ws.run.canvas is not ws.sys_canvas
     w, h = ws.app_window_size()
     assert ws.run.player.ns["seen"][-1][:2] == (w, h)
-    assert ws.wm._wins["desktop"].content_rect()[2:] == (w, h)
+    assert ws.wm.windows["desktop"].content_rect()[2:] == (w, h)
 
 
 def test_console_mode_gives_a_responsive_cart_the_whole_surface(tmp_path):
@@ -912,7 +912,7 @@ def test_a_refused_first_run_runs_nothing_and_asks_again(tmp_path):
     ws.open()
     ws.confirm.cancel()
     assert ws.consent.get(app_perms.app_id(cart)) is None
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     assert ws.run.player.cart_error == app_perms.UNASKED_REFUSAL
     assert not app_perms.run_admits_unsigned(ws, cart)
     select_on_home(ws, "Copied")

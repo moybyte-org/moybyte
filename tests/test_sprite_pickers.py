@@ -54,7 +54,7 @@ def _console(path, desk, ships):
                                         panel_diagonal_in=7.0, font_scale=1, windowed=True)
     else:
         ws = host_app.build_workstation(str(path / "carts"))
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     if desk:
@@ -118,7 +118,7 @@ class Pair:
         del self.alone[:]
 
     def _root(self, ws):
-        return ws.wm._root_canvas if self.desk else ws.sys_canvas
+        return ws.wm.root_canvas if self.desk else ws.sys_canvas
 
     def _drive(self, ws, drv):
         """One loop pass of `ws` with the toolkit's per-console state its
@@ -201,7 +201,7 @@ class Pair:
             assert own is not None and own[0] == "paint"
             x += own[4][0]
             y += own[4][1]
-            content = self.a.wm._wins["menu"].content_rect()
+            content = self.a.wm.windows["menu"].content_rect()
             x += content[0]
             y += content[1]
         return x, y, w, h
@@ -314,7 +314,7 @@ def test_a_page_drawn_anew_is_taken_from_the_frame_before_while_the_input_rests(
 
     def rec(*a, under=under, ws=p.a):
         r = under(*a)
-        got.append((r, ws._frame_requested))
+        got.append((r, ws.frame_requested))
         return r
     hold.under = rec
     p.key(mi.KEY_UP, 3)

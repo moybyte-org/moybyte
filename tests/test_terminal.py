@@ -18,7 +18,7 @@ if native_build.cc() is None:
 def term(tmp_path):
     from runtime.host_app import build_workstation
     ws = build_workstation(str(tmp_path / "carts"))
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     yield ws, app
     app.close_session()
@@ -50,7 +50,7 @@ def test_the_terminal_is_a_system_app_on_its_identity_cart(term):
     ws, app = term
     cart = [c for c in ws.carts.all if c.get("title") == "Terminal"]
     assert cart and app.is_app(cart[0])
-    assert ws._apps_by_id["terminal"] is app
+    assert ws.app("terminal") is app
 
 
 def test_a_line_is_echoed_and_run_in_the_session(term):
@@ -94,7 +94,7 @@ def test_a_first_run_asks_at_the_prompt_and_the_next_line_answers(tmp_path):
     _command(root, "local.greet", ["http"])
     _command(root, "local.other", ["http"])
     ws = build_workstation(str(root))
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     try:
         run(app, "echo before; greet one; echo after")
@@ -435,7 +435,7 @@ def test_a_desk_draws_no_key_row(tmp_path):
     from runtime import ui_draw
     from test_shell_goldens import CONFIGS, _build
     ws = _build(CONFIGS["p4_1024x600_cs2_fs1_windowed"], tmp_path)
-    app = ws.terminal_app
+    app = ws.app("terminal")
     kind = ui_draw.input_kind()
     try:
         for k in ("keys", "touch", "pad", "tdeck"):
@@ -454,9 +454,9 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
     from runtime.host_app import build_workstation, ConsoleDriver
     ws = build_workstation(str(tmp_path / "carts"))
     drv = ConsoleDriver(ws)
-    ws.spine.open_app(ws._apps_by_id["terminal"])
+    ws.spine.open_app(ws.app("terminal"))
     drv.frame(1 / 30)
-    app = ws.terminal_app
+    app = ws.app("terminal")
     kinds = ui_draw.input_kind(), ui_draw.hint_kind()
     ws.use_inputs([("local", "tdeck")])     # the keys typed below are the T-Deck's
     ui_draw.input_kind("tdeck")
@@ -521,7 +521,7 @@ def _frame(ws):
     from runtime.host_app import ConsoleDriver
     drv = ConsoleDriver(ws)
     if ws.wm.top_kind() != "terminal":
-        ws.spine.open_app(ws.terminal_app)
+        ws.spine.open_app(ws.app("terminal"))
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     return drv

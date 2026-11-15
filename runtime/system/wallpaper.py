@@ -460,8 +460,8 @@ class Wallpaper:
             return
         try:
             glass = bool(cart.get("glass"))
-            sheet = ws._build_sheet(cart)
-            tilemap = ws._build_tilemap(cart)
+            sheet = ws.build_sheet(cart)
+            tilemap = ws.build_tilemap(cart)
             ns = ws.make_api(ws.sys_canvas if glass else ws.run.canvas, ws.input,
                              dict(cart.get("cfg", {})),
                              # A wallpaper is silent: it holds no audio session.
@@ -469,8 +469,8 @@ class Wallpaper:
                              tilemap, Pmem(), None, cart.get("images") or {},
                              # A wallpaper is a cart, so it gets the fourth asset
                              # type too: sakura sheds its petals from a scene.
-                             ws._build_scenes(cart),
-                             flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
+                             ws.build_scenes(cart),
+                             flags=ws.build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if glass:               # after the module's own default, before _init
@@ -749,7 +749,7 @@ class Wallpaper:
         if ws.look.wallpaper_id == ws.look.PICTURE or self._wp_pics is not None:
             try:
                 if self.draw_picture(ws.sys_canvas):
-                    ws._reset_canvas_state()
+                    ws.reset_canvas_state()
                     self._painted(False)
                     return
             except Exception as exc:  # noqa: BLE001 -- fall back to the fill
@@ -804,7 +804,7 @@ class Wallpaper:
                 # Clear any camera/clip/pal/palt (#11) the wallpaper cart set (and the
                 # safe-area camera/clip above), so the home/settings foreground (icons,
                 # status strip) draws clean at full extent.
-                ws._reset_canvas_state()
+                ws.reset_canvas_state()
                 # Two-domain seam (#39): a wallpaper CART draws on the fixed 320x240
                 # game canvas (it runs under the kid cart API). On a DISTINCT (big)
                 # system canvas the desktop backdrop lives on the SYSTEM canvas, so
@@ -819,7 +819,7 @@ class Wallpaper:
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
-                ws._reset_canvas_state()
+                ws.reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
                 guard = getattr(ws, "wallpaper_guard", None)
                 if guard is not None:
@@ -1019,13 +1019,13 @@ class Wallpaper:
             # dance the look's `_show_wallpaper` does for the backdrop compile.
             ws.carts.rehydrate(cart)
             try:
-                sheet = ws._build_sheet(cart)
-                tilemap = ws._build_tilemap(cart)
+                sheet = ws.build_sheet(cart)
+                tilemap = ws.build_tilemap(cart)
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
                                  sheet, None,
                                  tilemap, Pmem(), None, cart.get("images") or {},
-                                 ws._build_scenes(cart),
-                                 flags=ws._build_flags(cart),
+                                 ws.build_scenes(cart),
+                                 flags=ws.build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
                 if cart.get("glass"):
@@ -1115,7 +1115,7 @@ class Wallpaper:
             if (pix is not None and path and sig is not None
                     and getattr(self.ws, "can_manage", False)):
                 try:
-                    self.ws._with_sd(lambda: save_wallpaper_preview(
+                    self.ws.with_sd(lambda: save_wallpaper_preview(
                         path, vw, vh, sig, pix))
                 except Exception:  # noqa: BLE001 -- regenerable cache
                     pass

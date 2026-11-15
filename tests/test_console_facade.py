@@ -122,10 +122,10 @@ GETATTR_ABSENT = {
     # has not measured them -- either way the line prints `-`, which is a
     # different reading from a 0. Giving them a value on the console would turn
     # "no windowed WM" into "the WM cost nothing", the fold=0 bug over again.
-    "_pf_wm_restore": "windowed-WM drag restore ms; only wm_windowed under "
+    "pf_wm_restore": "windowed-WM drag restore ms; only wm_windowed under "
                       "perf_capture writes it, and `-` is the honest reading",
-    "_pf_wm_windows": "windowed-WM window-stack pass ms, same condition",
-    "_pf_wm_stamp": "windowed-WM content stamp ms, same condition",
+    "pf_wm_windows": "windowed-WM window-stack pass ms, same condition",
+    "pf_wm_stamp": "windowed-WM content stamp ms, same condition",
 }
 
 GETATTR_RE = re.compile(

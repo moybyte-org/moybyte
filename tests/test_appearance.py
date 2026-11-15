@@ -31,7 +31,7 @@ they cannot see is everything below, and it is most of what this object does:
     buffer is installed while Settings draws (2026-07-26: "changing it while
     running messes it up, if I change and reboot it looks great").
 
-  * **`set_icon_sheet` clears a cache it does not own** -- `ws._bar_img_cache`
+  * **`set_icon_sheet` clears a cache it does not own** -- `ws.bar_img_cache`
     stays kernel because it backs the shared draw toolkit, so the one write
     across that line is pinned here.
 
@@ -220,7 +220,7 @@ def test_the_effective_scale_degrades_on_a_shared_canvas(tmp_path):
     """A T-Deck-shaped console remembers the choice and applies 1, so the chrome
     geometry matches the 8px text framebuf actually draws."""
     ws = build_ws(tmp_path)                               # 320x240, one canvas
-    assert ws._sys_canvas is None
+    assert ws.bound_sys_canvas is None
     ws.look.set_font_scale(3, persist=False)
     assert ws.look.font_scale == 3                        # remembered...
     assert ws.look.effective_font_scale() == 1            # ...not applied
@@ -229,7 +229,7 @@ def test_the_effective_scale_degrades_on_a_shared_canvas(tmp_path):
 
 def test_the_font_scale_lands_on_the_root_canvas_not_a_window_buffer(tmp_path):
     """2026-07-26, owner: "changing it while running messes it up, if I change
-    and reboot it looks great". On the windowed tier `ws._sys_canvas` is
+    and reboot it looks great". On the windowed tier `ws.bound_sys_canvas` is
     whatever WINDOW BUFFER is installed while that window's content draws or
     handles input -- and changing the font size from an open Settings window is
     exactly that. The scale then landed on a buffer `_relayout` immediately
@@ -237,14 +237,14 @@ def test_the_font_scale_lands_on_the_root_canvas_not_a_window_buffer(tmp_path):
     canvas (and every future window buffer, which clones font_scale from the
     root in new_layer) still rendering at the old one."""
     ws = build_desktop_ws(tmp_path)
-    root = ws.wm._root_canvas
+    root = ws.wm.root_canvas
     buf = root.new_layer(200, 120)
     assert buf is not root
-    ws._sys_canvas = buf                        # a window's content is installed
+    ws.bound_sys_canvas = buf                        # a window's content is installed
     try:
         ws.look.set_font_scale(3, persist=False)
     finally:
-        ws._sys_canvas = root
+        ws.bound_sys_canvas = root
     assert root.font_scale == 3, "the scale went to the window buffer"
     assert ws.look.effective_font_scale() == 3
 
@@ -305,7 +305,7 @@ def test_select_wallpaper_leaves_the_open_projects_cart_fat(tmp_path):
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.look.wallpaper_carts()
                 if c.get("path") and ws.look.wp_id_for(c) != ws.look.PICTURE)
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     assert ws.run.fat_cart is cart
     ws.look.select_wallpaper(ws.look.wp_id_for(cart), persist=False)
     assert cart.get("lazy") is not True and "src" in cart
@@ -1040,14 +1040,14 @@ def test_named_fonts_and_picture_travel_with_the_folder(tmp_path):
 
 def test_set_icon_sheet_clears_the_kernels_bar_image_cache(tmp_path):
     """`_bar_img_cache` stays on the Workstation (it backs the shared draw
-    toolkit `ws._icon`), so this is the one kernel field the look writes -- and
+    toolkit `ws.icon`), so this is the one kernel field the look writes -- and
     a stale entry would keep blitting the previous theme's pixels."""
     ws = build_ws(tmp_path)
-    assert ws._bar_image("home") is not None
-    assert ws._bar_img_cache
+    assert ws.bar_image("home") is not None
+    assert ws.bar_img_cache
     sheet = ws.look.icon_sheet
     ws.look.set_icon_sheet(sheet)
-    assert ws._bar_img_cache == {}
+    assert ws.bar_img_cache == {}
     assert ws.look.icon_sheet is sheet
 
 
@@ -1055,8 +1055,8 @@ def test_a_none_sheet_reverts_the_bar_to_the_glyph_fallback(tmp_path):
     ws = build_ws(tmp_path)
     ws.look.set_icon_sheet(None)
     assert ws.look.icon_sheet is None
-    assert ws._bar_image("home") is None
-    assert ws._icon_image_keyed("home") is None
+    assert ws.bar_image("home") is None
+    assert ws.icon_image_keyed("home") is None
 
 
 def test_load_icon_sheet_bakes_the_default_when_the_store_has_none(tmp_path):
@@ -1129,7 +1129,7 @@ def test_the_look_is_built_before_anything_reads_it(tmp_path):
     responsive `Layout` -- already ask it for one."""
     src = ROOT.joinpath("runtime/shell/console.py").read_text(encoding="utf-8")
     built = src.index("self.look = Appearance(")
-    for reader in ("self._sys_canvas.set_font_scale(self.look.font_scale)",
+    for reader in ("self.bound_sys_canvas.set_font_scale(self.look.font_scale)",
                    "self.look.effective_font_scale()"):
         assert src.index(reader) > built, reader
     ws = build_ws(tmp_path)

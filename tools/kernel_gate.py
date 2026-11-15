@@ -157,7 +157,7 @@ def _host_crc(name, lines, hint):
 def step_crash(name, dirs):
     _send(name, dirs, "kcrash kernel-test fault")
     bd.wait_for_desk(name, dirs, quiet=True)
-    crash, notice, rows = _vals(name, dirs, "__import__('moy_crash').last()", "ws._notice",
+    crash, notice, rows = _vals(name, dirs, "__import__('moy_crash').last()", "ws.notice_up",
                                 "[r[0] for r in ws.settings_layer._settings_rows()]")
     _vals(name, dirs, "ws.app_guard.forgive('kernel-test')")
     if "crash" not in rows:
@@ -177,7 +177,7 @@ def step_hang(name, dirs):
         raise GateError("%s: the console's loop has not armed the watchdog" % name)
     _send(name, dirs, "khang kernel-test")
     bd.wait_for_desk(name, dirs, quiet=True)
-    crash, notice = _vals(name, dirs, "__import__('moy_crash').last()", "ws._notice")
+    crash, notice = _vals(name, dirs, "__import__('moy_crash').last()", "ws.notice_up")
     _vals(name, dirs, "ws.app_guard.forgive('kernel-test')")
     if not crash or crash.get("kind") != "task_wdt" or crash.get("id") != "kernel-test":
         raise GateError("%s: state's crash is %r" % (name, crash))
@@ -342,7 +342,7 @@ def step_crashes(name, dirs):
 
 
 SETTINGS = "/sd/moybyte/system/settings"
-_FACE = "ws.terminal_app.face"
+_FACE = "ws.app('terminal').face"
 
 
 def _first_line(name, dirs):
@@ -368,7 +368,7 @@ def step_edit(name, dirs):
     mark_desk, mark_floor = "# edited-on-the-desk", "# edited-on-the-floor"
     cmd = "edit " + SETTINGS
     before = _first_line(name, dirs)
-    opened, = _vals(name, dirs, "(ws.spine.open_app(ws.terminal_app), %s.set_line(%r), %s.submit(), "
+    opened, = _vals(name, dirs, "(ws.spine.open_app(ws.app('terminal')), %s.set_line(%r), %s.submit(), "
                                 "%s.app())[3]" % (_FACE, cmd, _FACE, _FACE))
     if opened != "edit":
         raise GateError("%s: the desk's `%s` opened %r" % (name, cmd, opened))

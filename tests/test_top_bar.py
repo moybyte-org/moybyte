@@ -24,7 +24,7 @@ def _ws(tmp_path, **kw):
     frames across one; a test of the clock sets `_clock_text` itself."""
     ws = _build_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
-    ws.bar_layer._clock_text = lambda: "12:00"
+    ws.bar_layer.clock_text = lambda: "12:00"
     return ws
 
 
@@ -36,7 +36,7 @@ def _pin_clock(ws, drv):
     real :00 sooner or later -- it did, in CI, on 2026-09-03 (the same rollover
     the redraw-on-change tests are already isolated for). The settle frame
     absorbs the one legitimate rebuild the pin itself causes."""
-    ws.bar_layer._clock_text = lambda: "12:00"
+    ws.bar_layer.clock_text = lambda: "12:00"
     ws.mark_dirty()
     drv.frame(1 / 30)
 
@@ -236,17 +236,17 @@ def test_wifi_off_glyph_is_a_distinct_nonblank_tile():
 
 
 def test_wifi_icon_kind_tracks_connection_state(tmp_path):
-    """ws._wifi_icon_kind() -- the glyph the bar draws -- is "wifi_off" when there's no
+    """ws.wifi_icon_kind() -- the glyph the bar draws -- is "wifi_off" when there's no
     connection and "wifi" once the injected wifi service reports a link. FakeWifi boots
     disconnected, so the host default is deterministic ("wifi_off")."""
     ws = _ws(tmp_path)
     assert ws.wifi.status()[0] is False        # host FakeWifi boots offline
-    assert ws._wifi_icon_kind() == "wifi_off"  # ...so the status glyph is the slashed wifi
+    assert ws.wifi_icon_kind() == "wifi_off"  # ...so the status glyph is the slashed wifi
     ws.wifi.connect("Home WiFi", "pw")         # now associated
     assert ws.wifi.status()[0] is True
-    assert ws._wifi_icon_kind() == "wifi"      # connected -> the plain wifi glyph
+    assert ws.wifi_icon_kind() == "wifi"      # connected -> the plain wifi glyph
     ws.wifi.disconnect()
-    assert ws._wifi_icon_kind() == "wifi_off"  # back offline -> slashed again
+    assert ws.wifi_icon_kind() == "wifi_off"  # back offline -> slashed again
 
 
 def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
@@ -301,7 +301,7 @@ def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path
     ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    lay = ws.wm._root_ctx.layout
+    lay = ws.wm.root_ctx.layout
     drv.click(*_center(lay.wifi_btn))
     drv.frame(1 / 30)
     assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
@@ -330,7 +330,7 @@ def _run_a_cart(tmp_path):
     made = moy_carts.create("Tooly", ws.carts_root, src="def _draw():\n    cls(1)\n",
                             type="tool")
     ws.carts.rescan()
-    ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
+    ws.open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
     ws.spine.play(ws.launcher_layer)
     assert ws.screen == "desktop"
     ws.mark_dirty()
@@ -407,7 +407,7 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
-    ws.bar_layer._clock_text = lambda: "99:99"              # the clock "ticked"
+    ws.bar_layer.clock_text = lambda: "99:99"              # the clock "ticked"
     ws.mark_dirty()                              # crashed screens are static: force a repaint
     drv.frame(1 / 30)
     assert calls[0] == 1, "a clock change must re-render the bar"
@@ -536,7 +536,7 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
         return orig_whole(cv, key, i)
     ws.bar_layer._render_cart_part = counting
     ws.bar_layer._render_cart_bar = counting_whole
-    ws.text._open_paint()                 # EditorApp.set_tab bumps zone_gen
+    ws.text.open_paint()                 # EditorApp.set_tab bumps zone_gen
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert calls[0] == 1, "switching Editor tabs must draw the zoned bar's zone once"
@@ -631,7 +631,7 @@ def _ladder_center(ws, rect, target):
 def _sys_zone_center(ws, target):
     """Center of the tab-ladder / PLAY icon `target` on the SYSTEM-canvas bar
     (the code + blocks tabs). `target` is a tab name or None (PLAY)."""
-    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
+    return _ladder_center(ws, ws.bar_layer.zone_rect("menu"), target)
 
 
 def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
@@ -784,13 +784,13 @@ def test_blocks_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "blocks"
     drv.click(*_sys_zone_center(ws, "code"))     # ladder: blocks -> code
     drv.frame(1 / 30)
     assert ws.menu_view == "code"
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     drv.frame(1 / 30)
     drv.click(*_sys_zone_center(ws, None))       # PLAY
     drv.frame(1 / 30)
@@ -805,7 +805,7 @@ def test_blocks_tab_play_hard_commits_via_save_blocks(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     drv.frame(1 / 30)
     calls = []
     orig = ws.block_ui.save_blocks
@@ -819,7 +819,7 @@ def _game_zone_center(target, ws):
     """Center of the ladder/PLAY icon `target` on the GAME-canvas bar
     (cards/paint/map/music). `target` is a tab name or None (PLAY)."""
     from runtime import bar_layer as BL
-    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
+    return _ladder_center(ws, ws.bar_layer.zone_rect("menu"), target)
 
 
 def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
@@ -830,13 +830,13 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "music"
     drv.click(*_game_zone_center("paint", ws))       # ladder: music -> paint
     drv.frame(1 / 30)
     assert ws.menu_view == "paint"
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
@@ -853,7 +853,7 @@ def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     ws.music_ui.musicedit.toggle_rest()          # a real edit: PLAY must persist it
     calls = []
@@ -871,7 +871,7 @@ def test_music_tab_context_x_exits_to_home(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
@@ -905,8 +905,8 @@ def test_config_tab_play_runs_and_persists_config(tmp_path):
     ws.open_in_editor()
     assert ws.screen == "menu" and ws.menu_view == "cards"   # Config-first landing
     saved = []
-    orig = ws.saves._save_config
-    ws.saves._save_config = lambda: (saved.append(1), orig())[-1]
+    orig = ws.saves.save_config
+    ws.saves.save_config = lambda: (saved.append(1), orig())[-1]
     drv.click(*_game_zone_center(None, ws))          # PLAY (game-canvas bar)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
@@ -951,7 +951,7 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
 
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_paint()
+    ws.text.open_paint()
     drv.frame(1 / 30)
     drv.click(*_center(ws.bar_layer.cell("menu", "menu")[1]))  # the Editor's ≡
     drv.frame(1 / 30)
@@ -971,7 +971,7 @@ def test_context_x_exits_the_editor_to_home(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.text._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
+    ws.text.open_paint()                 # a game-domain tab -> the game-canvas zoned bar
     drv.frame(1 / 30)
     assert ws.screen == "menu"
     drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))
@@ -1073,8 +1073,8 @@ def test_bar_strip_cache_survives_alternating_canvases(tmp_path):
     # Alternate destinations the way a gesture does: buffer, root, root, ..., buffer.
     order = [other] + [root] * 6 + [other]
     for cv in order:
-        ws._sys_canvas = cv
-        ws.bar_layer._draw_status_strip("settings")
+        ws.bound_sys_canvas = cv
+        ws.bar_layer.draw_status_strip("settings")
 
     # One build per DISTINCT canvas, not one per switch.
     assert len(builds) == 2, (
@@ -1092,8 +1092,8 @@ def test_bar_strip_slots_stay_bounded(tmp_path):
     ws.open_settings()
     root = ws.sys_canvas
     for _ in range(6):                          # six distinct destinations
-        ws._sys_canvas = root.new_layer(root.w, root.h)
-        ws.bar_layer._draw_status_strip("settings")
+        ws.bound_sys_canvas = root.new_layer(root.w, root.h)
+        ws.bar_layer.draw_status_strip("settings")
     slots = ws.bar_layer._bar_strips["settings"][0]
     assert len(slots) <= _bl._BAR_STRIP_SLOTS
 
@@ -1115,8 +1115,8 @@ def test_bar_strip_rebuild_budget(tmp_path):
     other = root.new_layer(root.w, root.h)
     ws.costs.clear()
     for i in range(24):                        # 24 frames alternating like the WM
-        ws._sys_canvas = other if i % 4 == 0 else root
-        ws.bar_layer._draw_status_strip("settings")
+        ws.bound_sys_canvas = other if i % 4 == 0 else root
+        ws.bar_layer.draw_status_strip("settings")
     allocs = ws.costs.get("bar.strip.alloc", 0)
     renders = ws.costs.get("bar.strip.render", 0)
     # Lower bound FIRST: without it this test passes when the counters are gone,
@@ -1141,7 +1141,7 @@ def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
     assert bh == 28
 
     def frame(text):
-        ws.bar_layer._clock_text = lambda: text
+        ws.bar_layer.clock_text = lambda: text
         ws.bar_layer.invalidate()
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -1150,7 +1150,7 @@ def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
     frame("12:34")
     whole = frame("12:35")
     frame("12:34")
-    ws.bar_layer._clock_text = lambda: "12:35"
+    ws.bar_layer.clock_text = lambda: "12:35"
     ws.bar_layer.redraw_clock("home")
     assert bytes(cv._buf[:cv.w * bh * 2]) == whole
 
@@ -1184,10 +1184,10 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     assert ("play", ws.theme_colors["value"]) in drew
     # Day and Night take one rule: the T-Deck's one bar (no chevron, no
     # Wi-Fi, look step 30) names the open tab in either mode.
-    zone = ws.bar_layer._zone_rect("menu")
+    zone = ws.bar_layer.zone_rect("menu")
     day = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
     ws.look.set_theme("moy", persist=False, variant="dark")
-    zone = ws.bar_layer._zone_rect("menu")
+    zone = ws.bar_layer.zone_rect("menu")
     night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
     assert day[0] == night[0] == "Code" and day[1] >= 0 and night[1] >= 0
 

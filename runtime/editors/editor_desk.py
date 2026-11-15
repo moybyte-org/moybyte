@@ -268,7 +268,7 @@ class EditorDesk(Layer):
         plays in a desk window of its own (the pause card's Play in a
         window, owner 2026-10-31), when the panes left take its room; it
         comes back when that window closes."""
-        win = getattr(self.ws.wm, "_wins", {}).get("desktop")
+        win = getattr(self.ws.wm, "windows", {}).get("desktop")
         return win is None or not win.own
 
     def _warm_sig(self, key, area, u):
@@ -523,7 +523,7 @@ class EditorDesk(Layer):
         old = self._layout_of(tab)
         try:
             if tab == "code":
-                ws._relayout_code()
+                ws.relayout_code()
             else:
                 name, _attr = _OWNERS[tab]
                 getattr(ws, name).relayout(r[2], r[3], fs, cs)
@@ -785,14 +785,14 @@ class EditorDesk(Layer):
             # its gen still the desk's, so the next may be rows
             known = ret[0] != 0
             lag = ret[1:]
-            still = not ws._animating(dt)
+            still = not ws.animating(dt)
         else:
             c, tab, pane, r, _body, _n = own
             layer = None
             data = self._own_data(c)
             known = ret[0] != 0
             lag = ret[1:]
-            still = not (data is False or app.playing() or ws._animating(dt, False)
+            still = not (data is False or app.playing() or ws.animating(dt, False)
                          or self._spills() or self._loupe is not None
                          or (c == "paint" and ws.paint_layer._host.tap == 2
                              and ws.paint_layer._host.tap_armed()))
@@ -937,7 +937,7 @@ class EditorDesk(Layer):
             self._loupe = None
         if self._loupe is not None:
             self._draw_loupe(cv, th, u)
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._dock()
 
     def _ground(self, cv, col, lay, panes, divs, alone, u):
@@ -1256,7 +1256,7 @@ class EditorDesk(Layer):
         if self.paused:
             self.pause(False)
         else:
-            self.ws.defer(self.ws.text._leave_menu)
+            self.ws.defer(self.ws.text.leave_menu)
 
     def pause(self, on):
         """The Run slot's pause: the playtest's window hides with its run
@@ -1269,14 +1269,14 @@ class EditorDesk(Layer):
         self.paused = on
         if on:
             self._dock()                    # hidden now, its run held
-            ws.wm._move_focus("menu")
+            ws.wm.move_focus("menu")
         else:
-            win = ws.wm._wins.get("desktop")
+            win = ws.wm.windows.get("desktop")
             if win is not None:
                 win.held = False            # the restore lands on the run, not its menu
             ws.run.player.resume()
-            if "desktop" in ws.wm._wins:
-                ws.wm._move_focus("desktop")
+            if "desktop" in ws.wm.windows:
+                ws.wm.move_focus("desktop")
         ws.mark_dirty()
 
     def _title(self, c, label):
@@ -1664,7 +1664,7 @@ class EditorDesk(Layer):
         if not fresh or not (mods & _CTRL or (ev & 0xFFFF) == _F6):
             return False
         if (ev & 0xFFFF) == _F6:
-            self.ws.wm._move_focus("menu")
+            self.ws.wm.move_focus("menu")
         if self._chord(ev & 0xFFFF, mods):
             i.clear_edges()
             return True
@@ -1673,7 +1673,7 @@ class EditorDesk(Layer):
     def _origin(self):
         """Where the Editor's surface sits on the glass: its window's
         content rect's corner on the desk."""
-        wins = getattr(self.ws.wm, "_wins", None)
+        wins = getattr(self.ws.wm, "windows", None)
         win = wins.get("menu") if wins else None
         if win is None:
             return 0, 0
@@ -1817,7 +1817,7 @@ class EditorDesk(Layer):
             elif app.playing():
                 ws.defer(app.restart)
             else:
-                ws.defer(ws.text._leave_menu)
+                ws.defer(ws.text.leave_menu)
             return True
         if ctrl and code == ord("."):
             if app.playing():
@@ -1861,11 +1861,11 @@ class EditorDesk(Layer):
         if not self.active():
             return False
         holder = ws.wm.input_holder()
-        win = ws.wm._wins.get("desktop")
+        win = ws.wm.windows.get("desktop")
         if holder != "menu" and not (holder == "desktop" and win is not None and win.docked):
             return False
         app = ws.editor_app
-        ws.defer(app.restart if app.playing() else ws.text._leave_menu)
+        ws.defer(app.restart if app.playing() else ws.text.leave_menu)
         return True
 
     def _nudge(self, code):

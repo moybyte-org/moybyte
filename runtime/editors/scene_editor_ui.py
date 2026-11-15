@@ -132,7 +132,7 @@ class SceneEditorUI:
         return page.point(px, py, click, down)
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
+        """Rebuild the responsive geometry (#39) -- ws.relayout fan-out."""
         self.layout = SceneLayout(w, h, fs, chrome_scale=cs)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
@@ -318,7 +318,7 @@ class SceneEditorUI:
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()
-        ws.home._leave_or_home(ws.spine.exit)
+        ws.home.leave_or_home(ws.spine.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit

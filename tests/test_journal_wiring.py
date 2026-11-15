@@ -61,7 +61,7 @@ def test_commit_config_journals(tmp_path):
         edit=[{"key": "bg", "type": "int", "min": 0, "max": 15}])
     path = ws.cart["path"]
     ws.run.project.config["bg"] = 7
-    ws.saves._save_config()
+    ws.saves.save_config()
 
     ents = [e for e in _entries(path) if e["file"] == "config.json"]
     assert ents, "a config commit must journal"

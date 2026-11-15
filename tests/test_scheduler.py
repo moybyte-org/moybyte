@@ -434,7 +434,7 @@ def test_autostart_starts_what_holds_it_at_the_first_frame(console):
     drv.frame(1 / 60)
     assert p.ns["n"] >= 1                       # ticked by the host's frame
     for tab in ("games", "mine"):               # no service on a home tab
-        assert not [c for c in ws.home._launcher_items(ws.carts.all, tab)
+        assert not [c for c in ws.home.launcher_items(ws.carts.all, tab)
                     if c.get("type") == "service"]
 
 

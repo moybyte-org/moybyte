@@ -315,7 +315,7 @@ def test_a_held_arrow_steps_the_code_caret_at_the_tables_repeat(tmp_path, code):
     key's down, none until REPEAT_DELAY_MS, then one every REPEAT_RATE_MS --
     the decode path the page's `kd` takes, on a 60 fps clock."""
     ws, drv = _ws(tmp_path)
-    for c in ws.home._runnable_items():
+    for c in ws.home.runnable_items():
         if "star_catcher" in c.get("path", ""):
             ws.home.select_cart(c)
             break

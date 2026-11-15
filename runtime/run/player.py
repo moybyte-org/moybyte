@@ -22,7 +22,7 @@ What the Player owns (moved verbatim from Workstation):
   * `tick(dt)` -- the per-frame game loop: key-edge derivation (cart_key/cart_keyp),
     `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the crash chrome.
     It fills the DRAWBRK perf split
-    (ws._pf_upd/_pf_cart/_pf_audio/_pf_bg) -- that contract stays on `ws`.
+    (ws.pf_upd/pf_cart/pf_audio/pf_bg) -- that contract stays on `ws`.
   * `handle_input`/`handle_pointer` -- a running cart owns every key and tap. The
     console's key (`start`, Super) is read by the router before this layer and
     opens the pause menu (`pause`/`resume` below); a cart ends itself with `quit()`,
@@ -216,9 +216,9 @@ class Player(PlayerDiag):
     injected NAMES like the other surfaces. The cart-run fields it owns
     (ns/_update/_draw/cart_error/crash_line/_cart_start_ms) are exposed
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
-    ws.run.player._update/... is byte-for-byte unchanged; they are reset per run in start()."""
+    ws.run.player.update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
-    _play = None                      # the run's frame in C: _bind_play
+    play = None                      # the run's frame in C: _bind_play
     stack_pre = None                  # the task's stack mark before the open: start
     # The task manager's accounting (runtime/shell/procs.py, `Procs.account`):
     # the microseconds this run's `_update` and `_draw` took since the last
@@ -248,34 +248,34 @@ class Player(PlayerDiag):
         self._deaf_ns = None          # (ns, btn, btnp) the deafness took
         self.quit_asked = False
         self.ns = None
-        self._update = None
-        self._draw = None
+        self.update = None
+        self.draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.pid = None               # this run's process in the OS log (os_log.begin)
         self.crash_seq = 0            # ...and its crash's record there, 0: none
         self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
-        self._notice_title = None  # ...and the title it is drawn under (None: the fit's)
+        self.notice_title = None  # ...and the title it is drawn under (None: the fit's)
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self.verdict = None           # the run's (runtime, vm_free, why): _verdict
-        self._front = False           # the run is the kernel loop's foreground
+        self.front = False           # the run is the kernel loop's foreground
         self._front_want = False      # ...not yet, and the console's frames ask again
         self._stopping = False        # the kernel stops the VM for the run
-        self._paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
-        self._audio_held = 0          # the session the pause took the mix from
+        self.paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
+        self.audio_held = 0          # the session the pause took the mix from
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
         # #75: the tool/app-vs-game decision is a per-run CONSTANT (the manifest type
         # can't change mid-run), cached at start() so the per-frame tick/input paths
-        # don't re-derive it through ws._running_cart_shows_bar (a property-forward
+        # don't re-derive it through ws.running_cart_shows_bar (a property-forward
         # chain) on the sacred play path. Combined with the live cart_error check at
-        # each use site it answers exactly what _running_cart_shows_bar answers.
-        self._is_tool = False
-        self._script = False          # a `type: "script"` run: the shell's text console
+        # each use site it answers exactly what running_cart_shows_bar answers.
+        self.is_tool = False
+        self.script = False          # a `type: "script"` run: the shell's text console
                                       # is its screen (docs/theme_and_shell_2026-11.md §10)
         self._free = False            # a `"fps": "free"` game: unpaced, real dt (SPEC 5)
         # USER APP state (#181), all per-run and all reset in start():
@@ -295,21 +295,21 @@ class Player(PlayerDiag):
                                       # draws in the look (system_api.draws_in_look); 2 a
                                       # responsive app's, whose `ui` verbs do
         self._responsive = False      # the app defines `_layout` (Player._wants_layout)
-        self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
-        self._on_change = False       # an app on the verbs: drawn on change (animates())
+        self.ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
+        self.on_change = False       # an app on the verbs: drawn on change (animates())
         self._masks = None            # ws.input.button_masks, bound for an app's run
         self._owe = 0                 # drawn frames it still owes after the last change
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
-        self._app_ctx = None          # a user app's or script's context: its run grant
+        self.app_ctx = None          # a user app's or script's context: its run grant
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._flag_put = None         # flag_edits' applier for the running cart
         self._wasm = False            # the run is a compiled cart's
-        self._lua = None              # #67: the running runtime cart's state -- the
+        self.lua = None              # #67: the running runtime cart's state -- the
                                       # handle a ws.runtimes factory returned, Lua or
                                       # wasm; _close_lua() on exit so the cart's whole
                                       # heap dies with its run
-        self._play = None             # the run's frame in C (moy_play), or None: _bind_play
+        self.play = None             # the run's frame in C (moy_play), or None: _bind_play
         self._lua_split = None        # its frame_split, bound ONCE per run: _run_ticks
                                       # asks after every tick
         self._sram_run = None         # #211: the Lua allocator's headroom report for the
@@ -317,7 +317,7 @@ class Player(PlayerDiag):
         self._net = None              # #65: the running cart's net.* service, when it
                                       # has the "multiplayer" permission (else None); tick()
                                       # pumps inbound messages to its on_net handler
-        self._netplay = None          # #65 Phase 2: the live two-console lockstep session
+        self.netplay = None          # #65 Phase 2: the live two-console lockstep session
         self._drain_input = None      # pre-tick radio drain, bound by start()
                                       # (ws.netplay), when this run is a linked match. It
                                       # OWNS the tick: fixed dt, and a frame the peer's
@@ -338,16 +338,16 @@ class Player(PlayerDiag):
         self.sched = TickScheduler()
         self._tick_dt = 1.0 / 30
         self.tick_ms = 0
-        self._n_ticks = 1             # frame_plan's answer, run by tick()
+        self.n_ticks = 1             # frame_plan's answer, run by tick()
         self._np_plan = True          # ...and in a match, whether a tick may start
-        self._keyp_latch = 0          # a keyp edge waiting for a logic tick
-        self._tick_edges = None       # ws.input.tick_edges, bound while paced
-        self._keep_edges = None       # ws.input.keep_edges, bound while paced
+        self.keyp_latch = 0          # a keyp edge waiting for a logic tick
+        self.tick_edges = None       # ws.input.tick_edges, bound while paced
+        self.keep_edges = None       # ws.input.keep_edges, bound while paced
         # The editor handles this run opened (#181/#112). A per-run list, like
         # the Lua tier's layer pins: they die with the world, flushed HARD on
         # the way out so a kid who taps X never loses a note (#154).
-        self._editors = []
-        self._focus_editor = None     # the handle holding the keyboard, if any
+        self.editors = []
+        self.focus_editor = None     # the handle holding the keyboard, if any
         # An app on the verbs draws through its app host (`_ui_begin`):
         # whether its pass is drawing now, whether a clear broke its floor,
         # and what drew over its page after the pass (the FPS chip).
@@ -375,7 +375,7 @@ class Player(PlayerDiag):
         it only through the `open_editor` its manifest earned."""
         ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
                           clip=clip, host=self.ws, frame=self)
-        self._editors.append(ed)
+        self.editors.append(ed)
         return ed
 
     def _theme_colors(self):
@@ -388,20 +388,20 @@ class Player(PlayerDiag):
         `typing`. The one it replaces is blurred here, so two handles can
         never both believe they are being typed into; the keys let go inside a frame are the
         page's again in that frame (`api_keys_back`)."""
-        prev = self._focus_editor
+        prev = self.focus_editor
         if prev is not None and prev is not handle:
             prev._blur()
-        self._focus_editor = handle
-        if handle is None and prev is not None and self._pass and self._ui is not None:
+        self.focus_editor = handle
+        if handle is None and prev is not None and self._pass and self.ui is not None:
             # Let go inside the frame (the cart's update closed it): the page
             # this frame draws has the keys back, so its focus marks now.
-            _ui_draw._C.api_keys_back(self._ui[0])
+            _ui_draw._C.api_keys_back(self.ui[0])
 
     def focused_editor(self):
         """The handle holding the keyboard, or None -- what `ws.router.nav` asks
         before it spends a trackball roll on the cursor. None while the run
         is deaf: the keyboard is another window's."""
-        return None if self.deaf else self._focus_editor
+        return None if self.deaf else self.focus_editor
 
     def set_deaf(self, on):
         """Its desk window lost (`on`) or took back the keyboard
@@ -424,8 +424,8 @@ class Player(PlayerDiag):
             ns["btn"] = ns["btnp"] = _deaf_btn
         if on != self.deaf:
             self.deaf = on
-            self._keyp_latch = 0
-            m = getattr(self._lua, "mute", None)
+            self.keyp_latch = 0
+            m = getattr(self.lua, "mute", None)
             if m is not None and not self.detached:
                 m(on)
 
@@ -433,7 +433,7 @@ class Player(PlayerDiag):
         """Hold the context `make_system_api` built for this run: its grant
         is the run's, ended with it."""
         self._end_grant()
-        self._app_ctx = ctx
+        self.app_ctx = ctx
 
     def _end_grant(self):
         """The run is over: its grant ends, and so does any store session it
@@ -441,7 +441,7 @@ class Player(PlayerDiag):
         A Lua or compiled run closes first: a Lua state saves the files it
         left open at its close, through the grant, so the grant outlives it."""
         self._close_lua()
-        ctx, self._app_ctx = self._app_ctx, None
+        ctx, self.app_ctx = self.app_ctx, None
         if ctx is not None:
             ctx.end()
         self.ws.store.end_all()
@@ -475,7 +475,7 @@ class Player(PlayerDiag):
         run = getattr(app, "run", None)
         if run is None:
             return None
-        ctx = self._app_ctx
+        ctx = self.app_ctx
         rt = cart.get("runtime") if cart is not None else None
         native_app = cart is not None and cart.get("type") == "app" and bool(cart.get("native"))
         if (ctx is None or not (rt == "lua" or native_app or (
@@ -485,11 +485,11 @@ class Player(PlayerDiag):
 
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
-        eds = self._editors
-        self._focus_editor = None
+        eds = self.editors
+        self.focus_editor = None
         if not eds:
             return
-        self._editors = []
+        self.editors = []
         for ed in eds:
             try:
                 ed.close()
@@ -574,11 +574,11 @@ class Player(PlayerDiag):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
         exception-proof: a close() failure must never block the next start or
         the exit path -- the state is unreachable either way and gc finishes it."""
-        lua = self._lua
-        self._lua = None
+        lua = self.lua
+        self.lua = None
         self._wasm = False
         self._lua_split = None
-        self._play = None
+        self.play = None
         if lua is not None:
             try:
                 lua.close()
@@ -633,10 +633,10 @@ class Player(PlayerDiag):
         PLACE breaks the globals for every retained function ref; the layer
         reclaim + collect leave a compact heap for the next build. Idempotent;
         safe on the crash path (the error panel reads cart_error, never ns)."""
-        self._front = False
+        self.front = False
         self._front_want = False
-        self._paused_at = 0
-        self._audio_held = 0
+        self.paused_at = 0
+        self.audio_held = 0
         _os_log.end(self.pid)
         _moybyte.end(self.pid)
         self.pid = None
@@ -670,9 +670,9 @@ class Player(PlayerDiag):
         # stands -- an exit before the heal is precisely the evidence kept.
         self._app_layout = None
         self._app_wh = None
-        self._ui = None
+        self.ui = None
         self._uh = None
-        self._on_change = False
+        self.on_change = False
         # The guard reads the kernel's run, which the run's close ends.
         if self._app_id is not None:
             self._app_id = None
@@ -701,16 +701,16 @@ class Player(PlayerDiag):
         # for the heap a RUN leaves behind; go_home reaches here from the desk
         # and the Editor too, where nothing ran and a collect is pure pause --
         # 440ms of the PLAY tap on a Guition P4 (2026-09-09).
-        had_world = bool(ns) or self._update is not None \
-            or self._draw is not None or getattr(self, "_lua", None) is not None
+        had_world = bool(ns) or self.update is not None \
+            or self.draw is not None or getattr(self, "lua", None) is not None
         if ns:
             try:
                 ns.clear()
             except Exception:  # noqa: BLE001
                 pass
         self.ns = None
-        self._update = None
-        self._draw = None
+        self.update = None
+        self.draw = None
         self._restore_bg = None
         self._pass = False
         # #65: drop the net handler/inbox with the dead run so a stale on_net
@@ -723,12 +723,12 @@ class Player(PlayerDiag):
         self._net = None
         # The match dies with the run: drop the session's player slots so the
         # console is back to one local player the moment the cart is gone.
-        if self._netplay is not None:
+        if self.netplay is not None:
             try:
-                self._netplay.close()
+                self.netplay.close()
             except Exception:  # noqa: BLE001 -- teardown must never block an exit
                 pass
-            self._netplay = None
+            self.netplay = None
             self.ws.netplay = None
         try:
             self.ws.input.netplay_live = False
@@ -856,28 +856,28 @@ class Player(PlayerDiag):
                 print("Moybyte link failed:", exc)
         # Gated on the same permission: an unlinked console leaves this None and
         # the cart runs exactly as a single-player cart does.
-        self._netplay = ws.netplay if net is not None else None
+        self.netplay = ws.netplay if net is not None else None
         # The pre-tick radio drain (see the frame loop below). Bound once: a
         # linked run drains the link it started with, the way it keeps the
         # session it started with.
         self._drain_input = None
-        if self._netplay is not None and link is not None:
+        if self.netplay is not None and link is not None:
             self._drain_input = getattr(link, "drain_input", None)
         # The cart api reads this to refuse touch()/mouse() for the duration:
         # only buttons cross the radio, so a pointer would move one screen's
         # player and not the other's. Set on the InputState because that is what
         # make_api is handed.
         try:
-            ws.input.netplay_live = self._netplay is not None
-            ws.input.match_clock = self._netplay  # time() reads the match's clock
+            ws.input.netplay_live = self.netplay is not None
+            ws.input.match_clock = self.netplay  # time() reads the match's clock
         except Exception:  # noqa: BLE001 -- a bare test stub need not carry it
             pass
-        if self._netplay is not None and self._netplay.config:
+        if self.netplay is not None and self.netplay.config:
             # The host's tuning wins for the duration of the match. Applied to
             # the LIVE dict rather than written to the card: it is a property of
             # this match, not a change to the kid's own copy of the cart.
             try:
-                project.config.update(self._netplay.config)
+                project.config.update(self.netplay.config)
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte link config failed:", exc)
         t2 = _ticks_ms()
@@ -895,15 +895,15 @@ class Player(PlayerDiag):
             if ok:
                 self._arm_pacing(cart)
                 self._bind_play(run)
-                self._front = self._take_front()
+                self.front = self._take_front()
             elif run:
                 _moy_play.end(run, _moy_play.END_CRASH)
             return ok
         code, t_compile_native, _ckey, _csig = self._compile_python(project, src, ns)
-        if self._netplay is not None:
+        if self.netplay is not None:
             # The desync check's world digest, when the link has it armed:
             # the cart's globals entering a checkpoint frame.
-            self._netplay.world = lambda: _world_text(ns)
+            self.netplay.world = lambda: _world_text(ns)
         try:
             t4 = _ticks_ms()
             if code is None:
@@ -961,8 +961,8 @@ class Player(PlayerDiag):
         self.crash_line = None
         self.crash_file = None
         self.ns = ns
-        self._update = ns.get("_update")
-        self._draw = ns.get("_draw")
+        self.update = ns.get("_update")
+        self.draw = ns.get("_draw")
         # Declared background (#63): the api's frame-start restore hook. Cached here so
         # tick() pays one attribute read; it early-outs when the cart declared nothing.
         self._restore_bg = ns.get("_moy_restore_bg")
@@ -1017,9 +1017,9 @@ class Player(PlayerDiag):
         self.absent = ()
         self._boundary = 1
         self._responsive = False
-        self._ui = None
+        self.ui = None
         self._uh = None
-        self._on_change = False
+        self.on_change = False
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         self.run.view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -1044,13 +1044,13 @@ class Player(PlayerDiag):
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
-        self._is_tool = cart is not None and cart.get("type") in BAR_TYPES
+        self.is_tool = cart is not None and cart.get("type") in BAR_TYPES
         # A SCRIPT (docs/theme_and_shell_2026-11.md §10): a cart with no folder whose
         # screen is the shell's text console. Tool-shaped -- one unpaced tick
         # per loop frame, the minimal bar's X to leave. Its responsive bind is
         # below, WITH the app one: `release_run_canvas` sits between here and
         # there and would drop it.
-        self._script = cart is not None and cart.get("type") == SCRIPT_TYPE
+        self.script = cart is not None and cart.get("type") == SCRIPT_TYPE
         return cart
 
     def _gate_spec(self, ws, cart):
@@ -1135,7 +1135,7 @@ class Player(PlayerDiag):
         # opt-in to make. (Refused in the windowed desk world for the reason the
         # bind's own docstring gives, where it stays the fixed raster in a
         # window like any cart.)
-        elif self._script:
+        elif self.script:
             ws.binding.bind_app_canvas()
         return None
 
@@ -1204,14 +1204,14 @@ class Player(PlayerDiag):
         # when this cart declares the "network" permission, so a normal kid cart
         # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
         # cart namespace iff the backend it receives is non-None.
-        wifi = ws.wifi if ws._cart_has_perm("network") else None
+        wifi = ws.wifi if ws.cart_has_perm("network") else None
         if wifi is not None:
             ws.spine.wifi_hold("cart", self.pid)  # the radio lease for this run; its end lets go
         # Multiplayer message service (#65): gate net.* by the "multiplayer"
         # manifest permission exactly like wifi's "network" gate. reset() drops any
         # handler/inbox from a previous run so a fresh run starts clean; make_api
         # injects `net`/`on_net` into the namespace iff the backend is non-None.
-        net = ws.net if ws._cart_has_perm("multiplayer") else None
+        net = ws.net if ws.cart_has_perm("multiplayer") else None
         # Physical pins (#9), gated HERE with its two siblings rather than in the
         # tier that happens to supply it. It used to be injected by the browser
         # tier's own make_api wrapper the moment the serving host answered the pin
@@ -1222,13 +1222,13 @@ class Player(PlayerDiag):
         # dropped .p8 could land in a board's own store: a cart nobody wrote
         # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
         # never which carts.
-        gpio = ws.gpio if ws._cart_has_perm("pins") else None
+        gpio = ws.gpio if ws.cart_has_perm("pins") else None
         # The TEXT CONSOLE, gated on the "console" permission exactly as wifi is
         # on "network": a cart that never declares it keeps `print` as the DRAW
         # verb, and a script -- whose synthesized manifest DOES declare it --
         # gets the scrollback instead. The terminal (#115) declares it too.
         console = (getattr(ws, "script_console", None)
-                   if ws._cart_has_perm("console") else None)
+                   if ws.cart_has_perm("console") else None)
         if net is not None:
             net.reset()
         self._net = net
@@ -1271,9 +1271,9 @@ class Player(PlayerDiag):
         for a Python app, the run's own (`ui_draw.RUN_UI`) for any other
         (a Lua or compiled app's; one linking a toolkit of its own lends
         none there); None for a game or before a frame."""
-        if self._lua is not None:
-            return _ui_draw.RUN_UI if self._is_tool else None
-        ui = self._ui
+        if self.lua is not None:
+            return _ui_draw.RUN_UI if self.is_tool else None
+        ui = self.ui
         return ui[0] if ui else None
 
     def ball_steps(self):
@@ -1281,7 +1281,7 @@ class Player(PlayerDiag):
         surface that takes the keys (`InputPolicy.ball_steps`): an app's,
         unless a caret holds the keyboard (its editor handle takes the roll
         as arrows, `InputRouter.nav`); a game's trackball is its pointer."""
-        return self._is_tool and self._focus_editor is None
+        return self.is_tool and self.focus_editor is None
 
     def typing(self):
         """Whether the run takes typed bytes, which the input policy puts the
@@ -1291,14 +1291,14 @@ class Player(PlayerDiag):
         every runtime: the Python verbs' context, or the run face a Lua or
         compiled app draws through. On a T-Deck W A S D then type and press
         no direction (native/moy_input/moy_kbd.c)."""
-        if self.run.textmode or self._focus_editor is not None:
+        if self.run.textmode or self.focus_editor is not None:
             return True
-        if not self._is_tool or self.cart_error is not None:
+        if not self.is_tool or self.cart_error is not None:
             return False
-        lua = self._lua
+        lua = self.lua
         if lua is not None:
             return not getattr(lua, "own_ui", False) and _ui_draw.run_typing()
-        ui = self._ui
+        ui = self.ui
         return ui is not None and _ui_draw.app_typing(ui[0])
 
     def _ui_begin(self, ws, render=True):
@@ -1312,7 +1312,7 @@ class Player(PlayerDiag):
         text view's fling, glide or a keyed step moved out of the frame
         before, or its changed rows drawn alone
         (docs/history/scroll_and_text_2026-10.md §5). Any other run draws whole."""
-        ctx, a, cv = self._ui
+        ctx, a, cv = self.ui
         host = self._uh
         inp = ws.input
         bm = self._masks
@@ -1336,7 +1336,7 @@ class Player(PlayerDiag):
         _steps(inp, a, _UI_IN_REP)
         if getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE:
             a[4] |= _P_MIDDLE
-        fed = self._focus_editor
+        fed = self.focus_editor
         deaf = self.deaf or self.detached
         if deaf:
             a[0] = a[1] = a[5] = a[6] = 0   # the keys are another window's
@@ -1373,7 +1373,7 @@ class Player(PlayerDiag):
                 _ui_draw.window_frame(0)
         self._pass = render
         self._broke = False
-        if self._on_change:
+        if self.on_change:
             # A frame that moved anything owes the next, which paints the
             # state it left (a verb acts after its part drew, a tap on the
             # note moves the caret after the note drew); a frame with nothing
@@ -1387,7 +1387,7 @@ class Player(PlayerDiag):
     def _note(self):
         """The one editor handle the run's pass drew last, else None."""
         ed = None
-        for e in self._editors:         # a closed one draws nothing
+        for e in self.editors:         # a closed one draws nothing
             if e.live:
                 if ed is not None:
                     return None
@@ -1410,7 +1410,7 @@ class Player(PlayerDiag):
     def ui_host(self, cv):
         """The run's app host whose pass draws on `cv` now, else None: an
         editor handle draws its text view in that pass."""
-        ui = self._ui
+        ui = self.ui
         if not self._pass or ui is None or cv is not ui[2]:
             return None
         return self._uh
@@ -1419,7 +1419,7 @@ class Player(PlayerDiag):
         """Rect x, y, w, h of `cv` was drawn over the run's page after its
         pass (the FPS chip): the next frame moves none of an editor
         handle's rows where it lay."""
-        ui = self._ui
+        ui = self.ui
         if ui is None or cv is not ui[2] or w <= 0 or h <= 0:
             return
         o = self._over
@@ -1487,12 +1487,12 @@ class Player(PlayerDiag):
         began from) as focus steps up off it; False where none is, and Mic
         keeps its own meaning. Esc, B and the bar's chevron reach the same
         cancel through `back`."""
-        if not self._is_tool or self.cart_error is not None:
+        if not self.is_tool or self.cart_error is not None:
             return False
-        if self._lua is not None:
+        if self.lua is not None:
             took = _ui_draw.run_cancel(True)
         else:
-            ui = self._ui
+            ui = self.ui
             took = ui is not None and _ui_draw.app_cancel(ui[0], True)
         if not took:
             return False
@@ -1501,29 +1501,29 @@ class Player(PlayerDiag):
         return True
 
     def _app_back(self, take):
-        if not self._is_tool or self.cart_error is not None:
+        if not self.is_tool or self.cart_error is not None:
             return False
-        if self._lua is not None:       # the run's own context
+        if self.lua is not None:       # the run's own context
             return bool(_ui_draw.run_back(take))
-        ui = self._ui
+        ui = self.ui
         return ui is not None and bool(_ui_draw.app_back(ui[0], take))
 
     def animates(self):
         """Whether the running cart has a frame to draw now. A game always
-        has. An app on the verbs (`_on_change`) has one while input is going
+        has. An app on the verbs (`on_change`) has one while input is going
         on, while a frame it drew still owes the next, while the engine has a
         part in motion (`api_owes`: a toast, a fade; `api_moving`: a page's
         fling or glide) and while an editor
         handle it opened changed since it drew (`EditorHandle.owes`); still,
         it draws nothing, and its window keeps its last frame."""
-        if not self._on_change:
+        if not self.on_change:
             return True
         if self._owe or self._input_active(self.ws.input):
             return True
-        ui = self._ui
+        ui = self.ui
         if ui is not None and (_ui_owes(ui[0]) or _ui_moving(ui[0])):
             return True
-        for ed in self._editors:
+        for ed in self.editors:
             if ed.owes():
                 return True
         return False
@@ -1582,7 +1582,7 @@ class Player(PlayerDiag):
         # come from the manifest `run_script` synthesized, so the refusing is
         # the machinery that already refuses, and `carts` is not grantable to
         # anything (no permission maps to it, native/moy_app's policy).
-        if self._app_id is not None or self._script:
+        if self._app_id is not None or self.script:
             ns.update(make_system_api(ws.app_context, cart, self.run.canvas,
                                       editor=self._open_cart_editor,
                                       request=ws.take_text_request(),
@@ -1590,7 +1590,7 @@ class Player(PlayerDiag):
                                       owner=self.pid))
             if "ui" in ns:
                 self._uh = _ui_draw.AppHost()
-                self._ui = [self._uh.ctx, _array("i", [0] * _UI_IN_LEN), self.run.canvas]
+                self.ui = [self._uh.ctx, _array("i", [0] * _UI_IN_LEN), self.run.canvas]
                 # Bound once: a getattr that finds a method allocates its
                 # bound method every frame.
                 self._masks = getattr(ws.input, "button_masks", None)
@@ -1599,12 +1599,12 @@ class Player(PlayerDiag):
                 # manifest says it animates. One that plays sound keeps every
                 # frame too: the frame is where the host and the browser pull
                 # its mix (`audio_out.tick`), and a still frame pulls none.
-                self._on_change = (self._app_id is not None and not self._script
+                self.on_change = (self._app_id is not None and not self.script
                                    and cart.get("animates") is not True
                                    and "audio" not in (cart.get("permissions") or ()))
                 self._owe = 2
                 self._bg_on = False
-                if self._on_change and "cls" in ns:
+                if self.on_change and "cls" in ns:
                     # a clear lands under any floor: the frame draws whole;
                     # a declared background clears every frame
                     self._cls = ns["cls"]
@@ -1721,7 +1721,7 @@ class Player(PlayerDiag):
         60 opt-in, anything else the 30 the console guarantees -- and draw on
         the scheduler's divisor. A tool/app is event-driven and ticks with the
         loop it serves, so it is not paced."""
-        if self._is_tool:
+        if self.is_tool:
             return
         fps = cart.get("fps")
         if fps == "free":
@@ -1739,17 +1739,17 @@ class Player(PlayerDiag):
             rate = 30
         ws = self.ws
         self.sched.start(rate, getattr(ws, "steady", True))
-        self.sched.uncap_mode(bool(getattr(ws, "_uncap", False)))
+        self.sched.uncap_mode(bool(getattr(ws, "uncap", False)))
         self.tick_ms = self.sched.tick_ms
         # The dt a cart's tick is handed, in this VM's own float: the model
         # paces in C's single precision, the cart reads the exact period.
         self._tick_dt = 1.0 / self.sched.rate
         if _loop is not None:
             _loop.tick(self.tick_ms)
-        self._keyp_latch = 0
+        self.keyp_latch = 0
         inp = ws.input
-        self._tick_edges = getattr(inp, "tick_edges", None)
-        self._keep_edges = getattr(inp, "keep_edges", None)
+        self.tick_edges = getattr(inp, "tick_edges", None)
+        self.keep_edges = getattr(inp, "keep_edges", None)
 
     def _launch_play(self, cart):
         """Launch a runtime cart's run in the kernel's Player (native/moy_play)
@@ -1761,14 +1761,14 @@ class Player(PlayerDiag):
         path = cart.get("path") if cart else None
         if launch is None or not path:
             return 0
-        paced = not self._is_tool and cart.get("fps") != "free"
+        paced = not self.is_tool and cart.get("fps") != "free"
         ws = self.ws
         # What the kernel's stop verdict reads beside the catalogue entry:
         # the run's route is HOME (the home shelf started it), and whether the
         # cart's consent admits an unsigned module (app_perms.run_admits_unsigned),
         # which the load after a stop applies.
         flags = 0
-        if getattr(ws, "_home_launch", False) and not self._is_tool:
+        if getattr(ws, "home_launch", False) and not self.is_tool:
             flags |= getattr(_moy_play, "HOME", 0)
         if _perms.run_admits_unsigned(ws, cart):
             flags |= getattr(_moy_play, "UNSIGNED", 0)
@@ -1875,18 +1875,18 @@ class Player(PlayerDiag):
         `_run_ticks` makes one call. A runtime that offers it holds the run
         and ends it at its close (its loans go with it), taken or not; one
         that does not is ended here, and its frames tick through Python."""
-        self._play = None
+        self.play = None
         if not run:
             return
-        begin = getattr(self._lua, "play_begin", None)
+        begin = getattr(self.lua, "play_begin", None)
         if begin is None:
             _moy_play.end(run)
             return
         try:
-            self._play = begin(run, self.sched if self.tick_ms else None)
+            self.play = begin(run, self.sched if self.tick_ms else None)
         except Exception as exc:  # noqa: BLE001 -- the Python frame still runs it
             print("PLAY:", exc)
-            self._play = None
+            self.play = None
 
     def _take_front(self):
         """Hand a VM-free game's frame to the kernel (moy_play_front): from the
@@ -1901,7 +1901,7 @@ class Player(PlayerDiag):
         (`_front_again`); a bind the kernel then refuses asks no more until
         the next start or resume."""
         self._front_want = False
-        if (self._play is None or self._is_tool or self.cart_error is not None
+        if (self.play is None or self.is_tool or self.cart_error is not None
                 or not (self.verdict and self.verdict[1])):
             return False
         ws = self.ws
@@ -1920,9 +1920,9 @@ class Player(PlayerDiag):
 
     def _front_again(self):
         """A console frame of a run that wants the front: ask for it again."""
-        if self._paused_at or self.detached:
+        if self.paused_at or self.detached:
             return
-        self._front = self._take_front()
+        self.front = self._take_front()
 
     def _resume_from_front(self, ws):
         """The console's first frame after the kernel's front gave it back:
@@ -1934,53 +1934,53 @@ class Player(PlayerDiag):
         the console's: True, and the run stays the kernel's."""
         if _moy_play.front_live():
             return True
-        self._front = False
+        self.front = False
         info = _moy_play.info()
         if info is None or not info[6]:
             return False
-        ws._reset_canvas_state()
-        ws.spine._exit_to_caller()
+        ws.reset_canvas_state()
+        ws.spine.exit_to_caller()
         return True
 
     # -- the pause menu's hold (docs/history/look_2026-10.md step 25a) -----------------
 
     @property
     def paused(self):
-        return self._paused_at != 0
+        return self.paused_at != 0
 
     def pause(self):
         """Hold the run for the pause menu: no tick, no draw, its time() and
         its music stopped where they are (the mix loses its session, which
         keeps its state unheard), and the keys it kept dropped."""
-        if self._paused_at:
+        if self.paused_at:
             return
-        self._paused_at = _ticks_ms() or 1
+        self.paused_at = _ticks_ms() or 1
         na = _audio_native()
         if na is not None:
             try:
-                self._audio_held = na.focused()
+                self.audio_held = na.focused()
                 na.focus(0)
             except Exception:  # noqa: BLE001 -- a pause never fails on sound
-                self._audio_held = 0
+                self.audio_held = 0
         self.park()
 
     def resume(self):
         """Give the run back as if no time passed: its clock moves by the
         pause, the mix takes its session again, its next tick sees fresh
         edges and the kernel takes the frame again where it had it."""
-        if not self._paused_at:
+        if not self.paused_at:
             return
-        span = _ticks_diff(_ticks_ms(), self._paused_at)
-        self._paused_at = 0
+        span = _ticks_diff(_ticks_ms(), self.paused_at)
+        self.paused_at = 0
         if span > 0:
             self._cart_start_ms = _ticks_add(self._cart_start_ms, span)
             r = self.run
             if r.cart_start_ms is not None:
                 r.cart_start_ms = _ticks_add(r.cart_start_ms, span)
-            run = self._run_handle if self._play is not None else 0
+            run = self._run_handle if self.play is not None else 0
             if run:
                 _moy_play.hold(run, span)
-        held, self._audio_held = self._audio_held, 0
+        held, self.audio_held = self.audio_held, 0
         na = _audio_native()
         if na is not None and held:
             try:
@@ -1988,7 +1988,7 @@ class Player(PlayerDiag):
             except Exception:  # noqa: BLE001 -- the session may have closed
                 pass
         self.park()
-        self._front = self._take_front()
+        self.front = self._take_front()
 
     def _loop_dt(self, dt):
         """The dt an UNPACED tick gets: the loop's own for a tool/app, and for
@@ -2004,9 +2004,9 @@ class Player(PlayerDiag):
         if _loop is not None:
             _loop.tick(0)
         self._free = False
-        self._n_ticks = 1
-        self._tick_edges = None
-        self._keep_edges = None
+        self.n_ticks = 1
+        self.tick_edges = None
+        self.keep_edges = None
         self.park()
 
     def park(self):
@@ -2014,7 +2014,7 @@ class Player(PlayerDiag):
         over it) neither ticks nor keeps edges: what it kept for its next
         tick is dropped, so the shell reads fresh edges and the game does not
         resume on a press made before it was covered."""
-        self._keyp_latch = 0
+        self.keyp_latch = 0
         if self.detached:
             return                      # the edges are the front run's
         de = getattr(self.ws.input, "drop_edges", None)
@@ -2027,7 +2027,7 @@ class Player(PlayerDiag):
     def uncap_mode(self, on):
         """The DIAG uncap (serial `uncap 0|1`): every loop frame draws, logic
         keeps its rate. Reaches a running cart here; the next run reads
-        ws._uncap at start."""
+        ws.uncap at start."""
         self.sched.uncap_mode(on)
 
     def frame_plan(self, dt):
@@ -2038,46 +2038,46 @@ class Player(PlayerDiag):
         draw divisor stays 1 there -- composing the two is its own step."""
         # Each store is skipped when it changes nothing: a store on the Player
         # looks through its classes for a property setter.
-        np = self._netplay
+        np = self.netplay
         if np is not None:
             # A match, whatever the cart's pace: a frame may draw when a tick
             # is due or a stalled one retries, and tick() draws it only if it
             # simulated -- a cart's _draw runs exactly once a tick on both
             # consoles, so a _draw that keeps state cannot part them.
-            if self._n_ticks != 1:
-                self._n_ticks = 1
+            if self.n_ticks != 1:
+                self.n_ticks = 1
             plan = bool(np.waiting or np.pending(_ticks_ms()))
             if plan is not self._np_plan:
                 self._np_plan = plan
             return plan
         if not self.tick_ms:
-            if self._n_ticks != 1:
-                self._n_ticks = 1
+            if self.n_ticks != 1:
+                self.n_ticks = 1
             return True
         s = self.sched
         s.plan(dt)
         n = s.n
-        if n != self._n_ticks:
-            self._n_ticks = n
-        if n == 0 and self._keep_edges is not None:
-            self._keep_edges()
+        if n != self.n_ticks:
+            self.n_ticks = n
+        if n == 0 and self.keep_edges is not None:
+            self.keep_edges()
         return s.draw
 
     def _run_ticks(self, n, dt, draw):
         """`n` logic ticks of `dt`. Each takes the latched press edges, and the
         last carries this frame's draw for a runtime whose tick fuses _update
         and _draw (the Lua tier)."""
-        play = self._play
+        play = self.play
         if play is not None:
-            if self._keyp_latch:
-                self._keyp_latch = 0
+            if self.keyp_latch:
+                self.keyp_latch = 0
             if n:
                 play(n, dt, draw)
             return
-        upd = self._update
-        lua = self._lua
+        upd = self.update
+        lua = self.lua
         fs = self._lua_split
-        te = self._tick_edges
+        te = self.tick_edges
         inp = self.ws.input
         sched = self.sched
         i = 0
@@ -2085,10 +2085,10 @@ class Player(PlayerDiag):
             i += 1
             if te is not None:
                 te()
-            k = self._keyp_latch
+            k = self.keyp_latch
             inp.cart_keyp = k
             if k:
-                self._keyp_latch = 0
+                self.keyp_latch = 0
             if lua is not None:
                 lua.draw_next = draw and i == n
             if upd is not None:
@@ -2233,13 +2233,13 @@ class Player(PlayerDiag):
                 title = (ws.cart or {}).get("title")
                 if isinstance(exc, _Refused):
                     self._notice = self.cart_error = exc.args[0]
-                    self._notice_title = exc.args[1]
+                    self.notice_title = exc.args[1]
                 elif _out_of_memory(exc):
                     print("Moybyte cart load:", self.cart_error)
                     fit = _cart_fit(make, ws.cart or {})
                     self._notice = self.cart_error = fit_notice(
                         title, fit[0] if fit else None, fit[1] if fit else None)
-                    self._notice_title = _ch.say_title(_ch.SAY_FIT)
+                    self.notice_title = _ch.say_title(_ch.SAY_FIT)
             else:
                 self.crash_file, self.crash_line = _lua_cart_where(
                     self.cart_error, self.ws.cart)
@@ -2256,7 +2256,7 @@ class Player(PlayerDiag):
             print("Moybyte cart %s:" % ("notice" if self.notice else "error"),
                   self.cart_error)
             return False
-        self._lua = lua
+        self.lua = lua
         relayout = getattr(lua, "layout", None)
         if lay is not None and relayout is not None:
             self._app_layout = relayout
@@ -2267,8 +2267,8 @@ class Player(PlayerDiag):
         self.crash_line = None
         self.crash_file = None
         self.ns = ns
-        self._update = lua.update
-        self._draw = lua.draw
+        self.update = lua.update
+        self.draw = lua.draw
         self._restore_bg = ns.get("_moy_restore_bg")
         h1 = _hs()
         self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
@@ -2291,19 +2291,19 @@ class Player(PlayerDiag):
         ws = self.ws
         if self._stopping:
             return                     # the VM stops at this frame's end
-        if self._front and self._resume_from_front(ws):
+        if self.front and self._resume_from_front(ws):
             return
-        if self._paused_at:
+        if self.paused_at:
             return                     # the pause menu holds it: the frame stays
         if self._front_want:
             self._front_again()
-            if self._front:
+            if self.front:
                 return                 # the kernel draws it from the next frame
         _perf = (ws.perf_hud or ws.perf_capture) and not self.detached
         if self.cart_error is None:
             if not self.detached:
                 self._tick_keys(ws)
-            fed = self._focus_editor
+            fed = self.focus_editor
             gp = getattr(ws.input, "game_pointer", None) if fed is not None else None
             if gp is not None:
                 fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
@@ -2320,7 +2320,7 @@ class Player(PlayerDiag):
                     self._app_layout(*self._app_wh)
                 # A match's tick is decided before anything draws: a frame
                 # that did not simulate draws nothing (frame_plan).
-                np = self._netplay
+                np = self.netplay
                 stalled = False
                 if np is not None:
                     dt, stalled, np = self._lockstep_step(ws, dt)
@@ -2336,13 +2336,13 @@ class Player(PlayerDiag):
                 # for its first cls()), and letting it fall out of the bracket
                 # once put ~4.7ms of Brick Siege's frame under CHROME and sent
                 # #172 hunting the shell for a regression that was never there.
-                lua = getattr(self, "_lua", None)
-                if (self._is_tool and lua is not None and not (self.deaf or self.detached)
+                lua = getattr(self, "lua", None)
+                if (self.is_tool and lua is not None and not (self.deaf or self.detached)
                         and not getattr(lua, "own_ui", False)):
                     s = _RUN_STEPS              # into the run face's frame begun next
                     _steps(ws.input, s, 0)
                     _ui_draw._C.api_run_steps(s[0], s[1])
-                if self._ui is not None and lua is None:
+                if self.ui is not None and lua is None:
                     self._ui_begin(ws, render)
                 elif (lua is not None and getattr(ws.input, "last_key", 0) == _ui_draw.KEY_PASTE
                         and not getattr(lua, "own_ui", False)):
@@ -2374,13 +2374,13 @@ class Player(PlayerDiag):
                 if np is not None:
                     self._run_ticks(0 if stalled else 1, dt, render)
                 elif self.tick_ms:
-                    self._run_ticks(self._n_ticks, self._tick_dt, render)
+                    self._run_ticks(self.n_ticks, self._tick_dt, render)
                 else:
                     self._run_ticks(1, self._loop_dt(dt), render)
                 _tm = _ticks_us()
-                if render and self._draw:
-                    self._draw()
-                    if self._ui is not None and getattr(self, "_lua", None) is None:
+                if render and self.draw:
+                    self.draw()
+                    if self.ui is not None and getattr(self, "lua", None) is None:
                         self._ui_close()
                 _cart_text(_was)
                 _td = _ticks_us()
@@ -2408,10 +2408,10 @@ class Player(PlayerDiag):
                             cart = _dr + bg
                             upd = upd - _dr if upd > _dr else 0
                     aud = _ticks_diff(_ticks_us(), _td)   # audio_out.tick (the pull)
-                    ws._pf_upd = upd
-                    ws._pf_cart = cart
-                    ws._pf_audio = aud
-                    ws._pf_bg = bg        # the backdrop's share of cart, for DRAWBRK
+                    ws.pf_upd = upd
+                    ws.pf_cart = cart
+                    ws.pf_audio = aud
+                    ws.pf_bg = bg        # the backdrop's share of cart, for DRAWBRK
                     self._maybe_diag_slow_logic(upd, cart, aud)
                 # CRASH GUARD heal (#160): a rendered frame that got here ran the
                 # cart's body, its _init, its _update and its _draw without
@@ -2423,7 +2423,7 @@ class Player(PlayerDiag):
                     ws.app_guard.frame()
             except Exception as exc:  # noqa: BLE001
                 _cart_text(_was)
-                if self._capture_frame_error(ws, exc):
+                if self.capture_frame_error(ws, exc):
                     return
         self._tick_tail(ws, render)
 
@@ -2436,20 +2436,20 @@ class Player(PlayerDiag):
         i = ws.input
         k = i.last_key
         e = i.typed
-        if self._netplay is not None or self.deaf:
+        if self.netplay is not None or self.deaf:
             k = e = 0                   # no key() in a match (only buttons cross the air), nor deaf
-        fed = self._focus_editor
+        fed = self.focus_editor
         if fed is None:
             i.cart_key = k
             if e:
-                self._keyp_latch = e
+                self.keyp_latch = e
         else:
             # A FOCUSED editor handle owns the keyboard: the byte goes to
             # it and the cart's own key()/keyp() read nothing, so a skin
             # never has to filter the text its editor is eating.
             i.cart_key = 0
             if e and not fed.key(e):
-                self._keyp_latch = e    # a key it did not take (Esc) is the cart's
+                self.keyp_latch = e    # a key it did not take (Esc) is the cart's
             # a held key types again at the input table's repeat: the
             # handle's, never the cart's key()/keyp()
             n = 0 if self.deaf else getattr(ws.input, "key_repeats", 0)
@@ -2469,7 +2469,7 @@ class Player(PlayerDiag):
         # frame, which is what "waiting for player" looks like on hardware
         # that cannot extrapolate safely.
         stalled = False
-        np = self._netplay
+        np = self.netplay
         if np is not None and not self._np_plan:
             # The plan saw no tick due and none stalled, so this frame draws
             # nothing, and it starts no tick even if the clock has reached
@@ -2479,7 +2479,7 @@ class Player(PlayerDiag):
             if np.gate(_ticks_ms(), False):
                 np.resend()
             return np.dt_at(np.frame), True, np
-        if np is not None and self._play is not None:
+        if np is not None and self.play is not None:
             # A run in the kernel's Player: its lockstep is C -- the drain, the
             # due tick or the stall's retry, the advance, the resend between
             # ticks (moy_play_lockstep).
@@ -2531,7 +2531,7 @@ class Player(PlayerDiag):
                 np.resend()
         return dt, stalled, np
 
-    def _capture_frame_error(self, ws, exc):
+    def capture_frame_error(self, ws, exc):
         """A cart that raised mid-frame: capture it, stop the cart, persist
         pmem; the stop card then opens over its last frame (`_tick_tail`).
         Returns True when the screen left the run (a parked console goes
@@ -2543,12 +2543,12 @@ class Player(PlayerDiag):
         # mark the line on EDIT (#24): a Lua cart's line comes from the
         # error text's `cart:N:` position (#67 Phase 5); a Python cart's
         # from the traceback, mapped back through the nativize insert.
-        if self._lua is not None and _compiled(ws.cart):
+        if self.lua is not None and _compiled(ws.cart):
             # A trap: the run already cleared its canvas, and there is no
             # source line to mark (native/moy_wasm/README.md).
             self.cart_error = _lua_err_text(exc)
             self.crash_file, self.crash_line = None, None
-        elif self._lua is not None:
+        elif self.lua is not None:
             self.cart_error = _lua_err_text(exc)
             self.crash_file, self.crash_line = _lua_cart_where(
                 self.cart_error, ws.cart)
@@ -2556,9 +2556,9 @@ class Player(PlayerDiag):
             self.cart_error = _err_text(exc)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
             self.crash_file = None
-        self._crashed(exc if self._lua is None else None, self.cart_error)
-        self._update = None
-        self._draw = None
+        self._crashed(exc if self.lua is None else None, self.cart_error)
+        self.update = None
+        self.draw = None
         self._disarm_pacing()  # the crash panel is a console screen
         # Print the _err_text-guarded string, never the raw `exc`: a
         # cart exception whose __str__ itself raises would otherwise
@@ -2573,9 +2573,9 @@ class Player(PlayerDiag):
                 pm.flush()
             except Exception:  # noqa: BLE001
                 pass
-        ws._reset_canvas_state()
+        ws.reset_canvas_state()
         if ws.web.parked:
-            return ws._crash_to_code()
+            return ws.crash_to_code()
         return False
 
     def _tick_tail(self, ws, render):
@@ -2602,26 +2602,26 @@ class Player(PlayerDiag):
         # cart-set camera/clip/pal first so whatever paints underneath is clean.
         if self.cart_error is None and getattr(ws.input, "cart_quit", False):
             ws.input.cart_quit = False
-            ws._reset_canvas_state()
+            ws.reset_canvas_state()
             if self.detached:
                 self.quit_asked = True      # the running set closes it
                 return
-            ws.spine._exit_to_caller()
+            ws.spine.exit_to_caller()
             return
         if self.detached:
-            ws._reset_canvas_state()
+            ws.reset_canvas_state()
             return
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured. A
         # compiled cart draws under libmoy's own state, never the canvas's.
         if not self._wasm:
-            ws._reset_canvas_state()
+            ws.reset_canvas_state()
         # A logic-only frame (#217): nothing below draws pixels this frame --
         # the crash panel/tool bar all repaint on the next drawn frame
         # (a crash disarms the pacing itself, so the panel is never starved).
         if not render:
             return
-        if self.cart_error is not None or self._is_tool:
+        if self.cart_error is not None or self.is_tool:
             ws.settle_cart_frame()          # the chrome below draws over the frame
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). A run that
@@ -2633,11 +2633,11 @@ class Player(PlayerDiag):
             if not ws.pause.open:
                 ws.pause.stop()
                 ws.request_frame()
-        elif self._is_tool and not self.run.app_window_canvas:   # #75: cached at start()
+        elif self.is_tool and not self.run.app_window_canvas:   # #75: cached at start()
             # Part 4: a TOOL/APP runs WITH a minimal bar (back + title + status) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
-            # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
-            ws._draw_tool_bar()
+            # type rule keys on the running cart's manifest type (ws.running_cart_shows_bar).
+            ws.draw_tool_bar()
         # (The FPS chip + perf HUD is the game-domain _PerfLayer, drawn right after
         # this content -- still on the GAME canvas, before the composite.)
 
@@ -2656,7 +2656,7 @@ class Player(PlayerDiag):
         # the panel pointer into game coords (#39; identity in the degradation case).
         ws = self.ws
         sx, sy = px, py
-        gx, gy = ws._game_xy(px, py)
+        gx, gy = ws.game_xy(px, py)
         px, py = gx, gy
         # While a GAME plays the bar is hidden, so the game owns the full 320x240 and
         # every tap belongs to the cart (published as the game pointer by the router before
@@ -2664,8 +2664,8 @@ class Player(PlayerDiag):
         # show). One chrome case DOES hit-test a tap: a running TOOL/APP's minimal bar
         # (Part 4: its context-X / wifi / ≡), through a thin ws helper so this file never
         # reaches the bar surface directly.
-        if click and self._is_tool and self.cart_error is None:
-            if not self.run.app_window_canvas and ws._tool_bar_tap(px, py, sx, sy):   # ‹ exits
+        if click and self.is_tool and self.cart_error is None:
+            if not self.run.app_window_canvas and ws.tool_bar_tap(px, py, sx, sy):   # ‹ exits
                 # The bar consumed the tap -> clear the published game pointer's tap so the
                 # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).
                 gp = ws.input.game_pointer
@@ -2696,7 +2696,7 @@ class Player(PlayerDiag):
             fn(*args)
         except Exception as exc:  # noqa: BLE001 -- the cart's, as a frame's is
             _cart_text(_was)
-            self._capture_frame_error(ws, exc)
+            self.capture_frame_error(ws, exc)
             return False
         finally:
             self.us_upd += _ticks_diff(_ticks_us(), t0)
@@ -2716,4 +2716,4 @@ class Player(PlayerDiag):
     @property
     def newer(self):
         """True while the notice up is the newer-console one."""
-        return self.notice is not None and self._notice_title == _ch.say_title(_ch.SAY_NEWER)
+        return self.notice is not None and self.notice_title == _ch.say_title(_ch.SAY_NEWER)

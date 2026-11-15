@@ -410,7 +410,7 @@ def test_cover_file_read_budget(tmp_path):
 
 
 def test_the_cover_file_read_takes_the_storage_gate(tmp_path):
-    """A cover file is a STORE read, so it goes through `ws._with_sd`.
+    """A cover file is a STORE read, so it goes through `ws.with_sd`.
 
     On the T-Deck the gate drains the panel and brackets the session because
     the card shares the panel's SPI host, and an sdspi transaction overlapping
@@ -446,7 +446,7 @@ def test_the_cover_file_read_takes_the_storage_gate(tmp_path):
             reads.append(depth[0])
             return self._store.load_cover(*a, **kw)
 
-    ws._with_sd = gate
+    ws.with_sd = gate
     ws.carts_store = _Spy(ws.carts_store)
     for c in [c for c in ws.carts.all
               if c.get("path") in [x["path"] for x in carts]]:

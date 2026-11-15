@@ -94,8 +94,8 @@ OPEN = {
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
     "map":       "ws._g['_edit']('map')",
-    "files":     "ws.spine.open_app(ws.files_app)",
-    "storybook": "ws.spine.open_app(ws.storybook_app)",
+    "files":     "ws.spine.open_app(ws.app('files'))",
+    "storybook": "ws.spine.open_app(ws.app('storybook'))",
 }
 HELPER = """
 def _edit(tab):

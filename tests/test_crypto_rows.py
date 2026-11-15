@@ -213,7 +213,7 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     ws.input.begin_frame()
     ws.frame(DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    g = ws.run.player._lua.get_global
+    g = ws.run.player.lua.get_global
     assert g("SHA") == V.SHA256_ABC
     assert g("HMAC") == V.HMAC[1][2]
     assert g("RND") == 16

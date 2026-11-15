@@ -60,12 +60,12 @@ def _frame(ws, n=2):
 def _open(ws):
     if select_on_home(ws, "Appearance") is None:
         # Not on the home: Appearance is one of the WM's HIDDEN_APPS.
-        assert ws.spine.open_app(ws.appearance_app)
+        assert ws.spine.open_app(ws.app("appearance"))
     else:
         ws.open()
     _frame(ws, 3)
     assert ws.wm.top_kind() == "appearance"
-    return ws.appearance_app
+    return ws.app("appearance")
 
 
 def _press(ws, app, *keys):
@@ -454,12 +454,12 @@ def test_the_page_is_idle_once_drawn(tmp_path):
     app = _open(ws)
     _frame(ws)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     before = bytes(ws.sys_canvas._buf)
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert bytes(ws.sys_canvas._buf) == before
-    assert ws._animating(1 / 30) is False
+    assert ws.animating(1 / 30) is False
     calls = []
     real = app._theme.choices
     app._theme.choices = lambda *a: calls.append(1) or real(*a)

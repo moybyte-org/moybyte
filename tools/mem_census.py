@@ -188,7 +188,7 @@ def fit(b, title=DOOM, secs=8):
     got.update({"need": need, "seen": seen,
                 "frames_moved": (f1 or 0) - (got.get("frames") or 0),
                 "frames_before": st0.get("frames"),
-                "lua_up": val(b, "ws.run.player._lua is not None")})
+                "lua_up": val(b, "ws.run.player.lua is not None")})
     home(b)
     return got
 
@@ -216,7 +216,7 @@ def session(b):
                 continue
             r = settle_cart(b, what, secs)
         elif kind == "app":
-            ok = val(b, "ws.spine.open_app(ws._apps_by_id[%r]) if %r in ws._apps_by_id "
+            ok = val(b, "ws.spine.open_app(ws.app(%r)) if ws.app(%r) is not None "
                         "else None" % (what, what))
             b.drain(secs)
             r = {"opened": ok, "stack": (b.state() or {}).get("stack")}
@@ -277,7 +277,7 @@ def _sz(v, d=0):
 _gc.collect()
 _a0 = _gc.mem_alloc()
 _t0 = _t.ticks_ms()
-_r = ws._with_sd(lambda: _mc.catalogue(str(ws.carts_root)))
+_r = ws.with_sd(lambda: _mc.catalogue(str(ws.carts_root)))
 _dt = _t.ticks_diff(_t.ticks_ms(), _t0)
 _gc.collect()
 _a1 = _gc.mem_alloc()
@@ -321,7 +321,7 @@ LAUNCH = """
 import time as _t
 _c = __import__('console')
 _s = _t.ticks_us()
-_items = ws.home._launcher_items(ws.carts.all)
+_items = ws.home.launcher_items(ws.carts.all)
 _i = _t.ticks_diff(_t.ticks_us(), _s)
 _s = _t.ticks_us()
 _l = _c.Launcher(_items, ws.layout, _c.NAMES)

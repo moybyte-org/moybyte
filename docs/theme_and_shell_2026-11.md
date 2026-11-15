@@ -1133,7 +1133,7 @@ host runs instead).
   like any other, and an absent one falls back to the theme's image.
 - **The default is static.** An animated wallpaper defeats the redraw gate and
   the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws._animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
+  while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
   Moy's night, the default, is a still image, or animates only small dirty
   rects.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
@@ -1464,7 +1464,7 @@ window), and every exit door, each tested by name.
 
 **Parked windows live outside the stack.** Entering console mode moves the
 desk's window records — kind, rect, focus, the retained `win.buf` stamp —
-from `_order` to `wm._parked`, truncates the kernel back-stack to its root
+from `_order` to `wm.parked`, truncates the kernel back-stack to its root
 (`MOY_ROOT`, the home) and sets the mode; the processes behind the records
 (the Editor, Settings, an app) are not stopped, since a kind has one process
 and `goto(kind)` finds it. Leaving console mode restores `_order` from
@@ -2096,7 +2096,7 @@ arrangement (look step 18).
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
-| Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
+| Apps | the registered apps (`ws.app_layers`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
 | Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first); in the desk's Projects window PLAY too, the third button, which runs the cart in a desk window (§8.1) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
@@ -2342,7 +2342,7 @@ ONE function on every surface, and the twin test runs it once.
 **Motion is a declared Class B source.** `api_moving(ctx)` answers whether
 any nest of the context glides or flings; `AppHost.keys()` and `still()`
 read it beside `owed`, the frame gate reads it as animation, and the
-windowed WM reads it in place of `ws._animating` for the content freeze and
+windowed WM reads it in place of `ws.animating` for the content freeze and
 direct render (`docs/history/scroll_and_text_2026-10.md` §8): a surface moving on its own is the one legitimate
 reason to paint with nothing dirty, and the WM must know it is the focused
 window's content and nothing else.

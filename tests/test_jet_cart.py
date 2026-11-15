@@ -102,7 +102,7 @@ def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
     ws.look.set_theme_variant("dark", persist=False)
     open_cart(ws, title)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    assert type(ws.run.player._lua).__name__ == "WasmHostRun"
+    assert type(ws.run.player.lua).__name__ == "WasmHostRun"
     ws.run.player.uncap_mode(True)           # every frame draws: one tick, one frame
     return ws
 
@@ -111,7 +111,7 @@ def _frames(ws, n, hold=(), dt=DT):
     for _ in range(n):
         ws.pointer.visible = False
         settle_badges(ws)
-        ws._toast_until = 0
+        ws.toast_until = 0
         ws.show_fps = ws.perf_hud = ws.perf_capture = False
         for b in CART_BUTTONS:
             ws.input.set_held(b, b in hold)
@@ -133,7 +133,7 @@ def _rgb565(ws, x, y):
 
 
 def _pmem(ws):
-    return ws.run.player._lua._run.pmem()[1]
+    return ws.run.player.lua._run.pmem()[1]
 
 
 # -- the module ------------------------------------------------------------------

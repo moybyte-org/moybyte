@@ -465,8 +465,8 @@ def cmd_perf(b, a):
     st = need_desk(b, a.board)
     diag_was = bool(st.get("diag"))
     # `state`'s uncap is the RUNNING cart's; the switch the next run takes is
-    # `ws._uncap`, which is what `uncap` sets.
-    uncap_was = bool(b.pyval("getattr(ws, '_uncap', False)", timeout=10))
+    # `ws.uncap`, which is what `uncap` sets.
+    uncap_was = bool(b.pyval("getattr(ws, 'uncap', False)", timeout=10))
     held = st.get("wifi_held") or []
     status = 0
     try:
@@ -505,7 +505,7 @@ def cmd_perf(b, a):
     return status
 
 
-PMEM = ("(lambda p: (getattr(getattr(p, '_lua', None), 'flush_pmem', "
+PMEM = ("(lambda p: (getattr(getattr(p, 'lua', None), 'flush_pmem', "
         "lambda: 0)(), list(ws.run.project.pmem.cells) if getattr(ws.run.project, 'pmem', None) "
         "is not None else None)[1])(getattr(ws.run, 'player', None))")
 

@@ -189,13 +189,13 @@ def test_a_menu_row_that_opens_a_surface_keeps_its_mode(tmp_path):
 
 def test_files_rows_step_and_its_rename_field_types(tmp_path):
     ws, drv, t = _console(tmp_path)
-    ws.spine.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     t.tick(3)
     assert not ws.input.text_mode, "Files' rows are no text surface"
     before = _pixels(drv)
     t.key("s")
     assert _pixels(drv) != before
-    files = ws.files_app
+    files = ws.app("files")
     files.dialog = "rename"
     files.rename_text = ""
     t.tick(3)                         # drawn, its field focused, the mode applied
@@ -240,10 +240,10 @@ def test_the_sprite_tab_w_moves_the_cursor_and_e_steps_the_sprite(tmp_path):
 
 def test_my_art_w_is_no_wallpaper_on_the_tdeck(tmp_path):
     ws, _drv, t = _console(tmp_path)
-    ws.spine.open_app(ws._apps_by_id["myart"])
+    ws.spine.open_app(ws.app("myart"))
     t.tick(3)
     calls = []
-    art = ws.myart_app
+    art = ws.app("myart")
     art._verb = lambda v, *a, **k: calls.append(v)
     t.key("w", settle=2)
     assert calls == []

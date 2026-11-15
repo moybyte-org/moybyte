@@ -493,10 +493,10 @@ class HistoryRouter:
         ws.cart = fresh
         ws.run.project.config = dict(fresh.get("cfg", {}))
         ws.run.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
-        ws.sheet = ws._build_sheet()
-        ws.run.project.tilemap = ws._build_tilemap()
+        ws.sheet = ws.build_sheet()
+        ws.run.project.tilemap = ws.build_tilemap()
         ws.run.project.images = fresh.get("images") or {}
-        ws.run.project.scenes = ws._build_scenes()   # a scene undo must reach the live rows (#85)
+        ws.run.project.scenes = ws.build_scenes()   # a scene undo must reach the live rows (#85)
         ws.cart_error = None
         ws.run.player.crash_line = None
         ws.crash_popup = None        # the popup is transient -- any walk ends it
@@ -525,7 +525,7 @@ class HistoryRouter:
                 # Re-check the restored text (owner 2026-07-23): a marker only
                 # retires when the code actually parses again.
                 ws.code_layer._recheck_err()
-        ws._start()
+        ws.start()
 
     # -- the idle-typing autosave (Stage 7 soft trigger) ---------------------
 

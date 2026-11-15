@@ -189,7 +189,7 @@ class HostBoard:
         return {"order": [], "wins": {}}
 
     def leave_cart(self):
-        if self.ws.run.player._update is not None or self.ws.run.player._draw is not None:
+        if self.ws.run.player.update is not None or self.ws.run.player.draw is not None:
             self.ws.spine.exit()
 
     def close(self):

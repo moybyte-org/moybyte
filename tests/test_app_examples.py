@@ -133,7 +133,7 @@ def _pinger(ws, off=()):
         _serve()
         S.SCHED.tick(0)
         _frames(drv, 1)
-    return ws.run.player._lua
+    return ws.run.player.lua
 
 
 def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):

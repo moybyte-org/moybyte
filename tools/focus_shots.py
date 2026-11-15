@@ -290,7 +290,7 @@ def _sheet_setup(page, focus, keys, press, apps=None):
         app.open()
         ws.wm.goto(app.id)
         L._settle(g, ws, 2)
-        if app.id in getattr(ws.wm, "_wins", {}):
+        if app.id in getattr(ws.wm, "windows", {}):
             L._place(ws, app.id, *DESK_WIN)
             L._settle(g, ws, 2)
         ui_draw._C.api_focus(app.ctx, focus)
@@ -309,7 +309,7 @@ def _sheet_setup(page, focus, keys, press, apps=None):
 
 def _open(app_id, then=None):
     def setup(g, ws):
-        ws.spine.open_app(ws._apps_by_id[app_id])
+        ws.spine.open_app(ws.app(app_id))
         L._settle(g, ws, 2)
         if then is not None:
             then(g, ws)

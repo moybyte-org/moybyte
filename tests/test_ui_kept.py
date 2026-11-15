@@ -580,7 +580,7 @@ def test_the_lua_face_answers_the_floor_and_held(tmp_path):
         ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if hasattr(lua._run, "pmem"):
         pm = list(lua._run.pmem()[1])[:12]
     else:
@@ -642,7 +642,7 @@ def test_the_lua_face_keeps_faces(tmp_path):
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if hasattr(lua._run, "pmem"):
         pm = list(lua._run.pmem()[1])[:22]
     else:

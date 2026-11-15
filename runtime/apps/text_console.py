@@ -264,8 +264,8 @@ class TextConsole:
         """One keyboard byte. Enter submits; everything else edits the line.
         After the script ended, Enter runs it again."""
         if code in (0x0D, 0x0A) and self.ended and not self.reading():
-            self.ws._reset_canvas_state()
-            self.ws._start()
+            self.ws.reset_canvas_state()
+            self.ws.start()
             return True
         if not code or not self.reading():
             return False

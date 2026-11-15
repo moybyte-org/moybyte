@@ -669,7 +669,7 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   WM's.** Class C (§3) mutates content without marking dirty, so any button
   activity renders live. The check reads BOTH frames because handlers consume
   `p.click` in place — a tap that opens a prompt zeroes it before the draw sees
-  it, and the previous frame's edge is still in `ws._last_ptr`. A press that
+  it, and the previous frame's edge is still in `ws.last_ptr`. A press that
   lands on chrome — a strip, its buttons, a resize zone, a full-screen
   window's row head — is the WM's (`_grab`): no content is handed it, its
   drag or its release, so it waives the check. A position/visibility-only change is inert:

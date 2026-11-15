@@ -30,7 +30,7 @@ def _open(hh, tab):
     ws.text.set_menu_view(tab)
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(3):
         drv.frame(DT)
     return ws, drv

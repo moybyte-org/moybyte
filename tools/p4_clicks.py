@@ -56,7 +56,7 @@ Attributed with tools/p4_attrib.py's wrap hook over the same driver (cold):
   back_to_desk, 6 painted frames      open_picker, 5 painted frames
     cover_load      32 x  1572ms        cover_load      32 x  1561ms
     launcher.draw    6 x   400 excl     picker.draw      6 x   416 excl
-    wallpaper.draw   6 x   222          ws._relayout     1 x    25
+    wallpaper.draw   6 x   222          ws.relayout     1 x    25
     cover_prefetch 200 x  1338 incl     cover_prefetch 195 x  1334 incl
 
 A cover's blob read + parse is ~49ms and there are ~29 carts; each pop-in

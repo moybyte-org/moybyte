@@ -50,8 +50,8 @@ def test_the_frame_and_flush_brackets_use_the_microsecond_clock():
     assert "_flush_t0 = _ticks_us()" in body
     assert "_total = _ticks_diff(_ticks_us(), frame_t0)" in body
     # Converted ONCE, at the EMA -- every public number stays milliseconds.
-    assert "ws._flush_ms = _ema(ws._flush_ms, _flush / 1000.0)" in body
-    assert "ws._draw_ms = _ema(ws._draw_ms, _draw / 1000.0)" in body
+    assert "ws.flush_ms = _ema(ws.flush_ms, _flush / 1000.0)" in body
+    assert "ws.draw_ms = _ema(ws.draw_ms, _draw / 1000.0)" in body
 
 
 
@@ -63,7 +63,7 @@ def test_a_run_in_front_names_its_cart_and_leaves_the_console_meters_absent(tmp_
     from ws_helpers import build_ws, open_cart
     ws = build_ws(tmp_path)
     open_cart(ws, "Coin Quest")
-    ws._draw_ms = ws._flush_ms = 5.0
+    ws.draw_ms = ws.flush_ms = 5.0
 
     class Loop:
         def __init__(self):

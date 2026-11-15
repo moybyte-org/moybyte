@@ -2,7 +2,7 @@
 #   Home                     the home's verbs: launch, the desk, Projects, the tabs, search
 #   Home.launch_named        run a cart by name and answer its title
 #   Home.go_home             land on this mode's root
-#   Home._launcher_items     the home's tab over the roster
+#   Home.launcher_items      the home's tab over the roster
 #   Home._home_grid          the card model for an arrangement
 #   -- the resume record          where a reboot puts the home back
 #   -- the desk                   desktop mode's root, and PLAY into console mode
@@ -104,7 +104,7 @@ class Home:
         # frame loop's tail.
         ws = self.ws
         want = str(name or "").strip().lower()
-        items = self._runnable_items()
+        items = self.runnable_items()
         exact_title = None
         exact_folder = None
         partial = None
@@ -206,7 +206,7 @@ class Home:
         # Re-derive the shelf under the desk-tier filter (system apps are
         # desk icons here): the first call runs before the WM swap finished
         # populating anything, so the boot-time entry settles the filter.
-        ws.launcher.set_items(self._launcher_view_items())
+        ws.launcher.set_items(self.launcher_view_items())
         if ws.wm.mode == "console":
             ws.wm.leave_console()
         else:
@@ -256,7 +256,7 @@ class Home:
         g = ws.projects_grid
         if g is None:
             g = ws.projects_grid = self._home_grid(
-                "carousel", self._launcher_items(ws.carts.all, "make"))
+                "carousel", self.launcher_items(ws.carts.all, "make"))
             g.tab = "make"
             g.verb_sets = PROJECTS_VERB_SETS   # Make's Play, its pane's rows
         else:
@@ -295,7 +295,7 @@ class Home:
             ws.frame_state.dirty = True
         elif not wm.top_is("launcher"):
             self.go_home()
-        elif ws.bar_layer._show_x("home"):
+        elif ws.bar_layer.show_x("home"):
             self.open_desk()
 
     def go_home(self):
@@ -328,17 +328,17 @@ class Home:
         # change-gated, so this costs nothing for a surface with nothing
         # pending, and a future app gets it by implementing one method
         # instead of editing this file.
-        for _app in ws._apps:
+        for _app in ws.app_layers:
             ws.leave_surface(_app.id)
         ws.leave_surface("settings")    # a Name still typed, its radio lease
         _editor_app = getattr(ws, "editor_app", None)
-        if _editor_app is not None and (ws.text._editing_icons
+        if _editor_app is not None and (ws.text.editing_icons
                                         or _editor_app.project is ws.run.project):
             ws.leave_surface("menu")
         # The parked Editor's workspace (console mode): its window comes back
         # to it, so neither it nor the run state it holds is torn down.
         keep = ws.wm.is_parked("menu") and (
-            ws.text._editing_icons or (_editor_app is not None
+            ws.text.editing_icons or (_editor_app is not None
                                     and _editor_app.project is ws.run.project))
         if not keep:
             ws.editor = None
@@ -353,7 +353,7 @@ class Home:
         if not keep:
             ws.cart = None
             # #66 fragmentation fix: ns = None alone kept the world alive through
-            # player._update's closure; release clears the dict in place + collects.
+            # player.update's closure; release clears the dict in place + collects.
             ws.run.player.release_world()
             # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
             # the whole workspace. The fat cart re-slims NOW (not at the next open --
@@ -362,7 +362,7 @@ class Home:
             # churn arena; reopen costs one SD read) and a FRESH empty Project
             # replaces the old one's sheet/tilemap/images/pmem (ws.run.project is
             # never-None by design, so surfaces keep their invariant). The EDITOR
-            # return path (\_exit_to_caller -> menu) keeps both -- that's live
+            # return path (\exit_to_caller -> menu) keeps both -- that's live
             # editing state, not a corpse.
             _fat = ws.run.fat_cart
             if _fat is not None:
@@ -383,7 +383,7 @@ class Home:
 
     # -- the home's cards: the tabs, the search, the arrangement --------------
 
-    def _launcher_items(self, carts, tab=None):
+    def launcher_items(self, carts, tab=None):
         """The home's `tab` (the active one by default) over `carts`
         (docs/theme_and_shell_2026-11.md §8.10), the four without overlap:
 
@@ -416,7 +416,7 @@ class Home:
         if tab == "apps":
             hidden = getattr(ws.wm, "HIDDEN_APPS", ())
             out = []
-            for app in getattr(ws, "_apps", ()):
+            for app in getattr(ws, "app_layers", ()):
                 if app.id in hidden:
                     continue
                 for c in carts:
@@ -456,19 +456,19 @@ class Home:
         return [c for c in carts if c.get("type") in ("app", "tool")
                 and not own(c) and not ws.spine.is_system_app(c)]
 
-    def _runnable_items(self):
+    def runnable_items(self):
         """Every cart a tap on the home RUNS or opens -- Games, Mine and Apps,
         in that order: what a remote run (`launch_named`) chooses from."""
         ws = self.ws
         carts = ws.carts.all
         out = []
         for tab in ("games", "mine", "apps"):
-            for c in self._launcher_items(carts, tab):
+            for c in self.launcher_items(carts, tab):
                 if c.get("path"):
                     out.append(c)
         return out
 
-    def _launcher_view_items(self, grid=None):
+    def launcher_view_items(self, grid=None):
         """`grid`'s (the home's by default) current contents: its active tab,
         the home's narrowed by the search query (#105), if any -- a plain
         case-insensitive substring match on the title; a "+ New" card survives
@@ -477,8 +477,8 @@ class Home:
         on which list is "current"."""
         ws = self.ws
         if grid is not None and grid is not ws.launcher:
-            return self._launcher_items(ws.carts.all, grid.tab)
-        base = self._launcher_items(ws.carts.all)
+            return self.launcher_items(ws.carts.all, grid.tab)
+        base = self.launcher_items(ws.carts.all)
         q = ws.search_query.strip().lower()
         if not q:
             return base
@@ -505,7 +505,7 @@ class Home:
         g.broken_ids = ws.spine.broken_cart_ids
         g.own_for = ws.carts.is_own
         g.plays_for = ws.carts.plays
-        g.today_for = ws.notices._today_ymd
+        g.today_for = ws.notices.today_ymd
         g.theme = getattr(ws, "theme_colors", None)
         return g
 
@@ -536,7 +536,7 @@ class Home:
         sel = lw.selected()
         lw.tab_sel[lw.tab] = sel.get("path") if sel else None
         lw.tab = tab
-        lw.set_items(self._launcher_view_items(lw))
+        lw.set_items(self.launcher_view_items(lw))
         want = lw.tab_sel.get(tab)
         i = 0
         for k in range(len(lw.items)):
@@ -563,13 +563,13 @@ class Home:
         tabs = [ws.launcher.tab] + [t for t, _l in HOME_TABS
                                       if t != ws.launcher.tab and t != "make"]
         for tab in tabs:
-            items = self._launcher_items(ws.carts.all, tab)
+            items = self.launcher_items(ws.carts.all, tab)
             for k in range(len(items)):
                 if items[k] is cart or (path and items[k].get("path") == path):
                     if tab != ws.launcher.tab or ws.search_query:
                         ws.search_query = ""
                         self.set_home_tab(tab)
-                        ws.launcher.set_items(self._launcher_view_items())
+                        ws.launcher.set_items(self.launcher_view_items())
                     lw = ws.launcher
                     for j in range(len(lw.items)):
                         if lw.items[j] is cart or (path and lw.items[j].get("path") == path):
@@ -607,7 +607,7 @@ class Home:
         ws.search_typing = False
         if clear:
             ws.search_query = ""
-            ws.launcher.set_items(self._launcher_view_items())
+            ws.launcher.set_items(self.launcher_view_items())
         ws.frame_state.dirty = True
 
     def toggle_search(self):
@@ -626,7 +626,7 @@ class Home:
         grid."""
         ws = self.ws
         ws.search_query = q
-        ws.launcher.set_items(self._launcher_view_items())
+        ws.launcher.set_items(self.launcher_view_items())
         ws.frame_state.dirty = True
 
     def _make_items(self, carts):
@@ -651,7 +651,7 @@ class Home:
         is the console's own as well (docs/os_2026-11/processes.md §8)."""
         ws = self.ws
         carts = [c for c in carts if c.get("type") != "theme" and not _is_ach_proc(c)]
-        apps = getattr(ws, "_apps", ())
+        apps = getattr(ws, "app_layers", ())
         if apps:
             keep = []
             for c in carts:
@@ -668,7 +668,7 @@ class Home:
             carts = keep
         return [new_tile()] + list(carts)
 
-    def _leave_or_home(self, leave):
+    def leave_or_home(self, leave):
         """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by
         several menu_view input branches (theme/map/music/the default card editor)
         and the block-editor outline: B calls the view's own `leave` callback (it

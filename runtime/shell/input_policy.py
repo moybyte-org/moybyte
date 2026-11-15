@@ -50,7 +50,7 @@ class InputPolicy:
         """A menu holds a handheld's keys over the surface: the pause menu,
         the delete confirm, the system menu, About."""
         ws = self.ws
-        return not ws.windowed_chrome and (ws._modal_layer() is not None or ws._about)
+        return not ws.windowed_chrome and (ws.modal_layer() is not None or ws.about)
 
     def _typing_popover(self):
         """The popover component a field types in (the Wi-Fi panel's
@@ -136,9 +136,9 @@ class InputPolicy:
         elif ws.sysmenu.open:
             ws.sysmenu.close()
             ws.popover_touch()
-        elif ws._about:
+        elif ws.about:
             ws.menu_ui.about.close()
-        elif ws.plays_fullscreen() or ws._game_pauses():
+        elif ws.plays_fullscreen() or ws.game_pauses():
             ws.system_key()
         else:
             kind = ws.wm.input_kind()
@@ -157,7 +157,7 @@ class InputPolicy:
         if i.typed != 27 or not i.text_mode:
             return False
         ws = self.ws
-        if ws._modal_layer() is not None or ws.sysmenu.open:
+        if ws.modal_layer() is not None or ws.sysmenu.open:
             return False
         s = self.holder()
         if s is None or not (self.has_page(s) or getattr(s, "ESC_LEAVES", False)):
@@ -177,7 +177,7 @@ class InputPolicy:
         own on its first page, which its bar's chevron leaves)."""
         ws = self.ws
         return (s is None or s.ESC_LEAVES or self.has_page(s)
-                or ws.plays_fullscreen() or ws._game_pauses())
+                or ws.plays_fullscreen() or ws.game_pauses())
 
     def step(self, s):
         """One step back inside surface `s`, never out of it: the toolkit's
@@ -205,17 +205,17 @@ class InputPolicy:
         ws = self.ws
         if kind == "settings":
             ws.leave_surface(kind)
-            ws._exit_settings()
+            ws.exit_settings()
         elif kind == "tasks":
             ws.close_tasks()
         elif kind == "menu":
             ws.spine.exit()
-        elif kind == "desktop" or kind in ws._apps_by_id:
+        elif kind == "desktop" or ws.app(kind) is not None:
             ws.leave_surface(kind)
-            app = ws._apps_by_id.get(kind)
+            app = ws.app(kind)
             if app is not None and app.BACK_MINIMISES and ws.wm.minimise_kind(kind):
                 return
-            ws.spine._exit_to_caller()
+            ws.spine.exit_to_caller()
 
     # -- the trackball ---------------------------------------------------------
 
@@ -228,7 +228,7 @@ class InputPolicy:
         opens, the map, the scene) and a caret, which takes it as arrows
         (`InputRouter.nav`). The desk's windows are pointed at."""
         ws = self.ws
-        if ws._modal_layer() is not None or ws._about:
+        if ws.modal_layer() is not None or ws.about:
             return True
         if ws.windowed_chrome:
             return False

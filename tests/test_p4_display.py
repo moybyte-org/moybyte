@@ -148,7 +148,7 @@ class FakeWS:
         self.screen = "home"
         self.wifi = None
         self.carts = _FakeCarts()
-        self._apps = ()
+        self.app_layers = ()
         self._psave_ms = 0
         self._psave_asleep = False
 
@@ -364,7 +364,7 @@ def test_the_reuse_fence_stays_unarmed_while_presents_keep_up():
 
 def test_the_blocking_game_fence_is_timed(stepped):
     """The blind spot: this runs inside FrameLoop's UNTIMED present() hook --
-    outside `ws._flush_ms` and unattributed inside `busy=`."""
+    outside `ws.flush_ms` and unattributed inside `busy=`."""
     _dsi, ppa, ctx = build()
     with ctx as mod:
         stepped(mod)

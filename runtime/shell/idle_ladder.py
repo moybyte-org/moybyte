@@ -187,7 +187,7 @@ class Saver:
             cv.print(name, max(0, (w - _ui_draw.text_width(name, fs, "title")) // 2), ty,
                      _INK, 1)
             _ui_draw.print_font(_ui_draw.font("ui")[0])
-            clock = ws.bar_layer._clock_text()
+            clock = ws.bar_layer.clock_text()
             cv.print(clock, w - _ui_draw.text_width(clock, fs, "ui") - 10 * fs, 8 * fs, _DIM, 1)
         finally:
             _ui_draw.print_font(was)

@@ -34,7 +34,7 @@ def _frames(drv, n=3):
 def test_the_strip_is_drawn_by_the_frame_but_where_strip_self_says_why():
     """Every file that calls the strip itself is one `STRIP_SELF` names with
     its reason, and each one it names still does."""
-    call = re.compile(r"\._draw_status_strip\(")
+    call = re.compile(r"\.draw_status_strip\(")
     callers = set()
     for top in ("runtime", "device"):
         for p in (ROOT / top).rglob("*.py"):
@@ -50,8 +50,8 @@ def test_settings_strip_is_the_frames_and_drawn_once(tmp_path):
     ws.open_settings()
     _frames(drv)
     got = []
-    real = ws.bar_layer._draw_status_strip
-    ws.bar_layer._draw_status_strip = lambda where: (got.append(where), real(where))
+    real = ws.bar_layer.draw_status_strip
+    ws.bar_layer.draw_status_strip = lambda where: (got.append(where), real(where))
     ws.mark_dirty()
     drv.frame(DT)
     assert got == ["settings"]
@@ -82,7 +82,7 @@ def _files(ws, drv, place, name):
     ws.home.go_home()
     ws.open(next(c for c in ws.carts.all if c.get("title") == "Files"))
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place(place, keep=name)
     return app
 

@@ -653,7 +653,7 @@ def test_the_code_tab_hit_tests_at_the_mono_faces_7px_cell(tmp_path):
     assert rc == OK
     try:
         assert moy_ui.use_font("mono", fid)
-        ws._relayout_code()
+        ws.relayout_code()
         ws.screen = "menu"
         ws.text.set_menu_view("code")
         drv = host_app.ConsoleDriver(ws)

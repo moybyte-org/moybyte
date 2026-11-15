@@ -1,7 +1,7 @@
 """The Editor's SAVE and PLAY verbs on the Workstation: the compile-gated
 `save_code` and its inline error marker, `run_code`/`apply` (PLAY from the Code
 and Config tabs), the per-tab commit entry points the surfaces dispatch to
-(`save_sprites`/`save_map`/`save_scene`/`save_sounds`/`_save_config` -- thin over
+(`save_sprites`/`save_map`/`save_scene`/`save_sounds`/`save_config` -- thin over
 `Project.commit_*`), and the #18 cross-cart sprite reuse over the shared sheet.
 The console's `ws.saves`.
 """
@@ -41,9 +41,9 @@ class Saves:
         if not ok:
             if not force:
                 ws.cart_error = "Syntax error -- " + msg
-                self._set_code_error(msg)    # mark the bad line in the editor (#24)
+                self.set_code_error(msg)    # mark the bad line in the editor (#24)
                 return False
-            self._set_code_error(msg, move=False)   # badge it, leave the caret alone
+            self.set_code_error(msg, move=False)   # badge it, leave the caret alone
         else:
             ws.code_err = None             # parses now -> clear the inline marker
             ws.code_err_row = None
@@ -56,7 +56,7 @@ class Saves:
         # check + code-UI half above stays here (the code surface).
         return ws.run.project.commit_code(src, force=force, name=name)
 
-    def _set_code_error(self, msg, move=True):
+    def set_code_error(self, msg, move=True):
         """Record a syntax error so the code view can mark the offending line
         inline (#24). compile_check formats messages as "line N: <reason>"; pull
         N out for the marker, keep the short reason for the inline note, and move
@@ -70,9 +70,9 @@ class Saves:
             if p > 0 and rest[:p].strip().isdigit():
                 row = int(rest[:p].strip()) - 1
                 short = rest[p + 1:].strip()
-        self._mark_code_error(row, short, move=move)
+        self.mark_code_error(row, short, move=move)
 
-    def _mark_code_error(self, row, short, move=True):
+    def mark_code_error(self, row, short, move=True):
         """Record an inline error marker (#24) and, if the editor is open, move
         the caret onto `row` (0-based) so the fix is one tap away. `move=False`
         (the live re-check while the kid types) updates the marker WITHOUT
@@ -98,7 +98,7 @@ class Saves:
             # this is the only thing that makes a PLAY run what was just typed.
             ws.carts_store.set_source(ws.cart, ws.text.code_file_name(),
                                         ws.editor.text())
-        if ws._start():
+        if ws.start():
             ws.ach.award("first_run")         # Lift Off!: a cart was RUN
             # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
             # exit returns to the code tab (not the launcher home).
@@ -159,7 +159,7 @@ class Saves:
         128-line shared.moygfx parses into the top half with ids unchanged."""
         ws = self.ws
         try:
-            hexs = ws._with_sd(lambda: ws.carts_store.load_shared_sheet(ws.carts_root))
+            hexs = ws.with_sd(lambda: ws.carts_store.load_shared_sheet(ws.carts_root))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte load shared sheet failed:", exc)
             return None
@@ -210,7 +210,7 @@ class Saves:
             return False
         try:
             hexs = shared.to_hex()
-            ws._with_sd(lambda: ws.carts_store.save_shared_sheet(hexs, ws.carts_root))
+            ws.with_sd(lambda: ws.carts_store.save_shared_sheet(hexs, ws.carts_root))
         except Exception as exc:  # noqa: BLE001
             ws.paint_status = "CAN'T PUT"
             print("Moybyte save shared sheet failed:", exc)
@@ -237,7 +237,7 @@ class Saves:
                 name = ws.carts_store.new_file_name("sprites", ws.carts_root)
                 return ws.carts_store.save_file("sprites", name, hexs,
                                                   ws.carts_root)
-            name = ws._with_sd(_write)
+            name = ws.with_sd(_write)
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the editor
             ws.paint_status = "CAN'T SEND"
             print("Moybyte send sprites to files failed:", exc)
@@ -251,13 +251,13 @@ class Saves:
         # reachable). PLAY from the Config tab (Stage 3b): caller = the Editor, so the
         # cart's exit returns to the Config cards, not the launcher home.
         ws = self.ws
-        ok = ws._start()
+        ok = ws.start()
         ws.spine.play(ws.editor_app)
         if ok:
             ws.ach.award("first_run")         # Lift Off!: GO re-ran the cart
-            self._save_config()
+            self.save_config()
 
-    def _save_config(self):
+    def save_config(self):
         # Moved to Project.commit_config (Stage 1b); this stays as the tested ws. name
         # apply() dispatches to.
         ws = self.ws

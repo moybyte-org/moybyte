@@ -378,7 +378,7 @@ def get_carts_taps(n=3):
         ws = host_app.build_workstation(os.path.join(d, "carts"))
         cart_index.save_sources(os.path.join(d, "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
-        app = ws._apps_by_id["getcarts"]
+        app = ws.app("getcarts")
         ws.spine.open_app(app)
         for _ in range(60):
             ws.mark_dirty()

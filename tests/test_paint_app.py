@@ -26,18 +26,18 @@ def _open_paint(ws):
 def _opened_paint(ws):
     if select_on_home(ws, "Paint") is None:
         # Windowed tier (#105): system apps are desk-only, not on the shelf.
-        assert ws.spine.open_app(ws.artwork_app)
+        assert ws.spine.open_app(ws.app("artwork"))
         ws.input.begin_frame()
         ws.frame(1 / 30)
         assert ws.cart_error is None
         assert ws.wm.top_kind() == "artwork"
-        return ws.artwork_app
+        return ws.app("artwork")
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.cart_error is None
     assert ws.wm.top_kind() == "artwork"
-    return ws.artwork_app
+    return ws.app("artwork")
 
 
 def test_paint_my_art_and_the_wallpaper_are_well_formed_system_carts():
@@ -89,7 +89,7 @@ def test_going_home_with_paint_never_opened_writes_nothing(tmp_path):
     document never built there is nothing to save: no blank drawing lands in
     the gallery, no first-save achievement, and the document stays unbuilt."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = ws.artwork_app
+    app = ws.app("artwork")
     ws.home.go_home()
     ws.home.go_home()
     assert app._doc is None
@@ -183,7 +183,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
 
     other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
-    ws._open_workspace(other)
+    ws.open_workspace(other)
     ws.spine.play(ws.launcher_layer)
     assert "artwork" not in ws.ns
 
@@ -195,7 +195,7 @@ def test_a_desks_drawing_is_1024x600_and_a_window_resize_never_resamples_it(tmp_
     ws.home.open_desk()
     app = _open_paint(ws)
     ws.frame(1 / 30)
-    win = ws.wm._wins["artwork"]
+    win = ws.wm.windows["artwork"]
     lay = win.ctx.artwork_layout
     assert (app.doc.W, app.doc.H) == (1024, 600)
     assert lay.desk
@@ -203,7 +203,7 @@ def test_a_desks_drawing_is_1024x600_and_a_window_resize_never_resamples_it(tmp_
     assert app.sizes() == (2, 4, 8, 16)
 
     before = bytes(app.doc.pix)
-    ws.wm._resize_window(win, 720, 430)
+    ws.wm.resize_window(win, 720, 430)
     assert win.ctx.artwork_layout.w == win.buf.w
     assert bytes(app.doc.pix) == before
 
@@ -691,7 +691,7 @@ def test_a_handheld_views_a_desks_drawing_and_never_decodes_it_whole(tmp_path):
     ws.pointer.visible = False
     _wide(ws)
     ws.artwork.open_named("garden", "drawings")
-    app = ws.artwork_app
+    app = ws.app("artwork")
     app._starter_pending = False
     app = _open_paint(ws)
     v = app.viewer
@@ -727,7 +727,7 @@ def test_the_first_save_of_a_new_drawing_says_its_name(tmp_path):
 def test_put_in_a_story_adds_a_last_page_and_its_undo_takes_it_out(tmp_path):
     from runtime import storybook_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    sb = ws._apps_by_id["storybook"]
+    sb = ws.app("storybook")
     sb._new_story()
     app = _open_paint(ws)
     app.doc.put(2, 2, 8)
@@ -753,7 +753,7 @@ def test_the_desk_window_is_titled_with_the_drawing(tmp_path):
     for _ in range(2):
         ws.mark_dirty()
         ws.frame(1 / 30)
-    win = ws.wm._wins["artwork"]
+    win = ws.wm.windows["artwork"]
     assert ws.wm._win_title(win).startswith("Paint")
     assert app.doc_title() in ws.wm._win_title(win)
     assert ws.wm._chip_title(win) == "Paint"
@@ -782,8 +782,8 @@ def test_a_settled_canvas_and_a_settled_view_paint_nothing(tmp_path):
     assert _idle_paints(ws) == 0, "an idle canvas painted"
     _wide(ws)
     ws.artwork.open_named("garden", "drawings")
-    ws.artwork_app.open()
-    assert ws.artwork_app.viewer is not None
+    ws.app("artwork").open()
+    assert ws.app("artwork").viewer is not None
     assert _idle_paints(ws) == 0, "an idle view painted"
 
 
@@ -798,7 +798,7 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
     box = (0, 0, rect[2], rect[3])
     end = bl._title_end("app", bl.lent_zone("app", bl._packed("app")[0]), box, False)
     chip = [h for h, _i, _off, name, _r in bl._lent_rects("app", end, box, False)
-            if name == bl._lent("app")[4]]
+            if name == bl.lent("app")[4]]
     assert chip
     was = app.zoom
     x, y, w, h = chip[0]
@@ -828,7 +828,7 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
-    root = getattr(ws.wm, "_root_canvas", None) or ws.sys_canvas
+    root = getattr(ws.wm, "root_canvas", None) or ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     held = []
     if chosen:
@@ -848,7 +848,7 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         frame()
     app.tool = tool
     app.shape = shape
-    win = ws.wm._wins.get("artwork") if hasattr(ws.wm, "_wins") else None
+    win = ws.wm.windows.get("artwork") if hasattr(ws.wm, "windows") else None
     ox = oy = 0
     if win is not None:
         was = app.layout
@@ -945,10 +945,10 @@ def test_a_banner_over_the_page_makes_every_frame_whole(tmp_path):
     ws.ach.award("first_run")
     drv.frame(1 / 30)                   # the achievements process's slice raises it
     drv.frame(1 / 30)
-    assert ws._toast_until and ws.sys_canvas.covered
+    assert ws.toast_until and ws.sys_canvas.covered
     assert not app._may(ws.sys_canvas)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     drv.frame(1 / 30)
     assert not ws.sys_canvas.covered
 
@@ -993,7 +993,7 @@ def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_p
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
-    (getattr(ws.wm, "_root_canvas", None) or ws.sys_canvas).RETAINED_FRAMES = bufs
+    (getattr(ws.wm, "root_canvas", None) or ws.sys_canvas).RETAINED_FRAMES = bufs
     for _ in range(4):
         drv.frame(1 / 30)
     asked = [0]

@@ -116,7 +116,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
                                         windowed=True)
     else:
         ws = host_app.build_workstation(str(root / "carts"))
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
@@ -152,18 +152,18 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
                                 moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
                                 ws.carts_root)
         _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
-        assert ws.spine.open_app(ws._apps_by_id["myart"])
+        assert ws.spine.open_app(ws.app("myart"))
     elif app == "getcarts":
         repo, net = _shelf_net()
         ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = net
-        app_ = ws._apps_by_id["getcarts"]
+        app_ = ws.app("getcarts")
         app_._inst = _SameFree(app_._inst)
         assert ws.spine.open_app(app_) is not False
     else:
         if app == "storybook":
             seed_stories(ws)
-        app_ = ws._apps_by_id[app]
+        app_ = ws.app(app)
         assert ws.spine.open_app(app_) is not False
         if app == "files":
             # the list of projects, every cover made: which rows a frame's
@@ -180,7 +180,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
 
 def _owes(ws):
     """Whether an app of the console has idle work owed."""
-    for app in ws._apps:
+    for app in ws.app_layers:
         if getattr(app, "idle_owed", False):
             return True
     return False
@@ -431,7 +431,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     p = Pair(tmp_path, "notes", bufs, desk)
     sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     if desk:
-        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+        ox, oy, _w, _h = p.a.wm.windows["desktop"].content_rect()
         sx += ox
         sy += oy
     for ws in (p.a, p.b):
@@ -509,7 +509,7 @@ class _NoMark:
 
 
 def _app(ws, app):
-    a = ws._apps_by_id[app]
+    a = ws.app(app)
     return getattr(a, "_inst", a)
 
 

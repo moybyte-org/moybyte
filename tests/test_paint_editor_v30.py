@@ -36,7 +36,7 @@ def _open_paint(ws):
     # Open the first cart that has a sheet, then the paint editor.
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
 
 
@@ -279,7 +279,7 @@ def _open_map_cart(ws):
     if select_on_home(ws, _MAP_CART) is None:
         raise AssertionError("no seed cart titled " + _MAP_CART)
     ws.open_in_editor()
-    ws.text._open_map()
+    ws.text.open_map()
 
 
 def _map_cell_center(ws, cx, cy):

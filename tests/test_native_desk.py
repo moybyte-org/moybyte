@@ -101,9 +101,9 @@ def test_the_desk_windows_take_its_title_strip_and_content_sizes(tmp_path):
     ws = _ws(tmp_path)
     ws.home.open_desk()
     for app_id, size in (("files", (548, 534)), ("calc", (344, 488))):
-        ws.spine.open_app(ws._apps_by_id[app_id])
+        ws.spine.open_app(ws.app(app_id))
         _frames(ws, 2)
-        win = ws.wm._wins[app_id]
+        win = ws.wm.windows[app_id]
         assert win.title_h == 44
         assert (win.w, win.h) == size, app_id
 
@@ -163,12 +163,12 @@ def test_a_render_scale_2_theme_draws_the_desk_at_half_and_doubles_it(tmp_path):
         assert ws.render_scale == 2
         assert (ws.sys_canvas.w, ws.sys_canvas.h) == (512, 300)
         assert (ws.glass_canvas.w, ws.glass_canvas.h) == (1024, 600)
-        assert ws.wm._root_canvas is ws.sys_canvas
+        assert ws.wm.root_canvas is ws.sys_canvas
         assert ws.layout.status_h == 20 and ws.layout.cs == 1
         ws.home.open_desk()
-        ws.spine.open_app(ws._apps_by_id["files"])
+        ws.spine.open_app(ws.app("files"))
         _frames(ws)
-        assert ws.wm._wins["files"].title_h == 22
+        assert ws.wm.windows["files"].title_h == 22
         half, glass = bytes(ws.sys_canvas._buf), bytes(ws.glass_canvas._buf)
         for y in range(0, 300, 13):
             for x in range(0, 512, 17):

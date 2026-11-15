@@ -320,7 +320,7 @@ class _TK:
         # the swatches stop at their ends: seven steps right, seven back
         return n == ('right' if (ws._th_i // 7) % 2 == 0 else 'left')
 ws._th_key = _TK()
-ws._th_app = getattr(ws, 'appearance_app', None)
+ws._th_app = ws.app("appearance")
 if ws._th_app is not None and not hasattr(ws._th_app, 'show_row'):
     ws._th_app = None
 ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
@@ -542,16 +542,16 @@ def sprite_scenarios(b, bench, tag):
     b.open("settings"); b.drain(2.0)
     o = win_geom(b, "settings")
     if o is not None:
-        pyval(b, "ws.spine.open_app(ws._apps_by_id['calc'])"); b.drain(2.0)
+        pyval(b, "ws.spine.open_app(ws.app('calc'))"); b.drain(2.0)
         bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
         bench.stop("sprite chrome drag %s" % tag)
         home(b)
         b.open("settings"); b.drain(2.0)
         o = win_geom(b, "settings")
-        lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
-        sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
-        sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
-        sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+        lay = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_h")
+        sx = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_x")
+        sw = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_w")
+        sy = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_y0")
         x0, y0 = o[0] + sx + sw // 2, o[1] + sy
     else:
         lay = pyval(b, "ws.layout.set_row_h")
@@ -714,7 +714,7 @@ def bench_shadows(b, out_path):
     bench = Bench(b)
     pyexec(b, HOME_KEY)
     was = pyval(b, "(ws.look.theme_name, ws.look.theme_variant)")
-    windowed = bool(pyval(b, "hasattr(ws.wm, '_draw_unders')"))
+    windowed = bool(pyval(b, "hasattr(ws.wm, 'draw_unders')"))
     themes = [("live", None), ("moy day", "light"), ("moy night", "dark")]
     for tag, variant in themes:
         if variant is not None:
@@ -722,7 +722,7 @@ def bench_shadows(b, out_path):
         if windowed:
             home(b)
             for app in ("files", "calc"):
-                pyval(b, "ws.spine.open_app(ws._apps_by_id['%s'])" % app)
+                pyval(b, "ws.spine.open_app(ws.app('%s'))" % app)
                 b.drain(2.5)
             bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
             b.drain(1.0)
@@ -888,20 +888,20 @@ def bench_desk_scale(b, out_path):
         r = pyval(b, "ws.render_scale") or 1
         tag = "%dx" % r
         home(b)
-        pyexec(b, "ws.spine.open_app(ws._apps_by_id['files'])\n"
-                  "ws.spine.open_app(ws._apps_by_id['calc'])\n"
+        pyexec(b, "ws.spine.open_app(ws.app('files'))\n"
+                  "ws.spine.open_app(ws.app('calc'))\n"
                   "ws.open_settings()")
         b.drain(4.0)
         bench.start(); b.drain(3.0); bench.stop("desk idle, three windows, " + tag)
         bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
         bench.stop("window drag (settings), " + tag)
-        pyexec(b, "ws.spine.open_app(ws._apps_by_id['files'])\n"
-                  "ws._apps_by_id['files'].open_place('projects')")
+        pyexec(b, "ws.spine.open_app(ws.app('files'))\n"
+                  "ws.app('files').open_place('projects')")
         b.drain(2.0)
         o = win_geom(b, "files")
         # the projects' table: its rows scroll under a drag in the list rect
-        rows = pyval(b, "ws._apps_by_id['files'].layout.list"
-                        " if 'files' in ws.wm._wins else None")
+        rows = pyval(b, "ws.app('files').layout.list"
+                        " if 'files' in ws.wm.windows else None")
         if o and rows:
             cx = (o[0] + rows[0] + rows[2] // 2) * r
             y0 = (o[1] + rows[1] + rows[3] * 3 // 4) * r
@@ -936,7 +936,7 @@ def bench_all(b, out_path):
     # -- the desk's PROJECTS: the home in a window, on Make -----------------
     b.open("projects"); b.drain(1.0)
     bench.start(); b.drain(12.0); bench.stop("projects window open+settle")
-    g = pyval(b, "ws.wm._wins['projects'].ctx.layout.lib_grid")
+    g = pyval(b, "ws.wm.windows['projects'].ctx.layout.lib_grid")
     o = win_geom(b, "projects")
     if g and o:
         gx, gy, gw, gh = g
@@ -963,10 +963,10 @@ def bench_all(b, out_path):
     b.open("settings"); b.drain(2.0)
     bench.start(); b.drain(3.0); bench.stop("settings idle")
     o = win_geom(b, "settings")
-    lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
-    sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
-    sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
-    sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+    lay = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_h")
+    sx = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_x")
+    sw = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_w")
+    sy = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_y0")
     if o and lay:
         cx = o[0] + sx + sw // 2
         y0 = o[1] + sy + 4 * lay
@@ -984,7 +984,7 @@ def bench_all(b, out_path):
     # -- desk apps ----------------------------------------------------------
     for app in ("files", "artwork", "calc", "storybook",
                 "appearance"):
-        ok = pyval(b, "ws.spine.open_app(ws._apps_by_id['%s'])" % app)
+        ok = pyval(b, "ws.spine.open_app(ws.app('%s'))" % app)
         if not ok:
             print("  %-34s (app not available)" % ("app: " + app))
             continue
@@ -1023,8 +1023,8 @@ def bench_all(b, out_path):
     # read as the rows' max (the single-frame maximum) --------------------
     home(b)
     pyexec(b, "ws.open_settings()\n"
-              "ws.spine.open_app(ws._apps_by_id['calc'])\n"
-              "ws.spine.open_app(ws._apps_by_id['files'])")
+              "ws.spine.open_app(ws.app('calc'))\n"
+              "ws.spine.open_app(ws.app('files'))")
     b.drain(4.0)
     bench.start(); pyexec(b, "ws.defer(ws.home.open_library)"); b.drain(4.0)
     bench.stop("PLAY, three windows parked")
@@ -1069,7 +1069,7 @@ class _PK:
     def pressed(self, n):
         return n == self.n
 def _pk(n):
-    ws._sysmenu_layer.handle_input(_PK(n))
+    ws.sysmenu_layer.handle_input(_PK(n))
     if not getattr(ws.wm, 'popover_takes_keys', lambda: False)():
         ws.mark_dirty()
 ws._pk = _pk
@@ -1125,8 +1125,8 @@ def bench_popovers(b, out_path):
     print("\n=== popover benchmark (end-to-end frame ms) ===")
     home(b)
     pyexec(b, "ws.open_settings()\n"
-              "ws.spine.open_app(ws._apps_by_id['calc'])\n"
-              "ws.spine.open_app(ws._apps_by_id['files'])")
+              "ws.spine.open_app(ws.app('calc'))\n"
+              "ws.spine.open_app(ws.app('files'))")
     b.drain(4.0)
     bench.start(); b.drain(3.0); bench.stop("desk idle, three windows")
     popover_rows(b, bench, "over windows")
@@ -1178,7 +1178,7 @@ def bench_repaint(b, surfaces, seconds, out_path):
             pyexec(b, "ws.open_in_editor([c for c in ws.carts.all "
                       "if c.get('title') == 'Star Catcher'][0])\n"
                       "ws.text.set_menu_view('%s')" % name[7:])
-        elif not pyval(b, "ws.spine.open_app(ws._apps_by_id['%s'])" % name):
+        elif not pyval(b, "ws.spine.open_app(ws.app('%s'))" % name):
             print("  %-34s (app not available)" % name)
             continue
         b.drain(2.5)

@@ -707,7 +707,7 @@ class SettingsLayer(Layer):
             self.ws.sysmenu.close()
         elif self.wifi_return is not None:
             self._drop("wifi")
-            self.ws._exit_settings()
+            self.ws.exit_settings()
         else:
             self._drop("wifi")
 
@@ -1232,8 +1232,8 @@ class SettingsLayer(Layer):
         reason."""
         ws = self.ws
         bt = self._bt_service() is not None
-        upd = ws._update_available()
-        onl = ws._online_update_available()
+        upd = ws.update_available()
+        onl = ws.online_update_available()
         web = getattr(ws, "webhost", None) is not None
         c6u = getattr(ws, "c6_updater", None) is not None
         usb = getattr(ws, "usb_drive", None) is not None
@@ -1311,7 +1311,7 @@ class SettingsLayer(Layer):
         local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         ws = self.ws
         if key == "appearance":
-            ws.spine.open_app(ws.appearance_app)   # the one appearance surface
+            ws.spine.open_app(ws.app("appearance"))   # the one appearance surface
         elif key == "update":
             ws.update_ui.open_update()
         elif key == "update_online":
@@ -1389,7 +1389,7 @@ class SettingsLayer(Layer):
             ws.idle_ladder.step(key, d)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
-            ws.toggles._cycle_channel(d)
+            ws.toggles.cycle_channel(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.look.cycle_font_scale(d)
@@ -1451,7 +1451,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         out = []
         u = ws.updater
-        v = version_words(u, ws.toggles._ota_channel() if u is not None else None)
+        v = version_words(u, ws.toggles.ota_channel() if u is not None else None)
         if v:
             out.append(("Version", v))
         board = board_name()
@@ -1564,7 +1564,7 @@ class SettingsLayer(Layer):
             v = lad.value(key)
             return steps.index(v) if v in steps else 0
         if kind == "channel":
-            return 1 if ws.toggles._ota_channel() == "unstable" else 0
+            return 1 if ws.toggles.ota_channel() == "unstable" else 0
         if kind == "level":
             return self.level(key)
         if kind == "name" and not ws.text.can_type():
@@ -1678,7 +1678,7 @@ class SettingsLayer(Layer):
             cur = v
             got = _ui.seg(s, _STABLE_BETA, cur)
             if got != cur:
-                ws.toggles._cycle_channel(got - cur)
+                ws.toggles.cycle_channel(got - cur)
         elif kind == "level":
             self._kinds[s] = "slider"
             cur, lo, hi = v

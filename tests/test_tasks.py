@@ -175,9 +175,9 @@ def _desk_two(tmp_path):
     for t in ("Star Catcher", "Brick Siege"):
         open_cart(ws, t)
         drv.frame(_DT)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
         drv.frame(_DT)
     return ws, drv
 
@@ -186,7 +186,7 @@ def test_the_desk_lists_both_games_and_switches_and_closes(tmp_path):
     ws, drv = _desk_two(tmp_path)
     ws.open_tasks()
     drv.frame(_DT)
-    assert "tasks" in ws.wm._wins
+    assert "tasks" in ws.wm.windows
     rows = _rows(ws)
     assert [(r[0], r[1], r[3]) for r in rows] == [
         ("desktop", "Brick Siege", "running"), ("run:1", "Star Catcher", "throttled")]
@@ -198,7 +198,7 @@ def test_the_desk_lists_both_games_and_switches_and_closes(tmp_path):
     assert ws.procs.list == [] and ws.cart["title"] == "Star Catcher"
     ws.close_tasks()
     drv.frame(_DT)
-    assert "tasks" not in ws.wm._wins
+    assert "tasks" not in ws.wm.windows
 
 
 def test_the_system_menu_offers_the_task_manager(tmp_path):

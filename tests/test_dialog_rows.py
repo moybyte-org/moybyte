@@ -38,7 +38,7 @@ def _console(tmp_path, windowed):
                                         windowed=True, panel_diagonal_in=7.0)
     else:
         ws = host_app.build_workstation(carts)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
@@ -72,7 +72,7 @@ class Pair:
 
     @staticmethod
     def root(ws):
-        return ws.wm._root_canvas if hasattr(ws.wm, "_root_canvas") else ws.sys_canvas
+        return ws.wm.root_canvas if hasattr(ws.wm, "root_canvas") else ws.sys_canvas
 
     def frame(self, n=1, force=True):
         for _ in range(n):

@@ -417,7 +417,7 @@ def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
     assert sorted(os.listdir(root)) == before
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
+    assert ws.notice_up == ("CAN'T COPY", "The store is full", "warn")
     assert ws.notices.notice_active()
 
 
@@ -429,7 +429,7 @@ def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
     _full_after(monkeypatch, 0)
     assert ws.carts.new() is None
     assert sorted(os.listdir(root)) == before
-    assert ws._notice == ("CAN'T MAKE", "The store is full", "warn")
+    assert ws.notice_up == ("CAN'T MAKE", "The store is full", "warn")
 
 
 def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch):
@@ -442,7 +442,7 @@ def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch)
         raise OSError(5, "I/O error")
     monkeypatch.setattr(moy_carts, "duplicate", _broken)
     ws.carts.dup(target)
-    assert ws._notice is None
+    assert ws.notice_up is None
 
 
 def test_the_store_knows_a_full_store_from_every_other_failure():
@@ -462,7 +462,7 @@ def test_delete_with_no_cart_given_deletes_the_open_one(tmp_path):
     _mk(root, "Selected")
     ws.carts.apply(shelf(root))
     opened = next(c for c in ws.carts.all if c["title"] == "Opened")
-    ws._open_workspace(opened)
+    ws.open_workspace(opened)
     ws.carts.delete()
     titles = [c["title"] for c in ws.carts.all]
     assert "Opened" not in titles and "Selected" in titles
@@ -735,10 +735,10 @@ def _real(ws, n=1):
 def test_a_run_counts_a_play_and_stamps_the_day(tmp_path):
     ws = build_ws(tmp_path)
     a, b = _real(ws, 2)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     assert ws.carts.plays(a) is None
     ws.carts.note_recent(a)
-    ws.bar_layer._today = lambda: (2026, 10, 15)
+    ws.bar_layer.today = lambda: (2026, 10, 15)
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (2, 20261015)
     assert ws.carts.plays(b) is None
@@ -757,12 +757,12 @@ def test_a_launcher_run_writes_the_play_record(tmp_path):
 def test_a_board_without_a_wall_clock_keeps_the_day_it_had(tmp_path):
     ws = build_ws(tmp_path)
     a, = _real(ws)
-    ws.bar_layer._today = lambda: (2000, 1, 1)     # an unset RTC
+    ws.bar_layer.today = lambda: (2000, 1, 1)     # an unset RTC
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (1, 0)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     ws.carts.note_recent(a)
-    ws.bar_layer._today = lambda: (0, 0, 0)
+    ws.bar_layer.today = lambda: (0, 0, 0)
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (3, 20261014)
 

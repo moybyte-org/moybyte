@@ -26,9 +26,9 @@ def test_a_press_from_the_page_released_over_the_outline_lets_the_desk_rest(tmp_
     no_unlock_banner(ws)
     quiesce(ws)
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas
+    root = ws.wm.root_canvas
     root.RETAINED_FRAMES = 3
 
     def run(n):

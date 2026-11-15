@@ -120,7 +120,7 @@ console's clock and drops the samples, so the cart meets the same
 backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
 the cart queued, frames the feeder played, frames it found none -- and the
 AUDIORATE line's `snd=` field prints it. Each
-`read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
+`read` runs inside `gate(fn)`, the store's own gate (`ws.with_sd`), as every
 other store access does: on the T-Deck that drains the panel's flush before
 the card, which shares its SPI bus, is touched. The run's own state (libmoy's
 per-run struct, about 4 KB), the table's

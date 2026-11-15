@@ -465,7 +465,7 @@ def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
     assert ws.screen == "desktop" and g.sel == game     # a card's tap runs it
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     ws.home.set_home_tab("make")
     assert g.items[0]["type"] == "new" and g.tile_rect(0)[3] == g.tile_rect(1)[3]
 
@@ -797,7 +797,7 @@ def test_the_details_buttons_are_the_tabs_verbs_and_the_hero_plays(tmp_path):
 
 def test_the_details_read_the_play_records(tmp_path):
     ws, drv = _desk_home(tmp_path)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     home = ws.launcher_layer
     it = ws.launcher.selected()
     assert home._facts(it) == [("Played", "Not yet"), ("By", "Moybyte")]

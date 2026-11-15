@@ -144,12 +144,12 @@ class SettingsToggles:
         if not _wc.set_zone(tz):
             tz = _wc.UTC
         _wc.set_server(ws.system.get("ntp_server"))
-        ws.bar_layer._clock_at = -1
+        ws.bar_layer.clock_at = -1
         ws.frame_state.dirty = True
         if persist and ws.system.get("tz") != tz:
             ws.system.set("tz", tz)
 
-    def _ota_channel(self):
+    def ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
         manifest UPDATE ONLINE checks; persisted in system/settings once chosen.
 
@@ -175,7 +175,7 @@ class SettingsToggles:
                 pass
         return "stable"
 
-    def _cycle_channel(self, d):
+    def cycle_channel(self, d):
         """Toggle the OTA channel STABLE<->UNSTABLE and persist. Two channels, so any
         step flips. This only changes what UPDATE ONLINE checks -- the running firmware
         is unchanged until a manifest is actually installed (and the bootloader's
@@ -183,4 +183,4 @@ class SettingsToggles:
         ws = self.ws
         ws.system.set(
             "ota_channel",
-            "stable" if self._ota_channel() == "unstable" else "unstable")
+            "stable" if self.ota_channel() == "unstable" else "unstable")

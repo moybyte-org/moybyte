@@ -33,7 +33,7 @@ def _running_cart(tmp_path):
                            if it.get("path") and it.get("type") == "game")
     ws.open()
     assert ws.screen == "desktop"
-    assert ws.run.player._update is not None or ws.run.player._draw is not None
+    assert ws.run.player.update is not None or ws.run.player.draw is not None
     return ws, drv
 
 
@@ -51,10 +51,10 @@ def test_perf_fields_populate_after_frames_when_on(tmp_path):
         drv.frame(DT)
     # draw-ms is the bulk of the frame on host (flush is the ~0 no-op _NullComp);
     # it must be populated (>= 0, and a real number) after running frames.
-    assert isinstance(ws._draw_ms, float)
-    assert ws._draw_ms >= 0.0
-    assert isinstance(ws._flush_ms, float)
-    assert ws._flush_ms >= 0.0
+    assert isinstance(ws.draw_ms, float)
+    assert ws.draw_ms >= 0.0
+    assert isinstance(ws.flush_ms, float)
+    assert ws.flush_ms >= 0.0
 
 
 def test_drawing_the_hud_does_not_crash(tmp_path):
@@ -150,12 +150,12 @@ def test_hud_does_not_force_an_idle_redraw(tmp_path):
     cart running, every frame draws (60 of 60) whether the HUD is on or off."""
     ws, drv = _running_cart(tmp_path)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.perf_hud = True
     for _ in range(3):
         drv.frame(DT)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     drv.frame(DT)
     base = ws.frame_state.frames_drawn
     for _ in range(60):

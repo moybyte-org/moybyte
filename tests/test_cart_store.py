@@ -1087,7 +1087,7 @@ def _app_ws(tmp_path, net, indexes=None):
     if indexes is not None:
         ci.save_sources(str(tmp_path / "carts"), indexes)
     ws.cart_net = net
-    return ws, ws._apps_by_id["getcarts"]
+    return ws, ws.app("getcarts")
 
 
 def _frames(ws, app, n=40):
@@ -1687,7 +1687,7 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
         ws = host_app.build_workstation(str(d / "carts"), **kw)
         ci.save_sources(str(d / "carts"), [gpl.url("index.json"), mit.url("index.json")])
         ws.cart_net = net
-        app = ws._apps_by_id["getcarts"]
+        app = ws.app("getcarts")
         _open(ws, app)
         app._tap_row(0)
         ws.frame(1 / 30)
@@ -1948,7 +1948,7 @@ def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
         _frames(ws, app)
         assert app.phase == "done" and app._current_verbs() == ("REMOVE", "USE")
         assert "dusk" in ws.look.theme_names()
-        assert not [c for c in ws.home._launcher_items(ws.carts.all, "games")
+        assert not [c for c in ws.home.launcher_items(ws.carts.all, "games")
                     if c.get("type") == "theme"]
         app.back()
         app._tap_row(0)

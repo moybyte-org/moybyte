@@ -186,7 +186,7 @@ def serial_cfg(board):
 
 # The only device-side helpers left: the already-current check, the mkdir, the
 # store's room and the rename -- each one round trip, and each inside the
-# console's storage gate (`ws._with_sd`), because on the T-Deck the card shares
+# console's storage gate (`ws.with_sd`), because on the T-Deck the card shares
 # the panel's SPI host and a store op that overlaps a panel transfer hangs the
 # board. `_sha` reads the file back rather than trusting what was written,
 # which is what the board does at the end of a `recv` too -- item 2 above --
@@ -199,7 +199,7 @@ def serial_cfg(board):
 HELPERS = """
 import hashlib, os
 def _gated(fn):
-    g = getattr(ws, '_with_sd', None)
+    g = getattr(ws, 'with_sd', None)
     return fn() if g is None else g(fn)
 def _size(p):
     try: return os.stat(p)[6]

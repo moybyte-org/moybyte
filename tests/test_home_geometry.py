@@ -216,7 +216,7 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     """...and under the pause menu."""
     ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
     ws.home.go_home()
-    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.open_workspace(g._cart_by_title(ws, "Star Catcher"))
     ws.spine.play(ws.launcher_layer)
     _frame(ws, 3)
     ws.system_key()
@@ -437,7 +437,7 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     ws.text.set_menu_view("code")
     _frame(ws, 2)
     app = ws.editor_app
-    zone = ws.bar_layer._zone_rect("menu")
+    zone = ws.bar_layer.zone_rect("menu")
     assert app._compact(zone)
     rects = app._ladder_rects(zone)
     play = rects[-1][2]
@@ -459,14 +459,14 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
     ws.home.open_desk()
     ws.home.open_projects()
     _frame(ws)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     gaps = []
     for size in (None, (480, 534)):
         if size is not None:
-            ws.wm._resize_window(win, *size)
+            ws.wm.resize_window(win, *size)
             _frame(ws)
         grid = ws.projects_grid
-        ws.wm._install(win.ctx)
+        ws.wm.install_window(win.ctx)
         try:
             dk = grid._geom()[9]
             (_hx, hy, hero, _h), dy, pane = dk[0], dk[6], dk[5][5]
@@ -478,7 +478,7 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
             gaps.append(cap - foot)
             assert under >= 20, "the shelf runs into the strip"
         finally:
-            ws.wm._install(ws.wm._root_ctx)
+            ws.wm.install_window(ws.wm.root_ctx)
     assert gaps[0] == gaps[1] == home_grid.SHELF_GAP, gaps
 
 

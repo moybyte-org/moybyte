@@ -193,7 +193,7 @@ class _PlayerLayer(Layer):
         ws = self.ws
         if (ws.cart is not None and ws.cart.get("type") == "script"
                 and ws.script_console.reading()):
-            ws.spine._exit_to_caller()
+            ws.spine.exit_to_caller()
             return True
         return ws.run.player.cancel()
 
@@ -313,7 +313,7 @@ class _MapLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
 
     def at_top(self):
@@ -374,7 +374,7 @@ class _SceneLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.scene_ui._draw_scene()
 
     def handle_input(self, i):
@@ -414,7 +414,7 @@ class _MusicLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()
+        ws.reset_canvas_state()
         if ws.audio_out is not None:
             ws.audio_out.tick(dt)
         mu = ws.music_ui
@@ -464,7 +464,7 @@ class _PauseLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        full = getattr(self.ws.wm, "_pause_full", None)
+        full = getattr(self.ws.wm, "pause_full", None)
         if full is not None:
             full()                    # the windowed desk: a whole frame under it
         self.ws.pause.draw()
@@ -528,7 +528,7 @@ class _SysMenuLayer(Layer):
         p = self.ws.pause
         if p.open and p.shows_bar():
             return                    # over the paused game the pause draws it
-        paint = getattr(self.ws.wm, "_pop_paint", None)
+        paint = getattr(self.ws.wm, "pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu
         else:

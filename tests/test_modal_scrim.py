@@ -89,9 +89,9 @@ def test_the_handheld_home_dims_under_the_system_menu(tmp_path):
 def test_the_desk_dims_under_the_system_menu_once(tmp_path):
     ws = _ws(tmp_path, DESK)
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     _frames(ws, 2)
-    ws.spine.open_app(ws._apps_by_id["calc"])   # Files behind it: a window the desk may retain
+    ws.spine.open_app(ws.app("calc"))   # Files behind it: a window the desk may retain
     _frames(ws, 6)
     _check_menu(ws, 4)
 
@@ -99,7 +99,7 @@ def test_the_desk_dims_under_the_system_menu_once(tmp_path):
 def test_the_paused_game_dims_once_and_comes_back_whole(tmp_path):
     ws = _ws(tmp_path, HANDHELD, "dark")
     ws.home.go_home()
-    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.open_workspace(g._cart_by_title(ws, "Star Catcher"))
     ws.spine.play(ws.launcher_layer)
     _frames(ws, 6, dirty=False)
     cv = ws.glass_canvas

@@ -243,7 +243,7 @@ def run_desktop(fps_cap=60):
 
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
-        _ws._with_sd = store.session
+        _ws.with_sd = store.session
         store.ws = _ws
 
     def _after_services(ws):

@@ -83,11 +83,13 @@ def test_the_shell_registers_exactly_the_declared_apps(tmp_path):
     """The load-bearing one. A structural check cannot see a shell that builds
     an app somewhere else; this can."""
     ws = build_ws(tmp_path)
-    registered = [a.id for a in ws._apps]
+    registered = [a.id for a in ws.app_layers]
     assert registered == [d["id"] for d in app_decls.APPS]
-    for d in app_decls.APPS:
-        # the `<id>_app` attribute the shell and the apps address each other by
-        assert getattr(ws, d["id"] + "_app", None) is ws._apps_by_id[d["id"]]
+    for d, app in zip(app_decls.APPS, ws.app_layers):
+        # `ws.app(id)`, how the shell and the tools address an app; no
+        # `<id>_app` attribute stands beside it
+        assert ws.app(d["id"]) is app
+        assert not hasattr(ws, d["id"] + "_app")
 
 
 # -- structural: the hand-written lists cannot grow back --------------------

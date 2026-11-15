@@ -205,12 +205,12 @@ class Recorder:
         if not self.windowed:
             return
         wm = self.ws.wm
-        wm._sync_windows()
-        win = wm._wins["menu"]
+        wm.sync_windows()
+        win = wm.windows["menu"]
         x, y, w, h = _EDITOR_WIN
         win.x, win.y = x, y
-        wm._resize_window(win, w, h)     # rebuilds the buffer + layout context
-        wm._prewarm(win)
+        wm.resize_window(win, w, h)     # rebuilds the buffer + layout context
+        wm.prewarm(win)
 
     # -- live control geometry ----------------------------------------------
     #
@@ -229,13 +229,13 @@ class Recorder:
         if not self.windowed:
             return fn()
         wm = self.ws.wm
-        wm._sync_windows()
-        win = wm._wins[key]
-        wm._install(win.ctx)
+        wm.sync_windows()
+        win = wm.windows[key]
+        wm.install_window(win.ctx)
         try:
             out = fn()
         finally:
-            wm._install(wm._root_ctx)
+            wm.install_window(wm.root_ctx)
         ox, oy = win.x + 1, win.y + 1 + win.title_h
         if len(out) == 4:
             return (out[0] + ox, out[1] + oy, out[2], out[3])
@@ -247,7 +247,7 @@ class Recorder:
         roomier surface, which is every window on the desktop tier -- the labeled
         CHIP row (`ui.tab_row`). Ask the same geometry the tap dispatch uses."""
         ws = self.ws
-        rect = ws.bar_layer._zone_rect("menu")
+        rect = ws.bar_layer.zone_rect("menu")
         if getattr(ws.layout, "_base", True):
             for name, _glyph, r in ws.editor_app._ladder_rects(rect):
                 if name == tab:
@@ -361,8 +361,8 @@ class Recorder:
         if not self.windowed:
             return
         wm = self.ws.wm
-        wm._sync_windows()
-        win = wm._wins.get("desktop")
+        wm.sync_windows()
+        win = wm.windows.get("desktop")
         if win is not None:
             win.x, win.y = _PLAYER_WIN
         self.ws.mark_dirty()

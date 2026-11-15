@@ -499,14 +499,14 @@ def test_a_run_releases_the_caches_only_on_the_diet_tier(tmp_path):
     ws = build_ws(tmp_path)
     _land(ws, cart)
     live = next(c for c in ws.carts.all if c["path"] == cart["path"])
-    ws._open_workspace(live)
+    ws.open_workspace(live)
     assert ws.covers.diet is False
     warm = ws.covers.gen
-    ws._start()
+    ws.start()
     assert ws.covers.gen == warm            # nothing dropped
 
     ws.covers.diet = True
-    ws._start()
+    ws.start()
     assert ws.covers.gen > warm             # ...and now it did
 
 

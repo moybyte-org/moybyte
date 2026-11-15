@@ -453,8 +453,8 @@ def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
     from runtime import host_app, moy_carts
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    assert ws._apps, "no system apps registered"
-    for app in ws._apps:
+    assert ws.app_layers, "no system apps registered"
+    for app in ws.app_layers:
         claimed = [c for c in ws.carts.all if app.is_app(c)]
         assert len(claimed) == 1, \
             "%s claims %d carts on the host store" % (app.id, len(claimed))

@@ -385,9 +385,9 @@ def test_a_service_runs_on_through_an_app_switch(desk):
     for t in ("Star Catcher", "Brick Siege"):
         open_cart(ws, t)
         _frames(drv, 30)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
     ws.open_tasks()
     drv.frame(_DT)
     games = [r for r in ws.procs.rows() if r[2] == "game"]
@@ -575,7 +575,7 @@ def test_a_lua_app_holds_the_radio_by_handle(tmp_path, radio):
     N.step(0)
     ws.input.begin_frame()
     ws.frame(_DT)
-    assert pl._lua.get_global("GOT") == "hi"
+    assert pl.lua.get_global("GOT") == "hi"
 
 
 STATUS = """
@@ -652,7 +652,7 @@ def test_a_lua_app_shows_a_status_item_and_hears_its_panel(tmp_path):
     ws.frame(_DT)
     pl = ws.run.player
     assert pl.cart_error is None, pl.cart_error
-    lua = pl._lua
+    lua = pl.lua
     h = lua.get_global("H")
     assert h > 0 and lua.get_global("P") == 0
     it = ITEMS.of(pl.pid, h)

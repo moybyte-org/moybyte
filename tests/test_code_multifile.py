@@ -233,7 +233,7 @@ def test_a_crash_in_another_script_opens_that_script_on_that_line(tmp_path):
     assert ws.run.player.crash_file == "lib.lua", ws.cart_error
     assert ws.run.player.crash_line == 4, ws.cart_error
 
-    assert ws._crash_to_code()
+    assert ws.crash_to_code()
     assert ws.menu_view == "code"
     assert ws.text.code_file_name() == "lib.lua", \
         "crash-to-code opened the wrong file"
@@ -259,7 +259,7 @@ def test_a_crash_marker_never_lands_on_the_wrong_file(tmp_path):
     for _ in range(4):
         ws.input.begin_frame()
         ws.frame(DT)
-    assert ws._crash_to_code()
+    assert ws.crash_to_code()
     assert ws.text.code_file_name() == "lib.lua" and ws.code_err_row is not None
     ws.text.open_code_file("main.lua")
     assert ws.code_err_row is None, \
@@ -448,7 +448,7 @@ def test_a_script_added_here_actually_runs(tmp_path):
         ws.input.begin_frame()
         ws.frame(DT)
     assert ws.cart_error is None, ws.cart_error
-    assert ws.run.player._lua.get_global("seen") == 5, \
+    assert ws.run.player.lua.get_global("seen") == 5, \
         "the added script's global never reached the cart's own chunk"
 
 

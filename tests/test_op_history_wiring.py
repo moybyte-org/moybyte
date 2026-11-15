@@ -39,7 +39,7 @@ def _stroke(pe, x, y, color):
 
 def test_paint_stroke_bar_undo_reverts_one_stroke(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
     pe = ws.paint
     pe.n = 0
@@ -62,7 +62,7 @@ def test_paint_dimmed_state_is_truthful(tmp_path):
     # ws.history.can_undo()/can_redo() (the bar icons' enabled state) must track the active
     # paint History exactly -- a fresh sheet is dim both ways.
     ws = _make_ws_with_cart(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     assert ws.history.can_undo() is False and ws.history.can_redo() is False
@@ -82,7 +82,7 @@ def test_paint_commit_embeds_ops_in_journal(tmp_path):
     from runtime import moy_journal
     ws = _make_ws_with_cart(tmp_path)
     path = ws.cart["path"]
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     _stroke(pe, 0, 0, 5)
@@ -107,7 +107,7 @@ def test_paint_commit_rebaselines_the_history(tmp_path):
     # The clean boundary: a commit clears the in-RAM stack (in-RAM undo covers edits
     # SINCE the last commit only), so the journal owns commit-to-commit.
     ws = _make_ws_with_cart(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     _stroke(pe, 0, 0, 5)
@@ -119,7 +119,7 @@ def test_paint_repeated_undo_walks_into_the_previous_commit(tmp_path):
     # Two committed strokes + a third uncommitted: local undo reverts the live
     # stroke, then the SAME bar UNDO crosses into the journal and walks whole commits.
     ws = _make_ws_with_cart(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)
@@ -144,7 +144,7 @@ def test_paint_repeated_undo_walks_into_the_previous_commit(tmp_path):
 # -- map: a paste is one undo step; ops land in the journal ------------------
 
 def _open_map(ws):
-    ws.text._open_map()
+    ws.text.open_map()
     assert ws.menu_view == "map"
     return ws.map_ui.mapedit
 
@@ -354,7 +354,7 @@ def test_blocks_dimmed_state_is_truthful(tmp_path):
 # -- scene: a placement is one undo step; undo re-syncs ws.run.project.scenes (#111 phase 4) --
 
 def _open_scene(ws):
-    ws.text._open_scene()
+    ws.text.open_scene()
     assert ws.menu_view == "scene"
     return ws.scene_ui.sceneedit
 
@@ -413,7 +413,7 @@ def test_scene_commit_embeds_ops_in_journal(tmp_path):
 # -- music: a step edit is one undo step; ops land in the journal (#111 phase 4) --
 
 def _open_music(ws):
-    ws.text._open_music()
+    ws.text.open_music()
     assert ws.menu_view == "music"
     return ws.music_ui.musicedit
 
@@ -540,7 +540,7 @@ def test_config_commit_embeds_ops_in_journal(tmp_path):
     path = ws.cart["path"]
     step_card(ws, 2)
 
-    ws.saves._save_config()
+    ws.saves.save_config()
 
     ents = _entries(path, "config.json")
     assert ents, "a config commit must journal"
@@ -560,7 +560,7 @@ def test_bar_cache_key_tracks_local_history(tmp_path):
     # key must now change as soon as the local History gains a step -- and again
     # when undo empties it.
     ws = _make_ws_with_cart(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     before = ws.bar_layer._cart_bar_key("menu")
@@ -595,7 +595,7 @@ def test_active_tab_files_maps_each_tab(tmp_path):
     ws.text.set_menu_view("map");    assert ws.history.active_tab_files() == ("map.moymap",)
     ws.text.set_menu_view("music");  assert ws.history.active_tab_files() == ("sounds.json",)
     ws.text.set_menu_view("blocks"); assert ws.history.active_tab_files() == ("blocks.json", "main.py")
-    ws.text._open_scene()
+    ws.text.open_scene()
     assert ws.history.active_tab_files() == ("scenes/main.moyscene",)
     # off the Editor (launcher) there is no scoped set -> whole-project (None)
     ws.home.go_home()
@@ -661,7 +661,7 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
     assert ws.cart["graduated"] is True
 
     # Open the (now frozen, History-less) Blocks tab and press the bar UNDO ONCE.
-    ws.text._open_blocks()
+    ws.text.open_blocks()
     assert ws.menu_view == "blocks"
     assert ws.run.project.history_for("blocks") is None       # no in-RAM history: journal walk
     assert ws.history.undo() is True

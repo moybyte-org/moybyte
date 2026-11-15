@@ -162,7 +162,7 @@ def _open_map(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_map()
+    ws.text.open_map()
     drv = host_app.ConsoleDriver(ws)
     return ws, drv
 

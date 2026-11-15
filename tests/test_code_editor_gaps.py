@@ -1095,7 +1095,7 @@ def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatc
     ws.editor.set_text("\n".join("line %d = %d" % (i, i * 7) for i in range(300)))
 
     settle_badges(ws)
-    ws._toast_until = 0                # no unlock banner: the gate is the view's
+    ws.toast_until = 0                # no unlock banner: the gate is the view's
 
     def frame():
         now[0] += 33

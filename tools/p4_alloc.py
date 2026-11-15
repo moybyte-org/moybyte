@@ -388,9 +388,9 @@ def _wrap_phases():
     _wp = getattr(ws, 'wallpaper', None)
     if _wp is not None:
         ws._wrapa(_wp, 'draw', 'wallpaper')
-    for _k in getattr(ws.wm, '_wins', {}):
+    for _k in getattr(ws.wm, 'windows', {}):
         try:
-            ws._wrapa(ws.wm._content_for(ws.wm._wins[_k].kind), 'draw',
+            ws._wrapa(ws.wm.content_for(ws.wm.windows[_k].kind), 'draw',
                       'content:' + _k)
         except Exception:
             pass
@@ -400,11 +400,11 @@ ws._g['_wrap_phases'] = _wrap_phases
 # Fine wraps for the Settings surface -- the one that still hitches. Each is a
 # hypothesis about where the bytes are; the tool exists to rank them.
 DRILL_SETTINGS = [
-    "ws.wm._content_for('settings')::_settings_rows::set.rows",
-    "ws.wm._content_for('settings')::_draw_page::set.page",
-    "ws.wm._content_for('settings')::_rows_page::set.rows_page",
-    "ws.wm._content_for('settings')::_row::set.row",
-    "ws.wm._content_for('settings')::_grouped::set.groups",
+    "ws.wm.content_for('settings')::_settings_rows::set.rows",
+    "ws.wm.content_for('settings')::_draw_page::set.page",
+    "ws.wm.content_for('settings')::_rows_page::set.rows_page",
+    "ws.wm.content_for('settings')::_row::set.row",
+    "ws.wm.content_for('settings')::_grouped::set.groups",
     "ws.bar_layer::_draw_status_strip::bar.status",
     "ws.sys_canvas::print::cv.print",
     "ws.sys_canvas::rect::cv.rect",
@@ -567,7 +567,7 @@ def main():
         if args.surface in ("projects", "both"):
             b.open("projects")
             b.drain(14.0)                            # cover pop-in (#155)
-            g = b.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+            g = b.pyval("ws.wm.windows['projects'].ctx.layout.lib_grid")
             if g is None or "projects" not in b.state()["wins"]:
                 print("\n  the projects window did not open -- skipped")
                 return 0

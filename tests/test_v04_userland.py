@@ -598,7 +598,7 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
     ws.open_in_editor()                        # starts the cart, lands on the cards tab
     # The leak zones: 8px left/right strips (in the content area) + the 20px bottom strip.
     strips = [(3, 100), (316, 100), (3, 230), (160, 235)]
-    for open_tab in (ws.text._open_paint, ws.text._open_map):
+    for open_tab in (ws.text.open_paint, ws.text.open_map):
         open_tab()
         ws.mark_dirty()
         ws.frame(1 / 30)
@@ -703,7 +703,7 @@ def test_console_cards_make_it_mine_edit_and_run(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
-    ws.text._open_menu()                         # Space has an edit schema -> cards
+    ws.text.open_menu()                         # Space has an edit schema -> cards
     assert ws.menu_view == "cards"
     before = ws.run.project.config.get("star_count", 80)
     step_card(ws, 1)                        # +step on the first field (star_count, +10)
@@ -756,7 +756,7 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text.open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.text.set_menu_view("code")
     ed = ws.editor
@@ -788,7 +788,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text.open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.text.set_menu_view("code")
     ws.editor.set_text("\n".join("line %02d" % i for i in range(40)))
@@ -809,7 +809,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
-    ws.text._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    ws.text.open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.text.set_menu_view("code")
     from runtime import ui_draw
@@ -830,7 +830,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     # RUN dissolved into the unified bar (Stage-4 rollout): the code tab shows the SAME
     # zoned bar as every editor, so PLAY (in the bar's lent left zone) runs the cart.
     # The code tab is system-canvas, so the bar uses the responsive layout.zone_left.
-    play = [r for t, _g, r in ws.editor_app._ladder_rects(ws.bar_layer._zone_rect("menu"))
+    play = [r for t, _g, r in ws.editor_app._ladder_rects(ws.bar_layer.zone_rect("menu"))
             if t is None][0]                                 # PLAY entry (tab is None)
     drv.click(play[0] + play[2] // 2, play[1] + play[3] // 2)
     drv.frame(1 / 30)
@@ -844,7 +844,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.text._open_paint()                                     # the Editor's PAINT, over the run
+    ws.text.open_paint()                                     # the Editor's PAINT, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "paint" and ws.paint is not None
     lay = ws.paint_layer.layout
@@ -1349,7 +1349,7 @@ def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_map()
+    ws.text.open_map()
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
@@ -1380,7 +1380,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.text._open_map()                                       # the Editor's MAP, over the run
+    ws.text.open_map()                                       # the Editor's MAP, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
@@ -1408,7 +1408,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
-    ws.text._open_map()                                       # the Editor's MAP, over the run
+    ws.text.open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 3
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 3 at (0,0)
@@ -1435,7 +1435,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
-    ws.text._open_map()                                       # the Editor's MAP, over the run
+    ws.text.open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 6
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 6 at (0,0)
@@ -1459,7 +1459,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.run.project.tilemap
     before = tm.gen
-    ws.text._open_map()                                       # the Editor's MAP, over the run
+    ws.text.open_map()                                       # the Editor's MAP, over the run
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
@@ -1485,7 +1485,7 @@ def _open_cart_map(tmp_path, cart_name):
     assert sel is not None, "cart %r not seeded" % cart_name
     ws.launcher.sel = sel
     ws.open()
-    ws.text._open_map()
+    ws.text.open_map()
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     return C, ws, host_app.ConsoleDriver(ws)
 
@@ -1794,7 +1794,7 @@ def test_player_restores_declared_background_each_frame(tmp_path):
         "def _draw():\n"
         "    rect(0, 0, 8, 8, col('white'))\n"
     )
-    assert ws._start()
+    assert ws.start()
     ws.run.player.tick(1 / 30)
     red = chrome.color("red")
     white = chrome.color("white")

@@ -58,7 +58,7 @@ def test_make_lists_the_new_card_then_every_editable_cart(tmp_path):
     # ...MINUS the carts a shell APP claims as its identity (Files/Paint/...):
     # TEMPORARY until #181 makes the apps real carts.
     claimed = [c for c in ws.carts.all
-               if any(app.is_app(c) for app in getattr(ws, "_apps", ()))]
+               if any(app.is_app(c) for app in getattr(ws, "app_layers", ()))]
     # ...and the achievements process's, the console's own (processes.md §8).
     claimed += [c for c in ws.carts.all if c.get("id") == "moybyte.achievements"]
     assert claimed, "fixture has no app carts -- the exclusion is untested"
@@ -160,7 +160,7 @@ def test_the_one_bar_names_the_open_tab(tmp_path):
     ws.launcher.sel = _first_real(ws.launcher)
     ws.home.launch_selected()
     ea = ws.editor_app
-    rect = ws.bar_layer._zone_rect("menu")
+    rect = ws.bar_layer.zone_rect("menu")
     for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
         ws.text.set_menu_view(tab)
         for zone in (rect, (rect[0], rect[1], rect[2] + 80, rect[3])):
@@ -276,7 +276,7 @@ def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
     ws.wm._backdrop_layer._open_icon("projects")      # the desk's icon
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
-    assert ws.wm._order == ["projects"]
+    assert ws.wm.z_order == ["projects"]
     g = ws.projects_grid
     assert type(g) is Carousel and g is not ws.launcher and g.tab == "make"
     assert ws._content_layers["projects"] is ws.projects_layer
@@ -286,7 +286,7 @@ def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
     assert ws.launcher.tab == tab
     # A second PROJECTS brings it back to Make.
     ws.home.open_projects()
-    assert g.tab == "make" and ws.wm._order == ["projects"]
+    assert g.tab == "make" and ws.wm.z_order == ["projects"]
 
 
 def test_projects_window_is_a_normal_window(tmp_path):
@@ -295,12 +295,12 @@ def test_projects_window_is_a_normal_window(tmp_path):
     ws, drv = _desk(tmp_path)
     ws.home.open_projects()
     drv.frame(1 / 30)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     lay = win.ctx.layout
     assert (lay.w, lay.h) == (win.content_rect()[2], win.content_rect()[3])
     ws.wm.close_window_kind("projects")
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == []
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == []
     assert ws.screen == "desk"
 
 
@@ -313,12 +313,12 @@ def test_a_make_pick_opens_the_editor_in_its_own_window(tmp_path):
     ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
-    assert ws.wm._order == ["projects", "menu"]
+    assert ws.wm.z_order == ["projects", "menu"]
     assert ws.cart.get("path") == want
     # The Editor window's X closes it, back to the home window.
     ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
-    assert ws.wm._order == ["projects"] and ws.screen == "projects"
+    assert ws.wm.z_order == ["projects"] and ws.screen == "projects"
 
 
 def test_a_games_pick_runs_in_a_window(tmp_path):
@@ -330,7 +330,7 @@ def test_a_games_pick_runs_in_a_window(tmp_path):
     ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
-    assert ws.wm._order == ["projects", "desktop"]   # the player's window
+    assert ws.wm.z_order == ["projects", "desktop"]   # the player's window
     assert ws.cart is not None
 
 
@@ -340,12 +340,12 @@ def test_an_apps_pick_opens_its_app_window(tmp_path):
     g = ws.projects_grid
     ws.home.set_home_tab("apps", g)
     i = next(i for i, it in enumerate(g.items)
-             if ws._apps_by_id["calc"].is_app(it))
+             if ws.app("calc").is_app(it))
     g.sel = i
     ws.home.launch_selected(g)
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop"
-    assert ws.wm._order == ["projects", "calc"]
+    assert ws.wm.z_order == ["projects", "calc"]
 
 
 def test_the_window_draws_through_the_window_bar(tmp_path):
@@ -366,10 +366,10 @@ def test_the_window_draws_through_the_window_bar(tmp_path):
 
 def test_b_closes_the_window_alone(tmp_path):
     ws, drv = _desk(tmp_path)
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     ws.home.open_projects()
     drv.frame(1 / 30)
-    assert ws.wm._order == ["calc", "projects"]
+    assert ws.wm.z_order == ["calc", "projects"]
     ws.projects_layer.handle_input(_Keys({"b"}))
     drv.frame(1 / 30)
-    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc"]
+    assert ws.wm.mode == "desktop" and ws.wm.z_order == ["calc"]

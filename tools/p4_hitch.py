@@ -81,9 +81,9 @@ for _l in ws.wm.visible_stack_rev():
 _wp = getattr(ws, 'wallpaper', None)
 if _wp is not None:
     ws._wrapm(_wp, 'draw', 'wallpaper')
-for _k, _w in getattr(ws.wm, '_wins', {}).items():
+for _k, _w in getattr(ws.wm, 'windows', {}).items():
     try:
-        ws._wrapm(ws.wm._content_for(_w.kind), 'draw', 'content:' + _k)
+        ws._wrapm(ws.wm.content_for(_w.kind), 'draw', 'content:' + _k)
     except Exception:
         pass
 """
@@ -125,7 +125,7 @@ def main():
 
             Deliberately a RESET between surfaces, not ws.home.go_home(): go_home on
             the desk closes every window, the Make window with it -- so
-            ws.wm._wins has no 'projects' and the measurement dies with a
+            ws.wm.windows has no 'projects' and the measurement dies with a
             KeyError. A reset also keeps the two surfaces from contaminating
             each other's caches."""
             b.reset()
@@ -158,7 +158,7 @@ def main():
         b.open("projects")
         b.drain(14.0)
         b.pyexec(HOOK)
-        g = b.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+        g = b.pyval("ws.wm.windows['projects'].ctx.layout.lib_grid")
         if g is None or "projects" not in b.state()["wins"]:
             print("\n  the projects window did not open -- skipped")
             return 0

@@ -78,7 +78,7 @@ class InputRouter:
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
         kc = ws.wm.keys_to_cart()
-        ck = kc and not ws.run.player._is_tool
+        ck = kc and not ws.run.player.is_tool
         if ck != ws._cart_keys:
             ws._cart_keys = ck
             i.cart_keys = ck
@@ -90,7 +90,7 @@ class InputRouter:
         # chord), as the host's Super does. On a T-Deck a tap inside a field
         # is its cancel (`InputPolicy.cancel`).
         if i.pressed("start"):
-            desk = ws._editor_desk
+            desk = ws.built_editor_desk
             if desk is not None and i.held("select") and desk.select_start():
                 return                  # the desk Editor's Select+Start: Play
             self._start_down = _ticks_ms() or 1
@@ -165,7 +165,7 @@ class InputRouter:
         k = i.typed
         if ((k == 0x1A or k == 0x19) and ws.wm.input_kind() == "menu"
                 and (ws.menu_view in COMMIT_TABS or ws.menu_view in THEME_TABS)
-                and ws._modal_layer() is None):
+                and ws.modal_layer() is None):
             if k == 0x1A:
                 ws.history.undo()
             else:
@@ -193,7 +193,7 @@ class InputRouter:
         if policy.typed_escape(i):
             return
         for layer in ws.wm.visible_stack_rev():
-            if back is not None and layer is ws._content_layer():
+            if back is not None and layer is ws.content_layer():
                 if (policy.takes_stop(policy.holder()) if back is True
                         else policy.takes_b(back)):
                     policy.back()
@@ -272,7 +272,7 @@ class InputRouter:
             k = ws._gp_key
             run = ws.run
             gc = run.canvas
-            sc = ws._sys_canvas
+            sc = ws.bound_sys_canvas
             if sc is None:
                 sc = gc
             if (gc is k[1] and sc is k[2]
@@ -285,7 +285,7 @@ class InputRouter:
                     return
                 kept = True
         if not kept:
-            gx, gy = ws._game_xy(px, py)
+            gx, gy = ws.game_xy(px, py)
             _live = _pp() if _pp is not None else True
             gp = (gx, gy, click and _live, p.down and _live)
             ws.input.game_pointer = gp
@@ -296,7 +296,7 @@ class InputRouter:
                 k = ws._gp_key
                 run = ws.run
                 gc = run.canvas
-                sc = ws._sys_canvas
+                sc = ws.bound_sys_canvas
                 if sc is None:
                     sc = gc
                 k[0] = run.view
@@ -416,7 +416,7 @@ class InputRouter:
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
     # player.py); the "desktop" content layer routes to it via _PlayerLayer. The tool
-    # bar's draw/tap stay on the shell, reached via _draw_tool_bar / _tool_bar_tap.)
+    # bar's draw/tap stay on the shell, reached via draw_tool_bar / tool_bar_tap.)
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). It belongs to
@@ -614,7 +614,7 @@ class InputRouter:
             return "home"
         if kind in ("settings", "menu"):
             return kind
-        if kind in ws._apps_by_id:
+        if ws.app(kind) is not None:
             return "app"
         return None
 
@@ -632,7 +632,7 @@ class InputRouter:
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
             return False
-        held = (ws._modal_layer() is not None and not self._pause_bar()) or ws._about
+        held = (ws.modal_layer() is not None and not self._pause_bar()) or ws.about
         if bl.focus is not None:
             took = False
             if pressed and not held:
@@ -641,15 +641,15 @@ class InputRouter:
                 took = bl.focus_keys(i)
             # the strips name the bar's keys while it holds them, not under
             # a popover one of its items opened
-            _ui_draw.on_bar(bl.focus is not None and ws._modal_layer() is None
-                            and not ws._about)
+            _ui_draw.on_bar(bl.focus is not None and ws.modal_layer() is None
+                            and not ws.about)
             return took
         if held:
             return False
         where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
-        layer = ws.pause if where == "pause" else ws._content_layer()
+        layer = ws.pause if where == "pause" else ws.content_layer()
         if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
             if not layer.ball_steps():

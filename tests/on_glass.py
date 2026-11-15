@@ -330,12 +330,12 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
     drawing takes (the leave's, or the idle autosave's if it came first) is
     timed on the board, and the file must read back as the page."""
     _home_desk(board)
-    assert board.pyval("ws.spine.open_app(ws._apps_by_id['artwork'])", strict=True)
+    assert board.pyval("ws.spine.open_app(ws.app('artwork'))", strict=True)
     board.drain(2.5)
     try:
         board.pyexec(
             "import time\n"
-            "a = ws.artwork_app\n"
+            "a = ws.app('artwork')\n"
             "a._fresh_doc(a.doc.W, a.doc.H)\n"
             "ws._paint_probe = 1\n"
             "ws._paint_saves = []\n"
@@ -346,11 +346,11 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "    return ok\n"
             "a._art.save = _paint_timed\n"
             "def _paint_leave():\n"
-            "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
+            "    ws._paint_pix = bytes(ws.app('artwork').doc.pix)\n"
             "    ws.home.go_home()\n"
             "    return 1\n"
             "def _paint_glass(px, py):\n"
-            "    w = getattr(ws.wm, '_wins', {}).get('artwork')\n"
+            "    w = getattr(ws.wm, 'windows', {}).get('artwork')\n"
             "    if w is None or w.ctx is None:\n"
             "        return a._to_glass((px, py))\n"
             "    was = a.layout\n"
@@ -363,14 +363,14 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "    return (cx + gx, cy + gy)\n"
             "ws.mark_dirty()", strict=True)
         board.drain(1.0)
-        assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
-                           " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
+        assert board.pyval("bytes(ws.app('artwork').doc.pix) == bytes((ws.app('artwork').doc.pix[0],))"
+                           " * len(ws.app('artwork').doc.pix)", strict=True), "the page is not blank"
         # Where the drawing stands on the glass: a window's layout is
         # installed only around its dispatch, so a probe between frames reads
         # the root's and must put the window's in for the question.
         (x0, y0), (x1, y1) = board.pyval(
             "(lambda a, g: (g(a.doc.W // 3, a.doc.H // 2), g(2 * a.doc.W // 3, a.doc.H // 2)))"
-            "(ws.artwork_app, ws._g['_paint_glass'])", strict=True)
+            "(ws.app('artwork'), ws._g['_paint_glass'])", strict=True)
         board.swipe(x0, y0, x1, y1, frames=20)
         board.pyval("ws._g['_paint_leave']()", timeout=60)
         board.drain(1.0)
@@ -380,21 +380,21 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
         assert saves and all(ok for ok, _ms in saves), "Paint did not save: %r" % (saves,)
         worst = max(ms for _ok, ms in saves)
         assert worst < budget_ms, "a save held the console %d ms" % worst
-        kind, name = board.pyval("(ws.artwork_app._art.doc_kind(), "
-                                 "ws.artwork_app._art.doc_name())", strict=True)
+        kind, name = board.pyval("(ws.app('artwork')._art.doc_kind(), "
+                                 "ws.app('artwork')._art.doc_name())", strict=True)
         assert name, "the stroke was not saved under a name"
         assert board.pyval("ws._paint_pix != bytes((ws._paint_pix[0],)) * len(ws._paint_pix)",
                            strict=True), "the swipe drew nothing"
         same = board.pyval(
             "(lambda f: (lambda d: d is not None and bytes(d[2]) == ws._paint_pix)"
-            "(f.decode_image(f.load(%r, %r)[0])))(ws.artwork_app._art._files)" % (kind, name),
+            "(f.decode_image(f.load(%r, %r)[0])))(ws.app('artwork')._art._files)" % (kind, name),
             strict=True)
         assert same, "the saved drawing does not read back as the page"
-        board.pyval("ws.artwork_app._art._files.delete(%r, %r) and None" % (kind, name),
+        board.pyval("ws.app('artwork')._art._files.delete(%r, %r) and None" % (kind, name),
                     strict=True)
         return worst
     finally:
-        board.pyval("[delattr(o, k) for o, k in ((ws.artwork_app._art, 'save'), "
+        board.pyval("[delattr(o, k) for o, k in ((ws.app('artwork')._art, 'save'), "
                     "(ws, '_paint_pix'), (ws, '_paint_probe'), (ws, '_paint_saves')) "
                     "if k in o.__dict__] and None")
         _home_desk(board)
@@ -1404,7 +1404,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         assert board.pyval("__import__('moy_net').clock_state()", strict=True) == 1
         assert board.pyval("__import__('moybyte').clock_synced()", strict=True) is True
         lt, bar, after = board.pyval(
-            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer._clock_text(),"
+            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer.clock_text(),"
             " tuple(__import__('wallclock').localtime()[:6]))", strict=True)
         board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
         assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
@@ -1893,7 +1893,7 @@ def a_leaked_session_leaves_the_panel_flushing(board):
     session. A files session begun and never ended, with a store op inside it,
     must leave the panel presenting every repaint, and the next frame ends it."""
     import time
-    files = "ws.files_app.ctx.files"
+    files = "ws.app('files').ctx.files"
     assert board.pyval(files + ".begin()", strict=True) == (True, None)
     n, err = board.pyval(files + ".count('drawings')", strict=True)
     assert err is None and isinstance(n, int), (n, err)
@@ -2020,7 +2020,7 @@ def draw_gates_are_installed(board, windowed=False):
     assert board.pyval("ws.sys_canvas._gate_ctx is not None") is True
     if windowed:
         ungated = board.pyval(
-            "[k for k, w in ws.wm._wins.items() if w.buf._gate_ctx is None]")
+            "[k for k, w in ws.wm.windows.items() if w.buf._gate_ctx is None]")
         assert ungated == [], ungated
 
 
@@ -2041,7 +2041,7 @@ def draw_gates_take_the_traffic(board, windowed=False):
     Restored before the assert, so a failure does not leave the next test on
     the wrong screen."""
     bufs = "[ws.sys_canvas]" + (
-        " + [w.buf for w in ws.wm._wins.values()]" if windowed else "")
+        " + [w.buf for w in ws.wm.windows.values()]" if windowed else "")
     # Counted from before the open: a page's first frame draws whole, while a
     # repaint of an unchanged verbs page is a rows frame that may draw nothing.
     board.pyexec("for _c in [ws.sys_canvas]: _c.gate_counts_reset()")
@@ -2178,7 +2178,7 @@ def sd_card_io_takes_no_internal_dma(board):
     if not board.pyval("__import__('moy_sd').sector_count()", strict=True):
         pytest.skip("no card in the slot")
     board.pyexec(_SD_SQUEEZE, strict=True)
-    got = board.pyval("(getattr(ws, '_with_sd', None) or (lambda fn: fn()))"
+    got = board.pyval("(getattr(ws, 'with_sd', None) or (lambda fn: fn()))"
                       "(ws._g['_sd_squeeze'])", timeout=30, strict=True)
     assert got["left"] < 512, ("the squeeze left a sector's worth: no power", got)
     assert got["read"] == "same", got
@@ -2572,7 +2572,7 @@ def idle_saver_and_wake(board):
         assert after["stack"] == stack
         retained = board.pyval("getattr(ws.sys_canvas or ws.run.canvas, "
                                "'RETAINED_FRAMES', 1)", strict=True)
-        assert board.pyval("ws._saver is None", strict=True) is True
+        assert board.pyval("ws.saver is None", strict=True) is True
         assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
     finally:
         board.cmd("power saver 0", wait_for="REMOTE power")
@@ -2847,7 +2847,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
     try:
         assert board.pyexec(
             "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
-            "ws._open_workspace(c)\n"
+            "ws.open_workspace(c)\n"
             "ws.spine.play(ws.launcher_layer)" % title), board.last_error
         st = None
         for _ in range(20):
@@ -4286,7 +4286,7 @@ def _app_ui_host_pmem(look, tier):
         quiesce(ws)
         ws.mark_dirty()
         drv.frame(1.0 / 30.0)
-    pm = list(ws.run.player._lua._run.pmem()[1])
+    pm = list(ws.run.player.lua._run.pmem()[1])
     ws.spine.exit()
     ui_draw.input_kind("keys")      # the host's own again
     return pm
@@ -4432,8 +4432,8 @@ def jet_fps(board, seconds=10.0):
     blit565 and HUD over it). Leaves uncap and diag as it found them."""
     from runtime.perf_line import parse_perf
     # `state`'s uncap is the running cart's; the switch the next run takes is
-    # `ws._uncap`, which is what `uncap` sets.
-    uncap_was = bool(board.pyval("getattr(ws, '_uncap', False)", timeout=10))
+    # `ws.uncap`, which is what `uncap` sets.
+    uncap_was = bool(board.pyval("getattr(ws, 'uncap', False)", timeout=10))
     with perf_diag(board):
         board.cmd("uncap 1", wait_for="REMOTE uncap")
         n0 = len(board.lines)
@@ -4548,7 +4548,7 @@ def wasm_files_push(board, board_dir, fresh=True):
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/" + FILES_FOLDER)
     if fresh:
-        board.pyval("ws._with_sd(lambda: __import__('moy_store_base')._rmtree("
+        board.pyval("ws.with_sd(lambda: __import__('moy_store_base')._rmtree("
                     "__import__('cart_files').folder_of(str(ws.carts_root) + '/' + %r))) or 1"
                     % FILES_FOLDER, timeout=30, strict=True)
     board.pyval(RESCAN, timeout=60)
@@ -4642,7 +4642,7 @@ def wasm_unsigned_cart_follows_its_consent(board, board_dir):
 
     def _native_and_greets(b):
         hello_read_its_greeting(b)
-        assert b.pyval("bool(ws.run.player._lua.interp)", strict=True) is False
+        assert b.pyval("bool(ws.run.player.lua.interp)", strict=True) is False
     _runs_clean(board, UNSIGNED_NATIVE_TITLE, check=_native_and_greets)
     err = _wasm_run_error(board, TAMPERED_TITLE)
     assert "refused: bad signature" in err, err
@@ -4686,7 +4686,7 @@ def _notice_on_launch(board, title, text=None):
             assert notice == text, notice
         else:
             assert notice.startswith(title + " needs ") and " MB " in notice, notice
-        assert board.pyval("ws.run.player._lua is None", strict=True) is True
+        assert board.pyval("ws.run.player.lua is None", strict=True) is True
         return notice
     finally:
         board.leave_cart()
@@ -4855,7 +4855,7 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
-    interpreter tier: `ws.run.player._lua.interp` is true and the short system
+    interpreter tier: `ws.run.player.lua.interp` is true and the short system
     notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
@@ -4869,8 +4869,8 @@ def _runs_on_interpreter(board, title, check=None, cause="missing"):
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
         assert not st.get("notice"), st["notice"]
-        assert board.pyval("bool(ws.run.player._lua.interp)", strict=True) is True
-        notice = board.pyval("list(ws._notice[:2]) if ws._notice else None",
+        assert board.pyval("bool(ws.run.player.lua.interp)", strict=True) is True
+        notice = board.pyval("list(ws.notice_up[:2]) if ws.notice_up else None",
                              strict=True)
         assert notice == [INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB[cause]], notice
         if check is not None:
@@ -5045,7 +5045,7 @@ def _deep_init_inits(board, path):
                  "            return f.read(1)\n"
                  "    except OSError:\n"
                  "        return b''\n", strict=True)
-    got = board.pyval("ws._with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
+    got = board.pyval("ws.with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
                       ".folder_of(%r) + '/inits'))" % path, timeout=30, strict=True)
     return got[0] if got else 0
 
@@ -5534,7 +5534,7 @@ def _p4_frame_proof(glass):
     kept = cf.kept_view(cf._scratch, cf.kept_off, n)
     bad = -1
     if glass:
-        win = ws.wm._wins.get("desktop")
+        win = ws.wm.windows.get("desktop")
         ox, oy, scale = ws.wm._player_view(win)
         fbw, fbh = comp.size()
         dst = moy_alloc.alloc(2 * fbw * fbh, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
@@ -5621,7 +5621,7 @@ def _ff_rect():
     wm = ws.wm
     r = getattr(ws, 'render_scale', 1)
     if getattr(wm, 'mode', None) == 'desktop':
-        ox, oy, scale = wm._player_view(wm._wins['desktop'])
+        ox, oy, scale = wm._player_view(wm.windows['desktop'])
     else:
         ox, oy, scale = wm.play_viewport()
     return ox * r, oy * r, scale * r

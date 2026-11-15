@@ -26,7 +26,7 @@
   * `LauncherHomeLayer` -- the "launcher" content Layer: the home, console mode's
                       root on every board (wallpaper -> cells -> hint strip ->
                       bar, its tabs in the bar's zone), its four tabs (Games / Mine / Apps / Make, the lists
-                      ws.home._launcher_items builds) and their input. A tap on the
+                      ws.home.launcher_items builds) and their input. A tap on the
                       centre card is the active tab's (ws.home.launch_selected).
                       Its bases, in order: `HomeHints` (home_hints.py, the
                       hint strip, which a band frame draws), `HomeDetails`
@@ -386,7 +386,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         cache = self._lib_cache
         if (cache is None or self._lib_unsupported
                 or self.grid.dragging or self.grid.flinging
-                or ws._animating(dt)):
+                or ws.animating(dt)):
             return False
         # A canvas that retains nothing (RETAINED_FRAMES < 1) holds no frame to
         # capture from or replay.
@@ -471,7 +471,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         on a canvas that retains nothing."""
         ws = self.ws
         self._band_key = None
-        if (self._lib_unsupported or ws._animating(dt)
+        if (self._lib_unsupported or ws.animating(dt)
                 or ws.wallpaper.restore_key(True) is not None):
             return                # (a wallpaper that restores needs no copy)
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
@@ -505,7 +505,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         anything animates (those pixels are not a pure function of the key)."""
         ws = self.ws
         if (self._lib_unsupported or self.grid.dragging
-                or self.grid.flinging or ws._animating(dt)):
+                or self.grid.flinging or ws.animating(dt)):
             return
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return              # a canvas that retains nothing has no frame to copy
@@ -802,7 +802,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         animating, nothing drawn over it (`content_alone`)."""
         ws = self.ws
         wm = ws.wm
-        if ws._animating(dt):
+        if ws.animating(dt):
             return False
         top = getattr(wm, "top_kind", None)
         if top is not None and top() != self.id:
@@ -890,7 +890,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         # A strip this buffer holds under this key stays, unless a part
         # above was put back over it.
         if bar_lag or _overlaps_any(laid, ws.wallpaper.bars()):
-            ws.bar_layer._draw_status_strip("home")
+            ws.bar_layer.draw_status_strip("home")
         if self._note_still(cv, parts, bar):
             # every buffer holds this frame: the retained frame takes it once
             # nothing waits on the board (`capture_due`)
@@ -969,7 +969,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         while nothing moves and no press waits on it (as the windowed WM
         pays its own, `debt_owed`)."""
         ws = self.ws
-        if (not self.grid.moving and not ws._ptr_changed()
+        if (not self.grid.moving and not ws.ptr_changed()
                 and not getattr(ws.pointer, "down", False)):
             ws.request_frame()
 
@@ -1029,7 +1029,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             return
         # perf_capture (#66 instrument-before-cutting): time the home frame's
         # three sections so a slow launcher frame names its eater (PERF's
-        # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
+        # home= field carries ws.pf_home -- wallpaper vs grid vs bar).
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
         ws.wallpaper.draw(dt, home=True, quiet=self._quiet(ws))
         self._capture_band_backdrop(cv, dt)
@@ -1047,12 +1047,12 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         if carousel and self.grid.desk():
             self._draw_details(cv)
         _t2 = _ticks_ms() if _t0 is not None else None
-        ws.bar_layer._draw_status_strip("home")
+        ws.bar_layer.draw_status_strip("home")
         if self._back_tip:
             self._draw_back_tip(cv)
         if _t0 is not None:
             _t3 = _ticks_ms()
-            ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
+            ws.pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
         if end == -1 and self._bd_now is not None:
             self._still_debt()       # every buffer to this frame: the next step is a band frame
@@ -1247,7 +1247,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         keyboard -- where the X shows."""
         if self._search_open():
             self.ws.home.close_search(clear=True)
-        elif self.ws.bar_layer._show_x(self.strip):
+        elif self.ws.bar_layer.show_x(self.strip):
             self.ws.home.open_desk()
 
     # The doors out of the home.
@@ -1521,4 +1521,4 @@ class HomeWindowLayer(LauncherHomeLayer):
         self._band_landed(cv, dt, False)
         if grid.desk():
             self._draw_details(cv)
-        ws.bar_layer._draw_status_strip(self.strip)
+        ws.bar_layer.draw_status_strip(self.strip)

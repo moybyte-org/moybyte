@@ -67,7 +67,7 @@ def _settle_home(tmp_path):
     the covers are drained: two renders a moment apart must not differ by
     anything but the path under test."""
     ws = _ws(tmp_path)
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer.clock_text = lambda: "00:00"
     drv = _drv(ws)
     drv.frame(0.0)
     _settle_covers(ws, drv)

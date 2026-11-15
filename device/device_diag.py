@@ -29,7 +29,7 @@ def _diag_flush(diag, ws):
     try:
         if not getattr(ws, "can_manage", False):
             return 0
-        with_sd = getattr(ws, "_with_sd", None)
+        with_sd = getattr(ws, "with_sd", None)
         diag.flush_to_sd(with_sd)
     except Exception:
         return 0

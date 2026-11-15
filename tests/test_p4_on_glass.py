@@ -483,7 +483,7 @@ def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     assert st.get("order") == before and not st.get("parked"), st
     # The HOME key on the desk minimises every window and closes none; HOME
     # again brings them back (owner, 2026-10-13).
-    mins = "[ws.wm._wins[k].minimized for k in ws.wm._order]"
+    mins = "[ws.wm.windows[k].minimized for k in ws.wm.z_order]"
     board.pyexec("ws.home.home_key()", strict=True)
     board.drain(0.5)
     assert board.pyval(mins, strict=True) == [True] * len(before)
@@ -663,8 +663,8 @@ def test_window_chrome_freezes_during_a_content_scroll(board):
     ctop = w[1] + 1 + w[4]
     board.swipe_async(cx, ctop + (w[3] - w[4]) - 40, cx, ctop + 40, frames=200)
     board.drain(1.5)                     # let the streak reach both buffers
-    quiet = board.pyval("ws.wm._chrome_quiet")
-    streak = board.pyval("ws.wm._wins['settings']._chrome_streak")
+    quiet = board.pyval("ws.wm.chrome_quiet")
+    streak = board.pyval("ws.wm.windows['settings']._chrome_streak")
     board.wait_line("swipe done", 30)
     assert quiet is True, "the scroll frame never went quiet"
     assert (streak or 0) >= 2, "chrome never froze (streak=%s)" % (streak,)
@@ -708,7 +708,7 @@ def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
     Counted on the build/read side only, so this net costs nothing when healthy."""
     board.open("projects")
     board.drain(16.0)                    # let the idle prefetch finish the store
-    g = board.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+    g = board.pyval("ws.wm.windows['projects'].ctx.layout.lib_grid")
     assert g is not None, "the projects window did not open"
     w = board.state()["wins"]["projects"]
     ox, oy = w[0] + 1, w[1] + 1 + w[4]
@@ -881,7 +881,7 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     board.pyexec("import os\n"
                  "os.remove(ws.updater._pending_path())\n"
                  "ws.updater.boot_verdict = None\n"
-                 "ws._notice = None\n")
+                 "ws.notice_up = None\n")
     assert "pending.json" not in board.pyval(
         "__import__('os').listdir(ws.updater.update_dir)")
 

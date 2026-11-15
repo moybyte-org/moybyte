@@ -32,7 +32,7 @@ def _desk(tmp_path):
     focused."""
     ws = build_desktop_ws(tmp_path)
     ws.look.set_theme("moy", persist=False)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     ws.carts_store.save_file("docs", NOTE[0], NOTE[1], ws.carts_root)
     ws.home.open_desk()
     drv = make_drv(ws)
@@ -42,22 +42,22 @@ def _desk(tmp_path):
     ws.run.player.ns["_open"](NOTE[0])
     for _ in range(3):
         _frame(drv)
-    term = ws._apps_by_id["terminal"]
+    term = ws.app("terminal")
     ws.spine.open_app(term)
     for _ in range(4):
         _frame(drv)
-    assert ws.wm._focus == "terminal"
+    assert ws.wm.focus_key == "terminal"
     return ws, drv, term
 
 
 def _note_text(ws):
-    return ws.run.player._focus_editor.text()
+    return ws.run.player.focus_editor.text()
 
 
 def test_each_window_strip_shows_its_own_title_icon_and_back(tmp_path):
     ws, drv, _term = _desk(tmp_path)
     wm = ws.wm
-    notes, term = wm._wins["desktop"], wm._wins["terminal"]
+    notes, term = wm.windows["desktop"], wm.windows["terminal"]
     assert wm._win_title(notes) == "Notes · Story ideas"
     assert wm._win_title(term) == "Terminal"
     assert wm._icon_slot(notes) == "notes"
@@ -82,7 +82,7 @@ def test_a_window_drawn_under_another_leaves_its_strip(tmp_path):
     repaint draws, never Notes' page."""
     ws, drv, _term = _desk(tmp_path)
     wm = ws.wm
-    term = wm._wins["terminal"]
+    term = wm.windows["terminal"]
     for _ in range(4):
         _frame(drv)
     wm._win_sig = None                  # a whole repaint: every window and its chrome
@@ -107,10 +107,10 @@ def test_typing_reaches_the_focused_window_alone(tmp_path):
         _frame(drv)
     _type(drv, "\x1b")
     assert ws.run.player.ns["ed"] is not None, "the Terminal's Esc closed Notes' note"
-    ws.wm._bring_forward("desktop")
+    ws.wm.bring_to_front("desktop")
     for _ in range(2):
         _frame(drv)
-    assert ws.wm._focus == "desktop"
+    assert ws.wm.focus_key == "desktop"
     _type(drv, "ab")
     assert _note_text(ws) != was
     assert "ab" in _note_text(ws)
@@ -125,11 +125,11 @@ def test_opening_an_app_leaves_the_editors_project(tmp_path):
     ws.open_in_editor(cart)
     for _ in range(3):
         _frame(drv)
-    ws.spine.open_app(ws._apps_by_id["terminal"])
+    ws.spine.open_app(ws.app("terminal"))
     for _ in range(3):
         _frame(drv)
     assert ws.editor_app.project.cart.get("title") == "Star Catcher"
-    assert ws.wm._win_title(ws.wm._wins["menu"]) == "Editor · Star Catcher"
+    assert ws.wm._win_title(ws.wm.windows["menu"]) == "Editor · Star Catcher"
 
 
 @pytest.mark.parametrize("tier", ("python", "lua"))
@@ -139,14 +139,14 @@ def test_q_and_e_step_the_tabs_of_the_focused_window_alone(tmp_path, tier):
     for _ in range(4):
         _frame(drv)
     assert _pmem(ws, 1) == [1]
-    term = ws._apps_by_id["terminal"]
+    term = ws.app("terminal")
     ws.spine.open_app(term)
     for _ in range(3):
         _frame(drv)
     _type(drv, "eeq")
     assert term.face.line() == "eeq"
     assert _pmem(ws, 1) == [1], "the Terminal's E stepped the app's tabs"
-    ws.wm._bring_forward("desktop")
+    ws.wm.bring_to_front("desktop")
     for _ in range(2):
         _frame(drv)
     _type(drv, "e")

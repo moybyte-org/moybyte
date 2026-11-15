@@ -50,7 +50,7 @@ def _still_working(ws):
 
 
 def _paint_a_pixel(ws, color=11):
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     pe.color = color
@@ -168,7 +168,7 @@ def test_the_pointer_frame_is_what_stores_the_held_finger(tmp_path):
     must not leave it stale True, which would stall every later commit."""
     ws = _ws(tmp_path)
     _editable(ws)
-    ws.text._open_paint()
+    ws.text.open_paint()
 
     ws.pointer.x, ws.pointer.y = 40, 120
     ws.pointer.down = True
@@ -188,20 +188,20 @@ def test_the_whole_ladder_commits_on_the_debounce(tmp_path):
     ws = _ws(tmp_path)
     _editable(ws)
 
-    ws.text._open_map()
+    ws.text.open_map()
     ws.run.project.tilemap.mset(0, 0, 4)
     assert ws.run.project.tilemap.dirty is True
     _go_idle(ws)
     assert ws.run.project.tilemap.dirty is False
 
-    ws.text._open_scene()
+    ws.text.open_scene()
     se = ws.scene_ui.sceneedit
     se.place(16, 16)
     assert se.dirty is True
     _go_idle(ws)
     assert se.dirty is False
 
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     me.nudge_pitch(1)
     assert me.dirty is True
@@ -323,7 +323,7 @@ def test_a_clean_tab_writes_nothing_when_the_debounce_fires(tmp_path, monkeypatc
     from runtime import moy_carts
     ws = _ws(tmp_path)
     _editable(ws)
-    ws.text._open_paint()
+    ws.text.open_paint()
 
     writes = []
     monkeypatch.setattr(moy_carts, "save_sprites",
@@ -359,7 +359,7 @@ def test_a_touch_in_an_editor_tab_arms_the_debounce(tmp_path):
     what left them committing on the tab switch instead."""
     ws = _ws(tmp_path)
     _editable(ws)
-    ws.text._open_paint()
+    ws.text.open_paint()
     ws.history.edit_ms = None
 
     ws.pointer.x, ws.pointer.y = 40, 120

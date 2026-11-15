@@ -89,7 +89,7 @@ class PlayerDiag:
         for a Python cart (no such allocator) or a tier with one region. The dev
         channel's `state` is the route -- it is the one every board serves.
         """
-        if self._lua is not None:
+        if self.lua is not None:
             return _moycore_sram()
         return self._sram_run
 

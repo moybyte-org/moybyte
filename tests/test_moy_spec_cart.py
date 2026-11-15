@@ -323,7 +323,7 @@ def test_unknown_runtime_is_refused_cleanly(tmp_path):
     _open(ws, "Forth")
     assert ws.cart_error and "forth" in ws.cart_error
     # and the refusal must not have left a half-started world behind
-    assert ws.run.player._lua is None
+    assert ws.run.player.lua is None
 
 
 def test_lua_runtime_still_runs(tmp_path):
@@ -628,7 +628,7 @@ def test_a_flag_edit_reaches_the_running_cart_and_its_fset_stays_the_runs(tmp_pa
 
     def got():
         if lua:
-            return int(float(ws.run.player._lua.get_global("F")))
+            return int(float(ws.run.player.lua.get_global("F")))
         return ws.run.player.ns["F"]
 
     for _ in range(2):

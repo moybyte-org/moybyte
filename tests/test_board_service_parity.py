@@ -113,7 +113,7 @@ SERVICES = {
     "pointer": "the cursor model, sized to the SYSTEM canvas",
     "keyboard": "the physical keyboard, for the code editor's text/raw flip",
     "ble_keyboard": "an OPTIONAL SECOND keyboard over BLE HID (#26), on a board that already has a physical one",
-    "_with_sd": "the storage gate every store op is wrapped in",
+    "with_sd": "the storage gate every store op is wrapped in",
     "updater": "the #53 OTA updater behind Settings -> UPDATE FW",
     "c6_updater": "the C6 radio co-processor's updater behind Settings -> "
                   "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
@@ -162,7 +162,7 @@ WIRING = {
         "pointer": INJECTED,
         "keyboard": INJECTED,
         "ble_keyboard": INJECTED,
-        "_with_sd": INJECTED,
+        "with_sd": INJECTED,
         "updater": INJECTED,
         "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
@@ -202,7 +202,7 @@ WIRING = {
         "pointer": INJECTED,
         "keyboard": INJECTED,
         "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD card on this console -- the store is internal flash "
+        "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
@@ -244,7 +244,7 @@ WIRING = {
         "pointer": INJECTED,
         "keyboard": INJECTED,
         "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD card on this console -- the store is internal flash "
+        "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
@@ -284,7 +284,7 @@ WIRING = {
         "pointer": INJECTED,
         "keyboard": INJECTED,
         "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD in play (stage 4 open) -- the store is internal "
+        "with_sd": "no SD in play (stage 4 open) -- the store is internal "
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",
         "updater": INJECTED,
@@ -326,7 +326,7 @@ WIRING = {
                     "exists only so the code editor can flip a T-Deck keyboard "
                     "between ASCII and raw-matrix mode, which has no host analogue",
         "ble_keyboard": "the sim has no BLE radio; the host reads a real\n                         keyboard through ConsoleDriver/pygame, and a\n                         pairing UI over nothing would be a dead row.",
-        "_with_sd": "no shared bus and no card: the Workstation's call-through "
+        "with_sd": "no shared bus and no card: the Workstation's call-through "
                     "default is already right on a filesystem",
         "updater": "OTA writes an ESP32 app partition (esp32.Partition). There "
                    "is nothing on a host to flash, and Settings hides the row "
@@ -383,7 +383,7 @@ WIRING = {
         "keyboard": "browser key events arrive through web_input as InputState, "
                     "not as a device keyboard object with a mode command",
         "ble_keyboard": "a browser cannot pair HID devices for the page --\n                         keys arrive as DOM events through web_input.",
-        "_with_sd": "the VFS is in-memory; nothing to gate",
+        "with_sd": "the VFS is in-memory; nothing to gate",
         "updater": "not at BOOT, and not never: web_boot.update_enable binds a\n"
                    "                 RemoteUpdater over the board's /update endpoint AFTER the\n"
                    "                 worker's probe answers (#41), so it is out of this scan's\n"
@@ -428,7 +428,7 @@ NOT_A_SERVICE = {
                 "Neither is a capability the other target lacks",
     "perf_hud": "the same knob's other half -- whether the chip DRAWS. Turned "
                 "off with show_fps for the same clean-frame reason",
-    "_achievement_unlocked": "a de-branding stub: the web build silences the "
+    "achievement_unlocked": "a de-branding stub: the web build silences the "
                              "console's achievement toasts (gamification for "
                              "the kid console, not for a cart player). An "
                              "override of shared behaviour, not a backend",

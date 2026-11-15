@@ -74,7 +74,7 @@ def test_letter_blitz_opens_and_runs_headless(tmp_path):
 
     _open_cart(ws, "Letter Blitz")
     assert ws.screen == "desktop"
-    assert ws.ns is not None and ws.run.player._update and ws.run.player._draw
+    assert ws.ns is not None and ws.run.player.update and ws.run.player.draw
     _run(ws, 300)  # ~10s headless, tanks wandering, no input -- must not crash
 
 

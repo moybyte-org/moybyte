@@ -49,8 +49,8 @@ def _pkg(**change):
 def _quiet(ws):
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
-    ws.bar_layer._clock_text = lambda: _CLOCK
+    ws.toast_until = 0
+    ws.bar_layer.clock_text = lambda: _CLOCK
 
 
 def _world(tmp_path, desk):
@@ -66,7 +66,7 @@ def _world(tmp_path, desk):
     _quiet(ws)
     if desk:
         ws.home.open_desk()
-        assert ws.spine.open_app(ws._apps_by_id["files"])
+        assert ws.spine.open_app(ws.app("files"))
         ws.open_settings()               # focused; files stays behind it
     return ws
 
@@ -96,7 +96,7 @@ def _keys(ws, desk):
     if desk:
         wm = ws.wm
         out["desk"] = wm._desk_sig
-        out["chrome"] = tuple(getattr(w, "_chrome_sig", None) for w in wm._wins.values())
+        out["chrome"] = tuple(getattr(w, "_chrome_sig", None) for w in wm.windows.values())
     return out
 
 
@@ -131,8 +131,8 @@ def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, 
     for name, key in _keys(ws, desk).items():
         assert key != keys[name], name
     if desk:                              # every window buffer, focused or behind
-        assert {w.kind: w._look_gen for w in ws.wm._wins.values() if w.buf is not None} \
-            == {w.kind: ws.look.look_gen for w in ws.wm._wins.values() if w.buf is not None}
+        assert {w.kind: w._look_gen for w in ws.wm.windows.values() if w.buf is not None} \
+            == {w.kind: ws.look.look_gen for w in ws.wm.windows.values() if w.buf is not None}
 
     # Idle after the edit: nothing paints.
     drawn = ws.frame_state.frames_drawn

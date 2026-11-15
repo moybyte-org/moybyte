@@ -59,7 +59,7 @@ def test_all_new_carts_open_and_run_headless(tmp_path):
     for title in NEW_CARTS:
         _open_cart(ws, title)
         assert ws.screen == "desktop", title  # _start succeeded (else still launcher)
-        assert ws.ns is not None and ws.run.player._update and ws.run.player._draw
+        assert ws.ns is not None and ws.run.player.update and ws.run.player.draw
         _run(ws, 90)                            # attract-mode auto-play, no crash
         assert probe.drew_something(ws.run.canvas), title + " drew nothing"
         ws.home.go_home()
@@ -330,7 +330,7 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
-    ws.text._open_menu()
+    ws.text.open_menu()
     pet = [f for f in ws.cart["edit"] if f["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     assert len(pet["choices"]) == 3
@@ -406,7 +406,7 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
-    ws.text._open_menu()
+    ws.text.open_menu()
     pet = [f for f in ws.cart["edit"] if f["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     assert len(pet["choices"]) == 2

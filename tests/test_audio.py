@@ -892,7 +892,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws.open()
     assert ws.cart_error is None and ws.run.audio is not None
 
-    ws.text._open_music()
+    ws.text.open_music()
     assert ws.screen == "menu" and ws.menu_view == "music"
     me = ws.music_ui.musicedit
     assert me is not None
@@ -929,7 +929,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
 
     # Leaving the editor stops any preview and returns to the cart.
     page.act("hear")                          # start a preview again
-    ws.text._leave_menu()
+    ws.text.leave_menu()
     assert ws.music_ui.music_preview is None and ws.screen == "desktop"
 
 
@@ -938,7 +938,7 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
     # The Song tab; a frame draws it.
@@ -964,7 +964,7 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
 
@@ -1002,7 +1002,7 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
     page._view()
@@ -1033,7 +1033,7 @@ def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     drv = host_app.ConsoleDriver(ws)
 
@@ -1060,7 +1060,7 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
 
     me.select_cursor(0)
@@ -1343,7 +1343,7 @@ def test_the_music_tab_repaints_on_input_and_never_at_rest(tmp_path):
 
     def frame(inp):
         ws.input = real
-        ws.text._open_music()
+        ws.text.open_music()
         ws.frame(1 / 30)
         ws.frame_state.dirty = False
         ws.input = inp

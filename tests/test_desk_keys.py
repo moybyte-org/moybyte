@@ -110,7 +110,7 @@ def _sprite(tmp_path, path):
     ws = build_ws(tmp_path)
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
     kb = Keyboard(ws, path)
     ui_draw.input_kind("keys")

@@ -96,7 +96,7 @@ def test_undo_takes_the_local_op_before_the_journal(tmp_path):
     only once they are exhausted. With a committed sprite AND a live stroke on
     top, one press reverts the stroke and leaves the FILE alone."""
     ws = _cart_ws(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)
@@ -114,7 +114,7 @@ def test_undo_takes_the_local_op_before_the_journal(tmp_path):
 def test_undo_falls_through_to_the_journal_once_the_local_stack_is_empty(tmp_path):
     """...and the NEXT press crosses the boundary into the durable walk."""
     ws = _cart_ws(tmp_path)
-    ws.text._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)

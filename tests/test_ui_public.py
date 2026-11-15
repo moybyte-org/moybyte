@@ -101,7 +101,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.run.player, "_lua", None)
+    lua = getattr(ws.run.player, "lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:16]
     if lua is not None:

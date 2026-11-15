@@ -84,15 +84,15 @@ def test_lua_cart_runs_under_the_player(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
     assert ws.run.player.cart_error is None
-    assert ws.run.player._lua is not None                    # started via the seam
-    assert ws.run.player._update is not None and ws.run.player._draw is not None
+    assert ws.run.player.lua is not None                    # started via the seam
+    assert ws.run.player.update is not None and ws.run.player.draw is not None
     for _ in range(30):
         ws.frame(1 / 30)
     assert ws.run.player.cart_error is None
     # the cart world lives in the LUA state: 120 petals falling
     # Read through the run's own accessor, never an embedding's internals: a
     # test that reaches into one VM's guts only ever tested that VM.
-    assert ws.run.player._lua.get_global_len("petals") == 120
+    assert ws.run.player.lua.get_global_len("petals") == 120
 
 
 def test_lua_cart_exit_closes_the_state(tmp_path):
@@ -100,9 +100,9 @@ def test_lua_cart_exit_closes_the_state(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
     ws.frame(1 / 30)
-    lua = ws.run.player._lua
-    ws.spine._exit_to_caller()
-    assert ws.run.player._lua is None                        # closed with the run
+    lua = ws.run.player.lua
+    ws.spine.exit_to_caller()
+    assert ws.run.player.lua is None                        # closed with the run
     assert lua.update is None                            # handle torn down
 
 
@@ -142,7 +142,7 @@ def test_a_lua_carts_time_is_the_players_cart_clock(tmp_path):
     ws.launcher.items.append(cart)
     _open(ws, "Clock Lua")
     assert ws.run.player.cart_error is None
-    assert ws.run.player._play is not None, "the run's frame is not the kernel's Player's"
+    assert ws.run.player.play is not None, "the run's frame is not the kernel's Player's"
     img = [0] * 256
 
     def clock():
@@ -239,13 +239,13 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, "Bullet Storm")
     assert ws.run.player.cart_error is None
-    assert type(ws.run.player._lua).__name__ == "MoycoreRun", \
+    assert type(ws.run.player.lua).__name__ == "MoycoreRun", \
         "the cart is not on the glue's MoycoreRun"
     for _ in range(300):
         ws.frame(1 / 60)
         assert ws.run.player.cart_error is None
     # The swarm is live, read through the runtime-agnostic global reader.
-    assert ws.run.player._lua.get_global("nb") > 30
+    assert ws.run.player.lua.get_global("nb") > 30
 
 
 def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):

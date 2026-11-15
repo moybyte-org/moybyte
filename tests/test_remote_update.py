@@ -222,8 +222,8 @@ def test_the_rows_a_remote_backend_offers(tmp_path):
     _ota, board = _zero()
     link = _Link(board)
     ws = _ws(tmp_path, link.remote)
-    assert ws._online_update_available() is True
-    assert ws._update_available() is False
+    assert ws.online_update_available() is True
+    assert ws.update_available() is False
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     assert "update_online" in keys
     assert "update" not in keys
@@ -238,7 +238,7 @@ def test_a_page_no_board_served_has_no_updater_and_no_rows(tmp_path):
     capability row in this console already gates."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert ws.updater is None
-    assert ws._online_update_available() is False
+    assert ws.online_update_available() is False
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     assert "update_online" not in keys and "ota_channel" not in keys
 

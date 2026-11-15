@@ -240,7 +240,7 @@ class ConsoleUpdate:
         if ota is None:
             return None
         try:
-            return ota if self.ws._update_available() else None
+            return ota if self.ws.update_available() else None
         except Exception:                # noqa: BLE001 -- a ws without the query
             return None
 

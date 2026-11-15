@@ -329,7 +329,7 @@ class EditorApp:
         ws.editor = doc.ed
         ws.history.drop_code_history()
         ws.wm.activate("menu")
-        desk = getattr(ws, "_editor_desk", None)
+        desk = getattr(ws, "built_editor_desk", None)
         if desk is not None:
             desk.theme_shown(True)
         self.zone_gen += 1
@@ -380,7 +380,7 @@ class EditorApp:
         if ws.editor is doc.ed:
             ws.editor = None
         ws.history.drop_code_history()
-        desk = getattr(ws, "_editor_desk", None)
+        desk = getattr(ws, "built_editor_desk", None)
         if desk is not None:
             desk.theme_shown(False)
         self.tab = self._theme_was if self._theme_was not in (None,) + THEME_TABS else "cards"
@@ -482,7 +482,7 @@ class EditorApp:
                 if ws.run.player.crash_line is not None \
                         and (ws.run.player.crash_file or name) == name:
                     # Opened after a runtime crash -> land on the line that raised.
-                    ws.saves._mark_code_error(ws.run.player.crash_line - 1,
+                    ws.saves.mark_code_error(ws.run.player.crash_line - 1,
                                         (ws.cart_error or "crashed")[:32])
                 else:
                     ws.code_err = None
@@ -524,7 +524,7 @@ class EditorApp:
         inside each `relayout` see the live editor."""
         ws = self.ws
         if view == "code":
-            ws._relayout_code()              # ws owns the CodeLayout handle
+            ws.relayout_code()              # ws owns the CodeLayout handle
             return
         name = _TAB_LAYOUT_UI.get(view)
         owner = getattr(ws, name, None) if name else None
@@ -571,7 +571,7 @@ class EditorApp:
         # stale "crashed" panel and _update/_draw would stay None forever.
         if self.tab == "code" and ws.editor is not None and ws.cart is not None:
             ws.cart["src"] = ws.editor.text()
-            ws._start()
+            ws.start()
         elif self.tab == "blocks":
             ws.block_ui.on_leave()
             # save_current() above just recompiled + committed cart["src"] (save_blocks);
@@ -579,7 +579,7 @@ class EditorApp:
             # code editor does. (A refused save -- protected/graduated -- leaves src at
             # its last good state, so this re-runs THAT.)
             if ws.cart is not None:
-                ws._start()
+                ws.start()
         elif self.tab == "scene":
             # Scenes are consumed ONCE at _init (#85 Variant A) -- a resumed cart
             # would never re-read scene(), so PLAY from the scene tab re-starts:
@@ -587,19 +587,19 @@ class EditorApp:
             # live-syncs each gesture into ws.run.project.scenes; Player.start copies them
             # for the run). Mirrors the blocks tab's re-run-on-leave.
             if ws.cart is not None:
-                ws._start()
+                ws.start()
         elif self.tab == "cards":
             # PLAY on Config = the old GO (fix B retired that button): re-run the cart
             # with the freshly-tuned config AND persist config.json. Config binds at
             # _start (make_api), so a re-start is what makes card edits take effect;
             # _save_config commits them (mirrors ws.saves.apply()). Only persist on a clean
             # start so a crash doesn't overwrite config with a half-applied edit.
-            if ws.cart is not None and ws._start():
-                ws.saves._save_config()
+            if ws.cart is not None and ws.start():
+                ws.saves.save_config()
         project = ws.run.project
         if ws.cart is not None and self.tab not in ("code", "blocks", "scene", "cards") \
                 and (restart or owed or project.play_world()):
-            ws._start()              # Restart: from the start, whatever the tab
+            ws.start()              # Restart: from the start, whatever the tab
         else:
             project.play_world()     # E-02: the Editor's map and scenes, where edited
         if self.restart_owed:
@@ -660,7 +660,7 @@ class EditorApp:
                 draw = self._set_icon(cv, open_kind=open_kind,
                                       open_ink=_ui_draw.current_ink(cv, th),
                                       lead=bool(rects) and rects[0][2])
-            icon_for = getattr(ws, "_icon_image_keyed", None)
+            icon_for = getattr(ws, "icon_image_keyed", None)
             extra = self._shelf_layout(tabs_area)[1]
             for (tid, label, kind), (_t, r, labels_on) in zip(chips, rects):
                 _ui_draw.tab(cv, th, r, tid == self.tab, label, labels_on, band_ink,
@@ -679,7 +679,7 @@ class EditorApp:
                 self._bare_play(cv, play_r)
             else:
                 _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                           glyph_draw=ws._glyph)
+                           glyph_draw=ws.glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
         # one on the bar's current mark with its name where the bar has the
@@ -702,7 +702,7 @@ class EditorApp:
                 if label:
                     _ui_draw.tab(cv, th, r, False, label, True,
                                  th["chrome_ink"] if ink is None else ink,
-                                 ws._icon_image_keyed(glyph),
+                                 ws.icon_image_keyed(glyph),
                                  icon_draw=self._set_icon(cv, ink) if sets else None,
                                  kind=glyph)
                     continue
@@ -717,7 +717,7 @@ class EditorApp:
                 # Play: the set's bare glyph in `value` (DESIGN.md, Play)
                 self._draw_play(cv, (x, y, box, box), th["value"])
             else:
-                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y, cv,
+                ws.icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y, cv,
                          ink=ink)
 
     # -- the desk Editor's row (EDITOR_LAYOUT.md's frame) ---------------------
@@ -782,7 +782,7 @@ class EditorApp:
             kind = next((k for t, _l, k, _r, _o in tabs if t == cur), None)
             draw = self._set_icon(cv, open_kind=kind,
                                   open_ink=_ui_draw.current_ink(cv, th), lead=True)
-        icon_for = getattr(ws, "_icon_image_keyed", None)
+        icon_for = getattr(ws, "icon_image_keyed", None)
         for t, label, kind, r, on in tabs:
             _ui_draw.tab(cv, th, r, t == cur, label, on, band_ink,
                          icon_for(kind) if icon_for is not None else None,
@@ -806,7 +806,7 @@ class EditorApp:
             self._bare_play(cv, play_r)
         else:
             _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                            glyph_draw=ws._glyph)
+                            glyph_draw=ws.glyph)
 
     def _row_tap(self, px, py, rect, desk):
         tabs, undo_r, redo_r, _line, play_r = self._row_layout(rect, desk)
@@ -907,7 +907,7 @@ class EditorApp:
             m = 4 * fs
             cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
         elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
-            ws._glyph(slot, (x, y, box, box), ink, cv)
+            ws.glyph(slot, (x, y, box, box), ink, cv)
         line = _ui_draw.font("ui")[2] * fs
         cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
@@ -1077,11 +1077,11 @@ class EditorApp:
         carries the color instead."""
         ws = self.ws
         if enabled:
-            ws._icon(glyph, x, y, cv)
+            ws.icon(glyph, x, y, cv)
             return
         ink = _ui_draw.disabled_ink(ws.theme_colors)
         if not ws.draw_icon(glyph, (x, y, ic, ic), ink, cv):
-            ws._glyph(glyph, (x, y, ic, ic), ink, cv)
+            ws.glyph(glyph, (x, y, ic, ic), ink, cv)
 
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also
@@ -1232,21 +1232,21 @@ class EditorApp:
             return True
         self.zone_opened = tab in _OPENS
         if tab == "cards":
-            ws.text._open_menu()
+            ws.text.open_menu()
         elif tab == "code" and self.tab == "code" and ws.menu_view == "code":
             ws.code_layer.open_scripts()   # the tab tapped again: the cart's scripts
         elif tab == "code":
             ws.text.set_menu_view("code")
         elif tab == "paint":
-            ws.text._open_paint()
+            ws.text.open_paint()
         elif tab == "map":
-            ws.text._open_map()
+            ws.text.open_map()
         elif tab == "scene":
-            ws.text._open_scene()
+            ws.text.open_scene()
         elif tab == "blocks":
-            ws.text._open_blocks()
+            ws.text.open_blocks()
         elif tab == "music":
-            ws.text._open_music()
+            ws.text.open_music()
         elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
             ws.history.undo()
             self.owe_restart(self.tab)
@@ -1262,7 +1262,7 @@ class EditorApp:
             # asset tab) + compile + exec + first-world build run behind the
             # next painted frame (LOADING toast), never inside the bar tap
             # that asked for them.
-            ws.defer(ws.text._leave_menu)
+            ws.defer(ws.text.leave_menu)
         return True
 
     def playing(self):
@@ -1272,7 +1272,7 @@ class EditorApp:
         wm = self.ws.wm
         if not getattr(wm, "desk_open", lambda: False)():
             return False
-        win = getattr(wm, "_wins", {}).get("desktop")
+        win = getattr(wm, "windows", {}).get("desktop")
         return win is not None and not win.own
 
     def owe_restart(self, tab):
@@ -1290,7 +1290,7 @@ class EditorApp:
         """Restart: the playtest runs again from its start, with the tab's
         freshest edit (`leave`, which re-starts the cart); a paused Run
         slot goes on with it."""
-        desk = self.ws._editor_desk
+        desk = self.ws.built_editor_desk
         if desk is not None and desk.paused:
             desk.pause(False)
         self.leave(restart=True)
@@ -1468,5 +1468,5 @@ class EditorApp:
             ws.block_ui.save_blocks()
             ws.block_ui.commit_workspace_scene()   # persist the side-by-side scene pane (#93/#85)
         elif tab == "cards":
-            ws.saves._save_config()
+            ws.saves.save_config()
         return True

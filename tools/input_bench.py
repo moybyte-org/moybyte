@@ -241,10 +241,10 @@ def _canvases():
     out = []
     wm = ws.wm
     for c in (getattr(ws.run, 'canvas', None), getattr(ws, 'sys_canvas', None),
-              getattr(wm, '_root_canvas', None)):
+              getattr(wm, 'root_canvas', None)):
         if c is not None and hasattr(c, '_clip_x0') and not any(c is o for o in out):
             out.append(c)
-    for w in (getattr(wm, '_wins', None) or {}).values():
+    for w in (getattr(wm, 'windows', None) or {}).values():
         b = getattr(w, 'buf', None)
         if b is not None and hasattr(b, '_clip_x0') and not any(b is o for o in out):
             out.append(b)
@@ -268,16 +268,16 @@ def _wrap():
             _timed(l, slot, nm == 'launcher')
         else:
             _timed(l, 0 if l is base else 4, l is base)
-    cf = getattr(wm, '_content_for', None)
-    for k in list(getattr(wm, '_order', []) or []):
-        w = wm._wins.get(k)
+    cf = getattr(wm, 'content_for', None)
+    for k in list(getattr(wm, 'z_order', []) or []):
+        w = wm.windows.get(k)
         c = cf(w.kind) if (w is not None and cf is not None) else None
         if c is not None and not getattr(c, '_ib_d', False):
             try:
                 _timed(c, 0, True)
             except Exception:
                 pass
-    rc = getattr(wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
+    rc = getattr(wm, 'root_canvas', None) or getattr(ws.run, 'canvas', None)
     if rc is not None and not getattr(rc, '_ib_d', False):
         for nm, slot in (('blit_strip', 1), ('blit_strip_rect', 1), ('copy_last', 6)):
             f = getattr(rc, nm, None)
@@ -510,13 +510,13 @@ def _ib_tail():
     return (ib.n, ib.bn, ib.p0, st[0], st[1])
 
 def _ib_speaks():
-    rc = getattr(ws.wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
+    rc = getattr(ws.wm, 'root_canvas', None) or getattr(ws.run, 'canvas', None)
     return hasattr(ws, 'frame_change') or (rc is not None and hasattr(rc, 'shift_last'))
 
 def _ib_host(name):
     if name == 'settings':
         return ws.settings_layer._input_host()
-    a = ws._apps_by_id.get(name)
+    a = ws.app(name)
     return getattr(a, '_ui', None)
 
 import moy_ui as _mu
@@ -549,7 +549,7 @@ def _ib_app(app):
     if app == 'settings':
         ws.open_settings()
     else:
-        ws.spine.open_app(ws._apps_by_id[app])
+        ws.spine.open_app(ws.app(app))
 
 def _ib_cart(title):
     for c in ws.carts.all:
@@ -572,7 +572,7 @@ def _ib_window():
     # the Editor a window, whatever this board last left it as (`win_full`):
     # the window is the WM's once a frame drew it, so this is a step after
     # _ib_editor; "Code full screen" is the rows that take it full (_ib_full)
-    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    _w = (getattr(ws.wm, 'windows', None) or {}).get('menu')
     if _w is not None and getattr(_w, 'full', None) is not None and _w.full():
         ws.wm.bring_forward('menu')
         ws.wm.full_key()
@@ -622,7 +622,7 @@ def _ib_picker():
 
 def _ib_full():
     # the window full screen (never a toggle: _ib_window left it a window)
-    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    _w = (getattr(ws.wm, 'windows', None) or {}).get('menu')
     f = getattr(ws.wm, 'full_key', None)
     if f is not None and not (_w is not None and getattr(_w, 'full', None) is not None
                               and _w.full()):
@@ -687,7 +687,7 @@ _ib_s['tab'] = ws.launcher.tab
 _ib_s['theme'] = ws.look.file_text()
 _cl = getattr(ws, 'clipboard', None)
 _ib_s['clip'] = _cl.text() if _cl is not None else None
-_ib_s['full'] = set(k for k, w in (getattr(ws.wm, '_wins', None) or {}).items()
+_ib_s['full'] = set(k for k, w in (getattr(ws.wm, 'windows', None) or {}).items()
                     if getattr(w, 'full', None) is not None and w.full())
 _ib_s['win_full'] = ws.system.get('win_full', None)
 """
@@ -816,7 +816,7 @@ CLEANUP_STEPS = (
     "_cl = getattr(ws, 'clipboard', None)\n"
     "if _cl is not None and ws._ib_s.get('clip') is not None:\n"
     "    _cl.put_text(ws._ib_s['clip'])",
-    "for _k, _w in list((getattr(ws.wm, '_wins', None) or {}).items()):\n"
+    "for _k, _w in list((getattr(ws.wm, 'windows', None) or {}).items()):\n"
     "    if getattr(_w, 'full', None) is not None and _w.full() and _k not in ws._ib_s['full']:\n"
     "        ws.wm.bring_forward(_k)\n"
     "        ws.wm.full_key()",
@@ -1785,7 +1785,7 @@ def surfaces():
     s.append(Surface("Map", _ed(SCRATCH, "map", "art"), rect=RIGHT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
     s.append(Surface("Notes", _NOTES, "(lambda h: h.ed.top * 100000 + h.ed.row * 1000 + "
-                     "h.ed.col if h else -1)(ws.run.player._focus_editor)",
+                     "h.ed.col if h else -1)(ws.run.player.focus_editor)",
                      inputs=("fling", "drag", "key_steps", "key_held", "type", "type_fast",
                              "type_line", "ball_slow"),
                      rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.spine.exit()"))

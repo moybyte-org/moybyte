@@ -87,7 +87,7 @@ slideshow, the web view) costs nothing.
 the stop card since docs/history/look_2026-10.md step 33. A cart that fails to start
 or raises mid-frame stops under the stop card, whose See why exits into the
 Editor's Code tab with the caret on the crashing line, the inline marker set,
-and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
+and a tap/type-dismissible popover hung under it (`ws.crash_to_code`). On a cart of several scripts
 (SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every

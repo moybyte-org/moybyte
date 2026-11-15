@@ -40,7 +40,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
     ws.home.go_home()
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
@@ -79,7 +79,7 @@ def _session(ws, frame):
         ws.toggle_sysmenu()
         run(3)
         for k in ("down", "down", "up", "down"):
-            ws._sysmenu_layer.handle_input(_Key(k))
+            ws.sysmenu_layer.handle_input(_Key(k))
             ws.mark_dirty()
             run(2)
         ws.toggle_sysmenu()
@@ -98,10 +98,10 @@ def _session(ws, frame):
     menu_round()                   # over one that moved the other way
     ws.toggle_sysmenu()
     run(2)
-    ws.bar_layer._clock_text = lambda: "10:31"   # the minute turns under the menu
+    ws.bar_layer.clock_text = lambda: "10:31"   # the minute turns under the menu
     ws.mark_dirty()
     run(3)
-    ws._sysmenu_layer.handle_input(_Key("down"))
+    ws.sysmenu_layer.handle_input(_Key("down"))
     ws.mark_dirty()
     run(2)
     ws.toggle_sysmenu()

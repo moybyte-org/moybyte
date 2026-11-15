@@ -60,7 +60,7 @@ device build until the P4 port lands).
 The one mechanism of note is the LAYOUT CONTEXT: the responsive surfaces read
 their geometry from ws.layout / ws.code_layout / the per-editor layouts (#39),
 all derived from ws.sys_canvas. A window's content renders at the WINDOW's size,
-so the WM keeps one `_LayoutCtx` per window (captured by running ws._relayout()
+so the WM keeps one `_LayoutCtx` per window (captured by running ws.relayout()
 with the window's buffer installed) plus the ROOT context (the real canvas), and
 installs the right one around every content draw / input dispatch. The ambient
 context between dispatches is always the ROOT's, so the desktop root, the
@@ -115,7 +115,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     wallpaper + system icons + taskbar, every process above it a floating
     window; in CONSOLE mode this tier presents FULLSCREEN exactly like the
     small tiers (the home and everything opened from it own the whole
-    screen) while the desk's windows wait in `_parked`. Boot lands on the
+    screen) while the desk's windows wait in `parked`. Boot lands on the
     desk; the desk's PLAY enters console mode (`enter_console`), the
     home's X leaves it (`leave_console`). Install with
     `ws.wm = WindowedWM(ws)` right after construction
@@ -133,7 +133,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     # MicroPython a method the class lacks is looked up through the bases in
     # order, and the mixins stand before the base.
     _ensure_stack = FullscreenStackWM._ensure_stack
-    _overlay_sig = FullscreenStackWM._overlay_sig
+    overlay_sig = FullscreenStackWM.overlay_sig
     overlay_stack = FullscreenStackWM.overlay_stack
     visible_stack_rev = FullscreenStackWM.visible_stack_rev
     top_kind = FullscreenStackWM.top_kind
@@ -142,7 +142,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def __init__(self, ws):
         FullscreenStackWM.__init__(self, ws)
-        if ws._sys_canvas is None:
+        if ws.bound_sys_canvas is None:
             raise ValueError("WindowedWM needs a distinct (big) system canvas")
         # THE MODE (docs/theme_and_shell_2026-11.md §8.1): "desktop" -- the desk
         # and its windows -- or "console", FullscreenStackWM's presentation
@@ -158,29 +158,29 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # The desk's window records while console mode runs: outside the
         # back-stack, so the kernel route can truncate to its root, and put
         # back by its restore op on the way out (None in desktop mode).
-        self._parked = None
+        self.parked = None
         self._shown_focus = None      # the focus show_desk minimised away
-        self._root_canvas = ws._sys_canvas
-        self._root_ctx = _LayoutCtx.capture(ws)
+        self.root_canvas = ws.bound_sys_canvas
+        self.root_ctx = _LayoutCtx.capture(ws)
         self._win_layer = _WindowStackLayer(self)
-        self._wins = {}               # slot key -> _Win
+        self.windows = {}               # slot key -> _Win
         self._prewarm_failed = set()  # window kinds whose prewarm draw has been reported
         # Two orders of the same slots: `_kinds` is the back-stack's above the
         # desk (the order the windows opened in, which the chips keep), and
-        # `_order` is the Z-ORDER, bottom -> top, which the focus raises
-        # through: every draw and hit-test walks `_order`.
+        # `z_order` is the Z-ORDER, bottom -> top, which the focus raises
+        # through: every draw and hit-test walks `z_order`.
         self._kinds = []
-        self._order = []
+        self.z_order = []
         self._front = None            # the kind a goto() asked to bring forward
         self._player_under = False    # a window above the game window overlaps it
         # INPUT FOCUS -- decoupled from the back-stack (the owner call that fixed
         # "clicking anything else kills my playtest"): the stack still owns what's
         # OPEN and who TICKS (the Player ticks while it's the stack top), but the
-        # keyboard and window highlight follow _focus, which moves on click without
+        # keyboard and window highlight follow focus_key, which moves on click without
         # popping anything. A running game now keeps running while the editor
         # beside it is being typed in; only its X / the pause menu's Quit (when
         # focused) / an exit verb ends it. None = the desktop root has focus.
-        self._focus = None
+        self.focus_key = None
         # PLAY INTENT (#178): the same run() verb serves two jobs on a desktop --
         # playing a game (open it as big as fits) and PLAYTESTING the cart you are
         # editing (open it small, so the editor beside it stays readable). The
@@ -188,7 +188,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # rather than the kid choosing a scale: Editor PLAY -> "dev", everything
         # else -> "play". Read ONCE, when the player window is created; a window
         # the kid has since resized is never re-sized under them.
-        self._play_intent = "play"
+        self.play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
         self._rest = None             # a released drag's tuple, and the painted
         self._rest_end = 0            # frame it ends before (`_gesture`)
@@ -211,8 +211,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
         self._in_draw = False         # the windows draw: a relayout waits for its end
         self._relayout_owed = False
-        self._direct_root = False     # a window's content draws into the root now
-        self._scale_owed = False      # ...and changed the font scale the root takes after
+        self.direct_root = False     # a window's content draws into the root now
+        self.scale_owed = False      # ...and changed the font scale the root takes after
         # Quiet-frame fast path (#58): the stand-in stacks + the ping-pong
         # full-paint debt. After ANY full repaint the NEXT drawn frame must also
         # bring its buffer to it -- a double-buffered panel alternates physical
@@ -308,7 +308,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._backdrop_valid = False
         self._desk_tile = 0               # the system button's state the cache holds
         self._tile_shown = 0              # ...and the one the buffers last took
-        self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
+        self.backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
         self._backdrop_unsupported = False  # the root canvas can't snapshot pixels
                                             # (the web CommandCanvas, #113): stop
                                             # re-trying the capture every drag frame
@@ -337,20 +337,20 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # Chrome freeze (#155): a window strip/border and the taskbar chips are
         # disjoint from every content stamp, so a quiet frame can leave them
         # alone once both ping-pong buffers hold them.
-        self._chrome_quiet = False
+        self.chrome_quiet = False
         self._chip_sig = None
         self._chip_streak = 0
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
         # dominant cost on the P4 (PSRAM-bandwidth-bound, no accelerator helps a
-        # 1:1 copy). _gesture_hist holds the last _retained_n() frames' damage
+        # 1:1 copy). _gesture_hist holds the last retained_n() frames' damage
         # extents (a back buffer on an N-buffer root is N frames stale; a
         # single-buffer host needs one -- the floored N covers all). Seeded
         # with the window's extent at gesture START (every physical buffer
         # holds its pre-gesture stamp).
         self._gesture_hist = []
-        self._union_disabled = False      # A/B measurement knob (P4 remote `union`)
+        self.union_disabled = False      # A/B measurement knob (P4 remote `union`)
         # DAMAGE (the rotated-compositor lever, Guition P4 2026-09-08): on a
         # painted frame the WM can DESCRIBE -- a gesture's union, the windows
         # whose pixels it changed -- it hands those root rects to a canvas
@@ -392,7 +392,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     # -- layout-context plumbing ----------------------------------------------
 
     def on_relayout(self):
-        """Hook called by ws._relayout() (a font-scale change / future resize,
+        """Hook called by ws.relayout() (a font-scale change / future resize,
         or a mode switch). Re-anchors the relayout to the ROOT canvas if it ran
         while a window context was ambient and recaptures the root context. A
         mode switch stops there: it relayouts the bars and the root context and
@@ -405,12 +405,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             self._relayout_owed = True    # after the windows' draw (the layer's)
             return
         ws = self.ws
-        if ws._sys_canvas is not self._root_canvas:
+        if ws.bound_sys_canvas is not self.root_canvas:
             self._ctx_switching = True
-            ws._sys_canvas = self._root_canvas
-            ws._relayout()
+            ws.bound_sys_canvas = self.root_canvas
+            ws.relayout()
             self._ctx_switching = False
-        self._root_ctx = _LayoutCtx.capture(ws)
+        self.root_ctx = _LayoutCtx.capture(ws)
         self._pop_reset()             # a relayout repaints what a popover covered
         if self._mode_switch:
             # The desk's cache stays good: its signature carries the layout's
@@ -418,13 +418,13 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # again, and leave_console restarts its streak.
             self.content_gen += 1
             return
-        if self._parked is not None:
-            for win in self._parked.wins.values():
+        if self.parked is not None:
+            for win in self.parked.wins.values():
                 self._drop_win(win)
         self._drop_wins()
         self._kinds = []
-        self._order = []
-        self._focus = None
+        self.z_order = []
+        self.focus_key = None
         self.content_gen += 1
         # The drag cache stays minted (a mode switch does not change the root's
         # size; _ensure_backdrop re-makes it if one ever does) -- re-minting
@@ -437,9 +437,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         the public seam explicitly permits later shell registrations."""
         layout = getattr(app, "layout", None)
         if layout is not None:
-            self._root_ctx.app_layouts[app.id] = layout
+            self.root_ctx.app_layouts[app.id] = layout
 
-    def _install(self, ctx, win=None, draws=True):
+    def install_window(self, ctx, win=None, draws=True):
         # The focus mark draws only in the focused window (ui.marks), and in
         # none while a popover or the delete confirm above the windows holds
         # the keys: one a screen. `draws`: the window's buffer is drawn
@@ -467,7 +467,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _mark_word(self, win):
         """The shell's word on `win`'s focus mark (ui.marks): the focused
         window's, while no menu or confirm holds the keys (one a screen)."""
-        return (self._wins.get(self._focus) is win
+        return (self.windows.get(self.focus_key) is win
                 and not self.popover_takes_keys()
                 and not self.ws.confirm.open)
 
@@ -483,14 +483,14 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         window's `inner_foot`), capture it, then restore the root."""
         ws = self.ws
         self._ctx_switching = True
-        ws._sys_canvas = buf
+        ws.bound_sys_canvas = buf
         _layout_base.in_window(True, foot)    # a window's layouts take its band
         try:
-            ws._relayout()
+            ws.relayout()
         finally:
             _layout_base.in_window(False)
         ctx = _LayoutCtx.capture(ws)
-        self._root_ctx.install(ws)
+        self.root_ctx.install(ws)
         self._ctx_switching = False
         return ctx
 
@@ -499,18 +499,18 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _fs(self):
         return self.ws.look.effective_font_scale()
 
-    def _desk_rect(self):
+    def desk_rect(self):
         """The desk's content rect, (x, y, w, h) on the root canvas: the glass
         less the OS bar. Windows size, cascade, maximise and move inside it and
         never overlap the bar (the taskbar row is OS-owned, chips included)."""
-        lay = self._root_ctx.layout
+        lay = self.root_ctx.layout
         return (lay.cx, lay.cy, lay.cw, lay.ch)
 
     def _work_rect(self, fs):
         """The desk rect right of its icon column, 8 pixels clear at the font
         scale: where a new window opens, as macOS and GNOME open one in the
         free work area, never over the launchers."""
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         right = dx
         for _key, box, band, _label, _cart in self._backdrop_layer._icon_rects():
             right = max(right, box[0] + box[2], band[0] + band[2])
@@ -521,9 +521,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def desk_open(self):
         return self.mode == "desktop"
 
-    def _on_nav(self):
-        FullscreenStackWM._on_nav(self)
-        p = self._parked
+    def on_nav(self):
+        FullscreenStackWM.on_nav(self)
+        p = self.parked
         if p is not None:
             # A parked kind re-opened fullscreen is the one process: its
             # window shows what that process holds now when the desk returns.
@@ -542,7 +542,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             try:
                 # The catalogue is the mode's: bars that move relayout there.
                 if not self.ws.look.apply_layout():
-                    self.ws._relayout()
+                    self.ws.relayout()
             finally:
                 self._mode_switch = False
             self.ws.bar_layer.invalidate()      # the home's X follows the floor
@@ -558,29 +558,29 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         return "launcher" if self.mode == "console" else "desk"
 
     def is_parked(self, kind):
-        p = self._parked
+        p = self.parked
         return p is not None and kind in p.kinds
 
     def enter_console(self):
         """The desk's PLAY: end a running playtest as its window's X would,
         move the window records -- rect, focus, the retained stamp -- off the
-        stack into `_parked`, truncate the route to its root (the home) and
+        stack into `parked`, truncate the route to its root (the home) and
         present it fullscreen. The processes behind the records keep running:
         a kind has one process, and re-opening it here shows that process."""
         if self.mode == "console":
             return
         ws = self.ws
         if self.stack.has("desktop"):
-            ws.spine._exit_to_caller()
-        self._sync_windows()
+            ws.spine.exit_to_caller()
+        self.sync_windows()
         st = self.stack.kinds()
         at = self.stack.index("desk")
-        self._parked = _Parked(st[at + 1:] if at >= 0 else [], self._order,
-                               self._wins, self._focus)
-        self._wins = {}
+        self.parked = _Parked(st[at + 1:] if at >= 0 else [], self.z_order,
+                               self.windows, self.focus_key)
+        self.windows = {}
         self._kinds = []
-        self._order = []
-        self._focus = None
+        self.z_order = []
+        self.focus_key = None
         self._drag = self._drag_armed = self._resize = None
         self._rest = None
         self._grab = 0
@@ -589,7 +589,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._gesture_hist = []
         self.mode = "console"
         self.stack.goto("launcher")
-        self._on_nav()
+        self.on_nav()
         ws.mark_dirty()
 
     def leave_console(self, game=False):
@@ -607,10 +607,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         if self.stack.depth() > 1 and not game:
             ws.home.go_home()                  # what stood on the home leaves first
-        p = self._parked or _Parked([], [], {}, None)
-        self._parked = None
+        p = self.parked or _Parked([], [], {}, None)
+        self.parked = None
         kinds = list(p.kinds)
-        if ("menu" in kinds and not ws.text._editing_icons
+        if ("menu" in kinds and not ws.text.editing_icons
                 and ws.editor_app.project is not ws.run.project):
             kinds.remove("menu")
             win = p.wins.pop("menu", None)
@@ -621,23 +621,23 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 if p.focus == "menu":
                     p.focus = p.order[-1] if p.order else None
         self.stack.restore(["desk"] + kinds + (["desktop"] if game else []))
-        self._wins = p.wins
+        self.windows = p.wins
         self._kinds = kinds
-        self._order = p.order
-        self._focus = p.focus
+        self.z_order = p.order
+        self.focus_key = p.focus
         self.mode = "desktop"
-        self._on_nav()
-        self._sync_windows()
-        for g in self._order:
-            win = self._wins[g]
+        self.on_nav()
+        self.sync_windows()
+        for g in self.z_order:
+            win = self.windows[g]
             win._stamp_streak = 0
             if win.kind == "desktop":
                 continue
             if win.buf is None:
                 self._build_content(win)
-                self._prewarm(win)
+                self.prewarm(win)
             elif p.stale.get(g):
-                self._prewarm(win)
+                self.prewarm(win)
         self._win_sig = None
         self._desk_streak = 0             # every buffer holds the home
         ws.frame_state.dirty = MODE_MARK
@@ -648,27 +648,27 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         window already is, restore them and the focus they had. A running
         game's window stays up: the desk is shown beside the game, never by
         holding it."""
-        wins = [self._wins[g] for g in self._order
-                if self._wins[g].kind != "desktop"]
+        wins = [self.windows[g] for g in self.z_order
+                if self.windows[g].kind != "desktop"]
         if not wins:
             return
         if all(w.minimized for w in wins):
             for w in wins:
                 w.minimized = False
             focus = self._shown_focus
-            self._move_focus(focus if focus in self._wins else self._order[-1])
+            self.move_focus(focus if focus in self.windows else self.z_order[-1])
             return
-        self._shown_focus = self._focus
+        self._shown_focus = self.focus_key
         for w in wins:
             w.minimized = True
-        if self._focus is not None and self._wins[self._focus].minimized:
-            self._move_focus("desktop" if "desktop" in self._wins else None)
+        if self.focus_key is not None and self.windows[self.focus_key].minimized:
+            self.move_focus("desktop" if "desktop" in self.windows else None)
 
     def release_cache(self):
         """The fit check's release: the parked stamps oldest-first, one per
         call, then the popover's snapshots when none is live, then the home's
         retained frame and the layer a dialog's page is held in."""
-        p = self._parked
+        p = self.parked
         if p is not None:
             for g in p.order:
                 win = p.wins[g]
@@ -715,7 +715,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         console mode)."""
         return self._slots()
 
-    def _sync_windows(self):
+    def sync_windows(self):
         """Mirror the back-stack into window records: drop windows whose kind
         was popped, create records (buffer + layout context + cascade
         position) for newly-pushed ones."""
@@ -723,18 +723,18 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         front, self._front = self._front, None
         if keys != self._kinds:
             alive = set(keys)
-            old = self._focus
-            for g in list(self._wins):
+            old = self.focus_key
+            for g in list(self.windows):
                 if g not in alive:
-                    self._drop_win(self._wins.pop(g))
+                    self._drop_win(self.windows.pop(g))
                     self.ws.procs.dropped(g)    # a running set's game ends with it
-            pushed = keys[-1] if keys and keys[-1] not in self._wins else None
+            pushed = keys[-1] if keys and keys[-1] not in self.windows else None
             for depth, g in enumerate(keys):
-                if g not in self._wins:
-                    self._wins[g] = self._make_window(g, g, depth)
+                if g not in self.windows:
+                    self.windows[g] = self._make_window(g, g, depth)
             # The z-order keeps its windows where they were; a new one opens
             # on top.
-            order = [g for g in self._order if g in alive]
+            order = [g for g in self.z_order if g in alive]
             for g in keys:
                 if g not in order:
                     order.append(g)
@@ -744,7 +744,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 if bar is not None:
                     bar.invalidate()
             self._kinds = keys
-            self._order = order
+            self.z_order = order
             # The focus after a stack change: the kind a navigation brought
             # forward (a spawn, or a return to a window below), else a window
             # just opened; a close leaves it where it was, or on the window
@@ -757,17 +757,17 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 new = old
             else:
                 new = order[-1] if order else None
-            self._focus = new
+            self.focus_key = new
             self._raise(new)
-        elif front is not None and front in self._wins and self.mode == "desktop":
-            self._bring_forward(front)
+        elif front is not None and front in self.windows and self.mode == "desktop":
+            self.bring_to_front(front)
 
     def set_play_intent(self, intent):
         """Record WHY the next cart run is starting -- "dev" (a playtest launched
         from the Editor) or "play" (the desk/home). Only the player window's
         DEFAULT size reads it; see _win_size."""
-        self._play_intent = intent if intent == "dev" else "play"
-        win = self._wins.get("desktop")
+        self.play_intent = intent if intent == "dev" else "play"
+        win = self.windows.get("desktop")
         if win is not None:
             win.own = False               # a new run is its caller's again
 
@@ -801,9 +801,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                     if _ui_draw.depth()[12] else 0)
             e = max(foot, self._frame_edge())
             fit = max(1, min((full.w - 24 - 2 * e) // self.ws.run.canvas.w,
-                             (self._desk_rect()[3] - 24 - th - e)
+                             (self.desk_rect()[3] - 24 - th - e)
                              // self.ws.run.canvas.h))
-            s = min(fit, _DEV_SCALE) if self._play_intent == "dev" else fit
+            s = min(fit, _DEV_SCALE) if self.play_intent == "dev" else fit
             return (self.ws.run.canvas.w * s + 2 + 2 * e,
                     self.ws.run.canvas.h * s + 2 + th + e)
         if key in ("menu", "projects"):
@@ -821,15 +821,15 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         so the whole window, grip included, fits the desk beside the OS bar
         (a default can exceed a small desktop, e.g. the fs-scaled Settings
         minimum at font 2x on 600px)."""
-        w, h = self._win_size(key, self._root_canvas, fs)
-        _dx, _dy, dw, dh = self._desk_rect()
+        w, h = self._win_size(key, self.root_canvas, fs)
+        _dx, _dy, dw, dh = self.desk_rect()
         return min(w, dw - 4 * fs), min(h, dh - 8 * fs)
 
     def _make_window(self, key, kind, depth):
         fs = self._fs()
         w, h = self._open_size(key, fs)
         title_h = _layout_base.metric("title", fs)
-        if key == "desktop" and self._play_intent == "dev":
+        if key == "desktop" and self.play_intent == "dev":
             x, y = self._dev_place(w, h, fs)
         else:
             x, y, w, h = self._cascade(kind, w, h, title_h, depth, fs)
@@ -843,7 +843,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # created BEHIND another (e.g. the home window when it and the Editor
         # spawn in one navigation) shows its app instead of a black retained
         # buffer.
-        self._prewarm(win)
+        self.prewarm(win)
         return win
 
     def _cascade(self, kind, w, h, title_h, depth, fs):
@@ -855,7 +855,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         that would carry it past the desk's right or bottom edge shrinks it
         to the room left, never under its minimum (`_min_size`); a minimum
         that still does not fit moves it back onto the desk."""
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         wx, _wy, ww, _wh = self._work_rect(fs)
         if w > ww:
             wx, ww = max(dx, dx + dw - w), w
@@ -876,8 +876,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         centred over the Editor's window (the desk's middle with none); at
         native size, at the Editor's top right, clear of the symbol keys
         along its foot. Clamped to the desk."""
-        dx, dy, dw, dh = self._desk_rect()
-        ed = self._wins.get("menu")
+        dx, dy, dw, dh = self.desk_rect()
+        ed = self.windows.get("menu")
         native = w < 2 * self.ws.run.canvas.w
         if ed is None or getattr(ed, "minimized", False):
             ex, ey, ew, eh = dx, dy, dw, dh
@@ -908,7 +908,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if x + w <= sx - m or x >= sx + sw + m or y + h <= sy - m \
                 or y >= sy + sh + m:
             return x, y
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         dw -= self._work_rect(fs)[0] - dx
         dx = self._work_rect(fs)[0]
         best = None
@@ -921,16 +921,16 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 best = (d, cx, cy)
         return (x, y) if best is None else (best[1], best[2])
 
-    def _prewarm(self, win):
+    def prewarm(self, win):
         """One-shot render of an app window's content into its buffer (defensive:
         a content error leaves the buffer blank and stale, reported once per
         window kind)."""
         if win.buf is None or win.ctx is None:
             return
-        content = self._content_for(win.kind)
+        content = self.content_for(win.kind)
         if content is None:
             return
-        self._install(win.ctx, win)
+        self.install_window(win.ctx, win)
         try:
             self.ws.bar_layer.draw_surface(content, 0)
             self._row_over(win, win.buf)
@@ -941,21 +941,21 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 self._prewarm_failed.add(win.kind)
                 print("Moybyte window draw failed:", win.kind, _err_text(exc))
         finally:
-            self._install(self._root_ctx)
+            self.install_window(self.root_ctx)
 
     def in_window(self, kind, fn):
         """Run `fn()` in window `kind`'s layout context -- its canvas and its
         layouts, as its content draws -- drawing nothing: work a content does
         ahead of its next draw (`EditorDesk.warm_step`). False where no such
         window has a buffer."""
-        win = self._wins.get(kind)
+        win = self.windows.get(kind)
         if win is None or win.buf is None or win.ctx is None or self.mode == "console":
             return False
-        self._install(win.ctx, win, draws=False)
+        self.install_window(win.ctx, win, draws=False)
         try:
             fn()
         finally:
-            self._install(self._root_ctx)
+            self.install_window(self.root_ctx)
         return True
 
     def _row_over(self, win, cv, held=False, kept=False):
@@ -1003,7 +1003,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         or the rect `r` in its coordinates, is known and reaches none of
         `win`'s full-screen row."""
         if r is None:
-            c = self._content_for(win.kind)
+            c = self.content_for(win.kind)
             r = c.changed() if c is not None else None
         if r is None:
             return False
@@ -1039,9 +1039,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             win.buf = None
             win.ctx = None
             if self.ws.run.app_window_canvas:
-                self.ws._surface_write()  # the app's content rect is its window's
+                self.ws.surface_write()  # the app's content rect is its window's
             return
-        full = self._root_canvas
+        full = self.root_canvas
         _x, _y, cw, ch = win.content_rect()
         cw, ch = max(64, cw), max(40, ch)
         self._drop_win(win)             # a resize's old buffer, freed first
@@ -1050,12 +1050,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         win._buf_stale = True         # blank until a live render/_prewarm fills it
         win._lag[4] = 0
 
-    def _resize_window(self, win, w, h):
+    def resize_window(self, win, w, h):
         """Apply a new OUTER size (a resize's release / a restore): clamp to a
         usable minimum, then rebuild the content buffer + layout context so the
         app reflows to the new window size."""
-        dx, dy, max_w, max_h = self._desk_rect()
-        full = self._root_canvas
+        dx, dy, max_w, max_h = self.desk_rect()
+        full = self.root_canvas
         # A right or bottom bar is a wall a resize stops at.
         if dx + max_w < full.w:
             max_w = max(1, min(max_w, dx + max_w - win.x))
@@ -1088,7 +1088,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """The rect (x, y, w, h) a resize by (ddx, ddy) of the window that
         stood at (wx, wy, ow, oh) gives it: each moving edge stops at the
         desk's edge and where the window would be smaller than its minimum."""
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         min_w, min_h = self._min_size(win, dw, dh)
         x0, y0, x1, y1 = wx, wy, wx + ow, wy + oh
         if edges & RZ_L:
@@ -1105,13 +1105,13 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """(key, edges) of the window whose resize zone holds (px, py), the
         top one first; None where none does, a window above holds the point
         (its strip buttons included), or it is off the desk (a bar's)."""
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         if not (dx <= px < dx + dw and dy <= py < dy + dh):
             return None
-        order = self._order
+        order = self.z_order
         for i in range(len(order) - 1, -1, -1):
             key = order[i]
-            win = self._wins.get(key)
+            win = self.windows.get(key)
             if win is None or win.minimized or win.docked is not None:
                 continue
             inside = (win.x <= px < win.x + win.w
@@ -1152,8 +1152,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         win.row = 0
         x, y = px - fx, py - fy
         win.x, win.y = x, y
-        self._resize_window(win, w, h)
-        self._prewarm(win)
+        self.resize_window(win, w, h)
+        self.prewarm(win)
         self._remember_full(win)
         self._move_window(win, x, y)
         return x, y
@@ -1174,7 +1174,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def _row_h(self):
         """The full-screen row's height: the band's (a window's bar)."""
-        return _layout_base.bar_rows(self._root_ctx.layout.cs)
+        return _layout_base.bar_rows(self.root_ctx.layout.cs)
 
     def _band_is_row(self, kind):
         """Whether `kind`'s content draws the band a window's layouts take
@@ -1184,7 +1184,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _set_full(self, win):
         """`win` on the whole glass, its row above the content where its band
         is not the row (none for a game)."""
-        full = self._root_canvas
+        full = self.root_canvas
         win.x, win.y, win.w, win.h = 0, 0, full.w, full.h
         win.row = (0 if self._is_game(win) or self._band_is_row(win.kind)
                    else self._row_h())
@@ -1199,7 +1199,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return False
         return bool(win.row) or px < self._full_slot(win)
 
-    def _toggle_max(self, win):
+    def toggle_max(self, win):
         """Full screen <-> restored: the whole glass, remembering the rect a
         restore puts back unchanged; the state is remembered per board."""
         if win.saved is None:
@@ -1211,7 +1211,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             win.saved = None
             win.row = 0
             win.x, win.y = x, y
-            self._resize_window(win, w, h)
+            self.resize_window(win, w, h)
         self._remember_full(win)
         self.ws.mark_dirty()
 
@@ -1224,10 +1224,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if self.mode != "desktop" or win is None or win.minimized:
             return False
         if win.docked is not None:
-            win = self._wins.get("menu")    # a docked game: its host's
+            win = self.windows.get("menu")    # a docked game: its host's
             if win is None:
                 return False
-        self._toggle_max(win)
+        self.toggle_max(win)
         return True
 
     def _remember_full(self, win):
@@ -1248,7 +1248,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # Play is full screen on the desk (owner, 2026-10-31): a desk
             # play opens so, with no buttons; an Editor's playtest and a
             # window-bound app cart open as windows.
-            return self._play_intent == "play" and not self.ws.run.app_window_canvas
+            return self.play_intent == "play" and not self.ws.run.app_window_canvas
         if _layout_base.metric_class() != _layout_base.DESK:
             return False
         got = self.ws.system.get("win_full", None)
@@ -1259,9 +1259,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def full_cover(self):
         """The z-slot of the topmost shown full-screen window, -1 for none:
         it and the windows above it are all the glass shows."""
-        order = self._order
+        order = self.z_order
         for i in range(len(order) - 1, -1, -1):
-            win = self._wins.get(order[i])
+            win = self.windows.get(order[i])
             if win is not None and not win.minimized and win.saved is not None:
                 return i
         return -1
@@ -1302,7 +1302,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         None gives the window back its place; False hides it with its run
         held (`_dock_hide`), the Editor's playtest waiting for its slot. Whether there is such a window: a game moved
         out to a window of its own (`play_in_window`) never docks."""
-        win = self._wins.get(kind)
+        win = self.windows.get(kind)
         if win is None or win.own:
             return False
         if rect is None or rect is False:
@@ -1322,7 +1322,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if win.minimized:
             self._dock_hide(win, False)
         rect = tuple(rect)
-        host = self._wins.get("menu")
+        host = self.windows.get("menu")
         if host is not None:
             hx, hy = host.content_rect()[:2]
             win.dock_off = (rect[0] - hx, rect[1] - hy)
@@ -1334,7 +1334,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             win.x, win.y, win.w, win.h = rect
             self._build_content(win)
             self.ws.mark_dirty()
-        order = self._order
+        order = self.z_order
         if order and order[-1] != kind and kind in order:
             order.remove(kind)
             order.append(kind)
@@ -1350,8 +1350,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if self.mode == "console":
             return (self.stack.depth() == 2 and self.stack.top() == "desktop"
                     and not ws.run.app_window_canvas and ws.cart_error is None
-                    and not ws.run.player._is_tool)
-        win = self._wins.get("desktop")
+                    and not ws.run.player.is_tool)
+        win = self.windows.get("desktop")
         return (win is not None and self._is_game(win)
                 and (win.saved is not None or win.docked is not None))
 
@@ -1366,20 +1366,20 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         and its maximize is the way back to full screen. False where nothing
         moved."""
         if self.mode == "desktop":
-            self._sync_windows()          # a run spawned this frame has its window
+            self.sync_windows()          # a run spawned this frame has its window
         if not self.offers_window():
             return False
         if self.mode == "console":
             self.leave_console(game=True)
-        win = self._wins["desktop"]
+        win = self.windows["desktop"]
         docked = win.docked is not None
         if docked:
             self.dock("desktop", None)
         else:
-            self._toggle_max(win)
+            self.toggle_max(win)
         win.own = True
         self._editor_again()              # its workspaces without the game
-        self._bring_forward("desktop")
+        self.bring_to_front("desktop")
         self.ws.mark_dirty()
         return True
 
@@ -1403,10 +1403,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def _editor_again(self):
         """The Editor's window drawn again where a game left its workspaces
         or came back to them: its bar's Play or Stop, its Game tab."""
-        host = self._wins.get("menu")
-        if host is not None and not self.ws.text._editing_icons:
+        host = self.windows.get("menu")
+        if host is not None and not self.ws.text.editing_icons:
             self.ws.editor_app.zone_gen += 1
-            self._prewarm(host)
+            self.prewarm(host)
 
     def _end_playtest(self):
         """Closing the Editor ends its playtest (owner, 2026-10-31), the
@@ -1416,7 +1416,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         the shell acts as. A game moved to a window of its own, or one the
         Editor did not run, goes on."""
         ws = self.ws
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         if win is None:
             if ws.editor_app.project is ws.run.project:
                 ws.run.player.release_world()
@@ -1426,18 +1426,18 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         pause = ws.pause
         if pause.open and not pause.stopped:
             pause.close()
-        ws._reset_canvas_state()
-        ws.spine._exit_to_caller()
+        ws.reset_canvas_state()
+        ws.spine.exit_to_caller()
 
     def _undock_orphans(self):
         """A docked game whose host is gone, hidden, or no longer shows the
         desk's workspaces gets its window back; one whose host moved moves
         with it. The host's content is stamped, not drawn, while it moves,
         so the game follows its host here rather than from the host's draw."""
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         if win is None or win.docked is None:
             return
-        host = self._wins.get("menu")
+        host = self.windows.get("menu")
         if host is not None and not host.minimized \
                 and self.ws.editor_layer() is self.ws.editor_desk:
             off = win.dock_off
@@ -1451,14 +1451,14 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def _focus_win(self):
         """The window holding INPUT focus, or None (the desktop root)."""
-        return self._wins.get(self._focus) if self._focus else None
+        return self.windows.get(self.focus_key) if self.focus_key else None
 
     def input_holder(self):
         """The process the keyboard reaches: the focused window's key on the
         desk (None: the desk itself), the stack top in console mode."""
         if self.mode == "console":
             return self.stack.top()
-        return self._focus
+        return self.focus_key
 
     def input_kind(self):
         """The kind of the surface the keyboard reaches: the focused window's
@@ -1471,14 +1471,14 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return None
         return "" if win.minimized else win.kind
 
-    def _move_focus(self, key):
+    def move_focus(self, key):
         """Focus moves to window `key` (None: the desk) with no stack change,
         and the window comes to the front, as on every desktop."""
-        old = self._focus
+        old = self.focus_key
         if key == old:
             self._raise(key)
             return
-        self._focus = key
+        self.focus_key = key
         self._raise(key)
         p = self.ws.procs.by_key.get(key)
         if p is not None:
@@ -1486,25 +1486,25 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def _raise(self, key):
         """Window `key` to the top of the z-order (None, or one on top: no-op)."""
-        order = self._order
+        order = self.z_order
         if key is None or not order or order[-1] == key or key not in order:
             return
         order.remove(key)
         order.append(key)
         self.ws.mark_dirty()
 
-    def _bring_forward(self, key):
+    def bring_to_front(self, key):
         """Window `key` shown, focused and in front: what opening a process
         that already has a window does on the desk."""
-        win = self._wins.get(key)
+        win = self.windows.get(key)
         if win is None:
             return
         if win.minimized:
-            self._minimize(win, False)
+            self.minimize(win, False)
             self.ws.mark_dirty()
-        self._move_focus(key)
+        self.move_focus(key)
 
-    def _minimize(self, win, on):
+    def minimize(self, win, on):
         """Hide `win` to its chip (`on`) or show it again. A game's window,
         or a window-bound app cart's, keeps its run while hidden: the run is
         minimised -- its update at the minimised rate, no draw -- and hears
@@ -1519,7 +1519,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """A docked playtest hidden (`on`) or shown again: minimised, and
         its run held by the Editor while hidden unless something already
         holds it (the pause menu), which stays its holder's."""
-        self._minimize(win, on)
+        self.minimize(win, on)
         player = self.ws.run.player
         if on:
             win.held = not player.paused
@@ -1534,13 +1534,13 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def rekey(self, old, new):
         """Window `old` goes on under key `new`, where it is: its record, its
         z-slot, its focus, its back-stack slot."""
-        win = self._wins.pop(old)
-        self._wins[new] = win
-        order = self._order
+        win = self.windows.pop(old)
+        self.windows[new] = win
+        order = self.z_order
         if old in order:
             order[order.index(old)] = new
-        if self._focus == old:
-            self._focus = new
+        if self.focus_key == old:
+            self.focus_key = new
         st = self.stack.kinds()
         if old in st:
             st[st.index(old)] = new
@@ -1548,20 +1548,20 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._kinds = self._slots()
         win.proc = self.ws.procs.by_key.get(new)
         self._win_sig = None
-        self._on_nav()
+        self.on_nav()
 
     def swap_keys(self, a, b):
         """Windows `a` and `b` trade keys (a promotion: the world each shows
         moved), each staying where it is."""
-        wa, wb = self._wins[a], self._wins[b]
-        self._wins[a], self._wins[b] = wb, wa
-        order = self._order
+        wa, wb = self.windows[a], self.windows[b]
+        self.windows[a], self.windows[b] = wb, wa
+        order = self.z_order
         ia, ib = order.index(a), order.index(b)
         order[ia], order[ib] = b, a
-        if self._focus == b:
-            self._focus = a
-        elif self._focus == a:
-            self._focus = b
+        if self.focus_key == b:
+            self.focus_key = a
+        elif self.focus_key == a:
+            self.focus_key = b
         procs = self.ws.procs
         wa.proc = procs.by_key.get(b)
         wb.proc = procs.by_key.get(a)
@@ -1571,10 +1571,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def game_shown(self, key):
         """A running set's game window shows: on the desk, not hidden to
         its chip, not under a full-screen window."""
-        win = self._wins.get(key)
+        win = self.windows.get(key)
         if win is None or win.minimized or self.mode != "desktop":
             return False
-        return self._order.index(key) >= self.full_cover()
+        return self.z_order.index(key) >= self.full_cover()
 
     def _proc_paint(self, win, key, focused, dt, full=True):
         """A running set's game window: its run served, its canvas's
@@ -1607,12 +1607,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def minimise_kind(self, kind):
         """On the desk, window `kind` hidden to its chip and the focus off
         it (an app whose Back minimises: Music, whose stream plays on)."""
-        win = self._wins.get(kind)
+        win = self.windows.get(kind)
         if self.mode != "desktop" or win is None or win.minimized:
             return False
-        self._minimize(win, True)
-        if self._focus == kind:
-            self._move_focus(None)
+        self.minimize(win, True)
+        if self.focus_key == kind:
+            self.move_focus(None)
         self.ws.mark_dirty()
         return True
 
@@ -1620,10 +1620,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """On the desk, a process that already has a window is opened by
         bringing that window forward (shown, focused, raised), every other
         window left open, as a desktop's launcher does."""
-        if (self.mode != "desktop" or kind not in self._wins
+        if (self.mode != "desktop" or kind not in self.windows
                 or self._slots() != self._kinds):
             return False
-        self._bring_forward(kind)
+        self.bring_to_front(kind)
         self.ws.mark_dirty()
         return True
 
@@ -1659,7 +1659,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         any key (the P4 keyboard slowdown). An editor focused beside a playtest
         keeps repainting on typing exactly as before."""
         ws = self.ws
-        if ws.cart_error is not None or (ws.run.player._update is None and ws.run.player._draw is None):
+        if ws.cart_error is not None or (ws.run.player.update is None and ws.run.player.draw is None):
             return False
         if self.mode == "console":             # the fullscreen shape
             return FullscreenStackWM.keys_to_cart(self)
@@ -1672,9 +1672,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         notice or a notification over it. A running game, a music preview or any other
         content animates inside its window, over the desk's cache."""
         ws = self.ws
-        if ws._splash_until is not None or ws.wallpaper.is_animating(dt):
+        if ws.splash_until is not None or ws.wallpaper.is_animating(dt):
             return True
-        if ws._toast_until and _ticks_diff(ws._toast_until, _ticks_ms()) > 0:
+        if ws.toast_until and _ticks_diff(ws.toast_until, _ticks_ms()) > 0:
             return True
         if _NOTES.banner is not None and _NOTES.up() is not None:
             return True
@@ -1710,18 +1710,18 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True                 # a parked desk's wallpaper is not drawn
         if ws.procs.list:
             return True                 # a running set's game steps every frame
-        if "tasks" in self._wins and ws.tasks_layer.moved():
+        if "tasks" in self.windows and ws.tasks_layer.moved():
             return True                 # the task manager's rows moved
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.run.player.paused
-                and (ws.run.player._update is not None or ws.run.player._draw is not None)
-                and (pages or not ws.run.player._on_change)
+                and (ws.run.player.update is not None or ws.run.player.draw is not None)
+                and (pages or not ws.run.player.on_change)
                 and ws.run.player.animates())
 
-    def _content_for(self, kind):
+    def content_for(self, kind):
         """The content Layer a window presents (the router's registry lookup,
         window-kind-aware): the active Editor tab for "menu", the registry entry
-        otherwise -- same resolution ws._content_layer() does for the stack top."""
+        otherwise -- same resolution ws.content_layer() does for the stack top."""
         ws = self.ws
         if kind == "menu":
             return ws.editor_layer()
@@ -1736,7 +1736,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             # desk's windows are parked, not dropped.
             FullscreenStackWM._rebuild(self, content, sig)
             return
-        self._sync_windows()
+        self.sync_windows()
         ws = self.ws
         overlays = self._overlay_layers(sig)   # the shared sig ladder (wm.py)
         # The GAME-domain perf HUD is deliberately NOT in this stack. It draws on
@@ -1751,7 +1751,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # composite -- same pixels on a raster tier, correctly placed on a
         # recording one.
         base = [self._backdrop_layer, self._win_layer]
-        draw_base = [ws._splash_layer] if (sig & 1) else base
+        draw_base = [ws.splash_layer] if (sig & 1) else base
         self._cache_overlay = overlays
         self._cache_visible = base + overlays
         self._cache_draw = draw_base + overlays
@@ -1760,7 +1760,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._cache_visible_rev = rev
         self._cache_content = content
         self._cache_gen = self.content_gen
-        self._cache_sig = sig
+        self.cache_sig = sig
 
     # -- the overlays' state (docs/theme_and_shell_2026-11.md §8.6) ------------
     # The draw stack, the quiet frame and the debt check read these on every
@@ -1786,12 +1786,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         m = ws.sysmenu
         return (m.open and m.comp is None and self._pop_cur is not None
-                and not ws._about and not ws.pause.open and not ws.confirm.open
+                and not ws.about and not ws.pause.open and not ws.confirm.open
                 and self._pop_rides())
 
     def _pop_n(self):
         """The root's real buffer count: what a popover's rect is owed to."""
-        n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
+        n = getattr(self.root_canvas, "RETAINED_FRAMES", 1)
         return n if n > 1 else 1
 
     def _pause_rides(self):
@@ -1808,21 +1808,21 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         renders it again over the snapshot (`_wash_focus`)."""
         ws = self.ws
         m = ws.sysmenu
-        if ws._about or ws.confirm.open:
+        if ws.about or ws.confirm.open:
             return False
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if ws.pause.open:
             # The pause menu (or a stopped run's card) over its playtest's
             # window, the game composited (not drawn on the glass itself) and
             # held.
-            game = self._wins.get("desktop")
+            game = self.windows.get("desktop")
             return (not m.open and game is not None and not game.minimized
                     and ws.run.canvas is not ws.sys_canvas and self._game_held()
                     and (win is None or win is game))
-        if not (m.open and m.comp is None and "desktop" not in self._wins):
+        if not (m.open and m.comp is None and "desktop" not in self.windows):
             return False
         return (win is None or win.minimized
-                or (self._order[-1] == self._focus and win.buf is not None
+                or (self.z_order[-1] == self.focus_key and win.buf is not None
                     and win.ctx is not None))
 
     def _game_held(self):
@@ -1842,7 +1842,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
-    def _retained_n(self):
+    def retained_n(self):
         """How many physical buffers the root canvas rotates through -- the
         staleness horizon every partial-paint mechanism must respect: retained
         pixels may be trusted only after N consecutive identical paints, a
@@ -1851,7 +1851,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         frames' extents. Parameterized for the P4 triple-framebuffer render
         overlap (#58); FLOORED at 2 so the host's single persistent buffer
         keeps today's conservative gates (behavior-identical at N<=2)."""
-        n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
+        n = getattr(self.root_canvas, "RETAINED_FRAMES", 1)
         return n if n > 2 else 2
 
     def draw_stack(self):
@@ -1894,7 +1894,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 self._win_sig = None
                 self._desk_streak = 0
                 if (up and not ws.frame_state.dirty and follows and self._scrim_rides()
-                        and hasattr(self._root_canvas, "copy_last")):
+                        and hasattr(self.root_canvas, "copy_last")):
                     self._wash_all = True
                 else:
                     ws.mark_dirty()
@@ -1909,14 +1909,14 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         still = self._still()
         # A window over the game's casts its shadow on it and must stay over
         # it: the quiet stack repaints the game window alone, so not then.
-        quiet = (still and "desktop" in self._wins and not self._player_under
+        quiet = (still and "desktop" in self.windows and not self._player_under
                  and (not up or self._scrim_rides()))
         if self._wash_all:
             if quiet and pop:
                 # The frame before held all but the game and the wash: its
                 # copy, the game's frame, the scrim over both, the card.
                 self._pop_game_next = True
-                self._full_debt = self._retained_n() - 1
+                self._full_debt = self.retained_n() - 1
                 return self._lead_pop_stack
             self._wash_all = False
             ws.mark_dirty()
@@ -1927,7 +1927,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                 return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
         if (quiet and follows
-                and hasattr(self._root_canvas, "copy_last")):
+                and hasattr(self.root_canvas, "copy_last")):
             # The buffer this frame paints is owed the last change: the last
             # painted frame holds it, and every pixel but the game's is this
             # frame's. Copied whole (whole rows go to the GDMA; round the
@@ -1942,8 +1942,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._pop_game_next = False
         settled = not quiet and self._settled(still)
         if (follows and settled and (self._calm() or self._pop_holds_input())
-                and ("desktop" not in self._wins or self._game_held())
-                and hasattr(self._root_canvas, "copy_last")):
+                and ("desktop" not in self.windows or self._game_held())
+                and hasattr(self.root_canvas, "copy_last")):
             self._repeating = same_pop
             self._wash_repeats = same_wash
         if pop and settled:
@@ -1960,7 +1960,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         else:
             # A change painted: every OTHER physical buffer owes a full paint
             # before partial frames may resume (N-1 debts on an N-buffer root).
-            self._full_debt = self._retained_n() - 1
+            self._full_debt = self.retained_n() - 1
         return self._cache_draw
 
     def _still(self):
@@ -1969,7 +1969,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         one, or a stopped run's riding card)."""
         ws = self.ws
         return (not ws.frame_state.dirty
-                and (self._cache_sig & ~(578 if self._pause_rides() else 66)) == 0
+                and (self.cache_sig & ~(578 if self._pause_rides() else 66)) == 0
                 # FPS chip (bit 2), popover (64), the riding pause menu (512)
                 and (ws.cart_error is None or self._pause_rides())
                 and self._drag is None and self._drag_armed is None
@@ -1980,14 +1980,14 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """A still frame on the desk with nothing animating: what changes
         is the popover's, if anything."""
         return (still and self.mode == "desktop"
-                and not self.ws._animating(1 / 60))
+                and not self.ws.animating(1 / 60))
 
     def _calm(self):
         """...and the pointer neither moved nor is down (a press reaches
         content that marks nothing, §14.1): a full paint of such a frame
         changes nothing, so it brings one more retained buffer up to date."""
         ws = self.ws
-        return not ws._ptr_changed() and not getattr(ws.pointer, "down", False)
+        return not ws.ptr_changed() and not getattr(ws.pointer, "down", False)
 
     def _pop_holds_input(self):
         """The open system menu or riding pause menu takes every press: a
@@ -2008,42 +2008,42 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # rows the last frame changed (`_RepeatLayer`), whatever the focused
         # window's buffer holds, or the focused one's buffer holds its page
         # under the look in force (§14.1's freeze).
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if win is None or win.minimized or win.kind == "desktop":
             return True
         if win._look_gen != self.ws.look.look_gen and not win._buf_stale:
             return False
         if win.buf is not None and not win._buf_stale:
             return True
-        return (hasattr(self._root_canvas, "copy_last")
-                and ("desktop" not in self._wins or self._game_held()))
+        return (hasattr(self.root_canvas, "copy_last")
+                and ("desktop" not in self.windows or self._game_held()))
 
     # -- closing and moving windows ---------------------------------------------
 
-    def _remove_kind(self, kind):
+    def remove_kind(self, kind):
         """SURGICALLY remove one process from the back-stack -- the windowed
         close verb. The fullscreen tiers can only pop from the top (goto
         truncates everything above), but on a desktop closing one window must
         never take unrelated windows with it (the owner-reported bug: closing
         Make also closed Settings). The launcher root is never removable."""
         if self.stack.remove(kind):
-            self._on_nav()
+            self.on_nav()
 
     def close_player(self):
         """Close the playtest window (its X, or the pause menu's Quit routed through
-        ws.spine._exit_to_caller): remove ONLY the player from the stack, then hand
+        ws.spine.exit_to_caller): remove ONLY the player from the stack, then hand
         focus back to the run CALLER's window when it's open (the Editor for a
         PLAY run) -- the launch-and-return contract, without collateral pops."""
         ws = self.ws
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         own = win is not None and win.own
-        self._remove_kind("desktop")
-        self._sync_windows()
+        self.remove_kind("desktop")
+        self.sync_windows()
         if own:
             self._editor_again()          # its Game tab back
         if (ws.returns.caller() == EDITOR
-                and "menu" in self._order):
-            self._move_focus("menu")
+                and "menu" in self.z_order):
+            self.move_focus("menu")
         ws.mark_dirty()
 
     def close_window_kind(self, kind):
@@ -2059,15 +2059,15 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         ws = self.ws
         ws.mark_dirty()
         ws.leave_surface(kind)
-        if kind == "menu" and not ws.text._editing_icons:
+        if kind == "menu" and not ws.text.editing_icons:
             self._end_playtest()              # its playtest goes with it
         if kind == "desktop":
             self.close_player()
         elif kind in ws.procs.by_key:
             ws.procs.close(ws.procs.by_key[kind])
         else:
-            self._remove_kind(kind)
-        if kind == "menu" and not ws.text._editing_icons:
+            self.remove_kind(kind)
+        if kind == "menu" and not ws.text.editing_icons:
             ws.editor_closed()                # back where it was opened from
 
     def _close_window(self, kind):
@@ -2079,9 +2079,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # The content rect clamps it: a window may hang off the glass's left
         # or right edge with 40 columns still on the desk, and never crosses
         # a bar -- a side bar is a wall, as the top and bottom ones are.
-        full = self._root_canvas
+        full = self.root_canvas
         fs = self._fs()
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = self.desk_rect()
         lo = dx if dx > 0 else -win.w + 40 * fs
         hi = dx + dw - win.w if dx + dw < full.w else full.w - 40 * fs
         win.x = max(lo, min(nx, max(lo, hi)))

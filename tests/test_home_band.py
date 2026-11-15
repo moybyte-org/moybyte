@@ -87,7 +87,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     if cursor:                             # the cursor over the band: the one overdraw
@@ -95,7 +95,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         ws.pointer.visible = True
         ws.pointer.x, ws.pointer.y = bx + bw // 3, by + bh // 3
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas if tier == "desk" else ws.sys_canvas
+    root = ws.wm.root_canvas if tier == "desk" else ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     for _ in range(3):
         ws.mark_dirty()
@@ -493,7 +493,7 @@ def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
     drv.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 1
     assert layer._debt_owed + 1 == ws.frame_state.frames_drawn
-    assert not ws._frame_requested
+    assert not ws.frame_requested
     drew = list(ws.launcher.floor)
     assert drew and not ws.launcher.copied
     for _ in range(6):

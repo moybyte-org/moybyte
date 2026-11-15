@@ -109,7 +109,7 @@ class StoreHandle:
         (the card shares the panel's SPI host: the flush drains first and the
         next one waits) and leaves it when `fn` returns; on the host and the
         flash-backed boards it is a passthrough."""
-        return self.ws._with_sd(fn)
+        return self.ws.with_sd(fn)
 
     # A role's session (`carts.begin`/`end`, native/moy_app/README.md) is bookkeeping and nothing else: it holds no gate, because
     # every op takes the gate around itself (`call`). The console ends any

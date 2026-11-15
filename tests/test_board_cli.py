@@ -239,7 +239,7 @@ class Player:
         self.tick_ms = 0
         self.sched = Sched()
         self.notice = None
-        self._lua = None
+        self.lua = None
 
 
 class WM:
@@ -247,7 +247,7 @@ class WM:
         self._stack = ["launcher", "desk"] if windowed else ["launcher"]
         self.windowed = windowed
         if windowed:
-            self._wins, self._order, self._focus = {}, [], None
+            self.windows, self.z_order, self.focus_key = {}, [], None
             self.desk = True
 
     def desk_open(self):
@@ -274,7 +274,10 @@ class WS:
         self._psave_ms = 300000
         self._psave_asleep = False
         self.frame_state = types.SimpleNamespace(frames_drawn=5, dirty=False)
-        self._apps = ()
+        # the console's services, which this stand-in answers itself
+        self.router = self.home = self.text = self.binding = self.perf = self
+        self.toggles = self.saves = self.notices = self.intents = self.spine = self
+        self.app_layers = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
         self.run = types.SimpleNamespace(player=Player(), canvas=Canvas(8, 4),
@@ -486,7 +489,7 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
     assert "Brick Siege on tdeck:" in out
     assert "fps drawn (median of" in out
     assert ws.cart is None, "perf ends its cart"
-    assert ws._uncap is False and ws.diag_live is False
+    assert ws.uncap is False and ws.diag_live is False
     assert "uncap 1" in wire.sent and "uncap 0" in wire.sent
     # The shipping fps: PERF DIAG stays off, and the reading is the counter's.
     assert "diag 1" not in wire.sent and "(diag off" in out
@@ -495,11 +498,11 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
 
 def test_perf_keeps_a_switch_that_was_already_on(clock):
     ws, wire, b = console(clock)
-    ws._uncap = True
+    ws.uncap = True
     ws.diag_live = True
     run(board.cmd_perf, b, args(titles=["Brick Siege"], secs=4.0, diag=True,
                                 uncap=True))
-    assert ws._uncap is True and ws.diag_live is True
+    assert ws.uncap is True and ws.diag_live is True
     assert "uncap 0" not in wire.sent
 
 
@@ -571,7 +574,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
     from runtime.perf_line import parse_perf
     from ws_helpers import build_ws, open_cart
     ws = build_ws(tmp_path)
-    ws._uncap = uncap
+    ws.uncap = uncap
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None, ws.cart_error
     ws.diag_live = True
@@ -623,11 +626,11 @@ def test_pmem_flushes_the_cart_before_reading(clock):
     text = b"zone 1 failed\0"
     cells = [int.from_bytes(text[i:i + 4].ljust(4, b"\0"), "little")
              for i in range(0, len(text), 4)]
-    ws.run.player._lua = Lua(ws, [7, -1] + [0] * 254)
+    ws.run.player.lua = Lua(ws, [7, -1] + [0] * 254)
     code, out = run(board.cmd_pmem, b, args(text=False, start=0))
-    assert ws.run.player._lua.flushed == 1
+    assert ws.run.player.lua.flushed == 1
     assert out.split()[:3] == ["0:", "7", "-1"]
-    ws.run.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
+    ws.run.player.lua = Lua(ws, cells + [0] * (256 - len(cells)))
     code, out = run(board.cmd_pmem, b, args(text=True, start=0))
     assert out.strip() == "zone 1 failed"
 

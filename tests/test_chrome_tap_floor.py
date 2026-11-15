@@ -332,9 +332,9 @@ def _frames(ws, n=3):
 
 
 def _appearance(ws):
-    assert ws.spine.open_app(ws.appearance_app)
+    assert ws.spine.open_app(ws.app("appearance"))
     _frames(ws)
-    return ws.appearance_app
+    return ws.app("appearance")
 
 
 class _Right:
@@ -349,7 +349,7 @@ class _Right:
 
 def _step_chrome(ws):
     """CHROME SIZE stepped once, as a person does: focused, then right."""
-    app = ws.appearance_app
+    app = ws.app("appearance")
     app._ui.focus("Chrome size")
     _frames(ws, 1)
     app.handle_input(_Right())
@@ -436,15 +436,15 @@ def test_switching_chrome_size_matches_booting_at_it(tmp_path):
 
     _desk(tmp_path / "boot").system.set("chrome_scale", 2)
     ref = _desk(tmp_path / "boot")
-    ref.bar_layer._clock_text = lambda: "10:30"
+    ref.bar_layer.clock_text = lambda: "10:30"
     drv = ConsoleDriver(ref)
     _appearance(ref)
-    ref.appearance_app._ui.focus("Chrome size")    # where the live desk's focus is
+    ref.app("appearance")._ui.focus("Chrome size")    # where the live desk's focus is
     settle(ref, drv)
     reference = bytes(ref.sys_canvas._buf)
 
     ws = _desk(tmp_path / "live")
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     drv = ConsoleDriver(ws)
     _appearance(ws)
     settle(ws, drv)

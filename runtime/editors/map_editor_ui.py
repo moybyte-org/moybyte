@@ -225,7 +225,7 @@ class MapEditorUI:
         return True
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws.relayout on
         a font-scale change AND by EditorApp.set_tab on every entry into the tab
         (#216). Re-clamps the zoom index + camera, since the reflowed view may have
         a different zoom list / visible span; the OVERVIEW rung is carried by NAME
@@ -307,7 +307,7 @@ class MapEditorUI:
                 self._map_pan(1, 0)
             if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                 self._map_cycle_zoom()
-        ws.home._leave_or_home(ws.spine.exit)
+        ws.home.leave_or_home(ws.spine.exit)
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,

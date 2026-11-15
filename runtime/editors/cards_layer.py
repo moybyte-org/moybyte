@@ -25,7 +25,7 @@ the cart. Two of the cards' helpers stay here for the page: `_validate_field`
 tile's picture). `NAMES` (the palette) and `_err_text` are injected at
 construction, the circular-import dodge the other extracted UIs use.
 
-draw() calls ws.bar_layer._draw_status_strip("menu") LAST (chrome over
+draw() calls ws.bar_layer.draw_status_strip("menu") LAST (chrome over
 content), so the Editor's lent top-bar zone (the tab ladder + PLAY,
 EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
@@ -186,7 +186,7 @@ class CardsLayer(Layer):
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the geometry (#39 step 3) -- called by ws._relayout on a
+        """Rebuild the geometry (#39 step 3) -- called by ws.relayout on a
         font-scale change."""
         self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
@@ -200,14 +200,14 @@ class CardsLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         p = self.prompt
         hold = self._hold
         if p is not None and self.prompt_rows(dt):
             return
         how = hold.under(ws, None if p is None else self._held_key(p), self._page_rect(), dt)
         if how == _ui_draw.HOLD_PUT:
-            ws.bar_layer._draw_status_strip("menu")
+            ws.bar_layer.draw_status_strip("menu")
             self._draw_prompt(True, dt)
             hold.note()
             return
@@ -226,7 +226,7 @@ class CardsLayer(Layer):
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         # An open dialog draws OVER the bar too -- same order as the block
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
@@ -251,7 +251,7 @@ class CardsLayer(Layer):
                 ws, self._held_key(p), p.o["gen"], p.host, self._page_rect(),
                 _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._draw_prompt(True, dt)
         self._hold.note()
         return True
@@ -295,7 +295,7 @@ class CardsLayer(Layer):
             return self._fix_input(i)
         page = self.page()
         if (i.pressed("run") or i.pressed("a")) and not page.on_door():
-            ws.defer(ws.text._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+            ws.defer(ws.text.leave_menu)   # Enter PLAYs (a device's Enter is "a")
             return True
         if page.open_door(i):
             if self.prompt is not None:
@@ -303,7 +303,7 @@ class CardsLayer(Layer):
             return True
         if page.keys(i):
             ws.mark_dirty()
-        ws.home._leave_or_home(ws.spine.exit)
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -445,7 +445,7 @@ class CardsLayer(Layer):
             return True
         if self._fix_host.keys(i):
             ws.mark_dirty()
-        ws.home._leave_or_home(ws.spine.exit)
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def draw_choice(self, f, k, rect):
@@ -473,7 +473,7 @@ class CardsLayer(Layer):
         else:
             icons = f.get("icons") or []
             side = max(12, min(w, h) // 2)
-            ws._glyph(icons[k] if k < len(icons) else "dot",
+            ws.glyph(icons[k] if k < len(icons) else "dot",
                       (x + (w - side) // 2, y + (h - side) // 2, side, side),
                       ws.theme_colors["ink"], cv)
 
@@ -521,7 +521,7 @@ class CardsLayer(Layer):
         rows, msg = (), None
         try:
             kind = ws.carts_store.project_kind(path)
-            rows = tuple(ws._with_sd(
+            rows = tuple(ws.with_sd(
                 lambda: ws.carts_store.list_files(kind, ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- an unreadable folder lists none
             msg = self._err_text(exc)
@@ -791,7 +791,7 @@ class CardsLayer(Layer):
             p.say("Start its name with a letter.")
             ws.mark_dirty()
             return
-        made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
+        made = ws.with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
             p.say("There's a file with that name.")

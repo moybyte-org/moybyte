@@ -136,7 +136,7 @@ class AppContext:
         if "surface" in needs:
             self.surface = _moy_app.Surface(app, self.grant)
             # The new grant's surface row, from what the shell shows now.
-            ws._surface_write()
+            ws.surface_write()
         if "theme" in needs:
             self.theme = _moy_app.Theme(app, self.grant)
         if "files" in needs:

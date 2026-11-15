@@ -1928,7 +1928,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
-        ws._with_sd = lambda fn: fn()
+        ws.with_sd = lambda fn: fn()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
@@ -2294,7 +2294,7 @@ def test_the_runtime_reports_the_carts_footprint_by_the_engines_rule(tmp_path):
         engine = _Engine(world)
         gated = []
         ws = FakeWs(project=_CartProject(cart))
-        ws._with_sd = lambda fn: gated.append(fn) or fn()
+        ws.with_sd = lambda fn: gated.append(fn) or fn()
         rt = world.mod.make_wasm_runtime(ws)
         assert rt.footprint(cart) == (3 * 65536 + 3, 3 * 65536)
         assert engine.asked == [(3 * 65536, len(b"aot"))]

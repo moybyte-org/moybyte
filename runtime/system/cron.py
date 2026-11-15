@@ -342,7 +342,7 @@ class Cron:
                     return f.read()
             except OSError:
                 return None
-        sd = getattr(self.ws, "_with_sd", None)
+        sd = getattr(self.ws, "with_sd", None)
         return sd(read) if sd is not None else read()
 
     def reload(self):

@@ -107,7 +107,7 @@ def test_a_service_posts_and_the_banner_goes_up_over_the_game(tmp_path):
     assert n.summary == "Ana" and n.body == "are you coming?" and n.icon == N.ICON
     assert n.actions == (("reply", "Reply"),)
     drv.frame(_DT)
-    assert ws._note_layer in ws.wm._cache_overlay
+    assert ws.note_layer in ws.wm._cache_overlay
     r = ws._note_rect
     assert r is not None and r[1] < ws.sys_canvas.h // 3, "drawn at the top"
     assert not ws.run.player.paused and ws.screen == "desktop"
@@ -167,7 +167,7 @@ def test_dismissing_keeps_the_game_playing(tmp_path):
     assert N.NOTES.up() is None and [n.id for n in N.NOTES.list] == [nid]
     assert ws.run.player is pl and ws.screen == "desktop" and not pl.paused
     assert ws.procs.list == []
-    assert ws._note_layer not in ws.wm._cache_overlay
+    assert ws.note_layer not in ws.wm._cache_overlay
 
 
 def test_a_drag_up_on_the_banner_dismisses_it(tmp_path):
@@ -232,9 +232,9 @@ def test_acting_on_the_desk_throttles_the_game(tmp_path):
     for t in ("Mesh", "Star Catcher"):
         open_cart(ws, t)
         drv.frame(_DT)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
         drv.frame(_DT)
     assert ws.cart["title"] == "Star Catcher"
     mesh = ws.procs.list[0].player

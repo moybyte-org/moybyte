@@ -445,8 +445,8 @@ class ConsoleDriver:
         policy = self.ws.input_policy
         if self.input.text_mode:
             self.type_char(0x1B)
-        elif (policy.takes_stop(policy.holder()) or self.ws._modal_layer() is not None
-              or self.ws._about):
+        elif (policy.takes_stop(policy.holder()) or self.ws.modal_layer() is not None
+              or self.ws.about):
             policy.back()
 
     # -- per-frame tick ------------------------------------------------------
@@ -521,14 +521,14 @@ class ConsoleDriver:
             self.pointer.click = False
             self.ws.router.handle_pointer()
             self.ws.mark_dirty()
-            if self.ws._deferred:
+            if self.ws.deferred:
                 # #184: taps SCHEDULE their heavy transition now (run at the
                 # next frame's tail, behind the LOADING paint). This release
                 # pass ran after ws.frame(), so honor click()'s "the tap
                 # completes within this frame() call" contract by draining
                 # here -- click() is the tests/scripts verb; real mouse input
                 # rides touch()/touch_up() and the normal frame cadence.
-                self.ws._run_deferred()
+                self.ws.run_deferred()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

@@ -27,16 +27,16 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
                                     font_scale=2, windowed=True, panel_diagonal_in=7.0)
     ws.home.open_desk()
     ws.wallpaper.is_animating = lambda dt: False
-    assert ws.spine.open_app(ws.artwork_app)
+    assert ws.spine.open_app(ws.app("artwork"))
     ws.input.begin_frame()
     ws.frame(1 / 30)
     if full:
         assert ws.wm.full_key()       # full screen: the WM's row over the app's band
         ws.frame(1 / 30)
     quiesce(ws)
-    app = ws.artwork_app
+    app = ws.app("artwork")
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas
+    root = ws.wm.root_canvas
     root.RETAINED_FRAMES = bufs
     held = []
 
@@ -56,7 +56,7 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
     for _ in range(3 + bufs):
         ws.mark_dirty()
         frame()
-    win = ws.wm._wins["artwork"]
+    win = ws.wm.windows["artwork"]
     was = app.layout
     app.layout = win.ctx.artwork_layout
     x, y, w, h = app._spec()[:4]

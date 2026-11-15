@@ -235,7 +235,7 @@ ws._g['_paintpick'] = _paintpick
 ws._g['_content'] = _content
 """
 
-BAR = ("ws.bar_layer", "_draw_status_strip", "bar.strip")
+BAR = ("ws.bar_layer", "draw_status_strip", "bar.strip")
 
 # (open verb, [(device expr, attribute, tag), ...]). The FIRST wrap is the phase
 # everything else nests inside -- the table's "top".

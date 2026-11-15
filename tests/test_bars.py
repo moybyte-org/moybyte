@@ -174,7 +174,7 @@ def test_each_bar_draws_its_strip_at_its_rect(tmp_path, where):
 def test_taps_route_by_the_bar_they_land_on(tmp_path):
     ws = build_ws(tmp_path)
     _pick(ws, FOUR)
-    ws.spine.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     _settle(ws)
     bar = ws.bar_layer
     lb, menu = bar.cell("app", "menu")
@@ -193,7 +193,7 @@ def test_a_bar_without_the_clock_keeps_its_strip_on_the_tick(tmp_path):
     _pick(ws, FOUR)
     ws.open_settings()
     clock = ["12:34"]
-    ws.bar_layer._clock_text = lambda: clock[0]
+    ws.bar_layer.clock_text = lambda: clock[0]
     for _ in range(3):
         ws.mark_dirty()
         ws.frame(DT)
@@ -233,14 +233,14 @@ def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
                _bar("left", 24, ["chips"], [], ["wifi", "battery"])))
     ws.home.open_desk()
     wm = ws.wm
-    dx, dy, dw, dh = wm._desk_rect()
+    dx, dy, dw, dh = wm.desk_rect()
     (top, left), = [ws.bar_layer.bar_rects("desk")]
     assert (dx, dy) == (left[2], top[3])
     for _key, box, pill, _label, _cart in wm._backdrop_layer._icon_rects():
         assert _inside(box, (dx, dy, dw, dh)) and _inside(pill, (dx, dy, dw, dh))
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     ws.frame(DT)
-    win = wm._wins[wm._order[-1]]
+    win = wm.windows[wm.z_order[-1]]
     wm._move_window(win, -10_000, win.y)
     assert win.x == dx                                    # a side bar is a wall
     (lb, _cell) = ws.bar_layer.cell("desk", "chips")
@@ -248,9 +248,9 @@ def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
     assert chips and all(_inside(r, lb[1]) and r[2] == r[3] for _k, r, _l in chips)
     key, r, label = chips[0]
     assert len(label) == 1
-    wm._focus = None
+    wm.focus_key = None
     _tap(ws, r[0] + 2, r[1] + 2)
-    assert wm._focus == key
+    assert wm.focus_key == key
 
 
 def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
@@ -258,7 +258,7 @@ def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
     _pick(ws, (_bar("bottom", 22, ["menu", "separator", "chips", "zone"], [],
                     ["close", "wifi", "battery", "clock"]),))
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     ws.frame(DT)
     bar, cell = ws.bar_layer.cell("desk", "chips")
     (_k, r, _l), = ws.wm._chip_rects()
@@ -271,7 +271,7 @@ def test_a_window_keeps_its_band_on_top_under_a_bottom_bar(tmp_path):
     ws.home.open_desk()
     ws.open_settings()
     ws.frame(DT)
-    win = ws.wm._wins[ws.wm._order[-1]]
+    win = ws.wm.windows[ws.wm.z_order[-1]]
     lay = win.ctx.layout
     assert lay.cy == lay.status_h and lay.bars[0][0] == "top"
     assert lay.bars[0][1] == (0, 0, lay.w, lay.status_h)
@@ -334,7 +334,7 @@ def test_the_desk_bar_is_solid_over_the_backdrop(tmp_path, variant, fill):
     under it: the backdrop's discs never show through it."""
     ws = _looked_ws(tmp_path, variant, desk=True)
     _settle(ws)
-    cv = ws.wm._root_canvas
+    cv = ws.wm.root_canvas
     row = [_px(cv, x, 20) for x in range(400, 900, 7)]
     want = fill if fill is not None else _px(cv, 400, 20)
     assert set(row) == {want}
@@ -384,13 +384,13 @@ def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
     ws = _looked_ws(tmp_path, desk=True)
     ws.open_settings()
     _settle(ws)
-    cv = ws.wm._root_canvas
+    cv = ws.wm.root_canvas
     chips = ws.wm._chip_rects()
     assert chips and all(r[3] == 28 for _k, r, _l in chips)
     bar = _px(cv, 600, 20)
     for key, (x, y, w, h), _label in chips:
         inside = _px(cv, x + w - 4, y + h // 2)
-        assert (inside != bar) == (key == ws.wm._focus)
+        assert (inside != bar) == (key == ws.wm.focus_key)
 
 
 # -- the status cluster's gaps -------------------------------------------------

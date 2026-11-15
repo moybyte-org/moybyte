@@ -312,7 +312,7 @@ class BlockEditorUI:
         prog = None
         if ws.carts_store is not None and ws.run.project.cart.get("path"):
             try:
-                prog = ws._with_sd(
+                prog = ws.with_sd(
                     lambda: ws.carts_store.load_blocks(ws.run.project.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte load blocks failed:", self._err_text(exc))
@@ -330,7 +330,7 @@ class BlockEditorUI:
         # main.py and tell the kid why. A genuinely block-authored cart (has
         # blocks.json) -- or an empty/new-template cart with no real code -- is
         # unprotected and round-trips exactly as before.
-        self.blk_protect = (prog is None and ws.text._cart_has_handwritten_code())
+        self.blk_protect = (prog is None and ws.text.cart_has_handwritten_code())
         # GRADUATION (Stage 8, spec Section 8): a STORED, one-way project fact (read
         # from the manifest via cart["graduated"]), NOT the re-derived blk_protect
         # heuristic. A graduated cart's blocks.json is FROZEN -- it still opens (so the
@@ -964,7 +964,7 @@ class BlockEditorUI:
             ws.ach.award("first_code")
             return True
         try:
-            status, smsg = ws._with_sd(
+            status, smsg = ws.with_sd(
                 lambda: ws.carts_store.save_blocks(ws.run.project.cart, prog))
             if status != ws.carts_store.SAVE_OK:
                 self.blk_status = "CAN'T SAVE " + str(smsg)
@@ -1083,7 +1083,7 @@ class BlockEditorUI:
         elif i.pressed("run"):
             self.save_blocks()
         else:
-            ws.home._leave_or_home(ws.spine.exit)
+            ws.home.leave_or_home(ws.spine.exit)
 
     def _blk_left(self):
         be = self.blocks_ed
@@ -1173,13 +1173,13 @@ class BlockEditorUI:
             return
         how = hold.under(ws, None if k is None else self._held_key(k), self._page_rect(), dt)
         if how == _ui_draw.HOLD_PUT:
-            ws.bar_layer._draw_status_strip("menu")
+            ws.bar_layer.draw_status_strip("menu")
             self._draw_blk_kbd(True, dt)
             hold.note()
             return
         if how == _ui_draw.HOLD_DRAW:
             self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)
             hold.note()
@@ -1203,7 +1203,7 @@ class BlockEditorUI:
                 ws, self._held_key(k), k["gen"], k["host"], self._page_rect(),
                 _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._draw_blk_kbd(True, dt)
         self._hold.note()
         return True

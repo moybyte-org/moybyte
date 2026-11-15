@@ -123,7 +123,7 @@ def test_a_left_group_does_not_swallow_the_title(tmp_path, frame):
     ws.look.set_theme("framed", persist=False)
     ws.open_settings()
     _drv(ws).frame(1 / 30)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     btns = dict((n, r) for n, r, _s in ws.wm._frame_buttons(win))
     cx, cy, cw, ch = btns["close"]
     assert ws.wm._strip_button_hit(win, cx + cw // 2, cy + ch // 2) == "close"

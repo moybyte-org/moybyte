@@ -133,7 +133,7 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     # No view: 128x128 on 320x240 composites at 1x, centered (96, 56).
     assert ws.wm.viewport() == (96, 56, 1)
     settle_badges(ws)
-    ws._toast_until = 0                  # the first-play achievement toast is
+    ws.toast_until = 0                  # the first-play achievement toast is
     for _ in range(3):                   # wall-clock timed -- clear, don't wait
         drv.frame(DT)
     # pix() reads a palette INDEX back on every tier, so the cart's own colour
@@ -143,7 +143,7 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     # Run death restores the boot raster and the shared-canvas degradation.
     ws.run.player.release_world()
     assert ws.run.canvas is stock
-    assert ws._sys_canvas is None
+    assert ws.bound_sys_canvas is None
 
 
 def test_view_scales_and_maps_touch(tmp_path):
@@ -171,7 +171,7 @@ def test_out_of_set_canvas_is_refused_by_name(tmp_path):
     assert "256x192" in ws.cart_error
     # Refused BEFORE any bind: the boot raster never changed hands.
     assert (ws.run.canvas.w, ws.run.canvas.h) == (320, 240)
-    assert ws._sys_canvas is None
+    assert ws.bound_sys_canvas is None
     drv.frame(DT)                                     # the error panel draws
 
 

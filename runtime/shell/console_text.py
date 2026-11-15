@@ -7,8 +7,8 @@
 """The Workstation's TEXT verbs: whether the console can type (`can_type`, a
 board's declared keyboards, a connected Bluetooth one, a page's soft keyboard),
 the Editor's tab landings that stay the tested `ws.` entry points
-(`set_menu_view`, `_open_menu`/`_open_paint`/`_open_map`/..., `edit_theme`,
-`_leave_menu`) and the Code tab's file (`code_sources`/`code_file_name`/
+(`set_menu_view`, `open_menu`/`open_paint`/`open_map`/..., `edit_theme`,
+`leave_menu`) and the Code tab's file (`code_sources`/`code_file_name`/
 `open_code_file`). The console's `ws.text`; the keyboard's text mode is the
 input policy's (runtime/shell/input_policy.py).
 """
@@ -77,18 +77,18 @@ class Text:
 
     # The per-tab landing entry points moved to EditorApp (Stage 3, editor_app.py);
     # these stay as the tested ws. entry points (bar_layer's tool switcher + the
-    # player pause-B + tests call them). _open_menu is the Config-first landing --
+    # player pause-B + tests call them). open_menu is the Config-first landing --
     # EditorApp.open(project) -- so it forwards the open workspace.
-    def _open_menu(self):
+    def open_menu(self):
         ws = self.ws
         ws.editor_app.open(ws.run.project)
 
-    def _open_paint(self):
+    def open_paint(self):
         ws = self.ws
         ws.editor_app.open_paint()
 
     @property
-    def _editing_icons(self):
+    def editing_icons(self):
         """Whether the Editor holds a theme (its theme mode, runtime/editors/theme_editor.py):
         the windowed WM's name for it, whose window X commits it through
         `look.save_icons`."""
@@ -107,23 +107,23 @@ class Text:
         ws.editor_app.open_theme(doc, ws.wm.top_kind())
         return True
 
-    def _open_map(self):
+    def open_map(self):
         ws = self.ws
         ws.editor_app.open_map()
 
-    def _open_scene(self):
+    def open_scene(self):
         ws = self.ws
         ws.editor_app.open_scene()
 
-    def _open_blocks(self):
+    def open_blocks(self):
         ws = self.ws
         ws.editor_app.open_blocks()
 
-    def _open_music(self):
+    def open_music(self):
         ws = self.ws
         ws.editor_app.open_music()
 
-    def _cart_has_handwritten_code(self):
+    def cart_has_handwritten_code(self):
         """True if the current cart's main.py is real, hand-written code that the
         block editor must not overwrite: there is non-trivial source AND it was NOT
         emitted by the block compiler (no BLOCK_MARKER) AND it isn't the throwaway
@@ -144,7 +144,7 @@ class Text:
         # Any remaining non-whitespace source is the kid's own code -> protect it.
         return bool(src.strip())
 
-    def _leave_menu(self):
+    def leave_menu(self):
         # PLAY: leaving a tab RUNS the cart -- moved to EditorApp.leave (Stage 3,
         # editor_app.py). Stays as the tested ws. entry point (cards_layer/map/music/
         # block/code surfaces + host_app.escape + tests dispatch to it).

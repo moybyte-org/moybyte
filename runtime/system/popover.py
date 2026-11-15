@@ -94,7 +94,7 @@ class MonthView:
         return (200 * fs, (6 + 3) * fs + h)
 
     def month(self):
-        y, m, d = self.ws.bar_layer._today()
+        y, m, d = self.ws.bar_layer.today()
         if not y:
             return 0, 0, 0
         yy, mm = shift_month(y, m, self.off)
@@ -202,7 +202,7 @@ class WifiPanel:
 
     def _radio(self):
         sl = self.ws.settings_layer
-        return (tuple(sl.wifi_known), self.ws._wifi_icon_kind())
+        return (tuple(sl.wifi_known), self.ws.wifi_icon_kind())
 
     def _state(self):
         sl = self.ws.settings_layer
@@ -379,7 +379,7 @@ class ControlCenter:
             if got != cur:
                 sl.set_level(key, got)
                 ws.mark_dirty()
-        _ui.icon("wifi" if ws._wifi_icon_kind() == "wifi" else "wifi_off")
+        _ui.icon("wifi" if ws.wifi_icon_kind() == "wifi" else "wifi_off")
         if _ui.link("Wi-Fi", self._network()):
             ws.close_popover()
             ws.toggle_popover("wifi")

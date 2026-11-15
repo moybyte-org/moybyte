@@ -60,9 +60,9 @@ class Win:
 
 class WindowedWM:
     def __init__(self):
-        self._order = ["settings"]
-        self._focus = "settings"
-        self._wins = {"settings": Win(100, 80, 640, 400)}
+        self.z_order = ["settings"]
+        self.focus_key = "settings"
+        self.windows = {"settings": Win(100, 80, 640, 400)}
 
     def desk_open(self):
         return True
@@ -82,11 +82,14 @@ class FakeWS:
         self.screen = "home"
         self.wifi = None
         self.carts = _FakeCarts()
-        self._apps = ()
+        self.app_layers = ()
         self._psave_ms = 300000
         self._psave_asleep = False
         self.input = moy_input.HostInputTable()
         self.frame_state = FrameState()
+        # the console's services, which this stand-in answers itself
+        self.router = self.home = self.text = self.binding = self.perf = self
+        self.toggles = self.saves = self.notices = self.intents = self.spine = self
 
     def mark_dirty(self):
         self.frame_state.dirty = True
@@ -533,10 +536,10 @@ class _StoreWS(FakeWS):
         super().__init__()
         from runtime import moy_carts
         self.carts_store = moy_carts
-        self.notices = []
+        self.noted = []
 
     def notice(self, title, sub="", kind="ok", ms=6000):
-        self.notices.append((title, sub, kind))
+        self.noted.append((title, sub, kind))
 
 
 def _full_open(monkeypatch, room):
@@ -579,7 +582,7 @@ def test_a_store_with_no_room_stops_the_upload_plainly_and_on_screen(
     ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), dst))
     said = _said(capsys)
     assert said[-1] == "RECV ERR store full after 512 of %d bytes" % len(EVERY_BYTE)
-    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert ws.noted == [("CAN'T ADD CART", "the store is full", "warn")]
     assert not (tmp_path / "main.aot.new").exists()
 
 
@@ -608,7 +611,7 @@ def test_another_write_failure_is_named_and_not_called_a_full_store(
     ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), str(tmp_path / "x")))
     said = _said(capsys)
     assert said[-1].startswith("RECV ERR OSError:"), said[-1]
-    assert ws.notices == []
+    assert ws.noted == []
 
 
 class FeedingPoll(FakePoll):
@@ -1013,7 +1016,7 @@ def test_a_failure_at_the_payload_rate_is_said_there_before_going_back(
             2000000) in host.said
     assert host.mod.rate == 115200
     assert host.raw.data == bytearray()
-    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert ws.noted == [("CAN'T ADD CART", "the store is full", "warn")]
     assert not (tmp_path / "main.aot.new").exists()
 
 
@@ -1080,7 +1083,7 @@ def test_the_transfer_runs_inside_the_storage_gate(tmp_path, capsys):
         finally:
             sessions.append("out")
 
-    ws._with_sd = gate
+    ws.with_sd = gate
     ch.run(ws, "recv %d 512 %s" % (len(EVERY_BYTE), tmp_path / "main.lua"))
     assert sessions == ["in", "out"]
     assert "RECV done" in _said(capsys)[-1]
@@ -1369,7 +1372,7 @@ class _StoreWS2(FakeWS):
         self.carts_root = str(root)
         self.rescans = 0
         self.launched = []
-        self.notices = []
+        self.noted = []
 
     def rescan_carts(self):
         self.rescans += 1
@@ -1379,7 +1382,7 @@ class _StoreWS2(FakeWS):
         return name if name == "Plasma" else None
 
     def notice(self, title, sub="", kind="ok", ms=6000):
-        self.notices.append((title, sub, kind))
+        self.noted.append((title, sub, kind))
 
 
 def text_channel(root):
@@ -1466,7 +1469,7 @@ def test_moy_put_reads_through_moy_serial_and_hands_back_what_follows(
     data = bytes(range(256)) * 3
     ws, ch, _stdin = text_channel(tmp_path)
     sessions = []
-    ws._with_sd = lambda fn: sessions.append(1) or fn()
+    ws.with_sd = lambda fn: sessions.append(1) or fn()
     head, rest = put_lines("c.moy/main.lua", data).split("\n", 1)
     raw = FakeRawIn((rest + "sta").encode())
     monkeypatch.setattr(dc, "_moy_serial", FakeMoySerial(raw))
@@ -1514,7 +1517,7 @@ def test_a_full_store_is_said_plainly_to_moy_push_and_on_screen(tmp_path, capsys
     pump(ws, ch, stdin)
     said = _said(capsys, "moy-")
     assert said[0] == "moy-ok" and said[1].startswith("moy-err big.moy/main.wasm: store full")
-    assert ws.notices == [("CAN'T ADD CART", "the store is full", "warn")]
+    assert ws.noted == [("CAN'T ADD CART", "the store is full", "warn")]
     assert not list(tmp_path.rglob("*.new"))
 
 

@@ -274,7 +274,7 @@ class NavServer:
         """Spawn the registered app `app_id`. False when this build does not
         carry it or no cart carries its identity."""
         ws = self.__ws
-        app = ws._apps_by_id.get(app_id)
+        app = ws.app(app_id)
         if app is None:
             return False
         title = ws.spine.app_title(app.id) or app.id
@@ -304,7 +304,7 @@ class NavServer:
         ws = self.__ws
 
         def then():
-            ws.spine._note_app_caller()
+            ws.spine.note_app_caller()
             ws.open_in_editor(cart)
             if ws.run.project is None or ws.run.project.cart is not cart:
                 return False
@@ -335,7 +335,7 @@ class NavServer:
         ws = self.__ws
 
         def then():
-            ws.spine._note_app_caller()
+            ws.spine.note_app_caller()
             return bool(ws.open_project_file(cart, name, mode))
         return self._go(g, "Wants to edit " + str(name), then)
 
@@ -343,12 +343,12 @@ class NavServer:
         """Open `cart` as a workspace and RUN it, returning to the calling
         grant's app on exit (home when the grant is no registered app)."""
         ws = self.__ws
-        caller = ws._apps_by_id.get(ws.app_abi.grant_id(g))
+        caller = ws.app(ws.app_abi.grant_id(g))
         if caller is None:
             caller = ws.launcher_layer
 
         def go():
-            ws._open_workspace(cart)
+            ws.open_workspace(cart)
             ws.spine.play(caller)
 
         def then():

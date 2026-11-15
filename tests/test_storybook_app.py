@@ -74,7 +74,7 @@ def _handheld(tmp_path, seed=True):
     ws.pointer.visible = False
     if seed:
         _seed(ws.carts_root)
-    app = ws._apps_by_id["storybook"]
+    app = ws.app("storybook")
     ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
@@ -88,7 +88,7 @@ def _desk(tmp_path, seed=True):
     if seed:
         _seed(ws.carts_root)
     ws.home.open_desk()
-    app = ws._apps_by_id["storybook"]
+    app = ws.app("storybook")
     ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
@@ -194,7 +194,7 @@ def test_present_draws_no_bar_and_the_bars_band_is_the_slides(tmp_path):
 
 def test_the_desk_opens_at_its_designed_size(tmp_path):
     ws, app = _desk(tmp_path)
-    win = ws.wm._wins["storybook"]
+    win = ws.wm.windows["storybook"]
     assert (win.w, win.h) == (900, 536)
     assert app.layout.desk and app.ed is not None
 
@@ -385,7 +385,7 @@ def test_paints_door_lists_the_stories_and_adds_a_slide_with_its_undo(tmp_path):
 
 
 def _tap_part(ws, app, part):
-    cx, cy, _cw, _ch = ws.wm._wins["storybook"].content_rect()
+    cx, cy, _cw, _ch = ws.wm.windows["storybook"].content_rect()
     x, y, w, h = app._ui.box(part)
     ws.pointer.place(cx + x + w // 2, cy + y + h // 2)
     ws.pointer.click = True

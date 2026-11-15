@@ -325,7 +325,7 @@ def capture(cfg, carts_dir):
     for _ in range(2):              # its first frame lays its body out
         ws.menu_ui._draw_about()
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
-    ws._about = False
+    ws.about = False
 
     # The Achievements page (locked AND found cards, the console's and a
     # game's, a goal under way) with a badge opened and a goal's bar, the
@@ -352,11 +352,11 @@ def capture(cfg, carts_dir):
     ws.home.go_home()
     ws.ach.award("konami")
     settle_badges(ws)
-    ws._toast_at -= 10000
+    ws.toast_at -= 10000
     out["banner"] = _shot(ws, lambda: ws.notices._draw_toast())
-    ws._notice = ("Moybyte updated", "Now 0.8", "ok")
+    ws.notice_up = ("Moybyte updated", "Now 0.8", "ok")
     out["notice"] = _shot(ws, lambda: ws.notices._draw_notice())
-    ws._notice = None
+    ws.notice_up = None
 
     # The firmware-update screen: every phase it can be in.
     uu = ws.update_ui

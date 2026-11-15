@@ -94,14 +94,14 @@ def _band_alone(ws, dt, kind, calm=False):
     it. `calm`: the caller found it on top with nothing animating."""
     wm = ws.wm
     if not calm:
-        if ws._animating(dt):
+        if ws.animating(dt):
             return False
         top = getattr(wm, "top_kind", None)
         if top is not None and top() != kind:
             return False
-    if getattr(wm, "_cache_sig", 0) != 0 or getattr(wm, "mode", "console") != "console":
+    if getattr(wm, "cache_sig", 0) != 0 or getattr(wm, "mode", "console") != "console":
         return False
-    return not (ws._deferred and ws._toast_owed())
+    return not (ws.deferred and ws.toast_owed())
 
 
 class _Keyed:
@@ -156,7 +156,7 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
     selection's (`_beside`).
 
     `strip` is the bar strip's kind; `timed` records the home diag's
-    `ws._pf_home` split under perf_capture. Returns False when the frame
+    `ws.pf_home` split under perf_capture. Returns False when the frame
     must be painted in full."""
     ws = layer.ws
     moving = grid.dragging or grid.flinging
@@ -166,7 +166,7 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
         return False
     # Anything animating over the surface (toast/confetti/splash/live
     # wallpaper) moves pixels outside the band -> full frames.
-    if ws._animating(dt):
+    if ws.animating(dt):
         return False
     top = getattr(ws.wm, "top_kind", None)
     if top is not None and top() != kind:
@@ -204,12 +204,12 @@ def _band_frame(layer, cv, dt, grid, kind, fill, strip, timed=False, steps=False
         # the band and draws it whatever its key)
         whole = layer._band_landed(cv, dt, steps) or whole
     _t1 = _ticks_ms() if _t0 is not None else None
-    ws.bar_layer._draw_status_strip(strip)
+    ws.bar_layer.draw_status_strip(strip)
     if steps:
         for r in layer._beside_drew:
             ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
     if _t0 is not None:
-        ws._pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
+        ws.pf_home = (0, _ticks_diff(_t1, _t0), _ticks_diff(_ticks_ms(), _t1))
     if steps and not moving:
         layer._band_settle(end, whole)
     return True

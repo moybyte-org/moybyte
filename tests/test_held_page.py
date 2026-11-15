@@ -98,11 +98,11 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
                                         font_scale=1, windowed=True, panel_diagonal_in=7.0)
     else:
         ws = host_app.build_workstation(carts)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas if windowed else ws.sys_canvas
+    root = ws.wm.root_canvas if windowed else ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     held = [bytes(root._buf)]
     shots = []
@@ -425,7 +425,7 @@ def test_the_desk_root_reads_no_last_buffer_as_the_desk_boards_do(tmp_path):
         assert getattr(comp, "last_buffer", None) is None
     desk = host_app.build_workstation(str(tmp_path / "desk"), sys_size=(1024, 600),
                                       font_scale=2, windowed=True)
-    root = desk.wm._root_canvas
+    root = desk.wm.root_canvas
     assert getattr(root, "last_buffer", None) is None
     assert getattr(root, "copy_last", None) is not None
     hand = host_app.build_workstation(str(tmp_path / "hand"))

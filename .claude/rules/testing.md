@@ -159,7 +159,7 @@ paths:
     next command; PERF's `wmr/wmw/wms` are TAKEN per sample, `-` when their pass
     did not run in it; allow ~10s
     after a first `open projects` (cover pop-in, #155). `state`'s
-    `uncap` is the RUNNING cart's; the switch the next run takes is `ws._uncap`.
+    `uncap` is the RUNNING cart's; the switch the next run takes is `ws.uncap`.
   - **Look system-app carts up by TITLE, never folder name** — the device seeds
     from the title slug, the host copies the source folder, and that mismatch is
     what broke `AppearanceAppLayer.is_app` on device (pinned by

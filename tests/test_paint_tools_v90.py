@@ -648,7 +648,7 @@ def _open_paint(ws):
     from runtime import host_app  # noqa: F401
     ws.launcher.sel = 0
     ws.open()
-    ws.text._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
 
 

@@ -86,10 +86,10 @@ def test_super_opens_the_system_menu_from_every_surface(tmp_path, surface):
     if surface == "settings":
         ws.open_settings()
     elif surface == "calc":
-        ws.spine.open_app(ws._apps_by_id["calc"])
+        ws.spine.open_app(ws.app("calc"))
     else:
         open_cart(ws, "Star Catcher")
-        ws.spine._exit_to_caller()
+        ws.spine.exit_to_caller()
         ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
     _frames(drv)
     top = ws.screen
@@ -215,7 +215,7 @@ def test_the_pause_holds_the_carts_ticks_and_its_clock(tmp_path):
     drv.system_key()
     _frames(drv, 10)
     assert ws.run.player.ns["n"] == n0, "a held cart does not tick"
-    ws.run.player._paused_at -= 500             # half a second held
+    ws.run.player.paused_at -= 500             # half a second held
     drv.system_key()
     assert ws.run.cart_start_ms - start0 >= 500, "time() skips the pause"
     _frames(drv, 2)
@@ -240,8 +240,8 @@ def test_a_paused_frame_does_not_animate(tmp_path):
     drv.system_key()
     _frames(drv, 2)
     quiesce(ws)
-    ws._splash_until = None
-    assert not ws._animating(_DT), "the card is drawn on a change, not every frame"
+    ws.splash_until = None
+    assert not ws.animating(_DT), "the card is drawn on a change, not every frame"
 
 
 # -- the pause menu's verbs ------------------------------------------------------------
@@ -482,7 +482,7 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     if desk:
         ws = build_desktop_ws(tmp_path)
         ws.home.open_library()
-        ws._open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
+        ws.open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
         ws.spine.play(ws.launcher_layer)
         drv = make_drv(ws)
         _frames(drv, 3)
@@ -572,7 +572,7 @@ def test_the_pause_card_offers_play_in_a_window_on_a_board_with_a_desk(tmp_path)
     _frames(drv, 2)
     assert ws.pause._host.box(ws.pause.WINDOW) is not None, "drawn on the card"
     drv.system_key()
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     ws.home.open_library()                            # console mode on the same board
     assert select_on_home(ws, "Counter") is not None
     ws.open()
@@ -587,14 +587,14 @@ def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tm
     where they were, and the running game stands in a window there, its run
     going on: no restart, no full screen."""
     ws, drv = _desk_game(tmp_path)
-    ws.spine._exit_to_caller()
-    ws.spine.open_app(ws._apps_by_id["calc"])          # a desk window to come back to
+    ws.spine.exit_to_caller()
+    ws.spine.open_app(ws.app("calc"))          # a desk window to come back to
     _frames(drv, 2)
     ws.home.open_library()
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     _frames(drv, 3)
-    assert ws.wm.mode == "console" and "calc" in ws.wm._parked.kinds
+    assert ws.wm.mode == "console" and "calc" in ws.wm.parked.kinds
     drv.system_key()
     n0 = ws.run.player.ns["n"]
     _choose(ws, ws.pause.WINDOW)
@@ -602,9 +602,9 @@ def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tm
     wm = ws.wm
     assert wm.mode == "desktop" and not ws.pause.open and not ws.run.player.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on"
-    win = wm._wins["desktop"]
+    win = wm.windows["desktop"]
     assert not win.full() and win.content_rect()[1] > win.y and win.own
-    assert "calc" in wm._wins and wm._order[-1] == "desktop" and wm._focus == "desktop"
+    assert "calc" in wm.windows and wm.z_order[-1] == "desktop" and wm.focus_key == "desktop"
 
 
 def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_path):
@@ -613,8 +613,8 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     and that window's maximize is full screen again, with no buttons."""
     ws, drv = _desk_game(tmp_path)
     wm = ws.wm
-    win = wm._wins["desktop"]
-    cv = wm._root_canvas
+    win = wm.windows["desktop"]
+    cv = wm.root_canvas
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, cv.w, cv.h)
     assert wm._frame_buttons(win) == [], "no window buttons during play"
     drv.system_key()
@@ -622,7 +622,7 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     assert n0 > 0
     _choose(ws, ws.pause.WINDOW)
     _frames(drv, 3)
-    assert wm._wins["desktop"] is win and not ws.pause.open and not ws.run.player.paused
+    assert wm.windows["desktop"] is win and not ws.pause.open and not ws.run.player.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on, from where it stood"
     assert not win.full() and win.content_rect()[1] > win.y, "a title strip"
     names = [n for n, _r, _side in wm._frame_buttons(win)]
@@ -635,7 +635,7 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     _frames(drv, 2)
     assert win.full() and wm._frame_buttons(win) == []
     assert ws.run.player.ns["n"] > n0 and ws.plays_fullscreen()
-    wm._toggle_max(win)
+    wm.toggle_max(win)
     ws.pause.show()                              # the card over the windowed game
     assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS, \
         "a windowed game goes full screen by its maximise alone"

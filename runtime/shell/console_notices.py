@@ -7,7 +7,7 @@ firmware-update verdict that rides it, the banners -- the notice, the unlock
 and an app's notification (runtime/system/notifications.py), each
 native/moy_ui's `moy_ui_unlock` -- and the notification's input. The
 console's `ws.notices`; the deadlines it arms are the flat kernel fields
-`_animating` and both WMs read. The cards the console puts up over what is
+`animating` and both WMs read. The cards the console puts up over what is
 running are runtime/shell/shell_cards.py's; the intents' hooks are
 runtime/shell/console_intents.py's.
 """
@@ -63,21 +63,21 @@ class Notices:
             return ws.ach.env()
         return None
 
-    def _today_ymd(self):
+    def today_ymd(self):
         """Today as YYYYMMDD off the bar's wall clock, 0 without one (a board
         that never set its clock reads a year before 2020)."""
         ws = self.ws
-        y, m, d = ws.bar_layer._today()
+        y, m, d = ws.bar_layer.today()
         return y * 10000 + m * 100 + d if y >= 2020 else 0
 
-    def _achievement_unlocked(self, badge):
+    def achievement_unlocked(self, badge):
         """A fresh unlock's EFFECTS: arm the banner over `badge`, (head,
         title, icon, secret), then celebrate with a short rising beep when
         audio is wired (#21, rev-3 event push). The achievements process's
         notification brings it (`_note_shown`).
 
         The deadline is written HERE, at the unlock, rather than polled per frame off
-        the object -- `_animating` and the WM's overlay signature read the flat
+        the object -- `animating` and the WM's overlay signature read the flat
         field and never call into `ach` on the frame path. There is no banner
         QUEUE to preserve: each unlock overwrites the payload, so a second unlock
         inside the window replaces the banner and extends the deadline, which is
@@ -89,11 +89,11 @@ class Notices:
         ws = self.ws
         t = ws.ach.toast = badge
         now = _ticks_ms()
-        ws._toast_at = now
-        ws._toast_until = now + TOAST_MS
+        ws.toast_at = now
+        ws.toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
         if t:
-            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), ws._toast_until)
+            _ch._moy_play().chrome_toast_arm(t[0], t[1], t[2], bool(t[3]), ws.toast_until)
         au = ws.run.audio
         if au is not None:
             try:
@@ -110,19 +110,19 @@ class Notices:
         notice that needs dismissing is a modal, and a modal in front of a kid who
         just wanted to play is worse than the message is worth."""
         ws = self.ws
-        ws._notice = (str(title), str(sub), kind)
+        ws.notice_up = (str(title), str(sub), kind)
         ws._notice_until = _ticks_ms() + int(ms)
         ws.frame_state.dirty = True
         # The kernel's copy, which a run it drives draws over its frames.
-        _ch._moy_play().chrome_notice(ws._notice[0], ws._notice[1], kind == "ok",
+        _ch._moy_play().chrome_notice(ws.notice_up[0], ws.notice_up[1], kind == "ok",
                                       ws._notice_until)
 
     def notice_active(self, now=None):
         ws = self.ws
-        if ws._notice is None:
+        if ws.notice_up is None:
             return False
         if _ticks_diff(ws._notice_until, now if now is not None else _ticks_ms()) <= 0:
-            ws._notice = None
+            ws.notice_up = None
             return False
         return True
 
@@ -150,7 +150,7 @@ class Notices:
         the content, its tile a check (a warning's, the warning sign), the
         title in `value` over the line under it. The card's rect."""
         ws = self.ws
-        notice = ws._notice
+        notice = ws.notice_up
         if notice is None:      # expired between the frame's check and its draw
             return None
         cv = ws.sys_canvas
@@ -174,11 +174,11 @@ class Notices:
         desk = _desk_class()
         wm = ws.wm
         game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
-                and not ws._running_cart_shows_bar())
+                and not ws.running_cart_shows_bar())
         top = (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
         burst = 0
         if t[3]:
-            el = _ticks_diff(_ticks_ms(), ws._toast_at)
+            el = _ticks_diff(_ticks_ms(), ws.toast_at)
             burst = 255 if el >= _ach_ui.BURST_MS else max(1, el * 255 // _ach_ui.BURST_MS)
         _ui_draw.unlock(cv, ws.theme_colors, cv.w // 2, top, t[0], t[1], t[2], burst, desk)
 
@@ -323,7 +323,7 @@ class Notices:
         ws.frame_state.dirty = True
         badge = ws.ach.badge_of(n)
         if badge is not None:
-            self._achievement_unlocked(badge)
+            self.achievement_unlocked(badge)
             _NOTES.dismiss()
             return
         if n is None:
@@ -407,7 +407,7 @@ class Notices:
         desk = _desk_class()
         wm = ws.wm
         game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
-                and not ws._running_cart_shows_bar())
+                and not ws.running_cart_shows_bar())
         return (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
 
     def _draw_note(self):

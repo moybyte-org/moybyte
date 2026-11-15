@@ -153,7 +153,7 @@ def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):
     assert "kaboom" in ws.cart_error and "ValueError" in ws.cart_error
     assert bytes(ws.run.canvas._buf) != blank  # the panel drew something
     # The editor stays reachable so the kid can fix the cart.
-    ws.text._open_menu()
+    ws.text.open_menu()
     assert ws.screen == "menu"
 
 
@@ -251,7 +251,7 @@ def test_evil_str_cart_does_not_escape_frame(tmp_path):
     assert ws.cart_error is not None      # panel text was still produced via _err_text
     assert "Evil" in ws.cart_error        # the type name survives even when __str__ dies
     # The broken cart was stopped so it isn't re-run every frame.
-    assert ws.run.player._update is None and ws.run.player._draw is None
+    assert ws.run.player.update is None and ws.run.player.draw is None
 
 
 def test_evil_str_cart_at_start_does_not_escape(tmp_path):
@@ -285,7 +285,7 @@ def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
     assert ws.crash_popup is None              # tap anywhere closes it
     # A fresh crash re-arms it; the first EDIT dismisses it with the marker.
     ws.cart["src"] = "def _draw():\n    raise ValueError('again')\n"
-    ws._start()
+    ws.start()
     ws.spine.play(ws.editor_app)
     assert ws.screen == "desktop"
     ws.frame(1 / 30)
@@ -334,7 +334,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ws.history.code_burst_open()
     ed.set_text("def _draw():\n    boom_undefined()\n")
     ws.cart["src"] = ed.text()
-    ws._start()
+    ws.start()
     ws.spine.play(ws.editor_app)
     ws.frame(1 / 30)                            # crash -> the stop card
     _see_why(ws)
@@ -368,7 +368,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     path = ws.cart["path"]
 
     ws.frame(1 / 30)                      # crash -> panel set, cart stopped
-    assert ws.cart_error is not None and ws.run.player._draw is None
+    assert ws.cart_error is not None and ws.run.player.draw is None
 
     # Open the code editor, fix the source, and hit SAVE (not RUN).
     ws.text.set_menu_view("code")
@@ -380,10 +380,10 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart
     # actually runs again -- _draw is re-bound, no leftover panel.
-    ws.text._leave_menu()
+    ws.text.leave_menu()
     assert ws.screen == "desktop"
     assert ws.cart_error is None
-    assert ws.run.player._draw is not None           # re-_start() rebound the (now valid) cart
+    assert ws.run.player.draw is not None           # re-_start() rebound the (now valid) cart
     for _ in range(3):
         ws.frame(1 / 30)                  # runs clean, no panel
     assert ws.cart_error is None

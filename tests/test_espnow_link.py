@@ -956,9 +956,9 @@ def test_a_run_never_adopts_a_dead_session(tmp_path):
     link.calls[:] = []
     ws.netplay = _Dead()
 
-    assert ws._start() is True
+    assert ws.start() is True
     assert ws.netplay is None, "the dead session did not survive the run boundary"
-    assert ws.run.player._netplay is None, "...so the run is solo"
+    assert ws.run.player.netplay is None, "...so the run is solo"
     assert "end_match" in link.calls
     assert ("offer", "Brick Siege") in link.calls, \
         "and the fresh run is free to form a new match"
@@ -1171,7 +1171,7 @@ def _two_consoles(tmp_path, monkeypatch, title, loss, frames, tamper=None, step=
                 ws.frame(step / 1000)
             on(i, frame)
             assert ws.cart_error is None, ws.cart_error
-            np = ws.run.player._netplay
+            np = ws.run.player.netplay
             if np is not None:
                 worlds[i].setdefault((np.session, np.frame), _cart_world(ws))
     return worlds, wss
@@ -1190,7 +1190,7 @@ def test_two_consoles_on_a_lossy_air_play_the_same_brick_siege(tmp_path, monkeyp
     bad = [f for f in both if worlds[0][f] != worlds[1][f]]
     assert bad == [], "first divergent frame %r" % (bad[:1],)
     for ws in wss:
-        np = ws.run.player._netplay
+        np = ws.run.player.netplay
         assert np.checks >= 4 and np.desync < 0, \
             "the desync check compared checkpoints and found them agreeing"
         assert ws.ns["time"]() == np.ms(np.frame), \
@@ -1223,7 +1223,7 @@ def test_a_match_plays_while_one_console_serves_ssh(tmp_path, monkeypatch):
     assert ssh.link.wlan.ch == 6 and ssh.link.wlan.assoc, "the station never moved"
     assert free.link.wlan.ch == 6, "the free console followed it"
     for ws in wss:
-        np = ws.run.player._netplay
+        np = ws.run.player.netplay
         assert np.desync < 0 and np.checks >= 4, (np.desync, np.checks)
         assert np.frame * 1000 / (900 * 17) > 20, "the match ticked at its rate"
     ssh.netplay = None
@@ -1247,9 +1247,9 @@ def test_a_world_that_parts_is_said_out_of_sync_on_both_screens(tmp_path, monkey
 
     worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 420, nudge)
     for ws in wss:
-        np = ws.run.player._netplay
+        np = ws.run.player.netplay
         assert np.desync > 0 and np.desync_kind == 2, (np.desync, np.desync_kind)
-        assert ws._notice is not None and ws._notice[0] == "Out of sync"
+        assert ws.notice_up is not None and ws.notice_up[0] == "Out of sync"
     assert wss[0].link.stats()["match"]["desync_kind"] == "worlds"
 
 
@@ -1263,7 +1263,7 @@ def test_a_match_too_slow_for_sixty_steps_down_and_stays_in_sync(tmp_path, monke
     worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.1, 1300, step=22)
     both = sorted(set(worlds[0]) & set(worlds[1]))
     assert [f for f in both if worlds[0][f] != worlds[1][f]] == []
-    nps = [ws.run.player._netplay for ws in wss]
+    nps = [ws.run.player.netplay for ws in wss]
     f0 = nps[0].step_from
     assert f0 is not None and nps[1].step_from == f0, "the host stepped and named the frame"
     for ws, np in zip(wss, nps):
@@ -1277,7 +1277,7 @@ def test_a_fast_loop_does_not_flood_the_air(tmp_path, monkeypatch):
     """Two consoles looping every 4 ms (frames between ticks are cheap)
     send at most once per LOCK_MS between ticks, plus each tick's own."""
     _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, step=4)
-    np = wss[0].run.player._netplay
+    np = wss[0].run.player.netplay
     secs = 1500 * 4 / 1000
     assert np.frame > 25 * (secs - 2), "the match ticked"
     assert np.packets_out <= secs * (1000 / netplay.LOCK_MS + 30) + 40, np.packets_out
@@ -1293,7 +1293,7 @@ def test_a_match_draws_exactly_the_ticks_it_simulates(tmp_path, monkeypatch):
     seen, count = _draw_counter()
     _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.35, 600, count)
     for i, ws in enumerate(wss):
-        np = ws.run.player._netplay
+        np = ws.run.player.netplay
         f0, draws = seen[i]
         assert np.stall_ticks > 5, "the premise: the match stalled"
         assert draws == np.frame - f0, (i, draws, np.frame - f0)
@@ -1306,16 +1306,16 @@ def _draw_counter():
 
     def count(k, wss):
         for i, ws in enumerate(wss):
-            np = ws.run.player._netplay
+            np = ws.run.player.netplay
             if np is None or i in seen:
                 continue
-            draw = ws.run.player._draw
+            draw = ws.run.player.draw
             box = seen[i] = [np.frame, 0]
 
             def counted(draw=draw, box=box):
                 box[1] += 1
                 draw()
-            ws.run.player._draw = counted
+            ws.run.player.draw = counted
     return seen, count
 
 
@@ -1340,7 +1340,7 @@ def test_a_tick_the_clock_reaches_after_the_plan_waits_for_a_drawn_frame(
     _worlds, wss = _two_consoles(tmp_path, monkeypatch, "Brick Siege", 0.0, 1500, count,
                                  step=4)
     for i, ws in enumerate(wss):
-        np = ws.run.player._netplay
+        np = ws.run.player.netplay
         f0, draws = seen[i]
         assert np.frame - f0 > 400, "the premise: the match ticked"
         assert draws == np.frame - f0, (i, draws, np.frame - f0)

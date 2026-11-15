@@ -149,7 +149,7 @@ def _code_tab(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.text._open_menu()
+    ws.text.open_menu()
     if ws.menu_view == "cards":
         ws.text.set_menu_view("code")
     ws.editor.set_text("\n".join("r%02d" % i for i in range(20)))

@@ -376,7 +376,7 @@ def test_the_on_glass_fixture_cart_runs_under_the_real_player(tmp_path):
     ws = build_ws(tmp_path)
     open_cart(ws, "Placement Lua")
     assert ws.run.player.cart_error is None
-    run = ws.run.player._lua
+    run = ws.run.player.lua
     assert run is not None, "the fixture did not start on the Lua runtime"
     assert run.get_global("N") == 4                  # scene() saw four rows
     assert run.get_global("PLAYERS") == 1 and run.get_global("COINS") == 3

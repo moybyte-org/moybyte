@@ -1378,7 +1378,7 @@ def test_the_parked_screen_owns_the_glass_and_claims_every_event(tmp_path):
     the kid cannot see."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    layer = ws._content_layer()
+    layer = ws.content_layer()
     assert layer.id == "webconsole" and layer.domain == "system"
     assert layer.handle_pointer(0, 0, False) is True
     assert layer in ws.wm.draw_stack()
@@ -1390,13 +1390,13 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
     ws.frame(1 / 30.0)
-    ws._splash_until = None                  # the boot logo animates on its own
+    ws.splash_until = None                  # the boot logo animates on its own
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.frame_state.dirty = False
     ws.pointer.visible = False
-    ws._last_ptr = ws._ptr_state()
-    assert ws._animating(1 / 30.0) is False, "the connection screen animates"
+    ws.last_ptr = ws.ptr_state()
+    assert ws.animating(1 / 30.0) is False, "the connection screen animates"
     assert ws._needs_redraw(1 / 30.0) is False
 
 
@@ -1668,7 +1668,7 @@ def test_a_cart_launched_from_the_browser_exits_BACK_to_the_screen(tmp_path):
     ws.toggle_webhost()
     assert ws.home.launch_named("Star Catcher") == "Star Catcher"
     assert ws.wm.top_kind() == "desktop", "the cart did not start"
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "webconsole"
     assert ws.webhost_serving() is True, "the exit stopped the host"
 
@@ -1682,7 +1682,7 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
     ws.home.launch_named("Star Catcher")
     ws.toggle_webhost()
     assert ws.web.parked is False
-    ws.spine._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "launcher"
 
 

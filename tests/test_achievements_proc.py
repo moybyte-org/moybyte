@@ -110,18 +110,18 @@ def test_a_shell_award_reaches_the_prefs_and_posts(ws):
     notify = ws.app_context("probe", ("notify",)).notify
     notify.award("first_paint")
     assert not ws.ach.has(A.SYSTEM, "first_paint") and S.SCHED.mail_of(ws.ach.pid) == 1
-    assert ws._toast_until == 0
+    assert ws.toast_until == 0
     make_drv(ws).frame(1 / 30)
     assert ws.ach.has(A.SYSTEM, "first_paint") and S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.toast == (A.HEAD_BADGE, "Little Artist", "paint", False)
-    assert ws._toast_until
+    assert ws.toast_until
     notes = notifications.NOTES
     assert [(n.app, n.summary, n.body, n.pid) for n in notes.list] == [
         ("Achievements", A.HEAD_BADGE, "Little Artist", ws.ach.pid)]
     assert notes.banner is None             # the unlock banner is its banner
     day, title, icon, hint = _row(ws)["system"]["found"]["first_paint"]
     assert (title, icon, hint) == ("Little Artist", "paint", "Save a drawing")
-    assert day == ws.notices._today_ymd()
+    assert day == ws.notices.today_ymd()
 
 
 def test_the_tick_serves_a_message_the_frame_did_not(ws):
@@ -221,7 +221,7 @@ def test_the_page_lists_by_game_and_keeps_a_deleted_games_badges(ws):
     groups = ws.ach.groups()
     assert [g[:2] for g in groups] == [(A.SYSTEM, "Moybyte"), (GAME, "Harpoon Pop")]
     hp = {b[0]: b for b in groups[1][2]}
-    assert hp["first_clear"][6] == ws.notices._today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
+    assert hp["first_clear"][6] == ws.notices.today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
     assert hp["untouchable"][5] is True and hp["untouchable"][6] is None
     assert ws.ach.count() == 2 and ws.ach.total() == len(A.SHELL) + 4
     cart = next(c for c in ws.carts.all if c.get("id") == GAME)
@@ -425,7 +425,7 @@ def test_with_the_process_stopped_messages_go_nowhere_and_reads_hold(ws):
     assert S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.award("konami") is False
     assert ws.ach.has(A.SYSTEM, "first_run") and ws.ach.count() == 1   # its prefs
-    assert ws.ach.today() == ws.notices._today_ymd()
+    assert ws.ach.today() == ws.notices.today_ymd()
     ws.notices.load_achievements()                  # a store load starts it again
     assert ws.ach.running() and ws.ach.has(A.SYSTEM, "first_run")
 

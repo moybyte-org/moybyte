@@ -365,7 +365,7 @@ def test_a_window_drag_takes_the_band_frame(tmp_path):
     ws.home.open_projects()
     for _ in range(80):                      # settle covers
         drv.frame(1 / 30)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     home = ws.projects_layer
     took = []
     real = home._try_band_frame

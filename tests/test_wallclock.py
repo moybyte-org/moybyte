@@ -158,17 +158,17 @@ def test_the_bar_reads_dashes_until_synced_then_local_time(tmp_path, monkeypatch
     ws = build_ws(tmp_path)
     bar = ws.bar_layer
     _kernel(0)
-    bar._clock_at = -1
-    assert bar._clock_text() == "--:--"
-    assert bar._today() == (0, 0, 0)
-    assert ws.notices._today_ymd() == 0
+    bar.clock_at = -1
+    assert bar.clock_text() == "--:--"
+    assert bar.today() == (0, 0, 0)
+    assert ws.notices.today_ymd() == 0
     _kernel(1)
     monkeypatch.setattr(wc, "_now", lambda: _at(2026, 11, 6, 23, 30))
     ws.toggles.set_time_zone(BELGRADE)
-    assert bar._clock_text() == "00:30"            # the zone's next day
-    assert bar._today() == (2026, 11, 7)
+    assert bar.clock_text() == "00:30"            # the zone's next day
+    assert bar.today() == (2026, 11, 7)
     ws.toggles.set_time_zone("UTC0")
-    assert bar._clock_text() == "23:30"
+    assert bar.clock_text() == "23:30"
 
 
 # -- the setting ------------------------------------------------------------------------

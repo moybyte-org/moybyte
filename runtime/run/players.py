@@ -1109,7 +1109,7 @@ def launch_cart(ws, title):
         return False
     open_now = getattr(ws, "cart", None)
     if open_now and str(open_now.get("title") or "").lower() == want:
-        return bool(ws._start())
+        return bool(ws.start())
     items = getattr(ws.launcher, "items", [])
     for i in range(len(items)):
         it = items[i]

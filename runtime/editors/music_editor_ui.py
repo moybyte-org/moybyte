@@ -60,7 +60,7 @@ class MusicEditorUI:
             ws.mark_dirty()
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws.relayout on
         a font-scale change."""
         self.layout = MusicLayout(w, h, fs, chrome_scale=cs)
 
@@ -176,7 +176,7 @@ class MusicEditorUI:
                     self._play_music_preview()
         if i.pressed("b") or i.pressed("home"):
             changed = True
-        ws.home._leave_or_home(ws.spine.exit)
+        ws.home.leave_or_home(ws.spine.exit)
         if changed:
             ws.mark_dirty()
 

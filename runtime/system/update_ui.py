@@ -28,7 +28,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws.frame_state.dirty,
                              ws.home.go_home,
-                             ws._mini_btn, ws.toggles._ota_channel
+                             ws.mini_btn, ws.toggles.ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
                              begin_download/download_step/reset). This is the one
@@ -297,7 +297,7 @@ class UpdateUI:
             if not self._check_armed:
                 self._check_armed = True
                 return
-            verdict = cu.check(self.ws.toggles._ota_channel())
+            verdict = cu.check(self.ws.toggles.ota_channel())
             if verdict == "pending":
                 return                         # the link is dialled: ask next frame
             if verdict == "offer":
@@ -370,7 +370,7 @@ class UpdateUI:
                 self._upd_phase = "error"
                 self._upd_msg = "no updater"
                 return
-            ch = self.ws.toggles._ota_channel()
+            ch = self.ws.toggles.ota_channel()
             manifest = u.check_online(ch)      # connect (saved creds) + GET the manifest
             if u.error:
                 self._upd_phase = "error"
@@ -496,7 +496,7 @@ class UpdateUI:
         phase = self._upd_phase
         if phase == "checking":
             say("CHECKING ONLINE...", th["accent"])
-            beta = self.ws.toggles._ota_channel() == "unstable"
+            beta = self.ws.toggles.ota_channel() == "unstable"
             say("channel: %s" % ("BETA" if beta else "STABLE"),
                        NAMES["orange"] if beta else th["play"])
             say("running: %s %s" % (slot, vlabel), th["ink_dim"])
@@ -504,7 +504,7 @@ class UpdateUI:
                 say("joining WiFi" + _dots(), th["ink"])
             say("B = BACK", th["accent"])
         elif phase == "nopublish":
-            beta = self.ws.toggles._ota_channel() == "unstable"
+            beta = self.ws.toggles.ota_channel() == "unstable"
             say("NOTHING NEW YET", th["play"])
             say("no %s build for" % ("BETA" if beta else "STABLE"),
                        th["ink"])
@@ -530,7 +530,7 @@ class UpdateUI:
             newv = int(m.get("version", 0) or 0)
             kb = int(m.get("size", 0) or 0) // 1024
             run_ch = u.channel() if u is not None else "stable"
-            tgt_ch = m.get("channel") or self.ws.toggles._ota_channel()
+            tgt_ch = m.get("channel") or self.ws.toggles.ota_channel()
             label = str(m.get("label") or ("v%d" % newv))
             switch = tgt_ch != run_ch
             beta = tgt_ch == "unstable"
@@ -675,5 +675,5 @@ class UpdateUI:
                 _ui.label(item)
         _ui.group()
         if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
-            ws._mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
+            ws.mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 

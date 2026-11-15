@@ -27,13 +27,13 @@ def _desk(tmp_path, variant="light"):
 def _quiet(ws):
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
 
 
 def _below_bar(ws):
     """The frame under the OS bar: the bar's clock redraws over a cache
     restore in its own way under this theme, which is not the depth's."""
-    y = ws.wm._desk_rect()[1]
+    y = ws.wm.desk_rect()[1]
     return bytes(ws.sys_canvas._buf)[y * ws.sys_canvas.w * 2:]
 
 
@@ -85,7 +85,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     ws, drv = _desk(tmp_path)
     ws.open_settings()
     drv.frame(0.0)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     r, foot = ui_draw.frame_geom(win.w, win.h, win.title_h)[:2]
     assert r == 12 and foot == 11 == win.foot
     assert win.content_rect()[3] == win.h - 2 - win.title_h - foot
@@ -97,7 +97,7 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     ws.look.set_theme("boxed", persist=False, variant="light")
     ws.mark_dirty()
     drv.frame(0.0)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     assert win.foot == 0 and win.buf.h == win.h - 2 - win.title_h
 
 
@@ -109,7 +109,7 @@ def _drag(ws, drv):
     ws.open_settings()
     drv.frame(0.0)
     _quiet(ws)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     gx, gy = win.x + win.w // 2, win.y + 4
     drv.touch(gx, gy)
     drv.frame(0.0)
@@ -285,9 +285,9 @@ def test_a_window_shadow_falls_on_the_backdrop_it_covers(tmp_path):
 
     bare = bytes(drv.rgb888())
     rasters = ws.wallpaper.rasters
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     drv.frame(1 / 30)
-    win = ws.wm._wins["calc"]
+    win = ws.wm.windows["calc"]
     win.x, win.y = 60, 560 - win.h
     ws.wm.dirty = True
     for _ in range(3):
@@ -308,11 +308,11 @@ def _overlapping(tmp_path, variant):
     ws, drv = _desk(tmp_path, variant)
     ws.home.open_desk()
     drv.frame(0.0)
-    ws.spine.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     drv.frame(0.0)
-    ws.spine.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     drv.frame(0.0)
-    files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    files, calc = ws.wm.windows["files"], ws.wm.windows["calc"]
     # Files centred on the glass (the geometry these tests drag in), Calc
     # over its right half.
     ws.wm._move_window(files, (ws.sys_canvas.w - files.w) // 2, files.y)
@@ -430,7 +430,7 @@ def test_casts_over_a_window_are_a_full_repaints_on_every_buffer(tmp_path, varia
     ring.frame(drv)
     drv.touch_up()
     _frames(ws, ring, drv, 6)
-    assert ws.wm._order[-1] == "files"
+    assert ws.wm.z_order[-1] == "files"
     assert list(ring.bufs) == ring.full(drv)
 
 
@@ -454,11 +454,11 @@ def test_an_apps_page_in_a_window_lies_on_the_windows_body(tmp_path, variant):
         if app == "settings":
             ws.open_settings()
         else:
-            ws.spine.open_app(ws._apps_by_id[app])
+            ws.spine.open_app(ws.app(app))
         for _ in range(3):
             ws.mark_dirty()
             drv.frame(1 / 30)
-        cx, cy, cw, ch = ws.wm._wins[app].content_rect()
+        cx, cy, cw, ch = ws.wm.windows[app].content_rect()
         # the page's ground: under its last row (Calc's keys reach its foot,
         # so right of its tape)
         x, y = ((cx + cw - 2, cy + 1) if app == "calc"

@@ -54,8 +54,8 @@ def _quiesce(ws):
     if ws.pointer is not None:
         ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.toast_until = 0
+    ws.bar_layer.clock_text = lambda: "00:00"
 
 
 def _ws_shared(tmp_path):
@@ -71,8 +71,8 @@ def _ws_distinct_320(tmp_path):
     from runtime import host_app
     from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
-    ws._relayout()
+    ws.bound_sys_canvas = make_system_canvas(320, 240, font_scale=1)
+    ws.relayout()
     ws.set_pointer(host_app.console.Pointer(320, 240))
     ws.input.pointer = ws.pointer
     return _open_first_cart(ws)
@@ -416,7 +416,7 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws.text._open_paint()
+        ws.text.open_paint()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -431,7 +431,7 @@ def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_paint()
+    ws.text.open_paint()
     lay = ws.paint_layer.layout
     assert lay.pg_span > P._PG_SPAN and lay.pg_span % 48 == 0
     drv.frame(1 / 30)
@@ -446,7 +446,7 @@ def test_paint_editor_tap_paints_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_paint()
+    ws.text.open_paint()
     drv.frame(1 / 30)
     pe = ws.paint
     lay = ws.paint_layer.layout
@@ -470,7 +470,7 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws.text._open_map()
+        ws.text.open_map()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -484,7 +484,7 @@ def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_map()
+    ws.text.open_map()
     lay = ws.map_ui.layout
     base = M.MapLayout(320, 240, 1)
     assert lay.mv_avail_w > base.mv_avail_w and lay.mv_avail_h > base.mv_avail_h
@@ -504,7 +504,7 @@ def test_map_editor_tap_paints_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_map()
+    ws.text.open_map()
     drv.frame(1 / 30)
     me = ws.map_ui.mapedit
     tm = ws.run.project.tilemap
@@ -524,7 +524,7 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws.text._open_music()
+        ws.text.open_music()
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
@@ -536,7 +536,7 @@ def test_music_editor_renders_on_large_canvas(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
@@ -549,7 +549,7 @@ def test_music_editor_tap_works_in_system_coords(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
-    ws.text._open_music()
+    ws.text.open_music()
     drv.frame(1 / 30)
     if ws.music_ui.musicedit is None:
         return                                     # no audio bank -- nothing to pin

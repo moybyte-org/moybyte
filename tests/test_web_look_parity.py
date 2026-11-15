@@ -181,14 +181,14 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
 # pixel. The clock reads a fixed time in both (the host's zone is not node's),
 # the pointer is hidden (the page boots it hidden; the host draws the
 # cursor), and achievements stay quiet (a toast's slide is timed by the clock).
-_STEADY = ("_ws.bar_layer._clock_text = lambda: '12:00'\n"
+_STEADY = ("_ws.bar_layer.clock_text = lambda: '12:00'\n"
            "_ws.pointer.visible = False\n"
            "_ws.ach.mute = True\n"
            "_ws.ach.toast = None\n"
            "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
 _EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
            "_ws.text.set_menu_view('cards')\n")
-_APP = "_ws.spine.open_app(_ws._apps_by_id[%r])\n"
+_APP = "_ws.spine.open_app(_ws.app(%r))\n"
 # (arrangement, scene, theme, variant, what the scene does after the setup)
 SCENES = [("handheld", "home", "moy", "dark", ""),
           ("handheld", "editor_config", "moy", "dark", _EDITOR),

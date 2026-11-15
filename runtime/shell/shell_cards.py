@@ -240,16 +240,16 @@ class PauseMenu:
         Home leaves for the run's caller."""
         ws = self.ws
         self._shut()
-        if row == self.SEE_WHY and ws._crash_to_code():
+        if row == self.SEE_WHY and ws.crash_to_code():
             return
         if row == self.RESTART:
-            ws._reset_canvas_state()
-            ws._start()
+            ws.reset_canvas_state()
+            ws.start()
             return
         ws.cart_error = None
-        ws._reset_canvas_state()
+        ws.reset_canvas_state()
         if ws.wm.top_is_player():
-            ws.spine._exit_to_caller()
+            ws.spine.exit_to_caller()
         if row == self.UPDATES:
             ws.open_settings()
             ws.settings_layer.show_row("ota_channel")
@@ -272,8 +272,8 @@ class PauseMenu:
                 ws.run.player.resume()
         elif row == "Restart":
             self.close()
-            ws._reset_canvas_state()
-            ws._start()                   # the same cart from the top, same caller
+            ws.reset_canvas_state()
+            ws.start()                   # the same cart from the top, same caller
         elif row == "Options":
             self.page = 1
             self._host.reset()
@@ -281,8 +281,8 @@ class PauseMenu:
             return
         elif row == "Quit":
             self.close()
-            ws._reset_canvas_state()
-            ws.spine._exit_to_caller()
+            ws.reset_canvas_state()
+            ws.spine.exit_to_caller()
         ws.mark_dirty()
 
     def _unwash_strip(self, cv):
@@ -301,7 +301,7 @@ class PauseMenu:
         if card is not None and card[0] < sx + sw and sx < card[0] + card[2] \
                 and card[1] < sy + sh and sy < card[1] + card[3]:
             return
-        win = ws.wm._wins["projects"]
+        win = ws.wm.windows["projects"]
         cx, cy = win.content_rect()[:2]
         blit(win.buf, cx, cy, sx, sy, sw, sh)
 
@@ -363,7 +363,7 @@ class PauseMenu:
         ws = self.ws
         wm = ws.wm
         if getattr(wm, "mode", None) == "desktop":
-            win = getattr(wm, "_wins", {}).get("desktop")
+            win = getattr(wm, "windows", {}).get("desktop")
             if win is not None and not win.minimized:
                 return win.content_rect()
         cv = ws.sys_canvas
@@ -428,7 +428,7 @@ class PauseMenu:
     def _bar(self):
         """The bar over the paused game, where it shows (`shows_bar`)."""
         if self.shows_bar():
-            self.ws.bar_layer._draw_status_strip("pause")
+            self.ws.bar_layer.draw_status_strip("pause")
 
     def _washed_key(self, cv):
         """What the kept frame washed is a function of: the frame kept, the
@@ -451,7 +451,7 @@ class PauseMenu:
 
     def _over_full(self):
         """Whether the card is over a desk game full screen."""
-        win = getattr(self.ws.wm, "_wins", {}).get("desktop")
+        win = getattr(self.ws.wm, "windows", {}).get("desktop")
         return win is not None and not win.minimized and win.saved is not None
 
     def draw_card(self):
@@ -526,7 +526,7 @@ class PauseMenu:
         if player.notice is not None:
             _ui.info(title, "")
             _ui.rule()
-            _ui.label(str(player._notice_title or ""), _STOP_SENTENCE)
+            _ui.label(str(player.notice_title or ""), _STOP_SENTENCE)
             _ui.label(player.notice, _STOP_WORDS)
         else:
             _ui.info(title, "Stopped")
@@ -709,7 +709,7 @@ class DeleteConfirm:
         if card is not None and card[0] < sx + sw and sx < card[0] + card[2] \
                 and card[1] < sy + sh and sy < card[1] + card[3]:
             return
-        win = ws.wm._wins["projects"]
+        win = ws.wm.windows["projects"]
         cx, cy = win.content_rect()[:2]
         blit(win.buf, cx, cy, sx, sy, sw, sh)
 
@@ -934,7 +934,7 @@ class SystemMenuUI:
         # About's card over the washed content (AboutCard).
         self.ws.mark_dirty()
         self.about.open()
-        self.ws._about = True
+        self.ws.about = True
 
     def _menu_sleep(self):
         # The idle ladder's BLANK rung now: the light goes off and the next
@@ -993,7 +993,7 @@ class SystemMenuUI:
         ws = self.ws
         m = ws.sysmenu
         return (m.open and (m.comp is None or getattr(m.comp, "SCRIM", None) is not None)) \
-            or ws._about or ws.pause.open or ws.confirm.open
+            or ws.about or ws.pause.open or ws.confirm.open
 
     def draw_full(self, dt):
         """The menu on a frame of the whole glass: the scrim, then the card.
@@ -1035,8 +1035,8 @@ class SystemMenuUI:
         WM, the home under it and nothing else, where the home's retained
         frame stays the one before the menu (its close stamps it)."""
         wm = self.ws.wm
-        return (self.ws.sysmenu.open and getattr(wm, "_pop_paint", None) is None
-                and wm._overlay_sig() == 64 and wm.top_is("launcher"))
+        return (self.ws.sysmenu.open and getattr(wm, "pop_paint", None) is None
+                and wm.overlay_sig() == 64 and wm.top_is("launcher"))
 
     def _home_key(self, cv):
         """What the frame under the card is a function of while the home
@@ -1066,7 +1066,7 @@ class SystemMenuUI:
         ABOUT's content, or the system menu's bands."""
         ws = self.ws
         m = ws.sysmenu
-        if m.open and m.comp is not None and not ws._about:
+        if m.open and m.comp is not None and not ws.about:
             if getattr(m.comp, "SCRIM", None) is None:
                 return ()
             lay = ws.layout
@@ -1075,7 +1075,7 @@ class SystemMenuUI:
             if strip is not None and lay.cy < strip[1] < lay.cy + h:
                 h = strip[1] - lay.cy
             return ((lay.cx, lay.cy, lay.cw, h),)
-        if ws._about:
+        if ws.about:
             lay = ws.layout
             return ((lay.cx, lay.cy, lay.cw, lay.ch),)
         return self._scrim_bands()
@@ -1126,10 +1126,10 @@ class SystemMenuUI:
         layout, so the rects are read under it."""
         ws = self.ws
         wm = ws.wm
-        order = getattr(wm, "_order", None)
+        order = getattr(wm, "z_order", None)
         if getattr(wm, "mode", None) != "desktop" or not order or order[-1] != "projects":
             return None
-        win = wm._wins.get("projects")
+        win = wm.windows.get("projects")
         if win is None or win.minimized or win.ctx is None:
             return None
         grid = ws.projects_grid
@@ -1344,7 +1344,7 @@ class AboutCard:
         self.host.reset()
         ws = self.ws
         u = ws.updater
-        v = _about_ui.version_words(u, ws.toggles._ota_channel() if u is not None else None)
+        v = _about_ui.version_words(u, ws.toggles.ota_channel() if u is not None else None)
         b = _about_ui.board_of()
         from settings_layer import BOARDS
         upd = None
@@ -1436,7 +1436,7 @@ class AboutCard:
 
     def close(self):
         ws = self.ws
-        ws._about = False
+        ws.about = False
         self._words = None
         ws.mark_dirty()
 

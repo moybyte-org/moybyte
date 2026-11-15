@@ -41,8 +41,8 @@ def _press(drv, name, frames=2):
 
 
 def _editor(ws, drv):
-    ws._open_workspace(ws.launcher.selected())
-    ws.text._open_menu()
+    ws.open_workspace(ws.launcher.selected())
+    ws.text.open_menu()
     for _ in range(3):
         drv.frame(1 / 30)
 

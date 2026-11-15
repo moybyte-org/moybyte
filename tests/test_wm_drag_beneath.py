@@ -45,7 +45,7 @@ def _desk(tmp_path, beneath, how):
     if how == "look":
         use_theme(ws, "night", "dark")
     ws.home.open_desk()
-    ws.spine.open_app(ws._apps_by_id[beneath])
+    ws.spine.open_app(ws.app(beneath))
     if how == "look":
         _frames(ws, drv)
     ws.open_settings()
@@ -79,8 +79,8 @@ def _uncovered(row_x0, row_x1, cover):
 def test_a_window_beneath_a_drag_shows_its_fresh_render(tmp_path, beneath, how):
     ws, drv = _desk(tmp_path, beneath, how)
     wm = ws.wm
-    under, top = wm._wins[beneath], wm._wins[_DRAGGED]
-    assert wm._order[-1] == _DRAGGED
+    under, top = wm.windows[beneath], wm.windows[_DRAGGED]
+    assert wm.z_order[-1] == _DRAGGED
     cv = ws.sys_canvas
     x_was = top.x
     sx, sy = top.x + top.w // 3, top.y + top.title_h // 2
@@ -102,7 +102,7 @@ def test_a_window_beneath_a_drag_shows_its_fresh_render(tmp_path, beneath, how):
         shown.append((bytes(cv._buf), ext))
     assert top.x == x_was + 12 * 30, "the drag moved the window all the way"
     # The truth: the window beneath rendered afresh, into its own buffer.
-    wm._prewarm(under)
+    wm.prewarm(under)
     ref = bytes(under.buf._buf)
     cx, cy, cw, ch = under.content_rect()
     w = cv.w

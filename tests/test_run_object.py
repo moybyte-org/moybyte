@@ -148,7 +148,7 @@ def test_two_consoles_in_one_process_keep_their_own_runs(tmp_path):
     assert ra is not rb and ra.player is not rb.player
     assert ra.player.run is ra and rb.player.run is rb
     assert rb.cart_start_ms is not None and ra.cart_start_ms is not None
-    lua_a, lua_b = ra.player._lua, rb.player._lua
+    lua_a, lua_b = ra.player.lua, rb.player.lua
     assert lua_a is not lua_b
     seen = []
     for i in range(12):

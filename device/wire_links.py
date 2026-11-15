@@ -171,7 +171,7 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     # the panel's bus, a plain call-through elsewhere.
     try:
         import moy_ota
-        ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)
+        ws.updater = moy_ota.OtaUpdater(ws.with_sd, update_dir=update_dir)
     except Exception as exc:  # noqa: BLE001
         log("boot", "OTA updater unavailable: %s" % exc)
     if ws.updater is not None:

@@ -53,7 +53,7 @@ def _shot(drv):
     last = _pixels(drv.ws)
     same = 0
     for _ in range(600):
-        app = drv.ws.run.player._lua
+        app = drv.ws.run.player.lua
         before = getattr(app, "presented", None)
         _frame(drv)
         now = _pixels(drv.ws)
@@ -81,12 +81,12 @@ def _script(ws):
     for _ in range(3):
         _frame(drv)
     out.append((_surface(ws), _shot(drv)))
-    win = ws.wm._wins["desktop"]
-    ws.wm._resize_window(win, win.w - 120, win.h - 80)
+    win = ws.wm.windows["desktop"]
+    ws.wm.resize_window(win, win.w - 120, win.h - 80)
     out.append((_surface(ws), _shot(drv)))
     ws.look.set_font_scale(3, persist=False)
     out.append((_surface(ws), _shot(drv)))
-    ws.wm._toggle_max(ws.wm._wins["desktop"])
+    ws.wm.toggle_max(ws.wm.windows["desktop"])
     out.append((_surface(ws), _shot(drv)))
     return out
 
@@ -119,15 +119,15 @@ def _install(tier, root):
 
 def _pmem0(ws):
     p = ws.run.player
-    if p.ns.get("pmem") is not None and getattr(p, "_lua", None) is None:
+    if p.ns.get("pmem") is not None and getattr(p, "lua", None) is None:
         return p.ns["pmem"](0)
-    run = getattr(p._lua, "_run", None)
+    run = getattr(p.lua, "_run", None)
     if run is not None and hasattr(run, "pmem"):
         return list(run.pmem()[1])[0]
     import sys
     from array import array
     img = array("i", bytearray(4 * 256))
-    sys.modules[type(p._lua).__module__]._moycore.pmem_image(img)
+    sys.modules[type(p.lua).__module__]._moycore.pmem_image(img)
     return img[0]
 
 
@@ -146,11 +146,11 @@ def _open(tier, base, desk, **kw):
         return None
     ws.look.set_theme("moy", persist=False)
     ws.pointer.visible = False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     if desk:
         ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c["title"] == TITLES[tier])
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     ws.spine.play(ws.launcher_layer)
     if ws.confirm.open:             # a copied app's consent: Open
         act = ws.confirm._act

@@ -132,14 +132,14 @@ def _open(tmp_path, name, src, runtime):
 
 
 def _focus(ws):
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if lua is not None:
         return lua.get_global("FOCUS")
     return ws.run.player.ns["focus"]
 
 
 def _name(ws):
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if lua is not None:
         return lua.get_global("NAME")
     return ws.run.player.ns["name"]
@@ -188,7 +188,7 @@ def test_a_lua_field_types_the_keys(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(DT)
     drv.frame(DT)
-    assert ws.run.player._lua.get_global("NAME") == "wasd"
+    assert ws.run.player.lua.get_global("NAME") == "wasd"
     assert _focus(ws) == "Name"
 
 
@@ -288,7 +288,7 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
     it left gets its text back, the one it reaches keeps its own, and an
     edit there cancels to that."""
     ws, drv = _open(tmp_path, "Two Fields", LUA_TWO, "lua")
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     assert _focus(ws) == "Second"
     _type(drv, "x")
     _mic(ws, drv)
@@ -309,14 +309,14 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
 # names where the app keeps it.
 
 def _files_rename(ws):
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place("documents")
     app._act("NAME", "notes")
     return lambda: app.rename_text
 
 
 def _appearance_name(ws):
-    app = ws.appearance_app
+    app = ws.app("appearance")
     app._open_name()
     app.name_text = "bubble"
     app._damage.all()
@@ -324,7 +324,7 @@ def _appearance_name(ws):
 
 
 def _storybook_rename(ws):
-    app = ws.storybook_app
+    app = ws.app("storybook")
     app.typed = "Mine"
     app.asking = "rename"
     app._damage.all()
@@ -332,7 +332,7 @@ def _storybook_rename(ws):
 
 
 def _myart_rename(ws):
-    app = ws.myart_app
+    app = ws.app("myart")
     app._verb("rename", "kite")
     return lambda: app.renaming[1]
 
@@ -350,7 +350,7 @@ def test_mic_cancels_a_shell_apps_field(tmp_path, app_id):
                         moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64), carts)
     ws = host_app.build_workstation(carts)
     drv = host_app.ConsoleDriver(ws)
-    ws.spine.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws.app(app_id))
     for _ in range(3):
         drv.frame(DT)
     draft = SHELL_FIELDS[app_id](ws)

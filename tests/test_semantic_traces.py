@@ -2731,7 +2731,7 @@ def _app_roles_trace(tmp_path, lua):
         ws.input.begin_frame()
         ws.frame(1.0 / 30.0)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    trace = (ws.run.player._lua.get_global("TRACE") if lua
+    trace = (ws.run.player.lua.get_global("TRACE") if lua
              else ws.run.player.ns["TRACE"])
     return trace.split("\n"), ws.look.theme_name
 
@@ -2761,7 +2761,7 @@ def roles_trace(ws):
     if ws.run.player.cart_error is not None:
         print("T ERROR " + str(ws.run.player.cart_error))
         return
-    for line in ws.run.player._lua.get_global("TRACE").split("\n"):
+    for line in ws.run.player.lua.get_global("TRACE").split("\n"):
         print("T " + line)
     print("T theme " + ws.look.theme_name)
 '''

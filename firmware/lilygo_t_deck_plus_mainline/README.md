@@ -774,7 +774,7 @@ Every one of these was learned by hanging or bricking a board.
   (`native/moy_flush/moy_flush.h`), which stops the feeder queuing bands and
   lets the queued ones finish before the radio's command goes out.
   The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
-  `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
+  `cover.png` off `/sd` on idle frames through `ws.with_sd`, like every other
   store read (`tests/test_cover_pipeline.py` pins the gate).
   Worth being honest about the size of this risk rather than repeating the
   folklore: what the boards rule records as having actually hung boards is

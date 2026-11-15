@@ -91,7 +91,7 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     # keeps a writable store on internal flash, and an updater that went on
     # bracketing the SD bus and staging onto /sd/update would be aimed at a
     # card that is not there.
-    assert "ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)" in runtime
+    assert "ws.updater = moy_ota.OtaUpdater(ws.with_sd, update_dir=update_dir)" in runtime
     assert "(None if self.on_sd else FLASH_UPDATE_DIR)" in runtime
     assert "ws.updater.mark_valid()" not in runtime
 
@@ -129,7 +129,7 @@ def test_micropython_native_sd_shares_display_spi_host():
     # The SD session is wrapped so it drains any in-flight panel DMA first (the
     # double-buffer SD-vs-panel mutual exclusion), but still delegates to the
     # native live-mount path.
-    assert "_ws._with_sd = store.session" in runtime
+    assert "_ws.with_sd = store.session" in runtime
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
     # can_manage defaults to "the store root is known" inside the shared
     # console.wire_workstation_core (the runtime hands it carts_root).

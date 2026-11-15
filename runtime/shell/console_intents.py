@@ -62,7 +62,7 @@ class Intents:
     def _intent_app(self, cart):
         """The registered app whose identity `cart` is, else None."""
         ws = self.ws
-        for app in ws._apps:
+        for app in ws.app_layers:
             if app.is_app(cart):
                 return app
         return None
