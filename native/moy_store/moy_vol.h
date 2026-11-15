@@ -269,9 +269,11 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
 // caller takes it weak.
 int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg);
 //
-// moy_store_tick is called at every open and every listing: on a board it
+// moy_store_tick is called at every open and every listing, every card block
+// read or written and every internal-flash read, program or erase: on a board it
 // feeds the kernel's task watchdog when the frame loop has armed it, so a
-// long store call (a seed, a scan, a pack, a big load) is never a hang.
+// long store call (a seed, a scan, a pack, a big load, a restore onto
+// flash) is never a hang.
 void moy_store_tick(void);
 void *moy_store_alloc(size_t n);
 void *moy_store_keep(size_t n);

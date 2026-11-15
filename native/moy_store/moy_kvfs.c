@@ -44,6 +44,7 @@
 
 #if MOY_KVFS_FLASH
 #include "esp_partition.h"
+#include "moy_vol.h"
 #endif
 #include "extmod/vfs.h"
 #include "lib/littlefs/lfs2.h"
@@ -84,6 +85,7 @@ static kvol_t *s_kv;
 static int kv_read(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off, void *buf,
                    lfs2_size_t n) {
     const kvol_t *k = c->context;
+    moy_store_tick();
     return esp_partition_read(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
@@ -111,12 +113,14 @@ static int kv_prog(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off,
                    const void *buf, lfs2_size_t n) {
     const kvol_t *k = c->context;
     kv_quiet();
+    moy_store_tick();
     return esp_partition_write(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
 static int kv_erase(const struct lfs2_config *c, lfs2_block_t b) {
     const kvol_t *k = c->context;
     kv_quiet();
+    moy_store_tick();
     return esp_partition_erase_range(k->part, b * c->block_size, c->block_size) == ESP_OK
            ? 0 : LFS2_ERR_IO;
 }
