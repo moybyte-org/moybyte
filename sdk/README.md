@@ -99,14 +99,16 @@ standing only where it lists the reason.
   (a manifest of type `app`) and a WASI app (type `app` with `"wasi": true`,
   `runtime/run/wasi_run.py`), every `ui` row under app.h's name and
   signature, answered inline by the toolkit the app links (for WASI the same
-  sources built for wasm32 by `tools/wasm_cart.py`'s `libmoyui`, the four
+  sources built for wasm32 by `tools/wasm_cart.py`'s `libmoyui`, the five
   rows its `moybyte.os` imports):
   `src/moyui_link.c` and `native/moy_ui` with its RUN face, built into
   `libmoyui.a` (`tools/elf_cart.py`'s `libmoyui`, libmoy at RGB565 in it),
   which an app's module links before `libmoyos.a`. `moy_ui_link_frame`
   takes the frame and pulls the console's theme where it moved (the
-  `moy_ui_pull` and `moy_ui_font_pull` rows), the rows draw on the app's
-  own canvas, and `moy_ui_link_show` presents it, RGB565. An app that
+  `moy_ui_pull` and `moy_ui_font_pull` rows) and hands the console's
+  asks (cancel, back) to the copy, the rows draw on the app's own canvas,
+  and `moy_ui_link_show` tells the console what the copy would answer next
+  (the `moy_ui_tell` row) and presents the canvas, RGB565. An app that
   defines `_layout(w, h, fs)` (declared weak and exported here) is
   responsive: `moy_ui_link_frame` calls it when the frame's layout words
   move (`docs/app_api_v1.md` §3).

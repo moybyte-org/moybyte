@@ -1,4 +1,5 @@
-"""The dev channel's link words: `link`, `web`, `recv` and the tier-1
+"""The dev channel's link words: `link`, `web`, `recv`, the store's
+`backup` and `restore` (runtime/carts/moy_backup.py), and the tier-1
 sideload lines `moy?`, `moy-put`, `moy-del`, `moy-rescan` and `moy-run` (see
 runtime/boot/devch_input.py for the shape of a word). `recv` and `moy-put` leave
 the line discipline, so the byte readers they hand the stream to stay the
@@ -17,11 +18,11 @@ def link(chan, ws, parts, line):
         return
     action = parts[1] if len(parts) > 1 else ""
     if action == "on":
-        ws.wifi_hold("link")
+        ws.spine.wifi_hold("link")
         lk.start()
     elif action == "off":
         lk.stop()
-        ws.wifi_release("link")
+        ws.spine.wifi_release("link")
     elif action == "rate" and len(parts) > 2:
         lk.rate_force = int(parts[2]) if parts[2] in ("30", "60") else None
     elif action == "check" and len(parts) > 2:
@@ -64,9 +65,9 @@ def web(chan, ws, parts, line):
             print("WEB no service")
         else:
             if not wh.serving and not getattr(wh, "joining", False):
-                ws.toggle_webhost()
+                ws.web.toggle()
             _settle(wh)
-            url = ws.web_console_url() or wh.url()
+            url = ws.web.url() or wh.url()
             print("WEB %s %s" % (url, wh.error or ""))
     except Exception as exc:  # noqa: BLE001
         print("WEB ERR %s: %s" % (type(exc).__name__, exc))
@@ -82,5 +83,40 @@ def moy(chan, ws, parts, line):
     return chan._moy(ws, parts[0], parts, line) or False
 
 
-WORDS = {"link": link, "web": web, "recv": recv, "moy?": moy, "moy-put": moy,
-         "moy-del": moy, "moy-rescan": moy, "moy-run": moy}
+def backup(chan, ws, parts, line):
+    # `backup` writes the store's archive into the user files' Backups/ and
+    # names it: `REMOTE backup <path> <files>` (tools/console_backup.py reads it).
+    root = getattr(ws, "carts_root", None)
+    if root is None:
+        print("REMOTE backup: no store")
+        return
+    import moy_backup
+    try:
+        path, n = moy_backup.archive(root)
+    except (OSError, MemoryError) as exc:
+        print("REMOTE backup: failed %r" % (exc,))
+        return
+    print("REMOTE backup %s %d" % (path, n))
+
+
+def restore(chan, ws, parts, line):
+    # `restore <path>`: the archive at `path` on the console restored into its
+    # store, then the shelf read again.
+    root = getattr(ws, "carts_root", None)
+    if root is None or len(parts) < 2:
+        print("REMOTE restore: needs a store and an archive's path")
+        return
+    import moy_backup
+    try:
+        n = moy_backup.restore(line.split(None, 1)[1].strip(), root)
+    except (OSError, ValueError, MemoryError) as exc:
+        print("REMOTE restore: failed %r" % (exc,))
+        return
+    print("REMOTE restore %d" % n)
+    rescan = getattr(getattr(ws, "carts", None), "synced", None)
+    if rescan is not None:
+        rescan()
+
+
+WORDS = {"link": link, "web": web, "recv": recv, "backup": backup, "restore": restore,
+         "moy?": moy, "moy-put": moy, "moy-del": moy, "moy-rescan": moy, "moy-run": moy}

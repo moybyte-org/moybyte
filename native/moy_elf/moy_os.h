@@ -220,8 +220,13 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 // font scale), whether the console's RGB565 words are byte-swapped (its canvas's swapped565), the rect its ui frame lies
 // in, its content_rect() (x, y, w, h: the screen less the host's bars), and
 // the surface a responsive app lays out for, its `_layout`'s (w, h, fs): the
-// window's or the screen's size and the font scale (0, 0, 0 for a game).
-#define MOY_OS_FRAME_IN 13
+// window's or the screen's size and the font scale (0, 0, 0 for a game);
+// then the frame's steps beyond its presses (moy_ui_api.h's MOY_UI_IN_REP,
+// a held direction's repeats and the trackball's steps, and MOY_UI_IN_KEYREP,
+// a held key's typing repeats) and the console's asks of the toolkit the app
+// links, MOY_OS_ASK_* (its cancel and its back, which the app's last
+// moy_ui_tell said it would take: moy_screen_slot.h, THE TOOLKIT'S ANSWERS).
+#define MOY_OS_FRAME_IN 16
 #define MOY_OS_FRAME_IN_X 0
 #define MOY_OS_FRAME_IN_Y 1
 #define MOY_OS_FRAME_IN_PTR 2
@@ -235,6 +240,17 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 #define MOY_OS_FRAME_IN_LAYOUT_W 10
 #define MOY_OS_FRAME_IN_LAYOUT_H 11
 #define MOY_OS_FRAME_IN_LAYOUT_FS 12
+#define MOY_OS_FRAME_IN_REP 13
+#define MOY_OS_FRAME_IN_KEYREP 14
+#define MOY_OS_FRAME_IN_ASK 15
+#define MOY_OS_ASK_CANCEL 1
+#define MOY_OS_ASK_BACK 2
+// moy_ui_tell's answers: a field in focus (the keyboard types), a cancel
+// the toolkit would take (an edit in progress, else a popover open), a back
+// it would take.
+#define MOY_OS_TOLD_TYPING 1
+#define MOY_OS_TOLD_CANCEL 2
+#define MOY_OS_TOLD_BACK 4
 int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
                       uint32_t max_us, const int32_t *in, int n_in);
 // Game `pid`'s frame, w x h pixels of `depth` bytes, for the game's life (a

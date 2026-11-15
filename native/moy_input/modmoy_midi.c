@@ -1,6 +1,6 @@
 // moy_midi's MicroPython binding: the `midi` device API's driver (moy_midi.h)
 // as the module `moy_midi`, its names those face.json lists: the row here is
-// the hand one, the rest are generated into modmoy_midi_face.c. A refusal is
+// the hand one, the rest are generated into modmoy_midi_face.h. A refusal is
 // a negative errno, which the face (runtime/system/dev_midi.py) raises.
 //
 //   open(owner) close(owner) sweep(owner) owner() source()
@@ -15,7 +15,7 @@
 
 #include "moy_midi.h"
 
-#include "modmoy_midi_face.c"
+#include "modmoy_midi_face.h"
 
 static uint32_t u32(mp_obj_t o) {
     return (uint32_t)mp_obj_get_int(o);

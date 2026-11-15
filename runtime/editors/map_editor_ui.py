@@ -225,7 +225,7 @@ class MapEditorUI:
         return True
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws.relayout on
         a font-scale change AND by EditorApp.set_tab on every entry into the tab
         (#216). Re-clamps the zoom index + camera, since the reflowed view may have
         a different zoom list / visible span; the OVERVIEW rung is carried by NAME
@@ -245,7 +245,7 @@ class MapEditorUI:
         """Build the MapEditor over the cart's TileMap + sheet (both always exist
         after Workstation.open()). Edits go into the Editor's tilemap, which a
         run copies at its start and at Play (`ProjectStore.play_world`, E-02). Called from
-        Workstation.set_menu_view("map")."""
+        Text.set_menu_view("map")."""
         ws = self.ws
         if self.mapedit is None and ws.run.project.tilemap is not None and ws.run.project.sheet is not None:
             self.mapedit = MapEditor(ws.run.project.tilemap, ws.run.project.sheet)
@@ -253,11 +253,11 @@ class MapEditorUI:
     def reset(self):
         """Drop the active editor (a stale one must never leak into an unrelated
         cart or back to the launcher). Called from Workstation.open() (switching
-        carts) and Workstation.go_home()."""
+        carts) and Home.go_home()."""
         self.mapedit = None
 
     def on_open(self):
-        """Reset gesture/zoom state (#37) -- called from Workstation._open_map,
+        """Reset gesture/zoom state (#37) -- called from Text._open_map,
         before set_menu_view("map") (re)builds the editor."""
         self.map_erase = False
         self.map_zoom = 0              # the 8px field-size rung (#37 follow-up)
@@ -273,7 +273,7 @@ class MapEditorUI:
 
     def at_top(self):
         """The map's camera on its top row and no popover open: an up goes
-        on to the bar (Workstation._bar_keys)."""
+        on to the bar (InputRouter._bar_keys)."""
         me = self.mapedit
         page = self._page if self.layout.verbs else None
         return me is not None and me.cam_y <= 0 and (page is None or page.pop is None)
@@ -281,7 +281,7 @@ class MapEditorUI:
     def _map_input(self):
         """The d-pad pans the visible map window (the grid is bigger than the
         screen); B leaves (#37). Painting stays pointer/touch-driven. Called from
-        Workstation.handle_input's menu_view == "map" branch."""
+        InputRouter.handle_input's menu_view == "map" branch."""
         ws = self.ws
         i = ws.input
         me = self.mapedit
@@ -289,13 +289,13 @@ class MapEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.pop = None
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
         if me is not None:
             if i.steps("up"):
                 self._map_pan(0, -1)
@@ -307,7 +307,7 @@ class MapEditorUI:
                 self._map_pan(1, 0)
             if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                 self._map_cycle_zoom()
-        ws._leave_or_home(ws.exit)
+        ws.home.leave_or_home(ws.spine.exit)
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,

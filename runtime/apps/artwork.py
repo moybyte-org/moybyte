@@ -39,7 +39,6 @@ from moy_store_base import builtin_name, COVER_FILE
 from file_widgets import Bitmap
 from app_context import NO_STORE
 from picture_copies import PictureCopies
-from moyimg import cover_stream
 
 try:
     import moy_gfx as _gfx
@@ -105,19 +104,14 @@ def picture_size(blob):
 def read_cover(blob, dst, dw, dh):
     """Drawing `blob` read into `dst` (dw * dh indices) a row at a time,
     cropped about its centre to dw:dh and sampled nearest -- the picture
-    decoder the backdrop reads with (native/moy_store/moy_img.h, whose
-    reference is `moyimg.cover_stream`), so a 1024 x 600 drawing never stands
+    decoder the backdrop reads with (native/moy_store/moy_img.h,
+    `moy_ufiles.cover_image`), so a 1024 x 600 drawing never stands
     whole in memory. Its (w, h), or None when it is not a picture."""
-    if not blob:
+    if not blob or _uf is None:
         return None
     raw = blob.encode() if isinstance(blob, str) else blob
     f = _io.BytesIO(raw)
-    if _uf is not None:
-        try:
-            return _uf.cover_image(f, dst, dw, dh, DESK_W, DESK_H)
-        except (AttributeError, ImportError):
-            f.seek(0)
-    return cover_stream(f, dst, dw, dh, DESK_W, DESK_H)
+    return _uf.cover_image(f, dst, dw, dh, DESK_W, DESK_H)
 
 
 def _invalidate_bitmap(img):

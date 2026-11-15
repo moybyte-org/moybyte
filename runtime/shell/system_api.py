@@ -110,7 +110,7 @@ because they are not capabilities -- they are how an app draws.
 
   * `ui` is `runtime/toolkit/ui.py`, the public UI API (docs/ui_api_2026-10.md): its
     verbs and rect algebra, the calls a Lua cart and a compiled app make. The
-    Player begins each frame of them (`Player._ui_begin`). It imports
+    Player begins each frame of them (`AppFace.begin`). It imports
     nothing from the shell.
   * `screen()` returns the canvas the cart is drawing on. It is the SAME
     surface the kid API's `rect`/`print` already write to, so it grants no

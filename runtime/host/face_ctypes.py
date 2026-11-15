@@ -7,11 +7,25 @@ tuple; every face's `_lib()` is this."""
 
 import ctypes
 import os
+import sys
 
 import host_native
 
 _LIB = [None]
 _BOUND = set()
+
+
+def _ticks_ms():
+    """The console's tick clock, which a test may hold (moybyte._ticks_ms)."""
+    m = sys.modules.get("moybyte")
+    if m is None:
+        import ticks as m
+    return int(m._ticks_ms()) & 0xFFFFFFFFFFFFFFFF
+
+
+# The kernel's timers read the console's tick clock on the host
+# (moy_evq_clock_source), as the Python registry's deadlines did.
+_CLOCK = ctypes.CFUNCTYPE(ctypes.c_uint64)(_ticks_ms)
 
 
 def library():
@@ -20,7 +34,11 @@ def library():
         path = host_native.build()
         if path is None:
             raise ImportError("the host's native modules need a C compiler")
-        _LIB[0] = ctypes.CDLL(path)
+        d = ctypes.CDLL(path)
+        d.moy_evq_clock_source.argtypes = [ctypes.c_void_p]
+        d.moy_evq_clock_source.restype = None
+        d.moy_evq_clock_source(ctypes.cast(_CLOCK, ctypes.c_void_p))
+        _LIB[0] = d
     return _LIB[0]
 
 

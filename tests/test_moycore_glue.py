@@ -489,20 +489,27 @@ class MinimalInput:
         return name in self._pressed
 
 
-class FakePlayer:
-    """The Player's `ui_room()`: None, a game's whole canvas, unless a test
-    sets an app's content_rect; and its `ui_face()`, a game's 0 unless a test
-    sets one."""
+class FakeFace:
+    """The Player's app face: its `ui_room()`, None, a game's whole canvas,
+    unless a test sets an app's content_rect; and its `ui_face()`, a game's
+    0 unless a test sets one."""
 
     def __init__(self):
         self.room = None
-        self.face = 0
+        self.word = 0
 
     def ui_room(self):
         return self.room
 
     def ui_face(self):
-        return self.face
+        return self.word
+
+
+class FakePlayer:
+    """The Player, as the glue reads it: its app face."""
+
+    def __init__(self):
+        self.face = FakeFace()
 
 
 class FakeRun:
@@ -532,7 +539,9 @@ class FakeWs:
                            project, start)
         self.input = inp if inp is not None else FakeInput()
         if pmem is not None:
-            self.pmem = pmem
+            if self.run.project is None:
+                self.run.project = types.SimpleNamespace()
+            self.run.project.pmem = pmem
 
 
 class NsSession:
@@ -1018,12 +1027,11 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
 
     w.run()
     # Fields, a metamethod and the prelude's own functions, not handles: a
-    # layer's id, canvas and edited mark, an image's id, and the `moybyte`
-    # table's fire, event and grant, which the console's chunks call. And the layer and scene natives are the RUNTIME's
+    # layer's id, canvas and edited mark, an image's id, and the window
+    # events' entry, which the console calls (moycore.call). And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index",
-              "__moybyte_fire", "__moybyte_event", "__moybyte_grant"}
+    fields = {"__id", "__img", "__c", "__e", "__index", "__moybyte_event"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
@@ -1031,7 +1039,9 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     gated = {n for n in wanted
              if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
     assert gated, "the editor handles vanished from the prelude"
-    got = {n for n in w.core.registered if n.startswith("__")}
+    # `__moybyte_call` is the run's `moybyte` table's, which its C takes
+    # (moycore.own, native/moycore/moycore_moybyte.h), never the prelude's.
+    got = {n for n in w.core.registered if n.startswith("__")} - {"__moybyte_call"}
     assert wanted - gated == got, "an UNGATED handle is missing"
 
 
@@ -1372,23 +1382,23 @@ def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
     room = [C_CONSTS["SNAP_ROOM_" + k] for k in "XYWH"]
-    ws.run.player.room = (0, 18, 320, 222)
+    ws.run.player.face.room = (0, 18, 320, 222)
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 18, 320, 222]
-    ws.run.player.room = None
+    ws.run.player.face.room = None
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 0, 0, 0]
 
 
 def test_the_ui_face_crosses_whole(w):
     """The Player's ui_face() is the snapshot's face word as it is: the RUN
-    face reads its bits and its font scale (moy_ui_wasm.h)."""
+    face reads its bits and its font scale (moy_ui_run.h)."""
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
-    ws.run.player.face = 1 | 2 | 4 | 3 << 8
+    ws.run.player.face.word = 1 | 2 | 4 | 3 << 8
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 1 | 2 | 4 | 3 << 8
-    ws.run.player.face = 0
+    ws.run.player.face.word = 0
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 0
 
@@ -1734,7 +1744,7 @@ def test_a_failing_pmem_write_still_closes_the_vm(w):
             raise KeyboardInterrupt
 
     run = w.run(ws=FakeWs(pmem=FakePmem()))
-    run.ws.pmem = Exploding()
+    run.ws.run.project.pmem = Exploding()
     with pytest.raises(KeyboardInterrupt):
         run.close()
     assert w.core.closes == 1
@@ -1926,7 +1936,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
-        ws._with_sd = lambda fn: fn()
+        ws.with_sd = lambda fn: fn()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
@@ -2292,7 +2302,7 @@ def test_the_runtime_reports_the_carts_footprint_by_the_engines_rule(tmp_path):
         engine = _Engine(world)
         gated = []
         ws = FakeWs(project=_CartProject(cart))
-        ws._with_sd = lambda fn: gated.append(fn) or fn()
+        ws.with_sd = lambda fn: gated.append(fn) or fn()
         rt = world.mod.make_wasm_runtime(ws)
         assert rt.footprint(cart) == (3 * 65536 + 3, 3 * 65536)
         assert engine.asked == [(3 * 65536, len(b"aot"))]
@@ -2678,8 +2688,8 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
 
 
 def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
-    """The scheduler's compiled-service contract (runtime/system/scheduler.py,
-    COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
+    """The scheduler's compiled-service contract
+    (runtime/system/sched_compiled.py, COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
     has: the module for this console where the cart carries one, main.wasm
     on the interpreter where it is refused."""
     world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])

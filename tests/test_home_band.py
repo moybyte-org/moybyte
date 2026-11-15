@@ -79,15 +79,15 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         ws.look.set_theme(theme, persist=False)
         ws.look.select_wallpaper(None, persist=False)
     if tier == "desk":
-        ws.open_library()
+        ws.home.open_library()
     else:
-        ws.go_home()
-    ws.set_home_arrangement(arrangement)
-    ws.set_home_tab(tab)                   # Mine: the made carts, "+ New" first
+        ws.home.go_home()
+    ws.home.set_home_arrangement(arrangement)
+    ws.home.set_home_tab(tab)                   # Mine: the made carts, "+ New" first
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     if cursor:                             # the cursor over the band: the one overdraw
@@ -95,10 +95,10 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         ws.pointer.visible = True
         ws.pointer.x, ws.pointer.y = bx + bw // 3, by + bh // 3
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas if tier == "desk" else ws.sys_canvas
+    root = ws.wm.root_canvas if tier == "desk" else ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.wallpaper.restore_key(True)[0] == {"moy": "bg", "blocks": "bd",
                                                   "picture": "pic"}[theme]
@@ -118,7 +118,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         return held[-1]
 
     for _ in range(40):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     if not ref:                            # the faces an idle second draws
         for _ in range(4):
@@ -357,7 +357,7 @@ def test_kept_faces_are_released(tmp_path, monkeypatch):
     assert frame() is not None
     assert g.faces_bytes() > 0
     lay = g._face_lay
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     assert g._face_lay is None and len(lay._buf) == 2   # (the released view)
 
 
@@ -493,7 +493,7 @@ def test_a_steps_lagging_buffer_is_paid_on_an_idle_frame(tmp_path, monkeypatch):
     drv.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 1
     assert layer._debt_owed + 1 == ws.frame_state.frames_drawn
-    assert not ws._frame_requested
+    assert not ws.frame_requested
     drew = list(ws.launcher.floor)
     assert drew and not ws.launcher.copied
     for _ in range(6):

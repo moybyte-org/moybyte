@@ -157,7 +157,7 @@ BATCH6_SRAM = 72 + 48
 # Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
 # its first use: the per-verb profiler's counters (native/moycore/
 # moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
-# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# shape scratch (native/moy_ui/moy_ui_run.c, 1236, made while a compiled
 # app's theme names another shape) and the dev channel's `state` line while a
 # run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
 # heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
@@ -472,7 +472,7 @@ def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     HOME key shows the desktop and brings the windows back."""
     before = board.state().get("order")
     assert before, "no window open to park"
-    board.pyexec("ws.open_library()", strict=True)
+    board.pyexec("ws.home.open_library()", strict=True)
     st = board._settle(lambda s: s.get("desk") is False, 0.5)
     assert st.get("stack") == ["launcher"], st.get("stack")
     assert not st.get("order") and st.get("parked") == before, st
@@ -483,12 +483,12 @@ def test_play_parks_the_windows_and_the_back_brings_them_back(board):
     assert st.get("order") == before and not st.get("parked"), st
     # The HOME key on the desk minimises every window and closes none; HOME
     # again brings them back (owner, 2026-10-13).
-    mins = "[ws.wm._wins[k].minimized for k in ws.wm._order]"
-    board.pyexec("ws.home_key()", strict=True)
+    mins = "[ws.wm.windows[k].minimized for k in ws.wm.z_order]"
+    board.pyexec("ws.home.home_key()", strict=True)
     board.drain(0.5)
     assert board.pyval(mins, strict=True) == [True] * len(before)
     assert board.state().get("order") == before
-    board.pyexec("ws.home_key()", strict=True)
+    board.pyexec("ws.home.home_key()", strict=True)
     board.drain(0.5)
     assert board.pyval(mins, strict=True) == [False] * len(before)
 
@@ -565,6 +565,10 @@ def test_the_scheduler_stops_a_runaway_service(board):
 
 def test_a_lua_service_runs_on_a_task_of_its_own(board):
     on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
+
+
+def test_a_lua_app_s_every_runs_beside_a_python_app_s(board):
+    on_glass.a_lua_app_s_every_runs_beside_a_python_app_s(board)
 
 
 def test_an_asyncio_service_runs_beside_the_desk(board):
@@ -663,8 +667,8 @@ def test_window_chrome_freezes_during_a_content_scroll(board):
     ctop = w[1] + 1 + w[4]
     board.swipe_async(cx, ctop + (w[3] - w[4]) - 40, cx, ctop + 40, frames=200)
     board.drain(1.5)                     # let the streak reach both buffers
-    quiet = board.pyval("ws.wm._chrome_quiet")
-    streak = board.pyval("ws.wm._wins['settings']._chrome_streak")
+    quiet = board.pyval("ws.wm.chrome_quiet")
+    streak = board.pyval("ws.wm.windows['settings']._chrome_streak")
     board.wait_line("swipe done", 30)
     assert quiet is True, "the scroll frame never went quiet"
     assert (streak or 0) >= 2, "chrome never froze (streak=%s)" % (streak,)
@@ -690,7 +694,7 @@ def test_the_wm_meters_answer_for_the_frame_they_measured(board):
 
 def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
     """The two invariants this board's UI perf now rests on, asserted on the real
-    console via ws.note_cost (reported in `state` as "costs").
+    console via ws.perf.note_cost (reported in `state` as "costs").
 
     Both were bugs found the slow way on 2026-07-26, each costing a day because
     neither produced any signal -- they just made two frames per gesture 5x
@@ -708,7 +712,7 @@ def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
     Counted on the build/read side only, so this net costs nothing when healthy."""
     board.open("projects")
     board.drain(16.0)                    # let the idle prefetch finish the store
-    g = board.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+    g = board.pyval("ws.wm.windows['projects'].ctx.layout.lib_grid")
     assert g is not None, "the projects window did not open"
     w = board.state()["wins"]["projects"]
     ox, oy = w[0] + 1, w[1] + 1 + w[4]
@@ -881,7 +885,7 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     board.pyexec("import os\n"
                  "os.remove(ws.updater._pending_path())\n"
                  "ws.updater.boot_verdict = None\n"
-                 "ws._notice = None\n")
+                 "ws.notice_up = None\n")
     assert "pending.json" not in board.pyval(
         "__import__('os').listdir(ws.updater.update_dir)")
 
@@ -904,7 +908,7 @@ def test_a_lua_cart_runs_and_exits(board):
 
 
 def test_a_cart_runs_and_exits(board):
-    """The desk tier's door: ws.exit() out, not the cart-quit flag. A `run`
+    """The desk tier's door: ws.spine.exit() out, not the cart-quit flag. A `run`
     from the tour's projects arrangement opens the cart under it, where the
     first draft's cart-quit exit did not pop -- so this board pins the launch
     and the shell's own close, while the fullscreen tiers pin the kid-facing

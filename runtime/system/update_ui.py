@@ -10,7 +10,7 @@
 
 It is KERNEL CHROME, not an app (owner decision 2026-11-01): it drives the
 updater, firmware update is not a role (docs/app_api_v1.md), so it keeps the
-console like the About card in console_notices and takes no AppContext.
+console like the About card in shell_cards and takes no AppContext.
 
 The split follows the same discipline as the console's other sub-UIs:
   * The update *queries* + channel config -- Workstation._update_available /
@@ -26,9 +26,9 @@ The split follows the same discipline as the console's other sub-UIs:
 
 Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
-  * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
-                             ws.go_home,
-                             ws._mini_btn, ws._ota_channel
+  * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws.frame_state.dirty,
+                             ws.home.go_home,
+                             ws.mini_btn, ws.toggles.ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
                              begin_download/download_step/reset). This is the one
@@ -79,7 +79,7 @@ class UpdateUI:
         """Open the firmware-update screen: scan SD for an image to install. Lands on
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         u = self.ws.updater
@@ -104,7 +104,7 @@ class UpdateUI:
         the link's dial is polled there a frame at a time, so the screen keeps
         drawing and B cancels it."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         self._online_manifest = None
@@ -114,7 +114,7 @@ class UpdateUI:
             return
         if self._boot_verdict_phase():
             return
-        self.ws.wifi_hold("update")            # the radio lease: _exit_update lets go
+        self.ws.spine.wifi_hold("update")            # the radio lease: _exit_update lets go
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
 
@@ -124,14 +124,14 @@ class UpdateUI:
         this is capability-gated on it). check -> confirm -> download -> flash
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         self._upd_bin = None
         self._upd_msg = ""
         if getattr(self.ws, "c6_updater", None) is None:
             self._upd_phase = "error"
             self._upd_msg = "no c6 updater"
             return
-        self.ws.wifi_hold("update")            # the same lease: the manifest rides the link
+        self.ws.spine.wifi_hold("update")            # the same lease: the manifest rides the link
         self._check_armed = False              # CHECKING... paints first
         self._upd_phase = "c6_checking"
 
@@ -160,7 +160,7 @@ class UpdateUI:
         u = self.ws.updater
         if u is None or not self._online_manifest:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         try:
             u.begin_download(self._online_manifest)
             self._upd_phase = "downloading"
@@ -188,9 +188,9 @@ class UpdateUI:
                 cu.cancel()
             except Exception:
                 pass
-        self.ws.wifi_release("update")        # the screen was the radio's reason
+        self.ws.spine.wifi_release("update")        # the screen was the radio's reason
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _in_slot(self):
         """True when the image is already in the inactive slot (streamed there and
@@ -204,7 +204,7 @@ class UpdateUI:
         u = self.ws.updater
         if u is None or not self._upd_bin:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if self._in_slot():
             if u.finish():
                 self._upd_phase = "done"
@@ -225,7 +225,7 @@ class UpdateUI:
         if i.pressed("home") or i.pressed("stop"):
             if ph != "done":                   # "done" is past the point of no return
                 self._exit_update()
-                self.ws.home_key()
+                self.ws.home.home_key()
             return
         if ph == "confirm":
             if i.pressed("a") or i.pressed("run"):
@@ -274,7 +274,7 @@ class UpdateUI:
         cu = getattr(self.ws, "c6_updater", None)
         if cu is None or not cu.offer:
             return
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         try:
             cu.begin_download()
             self._upd_phase = "c6_downloading"
@@ -297,7 +297,7 @@ class UpdateUI:
             if not self._check_armed:
                 self._check_armed = True
                 return
-            verdict = cu.check(self.ws._ota_channel())
+            verdict = cu.check(self.ws.toggles.ota_channel())
             if verdict == "pending":
                 return                         # the link is dialled: ask next frame
             if verdict == "offer":
@@ -370,7 +370,7 @@ class UpdateUI:
                 self._upd_phase = "error"
                 self._upd_msg = "no updater"
                 return
-            ch = self.ws._ota_channel()
+            ch = self.ws.toggles.ota_channel()
             manifest = u.check_online(ch)      # connect (saved creds) + GET the manifest
             if u.error:
                 self._upd_phase = "error"
@@ -496,7 +496,7 @@ class UpdateUI:
         phase = self._upd_phase
         if phase == "checking":
             say("CHECKING ONLINE...", th["accent"])
-            beta = self.ws._ota_channel() == "unstable"
+            beta = self.ws.toggles.ota_channel() == "unstable"
             say("channel: %s" % ("BETA" if beta else "STABLE"),
                        NAMES["orange"] if beta else th["play"])
             say("running: %s %s" % (slot, vlabel), th["ink_dim"])
@@ -504,7 +504,7 @@ class UpdateUI:
                 say("joining WiFi" + _dots(), th["ink"])
             say("B = BACK", th["accent"])
         elif phase == "nopublish":
-            beta = self.ws._ota_channel() == "unstable"
+            beta = self.ws.toggles.ota_channel() == "unstable"
             say("NOTHING NEW YET", th["play"])
             say("no %s build for" % ("BETA" if beta else "STABLE"),
                        th["ink"])
@@ -530,7 +530,7 @@ class UpdateUI:
             newv = int(m.get("version", 0) or 0)
             kb = int(m.get("size", 0) or 0) // 1024
             run_ch = u.channel() if u is not None else "stable"
-            tgt_ch = m.get("channel") or self.ws._ota_channel()
+            tgt_ch = m.get("channel") or self.ws.toggles.ota_channel()
             label = str(m.get("label") or ("v%d" % newv))
             switch = tgt_ch != run_ch
             beta = tgt_ch == "unstable"
@@ -675,5 +675,5 @@ class UpdateUI:
                 _ui.label(item)
         _ui.group()
         if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
-            ws._mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
+            ws.mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 

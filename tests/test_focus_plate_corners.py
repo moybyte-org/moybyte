@@ -39,7 +39,7 @@ def _focused(tmp_path, mode, key):
     sl.show_row(key)
     for _ in range(3):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
     return ws, sl._host.box(sl._focused)
 

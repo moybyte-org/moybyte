@@ -51,12 +51,23 @@ class Layer:
     page step, after the toolkit's), `close` (leaving it, by any route),
     `page_title` and `ball_steps`. `B_BACK`: its B is the host's back, as
     every app's is; a surface whose B is a button of its own leaves it
-    False. `ESC_LEAVES`: Esc on its first page leaves it."""
+    False. `ESC_LEAVES`: Esc on its first page leaves it.
+
+    The FRAME PROTOCOL is what the console's frame asks of a surface,
+    whichever it is, so no surface is named there: `moved` (it changed on
+    its own since it drew, and draws again), `ON_WALLPAPER` (it shows the
+    live wallpaper behind it, whose animation keeps frames coming), `BAR`
+    (the strip the bar's keys walk while a registered app is on top: the
+    host's "app" strip, its own, or None for none), `leave` (its own way
+    back past its first page, else the host's) and `blur` (the keys went
+    to another surface)."""
 
     id = "layer"
     domain = "system"
     B_BACK = False
     ESC_LEAVES = True
+    ON_WALLPAPER = False
+    BAR = "app"
 
     def __init__(self, ws):
         self.ws = ws
@@ -113,6 +124,19 @@ class Layer:
     def ball_steps(self):
         """Whether the trackball steps the surface as W A S D do."""
         return True
+
+    def moved(self):
+        """Whether what it shows moved on its own since it drew (an async
+        state it follows): the frame draws it again with nothing dirty."""
+        return False
+
+    def leave(self):
+        """Leave it past its first page by its own way back: True where it
+        has one, False for the host's (the caller, the Editor's home)."""
+        return False
+
+    def blur(self):
+        """The keys went to another surface: what is typed is kept."""
 
 
 class AppLayer(Layer):
@@ -180,28 +204,28 @@ class _PlayerLayer(Layer):
     ESC_LEAVES = False
 
     def ball_steps(self):
-        """An app's page takes the trackball as its W A S D (`Player.ball_steps`);
+        """An app's page takes the trackball as its W A S D (`AppFace.ball_steps`);
         a game's trackball is its pointer."""
-        return self.ws.run.player.ball_steps()
+        return self.ws.run.player.face.ball_steps()
 
     def typing(self):
-        return self.ws.run.player.typing()
+        return self.ws.run.player.face.typing()
 
     def cancel(self):
         """Mic in a script's prompt is its Stop; in an app's field, the
-        field's edit given back (`Player.cancel`)."""
+        field's edit given back (`AppFace.cancel`)."""
         ws = self.ws
         if (ws.cart is not None and ws.cart.get("type") == "script"
                 and ws.script_console.reading()):
-            ws._exit_to_caller()
+            ws.spine.exit_to_caller()
             return True
-        return ws.run.player.cancel()
+        return ws.run.player.face.cancel()
 
     def back(self):
-        return self.ws.run.player.back()
+        return self.ws.run.player.face.back()
 
     def has_page(self):
-        return self.ws.run.player.has_page()
+        return self.ws.run.player.face.has_page()
 
     def draw(self, dt):
         self.ws.run.player.tick(dt)
@@ -224,7 +248,7 @@ class _BlocksLayer(Layer):
 
     def at_top(self):
         """Up goes on to the bar from the outline's first row
-        (Workstation._bar_keys)."""
+        (InputRouter._bar_keys)."""
         bu = self.ws.block_ui
         be = bu.blocks_ed
         return (be is not None and be.cur == 0 and bu.blk_menu is None
@@ -242,7 +266,7 @@ class _BlocksLayer(Layer):
         """Mic, Esc or B in an entry prompt: it closes, as its Cancel does."""
         if not self.ws.block_ui.cancel_prompt():
             return False
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         return True
 
     back = cancel
@@ -313,11 +337,11 @@ class _MapLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
 
     def at_top(self):
-        """Up goes on to the bar from the map's top row (Workstation._bar_keys)."""
+        """Up goes on to the bar from the map's top row (InputRouter._bar_keys)."""
         return self.ws.map_ui.at_top()
 
     def handle_input(self, i):
@@ -332,7 +356,7 @@ class _MapLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.map_ui.layout.verbs:
             if ws.map_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.map_ui._map_click(px, py)
         elif ws.pointer.down:
@@ -374,7 +398,7 @@ class _SceneLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.scene_ui._draw_scene()
 
     def handle_input(self, i):
@@ -389,7 +413,7 @@ class _SceneLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.scene_ui.layout.verbs:
             if ws.scene_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.scene_ui._scene_click(px, py)
         elif ws.pointer.down:
@@ -414,7 +438,7 @@ class _MusicLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()
+        ws.reset_canvas_state()
         if ws.audio_out is not None:
             ws.audio_out.tick(dt)
         mu = ws.music_ui
@@ -423,7 +447,7 @@ class _MusicLayer(Layer):
         mu._draw_music()
 
     def at_top(self):
-        """Up goes on to the bar from the first step (Workstation._bar_keys)."""
+        """Up goes on to the bar from the first step (InputRouter._bar_keys)."""
         return self.ws.music_ui.at_top()
 
     def handle_input(self, i):
@@ -464,7 +488,7 @@ class _PauseLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        full = getattr(self.ws.wm, "_pause_full", None)
+        full = getattr(self.ws.wm, "pause_full", None)
         if full is not None:
             full()                    # the windowed desk: a whole frame under it
         self.ws.pause.draw()
@@ -484,7 +508,7 @@ class _PauseLayer(Layer):
 
 
 class _ConfirmLayer(Layer):
-    """The delete confirm's layer (`console_notices.DeleteConfirm`): its
+    """The delete confirm's layer (`shell_cards.DeleteConfirm`): its
     dialog over the content, drawn on the system canvas; it takes every key
     and tap while it shows, and clears the game pointer's tap so a cart
     underneath never sees one."""
@@ -528,7 +552,7 @@ class _SysMenuLayer(Layer):
         p = self.ws.pause
         if p.open and p.shows_bar():
             return                    # over the paused game the pause draws it
-        paint = getattr(self.ws.wm, "_pop_paint", None)
+        paint = getattr(self.ws.wm, "pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu
         else:
@@ -539,12 +563,12 @@ class _SysMenuLayer(Layer):
         popover's (whatever dirty mark the handler left), one outside it
         marks the frame."""
         ws = self.ws
-        was = ws._dirty
+        was = ws.frame_state.dirty
         got = fn(*args)
         if got == "global":
-            ws._dirty = True
+            ws.mark_dirty()
         elif got == "local":
-            ws._dirty = was
+            ws.frame_state.dirty = was
             ws.popover_touch()
 
     def handle_input(self, i):
@@ -568,7 +592,7 @@ class _SysMenuLayer(Layer):
         elif i.pressed("a") or i.pressed("run"):
             m.activate()
             ws.popover_touch()
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -593,7 +617,7 @@ class _SysMenuLayer(Layer):
                 elif hit >= 0:
                     m.sel = hit           # a row: move+select
                     m.activate()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.popover_touch()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
@@ -601,7 +625,7 @@ class _SysMenuLayer(Layer):
 
 
 class _AboutLayer(Layer):
-    """About's card (console_notices.AboutCard) over the washed content: its rows
+    """About's card (shell_cards.AboutCard) over the washed content: its rows
     take the keys and taps; Esc, B or a tap outside closes it. Modal --
     always consumes + clears the game pointer's tap."""
 
@@ -617,13 +641,13 @@ class _AboutLayer(Layer):
         if i.pressed("b") or i.pressed("stop"):
             card.close()
         elif card.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if ws.menu_ui.about.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

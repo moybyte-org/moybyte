@@ -6,6 +6,7 @@ These exercise the SOFTWARE hardening only; the underlying SD/SPI bus-sharing
 hang is a hardware-only concern (see .claude/rules/boards.md) and is
 out of scope here."""
 
+import os
 from pathlib import Path
 
 from ws_helpers import build_ws_with_cart
@@ -153,7 +154,7 @@ def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):
     assert "kaboom" in ws.cart_error and "ValueError" in ws.cart_error
     assert bytes(ws.run.canvas._buf) != blank  # the panel drew something
     # The editor stays reachable so the kid can fix the cart.
-    ws._open_menu()
+    ws.text.open_menu()
     assert ws.screen == "menu"
 
 
@@ -202,10 +203,10 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
     assert ws.cart_error is None
     path = ws.cart["path"]
 
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(\n")   # break it
-    ws.run_code()
+    ws.saves.run_code()
 
     assert ws.screen == "menu" and ws.menu_view == "code"   # stayed in the editor
     assert ws.cart_error and "Syntax error" in ws.cart_error
@@ -214,7 +215,7 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
 
     # Now fix it and RUN -> it persists and runs.
     ws.editor.set_text("def _draw():\n    cls(6)\n")
-    ws.run_code()
+    ws.saves.run_code()
     assert ws.screen == "desktop" and ws.cart_error is None
     assert "cls(6)" in moy_carts.load(path)["src"]
 
@@ -251,7 +252,7 @@ def test_evil_str_cart_does_not_escape_frame(tmp_path):
     assert ws.cart_error is not None      # panel text was still produced via _err_text
     assert "Evil" in ws.cart_error        # the type name survives even when __str__ dies
     # The broken cart was stopped so it isn't re-run every frame.
-    assert ws._update is None and ws._draw is None
+    assert ws.run.player.update is None and ws.run.player.draw is None
 
 
 def test_evil_str_cart_at_start_does_not_escape(tmp_path):
@@ -285,8 +286,8 @@ def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
     assert ws.crash_popup is None              # tap anywhere closes it
     # A fresh crash re-arms it; the first EDIT dismisses it with the marker.
     ws.cart["src"] = "def _draw():\n    raise ValueError('again')\n"
-    ws._start()
-    ws.play(ws.editor_app)
+    ws.start()
+    ws.spine.play(ws.editor_app)
     assert ws.screen == "desktop"
     ws.frame(1 / 30)
     _see_why(ws)
@@ -327,15 +328,15 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     journal-commit fallback."""
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n",
                             title="Undoable")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ed = ws.editor
     # -- local tier: a typing burst breaks line 2, PLAY crashes, undo fixes.
     ws.history.code_burst_open()
     ed.set_text("def _draw():\n    boom_undefined()\n")
     ws.cart["src"] = ed.text()
-    ws._start()
-    ws.play(ws.editor_app)
+    ws.start()
+    ws.spine.play(ws.editor_app)
     ws.frame(1 / 30)                            # crash -> the stop card
     _see_why(ws)
     assert ws.screen == "menu" and ws.code_err_row == 1
@@ -347,9 +348,9 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     # -- journal tier: two commits, caret parked low, undo reloads the file.
     ed = ws.editor
     ed.set_text("def _draw():\n    cls(2)\n    cls(3)\n    cls(4)\n")
-    assert ws.save_code() is True               # commit 1
+    assert ws.saves.save_code() is True               # commit 1
     ed.set_text("def _draw():\n    cls(5)\n    cls(6)\n    cls(7)\n")
-    assert ws.save_code() is True               # commit 2
+    assert ws.saves.save_code() is True               # commit 2
     ed.goto_row(2, 4)
     ws.code_err = "stale"                       # a stale marker must not survive
     ws.code_err_row = 1
@@ -368,22 +369,22 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     path = ws.cart["path"]
 
     ws.frame(1 / 30)                      # crash -> panel set, cart stopped
-    assert ws.cart_error is not None and ws._draw is None
+    assert ws.cart_error is not None and ws.run.player.draw is None
 
     # Open the code editor, fix the source, and hit SAVE (not RUN).
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw():\n    cls(7)\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
     assert "cls(7)" in moy_carts.load(path)["src"]
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart
     # actually runs again -- _draw is re-bound, no leftover panel.
-    ws._leave_menu()
+    ws.text.leave_menu()
     assert ws.screen == "desktop"
     assert ws.cart_error is None
-    assert ws._draw is not None           # re-_start() rebound the (now valid) cart
+    assert ws.run.player.draw is not None           # re-_start() rebound the (now valid) cart
     for _ in range(3):
         ws.frame(1 / 30)                  # runs clean, no panel
     assert ws.cart_error is None
@@ -399,7 +400,7 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
     def _boom(cart, hexs):
         raise OSError("disk full")
     monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
-    ws.save_sprites()
+    ws.saves.save_sprites()
     assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
     assert ws.sheet.dirty is True         # not marked clean on failure
 
@@ -411,27 +412,14 @@ def test_crash_before_the_publish_keeps_the_previous_save(tmp_path, monkeypatch)
     # new source, main.py still holds the old one and is not a prefix of it. The
     # PREVIOUS save is what survives -- the guarantee the rename dance gave -- and
     # the cart is readable, which is the part that matters.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     c = moy_carts.create("Crashy", root, src="def _draw():\n    cls(1)  # OLD\n",
                          type="app")
     path = c["path"]
     main = Path(path) / "main.py"
-
-    real_write = moy_fs._write
-
-    def crash_on_publish(p, data):
-        if p.endswith("main.py"):
-            raise KeyboardInterrupt("power lost")   # the backup already landed
-        return real_write(p, data)
-
-    monkeypatch.setattr(moy_fs, "_write", crash_on_publish)
-    try:
-        moy_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
-    except KeyboardInterrupt:
-        pass
-    monkeypatch.setattr(moy_fs, "_write", real_write)
+    _cut_after_the_backup(str(main), "def _draw():\n    cls(2)  # NEW\n")
 
     assert "OLD" in main.read_text()               # the publish never ran
     loaded = moy_carts.load(path)
@@ -440,27 +428,34 @@ def test_crash_before_the_publish_keeps_the_previous_save(tmp_path, monkeypatch)
     assert not (Path(path) / "main.py.bak").exists()   # the stale stamp is retired
 
 
+def _cut_after_the_backup(path, new, landed=""):
+    """What a power loss after a save's backup leaves (moy_fs.h): the marker
+    naming `path` with `new`'s stamp, the stamped backup whole, and `path`
+    holding `landed` of the publish (nothing: the previous save), read by a
+    process that starts over."""
+    import moy_store
+    from runtime import moy_fs
+    root = str(Path(path).parent.parent.parent)
+    n, crc = moy_fs._stamp_of(new)
+    Path(root, moy_fs._PUBLISH).write_text("#moyfs1 %d %d %s\n" % (n, crc, path))
+    Path(path + ".bak").write_text(moy_fs._stamp_line(new) + new)
+    if landed:
+        Path(path).write_text(landed)
+    moy_store._reboot()
+
+
 def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):
     # The window the old rename dance could not see: `path` is present but SHORT.
     # _read_recover checked only for a MISSING file, so a truncated main.py read as
     # good source. The stamp beside it says otherwise.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     c = moy_carts.create("Torn", root, src="def _draw():\n    cls(1)\n", type="app")
     path = c["path"]
     main = Path(path) / "main.py"
-
-    real_write = moy_fs._write
-
-    def torn_publish(p, data):
-        if p.endswith("main.py"):
-            return real_write(p, data[: len(data) // 2])   # half the bytes land
-        return real_write(p, data)
-
-    monkeypatch.setattr(moy_fs, "_write", torn_publish)
-    moy_carts.save_code(c, "def _draw():\n    cls(2)  # WHOLE\n")
-    monkeypatch.setattr(moy_fs, "_write", real_write)
+    whole = "def _draw():\n    cls(2)  # WHOLE\n"
+    _cut_after_the_backup(str(main), whole, whole[:len(whole) // 2])
 
     assert "WHOLE" not in main.read_text()         # torn on disk
     assert "WHOLE" in moy_carts.load(path)["src"]  # ...and whole to every reader
@@ -472,26 +467,21 @@ def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):
 def test_failed_bak_write_keeps_the_published_file(tmp_path, monkeypatch):
     # ENOSPC on the backup (the FIRST write) must leave the good file untouched and
     # no half-written backup behind to be mistaken for one.
-    from runtime import moy_carts, moy_fs
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     good = "def _draw():\n    cls(1)  # KEEPME\n"
     c = moy_carts.create("Keep", root, src=good, type="app")
     main = Path(c["path"]) / "main.py"
 
-    real_open = open
-
-    def failing_open(p, mode="r"):
-        if p.endswith("main.py.bak") and mode == "w":
-            raise OSError("ENOSPC")
-        return real_open(p, mode)
-    monkeypatch.setattr(moy_fs, "open", failing_open, raising=False)
-
+    # The cart's folder takes no new file: the backup's open fails, as ENOSPC.
+    os.chmod(c["path"], 0o555)
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
     except OSError:
         pass
-    monkeypatch.delattr(moy_fs, "open", raising=False)
+    finally:
+        os.chmod(c["path"], 0o755)
 
     assert "KEEPME" in main.read_text()
     assert not (Path(c["path"]) / "main.py.bak").exists()

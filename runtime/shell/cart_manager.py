@@ -155,9 +155,9 @@ class CartManager:
             # hit the STALE entry and make it permanent.
             ws.covers.invalidate(paths)
             self.slim(paths)               # #66: bake the new entries' icons, mark them lazy
-            ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
+            ws.launcher.set_items(ws.home.launcher_view_items())   # #105: keep an active filter
             if ws.projects_grid is not None:
-                ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
+                ws.projects_grid.set_items(ws.home.launcher_view_items(ws.projects_grid))
             look = getattr(ws, "look", None)
             if look is not None:
                 look.store_moved()      # the theme packages are carts too
@@ -197,7 +197,7 @@ class CartManager:
             print("Moybyte rescan failed:", exc)
             return
         finally:
-            ws._dirty = True
+            ws.mark_dirty()
         self.apply(items, paths)
 
     def synced(self, folders=None):
@@ -385,7 +385,7 @@ class CartManager:
         that is left to do is tell the kid why nothing appeared."""
         full = getattr(self.ws.carts_store, "store_full", None)
         if full is not None and full(exc):
-            self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
+            self.ws.notices.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
 
     def delete(self, cart=None):
         """Delete `cart` (a home's Delete), else the OPEN cart (the system
@@ -393,7 +393,7 @@ class CartManager:
         and `pkg remove` take (`pkg.removed`): the folder, its install-record
         entry, the files it wrote, its consent and its keys all go, and no
         Trash holds a cart. Every route asks first
-        (`console_notices.DeleteConfirm`) and calls this on its Delete, which
+        (`shell_cards.DeleteConfirm`) and calls this on its Delete, which
         is done when this returns. Keeps at least one real cart on the
         device."""
         ws = self.ws
@@ -450,7 +450,7 @@ class CartManager:
         else:
             favs.append(path)
         ws.system.set("favorites", favs)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of
@@ -537,5 +537,5 @@ def _play_rec(rec):
 def today_ymd(ws):
     """Today as YYYYMMDD from the bar's wall clock, 0 without one (a board
     that never set its clock reads a year before 2020)."""
-    y, m, d = ws.bar_layer._today()
+    y, m, d = ws.bar_layer.today()
     return y * 10000 + m * 100 + d if y >= 2020 else 0

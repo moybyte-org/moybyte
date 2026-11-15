@@ -32,7 +32,7 @@ def _desk(tmp_path, size=(1024, 600), restored_editor=False):
     ws.look.set_theme("moy", persist=False, variant="light")
     if restored_editor:
         ws.system.set("win_full", {"menu": False})
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(ws)
     return ws
 
@@ -42,9 +42,9 @@ def _frames(ws, n=3):
         if ws.pointer is not None:
             ws.pointer.visible = False
         settle_badges(ws)
-        ws._toast_until = 0
+        ws.toast_until = 0
         ws.show_fps = False
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
 
 
@@ -60,9 +60,9 @@ def _tap(ws, drv, x, y):
 
 
 def _open(ws, app):
-    ws.open_app(ws._apps_by_id[app])
+    ws.spine.open_app(ws.app(app))
     _frames(ws)
-    return ws.wm._wins[app]
+    return ws.wm.windows[app]
 
 
 def _btn(ws, win, name):
@@ -85,7 +85,7 @@ def test_the_strip_control_enters_and_the_corner_restore_leaves(tmp_path):
     was = (win.x, win.y, win.w, win.h)
     _tap(ws, drv, *_centre(_btn(ws, win, "max")))
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
-    assert ws.wm.full_cover() == ws.wm._order.index("files")
+    assert ws.wm.full_cover() == ws.wm.z_order.index("files")
     # the row above the content: Files draws no band of its own
     assert win.row == ws.wm._row_h() == 40
     assert win.content_rect() == (0, 40, 1024, 560)
@@ -164,11 +164,11 @@ def test_a_ble_keyboard_s_f11_is_the_full_button():
 def test_the_bar_and_its_chips_are_hidden_and_the_desk_is_not_drawn(tmp_path, monkeypatch):
     ws = _desk(tmp_path)
     win = _open(ws, "files")
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     _frames(ws)
     drawn = []
-    real = ws.bar_layer._draw_status_strip
-    monkeypatch.setattr(ws.bar_layer, "_draw_status_strip",
+    real = ws.bar_layer.draw_status_strip
+    monkeypatch.setattr(ws.bar_layer, "draw_status_strip",
                         lambda where: (drawn.append(where), real(where)))
     chips = []
     monkeypatch.setattr(ws.wm, "_draw_taskbar_chips", lambda quiet=False: chips.append(1))
@@ -181,10 +181,10 @@ def test_the_bar_and_its_chips_are_hidden_and_the_desk_is_not_drawn(tmp_path, mo
     for _k, rect, _label in ws.wm._chip_rects():
         assert ws.wm._win_at(*_centre(rect)) == "files"
     # the glass's top row is the band's ground, the bar's colours nowhere
-    sc = ws.wm._root_canvas
+    sc = ws.wm.root_canvas
     band = _px(sc, 600, 4)
     assert all(_px(sc, x, 4) == band for x in range(200, 800, 50))
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     _frames(ws)
     assert chips and (desk or "desk" in drawn)
 
@@ -193,7 +193,7 @@ def test_windows_under_a_full_screen_one_are_not_drawn(tmp_path, monkeypatch):
     ws = _desk(tmp_path)
     _open(ws, "calc")
     win = _open(ws, "files")
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     _frames(ws)
     seen = []
     real = ws.wm._draw_app_window
@@ -207,7 +207,7 @@ def test_windows_under_a_full_screen_one_are_not_drawn(tmp_path, monkeypatch):
 def test_the_corner_controls_take_a_tap_32_pixels_wide_and_tall(tmp_path, name):
     ws = _desk(tmp_path)
     win = _open(ws, "files")
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     _frames(ws)
     cx, cy = _centre(_btn(ws, win, name))
     hit = ws.wm._strip_button_hit
@@ -221,15 +221,15 @@ def test_the_corner_minimises_and_closes(tmp_path):
     ws = _desk(tmp_path)
     drv = _drv(ws)
     win = _open(ws, "files")
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     _frames(ws)
     _tap(ws, drv, *_centre(_btn(ws, win, "min")))
     assert win.minimized and ws.wm.full_cover() == -1     # the bar is back
-    ws.wm._chip_tap("files")                               # its chip: full screen again
+    ws.wm.chip_tap("files")                               # its chip: full screen again
     _frames(ws)
     assert not win.minimized and win.full() and ws.wm.full_cover() >= 0
     _tap(ws, drv, *_centre(_btn(ws, win, "close")))
-    assert "files" not in ws.wm._wins
+    assert "files" not in ws.wm.windows
 
 
 def test_a_band_app_s_band_is_its_row(tmp_path):
@@ -239,16 +239,16 @@ def test_a_band_app_s_band_is_its_row(tmp_path):
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     _frames(ws)
     wm = ws.wm
-    win = wm._wins["menu"]
+    win = wm.windows["menu"]
     assert win.full(), "the Editor opens full screen the first time (E-04)"
     assert win.row == 0 and win.content_rect() == (0, 0, 1024, 600)
-    wm._install(win.ctx, win)
+    wm.install_window(win.ctx, win)
     try:
         x0, x1 = wm.band_span()
         bar = win.ctx.layout.bars[0]
         zone = ws.bar_layer.lent_zone("menu", bar)
     finally:
-        wm._install(wm._root_ctx)
+        wm.install_window(wm.root_ctx)
     assert zone[0] == x0 and zone[0] + zone[2] == x1
     assert x0 == 16 + 144                          # the title slot at 1024
     assert x1 < min(r[0] for _n, r in wm._strip_buttons(win))
@@ -259,13 +259,13 @@ def test_a_band_app_s_band_is_its_row(tmp_path):
 def test_full_screen_is_remembered_per_board(tmp_path):
     ws = _desk(tmp_path)
     win = _open(ws, "files")
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     assert ws.system.get("win_full")["files"] is True
     ws.wm.close_window_kind("files")
     _frames(ws)
     win = _open(ws, "files")
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)
-    ws.wm._toggle_max(win)
+    ws.wm.toggle_max(win)
     assert ws.system.get("win_full")["files"] is False
     ws.wm.close_window_kind("files")
     _frames(ws)
@@ -276,7 +276,7 @@ def test_a_restored_editor_stays_restored(tmp_path):
     ws = _desk(tmp_path, restored_editor=True)
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     _frames(ws)
-    assert not ws.wm._wins["menu"].full()
+    assert not ws.wm.windows["menu"].full()
 
 
 @pytest.mark.parametrize("size,scale", [((1024, 600), 2), ((1280, 800), 3), ((800, 480), 2)])
@@ -289,19 +289,19 @@ def test_a_desk_play_is_full_screen_the_game_alone(tmp_path, size, scale):
     open_cart(ws, "Star Catcher")
     _frames(ws, 4)
     wm = ws.wm
-    win = wm._wins["desktop"]
+    win = wm.windows["desktop"]
     assert win.full() and win.row == 0
     ox, oy, s = wm._player_view(win)
     assert s == scale
     assert wm._strip_buttons(win) == []
     gw, gh = ws.run.canvas.w * s, ws.run.canvas.h * s
-    sc = wm._root_canvas
+    sc = wm.root_canvas
     for x, y in ((2, 2), (size[0] - 3, 2), (2, size[1] - 3),
                  (ox - 1 if ox else 0, size[1] // 2)):
         if not (ox <= x < ox + gw and oy <= y < oy + gh):
             assert _px(sc, x, y) == 0, (x, y)
     _tap(ws, _drv(ws), size[0] - 8, 8)
-    assert win.full() and "desktop" in wm._wins
+    assert win.full() and "desktop" in wm.windows
 
 
 def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
@@ -313,7 +313,7 @@ def test_a_window_bound_app_cart_full_screen_is_an_app_window(tmp_path):
     open_cart(ws, "Notes")
     _frames(ws)
     wm = ws.wm
-    win = wm._wins["desktop"]
+    win = wm.windows["desktop"]
     assert ws.run.app_window_canvas and not win.full()
     drv = _drv(ws)
     _tap(ws, drv, *_centre(_btn(ws, win, "max")))
@@ -341,12 +341,12 @@ def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path
     open_cart(ws, "Notes")
     _frames(ws)
     wm = ws.wm
-    win = wm._wins["desktop"]
-    wm._toggle_max(win)
+    win = wm.windows["desktop"]
+    wm.toggle_max(win)
     _frames(ws)
-    wm._minimize(win, True)
+    wm.minimize(win, True)
     _frames(ws)
-    assert win.minimized and not ws.run.player.paused
-    wm._minimize(win, False)
+    assert win.minimized and not ws.run.player.pace.paused
+    wm.minimize(win, False)
     _frames(ws)
-    assert not ws.pause.open and not ws.run.player.paused and win.full()
+    assert not ws.pause.open and not ws.run.player.pace.paused and win.full()

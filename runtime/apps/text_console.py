@@ -264,8 +264,8 @@ class TextConsole:
         """One keyboard byte. Enter submits; everything else edits the line.
         After the script ended, Enter runs it again."""
         if code in (0x0D, 0x0A) and self.ended and not self.reading():
-            self.ws._reset_canvas_state()
-            self.ws._start()
+            self.ws.reset_canvas_state()
+            self.ws.start()
             return True
         if not code or not self.reading():
             return False
@@ -412,7 +412,7 @@ class TextConsole:
     # -- the surface ----------------------------------------------------------
 
     def _dirty(self):
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _fs(self):
         return max(1, int(getattr(self.ws.run.canvas, "font_scale", 1) or 1))
@@ -429,11 +429,11 @@ class TextConsole:
         # whatever the app-cart boundary is at
         was = _ui_draw.cart_text(False)
         # On a desk the run's canvas is its window's own, which the run
-        # alone draws (`Player.holds`): it holds the page as the last frame
+        # alone draws (`AppFace.holds`): it holds the page as the last frame
         # left it, but for the FPS chip, which names where it drew
         # (`overdrew`), so the log's view may move or keep its rows there.
         pl = self.ws.run.player
-        own = pl is not None and pl.holds(self.ws.run.canvas)
+        own = pl is not None and pl.face.holds(self.ws.run.canvas)
         if own:
             _ui_draw.window_frame(2)
         try:

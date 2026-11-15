@@ -74,7 +74,7 @@ UI_SOURCES = (
         "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
         "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.c", "moy_ui_api_text.c",
         "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c", "moy_ui_api_host.c",
-        "moy_ui_text.c", "moy_ui_tables.c", "moy_theme.c", "moy_ui_wasm.c")]
+        "moy_ui_text.c", "moy_ui_tables.c", "moy_theme.c", "moy_ui_run.c", "moy_ui_wasm.c")]
     + [os.path.join(NATIVE, "moy_gfx", n) for n in (
         "moy_text.c", "moy_shape.c", "moy_gfx_kernels.c", "moy_gfx_base.c")]
     + [os.path.join(NATIVE, "moy_spine", n) for n in ("moy_str.c", "moy_str_table.c",

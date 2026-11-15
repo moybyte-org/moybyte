@@ -34,7 +34,7 @@ def _frames(drv, n=3):
 def test_the_strip_is_drawn_by_the_frame_but_where_strip_self_says_why():
     """Every file that calls the strip itself is one `STRIP_SELF` names with
     its reason, and each one it names still does."""
-    call = re.compile(r"\._draw_status_strip\(")
+    call = re.compile(r"\.draw_status_strip\(")
     callers = set()
     for top in ("runtime", "device"):
         for p in (ROOT / top).rglob("*.py"):
@@ -50,9 +50,9 @@ def test_settings_strip_is_the_frames_and_drawn_once(tmp_path):
     ws.open_settings()
     _frames(drv)
     got = []
-    real = ws.bar_layer._draw_status_strip
-    ws.bar_layer._draw_status_strip = lambda where: (got.append(where), real(where))
-    ws._dirty = True
+    real = ws.bar_layer.draw_status_strip
+    ws.bar_layer.draw_status_strip = lambda where: (got.append(where), real(where))
+    ws.mark_dirty()
     drv.frame(DT)
     assert got == ["settings"]
 
@@ -79,10 +79,10 @@ def test_settings_keeps_no_per_page_flag_and_back_pops(tmp_path):
 # -- a file opens one way ----------------------------------------------------------
 
 def _files(ws, drv, place, name):
-    ws.go_home()
+    ws.home.go_home()
     ws.open(next(c for c in ws.carts.all if c.get("title") == "Files"))
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place(place, keep=name)
     return app
 
@@ -181,15 +181,15 @@ def test_a_cart_the_guard_turned_off_is_marked_on_make_and_one_it_forgave_is_not
     ws = build_ws(tmp_path)
     boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     for _ in range(ws.app_guard.STRIKES):
-        ws.go_home()
+        ws.home.go_home()
         ws.open(boomy)
-    ws.go_home()
-    ws.set_home_tab("make")
+    ws.home.go_home()
+    ws.home.set_home_tab("make")
     g = ws.launcher
     card = next(c for c in g.items if c.get("title") == "Boomy")
     assert g.is_broken(card)
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     assert not ws.launcher.is_broken(card), "the mark is the Make tab's"
-    ws.forgive_app(boomy)
-    ws.set_home_tab("make")
+    ws.spine.forgive_app(boomy)
+    ws.home.set_home_tab("make")
     assert not ws.launcher.is_broken(card)

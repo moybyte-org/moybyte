@@ -76,7 +76,7 @@ void moy_chrome_clear(moy_chrome_list_t *l);
 // -- the pieces -----------------------------------------------------------------
 
 // The panel the kernel's own run leaves when it refuses or stops a cart (the
-// shell's stop card is console_notices.PauseMenu's): `notice` is the calmer
+// shell's stop card is shell_cards.PauseMenu's): `notice` is the calmer
 // one (a cart this console cannot hold), titled `title` ("" or NULL: the
 // table's default for its kind); `text` word-wrapped; the hint names the way
 // out.

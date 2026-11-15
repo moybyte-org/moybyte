@@ -13,7 +13,7 @@ stop."""
 
 import pytest
 
-from runtime import console_notices, host_app
+from runtime import shell_cards, host_app
 from ws_helpers import no_unlock_banner, quiesce
 
 
@@ -32,15 +32,15 @@ class _Key:
 
 def _home(tmp_path, monkeypatch, bufs, ref, theme):
     if ref:
-        UI = console_notices.SystemMenuUI
+        UI = shell_cards.SystemMenuUI
         monkeypatch.setattr(UI, "holds_home", lambda self: False)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     if theme is not None:
         ws.look.set_theme(theme, persist=False)
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
-    ws.go_home()
+    ws.home.go_home()
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
@@ -60,7 +60,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
         return held[-1]
 
     for _ in range(20):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     ws.pause.prealloc()            # the idle frame's mint of the held layer
     return ws, frame
@@ -79,7 +79,7 @@ def _session(ws, frame):
         ws.toggle_sysmenu()
         run(3)
         for k in ("down", "down", "up", "down"):
-            ws._sysmenu_layer.handle_input(_Key(k))
+            ws.sysmenu_layer.handle_input(_Key(k))
             ws.mark_dirty()
             run(2)
         ws.toggle_sysmenu()
@@ -98,10 +98,10 @@ def _session(ws, frame):
     menu_round()                   # over one that moved the other way
     ws.toggle_sysmenu()
     run(2)
-    ws.bar_layer._clock_text = lambda: "10:31"   # the minute turns under the menu
+    ws.bar_layer.clock_text = lambda: "10:31"   # the minute turns under the menu
     ws.mark_dirty()
     run(3)
-    ws._sysmenu_layer.handle_input(_Key("down"))
+    ws.sysmenu_layer.handle_input(_Key("down"))
     ws.mark_dirty()
     run(2)
     ws.toggle_sysmenu()

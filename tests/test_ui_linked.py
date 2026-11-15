@@ -35,7 +35,7 @@ STEADY = 4
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 
@@ -53,7 +53,7 @@ def _shot(drv):
     last = _pixels(drv.ws)
     same = 0
     for _ in range(600):
-        app = drv.ws.run.player._lua
+        app = drv.ws.run.player.lua
         before = getattr(app, "presented", None)
         _frame(drv)
         now = _pixels(drv.ws)
@@ -134,11 +134,11 @@ def runs(tmp_path_factory):
         ws = host_app.build_workstation(root)
         tier = "wasm" if name == "wasi" else name
         if name != "python" and tier not in ws.runtimes:
-            ws.exit()
+            ws.spine.exit()
             continue
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
-        ws.bar_layer._clock_text = lambda: "10:30"
+        ws.bar_layer.clock_text = lambda: "10:30"
         open_cart(ws, "Native page")
         if ws.confirm.open:             # a copied app's consent: Open
             act = ws.confirm._act
@@ -149,7 +149,7 @@ def runs(tmp_path_factory):
         assert p.cart_error is None, (name, p.cart_error)
         shots = _script(ws)
         out[name] = (shots, p.cart_error, ws.screen)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 

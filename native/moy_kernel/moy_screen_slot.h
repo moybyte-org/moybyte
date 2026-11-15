@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 #define MOY_SCREEN_SLOTS 4u             // programs with a screen at once
-#define MOY_SCREEN_SLOT_IN 13           // input words a frame message carries at most
+#define MOY_SCREEN_SLOT_IN 16           // input words a frame message carries at most
 
 // The VM's task. Open: 0, or an errno negated (ENOSPC every slot another's,
 // EINVAL a size or depth refused, ENOMEM). Close: the slot freed, a present
@@ -63,5 +63,14 @@ void moy_screen_slot_kick(uint32_t pid);
 // The slot's pixels, for its life (what a SHOWN frame call took holds them
 // until the next call); NULL for none.
 const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth);
+
+// THE TOOLKIT'S ANSWERS. An app drawing with the toolkit it links tells,
+// after each frame it draws, what the console's input owner asks a run's
+// toolkit (moy_ui_wasm.h's MOY_UI_TOLD_*: a field in focus, a cancel or a
+// back it would take); the console reads the last told, and its cancel and
+// back go in by the next frame message's MOY_OS_FRAME_IN_ASK word.
+// Tell: the program's thread, 0 or -ENODEV. Told: any task, 0 for no slot.
+int moy_screen_slot_tell(uint32_t pid, uint32_t answers);
+uint32_t moy_screen_slot_told(uint32_t pid);
 
 #endif // MOY_SCREEN_SLOT_H

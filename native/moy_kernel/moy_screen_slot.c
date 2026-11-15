@@ -30,6 +30,7 @@ typedef struct {
     volatile uint32_t room;     // moved where the frame is let go or the slot closed
     volatile uint32_t shown;    // moved where a present made it READY, or a hop was queued
     volatile uint32_t hops;     // the program's hops queued (moy_screen_slot_kick)
+    volatile uint32_t told;     // the toolkit's answers the program told last (moy_screen_slot_tell)
     uint32_t served;            // `hops` when the console's frame call last served them
     moy_sync_who_t presenter;   // the program's task waiting on `room`
     moy_sync_who_t console;     // the console's task waiting on `shown`
@@ -226,4 +227,18 @@ const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth) 
     *h = s->h;
     *depth = s->depth;
     return s->px;
+}
+
+int moy_screen_slot_tell(uint32_t pid, uint32_t answers) {
+    slot_t *s = slot_of(pid);
+    if (s == NULL) {
+        return -ENODEV;
+    }
+    __atomic_store_n(&s->told, answers, __ATOMIC_RELEASE);
+    return 0;
+}
+
+uint32_t moy_screen_slot_told(uint32_t pid) {
+    slot_t *s = slot_of(pid);
+    return s != NULL ? __atomic_load_n(&s->told, __ATOMIC_ACQUIRE) : 0u;
 }

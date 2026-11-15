@@ -5,6 +5,7 @@ draws what the face's own encoding draws, answers what it answers, and,
 where the options fit the module's buffer, builds nothing: under the boards'
 MicroPython, the real module, each page drawn both ways."""
 
+import json
 import subprocess
 
 from unix_mp import require_unix_mp, runtime_tree
@@ -147,6 +148,84 @@ def run(seq):
 
 
 print("SEQ", ui._SEQ)
+# every override key (native/moy_ui/over.json) on the verb it names, alone
+# on a page of its own: the dict the module reads and the block the face
+# builds draw and answer alike, and the key moves pixels where over.json
+# does not call it unseen
+KEYS = @KEYS@
+PARTS = (("a",), ("b",), ("c",))
+GROUND = b"\x55\xaa" * (len(cv._buf) // 2)
+# a look whose every role is a colour of its own, so a key that moves a role
+# moves pixels
+TH = {}
+for i in range(len(ui_draw._TOKENS)):
+    TH[ui_draw._TOKENS[i]] = 1 + i % 62
+
+
+def probe(key, verb, ex, base):
+    o = dict(base)
+    o[key] = ex
+    ui.page("Probe")
+    got = None
+    if verb == "label":
+        ui.label("Probe", o)
+    elif verb == "button":
+        got = ui.button("Probe", "normal", o)
+    elif verb == "slider":
+        got = ui.slider("Probe", 3, 0, 8, o)
+    elif verb == "field":
+        got = ui.field("Probe", "", 32, o)
+    elif verb == "info":
+        ui.info("Probe", "-104 dBm", o)
+    elif verb == "link":
+        got = ui.link("Probe", "v", o)
+    elif verb == "list":
+        got = ui.list("Probe", WORDS, 1, o)
+    elif verb == "group":
+        ui.group("", o)
+        ui.label("in the group")
+        ui.group()
+    elif verb == "scroll":
+        ui.at(10, 30, 200, 60)
+        ui.scroll("probe", o)
+        for w in WORDS:
+            ui.label(w)
+        ui.scroll()
+    elif verb == "popover":
+        ui.at(20, 40, 120, 30)
+        got = ui.popover("probe", 160, o)
+        ui.info("Status", "Not sent")
+        ui.popover()
+    elif verb == "table":
+        if key not in ("lead", "bar", "part"):
+            o["part"] = (40, 30)
+        ui.at(10, 30, 200, 120)
+        got = ui.table("", ("",), PARTS, 0, o)
+    elif verb == "dialog":
+        got = ui.dialog("Probe?", ("Cancel", "Go"), "primary", o)
+        ui.dialog()
+    ui.end()
+    return got
+
+
+def run_key(seq, key, verb, ex, base):
+    ui._SEQ = seq
+    ui._OVER_DICT = seq
+    cv._buf[:] = GROUND                 # a ground no ink draws in
+    for _ in range(3):
+        ui_draw.ui_frame(ctx, cv, TH, None, inp)
+        got = probe(key, verb, ex, base)
+    return got
+
+
+for key, verb, ex, base in KEYS:
+    a = run_key(True, key, verb, ex, base)
+    pa = bytes(cv._buf)
+    b = run_key(False, key, verb, ex, base)
+    same = cv._buf == pa
+    run_key(True, key, verb, None, base)
+    print("KEY_" + key, a == b and same, cv._buf != pa, a, b)
+    pa = None
 a, pa = run(True)
 b, pb = run(False)
 print("ANSWERS", a == b, a, b)
@@ -176,8 +255,9 @@ print("DONE")
 def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it():
     exe = require_unix_mp("moy_ui", board_model=True,
                           why="the module's options read from a list or tuple")
+    keys = [(k["key"], k["probe"], k["example"], k.get("with", {})) for k in _over_keys()]
     prog = DRIVER.replace("@ROOT@", repr(str(ROOT))).replace(
-        "@RUNTIME@", repr(runtime_tree()))
+        "@RUNTIME@", repr(runtime_tree())).replace("@KEYS@", repr(keys))
     out = subprocess.run([exe, "-c", prog], capture_output=True, text=True, timeout=120,
                          cwd=str(ROOT))
     assert out.returncode == 0, out.stderr[-2000:]
@@ -188,9 +268,19 @@ def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it()
     assert lines["PIXELS"].startswith("True"), lines["PIXELS"]
     # options that fit the module's buffer cost the frame nothing
     assert lines["ALLOC"] == "0", lines["ALLOC"]
+    for k in _over_keys():
+        got = lines["KEY_" + k["key"]].split(" ", 2)
+        assert got[0] == "True", (k["key"], got)
+        # the probe shows the key, so the two readers' agreeing has power
+        assert got[1] == ("False" if k.get("unseen") else "True"), (k["key"], got)
 
 
-MORE = 1 << 29                          # moy_ui_api.h's MOY_UI_O_MORE
+MORE = 1 << 29                          # moy_ui_over_keys.h's MOY_UI_O_MORE
+
+
+def _over_keys():
+    with open(ROOT / "native" / "moy_ui" / "over.json") as f:
+        return json.load(f)["keys"]
 
 
 def _read(lib, block):
@@ -232,3 +322,15 @@ def test_the_second_flags_word_is_the_next_keys_door():
     assert got == plain
     assert _read(lib, head)["flags2"] == 0
     assert _read(lib, head + (-1).to_bytes(4, "little", signed=True))["flags2"] == 0
+
+
+def test_the_block_carries_every_key():
+    """Each override key (native/moy_ui/over.json), given alone at its
+    example, reaches the engine's struct through the block the host's face
+    builds: the generated table names no key the readers drop."""
+    from runtime import glass_binding, ui
+    lib = glass_binding._lib()
+    none = _read(lib, ui._block({}))
+    for k in _over_keys():
+        got = _read(lib, ui._block({k["key"]: k["example"]}))
+        assert got != none, k["key"]

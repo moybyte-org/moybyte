@@ -35,13 +35,13 @@ _TITLE = {"python": "Py", "lua": "Lua"}
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 
 def _pmem(ws, n):
     p = ws.run.player
-    lua = getattr(p, "_lua", None)
+    lua = getattr(p, "lua", None)
     if not lua:
         return [p.ns["pmem"](i) for i in range(n)]
     run = getattr(lua, "_run", None)
@@ -74,13 +74,13 @@ def _open(app, tier, base, desk=False):
     ws = build_desktop_ws(base) if desk else host_app.build_workstation(root)
     ws.look.set_theme("moy", persist=False)
     ws.pointer.visible = False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
         cart = next(c for c in ws.carts.all if c["title"] == "%s %s" % (
             app.capitalize(), _TITLE[tier]))
-        ws._open_workspace(cart)
-        ws.play(ws.launcher_layer)
+        ws.open_workspace(cart)
+        ws.spine.play(ws.launcher_layer)
     else:
         open_cart(ws, "%s %s" % (app.capitalize(), _TITLE[tier]))
     if ws.confirm.open:             # a copied app's consent: Open
@@ -119,7 +119,7 @@ def clip(tmp_path_factory):
                 bands[(vx, top)] = [at(i, j) for j in range(top, top + 12)
                                     for i in range(vx, vx + vw)]
         out[tier] = (_content(ws), views, at(x, y + h - 1), bands)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -195,7 +195,7 @@ def tabs(tmp_path_factory):
             got.append((m[0], m[1], settled, _content(ws)))
         assert ws.run.player.cart_error is None, (tier, ws.run.player.cart_error)
         out[tier] = got
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -226,7 +226,7 @@ def _back(ws, drv, how):
     if how == "esc":
         drv.escape()
     elif ws.windowed_chrome:
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         rect = dict(ws.wm._strip_buttons(win)).get("back")
         if rect is None:                # no chevron: the window's close leaves
             ws.wm._close_window("desktop")
@@ -245,9 +245,9 @@ def _state(ws):
         return None
     m = _pmem(ws, 3)
     if ws.windowed_chrome:
-        shows = "back" in dict(ws.wm._strip_buttons(ws.wm._wins["desktop"]))
+        shows = "back" in dict(ws.wm._strip_buttons(ws.wm.windows["desktop"]))
     else:
-        shows = ws.run.player.has_page()
+        shows = ws.run.player.face.has_page()
     return (m[0], m[1], m[2], shows)
 
 
@@ -272,4 +272,4 @@ def test_back_steps_out_of_the_apps_views_before_it_leaves(tmp_path, tier, how, 
     first = (1, 0, 1, False)
     assert got[:3] == [(2, 1, 0, True), (2, 0, 0, True), first], (tier, how, got)
     assert got[3] == (None if how == "chevron" else first), (tier, how, got)
-    ws.exit()
+    ws.spine.exit()

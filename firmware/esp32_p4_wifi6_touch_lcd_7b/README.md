@@ -60,7 +60,7 @@ canvas**, was reverted the day it was built — `26e1f9f`, whose verdict survive
 as a NOTE at the defer site in `device/p4_canvas.py`, which is the copy to read
 before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
 the whole lever existed for. Why, with numbers:
-`docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
+`docs/perf_native_gap_v1.md` §6; per-cart fps: `docs/perf/ledger.md`, never here.
 
 OTA is wired on this board like every other. The high-speed USB OTG port is
 the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`: HID reports,

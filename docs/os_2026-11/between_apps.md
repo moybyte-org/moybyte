@@ -128,7 +128,7 @@ page pulls `GET /apps.json` and pushes what a cart wrote in the tab as `apps`
 batches, the board being of record; a site page leaves its OPFS `apps/` to
 the keeper alone (`moy_store.commitWritten`, a write whole or not at all,
 moy-spec SPEC.md §16.12), and no sweep seeds or watches that root there. A
-cart's session reads its folder once, when it opens (`cart_files.py`), so a
+cart's session reads its folder once, when it opens (`native/moy_store/moy_files.h`), so a
 batch that lands while the same cart plays on the board's glass is what
 that session finds the next time it opens. A board-served page edits the
 board's tree, a site page its OPFS copy; SFTP mounts it from a computer

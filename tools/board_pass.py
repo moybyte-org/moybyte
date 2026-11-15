@@ -7,6 +7,7 @@ it, wait for the fresh boot, run its on-glass suite, print one table.
     tools/board.py pass tdeck --skip-build  flash the image already in dist/
     tools/board.py pass tdeck --no-flash    the suite only, on the image the board has
     tools/board.py pass --all --shot        ...and a screenshot of each at the end
+    tools/board.py pass tdeck --no-perf     no perf stage after the suite
     tools/board.py pass --all --build-only  every board's image, the Zero's too;
                                             no board attached (preflight's lane)
 
@@ -19,10 +20,22 @@ One row a board: the commit its image was built from (`+` when the tree had
 tracked changes on top), the OTA-slot headroom the build printed, the suite's
 passed/skipped/failed counts, where its time went (the build's wait for the
 configure lock, build, flash, boot to the desk, suite, the board's total) and the
-failing tests by name. Under the table, the pass's wall time; every time is
-also appended to the machine's timing log (tools/timings.py, tool `pass`).
-Every step's full output goes to a log file under one directory, whose path
-is printed.
+failing tests by name. Under the table, each board's perf block, then the
+pass's wall time; every time is also appended to the machine's timing log
+(tools/timings.py, tool `pass`). Every step's full output goes to a log file
+under one directory, whose path is printed.
+
+THE PERF STAGE runs after each board's suite unless `--no-perf` says not to
+(tools/perf_pass.py: the desk idle, the heap, a window drag on a windowed
+tier, the #66 roster's fps and frame ms, a compiled cart). Its record goes to
+`<board>.perf.json` in the log directory and to the machine's history
+(`~/.cache/moybyte-perf/<board>.jsonl`), and its block sets each metric beside
+the board's last run at another commit, a move past its noise band marked.
+It is a report: the pass's exit code stays its suites'. The pass then prints
+the command that writes the committed ledger (`docs/perf/ledger.md`,
+tools/perf_ledger.py) from these records; it never writes it itself. The boards take the
+stage one at a time, because two consoles in the same two-player cart form a
+match and measure its shared tick.
 
 A PASS THAT BUILDS builds the browser console first
 (`firmware/web_runner/build.sh`, once), because every image bakes this tree's
@@ -58,6 +71,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -67,9 +81,12 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import board                                                       # noqa: E402
+import perf_ledger                                                 # noqa: E402
+import perf_pass                                                   # noqa: E402
 import timings                                                     # noqa: E402
 
 BOARD_PY = os.path.join(HERE, "board.py")
+PERF_PY = os.path.join(HERE, "perf_pass.py")
 # Every image bakes the browser console from this tree's bundle, so a pass
 # that builds images builds the bundle first.
 WEB_BUILD = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
@@ -96,7 +113,7 @@ class PassError(RuntimeError):
 
 
 # A row's time columns, in the order a board takes them.
-STEPS = ("wait", "build", "flash", "boot", "suite", "total")
+STEPS = ("wait", "build", "flash", "boot", "suite", "perf", "total")
 
 
 class Row:
@@ -110,8 +127,17 @@ class Row:
         self.failing = []
         self.note = ""
         self.logs = []
+        # The perf stage's record, or why there is none ("" when it did not run).
+        self.perf = None
+        self.perf_note = ""
         # Seconds per step, None for a step the board did not take.
         self.times = dict.fromkeys(STEPS)
+
+    def suite_log(self):
+        """The log of the step that stopped the row or ran its suite: the
+        last one but the perf stage's."""
+        steps = [p for p in self.logs if not p.endswith(".perf.log")]
+        return (steps or self.logs)[-1]
 
     @property
     def ok(self):
@@ -382,6 +408,8 @@ def _run_board(row, a, ctx):
         stop("suite did not run", path)
     else:
         row.passed, row.skipped, row.failed, row.failing = got
+        if not a.no_perf and not board.holders(port):
+            perf_stage(row, a, ctx, log("perf"))
     if not board.holders(port):
         run(verb("desk"), path)
         if name in QUIET:
@@ -389,6 +417,46 @@ def _run_board(row, a, ctx):
         if a.shot:
             run(verb("shot", os.path.join(logs, "%s.png" % name)), path)
     return row
+
+
+def perf_stage(row, a, ctx, path):
+    """tools/perf_pass.py on the board the suite just ran on, its record
+    read back into the row. Never stops the row: no record is a note."""
+    name = row.name
+    out = os.path.join(ctx["logdir"], "%s.perf.json" % name)
+    if os.path.exists(out):
+        os.remove(out)
+    cmd = [sys.executable, PERF_PY, name, "--port", ctx["ports"][name],
+           "--out", out]
+    if not a.no_flash and row.image not in ("-", "?"):
+        # dist/ names the board's image only when this pass flashed it; under
+        # --no-flash the stage refuses to guess, and the row has no record
+        cmd += ["--image", row.image, "--flashed"]
+    # One board's stage at a time: two boards in the same two-player cart
+    # at once form a match and measure its shared tick, not the cart.
+    with ctx["perf_lock"]:
+        t = time.monotonic()
+        ctx["run"](cmd, path)
+        row.times["perf"] = time.monotonic() - t
+    try:
+        with open(out) as f:
+            row.perf = json.load(f)
+    except (OSError, ValueError):
+        row.perf_note = "%s: the perf stage wrote no record (%s)" % (
+            name, os.path.basename(path))
+
+
+def perf_blocks(rows):
+    """Each board's perf block, beside its last run at another commit."""
+    out = []
+    for r in rows:
+        if r.perf is not None:
+            rec = r.perf
+            out.append(perf_pass.block(
+                rec, perf_pass.previous(perf_pass.history(r.name), rec)))
+        elif r.perf_note:
+            out.append(r.perf_note)
+    return "\n".join(out)
 
 
 # -- the table ----------------------------------------------------------------
@@ -424,6 +492,8 @@ def parser():
     ap.add_argument("--shot", action="store_true",
                     help="a screenshot of each board at the end")
     ap.add_argument("-k", help="passed to pytest: only the tests it selects")
+    ap.add_argument("--no-perf", action="store_true",
+                    help="no perf stage after the suite")
     ap.add_argument("--build-only", action="store_true",
                     help="build each image and stop: no port, no flash, no "
                          "suite; with --all, every board the tree builds")
@@ -495,6 +565,7 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
     os.makedirs(logdir, exist_ok=True)
     print("board pass: %s  (logs: %s)" % (", ".join(names), logdir), flush=True)
     ctx = {"dirs": dirs, "ports": ports, "run": run, "logdir": logdir,
+           "perf_lock": threading.Lock(),
            "suites": suites(ROOT, dirs)}
     todo = [n for n in names if n in ports]
     rows = {r.name: r for r in stopped}
@@ -521,7 +592,13 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
     print(table(ordered))
     for r in ordered:
         if (r.note or r.failed) and r.logs:
-            print("%s: %s" % (r.name, r.logs[-1]))
+            print("%s: %s" % (r.name, r.suite_log()))
+    blocks = perf_blocks(ordered)
+    if blocks:
+        print(blocks)
+    if any(r.perf is not None for r in ordered):
+        print("perf ledger: `%s` writes docs/perf/ledger.md from these "
+              "records; commit it when you choose" % perf_ledger.regen_command())
     print("board pass: wall %s%s" % (
         timings.dur(wall),
         "" if web is None else ", browser console build %s" % timings.dur(web)))

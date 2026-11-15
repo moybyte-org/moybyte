@@ -335,7 +335,7 @@ def test_the_hand_off_keeps_the_radio_for_the_update_screen(tmp_path):
     same network, so the screen's hold is taken first."""
     ws = _ws(tmp_path)
     h = _host(ws, tmp_path)
-    ws.wifi_hold("web")                     # what toggle did when the row went on
+    ws.spine.wifi_hold("web")                     # what toggle did when the row went on
     _parked(ws, h)
     h.handle_http("POST", "/update", '{"action":"check"}')
     h.update.step()

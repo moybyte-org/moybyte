@@ -133,8 +133,9 @@ SHARED.update({
     ("moy_text.c", "s_dma_least"): "the board's DMA hook (moy_target_dma), set once at boot",
 })
 for _n in ("s_gen", "s_gen_serial", "s_ctx", "s_tick", "s_serial", "s_live",
-           "s_tp_on", "s_tp_clip", "s_tp_in", "s_wl", "s_paste", "s_paste_n", "s_rep", "s_keyrep"):
-    SHARED[("moy_ui_wasm.c", _n)] = "the console's one compiled run, on the main instance"
+           "s_tp_on", "s_tp_clip", "s_tp_in", "s_paste", "s_paste_n", "s_rep", "s_keyrep"):
+    SHARED[("moy_ui_run.c", _n)] = "the console's one compiled run, on the main instance"
+SHARED[("moy_ui_wasm.c", "s_wl")] = "the console's one compiled run, on the main instance"
 
 _DECL = re.compile(r"^(?!(?:return|typedef|extern|enum|union|goto|break|continue|case|default)\b)"
                    r"(?!struct\s+\w+\s*\{)[A-Za-z_][^;()]*;$")

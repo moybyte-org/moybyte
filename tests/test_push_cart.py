@@ -143,10 +143,10 @@ class _WS:
         self.carts_root = carts_root
         self.wm = None
         self.fs = fs
-        self.carts = types.SimpleNamespace(all=[])
+        self.carts = types.SimpleNamespace(all=[], synced=self._synced)
         self.consent = _Consent()
 
-    def rescan_carts(self):
+    def _synced(self, folders=None):
         """The shelf: a cart per `<root>/<id>.moy` folder holding a file."""
         root = self.carts_root.rstrip("/") + "/"
         names = {p[len(root):].split("/", 1)[0] for p in self.fs.files

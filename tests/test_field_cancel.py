@@ -77,7 +77,7 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
     _type(drv, "q")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(_DT)
     assert drawn[-1] != settings_layer._HINT_TYPE, drawn[-1]
 
@@ -134,8 +134,8 @@ def test_mic_cancels_the_wifi_password_prompt(tmp_path):
 def test_the_home_search_is_a_field_mic_cancels(tmp_path):
     ws = build_ws(tmp_path)
     make_drv(ws).frame(_DT)
-    ws.open_search()
-    ws.set_search_query("sta")
+    ws.home.open_search()
+    ws.home.set_search_query("sta")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
     assert not ws.search_typing and ws.search_query == "" and not ws.sysmenu.open

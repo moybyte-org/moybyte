@@ -7,6 +7,9 @@
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
 #   ShellInstall     that server as the shell drives it: pkg, the home's Delete
+#   WifiServer       the Wi-Fi station and the radio lease (Settings' panel)
+#   BtServer         the Bluetooth keyboard service (Settings' picker)
+#   UsbServer        the USB drive that lends the card to a computer
 #   ConsoleCalls     the moybyte role: console calls run as the calling process
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
@@ -50,6 +53,7 @@ door copies back.
 from app_context import NO_STORE
 from achievements import NotifyRole
 from front import FRONT as _FRONT
+import face_errors
 import moybyte as _moybyte
 
 try:
@@ -274,17 +278,17 @@ class NavServer:
         """Spawn the registered app `app_id`. False when this build does not
         carry it or no cart carries its identity."""
         ws = self.__ws
-        app = ws._apps_by_id.get(app_id)
+        app = ws.app(app_id)
         if app is None:
             return False
-        title = ws.app_title(app.id) or app.id
+        title = ws.spine.app_title(app.id) or app.id
         return self._go(g, "Wants to open " + str(title),
-                        lambda: bool(ws.open_app(app, cart)))
+                        lambda: bool(ws.spine.open_app(app, cart)))
 
     def is_system_app(self, g, cart):
         """True when a registered app's identity claims `cart` -- what keeps
         app carts out of project lists."""
-        return self.__ws.is_system_app(cart)
+        return self.__ws.spine.is_system_app(cart)
 
     def projects(self, g):
         """The editable PROJECTS: every scanned cart a system app does not
@@ -293,23 +297,23 @@ class NavServer:
         a list of places to GO is not permission to author one."""
         ws = self.__ws
         return [c for c in ws.carts.all
-                if c.get("type") != "theme" and not ws.is_system_app(c)]
+                if c.get("type") != "theme" and not ws.spine.is_system_app(c)]
 
     def edit(self, g, cart, tab=None):
         """Open `cart` in the project EDITOR, optionally on one tab. False when
         there is nothing to edit. Leaving the Editor comes back to the app
-        that opened it (`Workstation._go_home_or_back`)."""
+        that opened it (`Spine._go_home_or_back`)."""
         if cart is None:
             return False
         ws = self.__ws
 
         def then():
-            ws._note_app_caller()
+            ws.spine.note_app_caller()
             ws.open_in_editor(cart)
             if ws.run.project is None or ws.run.project.cart is not cart:
                 return False
             if tab:
-                ws.set_menu_view(tab)
+                ws.text.set_menu_view(tab)
             return True
         return self._go(g, "Wants to edit " + str(cart.get("title") or "a cart"), then)
 
@@ -335,7 +339,7 @@ class NavServer:
         ws = self.__ws
 
         def then():
-            ws._note_app_caller()
+            ws.spine.note_app_caller()
             return bool(ws.open_project_file(cart, name, mode))
         return self._go(g, "Wants to edit " + str(name), then)
 
@@ -343,16 +347,16 @@ class NavServer:
         """Open `cart` as a workspace and RUN it, returning to the calling
         grant's app on exit (home when the grant is no registered app)."""
         ws = self.__ws
-        caller = ws._apps_by_id.get(ws.app_abi.grant_id(g))
+        caller = ws.app(ws.app_abi.grant_id(g))
         if caller is None:
             caller = ws.launcher_layer
 
         def go():
-            ws._open_workspace(cart)
-            ws.play(caller)
+            ws.open_workspace(cart)
+            ws.spine.play(caller)
 
         def then():
-            if not ws.ask_first(cart, go):
+            if not ws.notices.ask_first(cart, go):
                 go()
         self._go(g, "Wants to play " + str((cart or {}).get("title") or "a cart"), then)
 
@@ -518,10 +522,10 @@ class InstallServer:
 
     def hold(self, g):
         """Take the radio under the "carts" lease. True when it came up."""
-        return self.__ws.wifi_hold("carts")
+        return self.__ws.spine.wifi_hold("carts")
 
     def release(self, g):
-        self.__ws.wifi_release("carts")
+        self.__ws.spine.wifi_release("carts")
 
     def root(self, g):
         return self.__ws.carts_root
@@ -563,7 +567,8 @@ class InstallServer:
         m = getattr(ws, "sysmenu", None)
         if m is not None and m.open and m.widget == "wifi":
             return True
-        return bool(ws.wm.top_is("settings") and ws.settings_layer.showing("wifi"))
+        sl = ws.settings_layer
+        return bool(ws.wm.top_is(sl.id) and sl.showing("wifi"))
 
     def consent(self, g):
         """The console's consent records (`app_perms.Consent`): what the
@@ -648,6 +653,77 @@ class ShellInstall:
     def __getattr__(self, name):
         fn = getattr(self._s, name)
         return lambda *a: fn(None, *a)
+
+
+# -- Settings' radios and the card lent over USB ---------------------------------
+
+class WifiServer:
+    """The Wi-Fi station and the radio lease: Settings' Wi-Fi panel scans,
+    joins and forgets through the station (`ws.wifi`, the service each head
+    injects, or None), and holds the radio while it shows, under the grant's
+    app id (`ConsoleSpine.wifi_hold`)."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def hold(self, g):
+        ws = self.__ws
+        return ws.spine.wifi_hold(ws.app_abi.grant_id(g))
+
+    def release(self, g):
+        ws = self.__ws
+        ws.spine.wifi_release(ws.app_abi.grant_id(g))
+
+    def station(self, g):
+        return self.__ws.wifi
+
+
+class BtServer:
+    """The Bluetooth keyboard service a picker drives, or None. Two shapes,
+    because the boards differ: on the touch-only boards (P4, Guition) a paired
+    keyboard is the only one, so it is `ws.keyboard` and the capability rides
+    the keyboard itself; the T-Deck has its own keyboard over I2C and the
+    Bluetooth one hangs off `ws.ble_keyboard`, both writing into the same
+    InputState. `settings_capable` is what picks."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def keyboard(self, g):
+        ws = self.__ws
+        for svc in (getattr(ws, "ble_keyboard", None), getattr(ws, "keyboard", None)):
+            if getattr(svc, "settings_capable", False):
+                return svc
+        return None
+
+
+class UsbServer:
+    """The USB drive (runtime/system/usb_drive.py), or None on a board with
+    none: the card lent to a computer, the store closed while it is. Each
+    verb answers None on a console with no drive."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def drive(self, g):
+        return self.__ws.usb_drive
+
+    def turn_on(self, g):
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.turn_on(ws)
+
+    def turn_off(self, g):
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.turn_off(ws)
+
+    def poll(self, g):
+        """The drive's state, a computer's take or release of the card
+        applied (`UsbDrive.poll`)."""
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.poll(ws)
 
 
 # -- the console calls --------------------------------------------------------
@@ -779,7 +855,8 @@ def _dev_handles():
 # -- the ROLE door ----------------------------------------------------------------
 
 # moy_app.h's codes the door answers with, negated.
-_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = -1, -2, -7, -8
+_DOOR_STALE, _DOOR_FULL, _DOOR_BAD, _DOOR_ABSENT = (
+    -face_errors.STALE, -face_errors.FULL, -face_errors.BAD, -face_errors.ABSENT)
 # The row the C shell's crossings take (native/moy_sh/moy_sh_board.h's
 # MOY_SH_DOOR, runtime/shell/sh_door.py).
 SH_DOOR = 0x7368
@@ -945,6 +1022,7 @@ def serve_all(ws):
         "carts": CartsServer(ws), "nav": NavServer(ws),
         "notify": NotifyRole(ws), "wallpaper": WallpaperServer(ws),
         "install": InstallServer(ws),
+        "wifi": WifiServer(ws), "bt": BtServer(ws), "usb": UsbServer(ws),
     }
     for role, server in servers.items():
         app.serve(role, server)

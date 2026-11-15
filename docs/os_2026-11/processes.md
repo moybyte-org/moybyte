@@ -71,7 +71,7 @@ window is in one of three states:
 - **minimised** (owner, 2026-11-03): a window hidden to its chip, under a
   full-screen window, or parked by console mode, and every run but the
   front one on a handheld. A **game** is paused: no `update`, no `draw`, its
-  clock held as the pause menu holds it (`Player.pause`; a Proc's clock
+  clock held as the pause menu holds it (`Pace.pause`; a Proc's clock
   alone, its session not being the audible one). An **app** (`"type":
   "app"`) keeps its `update` every loop frame with the true `dt` and never
   draws, so a player or a download keeps working. Either hears
@@ -135,8 +135,10 @@ tick.** It declares its wake sources and sleeps between them: timers
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`) and events
 (`moybyte.on(source, fn)`: a UART, a socket readable, a pin edge, a LoRa
 packet, a message). Events are read from the C rings of `hardware.md` §2, so nothing is
-lost and a record keeps its real timestamp; timers are deadlines on
-`ticks_ms` in the wake registry (`runtime/system/moybyte.py`). An idle process costs nothing, the
+lost and a record keeps its real timestamp; timers are rows of the kernel's
+one table on every tier (`native/moy_kernel/moy_evq.h`, TIMERS; decided
+2026-11-11, `docs/refactor_2026-11.md` §6), which the wake registry
+(`runtime/system/moybyte.py`) maps to a Python process's functions. An idle process costs nothing, the
 idle ladder can still dim and sleep (§5), and it is one model on every tier:
 the service model below. A timer means "no earlier than"; jitter of up
 to a frame is normal, and precise timing belongs to C, the wasm lanes and the
@@ -249,11 +251,12 @@ the shell's one VM (§3): its callbacks run in the shell loop's slack after
 a frame is presented and before the next. Services run on core 0 on the P4s
 and on core 1 on the S3s, their task stacks in PSRAM there. As built for Lua
 (`native/moycore/moycore_svc.h`, P5.3): a Lua service is a state of its own
-on a task of its own, which blocks in the one wait until its next timer, a
-message or a stop and runs what is due; the host and the desktop
+on a task of its own, which runs the kernel's timers itself and blocks in
+the one wait until the next deadline they answer, a message or a stop, and
+runs what is due; the host and the desktop
 MicroPython, which have no task to give, step their services at the
 scheduler's poll
-(`runtime/system/scheduler.py`, LUA SERVICES). Its state runs the
+(`runtime/system/sched_lua.py`, LUA SERVICES). Its state runs the
 service's scripts in load order, each its own chunk: an app's entry after
 the app's shared scripts, those its `sources` lists before `main`
 (`docs/app_api_v1.md` §7). What a Lua service asks of
@@ -261,7 +264,7 @@ the console (a notification, a message, a function the console handed it)
 goes through the VM's queue (`tiers.md` §2). A compiled service, ELF or
 WASI, is the scheduler's as a Python or Lua one is, started, listed,
 stopped, restarted and autostarted the same way
-(`runtime/system/scheduler.py`, COMPILED SERVICES), and the scheduler's
+(`runtime/system/sched_compiled.py`, COMPILED SERVICES), and the scheduler's
 poll reaps its end. An ELF service is its `main` on a task of its own, on
 core 0 on the P4s and core 1 on the S3s, its app calls (`moy_notify` and
 the rest) hops on the VM's queue under a run grant of its own, served at
@@ -367,7 +370,7 @@ build, and Remove forgets the record.
 **A cart that arrived as files is asked on its first run (owner,
 2026-11-09).** One copied onto the card, over SFTP or USB, or pushed by a
 paired browser has no record, and its first launch from the home shows the
-install prompt's lines, "Open <title>?" (`Workstation.ask_first`); a
+install prompt's lines, "Open <title>?" (`Notices.ask_first`); a
 command asks in its terminal (`sh_door`): where its session asks questions
 (`moy_sh_ask`), at the prompt, and the next line typed answers and runs its
 line again, so no run waits on the terminal. Open records the consent an
@@ -878,7 +881,7 @@ start runs it again.
   of the two names is bounded by §1's BACKPRESSURE alone.
 - **The sender is the OS's stamp.** The process asks the console for the
   sender's declaration (`game(app)`, handed at its start with `clock_day()`
-  and `row_stamp()` by `Workstation.service_env`; for `"system"` the
+  and `row_stamp()` by `Notices.service_env`; for `"system"` the
   console's own; kept per sender while the shelf's roster and titles
   stand), so a game
   reaches only the badges its own manifest declares, read strictly
@@ -907,7 +910,7 @@ start runs it again.
   badges found on a board and on its page between two syncs keep only the
   later side's (a per-badge union was weighed on 2026-11-08 and left out).
   There is no migration: a console's old
-  `achievements.json` is never read again (CLAUDE.md, no store migrations).
+  `achievements.json` is never read again (CLAUDE.md: a format change goes through the one door, never a legacy reader).
 - **The `notify` role is the console's face of it.** In
   `native/os_calls.json` its rows' `server` is `"proc:achievements"` and the
   grant stays `never`: `award` (one of the console's own, the eggs' and the

@@ -1,5 +1,5 @@
 // Tier-0 hover-flip baseline on the wasm desktop (the ui_widgets_2026-08 W1
-// number, measured early per the perf review's B3): a hover flip == ws._dirty
+// number, measured early per the perf review's B3): a hover flip == ws.mark_dirty()
 // + a full repaint, so forced-dirty frames time the exact cost class without
 // coordinate archaeology.
 //
@@ -32,7 +32,7 @@ function bench(label, n, { dirty = false, pre = null } = {}) {
     let drawn = 0, skipped = 0;
     for (let i = 0; i < n; i++) {
         if (pre) mp.runPython(pre);
-        if (dirty) mp.runPython(`_ws._dirty = True`);
+        if (dirty) mp.runPython(`_ws.mark_dirty()`);
         const t0 = process.hrtime.bigint();
         mp.runPython(`_f = step_frame_json(1/60, -1.0)`);
         const t1 = process.hrtime.bigint();
@@ -64,7 +64,7 @@ for _i, _c in enumerate(_ws.launcher.items):
         _ws.launcher.sel = _i
         break
 _ws.open_in_editor()
-_ws.set_menu_view("code")
+_ws.text.set_menu_view("code")
 `);
 for (let i = 0; i < 90; i++) { mp.runPython(`_f = step_frame_json(1/60, -1.0)`); const f = mp.globals.get("_f"); /* present is fixed-cost; not timed here */ }
 console.log("editor state:", JSON.stringify(pyJson(`json.dumps({"view": getattr(_ws, "menu_view", None), "editor": _ws.editor is not None})`)));
@@ -74,7 +74,7 @@ bench("editor forced-dirty (hover-flip class, code tab)", 60, { dirty: true });
 
 // heaviest tabs: sprites + map
 for (const tab of ["sprites", "map"]) {
-    mp.runPython(`_ws.set_menu_view(${JSON.stringify(tab)})`);
+    mp.runPython(`_ws.text.set_menu_view(${JSON.stringify(tab)})`);
     for (let i = 0; i < 60; i++) { mp.runPython(`_f = step_frame_json(1/60, -1.0)`); const f = mp.globals.get("_f"); /* present is fixed-cost; not timed here */ }
     bench(`editor ${tab} forced-dirty`, 60, { dirty: true });
 }

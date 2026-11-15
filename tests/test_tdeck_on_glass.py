@@ -74,7 +74,7 @@ BATCH6_SRAM = 70
 # Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
 # its first use: the per-verb profiler's counters (native/moycore/
 # moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
-# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# shape scratch (native/moy_ui/moy_ui_run.c, 1236, made while a compiled
 # app's theme names another shape) and the dev channel's `state` line while a
 # run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
 # heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
@@ -468,14 +468,14 @@ def test_the_homes_letter_keys_arrive_from_the_matrix(board):
     for data, ch in HOME_KEYS:
         assert board.pyval(_DECODE % data, strict=True) == ord(ch), ch
     try:
-        board.pyexec("ws.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
+        board.pyexec("ws.home.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
                      "enumerate(ws.launcher.items) if it.get('path')][0]", strict=True)
         board.pyexec("ws.input.source('local').key(%s)" % (_DECODE % HOME_KEYS[0][0]),
                      strict=True)
         board.drain(0.8)
         assert board.pyval("ws.screen", strict=True) == "menu", "C did not open the Editor"
     finally:
-        board.pyexec("ws.go_home()", strict=True)
+        board.pyexec("ws.home.go_home()", strict=True)
         board.drain(0.5)
 
 
@@ -521,7 +521,7 @@ def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
         _glass_start(board)                       # outside the field: the console's key
         assert board.pyval("ws.sysmenu.open", strict=True) is True
     finally:
-        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.go_home()", strict=True)
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.home.go_home()", strict=True)
         board.pyval("ws.system.set('name', %r)" % (was,))   # a flash write: its own line
         board.drain(0.5)
 

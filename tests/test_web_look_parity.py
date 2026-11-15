@@ -181,14 +181,14 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
 # pixel. The clock reads a fixed time in both (the host's zone is not node's),
 # the pointer is hidden (the page boots it hidden; the host draws the
 # cursor), and achievements stay quiet (a toast's slide is timed by the clock).
-_STEADY = ("_ws.bar_layer._clock_text = lambda: '12:00'\n"
+_STEADY = ("_ws.bar_layer.clock_text = lambda: '12:00'\n"
            "_ws.pointer.visible = False\n"
            "_ws.ach.mute = True\n"
            "_ws.ach.toast = None\n"
            "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
 _EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
-           "_ws.set_menu_view('cards')\n")
-_APP = "_ws.open_app(_ws._apps_by_id[%r])\n"
+           "_ws.text.set_menu_view('cards')\n")
+_APP = "_ws.spine.open_app(_ws.app(%r))\n"
 # (arrangement, scene, theme, variant, what the scene does after the setup)
 SCENES = [("handheld", "home", "moy", "dark", ""),
           ("handheld", "editor_config", "moy", "dark", _EDITOR),
@@ -213,7 +213,7 @@ def _host_frame(tmp_path, arrangement, src):
                                     panel_diagonal_in=glass)
     device_frames(ws, 30)
     exec(src, {"_ws": ws})
-    ws._dirty = True
+    ws.mark_dirty()
     device_frames(ws, 20)
     cv = ws.glass if ws.glass is not None else ws.run.canvas
     assert (cv.w, cv.h) == (w, h)
@@ -225,7 +225,7 @@ def _host_frame(tmp_path, arrangement, src):
 
 def _web_frame(tmp_path, arrangement, src):
     w, h = SIZES[arrangement]
-    steps = [{"frames": 30}, {"py": src + "_ws._dirty = True\n"}, {"frames": 20},
+    steps = [{"frames": 30}, {"py": src + "_ws.mark_dirty()\n"}, {"frames": 20},
              {"shot": "frame"}]
     tmp_path.mkdir(parents=True, exist_ok=True)
     scenario = tmp_path / "scene.json"

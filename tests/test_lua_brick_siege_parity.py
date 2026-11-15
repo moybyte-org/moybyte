@@ -59,8 +59,8 @@ def test_brick_siege_lua_runs_under_the_real_player(tmp_path):
     else:
         raise AssertionError("Brick Siege Lua is not on the shelf")
     assert ws.run.player.cart_error is None
-    assert ws.run.player._lua is not None                  # started via the #67 seam
-    run = ws.run.player._lua
+    assert ws.run.player.lua is not None                  # started via the #67 seam
+    run = ws.run.player.lua
     assert run.get_global_len("tanks") == 1            # _init built the P1 tank
     for _ in range(240):                               # 8s: spawns, shots, booms
         ws.frame(1 / 30)

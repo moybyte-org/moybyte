@@ -195,7 +195,7 @@ class Link:
         self.key = PROC + "_" + PREFS_KEY   # the process's row of system/settings
         # The unlock banner's payload, (head, title, icon, secret), set when
         # the process's notification arrives; the banner's deadline is the
-        # console's own flat field (`ws._toast_until`).
+        # console's own flat field (`ws.toast_until`).
         self.toast = None
         self.mute = False       # the shell's own sends dropped (a one-cart player)
         self._rows_gen = -1     # the rows' generation `_doc` was read at
@@ -230,7 +230,7 @@ class Link:
 
     def env(self):
         """What the console hands the process, in its namespace."""
-        return {"game": self.game, "clock_day": self.ws._today_ymd,
+        return {"game": self.game, "clock_day": self.ws.notices.today_ymd,
                 "row_stamp": self.stamp}
 
     def game(self, app):
@@ -419,7 +419,7 @@ class Link:
         return self._total
 
     def today(self):
-        return self.ws._today_ymd()
+        return self.ws.notices.today_ymd()
 
 
 def _badges(decl, rec):

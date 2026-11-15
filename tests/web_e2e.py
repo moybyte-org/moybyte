@@ -378,15 +378,15 @@ def get_carts_taps(n=3):
         ws = host_app.build_workstation(os.path.join(d, "carts"))
         cart_index.save_sources(os.path.join(d, "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
-        app = ws._apps_by_id["getcarts"]
-        ws.open_app(app)
+        app = ws.app("getcarts")
+        ws.spine.open_app(app)
         for _ in range(60):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30)
             if app.phase == "list":
                 break
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30)
         assert app.phase == "list" and len(app.rows) == n, app.phase
         lay = app.layout

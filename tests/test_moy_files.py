@@ -1,11 +1,8 @@
-"""A compiled cart's written files in C (native/moy_store/moy_files.c) held to
-runtime/carts/cart_files.py, the reference, rule for rule: the key a path is kept
-under and back, where a cart's files live, the whole-or-nothing write, the
-recovery of what a power loss left, erase, and the listing a cart walks.
-
-Each session runs the same script against two copies of one store, one by
-the Python and one by the C, and the two stores must end byte for byte the
-same, with every answer on the way equal."""
+"""A compiled cart's written files, native/moy_store/moy_files.c on every tier:
+the key a path is kept under and back (the key held to runtime/carts/
+cart_files.py's, which names an app's files on a VM), where a cart's files
+live, the whole-or-nothing write, the recovery of what a power loss left,
+erase, and the listing a cart walks."""
 
 import os
 import random
@@ -29,7 +26,7 @@ PATHS = [b"save", b"Save", b"save.dat", b".hidden", b"trail.", b"a.b.c", b"level
          b"a~b", b"%", b"\x00\xff", "été".encode(), b"-_09az", b"x" * 80]
 
 
-def test_the_key_and_its_way_back_are_the_reference_s():
+def test_the_key_and_its_way_back():
     _lib_or_skip()
     rng = random.Random(7)
     paths = list(PATHS) + [bytes(rng.randrange(256) for _ in range(rng.randrange(1, 12)))
@@ -37,17 +34,20 @@ def test_the_key_and_its_way_back_are_the_reference_s():
     for p in paths:
         k = cart_files.key(p)
         assert moy_play.files_key(p) == k, p
-        assert moy_play.files_path_of(k) == cart_files.path_of(k) == p, (p, k)
-    for name in ("", "a~b", "save~part", "%4", "%zz", "%4G", "ABC", "a b", "é",
-                 "%41%42", "%e9", "x.y", "%2e"):
-        assert moy_play.files_path_of(name) == cart_files.path_of(name), name
+        assert moy_play.files_path_of(k) == p, (p, k)
+    for name, want in (("", None), ("a~b", None), ("save~part", None), ("%4", None),
+                       ("%zz", None), ("%4G", None), ("ABC", None), ("a b", None),
+                       ("é", None), ("%41%42", b"AB"), ("%e9", b"\xe9"),
+                       ("x.y", b"x.y"), ("%2e", b".")):
+        assert moy_play.files_path_of(name) == want, name
 
 
-def test_a_cart_s_files_live_where_the_reference_keeps_them():
+def test_a_cart_s_files_live_in_its_app_folder():
     _lib_or_skip()
     for cart in ("/sd/moybyte/carts/x.moy", "/carts/x.moy", "carts/x.moy", "x.moy",
                  "/moy/carts/a.moy/", "/a/b/c/d", "/moy/carts/.moy"):
         assert moy_play.files_folder(cart) == cart_files.folder_of(cart), cart
+    assert moy_play.files_folder("/sd/moybyte/carts/x.moy") == "/sd/moybyte/apps/x"
 
 
 def _store(root):
@@ -106,18 +106,27 @@ def _where(files, path, root):
     return None if w is None else os.path.relpath(w, root)
 
 
-def test_a_session_writes_reads_and_lists_as_the_reference(tmp_path):
+SESSION = [None, 0, 0, 0, 0, -1, 0, 0, b"Save", b"levels/1", b"levels/2",
+           b"manifest.json", b"save", None, b"levels/1", b"levels/2", None, b"save",
+           None, None, 0, b"\x00\xff", b"hello again", b"aga", 11, 7, b"", 0, b"EL",
+           None, None, 0, b"third", 0, None]
+
+
+def test_a_session_writes_reads_and_lists(tmp_path):
     _lib_or_skip()
-    py_root, c_root = tmp_path / "py", tmp_path / "c"
-    py_cart, c_cart = _store(py_root), _store(c_root)
-    py = cart_files.CartFiles(py_cart)
+    cart = _store(tmp_path)
     held = moy_play.files_live()
-    c = moy_play.Files(c_cart)
-    assert _script(py) == _script(c)
-    for p in (b"save", b"Save", b"levels/1", b"empty", b"\x00\xff"):
-        assert _where(py, p, py_root) == _where(c, p, c_root), p
+    c = moy_play.Files(cart)
+    assert _script(c) == SESSION
+    for p, want in ((b"save", None), (b"Save", "apps/game/%53ave"),
+                    (b"levels/1", "apps/game/levels%2f1"), (b"empty", None),
+                    (b"\x00\xff", "apps/game/%00%ff")):
+        assert _where(c, p, tmp_path) == want, p
     c.close()
-    assert _snapshot(py_root) == _snapshot(c_root)
+    assert _snapshot(tmp_path) == {
+        "apps/game/%00%ff": b"bin", "apps/game/%53ave": b"HELLO",
+        "apps/game/levels%2f1": b"mine", "carts/game.moy/levels/1": b"one",
+        "carts/game.moy/levels/2": b"two", "carts/game.moy/manifest.json": b"{}"}
     assert moy_play.files_live() == held, "a closed session left memory held"
 
 
@@ -148,25 +157,19 @@ def test_a_read_of_the_cart_s_own_folder_streams_through_one_held_file(tmp_path)
 
 def test_opening_finishes_what_a_power_loss_left(tmp_path):
     _lib_or_skip()
-    roots = []
-    for side in ("py", "c"):
-        root = tmp_path / side
-        cart = _store(root)
-        written = root / "apps" / "game"
-        written.mkdir(parents=True)
-        (written / "save").write_bytes(b"old")
-        (written / "save~done").write_bytes(b"new")
-        (written / "half~part").write_bytes(b"torn")
-        (written / "other").write_bytes(b"kept")
-        roots.append((root, cart))
-    (py_root, py_cart), (c_root, c_cart) = roots
-    py = cart_files.CartFiles(py_cart)
+    cart = _store(tmp_path)
+    written = tmp_path / "apps" / "game"
+    written.mkdir(parents=True)
+    (written / "save").write_bytes(b"old")
+    (written / "save~done").write_bytes(b"new")
+    (written / "half~part").write_bytes(b"torn")
+    (written / "other").write_bytes(b"kept")
     held = moy_play.files_live()
-    c = moy_play.Files(c_cart)
-    assert _snapshot(py_root) == _snapshot(c_root)
-    assert (py_root / "apps" / "game" / "save").read_bytes() == b"new"
-    assert sorted(py.written) == [b"other", b"save"]
-    for p in (b"save", b"other", b"half"):
-        assert _where(py, p, py_root) == _where(c, p, c_root), p
+    c = moy_play.Files(cart)
+    assert sorted(os.listdir(written)) == ["other", "save"]
+    assert (written / "save").read_bytes() == b"new"
+    for p, want in ((b"save", "apps/game/save"), (b"other", "apps/game/other"),
+                    (b"half", None)):
+        assert _where(c, p, tmp_path) == want, p
     c.close()
     assert moy_play.files_live() == held

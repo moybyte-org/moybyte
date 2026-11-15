@@ -41,9 +41,28 @@ enum {
     X(FORGED, ValueError, NONE, "an argument the role refuses", "an argument the role refuses") \
     X(BUSY, ValueError, NONE, "an argument the role refuses", "an argument the role refuses")
 
+
+// The errno a compiled program reads for each code but OK, without its E:
+// X(code, ACCES) is an ELF module's EACCES and a WASI program's ACCES.
+#define MOY_APP_ERRNO(X) \
+    X(STALE, ACCES) \
+    X(FULL, RANGE) \
+    X(NOMEM, NOMEM) \
+    X(DENIED, ACCES) \
+    X(NOSTORE, NODEV) \
+    X(IO, IO) \
+    X(BAD, INVAL) \
+    X(ABSENT, NOENT) \
+    X(NEEDS_VM, AGAIN) \
+    X(FORGED, BADMSG) \
+    X(BUSY, BUSY)
+
 #define MOY_APP_ERR_NOMEM "memory allocation failed"
 #define MOY_APP_ERR_NOSTORE "NO STORAGE"
 #define MOY_APP_ERR_IO "[Errno %d] %s"
 #define MOY_APP_ERR_BAD "a refused argument"
+
+// The codes whose err is plain text: X(code), its text MOY_APP_ERR_<code>.
+#define MOY_APP_ERR_TEXTS(X) X(NOMEM) X(NOSTORE) X(BAD)
 
 #endif

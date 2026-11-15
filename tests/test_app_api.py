@@ -38,13 +38,13 @@ def _select(ws, title):
 
 def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
-    kinds = [app.id for app in ws._apps]
+    kinds = [app.id for app in ws.app_layers]
     assert kinds == ["artwork", "myart", "appearance", "storybook",
                      "files", "calc", "getcarts", "jukebox", "terminal"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
-    assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
-    assert ws.app_min_size("calc") == (170, 190)          # inferred from CalcLayout
+    assert ws.spine.app_min_size("artwork") == (310, 230)       # registered minimum
+    assert ws.spine.app_min_size("calc") == (170, 190)          # inferred from CalcLayout
 
 
 def test_register_app_dispatches_a_custom_app(tmp_path):
@@ -73,12 +73,12 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
             return True
 
     demo = Demo(ws)
-    ws.register_app(demo, min_size=(200, 100))
+    ws.spine.register_app(demo, min_size=(200, 100))
     assert ws._content_layers["demo"] is demo
-    assert ws.app_min_size("demo") == (200, 100)
-    assert ws.app_title("demo") == "BATTLE DEMO"
+    assert ws.spine.app_min_size("demo") == (200, 100)
+    assert ws.spine.app_title("demo") == "BATTLE DEMO"
     _select(ws, "Brick Siege")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert demo.opened == 1
     assert ws.screen == "demo"                            # back-stack kind
 
@@ -100,9 +100,9 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
             self.layout = DemoLayout()
 
     demo = Demo()
-    ws.register_app(demo)
-    assert ws.app_min_size(demo.id) == (210, 130)
-    assert ws.wm._root_ctx.app_layouts[demo.id] is demo.layout
+    ws.spine.register_app(demo)
+    assert ws.spine.app_min_size(demo.id) == (210, 130)
+    assert ws.wm.root_ctx.app_layouts[demo.id] is demo.layout
     win = type("Win", (), {"kind": demo.id})()
     assert ws.wm._win_title(win) == "Story Editor"
 
@@ -112,15 +112,15 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
     its Rename dialog's field is, while it shows."""
     ws = _ws(tmp_path)
     _select(ws, "Files")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "files"
     assert not ws.input.text_mode
-    ws.files_app.dialog = "rename"
+    ws.app("files").dialog = "rename"
     ws.frame(1 / 30)                  # the dialog draws, its field focused
     ws.frame(1 / 30)
     ws.input_policy.sync()            # and the input policy reads it
     assert ws.input.text_mode
-    ws.files_app.dialog = None
+    ws.app("files").dialog = None
     ws.frame(1 / 30)
     ws.input_policy.sync()
     assert not ws.input.text_mode
@@ -131,11 +131,11 @@ def test_files_types_only_while_its_rename_field_shows(tmp_path):
 def test_calc_opens_from_its_identity_cart(tmp_path):
     ws = _ws(tmp_path)
     _select(ws, "Calc")
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.screen == "calc"
     ws.frame(1 / 30)                                      # draws without error
-    # Exit returns home (the tool-bar context X path uses ws.exit).
-    ws.exit()
+    # Exit returns home (the tool-bar context X path uses ws.spine.exit).
+    ws.spine.exit()
     assert ws.screen == "launcher"
 
 
@@ -157,7 +157,7 @@ class _Key:
 def _calc(tmp_path):
     ws = _ws(tmp_path)
     _select(ws, "Calc")
-    ws.launch_selected()
+    ws.home.launch_selected()
     calc = ws._content_layers["calc"]
     ws.frame(1 / 30)
     return ws, calc
@@ -235,7 +235,7 @@ def test_calc_keeps_a_tape(tmp_path):
         if blank is None:
             ws.frame(1 / 30)
             blank = _region(ws, calc)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert calc.tape == [(48, "+", 72, "120"), (120, "-", 36, "84"),
                          (84, "/", 7, "12"), (12, "*", 7, "84")]
@@ -268,7 +268,7 @@ def test_calc_tags_its_keys_by_kind(tmp_path, monkeypatch):
         return real(label, kind, o)
 
     monkeypatch.setattr(calc_app.ui, "button", button)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert drawn["="] == "primary"
     assert drawn["C"] == "danger"
@@ -298,7 +298,7 @@ def test_calc_backspace_is_the_icon_sets_key_in_every_theme(tmp_path, monkeypatc
 
     monkeypatch.setattr(calc_app.ui, "icon", icon)
     monkeypatch.setattr(calc_app.ui, "button", button)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert ("", "<") in seen, seen
 
@@ -325,12 +325,12 @@ def test_calc_draws_in_the_faces_its_theme_names(tmp_path, monkeypatch, variant)
     monkeypatch.setattr(calc_app.ui, "face", face)
     for ch in "12*7=":
         calc.handle_input(_Key(typed=ord(ch)))
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert faces[-1] == ("result", "84", True)
     assert ui_draw.print_font() == ui_draw.font("ui")[0], "the ui face is put back"
     calc.entry = "OOPS"
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30)
     assert faces[-1] == ("result", "OOPS", False), "the result face has digits alone"
 
@@ -419,7 +419,7 @@ def _quiesce_frame(ws):
     if ws.pointer is not None:
         ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0
     ws.show_achievements = False
@@ -427,10 +427,10 @@ def _quiesce_frame(ws):
     ws.perf_hud = False
     ws.perf_capture = False
     ws.sysmenu.open = False
-    ws._about = False
-    ws._notice = None
+    ws.about = False
+    ws.notice_up = None
     ws._notice_until = 0
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer.clock_text = lambda: "00:00"
 
 
 _SENTINEL = b"\x5a"      # a colour no surface paints, to prove nothing drew
@@ -455,14 +455,14 @@ def _settle(ws):
     # ...and so is what a content's context vouches its last frame left there
     # (a verbs page's next frame would move those pixels, docs/surface_model_v1.md
     # §14.7): its next frame draws whole
-    for app in ws._apps:
+    for app in ws.app_layers:
         host = getattr(getattr(app, "_inst", app), "_ui", None)
         if host is not None and hasattr(host, "whole"):
             host.whole()
     prev = None
     for _ in range(_MAX_FRAMES):
         _quiesce_frame(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
         cur = bytes(ws.sys_canvas._buf)
         if cur == prev:
@@ -476,14 +476,14 @@ def _mute_app_strip(ws):
     alone -- the desk, launcher, picker, editor-menu, Settings and tool-cart
     bars must keep drawing, so a pixel difference here names the app bar and
     nothing else."""
-    orig = ws.bar_layer._draw_status_strip
+    orig = ws.bar_layer.draw_status_strip
 
     def muted(where):
         if where == "app":
             return
         return orig(where)
 
-    ws.bar_layer._draw_status_strip = muted
+    ws.bar_layer.draw_status_strip = muted
 
 
 def _band(ws, frame):
@@ -501,11 +501,11 @@ def _open_app_kind(ws, kind):
         names = ws._NAMES if hasattr(ws, "_NAMES") else None
         colour = 7 if names is None else 7
         app.draw = lambda dt, cv=ws.sys_canvas, c=colour: cv.cls(c)
-        ws.register_app(app)
-        ws.open_app(app, cart=ws.carts.all[0])
+        ws.spine.register_app(app)
+        ws.spine.open_app(app, cart=ws.carts.all[0])
         return app
-    app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
+    app = ws.app(kind)
+    assert ws.spine.open_app(app), kind + " has no identity cart"
     return app
 
 
@@ -542,7 +542,7 @@ def test_host_routes_the_context_x_and_the_app_exits(tmp_path, kind, size):
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher", kind + " did not exit on its bar X"
     if kind == "naked":
@@ -553,7 +553,7 @@ def test_the_windowed_tier_still_suppresses_the_app_bar(tmp_path):
     """In the desk world the WM's title strip carries the close, so the host
     must draw NO app strip -- muting it may not change a single pixel."""
     ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     assert ws.windowed_chrome                     # the make world is open
     with_bar = _settle(ws)
     _mute_app_strip(ws)

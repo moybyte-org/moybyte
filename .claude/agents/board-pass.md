@@ -7,7 +7,7 @@ effort: low
 
 You run ONE command and report what it printed. Your brief names the worktree,
 the boards (or `--all`) and any flags (`-k EXPR`, `--skip-build`, `--no-flash`,
-`--shot`).
+`--shot`, `--no-perf`).
 
 1. `tools/board.py ports` from the worktree. A board whose port another
    process holds is somebody's session: do not pass it, and say who holds it.
@@ -18,15 +18,16 @@ the boards (or `--all`) and any flags (`-k EXPR`, `--skip-build`, `--no-flash`,
    cd <worktree> && .venv/bin/python tools/board.py pass <boards> <flags>
    ```
 
-   It is one job for all the boards: one notice, the table and the wall
-   time as its last lines. It builds each image, flashes it, waits for the boot, runs the
-   suite and leaves each board at its launcher (the T-Deck at volume 0). It refuses the
+   It is one job for all the boards: one notice, the table, each board's perf
+   block and the wall time as its last lines. It builds each image, flashes it, waits for the boot, runs the
+   suite, measures the board's perf set (unless `--no-perf`) and leaves each board at its launcher (the T-Deck at volume 0). It refuses the
    main checkout; report that refusal as it is, never add `--main`.
 3. For each failing test, read its traceback from the suite log the pass
    printed (`grep -n` the test name, read that range only).
 
-Report: the table exactly as printed, the log directory, and for each failure
-its test name and the assertion or exception line. Nothing else.
+Report: the table and the perf blocks exactly as printed (name every
+`<<< WORSE` row), the log directory, and for each failure its test name and
+the assertion or exception line. Nothing else.
 
 You change no files, commit nothing, open no port by hand, spawn no
 sub-agents. Never touch the Zero. Never print or copy the OTA signing key.

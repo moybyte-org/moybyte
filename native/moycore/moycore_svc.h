@@ -5,25 +5,35 @@
 // screen.
 //
 // It is the Lua face of the one service model (docs/os_2026-11/processes.md
-// section 1): its timers are this library's, its messages its process's
-// event queue (native/moy_kernel/moy_evq.h), its rungs the one supervisor's
-// (moy_super.h) and its calls into the console the VM's queue (moy_vmq.h).
+// section 1): its timers and its messages are its process's event queue's
+// (native/moy_kernel/moy_evq.h; the kernel's timers are every tier's), its
+// `moybyte` table the one every Lua program holds (moycore_moybyte.h), its
+// rungs the one supervisor's (moy_super.h) and its calls into the console
+// the VM's queue (moy_vmq.h).
 //
 // WHERE IT RUNS. On a board each service runs on a task of its own at
 // MOYCORE_SVC_PRIO, pinned to core 0 on the P4s and to core 1 on the S3s,
 // whose stack is in PSRAM there: the task makes the state, runs the chunk and
-// `moy_start`, then blocks in the one kernel wait (moy_evq_wait) until its
-// next deadline, a message, an answer or a stop, and runs what is due, so a
-// callback never runs on the VM's task. The host and the desktop MicroPython have no task to give: their services
-// run when moycore_svc_step is called (the scheduler's poll, every POLL_MS), on
-// the caller's task, the same code with the caller's clock.
+// `moy_start`, then runs the kernel's timers itself (moy_evq_timers_run,
+// which posts its own that are due) and blocks in the one kernel wait
+// (moy_evq_wait) until the next deadline that run answers, a message, an
+// answer or a stop, and runs what is due, so a callback never runs on the
+// VM's task and a timer is not quantised to the console's frame. The host
+// and the desktop MicroPython have no task to give: their services run when
+// moycore_svc_step is called (the scheduler's poll, every POLL_MS), on the
+// caller's task, the same code, the kernel's timers run first.
 //
-// THE STATE has base (no load, dofile or loadfile: a binary chunk would
-// reach the kernel's memory, as for a cart), coroutine, table, string and
-// math, `os.time` and `os.clock` (the service's own time), the role names
-// its app's run grants (below), and `moybyte`:
+// THE STATE is the tier's one sandbox (moycore_lua_sandbox, a cart's: base
+// with no load, dofile, loadfile or collectgarbage, since a binary chunk
+// would reach the kernel's memory, coroutine, table, string and math), with
+// `os.time` and `os.clock` (the service's own time), the role names its
+// app's run grants (below), and `moybyte` (moycore_moybyte.h), whose
+// wakes' ids are the kernel's one counter's:
 //   moybyte.every(ms, fn) -> id    fn every `ms` (1 at least), from now
 //   moybyte.after(ms, fn) -> id    fn once, `ms` from now
+//   moybyte.at(t, fn) -> id        fn once at wall time `t` (Unix seconds),
+//                                  under `alarms`: the kernel's alarm, which
+//                                  goes off through a VM stop
 //   moybyte.cancel(id)
 //   moybyte.log(severity, text)    the OS log under the service's pid
 //   moybyte.exit(code)             the service ends with `code`
@@ -58,8 +68,9 @@
 // one with its id alone where none is open, and closes that one at its end).
 // Each `on` listens on its name; a message taken from the queue is handed to
 // each of its wakes on the name, its JSON array decoded into the handler's
-// arguments after the sender. The service runs them at its next step, after
-// its due timers: on its task, at once (a post wakes it).
+// arguments after the sender; a timer's MOY_EVQ_TIMER and an alarm's
+// MOY_EVQ_AT to the callback of the id it carries. The service runs them at
+// its next step: on its task, at once (a post wakes it).
 //
 // CONSOLE CALLS. What the console hands a service at its start (`env`, the
 // JSON array [values, calls]): each of `values`' members a global, and each
@@ -83,7 +94,7 @@
 // foreground run's is, owned by its pid) opens the same names a Lua app's
 // state opens (native/moy_app/moy_app_lua.h): `files`, `io` and
 // `os.remove`/`os.rename` with files, `prefs`, `set_theme`, `open_app`, and
-// none it is not granted. A row the table answers here (MOY_APP_LUA_HERE:
+// none it is not granted. A row the table answers here (how "here" in MOY_APP_LUA_NAMES:
 // the store's and the settings') runs on the service's own task, its time
 // not counted against the call's budget, and hops where it answers that it
 // needs the VM. Every other row runs on the VM's task: on the service's own
@@ -94,9 +105,10 @@
 //
 // THE LIFE. The chunk, then `moy_start()` where it is defined, each under
 // MOYCORE_SVC_STOP_MS: an error ends the service with exit 1, and one that
-// leaves no wake (a timer or a message wake) ends it with 0. Each due
-// timer's callback runs under MOY_SUPER_ABORT_US and is charged to the one
-// supervisor (moy_super.h): an overrun of MOY_SUPER_SLICE_US or an abort is a
+// leaves no wake (a timer or a message wake: MOY_EVQ_TIMERS and
+// MOYCORE_MB_ONS at most) ends it with 0. Each due timer's callback runs
+// under MOY_SUPER_ABORT_US and is charged to the one supervisor
+// (moy_super.h): an overrun of MOY_SUPER_SLICE_US or an abort is a
 // rung, and a suspended service serves none of its timers or messages until
 // it is resumed; an error ends it with 1. A message's handler is a callback
 // alike. A stop (TERM) runs
@@ -142,8 +154,6 @@ enum {
 #include "moy_tasks.h"            // the task's stack and priority (MOY_TASK_SVC)
 
 #define MOYCORE_SVCS 4u                 // services at once
-#define MOYCORE_SVC_TIMERS 16u          // timers a service holds
-#define MOYCORE_SVC_ONS 4u              // message wakes a service holds
 #define MOYCORE_SVC_STOP_MS 2000u       // a start's or a stop's limit (TERM to KILL)
 #define MOYCORE_SVC_HEAP_MAX (1024u * 1024u)
 #define MOYCORE_SVC_WHY 96u
@@ -200,9 +210,10 @@ uint32_t moycore_svc_term(const char *id, size_t n);
 uint32_t moycore_svc_at(uint32_t slot);
 // Whether each service has a task of its own here (a board).
 bool moycore_svc_tasks(void);
-// Where services have no task: run what is due on every service at
-// `now_ms`. Answers the milliseconds to the next deadline (UINT32_MAX: none).
-uint32_t moycore_svc_step(uint32_t now_ms);
+// Where services have no task: the kernel's timers run, then what is due on
+// every service. Answers the milliseconds to the next deadline (UINT32_MAX:
+// none).
+uint32_t moycore_svc_step(void);
 // Every service ended where it stands and its row freed (a test's teardown;
 // a stepped tier only).
 void moycore_svc_reset(void);

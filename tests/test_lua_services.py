@@ -315,7 +315,7 @@ ALARMS = """
 local late = moybyte.at(os.time() + 3600, function() print("late") end)
 moybyte.at(os.time(), function() print("rang") end)
 moybyte.cancel(late)
-print(late < 0)
+print(late > 0)          -- one id space: the kernel's
 """
 
 
@@ -350,7 +350,7 @@ def desk(tmp_path, monkeypatch):
     boot_on_fixture(monkeypatch)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     yield ws, drv
     S.SCHED.reset()
@@ -385,9 +385,9 @@ def test_a_service_runs_on_through_an_app_switch(desk):
     for t in ("Star Catcher", "Brick Siege"):
         open_cart(ws, t)
         _frames(drv, 30)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
     ws.open_tasks()
     drv.frame(_DT)
     games = [r for r in ws.procs.rows() if r[2] == "game"]
@@ -417,11 +417,12 @@ def test_the_task_manager_reads_its_exact_heap(desk):
 
 
 VM_SVC = """
-import moycore
+import moycore, time
 h = moycore.svc_start(9, "t.vm", "n = 0\\nmoybyte.every(10, function() n = n + 1; if n == 2 then moybyte.exit(3) end end)")
 print(moycore.svc_tasks(), moycore.svc_info(h)[0])
 for t in (0, 10, 20):
-    moycore.svc_step(t)
+    moycore.svc_step()
+    time.sleep_ms(12)
 i = moycore.svc_info(h)
 print(i[0], i[1], i[2], i[5] == "")
 moycore.svc_reap(h)
@@ -433,14 +434,14 @@ VM_MSG = """
 import moycore, moy_evq
 src = "moybyte.on('go', function(who, k, key) moybyte.exit(day() + #k + #who) end)"
 h = moycore.svc_start(9, "t.msg", src, '[{}, ["day"]]')
-moycore.svc_step(0)
+moycore.svc_step()
 print(moy_evq.post(9, 1, "go", '["run", null]'), moy_evq.post(9, 1, "stop", '[]'))
 print(moycore.svc_info(h)[6:])
-moycore.svc_step(1)
+moycore.svc_step()
 t = moy_evq.next_call()
 print(t[1:])
 moy_evq.answer(t[0], "7")
-moycore.svc_step(2)
+moycore.svc_step()
 i = moycore.svc_info(h)
 print(i[0], i[1])
 moycore.svc_reap(h)
@@ -468,15 +469,16 @@ def test_the_vm_a_board_runs_routes_messages_and_console_calls(tmp_path):
 
 
 VM_CHUNKS = """
-import moycore
+import moycore, time
 h = moycore.svc_start(9, "t.vm", [("A = 2\\nlocal b = 1", "@a.lua"),
                                   ("moybyte.every(1, function() moybyte.exit(A + (b or 0)) end)", None)])
 for t in (0, 1, 2):
-    moycore.svc_step(t)
+    moycore.svc_step()
+    time.sleep_ms(3)
 print(moycore.svc_info(h)[:2])
 moycore.svc_reap(h)
 h = moycore.svc_start(9, "t.vm", [("error('no')", "@a.lua"), ("x = 1", None)])
-moycore.svc_step(0)
+moycore.svc_step()
 i = moycore.svc_info(h)
 print(i[1], i[5])
 moycore.svc_reap(h)
@@ -575,7 +577,7 @@ def test_a_lua_app_holds_the_radio_by_handle(tmp_path, radio):
     N.step(0)
     ws.input.begin_frame()
     ws.frame(_DT)
-    assert pl._lua.get_global("GOT") == "hi"
+    assert pl.lua.get_global("GOT") == "hi"
 
 
 STATUS = """
@@ -652,7 +654,7 @@ def test_a_lua_app_shows_a_status_item_and_hears_its_panel(tmp_path):
     ws.frame(_DT)
     pl = ws.run.player
     assert pl.cart_error is None, pl.cart_error
-    lua = pl._lua
+    lua = pl.lua
     h = lua.get_global("H")
     assert h > 0 and lua.get_global("P") == 0
     it = ITEMS.of(pl.pid, h)
@@ -671,7 +673,7 @@ import sys
 sys.path[:0] = [@TREE@]
 import json
 from array import array
-import moy_spine, moy_app, moycore, moy_evq
+import moy_spine, moy_app, moycore, moy_evq, time
 import moy_log as L
 import moybyte
 from status_items import ITEMS
@@ -714,7 +716,8 @@ since = L.next()
 g = app.grant("t.st", (), run=True, owner=9)
 h = moycore.svc_start(9, "t.st", SVC, None, app.run(g, ()))
 for t in range(4):
-    moycore.svc_step(t * 10)
+    moycore.svc_step()
+    time.sleep_ms(3)
     req = moy_evq.next_call()
     if req is not None:
         print("call", req[1], req[2])
@@ -722,7 +725,8 @@ for t in range(4):
 print("svc", item(9))
 ITEMS.of(9, item(9)[0]).section._press(0, 1)
 for t in range(4, 8):
-    moycore.svc_step(t * 10)
+    moycore.svc_step()
+    time.sleep_ms(3)
 print("svc", item(9), moycore.svc_info(h)[:2])
 for r in L.read(since, 32):
     if r[3] == 9:

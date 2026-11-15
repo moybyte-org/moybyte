@@ -98,7 +98,7 @@ def _behind(ws, drv):
     """Asker running, minimised on a handheld; Star Catcher in front."""
     asker = _on_screen(ws, drv)
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     open_cart(ws, "Star Catcher")
     _frames(drv)
     assert [p.title() for p in ws.procs.list] == ["Asker"]
@@ -109,7 +109,7 @@ def _behind(ws, drv):
 def _tap_banner(ws, drv):
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
-    assert ws._note_pointer(x + w // 2, y + h // 2, True)
+    assert ws.notices._note_pointer(x + w // 2, y + h // 2, True)
     _frames(drv)
 
 
@@ -151,7 +151,7 @@ def test_a_run_behind_without_front_asks_by_a_notification(tmp_path):
     _as(asker.pid, asker.ns["ask"], "Documents/todo.md")
     _frames(drv)
     assert asker.ns["said"] == [True], "the request waits"
-    assert ws.cart["title"] == "Star Catcher" and not ws.run.player.paused
+    assert ws.cart["title"] == "Star Catcher" and not ws.run.player.pace.paused
     n = N.NOTES.up()
     assert n is not None and (n.app, n.summary) == ("Asker", "Wants to open todo.md in Notes")
     assert n.pid == asker.pid

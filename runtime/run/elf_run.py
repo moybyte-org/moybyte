@@ -9,7 +9,7 @@ runs: start(path, argv, roots, pid, id, budget_ms) -> (0 or REFUSED, why),
 step(pid, max_ms) -> RUNNING or the exit status, cancel(pid) -> 130. The
 runtime answers the door's job contract, the WASI runtime's too: start ->
 (0, None) or (REFUSED, why), step and cancel -> (code, why). A service is
-the scheduler's (runtime/system/scheduler.py, COMPILED SERVICES):
+the scheduler's (runtime/system/sched_compiled.py, COMPILED SERVICES):
 service(cart, pid, run) -> None or why, stop(pid), reap() and figures(pid).
 
 A GAME is the cart played in the Player (any type but a command or a
@@ -71,7 +71,12 @@ from array import array
 IN_X, IN_Y, IN_PTR, IN_KEY, IN_FACE, IN_SWAP = range(6)
 IN_ROOM_X, IN_ROOM_Y, IN_ROOM_W, IN_ROOM_H = range(6, 10)
 IN_LAYOUT_W, IN_LAYOUT_H, IN_LAYOUT_FS = range(10, 13)
-IN_WORDS = 13
+IN_REP, IN_KEYREP, IN_ASK = range(13, 16)
+IN_WORDS = 16
+# moy_os.h's MOY_OS_ASK_* (the ask word's bits) and MOY_OS_TOLD_* (what the
+# toolkit an app links told after its last frame: moy_ui_tell).
+ASK_CANCEL, ASK_BACK = 1, 2
+TOLD_TYPING, TOLD_CANCEL, TOLD_BACK = 1, 2, 4
 
 
 def elf_defines(path, name):
@@ -227,6 +232,52 @@ def fill_words(ws, words, ptr, ring, lay=None, pid=0):
         words[IN_LAYOUT_W] = lay[0]
         words[IN_LAYOUT_H] = lay[1]
         words[IN_LAYOUT_FS] = lay[2]
+    add_steps(inp, words)
+
+
+def add_steps(inp, words):
+    """The frame's steps beyond its presses (the input table's `rep_word`, a
+    byte a direction, and a held key's typing repeats) added to those
+    `words` hold while their message waits unread (IN_REP, IN_KEYREP; a
+    frame or two, so no byte carries); `sent` clears them."""
+    rw = getattr(inp, "rep_word", 0)
+    if rw:
+        v = (words[IN_REP] + rw) & 0xFFFFFFFF
+        words[IN_REP] = v - 0x100000000 if v >> 31 else v
+    kn = getattr(inp, "key_repeats", 0)
+    if kn:
+        key = inp.repeat_key & 0xFFFF
+        was = words[IN_KEYREP]
+        words[IN_KEYREP] = key | (kn + (was >> 16 if was & 0xFFFF == key else 0)) << 16
+
+
+def sent(words):
+    """A posted frame message carried the steps and the asks."""
+    words[IN_REP] = words[IN_KEYREP] = words[IN_ASK] = 0
+
+
+class LinkedUi:
+    """What the Player asks a run's toolkit (ui_draw.run_typing, run_cancel,
+    run_back), asked of an app drawing with the toolkit it links
+    (sdk/src/moyui_link.c): what its last frame told (moy_ui_tell, TOLD_*),
+    a cancel or a back taken going in on the next frame message (ASK_*)."""
+
+    def _ask(self, told, ask, take):
+        words = self._words
+        if not self._live or words is None or not _E.screen_told(self.pid) & told:
+            return False
+        if take:
+            words[IN_ASK] |= ask
+        return True
+
+    def ui_typing(self):
+        return self._ask(TOLD_TYPING, 0, False)
+
+    def ui_cancel(self, take=True):
+        return self._ask(TOLD_CANCEL, ASK_CANCEL, take)
+
+    def ui_back(self, take=True):
+        return self._ask(TOLD_BACK, ASK_BACK, take)
 
 
 def stop_text(code, fault=None):
@@ -263,15 +314,15 @@ class ElfRuntime:
         if hold:
             first = not self.netted
             self.netted.add(pid)
-            if getattr(ws, "wifi_hold", None) is not None:
-                ws.wifi_hold(NET_TAG, pid)
+            if getattr(getattr(ws, "spine", None), "wifi_hold", None) is not None:
+                ws.spine.wifi_hold(NET_TAG, pid)
                 dial = getattr(getattr(ws, "cart_net", None), "dial", None)
                 if first and dial is not None:
                     dial()
         elif pid in self.netted:
             self.netted.discard(pid)
-            if getattr(ws, "wifi_release", None) is not None:
-                ws.wifi_release(NET_TAG, pid)
+            if getattr(getattr(ws, "spine", None), "wifi_release", None) is not None:
+                ws.spine.wifi_release(NET_TAG, pid)
 
     def _flags(self, cart, net):
         import app_perms
@@ -428,7 +479,7 @@ def make_elf_runtime(ws):
     return ElfRuntime(ws, moy_elf)
 
 
-class ElfGame:
+class ElfGame(LinkedUi):
     """A native game's run in the Player (A GAME in this module's head)."""
 
     own_ui = True                       # an app's toolkit is its own: a paste is its message
@@ -497,6 +548,8 @@ class ElfGame:
             self._pressed = 0
             self._ms = 0
             key_sent(self._keys)
+            if words is not None:
+                sent(words)
         if got & FRAME_SHOWN:
             self._shown = True
             self.presented += 1

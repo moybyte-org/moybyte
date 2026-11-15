@@ -105,8 +105,9 @@ costs are #227's.
   (`native/moy_app/moy_app_rows.h`); the `moybyte.app` natives
   (`moy_app_wasm_rows.h`) and the toolkit's (`native/moy_ui/moy_ui_wasm_rows.h`);
   the names a Lua run and a Lua service hold (`moy_app_lua_rows.h`); the
-  answer codes and their texts (`moy_app_err.h`, and
-  `runtime/host/face_errors.py` for the host's faces); the
+  answer codes, their texts and their errno (`moy_app_err.h`, and
+  `runtime/system/face_errors.py` for the Python faces), what each tier
+  makes of the event queue's codes (`native/moy_kernel/moy_evq_codes.h`); the
   Python console's `ROLES`, `TABLE`, `DOOR_ARGS` and console calls; and
   `docs/app_api_v1.md`'s role and call tables. `tests/test_os_table.py`
   fails on a stale copy, and `tests/test_every_row.py` calls every row with

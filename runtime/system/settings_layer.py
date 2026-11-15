@@ -37,7 +37,7 @@ default, verb, capability gate, serial word -- and console.py and
 dev_channel.py import it back rather than each keeping a hand copy (#209
 section 7). Wallpaper + panel-theme picking is the Appearance app's; Settings
 deep-links to it. The actions Settings hosts delegate OUT to other layers
-(ws.open_app / ws.update_ui.open_update);
+(ws.spine.open_app / ws.update_ui.open_update);
 ws.open_settings / _exit_settings (the lifecycle) stay on ws. The frame the
 verbs draw in is begun by the host side the console hands it
 (the AppHost a shipped app is handed as `ctx.ui`), fed the keys and the
@@ -105,10 +105,10 @@ _SET_ROW_H = 26
 
 
 def _gate_second_keyboard(ws):
-    """LOCAL 2P needs a SECOND keyboard -- see Workstation.second_keyboard: on
+    """LOCAL 2P needs a SECOND keyboard -- see SettingsToggles.second_keyboard: on
     the touch-only boards the paired Bluetooth keyboard IS ws.keyboard, so
     handing it to player two leaves player one with nothing to press."""
-    return ws.second_keyboard() is not None
+    return ws.toggles.second_keyboard() is not None
 
 
 def _gate_crisp_scale(ws):
@@ -240,7 +240,7 @@ _STEPPED = {"steps": True}    # a level row's slider: a segment a level, no numb
 NAME_MAX = 16                 # the Name row's bytes
 _NAME_HINT = {"hint": None}   # the empty Name field shows the default name
 # The caption under the read-only Name where nothing can type (D-24's
-# interim words, `Workstation.can_type`).
+# interim words, `Text.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
@@ -286,9 +286,15 @@ class SettingsLayer(Layer):
     secret door (#21)."""
 
     B_BACK = True
+    # Its radios and the card lent over USB, through its context's roles: the
+    # Wi-Fi station and lease, the Bluetooth keyboard, the USB drive.
+    NEEDS = ("wifi", "bt", "usb")
 
     id = "settings"
     domain = "system"
+    TITLE = "Settings"              # its window's and its chip's (the app table)
+    BAR = "settings"                # its bar strip, whose zone it lends
+    ON_WALLPAPER = True
     zone_gen = 0
     back_title = "Settings"
     # Its pages are the public UI API's, whose frames say what they change:
@@ -298,7 +304,7 @@ class SettingsLayer(Layer):
     _SETTINGS_ROWS = (
         # WIFI (#38, spec shell_ux_v1.md §10: wifi setup lives in Settings): a
         # row that opens the wifi PANEL -- scan/pick/password/connect over the
-        # injected ws.wifi service. Settings is a system APP (not a cart), so
+        # Wi-Fi station its wifi role hands it. Settings is a system APP (not a cart), so
         # this works while a game keeps running in the one cart slot.
         ("wifi", "WIFI", "wifi-net"),
         # APPEARANCE: wallpaper + panel theme are the Appearance app's (the
@@ -320,6 +326,11 @@ class SettingsLayer(Layer):
 
     def __init__(self, ws, host):
         self.ws = ws
+        ctx = ws.app_context("settings", self.NEEDS)
+        self.ctx = ctx
+        self._wifi = ctx.wifi
+        self._bt = ctx.bt
+        self._usb = ctx.usb
         self._host = host()           # the rows page's UI context (an AppHost)
         self._sub = host()            # a panel's, fresh each time one opens
         self._view = None             # the page drawn last
@@ -332,7 +343,7 @@ class SettingsLayer(Layer):
         self._about = ()              # About's facts, read at each visit
         self._footer = None           # the note under the group being drawn
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
-        # connect/forget over the injected ws.wifi service.
+        # connect/forget over the station its wifi role hands it.
         self.wifi_return = None       # the app the panel goes back to (`_wifi_back`)
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
@@ -451,7 +462,7 @@ class SettingsLayer(Layer):
         if enter is not None:
             enter(self, pid)
         self._name_bar(self.page_title() or "Settings")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def close_page(self):
         """Back from the page shown to what is under it."""
@@ -469,7 +480,7 @@ class SettingsLayer(Layer):
             leave(self)
         self._want = _PAGES[page][4]
         self._name_bar(self.page_title() or "Settings")
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _name_bar(self, title):
         """The bar's title for the page shown, its zone drawn again when it
@@ -493,12 +504,33 @@ class SettingsLayer(Layer):
         let go comes back here (`UsbDrive.poll`)."""
         if not self.showing("usb"):
             return False
-        return self.ws.usb_drive.poll(self.ws) != self._usb_seen
+        return self._usb.poll() != self._usb_seen
 
     def log_moved(self):
         """The System log page is up and a record came since it drew: the
         console's animation gate draws it again."""
         return self.page == "log" and self.syslog.moved()
+
+    def moved(self):
+        """The Bluetooth picker's scan or pairing moves, a record came to the
+        System log page, or the USB drive's state moved under its page."""
+        return self.bluetooth_animating() or self.log_moved() or self.usb_moved()
+
+    def is_app(self, cart):
+        """No cart is Settings: it opens from the bar's gear and the menu."""
+        return False
+
+    def leave(self):
+        """Back to what it was opened over (`Workstation.exit_settings`), what
+        it holds written first."""
+        ws = self.ws
+        ws.leave_surface(self.id)
+        ws.exit_settings()
+        return True
+
+    def blur(self):
+        """The keys went to another window: a Name still typed is stored."""
+        self.commit_name()
 
     # -- the cursor, as a row index ---------------------------------------------
 
@@ -517,25 +549,14 @@ class SettingsLayer(Layer):
         rows = self._settings_rows()
         if rows:
             self._want = say(rows[i % len(rows)][1])
-            self.ws._dirty = True
+            self.ws.mark_dirty()
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated) ------------------------------
 
     def _bt_service(self):
-        """The BLE keyboard service, or None on a board without one.
-
-        TWO SHAPES, because the boards genuinely differ. On the touch-only
-        tiers (P4, Guition) a paired BLE keyboard IS the only keyboard, so it
-        is `ws.keyboard` and the capability rides the keyboard itself. The
-        T-Deck has a physical C3 keyboard over I2C AND can pair a BLE one, so
-        `ws.keyboard` stays the local keyboard and the BLE service hangs off
-        `ws.ble_keyboard`; both drivers write into the SAME InputState.
-        `settings_capable` is what gates."""
-        for svc in (getattr(self.ws, "ble_keyboard", None),
-                    getattr(self.ws, "keyboard", None)):
-            if getattr(svc, "settings_capable", False):
-                return svc
-        return None
+        """The Bluetooth keyboard service, or None on a board without one
+        (the bt role's server picks between the boards' two shapes)."""
+        return self._bt.keyboard()
 
     def _bt_open(self, _pid=None):
         """The Bluetooth keyboard picker's opening, STARTING the service if it is idle.
@@ -625,7 +646,7 @@ class SettingsLayer(Layer):
         except Exception as exc:  # noqa: BLE001
             self.bt_msg = ("Keyboard error: " + str(exc))[:40]
         self._bt_state = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def bluetooth_animating(self):
         """Keep a quiet Settings window repainting while async BLE state moves."""
@@ -683,7 +704,7 @@ class SettingsLayer(Layer):
         popover): a fresh password field, the radio lease, a rescan."""
         self.wifi_pick = None
         self.wifi_pw = ""
-        self.ws.wifi_hold("settings")  # the radio lease: wifi_leave lets go
+        self._wifi.hold()                 # the radio lease: wifi_leave lets go
         self._wifi_rescan()
 
     def wifi_leave(self):
@@ -697,7 +718,7 @@ class SettingsLayer(Layer):
             self.wifi_scanning = False
             self.wifi_joining = None
             self._wifi_unwatch()
-            ws.wifi_release("settings")
+            self._wifi.release()
 
     def _wifi_back(self, popover=False):
         """BACK out of the panel: to the Settings rows, or out of the popover
@@ -707,13 +728,12 @@ class SettingsLayer(Layer):
             self.ws.sysmenu.close()
         elif self.wifi_return is not None:
             self._drop("wifi")
-            self.ws._exit_settings()
+            self.ws.exit_settings()
         else:
             self._drop("wifi")
 
     def _wifi_rescan(self):
-        ws = self.ws
-        if ws.wifi is None:
+        if self._wifi.station() is None:
             self.wifi_nets = []
             self.wifi_known = []
             self.wifi_msg = "No Wi-Fi service."
@@ -728,7 +748,7 @@ class SettingsLayer(Layer):
         """The scan asked once more: its networks once it ended, nothing
         while it runs. A service with no polled scan answers at once."""
         ws = self.ws
-        w = ws.wifi
+        w = self._wifi.station()
         try:
             poll = getattr(w, "scan_poll", None)
             nets = poll() if poll is not None else w.scan()
@@ -744,7 +764,7 @@ class SettingsLayer(Layer):
         self.wifi_scanning = False
         if self.wifi_sel >= len(self.wifi_nets):
             self.wifi_sel = max(0, len(self.wifi_nets) - 1)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_watch(self):
         """Poll the running scan or join every WIFI_POLL_MS, as the shell's
@@ -777,7 +797,7 @@ class SettingsLayer(Layer):
         if self.wifi_scanning:
             self._wifi_scan_poll()
         if self.wifi_joining is not None:
-            w = self.ws.wifi
+            w = self._wifi.station()
             ok = None
             try:
                 ok = w.joined() if w is not None else False
@@ -807,7 +827,7 @@ class SettingsLayer(Layer):
             # saved password) reopens the prompt as the join settles, so the
             # kid can retype it (on-glass P4).
             self._wifi_connect(ssid, "", locked)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_ask(self, ssid):
         ws = self.ws
@@ -815,27 +835,27 @@ class SettingsLayer(Layer):
         self.wifi_pw = ""
         self.wifi_msg = ""
         ws.input.spend_key()          # the key that picked the net types nothing
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_connect(self, ssid, pw, locked=False):
         """Ask the service to join `ssid` and return at once: the verdict is
         the join's to give (`_wifi_settle`), now or when the poll sees it."""
         ws = self.ws
         self.wifi_pick = None
-        w = ws.wifi
+        w = self._wifi.station()
         try:
             join = getattr(w, "join", None) if w is not None else None
             ok = (join(ssid, pw) if join is not None else w.connect(ssid, pw)) \
                 if w is not None else False
         except Exception as exc:  # noqa: BLE001
             self.wifi_msg = ("Can't connect: " + str(exc))[:34]
-            ws._dirty = True
+            ws.mark_dirty()
             return False
         self.wifi_joining = (ssid, pw, locked)
         if ok is None:
             self.wifi_msg = ("Connecting to " + str(ssid) + "...")[:34]
             self._wifi_watch()
-            ws._dirty = True
+            ws.mark_dirty()
             return None
         return self._wifi_settle(bool(ok))
 
@@ -849,32 +869,34 @@ class SettingsLayer(Layer):
         self.wifi_msg = ("Connected to " + str(ssid))[:34] if ok \
             else ("That password didn't work." if pw
                   else "Couldn't connect.")
-        if ws.wifi is not None:
+        w = self._wifi.station()
+        if w is not None:
             try:
-                self.wifi_known = list(ws.wifi.known())
+                self.wifi_known = list(w.known())
             except Exception:  # noqa: BLE001
                 pass
         if not ok and locked and not pw:
             self._wifi_ask(ssid)
-        ws._dirty = True
+        ws.mark_dirty()
         return ok
 
     def _wifi_forget(self):
         ws = self.ws
-        if not self.wifi_nets or ws.wifi is None:
+        w = self._wifi.station()
+        if not self.wifi_nets or w is None:
             return
         ssid = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0]
         try:
-            ws.wifi.forget(ssid)
-            self.wifi_known = list(ws.wifi.known())
+            w.forget(ssid)
+            self.wifi_known = list(w.known())
             self.wifi_msg = ("Forgot " + str(ssid))[:34]
         except Exception as exc:  # noqa: BLE001
             self.wifi_msg = ("Forget failed: " + str(exc))[:34]
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _wifi_cancel(self):
         self.wifi_pick = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def wifi_input(self, i, host, popover=False):
         """Keys for the wifi panel held by `host`. In PASSWORD mode the
@@ -902,16 +924,17 @@ class SettingsLayer(Layer):
         popover's card is shorter than its rows, and the networks scroll."""
         ws = self.ws
         connected, ssid, ip = (False, None, None)
-        if ws.wifi is not None:
+        w = self._wifi.station()
+        if w is not None:
             try:
-                connected, ssid, ip = ws.wifi.status()
+                connected, ssid, ip = w.status()
             except Exception:  # noqa: BLE001
                 pass
         if popover:
             self._wifi_popover(connected, ssid, scroll)
             return
         _ui.page("")
-        if self.wifi_pick is not None and not ws.can_type():
+        if self.wifi_pick is not None and not ws.text.can_type():
             _ui.hints(("back", "Cancel"))     # the prompt has no field and no Connect
         elif self.wifi_pick is not None:
             _ui.hints(("confirm", "Connect", "back", "Cancel"))
@@ -938,7 +961,7 @@ class SettingsLayer(Layer):
         _ui.group("Options")
         if _ui.link("Scan again"):
             self._wifi_rescan()
-            ws._dirty = True
+            ws.mark_dirty()
         sel = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0] if self.wifi_nets else None
         if sel is not None and str(sel) in self.wifi_known:
             if _ui.link("Forget", str(sel)[:16]):
@@ -981,7 +1004,7 @@ class SettingsLayer(Layer):
             return
         if got == len(names) - 1:
             self._wifi_rescan()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif got >= 0:
             self.wifi_sel = got
             self._wifi_activate()
@@ -994,7 +1017,7 @@ class SettingsLayer(Layer):
         the engine's field (focused as it opens: typing goes in) and Cancel
         and Connect side by side at its foot. Enter in the field connects."""
         title = ("Password for " + str(self.wifi_pick))[:30]
-        if not self.ws.can_type():
+        if not self.ws.text.can_type():
             # nothing in use can type: no field and no Connect a key can't
             # fill (#239 is the on-screen keyboard)
             if _ui.dialog(title, ("Cancel",)) == 0:
@@ -1027,7 +1050,7 @@ class SettingsLayer(Layer):
                 _ui.label(part)
         if dump and _ui.button("Clear core dump"):
             clear_core_dump()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         if _ui.button("Back"):
             self._drop("crash")
         _ui.group()
@@ -1063,7 +1086,7 @@ class SettingsLayer(Layer):
                 got = k
         _ui.group()
         if got is not None:
-            self.ws.set_time_zone(_wc.ZONES[got][1])
+            self.ws.toggles.set_time_zone(_wc.ZONES[got][1])
             self._drop("tz")
 
     # -- Paired browsers ---------------------------------------------------------------
@@ -1091,7 +1114,7 @@ class SettingsLayer(Layer):
         if web is not None:
             web.forget(kid)
         self._read_paired()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _paired_page(self):
         """Each browser this console paired, by its name and the day it was
@@ -1125,18 +1148,18 @@ class SettingsLayer(Layer):
     # -- the USB drive page (runtime/system/usb_drive.py) ----------------------
 
     def _usb_on(self):
-        d = getattr(self.ws, "usb_drive", None)
+        d = self._usb.drive()
         return d is not None and d.on
 
     def _usb_open(self, _pid=None):
-        self.ws.usb_drive.why = None
+        self._usb.drive().why = None
 
     def _usb_page(self):
         """Off: what the drive does and its one button, Turn on (and why it
         did not, where it did not). On: where the card is, how to give it
         back, and Turn off, the page's only way out."""
         ws = self.ws
-        d = ws.usb_drive
+        d = self._usb.drive()
         st = d.state()
         self._usb_seen = st
         _x, _y, w, _h = _ui.page("")
@@ -1155,7 +1178,7 @@ class SettingsLayer(Layer):
                 for line in _wrap(_USB_SERIAL_BACK, n):
                     _ui.label(line)
             if _ui.button("Turn off", "danger"):
-                d.turn_off(ws)
+                self._usb.turn_off()
         else:
             if d.dev_channel:
                 for line in _wrap(_USB_SERIAL_OFF, n):
@@ -1163,7 +1186,7 @@ class SettingsLayer(Layer):
             if d.why is not None:
                 _ui.label(d.why)
             if _ui.button("Turn on"):
-                d.turn_on(ws)
+                self._usb.turn_on()
         _ui.group()
 
     # -- the lent left zone (#46 zoned bar) -------------------------------------
@@ -1232,11 +1255,11 @@ class SettingsLayer(Layer):
         reason."""
         ws = self.ws
         bt = self._bt_service() is not None
-        upd = ws._update_available()
-        onl = ws._online_update_available()
+        upd = ws.update_available()
+        onl = ws.online_update_available()
         web = getattr(ws, "webhost", None) is not None
         c6u = getattr(ws, "c6_updater", None) is not None
-        usb = getattr(ws, "usb_drive", None) is not None
+        usb = self._usb.drive() is not None
         idle = getattr(ws, "idle_ladder", None)
         tog = self._toggle_rows()
         lgen = ws.look.layout_gen
@@ -1311,7 +1334,7 @@ class SettingsLayer(Layer):
         local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         ws = self.ws
         if key == "appearance":
-            ws.open_app(ws.appearance_app)   # the one appearance surface
+            ws.spine.open_app(ws.app("appearance"))   # the one appearance surface
         elif key == "update":
             ws.update_ui.open_update()
         elif key == "update_online":
@@ -1330,7 +1353,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         for t in SETTINGS_TOGGLES:
             if t[0] == key:
-                getattr(ws, t[3])(not getattr(ws, key, False))
+                getattr(getattr(ws, "toggles", None), t[3])(not getattr(ws, key, False))
                 return
 
     def row_index(self, key):
@@ -1374,7 +1397,7 @@ class SettingsLayer(Layer):
             self._toggle_diag_row(key)
             return
         if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
-            ws.toggle_webhost()
+            ws.web.toggle()
             return
         if kind == "crash":                     # LAST CRASH: any step/tap opens the record
             self.open_page("crash")
@@ -1389,7 +1412,7 @@ class SettingsLayer(Layer):
             ws.idle_ladder.step(key, d)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
-            ws._cycle_channel(d)
+            ws.toggles.cycle_channel(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.look.cycle_font_scale(d)
@@ -1451,7 +1474,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         out = []
         u = ws.updater
-        v = version_words(u, ws._ota_channel() if u is not None else None)
+        v = version_words(u, ws.toggles.ota_channel() if u is not None else None)
         if v:
             out.append(("Version", v))
         board = board_name()
@@ -1519,9 +1542,10 @@ class SettingsLayer(Layer):
         ws = self.ws
         if kind == "wifi-net":
             ssid = None
-            if ws.wifi is not None:
+            w = self._wifi.station()
+            if w is not None:
                 try:
-                    connected, ssid, _ip = ws.wifi.status()
+                    connected, ssid, _ip = w.status()
                     ssid = ssid if connected else None
                 except Exception:  # noqa: BLE001
                     ssid = None
@@ -1543,7 +1567,7 @@ class SettingsLayer(Layer):
             v = str(rec.get("kind") or "?")[:8] if rec else ("Dump" if core_dump() else "None")
             return v[:1].upper() + v[1:]
         if kind == "webhost":
-            return ws.webhost_label() if ws.webhost_serving() else "Off"
+            return ws.web.label() if ws.web.serving() else "Off"
         if kind == "paired":
             return self._paired_words
         if kind == "diag":
@@ -1564,10 +1588,10 @@ class SettingsLayer(Layer):
             v = lad.value(key)
             return steps.index(v) if v in steps else 0
         if kind == "channel":
-            return 1 if ws._ota_channel() == "unstable" else 0
+            return 1 if ws.toggles.ota_channel() == "unstable" else 0
         if kind == "level":
             return self.level(key)
-        if kind == "name" and not ws.can_type():
+        if kind == "name" and not ws.text.can_type():
             return _ssh.name(ws)
         return None
 
@@ -1594,10 +1618,10 @@ class SettingsLayer(Layer):
         t = ws.ach.total()
         if (lvl != self._lvl or a != self._ach_n or t != self._ach_t
                 or self._about is not self._about_was
-                or ws.can_type() != self._could_type):
+                or ws.text.can_type() != self._could_type):
             self._lvl = lvl
             self._about_was = self._about
-            self._could_type = ws.can_type()
+            self._could_type = ws.text.can_type()
             moved = True
         if a != self._ach_n or t != self._ach_t:
             self._ach_n = a
@@ -1639,7 +1663,7 @@ class SettingsLayer(Layer):
         elif kind == "webhost":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                ws.toggle_webhost()
+                ws.web.toggle()
         elif kind == "diag":
             on = v
             self._kinds[s] = "toggle"
@@ -1678,7 +1702,7 @@ class SettingsLayer(Layer):
             cur = v
             got = _ui.seg(s, _STABLE_BETA, cur)
             if got != cur:
-                ws._cycle_channel(got - cur)
+                ws.toggles.cycle_channel(got - cur)
         elif kind == "level":
             self._kinds[s] = "slider"
             cur, lo, hi = v
@@ -1793,7 +1817,7 @@ class SettingsLayer(Layer):
                 i.pressed("home") or i.pressed("b") or i.pressed("stop")):
             return True                   # the page holds while the drive is on
         if i.pressed("home"):
-            ws.home_key()
+            ws.home.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
             ws.input_policy.back(leave=True)
@@ -1879,8 +1903,8 @@ class SettingsLayer(Layer):
             self.syslog.aim(host)
         host.begin(ws.sys_canvas, ws.theme_colors, self._content(),
                    _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
-        was = ws._dirty
-        ws._dirty = False             # what the rows' answers change marks it again
+        was = ws.frame_state.dirty
+        ws.frame_state.dirty = False             # what the rows' answers change marks it again
         if view is None:
             if want is not None and _ui.focus() != want:
                 _ui.focus(want)       # a page not drawn yet: from this frame on
@@ -1894,9 +1918,9 @@ class SettingsLayer(Layer):
             _PAGES[view][3](self)
             self._sub_focused = _ui.focus()
         _ui.end()                     # the fade where the rows run on below
-        if ws._dirty or self.page != view or host.owed or host.tap == 2:
+        if ws.frame_state.dirty or self.page != view or host.owed or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
-        ws._dirty = was or ws._dirty
+        ws.frame_state.dirty = was or ws.frame_state.dirty
 
     # -- the pages' own halves (`_PAGES`) ------------------------------------------
 

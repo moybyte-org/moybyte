@@ -823,7 +823,7 @@ class DeviceCanvas:
         self._clip_y0 = self._oy
         self._clip_x1 = self._ox + self.w
         self._clip_y1 = self._oy + self.h
-        # #75: this runs EVERY cart frame (ws._reset_canvas_state), and rebuilding the
+        # #75: this runs EVERY cart frame (ws.reset_canvas_state), and rebuilding the
         # two 64-byte tables was two heap allocations per frame. The tables are created
         # once (first call: the attributes don't exist yet) and afterwards restored
         # IN PLACE, and only when a pal()/palt() actually touched them (_pal_dirty) --

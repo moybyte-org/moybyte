@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from runtime.player import Player, FREE_DT_MAX
+from runtime.player_pace import Pace
 from runtime.moy_play import Tick as TickScheduler
 from tools import gen_device_carts
 
@@ -25,50 +26,51 @@ class _Ws:
 
 def _player():
     pl = Player.__new__(Player)
-    pl._is_tool = False
+    pl._tool = False
+    pl.pace = Pace(pl)
     pl._free = False
     pl.sched = TickScheduler()
     pl.tick_ms = 0
-    pl._n_ticks = 1
-    pl._netplay = None
+    pl.n_ticks = 1
+    pl.netplay = None
     pl.ws = _Ws()
     return pl
 
 
 def test_a_free_cart_is_not_paced_and_draws_every_frame():
     pl = _player()
-    pl._arm_pacing({"fps": "free"})
+    pl.pace.arm({"fps": "free"})
     assert pl.tick_ms == 0 and pl._free is True
     for _ in range(10):
         assert pl.frame_plan(1 / 45) is True     # every loop frame draws
-        assert pl._n_ticks == 1                  # one real-dt tick each
+        assert pl.n_ticks == 1                  # one real-dt tick each
 
 
 def test_a_numbered_cart_keeps_its_tick():
     pl = _player()
-    pl._arm_pacing({"fps": 60})
+    pl.pace.arm({"fps": 60})
     assert pl.tick_ms == 16 and pl._free is False
     pl = _player()
-    pl._arm_pacing({})
+    pl.pace.arm({})
     assert pl.tick_ms == 33
 
 
 def test_free_dt_is_the_real_one_up_to_a_stall():
     pl = _player()
-    pl._arm_pacing({"fps": "free"})
+    pl.pace.arm({"fps": "free"})
     assert pl._loop_dt(1 / 45) == 1 / 45
     assert pl._loop_dt(0.7) == FREE_DT_MAX       # a radio scan slows time, never jumps it
     pl2 = _player()                              # a tool: the loop's own dt, unclamped
-    pl2._is_tool = True
-    pl2._arm_pacing({})
+    pl2._tool = True
+    pl2.pace.arm({})
     assert pl2._loop_dt(0.7) == 0.7
 
 
 def test_disarming_forgets_free():
     pl = _player()
-    pl._arm_pacing({"fps": "free"})
-    pl.park = lambda: None
-    pl._disarm_pacing()
+    pl.pace.arm({"fps": "free"})
+    pl.pace.park = lambda: None
+    pl.pace.disarm()
     assert pl._free is False
 
 

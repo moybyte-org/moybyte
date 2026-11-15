@@ -115,7 +115,7 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   nothing drains for it. Its stop hangs the descriptor up; its wakes are
   charged to the one supervisor (`moy_super.h`); a service that returns by
   itself is swept on the console's task (`moy_os_reap`), at the
-  scheduler's poll (`runtime/system/scheduler.py`, COMPILED SERVICES),
+  scheduler's poll (`runtime/system/sched_compiled.py`, COMPILED SERVICES),
   which starts, stops and restarts it as any service.
 - Native code is not aborted where it stands by a timer. A wake that runs
   on without polling its descriptor again is struck at that poll by

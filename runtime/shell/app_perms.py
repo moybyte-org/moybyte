@@ -38,7 +38,7 @@ lists refuses the launch with a message naming it.
 A cart in a folder with no consent record -- one that arrived as files:
 copied onto the card, over SFTP or USB, pushed by a paired browser -- is
 asked on its first run, with the install prompt's lines (`asks_first`): the
-home's launch asks (`Workstation.ask_first`), a command asks in its terminal
+home's launch asks (`Notices.ask_first`), a command asks in its terminal
 (`sh_door`), and until a yes every launch of it is refused (`UNASKED`). A
 yes records the consent an install would. Never asked: a built-in (known by
 its seed, `builtin_name`), a cart with no folder (a script), a cart whose
@@ -443,7 +443,7 @@ def show(ui, lines):
     """The install prompt's body, drawn into the dialog the public UI API
     `ui` has open: "It can:" over the prompt's `lines`, TRUSTED in the
     danger tone. Get Carts' install prompt and the shell's first-run one
-    (`console_notices.DeleteConfirm`) both draw it."""
+    (`shell_cards.DeleteConfirm`) both draw it."""
     if any(ln != TRUSTED for ln in lines):
         ui.label("It can:", {"tone": "dim"})
     for ln in lines:

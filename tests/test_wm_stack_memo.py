@@ -32,13 +32,13 @@ def _running_cart(tmp_path):
     assert ws.launcher.items, "system carts should be seeded"
     ws.launcher.sel = 0
     ws.open()                      # PLAY the first seed cart -> screen "desktop"
-    ws._splash_until = None
+    ws.splash_until = None
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(3):
         drv.frame(DT)
     settle_badges(ws)
-    ws._toast_until = 0            # drop any "First Steps" toast so the overlays are static
+    ws.toast_until = 0            # drop any "First Steps" toast so the overlays are static
     for _ in range(2):
         drv.frame(DT)
     return ws, drv
@@ -70,7 +70,7 @@ def test_static_play_stack_is_memoized_zero_rebuilds(tmp_path):
     a_rev = ws.wm.visible_stack_rev()
     a_ovl = ws.wm.overlay_stack()
     # The content slot IS the active content layer (spec alias), so the memo is faithful.
-    assert a_vis[0] is ws._content_layer()
+    assert a_vis[0] is ws.content_layer()
     # Reversed is genuinely top -> bottom (cursor first, content last).
     assert a_rev[0] is a_vis[-1] and a_rev[-1] is a_vis[0]
 
@@ -90,13 +90,13 @@ def test_static_launcher_stack_is_memoized(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     ws.look.select_wallpaper(None, persist=False)
-    ws._splash_until = None
+    ws.splash_until = None
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(3):
         drv.frame(DT)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     a = ws.wm.draw_stack()
     calls = _count_rebuilds(ws)
     for _ in range(20):
@@ -113,18 +113,18 @@ def test_backstack_push_pop_invalidates_the_memo(tmp_path):
     ws, drv = _running_cart(tmp_path)
     a = ws.wm.visible_stack()
     assert a is ws.wm.visible_stack()          # stable until a change
-    ws.go_home()                               # pop the Player -> launcher root
+    ws.home.go_home()                               # pop the Player -> launcher root
     b = ws.wm.visible_stack()
     assert b is not a
     assert ws.screen == "launcher"
-    assert b[0] is ws._content_layer()         # content slot tracked the new top
+    assert b[0] is ws.content_layer()         # content slot tracked the new top
 
 
 def test_overlay_gate_change_invalidates_the_memo(tmp_path):
     """An overlay gate flipping ON (the system menu opening) rebuilds the stack and adds
     the overlay -- the memo signature caught it without any explicit nav."""
     ws, drv = _running_cart(tmp_path)
-    ws.go_home()
+    ws.home.go_home()
     for _ in range(2):
         drv.frame(DT)
     a = ws.wm.draw_stack()
@@ -132,7 +132,7 @@ def test_overlay_gate_change_invalidates_the_memo(tmp_path):
     ws.toggle_sysmenu()                        # opens the ≡ dropdown overlay
     b = ws.wm.draw_stack()
     assert b is not a
-    assert ws._sysmenu_layer in b and ws._sysmenu_layer not in a
+    assert ws.sysmenu_layer in b and ws.sysmenu_layer not in a
 
 
 def test_editor_tab_switch_invalidates_the_memo(tmp_path):
@@ -142,10 +142,10 @@ def test_editor_tab_switch_invalidates_the_memo(tmp_path):
     assert ws.launcher.items
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     a = ws.wm.visible_stack()
     assert ws.wm.visible_stack() is a
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     b = ws.wm.visible_stack()
     assert b is not a
     assert b[0] is ws.code_layer               # the Code tab is now the content slot
@@ -156,15 +156,15 @@ def test_splash_expiry_invalidates_the_memo(tmp_path):
     underneath). Arming/clearing it flips the signature, so the draw stack rebuilds."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    ws._splash_until = None
+    ws.splash_until = None
     for _ in range(2):
         drv.frame(DT)
     plain = ws.wm.draw_stack()
-    assert plain[0] is ws._content_layer()     # no splash -> real content in the draw slot
+    assert plain[0] is ws.content_layer()     # no splash -> real content in the draw slot
     import runtime.console as C
-    ws._splash_until = C._ticks_ms() + 10 ** 6  # arm the splash
+    ws.splash_until = C._ticks_ms() + 10 ** 6  # arm the splash
     armed = ws.wm.draw_stack()
     assert armed is not plain
-    assert armed[0] is ws._splash_layer         # splash takes the draw content slot
+    assert armed[0] is ws.splash_layer         # splash takes the draw content slot
     # ...but input still routes to the content underneath (visible stack keeps content).
-    assert ws.wm.visible_stack()[0] is ws._content_layer()
+    assert ws.wm.visible_stack()[0] is ws.content_layer()

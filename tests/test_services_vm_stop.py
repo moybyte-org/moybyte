@@ -9,7 +9,7 @@ kernel's tables with no second start. A Python service still pauses: it is
 TERMed before the stop and started again after it, a new process.
 
 The host stands the stop in as the board's teardown and return start do it:
-the resume record written and the pause run (the Player's `_stop_for`), the
+the resume record written and the pause run (`Pace.stop_for`), the
 VM's queues closed and its door gone, the VM down for the queue of calls
 (moy_kernel_vm_down), the kernel's frame serving the hops meanwhile; then
 the VM up, the app ABI's run grants ended but the kept services'
@@ -26,6 +26,8 @@ import time
 import pytest
 
 from runtime import moy_evq, moy_loop, moybyte, moycore, native_build, os_log, scheduler as S
+from runtime import sched_python
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime.notifications import NOTES
 from test_scheduler import _clear
@@ -92,7 +94,7 @@ def fresh(monkeypatch):
 def _stop(ws, s):
     """The VM stops: what the board's Player and teardown do, the record
     answered."""
-    rec = json.loads(ws.resume_record())
+    rec = json.loads(ws.home.resume_record())
     s.pause()
     moy_evq.vm_stop()
     door = moy_loop._ROLE[0]
@@ -121,7 +123,7 @@ def _back(ws, rec, door, monkeypatch):
     moy_loop.role(door)
     s = S.Scheduler()
     monkeypatch.setattr(S, "SCHED", s)
-    ws.resume_launcher(json.dumps(rec))
+    ws.home.resume_launcher(json.dumps(rec))
     started = S.boot(ws)
     return s, started
 
@@ -137,10 +139,10 @@ def _polled(s, cond, secs=5.0):
 
 
 def _lua_step():
-    moycore.svc_step(int(time.monotonic() * 1000) & 0x3FFFFFFF)
+    moycore.svc_step()
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
         tmp_path, fresh, monkeypatch):
     _cart(tmp_path / "carts", "t.tick", "service.lua", LUA_SVC,
@@ -207,7 +209,7 @@ end)
 '''
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_lua_service_hears_and_answers_its_radio_through_a_vm_stop(
         tmp_path, fresh, monkeypatch):
     """A Lua service's radio is the kernel's handle and its wake the kernel's
@@ -251,7 +253,7 @@ moybyte.on("unset", function(_, tag) moybyte.cancel(ids[tag]); print("unset " ..
 '''
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_kernel_alarm_keeps_its_wall_time_through_a_clock_step_and_a_cancel_frees_it(
         tmp_path, fresh):
     """The wall clock steps (the board's NTP answer, moy_wifi.c's
@@ -560,7 +562,7 @@ def test_a_compiled_program_stops_its_app_s_services_through_a_vm_stop(
     _cart(carts, "t.tick", "service.lua", LUA_SVC)
     from runtime.host_app import build_workstation
     ws = build_workstation(str(carts))
-    if not all(t in ws.runtimes for t in ("elf", "wasm")) or S._svc() is None:
+    if not all(t in ws.runtimes for t in ("elf", "wasm")) or sched_lua.runtime() is None:
         pytest.skip("no ELF, wasm or Lua tier on this host")
     s = fresh
     since = L.next()
@@ -875,7 +877,7 @@ def test_a_wake_waiting_on_the_store_s_lock_is_not_struck(tmp_path, elf_built, w
     assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
     assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
                                   for p in (elf, wasi)))
-    hold = 3.5 * S.MOY_BG_ABORT_US / 1e6
+    hold = 3.5 * sched_python.MOY_BG_ABORT_US / 1e6
     lib.moy_store_lock()
     try:
         assert moy_evq.send(peer, "elf.svc", "files", "[1]")[0] == 1
@@ -949,7 +951,7 @@ def test_a_program_s_prefs_and_the_console_s_settings_writes_interleave_and_both
 # -- on the VM a board runs ---------------------------------------------------------
 
 VM_STOP = """
-import moycore, moy_evq
+import moycore, moy_evq, time
 src = '''
 n = 0
 moybyte.every(5, function() n = n + 1 end)
@@ -960,14 +962,15 @@ h = moycore.svc_start(9, "t.tick", src, '[{}, ["day"]]')
 print(moy_evq.open(8, "t.tick", "", False), moy_evq.listen(8, "counted", True))
 moy_evq.vm(False)
 rc, tid = moy_evq.timer(8, 0)
-print(moy_evq.vm(), rc, tid & moy_evq.TIMER_ID != 0, moy_evq.timers(8))
+print(moy_evq.vm(), rc, 0 < tid <= 0x3FFFFFFF, moy_evq.timers(8))
 moy_evq.timers_run()
 m = moy_evq.take(8)
 print(m[2], m[3] == "[%d]" % tid, moy_evq.timers(8))
 for t in range(0, 50, 5):
-    moycore.svc_step(t)
+    time.sleep_ms(6)
+    moycore.svc_step()
 print(moy_evq.send(8, "t.tick", "count", "[]")[0])
-moycore.svc_step(55)
+moycore.svc_step()
 m = moy_evq.take(8)
 print(m[2], int(m[3][1:-1]) >= 9)
 import moy_app
@@ -976,13 +979,13 @@ g = a.grant("t.tick", [], run=True, owner=8)
 print(a.role(g, moy_app.table().index("moybyte.service_running"), b"", 0)[0])
 a.end(g)
 moy_evq.send(8, "t.tick", "ask", "[]")
-moycore.svc_step(60)
+moycore.svc_step()
 t = moy_evq.next_call()
-moycore.svc_step(65)
+moycore.svc_step()
 print(t[1:], moycore.svc_info(h)[:2])
 moy_evq.vm(True)
 moy_evq.answer(t[0], "7")
-moycore.svc_step(70)
+moycore.svc_step()
 print(moycore.svc_info(h)[:2], moy_evq.vm())
 moycore.svc_reap(h)
 """

@@ -30,7 +30,7 @@ def test_search_filters_the_grid(tmp_path):
     full = list(ws.launcher.items)
     assert len(_real_items(ws)) > 1        # a real library to search over
 
-    ws.set_search_query("star")
+    ws.home.set_search_query("star")
     titles = [it.get("title") for it in ws.launcher.items if it.get("path")]
     assert titles == ["Star Catcher"]
     assert len(ws.launcher.items) < len(full)
@@ -38,17 +38,17 @@ def test_search_filters_the_grid(tmp_path):
 
 def test_search_is_case_insensitive_substring(tmp_path):
     ws = _ws(tmp_path)
-    ws.set_search_query("STAR")
+    ws.home.set_search_query("STAR")
     assert [it["title"] for it in _real_items(ws)] == ["Star Catcher"]
-    ws.set_search_query("cat")               # substring, mid-word
+    ws.home.set_search_query("cat")               # substring, mid-word
     assert [it["title"] for it in _real_items(ws)] == ["Star Catcher"]
 
 
 def test_search_no_matches_empties_the_tab_but_keeps_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.set_search_query("zzzznotacart")
+    ws.home.set_search_query("zzzznotacart")
     assert ws.launcher.items == []             # Games: no match, no card
-    ws.set_home_tab("make")                    # the filter follows the tab...
+    ws.home.set_home_tab("make")                    # the filter follows the tab...
     assert len(ws.launcher.items) == 1         # ...and "+ New" survives it
     assert ws.launcher.items[0].get("type") == "new"
 
@@ -56,9 +56,9 @@ def test_search_no_matches_empties_the_tab_but_keeps_the_new_card(tmp_path):
 def test_empty_query_restores_the_full_grid(tmp_path):
     ws = _ws(tmp_path)
     before = [it.get("path") for it in ws.launcher.items]
-    ws.set_search_query("star")
+    ws.home.set_search_query("star")
     assert [it.get("path") for it in ws.launcher.items] != before
-    ws.set_search_query("")
+    ws.home.set_search_query("")
     assert [it.get("path") for it in ws.launcher.items] == before
 
 
@@ -67,7 +67,7 @@ def test_a_rescan_reapplies_the_active_search_filter(tmp_path):
     an active search must survive that resync, not silently revert to the full
     list."""
     ws = _ws(tmp_path)
-    ws.set_search_query("star")
+    ws.home.set_search_query("star")
     ws.carts.apply(ws.carts.all)   # the shape every cart-management verb calls
     assert [it["title"] for it in _real_items(ws)] == ["Star Catcher"]
 
@@ -114,10 +114,10 @@ def test_sysmenu_search_row_opens_typing_and_filters_live(tmp_path):
 def test_search_esc_cancels_and_restores_the_full_grid(tmp_path):
     ws = _ws(tmp_path)
     full_n = len(_real_items(ws))
-    ws.open_search()
-    ws.set_search_query("star")
+    ws.home.open_search()
+    ws.home.set_search_query("star")
     assert len(_real_items(ws)) == 1
-    ws.close_search(clear=True)
+    ws.home.close_search(clear=True)
     assert ws.search_query == ""
     assert ws.search_typing is False
     assert len(_real_items(ws)) == full_n
@@ -129,7 +129,7 @@ def _search_frame(ws, drv, kind, typed=""):
     from runtime import ui_draw
     ws.launcher_layer._lib_unsupported = True   # every frame a full paint
     ws.use_inputs([("local", kind)])
-    ws.open_search()
+    ws.home.open_search()
     drv.frame(1 / 30)                           # the search takes the keyboard
     for ch in typed:
         drv.type_char(ord(ch))
@@ -148,7 +148,7 @@ def _search_frame(ws, drv, kind, typed=""):
         return real_hints(c, th, rect, items, *a, **kw)
     cv.print, ui_draw.hints = spy_print, spy_hints
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         cv.print, ui_draw.hints = real_print, real_hints
@@ -196,7 +196,7 @@ def test_a_held_search_closes_on_back(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     _search_frame(ws, drv, "keys", "st")
-    ws.close_search(clear=False)
+    ws.home.close_search(clear=False)
     assert ws.launcher_layer._search_close_items() == ("back", "Close")
     ws.launcher_layer._back()
     assert ws.search_query == ""
@@ -277,7 +277,7 @@ def test_favorite_star_badge_tap_toggles_without_launching(tmp_path):
 
 def test_favorite_rect_is_none_for_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0                        # Make's "+ New" pseudo card
     assert ws.launcher.selected().get("type") == "new"
     assert ws.launcher.favorite_rect(0) is None
@@ -292,14 +292,14 @@ def test_recent_carts_ordering_after_runs(tmp_path):
     battle = _find(ws, "Brick Siege")
 
     ws.launcher.sel = ws.launcher.items.index(star)
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.system.get("desk_mru") == [star["path"]]
-    ws.go_home()
+    ws.home.go_home()
 
     ws.launcher.sel = ws.launcher.items.index(battle)
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.system.get("desk_mru") == [battle["path"], star["path"]]
-    ws.go_home()
+    ws.home.go_home()
 
     recent = ws.carts.recent()
     assert [c["title"] for c in recent] == ["Brick Siege", "Star Catcher"]
@@ -312,8 +312,8 @@ def test_rerunning_a_cart_moves_it_to_the_front_without_duplicating(tmp_path):
 
     for cart in (star, battle, star):
         ws.launcher.sel = ws.launcher.items.index(cart)
-        ws.launch_selected()
-        ws.go_home()
+        ws.home.launch_selected()
+        ws.home.go_home()
 
     assert ws.system.get("desk_mru") == [star["path"], battle["path"]]
 
@@ -324,7 +324,7 @@ def test_recents_persist_across_reboot(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     star = _find(ws, "Star Catcher")
     ws.launcher.sel = ws.launcher.items.index(star)
-    ws.launch_selected()
+    ws.home.launch_selected()
 
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.system.get("desk_mru") == [star["path"]]
@@ -342,13 +342,13 @@ def test_recents_cap_at_mru_limit(tmp_path):
         moy_carts.create("Pad%d" % k, carts_dir, src="def _draw():\n    cls(1)\n",
                           type="game")
     ws.carts.apply(shelf(carts_dir))
-    ws.set_home_tab("mine")                    # made here: the kid's own
+    ws.home.set_home_tab("mine")                    # made here: the kid's own
     pads = [it for it in ws.launcher.items if it.get("title", "").startswith("Pad")]
     assert len(pads) == n
     for it in pads:
         ws.launcher.sel = ws.launcher.items.index(it)
-        ws.launch_selected()
-        ws.go_home()
+        ws.home.launch_selected()
+        ws.home.go_home()
 
     assert len(ws.system.get("desk_mru")) == ws.carts._MRU_CAP
     # Newest-first: the last cart run is at the front.
@@ -359,8 +359,8 @@ def test_recent_carts_skips_a_deleted_cart(tmp_path):
     ws = _ws(tmp_path)
     star = _find(ws, "Star Catcher")
     ws.launcher.sel = ws.launcher.items.index(star)
-    ws.launch_selected()
-    ws.go_home()
+    ws.home.launch_selected()
+    ws.home.go_home()
     assert ws.carts.recent()                    # sanity: recorded
 
     ws.system.set("desk_mru", ["nonexistent/path"] + ws.system.get("desk_mru"))
@@ -412,7 +412,7 @@ def test_the_new_card_takes_no_star_by_key(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = 0
     before = list(ws.system.get("favorites", []))
     drv.type_char(ord("f")); drv.frame(1 / 30)

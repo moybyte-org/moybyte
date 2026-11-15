@@ -41,12 +41,12 @@ def _ws_with_cart(edit, cfg, sheet=None):
     inp.pointer = ws.pointer
     ws.cart = {"title": "T", "type": "app", "src": "", "cfg": dict(cfg),
                "edit": edit, "path": None}
-    ws.config = dict(cfg)
+    ws.run.project.config = dict(cfg)
     ws.sheet = sheet if sheet is not None else SpriteSheet()
     ws.screen = "menu"
     ws.menu_view = "cards"
-    ws._draw = None
-    ws._update = None
+    ws.run.player.draw = None
+    ws.run.player.update = None
     return ws
 
 
@@ -124,7 +124,7 @@ def _tap_cell(ws, key, k):
     (cx, cy, cw, ch), _k = ws.cards_layer.page()._tiles[key][k]
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
 
 
@@ -136,9 +136,9 @@ def test_sprite_tile_card_selects_by_tapping_a_tile():
     assert len(ws.cards_layer.page()._tiles["who"]) == 2  # one tappable tile per choice
 
     _tap_cell(ws, "who", 1)                 # tap the second tile
-    assert ws.config["who"] == 1
+    assert ws.run.project.config["who"] == 1
     _tap_cell(ws, "who", 0)                 # tap the first tile
-    assert ws.config["who"] == 0
+    assert ws.run.project.config["who"] == 0
 
 
 def test_choice_icons_card_selects_by_tapping_an_icon():
@@ -152,7 +152,7 @@ def test_choice_icons_card_selects_by_tapping_an_icon():
         # every tile lies inside its card's row: no dead zone at its foot
         assert rx <= cx and cx + cw <= rx + rw and ry <= cy and cy + ch <= ry + rh
     _tap_cell(ws, "p", 2)                   # tap the third icon
-    assert ws.config["p"] == "z"
+    assert ws.run.project.config["p"] == "z"
 
 
 def test_a_two_way_choice_icons_card_is_a_toggle_at_row_height():
@@ -181,10 +181,10 @@ def test_an_int_card_steps_by_its_step_with_left_and_right():
     drv.frame(1 / 30)
     drv.press("right")
     drv.frame(1 / 30)
-    assert ws.config["spd"] == 60
+    assert ws.run.project.config["spd"] == 60
     drv.press("left")
     drv.frame(1 / 30)
-    assert ws.config["spd"] == 50
+    assert ws.run.project.config["spd"] == 50
 
 
 # -- the showcase cart: Star Catcher with real sprite-tile catcher ----------
@@ -200,8 +200,8 @@ def _open(ws, title):
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     if cart is None:
         raise AssertionError("cart not found: " + title)
-    ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.open_workspace(cart)
+    ws.spine.play(ws.launcher_layer)
 
 
 def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
@@ -219,12 +219,12 @@ def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):
     assert ws.cart_error is None
 
     # its CATCHER card is a sprite-tile picker.
-    ws._open_menu()
+    ws.text.open_menu()
     basket = [f for f in ws.cart["edit"] if f["key"] == "basket"][0]
     assert basket["display"] == "sprite-tiles"
     _tap_cell(ws, "basket", 1)                          # pick the robot tile
-    assert ws.config["basket"] == 1
-    ws.apply()                                          # re-run with the new pick
+    assert ws.run.project.config["basket"] == 1
+    ws.saves.apply()                                          # re-run with the new pick
     assert ws.cart_error is None
     assert ws.ns["catcher"] == 1
 
@@ -233,8 +233,8 @@ def test_showcase_runs_with_a_stale_string_basket(tmp_path):
     # An older config may still carry basket="frog"; the cart must not crash.
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Star Catcher")
-    ws.config["basket"] = "robot"
-    ws.apply()
+    ws.run.project.config["basket"] = "robot"
+    ws.saves.apply()
     assert ws.cart_error is None
     assert ws.ns["catcher"] == 1                        # mapped name -> tile id
 
@@ -249,20 +249,20 @@ def test_bg_thumbs_card_renders_and_selects_by_tapping_a_thumbnail():
     _draw_once(ws)                               # draws solid/starfield/stripes thumbs
     assert len(ws.cards_layer.page()._tiles["bg"]) == 4      # one thumbnail per preset
     _tap_cell(ws, "bg", 2)                       # tap the "stripes" thumbnail
-    assert ws.config["bg"] == "stripes"
+    assert ws.run.project.config["bg"] == "stripes"
 
 
 def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Space Desktop")
-    ws._open_menu()
+    ws.text.open_menu()
     bg = [f for f in ws.cart["edit"] if f["key"] == "bg"][0]
     assert bg["display"] == "bg-thumbs"
     ws.cards_layer.page().host.focus("bg")       # the page scrolls it into view
     _draw_once(ws)
     _tap_cell(ws, "bg", 2)                       # "stripes"
-    assert ws.config["bg"] == "stripes"
-    ws.apply()                                   # the cart paints stripes, no crash
+    assert ws.run.project.config["bg"] == "stripes"
+    ws.saves.apply()                                   # the cart paints stripes, no crash
     assert ws.cart_error is None
     for _ in range(10):
         ws.input.begin_frame()
@@ -277,14 +277,14 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
     for title in ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red"):
         _open(ws, title)
         if not ws.cart.get("edit"):
-            ws.go_home()
+            ws.home.go_home()
             continue
-        ws._open_menu()
+        ws.text.open_menu()
         assert ws.menu_view == "cards"
         ws.input.begin_frame()
         ws.frame(1 / 30)                                # draws cards, no error
         assert probe.drew_something(ws.run.canvas)
-        ws.go_home()
+        ws.home.go_home()
 
 
 # -- robustness: a malformed sprite-tiles card can't crash the cards menu (#1) --
@@ -359,7 +359,7 @@ def test_left_right_input_on_malformed_card_does_not_crash():
     drv.press("right")
     drv.frame(1 / 30)
     assert ws.cart_error is None
-    assert ws.config["bad"] == 5
+    assert ws.run.project.config["bad"] == 5
 
 
 # -- many cards: the page scrolls (#3) --------------------------------------

@@ -132,7 +132,7 @@ class SceneEditorUI:
         return page.point(px, py, click, down)
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
+        """Rebuild the responsive geometry (#39) -- ws.relayout fan-out."""
         self.layout = SceneLayout(w, h, fs, chrome_scale=cs)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
@@ -141,7 +141,7 @@ class SceneEditorUI:
     def build(self):
         """Build the SceneEditor over the open cart's DEFAULT scene (the
         manifest's element 0; a cart with none starts an empty "main"). Called
-        from Workstation.set_menu_view("scene")."""
+        from Text.set_menu_view("scene")."""
         ws = self.ws
         if self.sceneedit is not None or ws.run.project.sheet is None:
             return
@@ -182,7 +182,7 @@ class SceneEditorUI:
     def save(self):
         """SAVE: persist the edited scene through Project.commit_scene (atomic
         write + manifest registration + the durable undo journal, Stage 1).
-        The ws entry point Workstation.save_scene forwards here."""
+        The ws entry point Saves.save_scene forwards here."""
         ws = self.ws
         se = self.sceneedit
         if se is None or self.scene_name is None:
@@ -289,13 +289,13 @@ class SceneEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.close()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
         if se is not None:
             g = 8
             if se.selected() is not None:
@@ -318,7 +318,7 @@ class SceneEditorUI:
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()
-        ws._leave_or_home(ws.exit)
+        ws.home.leave_or_home(ws.spine.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit
@@ -351,7 +351,7 @@ class SceneEditorUI:
                 se.begin_edit()
             else:
                 self._mode = "pan"
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _scene_drag(self, px, py):
         """Held-drag: a MOVE gesture tracks the actor under the finger (live,
@@ -366,7 +366,7 @@ class SceneEditorUI:
             wx = se.cam_x + (px - x0) // scale
             wy = se.cam_y + (py - y0) // scale
             se.move_sel(wx + self._grab[0], wy + self._grab[1])
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         if self._mode != "pan":
             return
@@ -402,7 +402,7 @@ class SceneEditorUI:
                 if w is not None:
                     se.place(w[0], w[1])
                     self._sync_live()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         self._press = None
         self._mode = None
         self._panning = False

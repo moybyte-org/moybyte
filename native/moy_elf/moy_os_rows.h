@@ -205,5 +205,6 @@ int32_t moy_os_moy_aes_ccm_seal(const void *key, size_t key_len, const void *dat
 int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sealed, size_t sealed_len, int32_t tag, void *plain, size_t plain_cap);
 int32_t moy_os_moy_name(void *name, size_t name_cap);
 int32_t moy_os_moy_clock(int32_t local);
+int moy_os_moy_ui_tell(uint32_t answers);
 
 #endif // MOY_OS_ROWS_H

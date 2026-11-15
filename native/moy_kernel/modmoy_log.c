@@ -1,6 +1,6 @@
 // moy_log's MicroPython binding: the OS log (moy_log.h) as the module
 // `moy_log`, its names those face.json lists: the rows here are the hand
-// ones, the rest are generated into modmoy_log_face.c.
+// ones, the rest are generated into modmoy_log_face.h.
 //
 //   write(level, pid, *parts)   one record: the parts' str() joined by spaces,
 //                      under `pid` (None: current). A single str part is
@@ -26,7 +26,7 @@
 #include "moy_log.h"
 #include "moy_proc_exit.h"
 
-#include "modmoy_log_face.c"
+#include "modmoy_log_face.h"
 
 #define JOIN_MAX 384
 

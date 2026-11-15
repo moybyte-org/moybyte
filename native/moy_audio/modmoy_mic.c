@@ -1,6 +1,6 @@
 // moy_mic's MicroPython binding: the `mic` device API's driver (moy_mic.h) as
 // the module `moy_mic`, its names those face.json lists: the row here is the
-// hand one, the rest are generated into modmoy_mic_face.c. A refusal is a
+// hand one, the rest are generated into modmoy_mic_face.h. A refusal is a
 // negative errno (Linux's numbers), which the Python face
 // (runtime/system/dev_mic.py) raises.
 //
@@ -12,7 +12,7 @@
 
 #include "moy_mic.h"
 
-#include "modmoy_mic_face.c"
+#include "modmoy_mic_face.h"
 
 static mp_obj_t mic_push(mp_obj_t buf) {
     mp_buffer_info_t b;

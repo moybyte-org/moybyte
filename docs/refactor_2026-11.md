@@ -487,7 +487,7 @@ Closes T1, T9, T10, T13, N9, T16; measures X8. Decided: §6, decision 2.
   the error table to raise from, constants, defaults, no-allocation rows,
   the targets a row is absent on).
 - The generator emits, committed and drift-tested: the MicroPython face
-  (`modmoy_<m>_face.c`, included by the hand file's globals table), the
+  (`modmoy_<m>_face.h`, included by the hand file's globals table), the
   ctypes face, the mirrored structures (T9, N9: from the headers), the
   constants (T13, N9) and the one table `runtime/__init__.py` registers host
   faces from (T10).
@@ -612,10 +612,10 @@ Closes T7, G2, T2, I3, I4.
   layout from a stale measure. Owed frames are counted with the engine's
   other counts.
 - The run face moves from `moy_ui_wasm.c` to
-  `+native/moy_ui/moy_ui_run.c`.
+  `native/moy_ui/moy_ui_run.c`.
 - T2: the `ui.*` rows gain what the faces need (the Python signature, enum
   arguments, index base per tier, list arguments, the shape of an answer,
-  the end form), and `+native/moy_ui/over.json` lists every override key.
+  the end form), and `native/moy_ui/over.json` lists every override key.
   The generator emits the MicroPython verbs, the ctypes verbs, the run face,
   the wasm imports, the Lua verbs and `runtime/toolkit/ui.py`'s bodies
   between markers, and all five override codecs.
@@ -633,7 +633,7 @@ frame, so none should move; one that does is reviewed under this name.
 and `tests/test_ui_opts_seq.py` (the boards' dict path still allocates
 nothing). T-Deck and P4 pass. Goldens unchanged, which here is the proof.
 
-**Guards.** `+tests/test_ui_ctx_groups.py`: each engine file touches only
+**Guards.** `tests/test_ui_ctx_groups.py`: each engine file touches only
 the sub-struct it owns, and 17 kept ids in one context raise `keep_lost`.
 `tests/test_ui_opts_seq.py` drives every key of `over.json`. T3 and the
 parity test hold the names. Phase 4's matrix has no failing cell left, and
@@ -674,7 +674,7 @@ decision 3.
   owning object in any case, and the rest of their sites are outside callers
   and tests the carve does not need to touch (§7).
 - **S10.** `console_notices.py` splits: the intents glue to its service, the
-  pause, confirm and system-menu cards to `+runtime/shell/shell_cards.py`,
+  pause, confirm and system-menu cards to `runtime/shell/shell_cards.py`,
   the pre-toolkit draw trio beside `bar_layer`. New modules are added to git
   before the first board build (the stager prunes untracked files) and to
   the Zero's allowlist.
@@ -772,7 +772,7 @@ traces that record wake order; no pixels.
 One S3: a Lua service's timers through a VM stop. One P4: a Lua app's
 `every` beside a Python app's.
 
-**Guard.** `+tests/test_one_scheduler.py`: a timer made on any tier is a
+**Guard.** `tests/test_one_scheduler.py`: a timer made on any tier is a
 row of the kernel's table; a Lua app's and a Lua service's `moybyte` names
 are one set; a service and a cart see one set of banned globals; no timer
 table in `moycore_svc.c` and no due-list in `Wakes`.
@@ -796,7 +796,7 @@ on a board. `is_app()` is the public question.
 **Check.** `tests/test_frame_alloc.py`, the semantic traces, the cart
 raster's goldens unchanged. T-Deck: per-cart fps as before (#66).
 
-**Guard.** `+tests/test_player_parts.py`: the Player defines no method of
+**Guard.** `tests/test_player_parts.py`: the Player defines no method of
 the app face or the pacing half, and the frame path makes no call through
 either.
 
@@ -835,7 +835,7 @@ Closes N15, X1, E1. Decided: §6, decision 4.
     the door above.
   - The archive lands in the user files, where the USB drive and SFTP
     already reach it; no new transport.
-  - `+tools/console_backup.py` pulls and pushes an archive from a host, and
+  - `tools/console_backup.py` pulls and pushes an archive from a host, and
     the dev channel has the two calls as commands.
   - The on-device action, a row in Settings with its confirm and its restore
     picker, is not in the sprint (§6's rule, §7).
@@ -851,7 +851,7 @@ store sweep costs what it did; an archive of a full card is written without
 running the heap out. P4: the same archive restored onto its internal
 flash.
 
-**Guard.** `+tests/test_store_one_body.py`: no module under `runtime/carts`
+**Guard.** `tests/test_store_one_body.py`: no module under `runtime/carts`
 defines a body for a function the C store exports; the fixture store opens,
 unchanged, on the current tree; a store archived and restored into an empty
 root reads back equal, file for file, thumbnails aside, and a re-seed after

@@ -27,10 +27,13 @@ layers the picture, which must be the Python app's after the same gesture,
 the Python app's cell passing (tests/test_ui_linked.py holds the three to
 the same pixels at rest).
 
-A cell that fails today is in FAILING under the phase whose change clears it
-(phase 5, the input owner; phase 8, the toolkit's widget state). Each is a
-strict expected failure, so the phase that clears a cell has to take it out;
-emptying a phase's set is that phase's guard.
+A compiled or ELF app's toolkit is a copy linked into its module: the
+console's input owner reaches it through the frame message's steps and asks
+and the answers the module tells after each frame (sdk/src/moyui_link.c,
+native/moy_kernel/moy_screen_slot.h's THE TOOLKIT'S ANSWERS), as it reaches a
+Lua run's through the run face.
+
+Every cell passes: a cell is never marked as an expected failure.
 """
 
 import os
@@ -71,31 +74,6 @@ GESTURES = {
 
 CELLS = [(layer, row, col) for layer in LAYERS for row in ROWS for col in COLUMNS
          if col in GESTURES[row]]
-
-# The cells that fail today, by the phase whose change clears them. A cell
-# here is a strict xfail: when it passes, take it out.
-FAILING = {
-    "phase 5": {
-        # A compiled (WASI) or ELF app's page draws through a toolkit linked
-        # into the module, whose focus, popover and edit the console cannot
-        # see or reach: the input owner asks the run's context
-        # (`ui_draw.run_typing`, `run_cancel`, `run_back`), which such an app
-        # leaves closed (native/moy_ui/moy_ui_wasm.c). So a focused field
-        # leaves the keyboard in move mode, Esc, B and Mic reach neither its
-        # edit nor its popover, and the trackball steps no list of it -- until
-        # the module's ABI carries the toolkit's answers out and the host's
-        # cancel and back in (moy-spec's proposals/wasm-runtime.md).
-        *[(layer, row, "mic") for layer in ("wasm_app", "elf_app")
-          for row in ("field", "popover")],
-        *[(layer, "field", col) for layer in ("wasm_app", "elf_app")
-          for col in ("kbd_move", "esc")],
-        *[(layer, "popover", col) for layer in ("wasm_app", "elf_app")
-          for col in ("esc", "gamepad")],
-        ("wasm_app", "list", "trackball"),
-        ("elf_app", "list", "trackball"),
-    },
-    "phase 8": set(),
-}
 
 # The page's widget rect, in the page's content rect: 8 in from its corner.
 INSET = 8
@@ -352,7 +330,7 @@ class Rig:
                        ("local", "keys"), ("touch", "touch")))
         ws.look.set_theme("moy", persist=False)
         ws.pointer.visible = False
-        ws.bar_layer._clock_text = lambda: "10:30"
+        ws.bar_layer.clock_text = lambda: "10:30"
         self.drv = host_app.ConsoleDriver(ws)
         self.kbd_bus = Kbd()
         self.kbd_bus.frames = [b"\x00"]
@@ -368,7 +346,7 @@ class Rig:
             ctx.ui = AppHost("matrix", ctx.surface)
             ws._app_hosts["matrix"] = ctx.ui
             app = MatrixShellPage(ctx)
-            ws.register_app(app)
+            ws.spine.register_app(app)
             self.app = app
         open_cart(ws, "Matrix Shell" if layer == "py_shell" else "Matrix")
         if ws.confirm.open:
@@ -388,7 +366,7 @@ class Rig:
             self.kbd.pass_()
             self.ble.frame()
             quiesce(self.ws)
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             self.drv.frame(DT)
 
     def state(self):
@@ -396,7 +374,7 @@ class Rig:
         if self.layer == "py_shell":
             return dict(self.app.S)
         if self.layer == "lua_app":
-            g = p._lua.get_global
+            g = p.lua.get_global
             return {"t": g("T"), "c": g("C"), "n": g("N"), "open": g("OPEN"), "first": g("FIRST"),
                     "r": PAGE_RECT.get(self.row)}
         if self.layer == "py_app":
@@ -419,7 +397,7 @@ class Rig:
         r = (self.state() or {}).get("r") or PAGE_RECT.get(self.row)
         if r is None:
             ref = Rig(self.tmp / "rect", "py_app", self.row, self.monkeypatch, {})
-            ref.ws.exit()
+            ref.ws.spine.exit()
             r = PAGE_RECT[self.row]
         x, y = self.screen_of(r[0] + INSET, r[1] + INSET)
         sc = 1 if self.layer == "py_shell" else self.ws._viewport()[2]
@@ -658,27 +636,11 @@ def _reference(tmp_path, row, col, monkeypatch, built):
         what = GESTURES[row][col]
         gesture(rig, col, what)
         _REF[key] = (a, rig.shot(), effect(what, s0, rig.state()))
-        rig.ws.exit()
+        rig.ws.spine.exit()
     return _REF[key]
 
 
-def _phase_of(cell):
-    for phase, cells in FAILING.items():
-        if cell in cells:
-            return phase
-    return None
-
-
-def _params():
-    out = []
-    for cell in CELLS:
-        phase = _phase_of(cell)
-        marks = [pytest.mark.xfail(strict=True, reason="cleared by " + phase)] if phase else []
-        out.append(pytest.param(*cell, id="-".join(cell), marks=marks))
-    return out
-
-
-@pytest.mark.parametrize("layer,row,col", _params())
+@pytest.mark.parametrize("layer,row,col", CELLS, ids=["-".join(c) for c in CELLS])
 def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     what = GESTURES[row][col]
     if layer in ("wasm_app", "elf_app"):
@@ -693,12 +655,21 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     try:
         if layer in ("wasm_app", "elf_app"):
             before = rig.shot()
-            gesture(rig, col, what)
+            if what == "cancel":
+                # A cancel draws the page as it was before the typing, so the
+                # typing has to show first: a cancel that did nothing would
+                # draw the same.
+                rig.desk_type(TYPED)
+                typed = rig.shot() != before
+                assert typed, "%s: typing into the field draws nothing" % layer
+                gesture(rig, col, "dismiss")
+            else:
+                gesture(rig, col, what)
             after = rig.shot()
             assert ref[2], "the Python app's own cell fails: so does this layer's"
             # Booleans, not the shots: a failed == over two frames' bytes
             # makes pytest diff them, which runs for hours.
-            drew = ref[1] != ref[0] and after == ref[1]
+            drew = (ref[1] != ref[0] or what == "cancel") and after == ref[1]
             assert drew, ("%s: the %s's %s by %s does not draw what the Python app's does"
                           % (layer, row, what, col))
             rests = before == ref[0]
@@ -710,13 +681,96 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
         assert effect(what, before, after), (
             "%s: %s by %s: %r -> %r" % (layer, what, col, before, after))
     finally:
-        rig.ws.exit()
+        rig.ws.spine.exit()
 
 
-def test_every_failing_cell_is_a_cell_and_names_one_phase():
-    seen = set()
-    for phase, cells in FAILING.items():
-        assert phase in ("phase 5", "phase 8"), phase
-        assert cells <= set(CELLS), cells - set(CELLS)
-        assert not cells & seen, cells & seen
-        seen |= cells
+# -- widget state (phase 8): a field's edit and a popover's size are its own ----------
+
+STACK_PY = """
+a = "aa"
+b = "bb"
+pop = 0
+want = ""
+focus = ""
+
+
+def _draw():
+    global a, b, pop, want, focus
+    cls(0)
+    ui.page("Stack")
+    a, _ = ui.field("Name", a, 11)
+    ui.button("Open")
+    if pop:
+        if not ui.popover("pop", 160):
+            pop = 0
+        b, _ = ui.field("Note", b, 11)
+        ui.popover()
+    if want:
+        ui.focus(want)
+        want = ""
+    focus = ui.focus()
+"""
+
+class _Stack:
+    """A Python app's page whose field a popover with a field of its own
+    stacks over; the engine and its records are the one every runtime
+    draws through."""
+
+    def __init__(self, tmp_path):
+        from test_app_field_typing import _open
+        self.ws, self.drv = _open(tmp_path, "Stack", STACK_PY, "python")
+        self.ns = self.ws.run.player.ns
+
+    def set(self, name, v):
+        self.ns[name] = v
+        for _ in range(3):
+            self.drv.frame(DT)
+
+
+def test_a_stacked_fields_cancel_gives_each_field_its_own_text(tmp_path):
+    """A field with an edit in progress under a popover whose field takes an
+    edit of its own: each field's record keeps the text its edit began
+    from, so the popover's cancel gives its field its text, and the page's,
+    focused again, cancels to its own."""
+    from test_app_field_typing import _mic, _type
+    from runtime import ui_draw
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("tdeck")
+    try:
+        st = _Stack(tmp_path)
+        st.set("want", "Name")
+        _type(st.drv, "x")
+        st.set("pop", 1)
+        st.set("want", "Note")
+        _type(st.drv, "y")
+        assert (st.ns["a"], st.ns["b"]) == ("aax", "bby")
+        _mic(st.ws, st.drv)
+        assert (st.ns["a"], st.ns["b"]) == ("aax", "bb")
+        st.set("pop", 0)
+        st.set("want", "Name")
+        _mic(st.ws, st.drv)
+        assert (st.ns["a"], st.ns["b"]) == ("aa", "bb")
+        assert not st.ws.sysmenu.open, "the page's field had its own edit to cancel"
+    finally:
+        ui_draw.input_kind(was)
+
+
+def test_a_popover_first_shows_at_its_settled_box(tmp_path):
+    """A popover with no size kept lays its body out and draws nothing, owing
+    the next frame: the first frame it shows on is the frame after it, and
+    the one after that draws the same."""
+    from test_ui_linked import _pixels
+    st = _Stack(tmp_path)
+    base = _pixels(st.ws)
+    st.ns["pop"] = 1
+    shots = []
+    for _ in range(4):
+        st.ws.mark_dirty()
+        st.drv.frame(DT)
+        shots.append(_pixels(st.ws))
+    shown = [i for i, s in enumerate(shots) if s != base]
+    assert shown, "the popover never showed"
+    first = shown[0]
+    assert first >= 1, "it showed on its first frame, at a size it had not measured"
+    same = shots[first] == shots[first + 1]
+    assert same, "the popover's box moved after it first showed"

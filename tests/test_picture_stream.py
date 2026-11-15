@@ -1,7 +1,6 @@
 """The desk's picture read from its file a row at a time: the C reader
 (native/moy_store/moy_img.h's streamed reader, `moy_ufiles.cover_image`) held
-to its reference (`moyimg.cover_stream`) over every shape, window and way a
-file is not one; the Wallpaper reading a 1024x600 picture into one
+over every shape, window and way a file is not one; the Wallpaper reading a 1024x600 picture into one
 screen-sized buffer and keeping the screen it made beside the picture; and a
 picture cart's one-picture-per-glass-size field."""
 
@@ -56,14 +55,9 @@ class _Trickle(io.RawIOBase):
 
 def _both(blob, dw, dh, mw=4096, mh=4096, trickle=None):
     uf = _uf()
-    a, b = bytearray(dw * dh), bytearray(dw * dh)
+    a = bytearray(dw * dh)
     src = _Trickle(blob, trickle) if trickle is not None else io.BytesIO(blob)
-    got_c = uf.cover_image(src, a, dw, dh, mw, mh)
-    got_py = moyimg.cover_stream(io.BytesIO(blob), b, dw, dh, mw, mh)
-    assert got_c == got_py, (blob[:80], got_c, got_py)
-    if got_c is not None:
-        assert a == b
-    return got_c, a
+    return uf.cover_image(src, a, dw, dh, mw, mh), a
 
 
 def _art(w, h, seed=7):
@@ -234,10 +228,13 @@ def test_the_next_read_is_the_kept_screen(tmp_path, monkeypatch):
     assert ws.wallpaper.draw_picture(ws.sys_canvas)
     first = bytes(ws.wallpaper._pic_data[2])
 
-    import runtime.moyimg as rm
-    monkeypatch.setattr(ws.carts_store, "cover_image", None, raising=False)
     calls = []
-    monkeypatch.setattr(rm, "cover_stream", lambda *a: calls.append(a))
+    real = ws.carts_store.cover_image
+
+    def cover(*a):
+        calls.append(a)
+        return real(*a)
+    monkeypatch.setattr(ws.carts_store, "cover_image", cover, raising=False)
     wall = Wallpaper(ws, ws.wallpaper._NAMES)
     assert wall.draw_picture(ws.sys_canvas)
     assert bytes(wall._pic_data[2]) == first and calls == []
@@ -403,19 +400,17 @@ def test_a_seeded_picture_cart_keeps_its_pictures(tmp_path):
 MP_DRIVER = r'''
 import sys, json, hashlib, binascii, io
 sys.path.insert(0, @RUNTIME@)
-import moyimg, moy_ufiles
+import moy_ufiles
 out = []
 for path, dw, dh in json.loads(@JOBS@):
     rows = []
-    for how in ("file", "bytes", "twin"):
+    for how in ("file", "bytes"):
         buf = bytearray(dw * dh)
         with open(path, "rb") as f:
             if how == "file":
                 got = moy_ufiles.cover_image(f, buf, dw, dh, 1024, 600)
-            elif how == "bytes":
-                got = moy_ufiles.cover_image(io.BytesIO(f.read()), buf, dw, dh, 1024, 600)
             else:
-                got = moyimg.cover_stream(f, buf, dw, dh, 1024, 600)
+                got = moy_ufiles.cover_image(io.BytesIO(f.read()), buf, dw, dh, 1024, 600)
         rows.append(None if got is None else
                     [got[0], got[1], binascii.hexlify(hashlib.sha256(buf).digest()).decode()])
     out.append(rows)
@@ -424,9 +419,9 @@ print(json.dumps(out))
 
 
 @pytest.mark.parametrize("board_model", (False, True))
-def test_the_boards_reader_is_the_reference(tmp_path, board_model):
+def test_the_boards_reader_is_the_hosts(tmp_path, board_model):
     """`moy_ufiles.cover_image` on the desktop MicroPython, over a file and a
-    BytesIO through the stream protocol, and the reference run there too."""
+    BytesIO through the stream protocol, answers as the host's."""
     import hashlib
     import subprocess
 
@@ -451,7 +446,7 @@ def test_the_boards_reader_is_the_reference(tmp_path, board_model):
     for (path, dw, dh), rows in zip(jobs, got):
         buf = bytearray(dw * dh)
         with open(path, "rb") as f:
-            want = moyimg.cover_stream(f, buf, dw, dh, 1024, 600)
+            want = _uf().cover_image(f, buf, dw, dh, 1024, 600)
         want = None if want is None else [want[0], want[1], hashlib.sha256(buf).hexdigest()]
-        assert rows == [want, want, want], (path, dw, dh)
+        assert rows == [want, want], (path, dw, dh)
     assert got[0][0] is not None and got[-1][0] is None

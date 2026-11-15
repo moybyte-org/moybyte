@@ -33,3 +33,7 @@ SRC_USERMOD_LIB_C += $(MOY_KERNEL_DIR)/moy_loop.c $(MOY_KERNEL_DIR)/moy_idle.c \
     $(MOY_KERNEL_DIR)/moy_notes.c \
     $(MOY_KERNEL_DIR)/moy_items.c
 CFLAGS_USERMOD += -I$(MOY_KERNEL_DIR)
+# A generated face (gen_os, *_face.h) holds names only its includer uses, and
+# the qstr pass re-scans a source only when that source changed: a face that
+# changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_KERNEL_DIR)/*_face.h)

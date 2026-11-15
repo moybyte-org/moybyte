@@ -225,7 +225,7 @@ class HomeHints:
         for v, x0, x1 in spans:
             if x0 <= px < x1:
                 if v == "tabs":
-                    self.ws.step_home_tab(1, self.grid)
+                    self.ws.home.step_home_tab(1, self.grid)
                 else:
                     self._do_verb(v)
                 return True
@@ -240,7 +240,7 @@ class HomeHints:
             return False
         ch = chr(k).lower()
         if ch in ("q", "e"):
-            self.ws.step_home_tab(-1 if ch == "q" else 1, self.grid)
+            self.ws.home.step_home_tab(-1 if ch == "q" else 1, self.grid)
             if self._tab_keys:
                 self._tab_at = self.grid.tab
                 self._zone_bump += 1

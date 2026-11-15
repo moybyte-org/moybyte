@@ -628,7 +628,7 @@ _ICON = {
     "close": 12, "run": 13, "save": 14, "music": 15,
     "moy": 16,          # the moybyte mascot (boot logo); not a bar control
     "wifi_off": 17,     # wifi-with-a-red-slash: the right-zone status glyph when
-                        # there's NO connection (ws._wifi_icon_kind picks it, #Part3)
+                        # there's NO connection (ws.wifi_icon_kind picks it, #Part3)
     "scene": 18,        # the scene placement editor tab (#85 Stage 2)
     "undo": 19, "redo": 20,   # the shared Editor bar's undo/redo icons (#88)
     # the media transport, the volume's steps, a list and what plays (#110)
@@ -691,7 +691,7 @@ _ICON_ART = {
         ".......77.......", "................", "................", "................",
     ),
     # "wifi_off": the wifi signal with a bold red (8) diagonal slash through it -- the
-    # right-zone STATUS glyph shown when there is NO connection (ws._wifi_icon_kind).
+    # right-zone STATUS glyph shown when there is NO connection (ws.wifi_icon_kind).
     "wifi_off": (
         "................", "....77777777....", ".887........77..", ".788..7777....7.",
         "...887....77....", "...788......7...", ".....88777......", ".....788..7.....",

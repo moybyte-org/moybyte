@@ -2,8 +2,8 @@
 (`set_diag_live`/`set_diag_sd`/`set_steady`/`set_two_player`/`set_crisp_pixels`/
 `set_show_fps`) over the one `_set_toggle` tail, the
 second-keyboard probe local 2P rides on, the time zone and the OTA channel
-choice. A mixin
-of `Workstation`: each verb writes the flat mirror, marks the repaint and
+choice. The
+console's `ws.toggles`: each verb writes the flat mirror, marks the repaint and
 persists through `prefs`. What the settings MEAN at boot (`load_system`'s
 apply cascade) stays on the kernel.
 """
@@ -18,6 +18,9 @@ import wallclock as _wc
 
 class SettingsToggles:
 
+    def __init__(self, ws):
+        self.ws = ws
+
     def _set_toggle(self, key, on, persist):
         """The tail every SETTINGS_TOGGLES verb shares: the flat mirror, the
         repaint mark, and the persisted copy under the SAME name (#209 section
@@ -28,18 +31,20 @@ class SettingsToggles:
         FLIP and at boot, never per frame; the READ side stays a plain
         attribute everywhere, and must -- both WMs read show_fps on every
         painted game frame on all three boards."""
-        setattr(self, key, on)
-        self._dirty = True
+        ws = self.ws
+        setattr(ws, key, on)
+        ws.frame_state.dirty = True
         if persist:
-            self.system.set(key, on)
+            ws.system.set(key, on)
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
         On a tier whose frames are the kernel's, the capture meters and the
         PERF line follow it at the next frame -- no reboot."""
+        ws = self.ws
         self._set_toggle("diag_live", bool(on), persist)
         if _loop is not None:
-            self.perf_capture = bool(on)
+            ws.perf_capture = bool(on)
             _loop.capture(bool(on))
 
     def set_diag_sd(self, on, persist=True):
@@ -54,10 +59,11 @@ class SettingsToggles:
         """Flip the tick model's STEADY / FREE knob (#217, Settings -> STEADY)
         and persist it: how long the draw divisor remembers before it decides
         again. Relayed live into the running cart's scheduler."""
+        ws = self.ws
         self._set_toggle("steady", bool(on), persist)
-        pl = self.run.player
+        pl = ws.run.player
         if pl is not None:
-            pl.steady_mode(on)
+            pl.pace.steady_mode(on)
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.
@@ -67,8 +73,9 @@ class SettingsToggles:
         has. On the touch-only boards a BLE keyboard IS `ws.keyboard` -- the
         only one there is -- so handing it to player two would leave player one
         with nothing to press."""
-        ble = getattr(self, "ble_keyboard", None)
-        if ble is None or ble is self.keyboard:
+        ws = self.ws
+        ble = getattr(ws, "ble_keyboard", None)
+        if ble is None or ble is ws.keyboard:
             return None
         return ble if getattr(ble, "set_player", None) is not None else None
 
@@ -107,9 +114,10 @@ class SettingsToggles:
         leaves a compiled cart's direct-colour frame bilinear); a canvas without the hook
         never shows the row, so this setter is then only ever the boot apply
         of a stale system/settings key."""
+        ws = self.ws
         on = bool(on)
         self._set_toggle("crisp_pixels", on, persist)
-        hook = getattr(self.sys_canvas, "set_crisp_scale", None)
+        hook = getattr(ws.sys_canvas, "set_crisp_scale", None)
         if hook is not None:
             hook(on)
 
@@ -120,9 +128,10 @@ class SettingsToggles:
         so hiding it is purely cosmetic: the perf fields keep updating and
         PERF DIAG is untouched. Hiding also disables the chip's tap-to-toggle
         breakdown HUD, so clear that too rather than strand it on-screen."""
+        ws = self.ws
         on = bool(on)
         if not on:
-            self.perf_hud = False
+            ws.perf_hud = False
         self._set_toggle("show_fps", on, persist)
 
     def set_time_zone(self, tz, persist=True):
@@ -130,16 +139,17 @@ class SettingsToggles:
         `wallclock.ZONES`), applied to the bar's clock from its next read
         and persisted as `tz`; one that does not parse is UTC. The NTP
         server, `ntp_server`, has no row: it is applied with the zone."""
+        ws = self.ws
         tz = tz if isinstance(tz, str) and tz else _wc.UTC
         if not _wc.set_zone(tz):
             tz = _wc.UTC
-        _wc.set_server(self.system.get("ntp_server"))
-        self.bar_layer._clock_at = -1
-        self._dirty = True
-        if persist and self.system.get("tz") != tz:
-            self.system.set("tz", tz)
+        _wc.set_server(ws.system.get("ntp_server"))
+        ws.bar_layer.clock_at = -1
+        ws.frame_state.dirty = True
+        if persist and ws.system.get("tz") != tz:
+            ws.system.set("tz", tz)
 
-    def _ota_channel(self):
+    def ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
         manifest UPDATE ONLINE checks; persisted in system/settings once chosen.
 
@@ -151,10 +161,11 @@ class SettingsToggles:
         channel you are on is a fact about the running image; the setting is a
         deliberate departure from it, so absence of a setting should mean "the
         one I am on"."""
-        saved = self.system.get("ota_channel")
+        ws = self.ws
+        saved = ws.system.get("ota_channel")
         if saved in ("stable", "unstable"):
             return saved
-        u = self.updater
+        u = ws.updater
         if u is not None:
             try:
                 running = u.channel()
@@ -164,11 +175,12 @@ class SettingsToggles:
                 pass
         return "stable"
 
-    def _cycle_channel(self, d):
+    def cycle_channel(self, d):
         """Toggle the OTA channel STABLE<->UNSTABLE and persist. Two channels, so any
         step flips. This only changes what UPDATE ONLINE checks -- the running firmware
         is unchanged until a manifest is actually installed (and the bootloader's
         rollback still guards a bad beta image)."""
-        self.system.set(
+        ws = self.ws
+        ws.system.set(
             "ota_channel",
-            "stable" if self._ota_channel() == "unstable" else "unstable")
+            "stable" if self.ota_channel() == "unstable" else "unstable")

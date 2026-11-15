@@ -268,7 +268,7 @@ class EditorDesk(Layer):
         plays in a desk window of its own (the pause card's Play in a
         window, owner 2026-10-31), when the panes left take its room; it
         comes back when that window closes."""
-        win = getattr(self.ws.wm, "_wins", {}).get("desktop")
+        win = getattr(self.ws.wm, "windows", {}).get("desktop")
         return win is None or not win.own
 
     def _warm_sig(self, key, area, u):
@@ -431,7 +431,7 @@ class EditorDesk(Layer):
         if tab is not None:
             app.focus_tab(tab)
         self._seen = app.tab
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def follow(self):
         """A tab opened from outside the desk (`EditorApp.set_tab`): its
@@ -481,7 +481,7 @@ class EditorDesk(Layer):
             self.grown = None
         else:
             self.grown = pane
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     # -- a tab in a pane ----------------------------------------------------------
 
@@ -523,7 +523,7 @@ class EditorDesk(Layer):
         old = self._layout_of(tab)
         try:
             if tab == "code":
-                ws._relayout_code()
+                ws.relayout_code()
             else:
                 name, _attr = _OWNERS[tab]
                 getattr(ws, name).relayout(r[2], r[3], fs, cs)
@@ -730,7 +730,7 @@ class EditorDesk(Layer):
         object, the Map's tools, the Code pane's file and find tool."""
         ws = self.ws
         if c in ("code", "theme_config"):
-            return (ws.code_file_name(), bool(ws.layer_of(c)._find_open))
+            return (ws.text.code_file_name(), bool(ws.layer_of(c)._find_open))
         if c == "blocks":
             bu = ws.block_ui
             be = bu.blocks_ed
@@ -785,14 +785,14 @@ class EditorDesk(Layer):
             # its gen still the desk's, so the next may be rows
             known = ret[0] != 0
             lag = ret[1:]
-            still = not ws._animating(dt)
+            still = not ws.animating(dt)
         else:
             c, tab, pane, r, _body, _n = own
             layer = None
             data = self._own_data(c)
             known = ret[0] != 0
             lag = ret[1:]
-            still = not (data is False or app.playing() or ws._animating(dt, False)
+            still = not (data is False or app.playing() or ws.animating(dt, False)
                          or self._spills() or self._loupe is not None
                          or (c == "paint" and ws.paint_layer._host.tap == 2
                              and ws.paint_layer._host.tap_armed()))
@@ -937,7 +937,7 @@ class EditorDesk(Layer):
             self._loupe = None
         if self._loupe is not None:
             self._draw_loupe(cv, th, u)
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._dock()
 
     def _ground(self, cv, col, lay, panes, divs, alone, u):
@@ -1001,13 +1001,13 @@ class EditorDesk(Layer):
                 for pane, t in self._back_tab.items():
                     self._tabs[pane] = t
                 self._back_tab.clear()
-                ws._dirty = True
+                ws.mark_dirty()
                 return
             for _n, pane, _r in self._shown_panes():
                 if "game" in pane and len(pane) > 1:
                     self._back_tab[pane] = self._tabs.get(pane, 0)
                     self._tabs[pane] = pane.index("game")
-                    ws._dirty = True
+                    ws.mark_dirty()
 
     def undock(self):
         """The playtest back in a window of its own (the Editor left the
@@ -1044,7 +1044,7 @@ class EditorDesk(Layer):
         divider stopped at its minimum. It runs inside the draw, after the
         bodies, so what its answers change (a tab, a tool, Grow, a divider's
         release) shows on the frame it owes (`AppHost.owed`, asked for with
-        `request_frame`): a `ws._dirty` set here is spent by this frame's
+        `request_frame`): a `ws.frame_state.dirty` set here is spent by this frame's
         own tail."""
         host = self._host
         host.begin(cv, th, (0, 0, cv.w, cv.h), True, True,
@@ -1100,7 +1100,7 @@ class EditorDesk(Layer):
                 ui.at(tx, y, cell, hh)
                 if ui.tool("more", "More", {"id": pid + " head more"}):
                     self.part_state["head more"] = (tx, y + hh, cell, folded)
-                    self.ws._dirty = True
+                    self.ws.mark_dirty()
             if c == "game":
                 tx -= cell
                 ui.at(tx, y, cell, hh)
@@ -1169,14 +1169,14 @@ class EditorDesk(Layer):
                 else:
                     cl.jump_anchor = (tx, y, cell, hh) if op == "goto" else None
                     cl._run_tool(op, ws.editor)
-                ws._dirty = True
-        name = ws.code_file_name() or ""
-        names = ws.code_sources() or [name]
+                ws.mark_dirty()
+        name = ws.text.code_file_name() or ""
+        names = ws.text.code_sources() or [name]
         cur = names.index(name) if name in names else 0
         ui.at(x + 4 * u, y + 2 * u, max(0, tx - x - 8 * u), hh - 4 * u)
         got = ui.tabs(pid + " files", names, cur, {"id": pid + " files"})
         if got is not None and 0 <= got < len(names) and got != cur:
-            ws.open_code_file(names[got])
+            ws.text.open_code_file(names[got])
         return tx
 
     def _head_fit(self, pane, c, x, w, u):
@@ -1207,14 +1207,14 @@ class EditorDesk(Layer):
         if not ui.popover("head more", w):
             self.part_state["head more"] = None
             ui.popover()
-            ws._dirty = True
+            ws.mark_dirty()
             return
         got = ui.menu("", [o[1] for o in ops], [o[0] for o in ops])
         ui.popover()
         if got is not None and 0 <= got < len(ops):
             self.part_state["head more"] = None
             self._head_tool(ops[got][2])
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _menu_open(self):
         """Whether a header's more menu is open (it takes the keys and the
@@ -1232,14 +1232,14 @@ class EditorDesk(Layer):
         if not ui.popover("code more", w):
             self.part_state["code more"] = None
             ui.popover()
-            ws._dirty = True
+            ws.mark_dirty()
             return
         got = ui.menu("", [m[1] for m in _CODE_MORE], [m[0] for m in _CODE_MORE])
         ui.popover()
         if got is not None and 0 <= got < len(_CODE_MORE):
             self.part_state["code more"] = None
             ws.code_layer._run_tool(_CODE_MORE[got][2], ws.editor)
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _still_tool(self, pid, u):
         """Play over the Run slot's still frame."""
@@ -1256,7 +1256,7 @@ class EditorDesk(Layer):
         if self.paused:
             self.pause(False)
         else:
-            self.ws.defer(self.ws._leave_menu)
+            self.ws.defer(self.ws.text.leave_menu)
 
     def pause(self, on):
         """The Run slot's pause: the playtest's window hides with its run
@@ -1269,22 +1269,22 @@ class EditorDesk(Layer):
         self.paused = on
         if on:
             self._dock()                    # hidden now, its run held
-            ws.wm._move_focus("menu")
+            ws.wm.move_focus("menu")
         else:
-            win = ws.wm._wins.get("desktop")
+            win = ws.wm.windows.get("desktop")
             if win is not None:
                 win.held = False            # the restore lands on the run, not its menu
-            ws.run.player.resume()
-            if "desktop" in ws.wm._wins:
-                ws.wm._move_focus("desktop")
-        ws._dirty = True
+            ws.run.player.pace.resume()
+            if "desktop" in ws.wm.windows:
+                ws.wm.move_focus("desktop")
+        ws.mark_dirty()
 
     def _title(self, c, label):
         ws = self.ws
         if c == "paint" and ws.paint is not None:
             return "Sprite %d" % ws.paint.n
         if c == "code":
-            return ws.code_file_name()
+            return ws.text.code_file_name()
         if c == "music":
             return Sound.title(self)
         return label
@@ -1409,7 +1409,7 @@ class EditorDesk(Layer):
                     continue
                 self._placed = None
                 self._remember()
-                ws._dirty = True
+                ws.mark_dirty()
                 continue
             held = (path, i, axis, at, stop, bool(bits & ui.LIVE))
             if held[5] and stop >= 0:
@@ -1574,7 +1574,7 @@ class EditorDesk(Layer):
         if ui.button("Insert", "normal", {"id": "insert call"}) and ws.editor is not None:
             ws.history.code_burst_open()
             ws.editor.insert_text(call)
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _pick(self, t):
         """A sprite picked on the Sheet: the Sprite pane's and the map's
@@ -1586,7 +1586,7 @@ class EditorDesk(Layer):
         mu = ws.built("map_ui")
         if mu is not None and getattr(mu, "mapedit", None) is not None:
             mu.mapedit.n = t
-        ws._dirty = True
+        ws.mark_dirty()
 
     # -- input ----------------------------------------------------------------
 
@@ -1602,7 +1602,7 @@ class EditorDesk(Layer):
             return True
         if self._pad(i):
             i.clear_edges()
-            ws._dirty = True
+            ws.mark_dirty()
             self._acts += 1
             return True
         if self.grown is not None and i.pressed("stop") and self.escape():
@@ -1613,7 +1613,7 @@ class EditorDesk(Layer):
             return True
         if self._menu_open():
             if self._host.keys(i):
-                ws._dirty = True
+                ws.mark_dirty()
             self._acts += 1
             return True
         got = self._prompt()
@@ -1630,7 +1630,7 @@ class EditorDesk(Layer):
             if Sound.keys(self, i, self._fresh):
                 i.spend_edges()                 # a held arrow keeps its repeats
             elif self._host.keys(i):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if tab is not None:
             layer = ws.layer_of(tab)
@@ -1648,7 +1648,7 @@ class EditorDesk(Layer):
             if Parts.keys(self, c, i):
                 i.spend_edges()
             elif self._host.keys(i):
-                ws._dirty = True
+                ws.mark_dirty()
             if c == "actor":
                 self._owe_restart("scene")
             return True
@@ -1664,7 +1664,7 @@ class EditorDesk(Layer):
         if not fresh or not (mods & _CTRL or (ev & 0xFFFF) == _F6):
             return False
         if (ev & 0xFFFF) == _F6:
-            self.ws.wm._move_focus("menu")
+            self.ws.wm.move_focus("menu")
         if self._chord(ev & 0xFFFF, mods):
             i.clear_edges()
             return True
@@ -1673,7 +1673,7 @@ class EditorDesk(Layer):
     def _origin(self):
         """Where the Editor's surface sits on the glass: its window's
         content rect's corner on the desk."""
-        wins = getattr(self.ws.wm, "_wins", None)
+        wins = getattr(self.ws.wm, "windows", None)
         win = wins.get("menu") if wins else None
         if win is None:
             return 0, 0
@@ -1706,13 +1706,13 @@ class EditorDesk(Layer):
         if tab not in ("map", "scene"):
             if tab is None and self.tab_of(hit[0]) in ("sheet", "sprites") and wy:
                 self._sheet_page = max(0, min(3, self._sheet_page + (1 if wy > 0 else -1)))
-                ws._dirty = True
+                ws.mark_dirty()
                 return True
             if tab is None and wy and self.tab_of(hit[0]) == "made":
                 # the made code's text view takes the wheel where it rests
                 self._host.point(px, py, False)
                 if self._host.wheel(0, wy):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return True
             if tab is None and wy:
                 return Parts.scroll(self, self.tab_of(hit[0]), 1 if wy > 0 else -1)
@@ -1726,7 +1726,7 @@ class EditorDesk(Layer):
             self._mid = (p.x, p.y)
             if last is not None and (p.x, p.y) != last:
                 self._in_pane(tab, body, view.drag_pan, p.x - last[0], p.y - last[1])
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if shift and wy:
             wx, wy = wy, 0
@@ -1734,7 +1734,7 @@ class EditorDesk(Layer):
             self._in_pane(tab, body, view.drag_pan, -wx * 24 * self._unit(), 0)
         if wy:
             self._in_pane(tab, body, view.wheel_zoom, lx, ly, -1 if wy < 0 else 1)
-        ws._dirty = True
+        ws.mark_dirty()
         return True
 
     def _part_focused(self):
@@ -1817,7 +1817,7 @@ class EditorDesk(Layer):
             elif app.playing():
                 ws.defer(app.restart)
             else:
-                ws.defer(ws._leave_menu)
+                ws.defer(ws.text.leave_menu)
             return True
         if ctrl and code == ord("."):
             if app.playing():
@@ -1827,7 +1827,7 @@ class EditorDesk(Layer):
             self.arrangement().reset()
             self._placed = None
             self._remember()
-            ws._dirty = True
+            ws.mark_dirty()
             return True
         return False
 
@@ -1861,11 +1861,11 @@ class EditorDesk(Layer):
         if not self.active():
             return False
         holder = ws.wm.input_holder()
-        win = ws.wm._wins.get("desktop")
+        win = ws.wm.windows.get("desktop")
         if holder != "menu" and not (holder == "desktop" and win is not None and win.docked):
             return False
         app = ws.editor_app
-        ws.defer(app.restart if app.playing() else ws._leave_menu)
+        ws.defer(app.restart if app.playing() else ws.text.leave_menu)
         return True
 
     def _nudge(self, code):
@@ -1880,7 +1880,7 @@ class EditorDesk(Layer):
                 arr.drag(p, i, arr.sizes[p][i] + step)
                 self._placed = None
                 self._remember()
-                self.ws._dirty = True
+                self.ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1897,7 +1897,7 @@ class EditorDesk(Layer):
             # a divider's press, its drag and its release are the frame's
             # (`_dividers`)
             if self._host.point(px, py, click, down):
-                ws._dirty = True
+                ws.mark_dirty()
             if not down:
                 self._on_div = False
             return True
@@ -1911,7 +1911,7 @@ class EditorDesk(Layer):
                 self._on_div = True
                 self._press = None
                 self._host.point(px, py, click, down)
-                ws._dirty = True
+                ws.mark_dirty()
                 return True
             self._press = None
             for n, pane, r in self._shown_panes():
@@ -1922,7 +1922,7 @@ class EditorDesk(Layer):
                     break
         if self._menu_open():
             if self._host.point(px, py, click, down):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         p = self._press
         if p is None:
@@ -1937,7 +1937,7 @@ class EditorDesk(Layer):
         host = self._host
         if py < r[1] + head or click is False and host.hold:
             if host.point(px, py, click, down):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         c = self.tab_of(pane)
         body = self._body(r, u, pane)
@@ -1945,7 +1945,7 @@ class EditorDesk(Layer):
         if c == "music":
             if Sound.pointer(self, body, u, px, py, click, down) \
                     or host.point(px, py, click, down):
-                ws._dirty = True
+                ws.mark_dirty()
             self._in_code = True
             return True
         if tab is not None:
@@ -1966,16 +1966,16 @@ class EditorDesk(Layer):
             return True
         if c in ("sprites", "stamps") and py >= body[1] + body[3] - 40 * u:
             if host.point(px, py, click, down):     # the foot's line (Insert)
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if c in ("sheet", "sprites", "stamps"):
             if host.point(px, py, click, down):     # the Sheet's part (`_sheet`)
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if c in Parts.PARTS:
             if Parts.pointer(self, c, body, u, px, py, click, down) \
                     or host.point(px, py, click, down):
-                ws._dirty = True
+                ws.mark_dirty()
             if c == "actor":
                 self._owe_restart("scene")
             return True

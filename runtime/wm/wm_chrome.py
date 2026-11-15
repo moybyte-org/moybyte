@@ -5,7 +5,7 @@
 #   WindowChrome._win_title            a window's title ("Notes · Story ideas")
 #   WindowChrome._full_chrome          a full-screen window's row on the glass
 #   WindowChrome._paint_row            the row's head and its corner's controls
-#   WindowChrome._draw_unders          the shadows the desk takes under the windows
+#   WindowChrome.draw_unders           the shadows the desk takes under the windows
 #   WindowChrome._cast_onto            the shadows a window behind takes
 #   WindowChrome._strip_button_hit     the strip's and the corner's fat-finger hit
 #   WindowChrome._grip_hit_rect        the resize grip's touch target
@@ -82,7 +82,7 @@ class WindowChrome:
         `_grip_hit_rect`)."""
         if not focused or _ui_draw.depth()[12] or win.saved is not None:
             return
-        sc = self._root_canvas
+        sc = self.root_canvas
         ink = self.ws.theme_colors["chrome_ink"]
         fs = self._fs()
         gx, gy, gw, gh = self._grip_rect(win)
@@ -111,7 +111,7 @@ class WindowChrome:
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
-        elif win._chrome_streak >= self._retained_n():
+        elif win._chrome_streak >= self.retained_n():
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
@@ -120,7 +120,7 @@ class WindowChrome:
         # The game window's content stands in further than the frame takes
         # (_win_edge): the frame's body paints that matte, as it does the foot.
         matte = _ui_draw.FRAME_MATTE if win.edge > self._frame_edge() else 0
-        _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
+        _ui_draw.frame(self.root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
                   win.title_h, self._win_title(win), focused, int(btns) | matte, self._fs())
         slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h, btns)
         if slot is not None:
@@ -149,13 +149,13 @@ class WindowChrome:
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
-        elif win._chrome_streak >= self._retained_n():
+        elif win._chrome_streak >= self.retained_n():
             return
         win._chrome_streak += 1
         self._chrome_drew = True
         if win.row:
-            self.ws.bar_layer.paint_band(self._root_canvas, (win.x, win.y, win.w, win.row))
-        self._paint_row(win, self._root_canvas)
+            self.ws.bar_layer.paint_band(self.root_canvas, (win.x, win.y, win.w, win.row))
+        self._paint_row(win, self.root_canvas)
 
     def _paint_row(self, win, cv, title=None):
         """A full-screen row's head and controls on `cv` (the glass's
@@ -203,7 +203,7 @@ class WindowChrome:
         scale that fits, else its glyph, in the title's ink (on a full-screen
         `row`, the band's)."""
         ws = self.ws
-        sc = self._root_canvas if cv is None else cv
+        sc = self.root_canvas if cv is None else cv
         x, y, w, h = slot
         role = "chrome_ink" if focused else "chrome_ink_dim"
         if focused and not row and _ui_draw.depth()[12] \
@@ -219,7 +219,7 @@ class WindowChrome:
             sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
             return
         if not ws.draw_icon("app", slot, ink, sc):
-            ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+            ws.glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
     def _theme_doc(self, win):
         """The theme the Editor's window holds in its theme mode, or None."""
@@ -249,7 +249,7 @@ class WindowChrome:
             return got
         ws = self.ws
         img = None
-        for app in getattr(ws, "_apps", ()):
+        for app in getattr(ws, "app_layers", ()):
             if app.id != win.kind:
                 continue
             for c in ws.carts.all:
@@ -309,7 +309,7 @@ class WindowChrome:
             return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
         return (x - 2, y - 2, w + 7, h + 7)
 
-    def _draw_unders(self, clip=None):
+    def draw_unders(self, clip=None):
         """Every visible window's shadow and outline fringe, bottom to top,
         over the desk the backdrop layer just painted: the whole desk, or only
         `clip`, the rect a cache restore covered -- and never over the bar,
@@ -319,9 +319,9 @@ class WindowChrome:
         same shadow as a still one: a moving thing keeps its shadow."""
         if not _ui_draw.depth()[12]:
             return
-        rc = self._root_canvas
+        rc = self.root_canvas
         th = self.ws.theme_colors
-        x0, y0, w, h = self._desk_rect()
+        x0, y0, w, h = self.desk_rect()
         x1, y1 = x0 + w, y0 + h
         if clip is not None:
             x0, y0 = max(x0, clip[0]), max(y0, clip[1])
@@ -330,12 +330,12 @@ class WindowChrome:
             return
         rc.clip(x0, y0, x1 - x0, y1 - y0)
         try:
-            for key in self._order:
-                win = self._wins.get(key)
+            for key in self.z_order:
+                win = self.windows.get(key)
                 if win is None or win.minimized or win.saved is not None:
                     continue
                 _ui_draw.frame_under(rc, th, self._shown_rect(win), win.title_h,
-                                key == self._focus)
+                                key == self.focus_key)
         finally:
             rc.clip()
 
@@ -343,7 +343,7 @@ class WindowChrome:
         """Where `win` stands this frame: a live resize's rubber rect, else
         its own -- what its shadow and outline fringe follow."""
         g = self._resize
-        if (g is not None and self._wins.get(g[0]) is win
+        if (g is not None and self.windows.get(g[0]) is win
                 and win.kind != "desktop" and self._live_resize_ok()):
             return (g[10], g[11], g[5], g[6])
         return (win.x, win.y, win.w, win.h)
@@ -355,19 +355,19 @@ class WindowChrome:
         rect `within` where given -- bottom to top. Window `i` painted those
         pixels afresh, so each blend lands once; what it left alone keeps the
         casts it took when it was painted."""
-        order = self._order
+        order = self.z_order
         n = len(order)
         if i >= n - 1 or not _ui_draw.depth()[12]:
             return
         key = order[i]
-        win = self._wins[key]
+        win = self.windows[key]
         chrome = self._chrome_drew
         if chrome:
             rx, ry, rw, rh = win.x, win.y, win.w, win.h
         else:
             rx, ry, rw, rh = win.content_rect()
         dx, dy, dw, dh = (win.x, win.y, win.w, win.h) if win.saved is not None \
-            else self._desk_rect()
+            else self.desk_rect()
         x0, y0 = max(dx, rx), max(dy, ry)
         x1, y1 = min(dx + dw, rx + rw), min(dy + dh, ry + rh)
         if within is not None:
@@ -376,15 +376,15 @@ class WindowChrome:
             y1 = min(y1, within[1] + within[3])
         if x1 <= x0 or y1 <= y0:
             return
-        rc = self._root_canvas
+        rc = self.root_canvas
         th = self.ws.theme_colors
-        focus = self._focus
+        focus = self.focus_key
         onto = (win.x, win.y, win.w, win.h)
         clipped = False
         try:
             for j in range(i + 1, n):
                 k = order[j]
-                up = self._wins.get(k)
+                up = self.windows.get(k)
                 if up is None or up.minimized or up.saved is not None:
                     continue
                 rect = self._shown_rect(up)
@@ -411,16 +411,16 @@ class WindowChrome:
         if gen == self._foot_gen:
             return
         self._foot_gen = gen
-        for key in self._order:
-            win = self._wins.get(key)
+        for key in self.z_order:
+            win = self.windows.get(key)
             if win is not None and (win.foot != self._win_foot(win)
                                     or win.edge != self._win_edge(win)):
-                self._resize_window(win, win.w, win.h)
+                self.resize_window(win, win.w, win.h)
 
     def _page_named(self, win):
         """The page a shell app names in its window's title (a story's,
         Settings' Achievements), or None."""
-        app = self.ws.settings_layer if win.kind == "settings" else self.ws._apps_by_id.get(win.kind)
+        app = self.ws.app(win.kind)
         return app.page_title() if app is not None else None
 
     def _win_title(self, win):
@@ -430,17 +430,17 @@ class WindowChrome:
             return p.title()                  # a running set's game
         if win.kind == "desktop":
             t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
-            if getattr(self, "_play_intent", None) == "dev":
+            if getattr(self, "play_intent", None) == "dev":
                 return _PLAY + _title_sep() + t       # a playtest from the Editor
-            lent = ws.bar_layer._lent("tool") if ws.run.app_window_canvas else None
+            lent = ws.bar_layer.lent("tool") if ws.run.app_window_canvas else None
             if lent is not None and lent[0]:
                 return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
         named = self._page_named(win)
         if named:
             return named                      # the page a shell app names (a story's)
-        base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
-        app = ws._apps_by_id.get(win.kind)
+        base = ws.spine.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
+        app = ws.app(win.kind)
         host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
         if host is not None:
             lent = _ui_draw.bar_lent(host.ctx)
@@ -463,20 +463,20 @@ class WindowChrome:
         t = self._win_title(win)
         named = self._page_named(win)
         if named and t == named:
-            t = self.ws.app_title(win.kind) or t  # the chip names the app
+            t = self.ws.spine.app_title(win.kind) or t  # the chip names the app
         for sep in (_SEP_DOT, _SEP_ASCII):
             at = t.find(sep)
             if at > 0 and win.kind == "desktop" and self.ws.run.app_window_canvas:
                 return t[:at]                     # an app's chip names the app
             if at > 0 and win.kind == "desktop":
                 return t[at + len(sep):]          # a playtest's chip names the cart
-            if at > 0 and (win.kind == "menu" or win.kind in self.ws._apps_by_id):
+            if at > 0 and (win.kind == "menu" or self.ws.app(win.kind) is not None):
                 return t[:at]                     # the Editor's, an app's: the app
         return t
 
     def _win_btns(self, win):
         """The frame's optional strip buttons for `win` (ui_draw.FRAME_*):
-        minimize on every window, a running game's too (`_minimize`
+        minimize on every window, a running game's too (`minimize`
         minimises its run while it is hidden), so every frame has one control set; and
         the back chevron while its app has a page of it open
         (docs/history/look_2026-10.md step 27a), which the chrome's freeze signature
@@ -510,13 +510,13 @@ class WindowChrome:
         if s is None or not policy.has_page(s):
             return False
         if win.ctx is not None:
-            self._install(win.ctx, win, draws=False)
+            self.install_window(win.ctx, win, draws=False)
         try:
             policy.step(s)
         finally:
             if win.ctx is not None:
-                self._install(self._root_ctx)
-        ws._dirty = True
+                self.install_window(self.root_ctx)
+        ws.mark_dirty()
         return True
 
     def _strip_buttons(self, win):
@@ -586,7 +586,7 @@ class WindowChrome:
         total = 5 * n
         diag = getattr(self.ws, "panel_diagonal_in", None)
         if diag:
-            full = self._root_canvas
+            full = self.root_canvas
             r = _layout_base.render_scale()
             gw, gh = full.w * r, full.h * r
             per_mm = (gw * gw + gh * gh) ** 0.5 / (float(diag) * 25.4) / r
@@ -634,7 +634,7 @@ class WindowChrome:
     def _live_resize_ok(self):
         """Live-body resize needs the rect-clipped stamp (see _blit_backdrop_cache);
         without it (the web RecordingLayer) the rubber-band outline preview stays."""
-        return hasattr(self._root_canvas, "blit_strip_rect")
+        return hasattr(self.root_canvas, "blit_strip_rect")
 
     def _draw_resizing_window(self, win, focused, x, y, cw, ch):
         """The 'real OS' resize feel (#58): during the gesture the window BODY
@@ -643,7 +643,7 @@ class WindowChrome:
         grow reveals the panel field -- no re-layout mid-gesture, the real reflow
         still lands on release via _resize_window). Draws via a temporary rect
         swap so _win_chrome/content_rect need no size plumbing."""
-        sc = self._root_canvas
+        sc = self.root_canvas
         ox, oy, ow, oh = win.x, win.y, win.w, win.h
         win.x, win.y, win.w, win.h = x, y, cw, ch
         try:
@@ -660,7 +660,7 @@ class WindowChrome:
     def _chips_cell(self):
         """(bar, cell) of the desk's `chips` widget in the root layout's
         packing (shell_layout.pack), or None where no bar places it."""
-        for bar in self._root_ctx.layout.bars:
+        for bar in self.root_ctx.layout.bars:
             for c in bar[3]:
                 if c[0] == "chips":
                     return bar, c
@@ -676,14 +676,14 @@ class WindowChrome:
         back-stack's, never the z-order, so a chip never moves when the focus
         does), on the root canvas; deterministic, so draw + hit-test share it
         without stored state."""
-        kinds = [k for k in self._kinds if k in self._wins]
+        kinds = [k for k in self._kinds if k in self.windows]
         if not kinds:
             return []
         got = self._chips_cell()
         if got is None:
             return []
         (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
-        lay = self._root_ctx.layout
+        lay = self.root_ctx.layout
         fs = lay.fs
         out = []
         if edge in ("left", "right"):
@@ -694,10 +694,10 @@ class WindowChrome:
             for k in kinds:
                 if y + side > end:
                     break                              # out of bar space -- stop
-                out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
+                out.append((k, (x, y, side, side), self._win_title(self.windows[k])[:1]))
                 y += side + 2 * fs
             return out
-        titles = [self._chip_title(self._wins[k]) for k in kinds]
+        titles = [self._chip_title(self.windows[k]) for k in kinds]
         pad = _CHIP_PAD                    # the look's: icon slot and margins
         gap = 6
         room = cw - 4 * fs - (len(titles) - 1) * gap
@@ -732,10 +732,10 @@ class WindowChrome:
         # ping-pong buffers they stay correct until something changes them. Any
         # disturbance (desk repaint, drag, cursor, animation) makes `quiet` False
         # and restarts the streak, so both buffers refresh before skipping again.
-        sc = self._root_canvas
+        sc = self.root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
-        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
+        sig = tuple((k, r, lb, k == self.focus_key, self.windows[k].minimized)
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
@@ -743,18 +743,18 @@ class WindowChrome:
             got = self._chips_cell()
             if got is not None:
                 bx, by, bw, bh = got[0][1]
-                self.ws.bar_layer._strip_moved(sc, bx, by, bw, bh)
+                self.ws.bar_layer.strip_moved(sc, bx, by, bw, bh)
         if not quiet or sig != self._chip_sig:
             self._chip_sig = sig
             self._chip_streak = 0
-        elif self._chip_streak >= self._retained_n():
+        elif self._chip_streak >= self.retained_n():
             return
         self._chip_streak += 1
         # The chips blend (their labels' and plates' edges) over the bar's
         # band, which the bar painted once: its ground goes down again first
         # in the root's bar, so a chip repaint is a full repaint's pixels.
         self.ws.bar_layer.repaint_cell("desk", "chips")
-        line_h = self._root_ctx.layout.line_h
+        line_h = self.root_ctx.layout.line_h
         self._draw_look_chips(sc, th, fs, line_h)
 
     def _draw_look_chips(self, sc, th, fs, line_h):
@@ -766,8 +766,8 @@ class WindowChrome:
         minimized window's chip keeps the chrome's ink."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
-            win = self._wins[key]
-            focused = key == self._focus and not win.minimized
+            win = self.windows[key]
+            focused = key == self.focus_key and not win.minimized
             _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)
             ink = (current if focused else
                    th["chrome_ink"] if win.minimized else th["chrome_ink_dim"])
@@ -779,24 +779,24 @@ class WindowChrome:
                     s = max(1, 18 // iw)
                     sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
                 else:
-                    self.ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+                    self.ws.glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
 
-    def _chip_tap(self, key):
+    def chip_tap(self, key):
         """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a
         minimized window (and focus it), minimize the focused one (apps only;
         the focus leaves it, as the title strip's minimize leaves it), or just
         move focus to it. Nothing closes from the taskbar."""
         ws = self.ws
-        win = self._wins.get(key)
+        win = self.windows.get(key)
         if win is None:
             return
-        ws._dirty = True
+        ws.mark_dirty()
         if win.minimized:
-            self._minimize(win, False)
-            self._move_focus(key)
-        elif key == self._focus:
-            self._minimize(win, True)
-            self._move_focus(None)
+            self.minimize(win, False)
+            self.move_focus(key)
+        elif key == self.focus_key:
+            self.minimize(win, True)
+            self.move_focus(None)
         else:
-            self._move_focus(key)
+            self.move_focus(key)

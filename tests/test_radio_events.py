@@ -277,10 +277,10 @@ print("CHANGED", t.radio(I.EV_NET, True), t.radio(I.EV_NET, True), t.radio_up(I.
 t.radio(I.EV_NET, False, 8)
 out = [0] * 4
 w = moybyte.WAKES
-for i in range(w.due(0, out)):
+for i in range(w.pending(out)):
     w.call(out[i])
 scheduler.SCHED.mail()
-for i in range(w.due(0, out)):
+for i in range(w.pending(out)):
     w.call(out[i])
 scheduler.SCHED.mail()
 print("HEARD", heard)

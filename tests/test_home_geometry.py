@@ -29,7 +29,7 @@ def _ws(tmp_path, config, theme, mode):
 def _frame(ws, n=3):
     for _ in range(n):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(g._DT)
 
 
@@ -37,10 +37,10 @@ def _home(ws):
     # every frame a full paint: the retained-frame stamp would present the
     # last one without drawing a card
     ws.launcher_layer._lib_unsupported = True
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, "mode", None) is not None:
-        ws.open_library()
-    ws.set_home_tab("games")
+        ws.home.open_library()
+    ws.home.set_home_tab("games")
     titles = [it.get("title") for it in ws.launcher.items]
     if "Sky Run" in titles:
         ws.launcher.sel = titles.index("Sky Run")
@@ -198,7 +198,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1, \
         "the home behind the system menu still draws its focus"
@@ -207,7 +207,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1, "the closed menu left the focus off"
 
@@ -215,16 +215,16 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
 def test_one_focus_mark_under_the_pause_menu(tmp_path):
     """...and under the pause menu."""
     ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
-    ws.go_home()
-    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.play(ws.launcher_layer)
+    ws.home.go_home()
+    ws.open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.spine.play(ws.launcher_layer)
     _frame(ws, 3)
     ws.system_key()
     assert ws.pause.open
     _frame(ws, 1)
     ui_draw.marks(None, True)
     g._quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[1] == 1
 
@@ -307,7 +307,7 @@ def test_the_desk_shelf_marks_its_selected_card_under_every_input(tmp_path, monk
                 got.append(rect[0])
             return real(cv, th, rect, item, r, after, **kw)
         monkeypatch.setattr(launcher_layer._ui_draw, "focus", focus)
-        ws._dirty = True
+        ws.mark_dirty()
         _frame(ws, 1)
         monkeypatch.setattr(launcher_layer._ui_draw, "focus", real)
         assert len(set(got)) == 1, "one card wears the mark: %s" % got
@@ -328,7 +328,7 @@ def test_the_new_tile_takes_a_covers_corners(tmp_path, monkeypatch, config):
     square among rounded neighbours (design review R4-21)."""
     ws = _ws(tmp_path, config, "moy", "dark")
     _home(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     _frame(ws, 2)
     calls = []
     for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
@@ -361,7 +361,7 @@ def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mod
     where a cover's corner is smallest (design review R5-10, F6-04)."""
     ws = _ws(tmp_path, HANDHELD, "contrast", mode)
     _home(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     if not hero:
         ws.launcher.sel = 1             # the + tile on the shelf beside it
     _frame(ws, 2)
@@ -434,10 +434,10 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     review R4-26)."""
     ws = _ws(tmp_path, HANDHELD, "moy", "dark")
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     _frame(ws, 2)
     app = ws.editor_app
-    zone = ws.bar_layer._zone_rect("menu")
+    zone = ws.bar_layer.zone_rect("menu")
     assert app._compact(zone)
     rects = app._ladder_rects(zone)
     play = rects[-1][2]
@@ -456,17 +456,17 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
     splits what it has (`_geom_desk_at`)."""
     ws = _ws(tmp_path, DESK, theme, mode)
     ui_draw.input_kind("keys")
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frame(ws)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     gaps = []
     for size in (None, (480, 534)):
         if size is not None:
-            ws.wm._resize_window(win, *size)
+            ws.wm.resize_window(win, *size)
             _frame(ws)
         grid = ws.projects_grid
-        ws.wm._install(win.ctx)
+        ws.wm.install_window(win.ctx)
         try:
             dk = grid._geom()[9]
             (_hx, hy, hero, _h), dy, pane = dk[0], dk[6], dk[5][5]
@@ -478,7 +478,7 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
             gaps.append(cap - foot)
             assert under >= 20, "the shelf runs into the strip"
         finally:
-            ws.wm._install(ws.wm._root_ctx)
+            ws.wm.install_window(ws.wm.root_ctx)
     assert gaps[0] == gaps[1] == home_grid.SHELF_GAP, gaps
 
 

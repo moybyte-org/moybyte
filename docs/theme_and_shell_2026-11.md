@@ -22,7 +22,7 @@ model and each theme's fields, `GAPS.md` what the engine lacked, and
 is `docs/app_api_v1.md`; the shell's process model is `docs/shell_ux_v1.md`;
 the dirty protocol every cache here obeys is `docs/surface_model_v1.md` §3,
 and its §14.6-§14.7 state the copy and shift frames §9 relies on. Numbers
-that measure any of this live in **#66** (frames, per board), **#58** (the
+that measure any of this live in `docs/perf/ledger.md` and **#66** (frames, per board), **#58** (the
 P4 port), **#113** (the shift costs) and `docs/perf_native_gap_v1.md`
 (**#77**); this doc cites them and copies none.
 
@@ -235,7 +235,7 @@ Nothing is pending the owner.
   menu's "Delete cart" all open one `ui.dialog`, "Delete <title>?" over
   "This can't be undone.", Cancel (where focus opens) and Delete (the
   danger button), dimming what is behind it (D-01;
-  `console_notices.DeleteConfirm`).
+  `shell_cards.DeleteConfirm`).
 
 ### 1.4 Scrolling and text editing (2026-10-27)
 
@@ -319,7 +319,7 @@ renders the owner chose from):
 9. **Stop & play.** When the VM must stop for a compiled game and the
    music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
    Cancel (focused) and Stop & play, which stops the stream and opens the
-   game (`Player._music_keeps_the_vm`, `Workstation.ask_stop_music`).
+   game (`Pace.music_keeps_the_vm`, `Notices.ask_stop_music`).
 10. The system menu has no Stop music row: the music app's status item is
     where a stream stops.
 
@@ -1062,7 +1062,7 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     come back after. A responsive app's mode (`CART_APP`) keeps its print
     and its colours inside while its `ui` verbs' sinks are outside. A
     run's page on the RUN face draws as a cart's, petme128, unless its
-    snapshot's face names the look (`moy_ui_wasm.h`).
+    snapshot's face names the look (`moy_ui_run.h`).
     A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
     Notes) runs outside it: its page is the verbs' and its note the editor
     handle's, both in the look's colours and faces; a copy of it is a
@@ -1133,7 +1133,7 @@ host runs instead).
   like any other, and an absent one falls back to the theme's image.
 - **The default is static.** An animated wallpaper defeats the redraw gate and
   the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws._animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
+  while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
   Moy's night, the default, is a still image, or animates only small dirty
   rects.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
@@ -1312,7 +1312,7 @@ since the face's preview ring holds four looks and would thrash.
   stays the cart's. That is the "don't theme our apps" lesson turned around: the
   chrome is fully themeable, game pixels are not.
 - **A switch is one Class A dirty plus one integer.** A theme load, switch,
-  install or in-place edit is an un-attributed Class A dirty (`ws._dirty`, the
+  install or in-place edit is an un-attributed Class A dirty (`ws.mark_dirty()`, the
   global epoch; `docs/surface_model_v1.md` §3) and moves one monotonic
   integer, `ws.look.look_gen`: a plain attribute `publish()` sets from
   native/moy_app's token-table generation (`theme_write` answers it), which
@@ -1464,7 +1464,7 @@ window), and every exit door, each tested by name.
 
 **Parked windows live outside the stack.** Entering console mode moves the
 desk's window records — kind, rect, focus, the retained `win.buf` stamp —
-from `_order` to `wm._parked`, truncates the kernel back-stack to its root
+from `_order` to `wm.parked`, truncates the kernel back-stack to its root
 (`MOY_ROOT`, the home) and sets the mode; the processes behind the records
 (the Editor, Settings, an app) are not stopped, since a kind has one process
 and `goto(kind)` finds it. Leaving console mode restores `_order` from
@@ -1936,9 +1936,9 @@ the open one its current mark, so the two read apart; the hint strip names
 the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
 bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
 ends and up goes on to the bar. A trackball roll steps on its stronger axis,
-and mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
+and mid-roll the other axis takes `InputRouter.BALL_TURN` pulses, so a roll
 along the row that drifts a pulse or two down stays on it; a pause frees it
-(`Workstation._ball_roll`).
+(`InputRouter._ball_roll`).
 
 **The Editor's tabs and the bar's items are one row too** (owner call
 2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
@@ -2050,7 +2050,7 @@ edited through Appearance's Edit theme…, the Editor's theme mode
 resolves, else the active theme's, else the default; then §8.8's per-element
 rule and §8.7's rule for the current mode. It runs at boot's `load_system`
 cascade, at the end of `set_theme`, at the Settings write, and at a mode
-switch (the catalogue changes), and on a change marks `ws._dirty` and runs
+switch (the catalogue changes), and on a change calls `ws.mark_dirty()` and runs
 `_relayout()` (§8.11). It is never read per frame.
 
 **Settings.** One row after FONT SIZE, `LAYOUT: THEME / <package names>`,
@@ -2096,7 +2096,7 @@ arrangement (look step 18).
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
-| Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
+| Apps | the registered apps (`ws.app_layers`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
 | Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first); in the desk's Projects window PLAY too, the third button, which runs the cart in a desk window (§8.1) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
@@ -2284,7 +2284,7 @@ relayout) and exit (the desk re-render, the stamps, one full frame) — are
 gated as single-frame maxima. Idle
 stays zero under every layout and in both modes: `tools/p4_bench.py`'s
 `desk idle`, `library idle`, `settings idle` and `app idle` capture no frame,
-and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
+and `ws.perf.note_cost`'s `bar.strip.render` count over an idle minute is one
 (the clock's) (`runtime/shell/console_perf.py`). The carousel's motion cost is
 §8.10's and goes to #66; parked windows' memory and the off-heap census are #58's.
 
@@ -2342,7 +2342,7 @@ ONE function on every surface, and the twin test runs it once.
 **Motion is a declared Class B source.** `api_moving(ctx)` answers whether
 any nest of the context glides or flings; `AppHost.keys()` and `still()`
 read it beside `owed`, the frame gate reads it as animation, and the
-windowed WM reads it in place of `ws._animating` for the content freeze and
+windowed WM reads it in place of `ws.animating` for the content freeze and
 direct render (`docs/history/scroll_and_text_2026-10.md` §8): a surface moving on its own is the one legitimate
 reason to paint with nothing dirty, and the WM must know it is the focused
 window's content and nothing else.
@@ -2590,7 +2590,7 @@ records who it is returning to: the run's caller kind (`ws.returns`) for a run
 (the Notes cart), `_project_return` for a project file (which returns through
 the loader), and the app-return (`ws.returns.back()`) for a jump into another
 app's own surface (Paint, a project's Editor) -- popped by
-`Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
+`Spine._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file. Every file draws as its
 monospace source in `ui.text_view` (`runtime/editors/editor_handle.py`): Markdown wraps
@@ -2645,7 +2645,7 @@ foot and after a rule on the desk; any cart holding a handle gets the same verb.
 
 The T-Deck is the writing device (keyboard, trackball as caret, the symbol
 palette for the keys it lacks). **The trackball is the caret in a cart's editor
-handle too, not only in the Code tab**: `Workstation.nav` is the one place that
+handle too, not only in the Code tab**: `InputRouter.nav` is the one place that
 decides, and it answers whether it spent the roll so the board loop can give the
 same pulses to the cursor when nothing holds a caret.
 

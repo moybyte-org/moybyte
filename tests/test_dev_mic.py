@@ -174,7 +174,7 @@ def _shell(tmp_path):
     from runtime.host_app import build_workstation
     from test_terminal import plain, run
     ws = build_workstation(str(tmp_path / "carts"))
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     return app, lambda line: (run(app, line), plain(app))[1]
 

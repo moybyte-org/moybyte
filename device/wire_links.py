@@ -91,7 +91,7 @@ class CartNet:
     console whose internal RAM is spent says so. TLS verifies the server's
     certificate (native/moy_net/moy_ota.h), and cart_index checks every file
     against its index's sha256 besides. The radio is the
-    app's lease (`ws.wifi_hold("carts")`), never this."""
+    app's lease (`ws.spine.wifi_hold("carts")`), never this."""
 
     def __init__(self, wifi, autoconnect=None):
         self.wifi = wifi
@@ -171,7 +171,7 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     # the panel's bus, a plain call-through elsewhere.
     try:
         import moy_ota
-        ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)
+        ws.updater = moy_ota.OtaUpdater(ws.with_sd, update_dir=update_dir)
     except Exception as exc:  # noqa: BLE001
         log("boot", "OTA updater unavailable: %s" % exc)
     if ws.updater is not None:

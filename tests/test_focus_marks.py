@@ -66,7 +66,7 @@ def _sheet(theme, mode, surface, tag, focus, touch):
                                 "touch" if touch else None)
         app = apps[-1]
         # a stop's box is the app canvas's: on the desk, its window's content
-        win = getattr(app.ws.wm, "_wins", {}).get(app.id)
+        win = getattr(app.ws.wm, "windows", {}).get(app.id)
         ox, oy = win.content_rect()[:2] if win is not None else (0, 0)
         if win is not None:
             x, y, w, h = win.content_rect()

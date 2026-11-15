@@ -231,7 +231,7 @@ class MoycoreRun:
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
 
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         if pmem is not None:
             cells = getattr(pmem, "cells", None)
             if cells is not None:
@@ -297,7 +297,14 @@ class MoycoreRun:
                 if isinstance(blob, (str, bytes)):
                     _moycore.image_put(name, blob)
             put_scenes(ns, _moycore.scene_put)
-            self._pins = install_handles(ns, _moycore.register, self.exec)
+            self._pins = install_handles(ns, _moycore.register, self.call)
+            pid = ns.get("_moy_pid") if hasattr(ns, "get") else None
+            if pid:
+                # The run's `moybyte` table, its wakes the kernel's under
+                # its process (native/moycore/moycore_moybyte.h).
+                err = _moycore.own(pid)
+                if err:
+                    raise RuntimeError(err)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
@@ -508,7 +515,7 @@ class MoycoreRun:
 
     def play_begin(self, run, tick):
         """Hand this run's frame to the kernel's Player, which launched `run`
-        before this runtime loaded (the Player's _launch_play): `bind` gives
+        before this runtime loaded (`Pace.launch`): `bind` gives
         it the console's input table, the cart's audio session and the Tick a
         paced run notes its costs into (None: unpaced), `open` checks the
         runtime the constructor opened. Returns `play_frame`, which the Player
@@ -563,7 +570,7 @@ class MoycoreRun:
     def _sync_textmode(self):
         """The cart's `textmode()` (libmoy's host callback writes
         SNAP_TEXTMODE) on its run as it changes, as a Python cart's writes
-        it: the keyboard's mode follows (`Player.typing`)."""
+        it: the keyboard's mode follows (`AppFace.typing`)."""
         t = self.snap[self._I_TEXT]
         if t != self._textmode:
             self._textmode = t
@@ -587,7 +594,7 @@ class MoycoreRun:
             return False
         if not _moycore.pmem_image(self.pmem_img):
             return False
-        pmem = getattr(self.ws, "pmem", None)
+        pmem = getattr(self.ws.run.project, "pmem", None)
         if pmem is None:
             return False
         cell = getattr(pmem, "cell", None)
@@ -618,6 +625,13 @@ class MoycoreRun:
         if not _moycore.use(self._h):
             return "the run has closed"
         return _moycore.exec(src, name)
+
+    def call(self, fn, args):
+        """The state's global `fn` called with the values of `args`, a JSON
+        array: None, or the error text."""
+        if not _moycore.use(self._h):
+            return "the run has closed"
+        return _moycore.call(fn, args)
 
     def heap(self):
         """The run's Lua heap in bytes, Lua's own count, or None: a run with
@@ -1102,7 +1116,7 @@ class WasmRun(MoycoreRun):
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
         if cells is not None:
             for i in range(min(256, len(cells))):
@@ -1282,7 +1296,7 @@ class WasmRuntime:
             return None
         main = cart.get("main", "main.wasm")
         import os
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
 
         def _size(p):
             return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
@@ -1314,7 +1328,7 @@ class WasmRuntime:
         if table is None or not path:
             return []
         p = path + "/" + cart.get("main", "main.wasm")
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
         try:
             head = gate(lambda: wasm_head(p)) if gate is not None else wasm_head(p)
         except OSError:
@@ -1323,7 +1337,7 @@ class WasmRuntime:
 
     def wants_layout(self, cart):
         """Whether the cart's module exports `_layout` (`wasm_wants_layout`)."""
-        return wasm_wants_layout(cart, getattr(self.ws, "_with_sd", None))
+        return wasm_wants_layout(cart, getattr(self.ws, "with_sd", None))
 
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and

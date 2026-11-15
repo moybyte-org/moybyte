@@ -315,12 +315,12 @@ def test_a_held_arrow_steps_the_code_caret_at_the_tables_repeat(tmp_path, code):
     key's down, none until REPEAT_DELAY_MS, then one every REPEAT_RATE_MS --
     the decode path the page's `kd` takes, on a 60 fps clock."""
     ws, drv = _ws(tmp_path)
-    for c in ws._runnable_items():
+    for c in ws.home.runnable_items():
         if "star_catcher" in c.get("path", ""):
-            ws.select_cart(c)
+            ws.home.select_cart(c)
             break
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     for _ in range(5):
         drv.frame(1 / 60)
     ed = ws.editor
@@ -405,7 +405,7 @@ def _cart_reads(tmp_path, runtime, repeat, text):
         img = array("i", [0] * 256)
         moycore.pmem_image(img)
         return img[0], img[1]
-    return ws.pmem.cell(0), ws.pmem.cell(1)
+    return ws.run.project.pmem.cell(0), ws.run.project.pmem.cell(1)
 
 
 @pytest.mark.parametrize("runtime", ["python", "lua"])
@@ -502,21 +502,21 @@ def test_ball_coast_ships_off_and_carries_a_fast_roll_on_when_set(tmp_path, monk
     ws.input.add_steps = lambda name, k: got.append((name, k))
     assert ws._coast == 0
     ws._ball_rate_at = t[0] - 100
-    ws._ball_steps("right", 6)                  # 60 a second
+    ws.router._ball_steps("right", 6)                  # 60 a second
     assert got == [("right", 6)] and not ws._coast_r.flinging
     ws._coast, ws._coast_rate = 100, 20
     got.clear()
     ws._ball_rate_at = t[0]
     t[0] += 100
-    ws._ball_steps("right", 6)                  # 2 a 100 ms at 20/s; 4 over
+    ws.router._ball_steps("right", 6)                  # 2 a 100 ms at 20/s; 4 over
     assert got == [("right", 2)]
-    assert ws._coast_r._vel / ws.COAST_UNIT == pytest.approx(0.4)    # steps a ms
+    assert ws._coast_r._vel / ws.router.COAST_UNIT == pytest.approx(0.4)    # steps a ms
     per = []
     ws.frame_state.frame_dt_ms = 33.0                      # the loop's dt, which the coast takes
     for _ in range(400):
         t[0] += 33
         got.clear()
-        ws.ball(0, 0)
+        ws.router.ball(0, 0)
         per.append(sum(k for _n, k in got))
         if not ws.ball_owed:
             break

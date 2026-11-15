@@ -310,7 +310,7 @@ class Launcher:
 
     def __init__(self, items, layout=None, names=None):
         self.items = items
-        self.tab = HOME_TABS[0][0]   # the home's active tab (ws.set_home_tab)
+        self.tab = HOME_TABS[0][0]   # the home's active tab (ws.home.set_home_tab)
         self.tab_sel = {}            # tab -> the path its card was on when left
         # bumped whenever anything the bar's zone shows changes (BarLayer
         # folds it into its cache key); set before `sel`, whose setter reads it
@@ -337,7 +337,7 @@ class Launcher:
         self.wall_ink = None          # (white, black) over a wallpaper (_wall_ink)
         self.ground = None            # the home's ground's colour (_ground_of)
         self.favorite_for = None      # optional cart -> bool (ws.carts.is_favorite)
-        self.broken_for = None        # optional cart -> bool (ws.cart_broken)
+        self.broken_for = None        # optional cart -> bool (ws.spine.cart_broken)
         self.broken_ids = None        # optional () -> what broken_for answers from
         self.own_for = None           # optional cart -> bool (ws.carts.is_own)
         self.plays_for = None         # optional cart -> its play record (ws.carts.plays)

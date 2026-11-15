@@ -24,9 +24,9 @@
 // -- HTTP ----------------------------------------------------------------------
 
 enum {
-    MOY_HTTP_PARTIAL = 0,   // the head's blank line has not arrived
-    MOY_HTTP_OK = 1,
-    MOY_HTTP_BAD = -1,      // a head whose request line has no target
+    MOY_HTTP_OK = 0,
+    MOY_HTTP_PARTIAL = 1,   // the head's blank line has not arrived
+    MOY_HTTP_BAD = 2,       // a head whose request line has no target
 };
 
 // The largest Content-Length a request is believed about; beyond it the
@@ -576,7 +576,7 @@ typedef struct {
 // THE BOOK. The station's power follows the lease table's radio rows
 // (moy_lease.h's THE RADIO), the one record of who holds it: the table calls
 // moy_wifi_book with its mask after every change, under its lock, from
-// whichever task made it (the VM's Workstation.wifi_hold, a compiled
+// whichever task made it (the VM's Spine.wifi_hold, a compiled
 // program's http handle, the media service). The mask's first holder powers
 // a station that is down on (moy_wifi_on), and the book is the station's one
 // start: the VM's view of it (modmoy_net's wifi_on) starts only a station

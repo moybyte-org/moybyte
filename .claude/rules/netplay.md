@@ -107,7 +107,7 @@ belongs here is only what a coder must not undo:
 - **LOCAL 2P is the same cart API with no radio at all** (#65 Phase 1): Settings
   -> **2 PLAYERS** gives a paired Bluetooth keyboard the second player slot, so
   two kids share one screen using two real keyboards. Capability-gated on
-  `ws.second_keyboard()`, which is non-None only where a board ALREADY has a
+  `ws.toggles.second_keyboard()`, which is non-None only where a board ALREADY has a
   keyboard of its own (the T-Deck); elsewhere the Bluetooth one is `ws.keyboard`
   and reassigning it would strand player one. The mechanism is entirely #26's: a
   source carries a player, two disagreeing IS multiplayer. Two honesty rules fell

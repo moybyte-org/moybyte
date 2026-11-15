@@ -161,9 +161,9 @@ def test_the_finished_request_wakes_its_process(ws, server):
         seen = []
         r = _as(pid, lambda: moybyte.http.get(server + "/hello", on_done=seen.append))
         out = [0] * 8
-        assert moybyte.WAKES.due(0, out) == 0
+        assert moybyte.WAKES.pending(out) == 0
         N.run()
-        n = moybyte.WAKES.due(0, out)
+        n = moybyte.WAKES.pending(out)
         for wid in out[:n]:
             _as(pid, lambda: moybyte.WAKES.call(wid))
         assert seen == [r] and r.body() == b"hello, moybyte"

@@ -318,7 +318,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws.net = _players.LoopbackNet()
     # The Picotron-style windowed WM (#73): swap the presentation tier in before
     # the first frame. Only meaningful with a distinct (big) system canvas.
-    if windowed and ws._sys_canvas is not None:
+    if windowed and ws.bound_sys_canvas is not None:
         from runtime.wm_windowed import WindowedWM
         # A windowed composite must NOT letterbox: `blit_game` is asked to put a
         # cart inside a WINDOW here, and the fullscreen meaning of the same verb
@@ -328,7 +328,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # the wasm head's twin of this line -- web_boot.boot -- clears the same
         # one) -- the tier is chosen here, so this is where the canvas is told
         # which meaning it serves.
-        ws._sys_canvas.letterbox_composite = False
+        ws.bound_sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
-        ws.open_desk()                 # boot onto the DESK (desktop mode)
+        ws.home.open_desk()                 # boot onto the DESK (desktop mode)
     return ws

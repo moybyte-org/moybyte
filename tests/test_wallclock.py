@@ -158,17 +158,17 @@ def test_the_bar_reads_dashes_until_synced_then_local_time(tmp_path, monkeypatch
     ws = build_ws(tmp_path)
     bar = ws.bar_layer
     _kernel(0)
-    bar._clock_at = -1
-    assert bar._clock_text() == "--:--"
-    assert bar._today() == (0, 0, 0)
-    assert ws._today_ymd() == 0
+    bar.clock_at = -1
+    assert bar.clock_text() == "--:--"
+    assert bar.today() == (0, 0, 0)
+    assert ws.notices.today_ymd() == 0
     _kernel(1)
     monkeypatch.setattr(wc, "_now", lambda: _at(2026, 11, 6, 23, 30))
-    ws.set_time_zone(BELGRADE)
-    assert bar._clock_text() == "00:30"            # the zone's next day
-    assert bar._today() == (2026, 11, 7)
-    ws.set_time_zone("UTC0")
-    assert bar._clock_text() == "23:30"
+    ws.toggles.set_time_zone(BELGRADE)
+    assert bar.clock_text() == "00:30"            # the zone's next day
+    assert bar.today() == (2026, 11, 7)
+    ws.toggles.set_time_zone("UTC0")
+    assert bar.clock_text() == "23:30"
 
 
 # -- the setting ------------------------------------------------------------------------
@@ -176,12 +176,12 @@ def test_the_bar_reads_dashes_until_synced_then_local_time(tmp_path, monkeypatch
 def test_the_zone_is_stored_and_read_back_at_boot(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.system.get("tz") is None and wc.zone() == wc.UTC
-    ws.set_time_zone(BELGRADE)
+    ws.toggles.set_time_zone(BELGRADE)
     assert ws.system.get("tz") == BELGRADE
     wc.set_zone(wc.UTC)
-    ws.load_system()
+    ws.spine.load_system()
     assert wc.zone() == BELGRADE
-    ws.set_time_zone("not a zone")
+    ws.toggles.set_time_zone("not a zone")
     assert ws.system.get("tz") == wc.UTC and wc.zone() == wc.UTC
 
 

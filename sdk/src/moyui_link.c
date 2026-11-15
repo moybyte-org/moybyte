@@ -1,5 +1,5 @@
 // The front of the toolkit a native app links (moybyte/ui.h): the app's own
-// copy of native/moy_ui, its RUN face (moy_ui_wasm.c) drawing on a canvas of
+// copy of native/moy_ui, its RUN face (moy_ui_run.c) drawing on a canvas of
 // the app's own, the RGB565 screen moy_present hands to the console. What
 // the RUN face reads from a compiled run's engine it reads from here: the
 // frame's input words (moycore_ui_snap), its milliseconds
@@ -7,7 +7,11 @@
 // (moy_app_wasm_theme), which the console's theme block brings in through the
 // moy_ui_pull and moy_ui_font_pull rows (moy_ui.h's moy_ui_theme_pull). The
 // app's `_layout`, where it defines one, hears the surface the frame's layout
-// words name whenever they move.
+// words name whenever they move. The console's input owner reaches the copy
+// as it reaches a Lua run's: the frame's steps and its asks (cancel, back)
+// go into the RUN face before the rows, and the show tells the console what
+// the copy would answer next (moy_ui_tell: a field in focus, a cancel or a
+// back it would take).
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -18,7 +22,7 @@
 #include "moy_text.h"
 #include "moy_ui.h"
 #include "moy_ui_api.h"
-#include "moy_ui_wasm.h"
+#include "moy_ui_run.h"
 #include "moybyte/frame.h"
 #include "moybyte/os.h"
 #include "moybyte/ui.h"
@@ -125,6 +129,13 @@ int moy_ui_link_frame(moy_frame_t *f) {
     s_dt += (int32_t)f->ms;
     s_tick++;
     moy_ui_inst_sync(NULL);
+    moy_ui_run_steps(f->in[MOY_FRAME_REP], f->in[MOY_FRAME_KEYREP]);
+    if (f->in[MOY_FRAME_ASK] & MOY_FRAME_ASK_CANCEL) {
+        (void)moy_ui_run_cancel(1);
+    }
+    if (f->in[MOY_FRAME_ASK] & MOY_FRAME_ASK_BACK) {
+        (void)moy_ui_run_back(1);
+    }
     return 1;
 }
 
@@ -132,6 +143,10 @@ int moy_ui_link_show(void) {
     if (s_px == NULL) {
         return -1;
     }
+    uint32_t told = (moy_ui_run_typing() ? MOY_FRAME_TOLD_TYPING : 0u)
+                    | (moy_ui_run_cancel(0) ? MOY_FRAME_TOLD_CANCEL : 0u)
+                    | (moy_ui_run_back(0) ? MOY_FRAME_TOLD_BACK : 0u);
+    (void)moy_ui_tell(told);
     return moy_present(s_px, (size_t)s_w * (size_t)s_h * sizeof(moy_pixel));
 }
 

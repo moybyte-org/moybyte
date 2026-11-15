@@ -13,9 +13,9 @@ the store loads it -- `moy_catalogue.load`), its live `config` dict, the built
 SpriteSheet/TileMap/Pmem/Scenes and the paint-image assets (`images`); its
 builders turn a loaded cart into those, and its commit_* verbs write them back
 through the injected store (`ws.carts_store`) inside the SD session
-(`ws._with_sd`) and journal what landed (the durable undo journal,
+(`ws.with_sd`) and journal what landed (the durable undo journal,
 `moy_journal`). It keeps a `ws` back-reference for the Workstation-owned deps
-the builders and commits need: the SD-session wrapper `ws._with_sd`, the cart
+the builders and commits need: the SD-session wrapper `ws.with_sd`, the cart
 store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.run.audio`,
 the save-failure UI field `ws.cart_error` and
 the achievements link `ws.ach`.
@@ -110,7 +110,7 @@ class ProjectStore:
         cells = None
         if path and ws.carts_store is not None:
             try:
-                cells = ws._with_sd(lambda: ws.carts_store.load_pmem(path))
+                cells = ws.with_sd(lambda: ws.carts_store.load_pmem(path))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte pmem load failed:", exc)
                 cells = None
@@ -126,7 +126,7 @@ class ProjectStore:
                 # the deferred cadence; perf_capture-gated like every diag line).
                 t0 = _ticks_ms()
                 try:
-                    ws._with_sd(lambda: ws.carts_store.save_pmem(cart, values))
+                    ws.with_sd(lambda: ws.carts_store.save_pmem(cart, values))
                 except Exception as exc:  # noqa: BLE001
                     # No serial in the device run loop, but a failed pmem write must
                     # not crash the cart -- the kid just loses that one save.
@@ -255,7 +255,7 @@ class ProjectStore:
     # (moy_catalogue.journal_append, by the cart's handle). The journal store owns the O(1) raw append, the
     # snapshot ceiling (no-op commits write nothing), and rotation; here we only feed
     # it the (file, bytes) each commit produced, in the SAME between-frames SD-session
-    # discipline (ws._with_sd) as the save it shadows.
+    # discipline (ws.with_sd) as the save it shadows.
 
     def _journal(self, file, new_bytes, grad=None, ops=None):
         """Append a durable undo-journal entry for `file`. Best-effort: a journal
@@ -273,7 +273,7 @@ class ProjectStore:
         if not h or not ws.can_manage:
             return
         try:
-            seq = ws._with_sd(lambda: moy_catalogue.journal_append(
+            seq = ws.with_sd(lambda: moy_catalogue.journal_append(
                 h, file, new_bytes, grad=grad, ops=ops))
         except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
             print("Moybyte journal append failed:", _err_text(exc))
@@ -355,8 +355,8 @@ class ProjectStore:
     # -- persistence verbs ----------------------------------------------------
     #
     # These write the cart's live data back through the injected store inside the
-    # SD session (ws._with_sd). The Workstation ws.save_* /
-    # ws._save_config names stay as one-line forwards (tested surface); the
+    # SD session (ws.with_sd). The Workstation ws.save_* /
+    # ws.saves.save_config names stay as one-line forwards (tested surface); the
     # save-failure UI field (ws.cart_error) + achievements (ws.ach)
     # they touch stay on Workstation, reached via the ws back-reference.
 
@@ -368,7 +368,7 @@ class ProjectStore:
             if not ws.can_manage:
                 return                             # writes deferred on device
             try:
-                ws._with_sd(lambda: ws.carts_store.save_config(self.cart))
+                ws.with_sd(lambda: ws.carts_store.save_config(self.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte save failed:", exc)
                 return
@@ -412,7 +412,7 @@ class ProjectStore:
         if not ws.can_manage:
             return True                   # write deferred on device (cfg pattern)
         try:
-            ws._with_sd(lambda: ws.carts_store.save_manifest_meta(
+            ws.with_sd(lambda: ws.carts_store.save_manifest_meta(
                 cart["path"], title=t, author=a))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte save manifest failed:", _err_text(exc))
@@ -421,8 +421,8 @@ class ProjectStore:
 
     def commit_code(self, src, quiet=False, force=False, name=None):
         """Persist validated source through the store -- the store-write half of the
-        old Workstation.save_code. The compile-check + code-UI half stays on the code
-        surface (ws.save_code), which calls this once the source is known to parse.
+        old Saves.save_code. The compile-check + code-UI half stays on the code
+        surface (ws.saves.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
 
         `name` is WHICH of the cart's scripts (SPEC.md 4) the Code tab is on --
@@ -455,7 +455,7 @@ class ProjectStore:
         _t_write = _t_burst = _t_ops = 0
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
-            status, smsg = ws._with_sd(
+            status, smsg = ws.with_sd(
                 lambda: ws.carts_store.save_code(self.cart, src, force, name))
             _t_write = _ticks_diff(_ticks_ms(), _t0)
             if status == ws.carts_store.SAVE_BAD_SYNTAX:
@@ -499,15 +499,15 @@ class ProjectStore:
             # ...and the same for a cart the crash guard struck out (#160), as
             # an app or as the wallpaper. The refusal panel says "EDIT it";
             # this is the line that makes that true. Code is the ONLY edit that
-            # clears strikes -- see Workstation.forgive_app for why not every
+            # clears strikes -- see Spine.forgive_app for why not every
             # commit_* verb.
             # Neither is true of a KEPT write: the code is on disk and still
             # broken, so a stale crash panel is not stale and re-arming the guard
             # would just let the same cart strike out again.
             if parsed:
                 ws.cart_error = None
-                ws.forgive_app(self.cart)
-                ws.forgive_wallpaper(self.cart)
+                ws.spine.forgive_app(self.cart)
+                ws.spine.forgive_wallpaper(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
@@ -529,7 +529,7 @@ class ProjectStore:
         cannot itself escape. Returns True on a persisted commit."""
         ws = self.ws
         try:
-            ws._with_sd(save)
+            ws.with_sd(save)
             if clean is not None:
                 clean.dirty = False
             ops = hist.flush() if hist is not None else None
@@ -561,7 +561,7 @@ class ProjectStore:
             # commit: they are the sprites' own data.
             self.flags_dirty = False
             flags = self.flags
-            ws._with_sd(lambda: ws.carts_store.save_flags(self.cart, flags))
+            ws.with_sd(lambda: ws.carts_store.save_flags(self.cart, flags))
 
     def commit_map(self):
         """Persist the cart's tilemap to map.moymap (#32). The running cart

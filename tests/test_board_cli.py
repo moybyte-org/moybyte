@@ -231,7 +231,7 @@ class Lua:
     def flush_pmem(self):
         self.flushed += 1
         for i, v in enumerate(self.cells):
-            self.ws.pmem.cells[i] = v
+            self.ws.run.project.pmem.cells[i] = v
 
 
 class Player:
@@ -239,7 +239,7 @@ class Player:
         self.tick_ms = 0
         self.sched = Sched()
         self.notice = None
-        self._lua = None
+        self.lua = None
 
 
 class WM:
@@ -247,7 +247,7 @@ class WM:
         self._stack = ["launcher", "desk"] if windowed else ["launcher"]
         self.windowed = windowed
         if windowed:
-            self._wins, self._order, self._focus = {}, [], None
+            self.windows, self.z_order, self.focus_key = {}, [], None
             self.desk = True
 
     def desk_open(self):
@@ -273,13 +273,16 @@ class WS:
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False
-        self.frame_state = types.SimpleNamespace(frames_drawn=5)
-        self._apps = ()
+        self.frame_state = types.SimpleNamespace(frames_drawn=5, dirty=False)
+        # the console's services, which this stand-in answers itself
+        self.router = self.home = self.text = self.binding = self.perf = self
+        self.toggles = self.saves = self.notices = self.intents = self.spine = self
+        self.app_layers = ()
         self.carts = types.SimpleNamespace(
             all=[{"title": t} for t in titles])
         self.run = types.SimpleNamespace(player=Player(), canvas=Canvas(8, 4),
-                                         cart_frame=None, view=None)
-        self.pmem = None
+                                         cart_frame=None, view=None,
+                                         project=types.SimpleNamespace(pmem=None))
         self.homes = 0
         self.net_tps = None           # a lockstep rate, when a test sets one
 
@@ -300,6 +303,9 @@ class WS:
                 self.wm._stack.append("player")
                 return c["title"]
         return None
+
+    def mark_dirty(self):
+        self.frame_state.dirty = True
 
     def exit(self):
         if self.cart:
@@ -483,7 +489,7 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
     assert "Brick Siege on tdeck:" in out
     assert "fps drawn (median of" in out
     assert ws.cart is None, "perf ends its cart"
-    assert ws._uncap is False and ws.diag_live is False
+    assert ws.uncap is False and ws.diag_live is False
     assert "uncap 1" in wire.sent and "uncap 0" in wire.sent
     # The shipping fps: PERF DIAG stays off, and the reading is the counter's.
     assert "diag 1" not in wire.sent and "(diag off" in out
@@ -492,24 +498,24 @@ def test_perf_reports_the_median_and_restores_the_switches(clock):
 
 def test_perf_keeps_a_switch_that_was_already_on(clock):
     ws, wire, b = console(clock)
-    ws._uncap = True
+    ws.uncap = True
     ws.diag_live = True
     run(board.cmd_perf, b, args(titles=["Brick Siege"], secs=4.0, diag=True,
                                 uncap=True))
-    assert ws._uncap is True and ws.diag_live is True
+    assert ws.uncap is True and ws.diag_live is True
     assert "uncap 0" not in wire.sent
 
 
 def test_perf_refuses_samples_that_name_another_cart(clock, monkeypatch):
     ws, wire, b = console(clock)
-    real = ws.launch_named
+    real = ws.home.launch_named
 
     def wrong(name):
         got = real(name)
         ws.cart = {"title": "Other"}               # what PERF will name
         return got
 
-    ws.launch_named = wrong
+    ws.home.launch_named = wrong
     code, out = run(board.cmd_perf, b, args(titles=["Brick Siege"], secs=4.0,
                                             diag=True, uncap=False))
     assert code == 1 and "PERF names cart=Other" in out
@@ -545,14 +551,14 @@ def test_the_counter_names_a_lockstep_match(clock):
 def test_the_counter_refuses_a_run_of_another_cart(clock):
     import p4_perf
     ws, wire, b = console(clock)
-    real = ws.launch_named
+    real = ws.home.launch_named
 
     def wrong(name):
         got = real(name)
         ws.cart = {"title": "Other"}
         return got
 
-    ws.launch_named = wrong
+    ws.home.launch_named = wrong
     with pytest.raises(RuntimeError, match="ran Other, not Brick Siege"):
         p4_perf.measure(b, "Brick Siege", 4.0, lambda *x: None)
 
@@ -568,7 +574,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
     from runtime.perf_line import parse_perf
     from ws_helpers import build_ws, open_cart
     ws = build_ws(tmp_path)
-    ws._uncap = uncap
+    ws.uncap = uncap
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None, ws.cart_error
     ws.diag_live = True
@@ -577,7 +583,7 @@ def _perf_run(tmp_path, monkeypatch, uncap):
     def frame(dt):
         ws.frame(1 / 60.0)
         if moy_loop.perf_due():
-            ws.perf_push(moy_loop)
+            ws.perf.perf_push(moy_loop)
         return ws.frame_state.frames_drawn
 
     moy_loop.register(ws.input.begin_frame, lambda: None, frame)
@@ -616,15 +622,15 @@ def test_the_counter_is_the_one_PERF_is_taken_from(tmp_path, monkeypatch,
 
 def test_pmem_flushes_the_cart_before_reading(clock):
     ws, wire, b = console(clock)
-    ws.pmem = types.SimpleNamespace(cells=[0] * 256)
+    ws.run.project.pmem = types.SimpleNamespace(cells=[0] * 256)
     text = b"zone 1 failed\0"
     cells = [int.from_bytes(text[i:i + 4].ljust(4, b"\0"), "little")
              for i in range(0, len(text), 4)]
-    ws.run.player._lua = Lua(ws, [7, -1] + [0] * 254)
+    ws.run.player.lua = Lua(ws, [7, -1] + [0] * 254)
     code, out = run(board.cmd_pmem, b, args(text=False, start=0))
-    assert ws.run.player._lua.flushed == 1
+    assert ws.run.player.lua.flushed == 1
     assert out.split()[:3] == ["0:", "7", "-1"]
-    ws.run.player._lua = Lua(ws, cells + [0] * (256 - len(cells)))
+    ws.run.player.lua = Lua(ws, cells + [0] * (256 - len(cells)))
     code, out = run(board.cmd_pmem, b, args(text=True, start=0))
     assert out.strip() == "zone 1 failed"
 
@@ -678,8 +684,8 @@ def c6_console(clock, monkeypatch, radio):
     ws.c6_updater = radio
     held = []
     ws.wifi = types.SimpleNamespace(status=lambda: (True, "net", "10.0.0.2"))
-    ws.wifi_hold = held.append
-    ws.wifi_release = held.remove
+    ws.spine.wifi_hold = held.append
+    ws.spine.wifi_release = held.remove
     monkeypatch.setitem(sys.modules, "device_wifi", types.SimpleNamespace(
         autoconnect_wifi=lambda w: True))
     monkeypatch.setitem(sys.modules, "moy_ota", types.SimpleNamespace(SINK_C6=2))

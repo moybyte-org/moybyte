@@ -170,14 +170,14 @@ def test_on_the_vm_the_guard_counts_what_a_call_allocates(tmp_path):
 def _desk_two(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     for t in ("Star Catcher", "Brick Siege"):
         open_cart(ws, t)
         drv.frame(_DT)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
         drv.frame(_DT)
     return ws, drv
 
@@ -186,7 +186,7 @@ def test_the_desk_lists_both_games_and_switches_and_closes(tmp_path):
     ws, drv = _desk_two(tmp_path)
     ws.open_tasks()
     drv.frame(_DT)
-    assert "tasks" in ws.wm._wins
+    assert "tasks" in ws.wm.windows
     rows = _rows(ws)
     assert [(r[0], r[1], r[3]) for r in rows] == [
         ("desktop", "Brick Siege", "running"), ("run:1", "Star Catcher", "throttled")]
@@ -198,7 +198,7 @@ def test_the_desk_lists_both_games_and_switches_and_closes(tmp_path):
     assert ws.procs.list == [] and ws.cart["title"] == "Star Catcher"
     ws.close_tasks()
     drv.frame(_DT)
-    assert "tasks" not in ws.wm._wins
+    assert "tasks" not in ws.wm.windows
 
 
 def test_the_system_menu_offers_the_task_manager(tmp_path):
@@ -243,7 +243,7 @@ def test_the_pause_cards_minimise_keeps_the_game_held_and_goes_home(tmp_path):
     assert ws.screen == "launcher" and not ws.pause.open
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     p = ws.procs.list[0]
-    assert p.state == "minimised" and p.player.paused and heard == ["min"]
+    assert p.state == "minimised" and p.player.pace.paused and heard == ["min"]
     assert p.player.ns["_update"] is n and p.player is pl
     ups = p.ups
     for _ in range(10):
@@ -263,7 +263,7 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.screen == "tasks" and ws.run.player.paused   # it holds the front game
+    assert ws.screen == "tasks" and ws.run.player.pace.paused   # it holds the front game
     rows = _rows(ws)
     assert [(r[1], r[3]) for r in rows] == [("Brick Siege", "paused"),
                                             ("Star Catcher", "minimised")]
@@ -271,9 +271,9 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     ws.tasks_layer._do("Switch to", rows[1])
     drv.frame(_DT)
     assert ws.screen == "desktop" and ws.cart["title"] == "Star Catcher"
-    assert not ws.run.player.paused and not ws.run.player.detached
+    assert not ws.run.player.pace.paused and not ws.run.player.detached
     assert [p.title() for p in ws.procs.list] == ["Brick Siege"]
-    assert ws.procs.list[0].state == "minimised" and ws.procs.list[0].player.paused
+    assert ws.procs.list[0].state == "minimised" and ws.procs.list[0].player.pace.paused
     n0 = ws.run.player.ns.get("score", 0)
     for _ in range(5):
         drv.frame(_DT)
@@ -294,10 +294,10 @@ def test_the_task_manager_goes_back_to_the_game_it_held_and_home_keeps_it(tmp_pa
     drv.frame(_DT)
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.run.player.paused
+    assert ws.run.player.pace.paused
     ws.input_policy.back()
     drv.frame(_DT)
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
     ws.open_tasks()
     drv.frame(_DT)
     rows = _rows(ws)
@@ -329,9 +329,9 @@ def test_a_minimised_app_keeps_updating_on_a_handheld(tmp_path):
     drv.frame(_DT)
     assert ws.procs._detachable()
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     p = ws.procs.list[0]
-    assert p.app and p.state == "minimised" and not p.player.paused
+    assert p.app and p.state == "minimised" and not p.player.pace.paused
     n = p.player.ns["n"]
     for _ in range(10):
         drv.frame(_DT)
@@ -351,16 +351,16 @@ def _start_frames(ws, monkeypatch, held_ms):
     try:
         i.source("kbd").set_button("start", True)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         t = 0
         while t < held_ms:
             now[0] += 100
             t += 100
             i.begin_frame()
-            ws.handle_input()
+            ws.router.handle_input()
         i.source("kbd").set_button("start", False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -432,18 +432,18 @@ def test_a_chord_on_the_console_key_spends_it(tmp_path, monkeypatch):
     try:
         i.source("kbd").set_button("start", True)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button("up", True)      # another key while it is held
         now[0] += 100
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         now[0] += 900
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button("start", False)
         i.source("kbd").set_button("up", False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
     assert ws.screen == "launcher" and not ws.sysmenu.open

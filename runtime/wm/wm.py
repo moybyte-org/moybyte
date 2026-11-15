@@ -77,11 +77,11 @@ class FullscreenStackWM:
         # as kinds (the vocabulary the flat `screen` attribute used: "launcher" | "menu" |
         # "settings" | "update" | "desktop" | an app id); the TOP is what
         # `Workstation.screen` projects onto (`top_kind`). It is a DATA STRUCTURE the
-        # string-keyed router READS (via ws._content_layer), NOT a second dispatcher --
+        # string-keyed router READS (via ws.content_layer), NOT a second dispatcher --
         # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
         # The spine owns it; every navigation goes through `goto` here, so the WM sees
         # each change it has to rebuild for.
-        kt = getattr(ws, "_kernel_tables", None)
+        kt = getattr(ws, "kernel_tables", None)
         self.stack = kt[1] if kt is not None else BackStack()
         # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
         # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
@@ -96,7 +96,7 @@ class FullscreenStackWM:
         # (this retires the ~9-lists/frame churn the layers refactor introduced -- #66).
         self._cache_content = None    # the content Layer the caches were built for
         self._cache_gen = -1          # content_gen the caches were built at
-        self._cache_sig = -1          # _overlay_sig() the caches were built at
+        self.cache_sig = -1          # _overlay_sig() the caches were built at
         self._cache_visible = None    # [content] + overlays (draw/route order, bottom->top)
         self._cache_visible_rev = None  # visible reversed (top->bottom, input routing)
         self._cache_draw = None       # [splash-or-content] + overlays (draw order)
@@ -177,11 +177,11 @@ class FullscreenStackWM:
 
     def popover_changed(self):
         """The popover opened, moved or closed: here the frame repaints."""
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def pause_changed(self):
         """The pause menu opened, moved or closed: here the frame repaints."""
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def popover_owed(self):
         """True while the popover still owes a frame; never here."""
@@ -252,7 +252,7 @@ class FullscreenStackWM:
         cache a failed fit check can have back -- here the home's retained
         frame, then the layer a dialog's page is held in. True when
         something was freed."""
-        return self.ws.launcher_layer.release_retained() or self.ws.release_held()
+        return self.ws.launcher_layer.release_retained() or self.ws.binding.release_held()
 
     def prealloc(self):
         """An idle frame's mint of what a WM's first modal frame would
@@ -274,11 +274,11 @@ class FullscreenStackWM:
         overlay, splash, perf HUD, visible cursor or owed LOADING pill over
         it -- but the overlays of the sig bits `besides`, which the caller
         accounts for itself."""
-        if self._cache_sig & ~besides:
+        if self.cache_sig & ~besides:
             return False
         ws = self.ws
         return not (getattr(ws.pointer, "visible", False)
-                    or (ws._deferred and ws._toast_owed()))
+                    or (ws.deferred and ws.toast_owed()))
 
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a
@@ -289,7 +289,7 @@ class FullscreenStackWM:
         (cart_error) hands keys back to the system chrome."""
         pl = self.ws.run.player
         return (self.stack.top() == "desktop" and pl.cart_error is None
-                and (pl._update is not None or pl._draw is not None))
+                and (pl.update is not None or pl.draw is not None))
 
     def goto(self, kind):
         """Navigate the back-stack so `kind` is on top -- the mechanism behind the
@@ -299,7 +299,7 @@ class FullscreenStackWM:
         `screen` transitions exactly at the top (golden-identical) while giving the
         stack an honest launcher-root -> ... -> top shape."""
         if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
-            self._on_nav()
+            self.on_nav()
 
     def minimise_kind(self, kind):
         """Hide process `kind`'s window to its chip, the focus leaving it:
@@ -319,7 +319,7 @@ class FullscreenStackWM:
         if not self.bring_forward(kind):
             self.goto(kind)
 
-    def _on_nav(self):
+    def on_nav(self):
         """A real top-of-stack change happened: bump the content generation so the
         memoized layer stack (Stage 6c) rebuilds on the next access."""
         self.content_gen += 1
@@ -344,7 +344,7 @@ class FullscreenStackWM:
     # top-of-stack allocates zero new lists (built per access, the three walks a
     # frame cost ~9 fresh lists even during play).
 
-    def _overlay_sig(self):
+    def overlay_sig(self):
         """A cheap, allocation-free signature (int bitmask) of the splash state + which
         transient overlays are gated ON this frame. Together with the content-layer
         identity + content_gen it is the memo key: while it is unchanged the cached
@@ -353,7 +353,7 @@ class FullscreenStackWM:
         with no banner armed reads flags only: no clock, no call."""
         ws = self.ws
         sig = 0
-        if ws._splash_until is not None:
+        if ws.splash_until is not None:
             sig |= 1
         if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
@@ -363,19 +363,19 @@ class FullscreenStackWM:
             sig |= 512
         if ws.confirm.open:
             sig |= 1024
-        if ws._about:
+        if ws.about:
             sig |= 128
         if _MIC[0]:
             sig |= 4096                 # the recording indicator, while the mic is held
         # The banners up for a span of the clock: the unlock's is a flat
         # kernel deadline the unlock pushes at event time (#209 landing B) --
         # a plain int read, no call into ach from the hot path.
-        tu = ws._toast_until
-        if tu or ws._notice is not None or _NOTES.banner is not None:
+        tu = ws.toast_until
+        if tu or ws.notice_up is not None or _NOTES.banner is not None:
             now = _ticks_ms()
             if tu and _ticks_diff(tu, now) > 0:
                 sig |= 32
-            if ws.notice_active(now):
+            if ws.notices.notice_active(now):
                 sig |= 256
             if _NOTES.banner is not None and _NOTES.up(now) is not None:
                 sig |= 2048
@@ -389,18 +389,18 @@ class FullscreenStackWM:
         every frame (zero allocation).
 
         #75: content_gen alone stands in for the content-layer identity on the hot path
-        (no per-access ws._content_layer() call). The contract that makes this sound:
+        (no per-access ws.content_layer() call). The contract that makes this sound:
         EVERY writer that can change what _content_layer() resolves to bumps the gen --
         a back-stack push/pop/return goes through goto() -> _on_nav(), and an Editor tab
         switch (screen stays "menu", the resolved tab layer changes) goes through
         EditorApp.tab's setter -> note_content_change(). The memo guardrail test
         (tests/test_wm_stack_memo.py) pins both invalidation paths."""
-        sig = self._overlay_sig()
+        sig = self.overlay_sig()
         if (self._cache_visible is not None
                 and self.content_gen == self._cache_gen
-                and sig == self._cache_sig):
+                and sig == self.cache_sig):
             return
-        self._rebuild(self.ws._content_layer(), sig)
+        self._rebuild(self.ws.content_layer(), sig)
 
     def _overlay_layers(self, sig):
         """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..4096,
@@ -412,22 +412,22 @@ class FullscreenStackWM:
         ws = self.ws
         overlays = []
         if sig & 32:
-            overlays.append(ws._toast_layer)
+            overlays.append(ws.toast_layer)
         if sig & 64:
-            overlays.append(ws._sysmenu_layer)
+            overlays.append(ws.sysmenu_layer)
         if sig & 512:
-            overlays.append(ws._pause_layer)
+            overlays.append(ws.pause_layer)
         if sig & 128:
-            overlays.append(ws._about_layer)
+            overlays.append(ws.about_layer)
         if sig & 1024:
-            overlays.append(ws._confirm_layer)
+            overlays.append(ws.confirm_layer)
         if sig & 256:
-            overlays.append(ws._notice_layer)
+            overlays.append(ws.notice_layer)
         if sig & 2048:
-            overlays.append(ws._note_layer)
+            overlays.append(ws.note_layer)
         if sig & 4096:
-            overlays.append(ws._rec_layer)
-        overlays.append(ws._cursor_layer)
+            overlays.append(ws.rec_layer)
+        overlays.append(ws.cursor_layer)
         return overlays
 
     def _rebuild(self, content, sig):
@@ -441,11 +441,11 @@ class FullscreenStackWM:
         # running cart, before the composite), so it must precede any system overlay.
         # (The windowed tier deliberately leaves it out -- see its _rebuild.)
         if sig & 2:
-            overlays.insert(0, ws._perf_layer)
+            overlays.insert(0, ws.perf_layer)
         # The boot logo is a draw-time takeover of the content slot (input still routes to
         # the content underneath -- so _cache_visible keeps `content`, only the draw slot
         # swaps in the splash).
-        draw_content = ws._splash_layer if (sig & 1) else content
+        draw_content = ws.splash_layer if (sig & 1) else content
         self._cache_overlay = overlays
         self._cache_visible = [content] + overlays
         self._cache_draw = [draw_content] + overlays
@@ -454,7 +454,7 @@ class FullscreenStackWM:
         self._cache_visible_rev = rev
         self._cache_content = content
         self._cache_gen = self.content_gen
-        self._cache_sig = sig
+        self.cache_sig = sig
 
     def overlay_stack(self):
         """The transient overlays + cursor, in draw order (bottom -> top). Memoized."""
@@ -675,7 +675,7 @@ class FullscreenStackWM:
         gc = self.ws.run.canvas
         sc = self.ws.sys_canvas
         # #63: complete any sprites still queued in the game canvas's auto-batch before
-        # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-
+        # its buffer is read (usually already flushed by reset_canvas_state; belt-and-
         # suspenders so a missed reset can never drop a cart's last sprite run).
         # #75: the flush_batch probe is cached by canvas identity -- this runs every
         # play frame, and the canvas only changes on a web-view Tee swap.

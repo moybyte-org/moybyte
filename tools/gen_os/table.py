@@ -29,7 +29,8 @@ WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
 ERR_H = os.path.join(ROOT, "native", "moy_app", "moy_app_err.h")
-FACE_ERRORS = os.path.join(ROOT, "runtime", "host", "face_errors.py")
+FACE_ERRORS = str(runtime_file("face_errors.py"))
+EVQ_CODES_H = os.path.join(ROOT, "native", "moy_kernel", "moy_evq_codes.h")
 WASI_OS_H = os.path.join(ROOT, "native", "moy_wasm", "moy_wasi_os_rows.h")
 # The module a WASI program imports a "wasi" row from.
 WASI_OS = "moybyte.os"
@@ -57,7 +58,8 @@ SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
               "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
-              "u", "example"}
+              "u", "example", "lua_ret", "lua_in", "lua_enum", "out_shape", "object", "py_sig",
+              "enum", "base", "list", "end_form", "ui"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 # The Python faces a row's Lua names stand beside where Python holds its
 # service as objects, not the row's verbs (a row's py_face): the device faces
@@ -97,7 +99,7 @@ def dump(src):
     """The source's text as it is kept: one row a line."""
     o = ["{", '  "about": %s,' % json.dumps(src["about"]),
          '  "version": %d,' % src["version"]]
-    keys = [k for k in ("roles", "rows", "permissions", "errors") if k in src]
+    keys = [k for k in ("roles", "rows", "permissions", "errors", "evq_errors") if k in src]
     for key in keys:
         items = src[key]
         o.append('  "%s": [' % key)

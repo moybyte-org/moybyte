@@ -26,13 +26,13 @@ def test_release_world_on_exit_drops_the_cart_world(tmp_path):
     _open_game(ws)
     for _ in range(10):
         ws.frame(1 / 60)
-    assert ws.run.player._update is not None
+    assert ws.run.player.update is not None
     ns = ws.run.player.ns
     assert ns and "_update" in ns
-    ws.go_home()
+    ws.home.go_home()
     # The run's world is gone: hooks nulled, the ns dict itself emptied (so any
     # lingering function object no longer pins its globals).
-    assert ws.run.player._update is None and ws.run.player._draw is None
+    assert ws.run.player.update is None and ws.run.player.draw is None
     assert ws.run.player.ns is None
     assert len(ns) == 0
     gc.collect()
@@ -41,9 +41,9 @@ def test_release_world_on_exit_drops_the_cart_world(tmp_path):
     for _ in range(5):
         ws.frame(1 / 60)
     ns2 = ws.run.player.ns
-    assert ns2 and ws.run.player._update is not None
-    ws._exit_to_caller()
-    assert ws.run.player._update is None
+    assert ns2 and ws.run.player.update is not None
+    ws.spine.exit_to_caller()
+    assert ws.run.player.update is None
     assert len(ns2) == 0
 
 
@@ -59,7 +59,7 @@ def test_go_home_drops_the_workspace_pins(tmp_path):
     proj = ws.run.project
     assert cart.get("lazy") is False          # rehydrated fat for the run
     assert proj.sheet is not None
-    ws.go_home()
+    ws.home.go_home()
     assert cart.get("lazy") is True           # re-slimmed at exit
     assert "src" not in cart
     assert ws.run.project is not proj             # fresh empty workspace
@@ -80,24 +80,24 @@ def test_text_mode_restored_on_play_exit_to_code_tab(tmp_path):
     is the input policy's, derived from the tab the exit lands on."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
-    ws.launch_selected()
-    ws.set_menu_view("code")
+    ws.home.launch_selected()
+    ws.text.set_menu_view("code")
     ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True          # code tab = typing mode
-    ws._leave_menu()                            # PLAY: cart wants game keys
+    ws.text.leave_menu()                            # PLAY: cart wants game keys
     ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is False
-    ws._exit_to_caller()                        # Quit back to the code tab
+    ws.spine.exit_to_caller()                        # Quit back to the code tab
     assert ws.wm.top_is("menu")
     ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True          # the #80 fix: mode restored
     # And returning to a NON-text tab stays in game-key mode.
-    ws.set_menu_view("config")
-    ws._leave_menu()
-    ws._exit_to_caller()
+    ws.text.set_menu_view("config")
+    ws.text.leave_menu()
+    ws.spine.exit_to_caller()
     ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is False
 
@@ -129,8 +129,8 @@ def test_the_exit_boundary_reports_the_sram_headroom_the_run_had(tmp_path, capsy
     fake.sram_report = lambda: (21504, True, 24576)
     monkeypatch.setitem(sys.modules, "moycore", fake)
     ws.diag_live = True
-    ws.run.player._lua = type("L", (), {"close": lambda _s: None})()
-    ws.go_home()                                    # release_world, the boundary
+    ws.run.player.lua = type("L", (), {"close": lambda _s: None})()
+    ws.home.go_home()                                    # release_world, the boundary
     assert ws.run.player.sram_report() == {
         "sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
     line = [l for l in capsys.readouterr().out.splitlines() if " SRAM " in l]

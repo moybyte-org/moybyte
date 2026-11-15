@@ -16,14 +16,14 @@ from moy_evq_face import OK, RANGE, _moy_notes_note_t, _moy_status_item_t
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
-PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq.c", "moy_super.h",
+PART = native_build.Part("evq", ("moy_sync.h", "moy_evq.h", "moy_evq_codes.h", "moy_evq.c",
+                                 "moy_super.h",
                                  "moy_super.c", "moy_vmq.h", "moy_vmq.c", "moy_screen_slot.h",
                                  "moy_screen_slot.c", "moy_status.h", "moy_status.c",
                                  "moy_notes.h", "moy_notes.c", "moy_items.h", "moy_items.c"),
                          (_KERNEL,))
 
 SYSTEM = "system"
-TIMER_ID = 0x40000000
 _VM = 0x01
 _ALARMS = 0x02
 _NOTIFY = 0x04
@@ -44,7 +44,7 @@ _SIGS = (
     ("moy_screen_slot_pixels", [_U32, ctypes.POINTER(_I), ctypes.POINTER(_I),
                                 ctypes.POINTER(_I)], ctypes.c_void_p),
     ("moy_evq_open", [_U32, _P, _P, _U32], _I),
-    ("moy_evq_send", [_U32, _P, _P, _P, _SZ, ctypes.POINTER(_U32)], _I),
+    ("moy_evq_send", [_U32, _P, _P, _P, _SZ, ctypes.POINTER(_U32), ctypes.POINTER(_U32)], _I),
     ("moy_evq_take", [_U32, ctypes.POINTER(_Ev), _VP, _SZ], _I),
     ("moy_evq_kick", [_U32], None),
     ("moy_evq_reset", [], None),
@@ -57,7 +57,7 @@ _SIGS = (
     ("moy_vmq_answer", [_U32, _P, _SZ], _I),
     ("moy_vmq_vm", [ctypes.c_bool], None),
     ("moy_evq_timer", [_U32, _U32, _U32, ctypes.POINTER(_U32)], _I),
-    ("moy_evq_alarm", [_U32, _U32, ctypes.POINTER(_U32)], _I),
+    ("moy_evq_alarm", [_U32, _U32, _B, ctypes.POINTER(_U32)], _I),
     ("moy_status_gen", [], _U32),
     ("moy_status_get", [_I, ctypes.c_void_p], _B),
     ("moy_notes_take", [ctypes.c_void_p], _B),
@@ -84,9 +84,10 @@ def open(pid, app, receives="", vm=False, alarms=False,  # noqa: A001 -- the mod
 
 def send(frm, app, name, args):
     b = _b(args)
-    denied = _U32(0)
-    took = _lib().moy_evq_send(frm, _b(app), _b(name), b, len(b), ctypes.byref(denied))
-    return (took, denied.value)
+    took, denied = _U32(0), _U32(0)
+    rc = _lib().moy_evq_send(frm, _b(app), _b(name), b, len(b), ctypes.byref(took),
+                             ctypes.byref(denied))
+    return (took.value if rc == 0 else -rc, denied.value)
 
 
 def take(pid):
@@ -152,10 +153,11 @@ def timer(pid, ms, every=0):
     return rc, t.value
 
 
-def alarm(pid, ms):
-    """An alarm of `pid`'s queue (moy_evq.h, TIMERS): (rc, its id)."""
+def alarm(pid, ms, wakes=True):
+    """An alarm of `pid`'s queue (moy_evq.h, TIMERS), naming its process to
+    `woke` as it goes off where it `wakes`: (rc, its id)."""
     t = _U32(0)
-    rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), ctypes.byref(t))
+    rc = _lib().moy_evq_alarm(pid, max(0, int(ms)), bool(wakes), ctypes.byref(t))
     return rc, t.value
 
 

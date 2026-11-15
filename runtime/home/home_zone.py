@@ -154,7 +154,7 @@ class HomeZone:
                 rect if rect is not None else ws.layout.zone_left):
             if _in(px, py, r):
                 self._tab_focus = False
-                ws.set_home_tab(tid, self.grid)
+                ws.home.set_home_tab(tid, self.grid)
                 return True
         chips = self._zone_action_rects(
             rect if rect is not None else ws.layout.zone_left)

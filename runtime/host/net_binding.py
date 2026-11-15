@@ -297,7 +297,7 @@ def parse_request(raw):
     raw = _bytes(raw)
     buf = ctypes.create_string_buffer(raw, len(raw))
     r = _Req()
-    if _lib().moy_http_parse(buf, len(raw), ctypes.byref(r)) != 1:
+    if _lib().moy_http_parse(buf, len(raw), ctypes.byref(r)) != 0:
         return (None, None, 0, -1)
     base = ctypes.addressof(buf)
     method = raw[r.method - base:r.method - base + r.method_n]

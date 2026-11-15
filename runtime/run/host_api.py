@@ -125,7 +125,7 @@ class FakeWifi:
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
         report connected. Returns True. The link lasts as long as the radio's
-        lease does (Workstation.wifi_hold / wifi_release, host == device); the
+        lease does (Spine.wifi_hold / wifi_release, host == device); the
         creds persist to disk for autoconnect. An EMPTY
         password resolves to the stored one first (the DeviceWifi contract): the
         panel's known-network reconnect passes "", and remembering that "" used
@@ -445,8 +445,8 @@ class ConsoleDriver:
         policy = self.ws.input_policy
         if self.input.text_mode:
             self.type_char(0x1B)
-        elif (policy.takes_stop(policy.holder()) or self.ws._modal_layer() is not None
-              or self.ws._about):
+        elif (policy.takes_stop(policy.holder()) or self.ws.modal_layer() is not None
+              or self.ws.about):
             policy.back()
 
     # -- per-frame tick ------------------------------------------------------
@@ -477,13 +477,13 @@ class ConsoleDriver:
         self._clock += max(0.0, dt) * 1000.0
         self.input.begin_frame(int(self._clock))
         # The trackball (`pan`, `ball_click`), spent after the merge as the
-        # T-Deck's is (`Workstation.ball`): a surface's steps and Enter, a
+        # T-Deck's is (`InputRouter.ball`): a surface's steps and Enter, a
         # caret's arrows, else the cursor's nudge and the pointer's click.
         dx, dy = self._pan
         bc = self._ball_click
         self._ball_click = False
         if dx or dy or bc or self.ws.ball_owed:
-            took = self.ws.ball_frame(dx, dy, bc, self.pointer, _pan_px)
+            took = self.ws.router.ball_frame(dx, dy, bc, self.pointer, _pan_px)
             if bc and not took & 2:
                 self._click = True
         self.pointer.down = self._down
@@ -493,7 +493,7 @@ class ConsoleDriver:
         # into the console's three entries in its order. This harness owns the
         # input (above) and the clock, so the frame keeps the dt it was given.
         ws = self.ws
-        _loop.drive(ws.handle_input, ws.handle_pointer,
+        _loop.drive(ws.router.handle_input, ws.router.handle_pointer,
                     lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
         # The background scheduler after the frame, as a board's tail runs it:
         # this harness does not sleep, so its budget is the guaranteed slice.
@@ -519,16 +519,16 @@ class ConsoleDriver:
             self._buttons(_mi.PB_PRIMARY, False)
             self.pointer.down = False
             self.pointer.click = False
-            self.ws.handle_pointer()
+            self.ws.router.handle_pointer()
             self.ws.mark_dirty()
-            if self.ws._deferred:
+            if self.ws.deferred:
                 # #184: taps SCHEDULE their heavy transition now (run at the
                 # next frame's tail, behind the LOADING paint). This release
                 # pass ran after ws.frame(), so honor click()'s "the tap
                 # completes within this frame() call" contract by draining
                 # here -- click() is the tests/scripts verb; real mouse input
                 # rides touch()/touch_up() and the normal frame cadence.
-                self.ws._run_deferred()
+                self.ws.run_deferred()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

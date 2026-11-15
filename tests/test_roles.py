@@ -80,7 +80,8 @@ _CLASSES = {"damage": moy_app.Damage, "surface": moy_app.Surface,
             "carts": moy_app.Carts, "nav": moy_app.Nav, "prefs": moy_app.Prefs,
             "notify": moy_app.Notify, "wallpaper": moy_app.Wallpaper,
             "artwork": moy_app.Artwork, "clipboard": moy_app.Clipboard,
-            "install": moy_app.Install}
+            "install": moy_app.Install, "wifi": moy_app.Wifi, "bt": moy_app.Bt,
+            "usb": moy_app.Usb}
 
 
 def test_every_role_has_its_type():
@@ -196,7 +197,8 @@ def test_the_shell_rows_are_the_servers_methods():
     servers = {"theme": ss.ThemeServer,
                "carts": ss.CartsServer,
                "nav": ss.NavServer,
-               "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
+               "wallpaper": ss.WallpaperServer, "install": ss.InstallServer,
+               "wifi": ss.WifiServer, "bt": ss.BtServer, "usb": ss.UsbServer}
     shell = {}
     for r in _rows():
         if r["server"] == "shell":
@@ -347,15 +349,15 @@ def _count_rows(ws, app):
 @pytest.mark.parametrize("kind", sorted(BUDGETS))
 def test_each_apps_drawn_frame_keeps_its_role_budget(tmp_path, kind):
     ws = build_ws(tmp_path)
-    app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
+    app = ws.app(kind)
+    assert ws.spine.open_app(app), kind + " has no identity cart"
     for _ in range(3):                       # the open's own settling frames
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     counts = _count_rows(ws, app)
     frames = 4
     for _ in range(frames):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
     assert counts.get("surface.canvas", 0) >= frames, \
         "no canvas() read counted in %d frames: is the counter on the app?" % frames
@@ -420,17 +422,17 @@ def test_the_surface_and_theme_rows_follow_the_fullscreen_shell(tmp_path, monkey
     ws = build_ws(tmp_path)
     bad = _checked_rows(monkeypatch, ws)
     for kind in sorted(BUDGETS):
-        assert ws.open_app(ws._apps_by_id[kind]), kind
+        assert ws.spine.open_app(ws.app(kind)), kind
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
         ws.look.set_theme("berry", variant="light")
         ws.look.cycle_font_scale(1)
         for _ in range(2):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
         ws.look.set_theme("night", variant="dark")
-        ws.exit()
+        ws.spine.exit()
     assert not bad, bad[:5]
 
 
@@ -440,19 +442,19 @@ def test_the_surface_and_theme_rows_follow_the_desk(tmp_path, monkeypatch):
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     bad = _checked_rows(monkeypatch, ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     for _ in range(4):
         drv.frame(1 / 30)
-    calc = ws.wm._wins["calc"]
-    ws.wm._resize_window(calc, 360, 300)
-    ws.open_app(ws._apps_by_id["files"])
+    calc = ws.wm.windows["calc"]
+    ws.wm.resize_window(calc, 360, 300)
+    ws.spine.open_app(ws.app("files"))
     for _ in range(4):
         drv.frame(1 / 30)
-    files = ws.wm._wins["files"]
+    files = ws.wm.windows["files"]
     assert (calc.w, calc.h) != (files.w, files.h)
-    ws.open_app(ws._apps_by_id["calc"])
+    ws.spine.open_app(ws.app("calc"))
     for _ in range(3):
         drv.frame(1 / 30)
     cx, cy, cw, ch = calc.content_rect()
@@ -460,11 +462,11 @@ def test_the_surface_and_theme_rows_follow_the_desk(tmp_path, monkeypatch):
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    ws.wm._toggle_max(files)
+    ws.wm.toggle_max(files)
     ws.look.cycle_font_scale(1)
     ws.look.set_theme("forest")
     for _ in range(4):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert not bad, bad[:5]
 

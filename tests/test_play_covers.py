@@ -46,7 +46,7 @@ def _seed_ids():
 @pytest.mark.parametrize("tab", ["games", "apps"])
 def test_every_seed_tile_on_play_draws_its_cover(tmp_path, tab):
     ws = build_ws(tmp_path)
-    ws.set_home_tab(tab)
+    ws.home.set_home_tab(tab)
     seeds = _seed_ids()
     tiles = [it for it in ws.launcher.items if it.get("id") in seeds]
     assert tiles, "no seed cart on the %s tab" % tab

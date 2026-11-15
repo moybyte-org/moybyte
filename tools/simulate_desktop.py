@@ -295,9 +295,9 @@ def _force_autoplay_on_open(ws):
 
     def _open(cart=None):
         _orig_open(cart)
-        if ws.cart and isinstance(ws.config, dict) and "autoplay" in ws.config:
-            ws.config["autoplay"] = 1
-            ws._start()
+        if ws.cart and isinstance(ws.run.project.config, dict) and "autoplay" in ws.run.project.config:
+            ws.run.project.config["autoplay"] = 1
+            ws.start()
 
     ws.open = _open
 

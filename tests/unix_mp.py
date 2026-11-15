@@ -90,8 +90,31 @@ def runtime_tree():
     for name, path in board_config.shared_sources(src).items():
         if not board_config.host_only(src, path):
             os.symlink(path, os.path.join(out, name))
+    _host_store(out)
     _RUNTIME_TREE.append(out)
     return out
+
+
+HOST_STORE = """# CPython's `moy_store` over the staged tree: the host's ctypes face
+# (runtime/host/moy_store_binding.py) over the library this test process
+# built. A VM's built-in moy_store wins over this file.
+import importlib.util, os, sys
+_spec = importlib.util.spec_from_file_location("moy_store_binding", %r)
+_face = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_face)
+sys.modules[__name__] = _face.binding()
+"""
+
+
+def _host_store(tree):
+    """The store's host face in `tree`, for a CPython that runs it: a VM's
+    native `moy_store` is a built-in, which an import finds first."""
+    from runtime import host_native
+    lib = host_native.build()
+    if lib is not None:
+        os.environ["MOYHOST_LIB"] = lib
+    with open(os.path.join(tree, "moy_store.py"), "w") as f:
+        f.write(HOST_STORE % str(ROOT / "runtime" / "host" / "moy_store_binding.py"))
 
 
 def build_flags():

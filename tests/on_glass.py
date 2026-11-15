@@ -24,7 +24,7 @@ bodies those tests call.
 
 What is deliberately NOT here is every genuine difference, which stays in the
 suite that owns it: the P4's windowed-desk tour, its OTA-verifier trio and its
-own cart exit path (`ws.exit()`, so the T-Deck keeps the kid-facing `quit()`
+own cart exit path (`ws.spine.exit()`, so the T-Deck keeps the kid-facing `quit()`
 flag pinned), the Guition's landscape canvas and sync-RPC tests, each board's
 swipe coordinates, and the tail of the idle-blank check -- the P4 pins `power
 0`, the S3s pin the restore.
@@ -44,6 +44,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))          # p4_autotest.P4Board
+
+from radio_room import radio_room  # noqa: E402 -- tools/ is on sys.path above
 
 
 def gate(env_var, board):
@@ -164,7 +166,7 @@ def give_store_back(board, before):
 # is one that arrived as files, which the console asks about on its first
 # run (runtime/shell/app_perms.py, `asks_first`), and a suite runs it on its
 # manifest as written.
-RESCAN = ("len(ws.rescan_carts() or ()) + len([ws.consent.made("
+RESCAN = ("len(ws.carts.synced() or ()) + len([ws.consent.made("
           "__import__('app_perms').app_id(c)) for c in ws.carts.all])")
 
 
@@ -330,12 +332,12 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
     drawing takes (the leave's, or the idle autosave's if it came first) is
     timed on the board, and the file must read back as the page."""
     _home_desk(board)
-    assert board.pyval("ws.open_app(ws._apps_by_id['artwork'])", strict=True)
+    assert board.pyval("ws.spine.open_app(ws.app('artwork'))", strict=True)
     board.drain(2.5)
     try:
         board.pyexec(
             "import time\n"
-            "a = ws.artwork_app\n"
+            "a = ws.app('artwork')\n"
             "a._fresh_doc(a.doc.W, a.doc.H)\n"
             "ws._paint_probe = 1\n"
             "ws._paint_saves = []\n"
@@ -346,11 +348,11 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "    return ok\n"
             "a._art.save = _paint_timed\n"
             "def _paint_leave():\n"
-            "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
-            "    ws.go_home()\n"
+            "    ws._paint_pix = bytes(ws.app('artwork').doc.pix)\n"
+            "    ws.home.go_home()\n"
             "    return 1\n"
             "def _paint_glass(px, py):\n"
-            "    w = getattr(ws.wm, '_wins', {}).get('artwork')\n"
+            "    w = getattr(ws.wm, 'windows', {}).get('artwork')\n"
             "    if w is None or w.ctx is None:\n"
             "        return a._to_glass((px, py))\n"
             "    was = a.layout\n"
@@ -363,14 +365,14 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "    return (cx + gx, cy + gy)\n"
             "ws.mark_dirty()", strict=True)
         board.drain(1.0)
-        assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
-                           " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
+        assert board.pyval("bytes(ws.app('artwork').doc.pix) == bytes((ws.app('artwork').doc.pix[0],))"
+                           " * len(ws.app('artwork').doc.pix)", strict=True), "the page is not blank"
         # Where the drawing stands on the glass: a window's layout is
         # installed only around its dispatch, so a probe between frames reads
         # the root's and must put the window's in for the question.
         (x0, y0), (x1, y1) = board.pyval(
             "(lambda a, g: (g(a.doc.W // 3, a.doc.H // 2), g(2 * a.doc.W // 3, a.doc.H // 2)))"
-            "(ws.artwork_app, ws._g['_paint_glass'])", strict=True)
+            "(ws.app('artwork'), ws._g['_paint_glass'])", strict=True)
         board.swipe(x0, y0, x1, y1, frames=20)
         board.pyval("ws._g['_paint_leave']()", timeout=60)
         board.drain(1.0)
@@ -380,21 +382,21 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
         assert saves and all(ok for ok, _ms in saves), "Paint did not save: %r" % (saves,)
         worst = max(ms for _ok, ms in saves)
         assert worst < budget_ms, "a save held the console %d ms" % worst
-        kind, name = board.pyval("(ws.artwork_app._art.doc_kind(), "
-                                 "ws.artwork_app._art.doc_name())", strict=True)
+        kind, name = board.pyval("(ws.app('artwork')._art.doc_kind(), "
+                                 "ws.app('artwork')._art.doc_name())", strict=True)
         assert name, "the stroke was not saved under a name"
         assert board.pyval("ws._paint_pix != bytes((ws._paint_pix[0],)) * len(ws._paint_pix)",
                            strict=True), "the swipe drew nothing"
         same = board.pyval(
             "(lambda f: (lambda d: d is not None and bytes(d[2]) == ws._paint_pix)"
-            "(f.decode_image(f.load(%r, %r)[0])))(ws.artwork_app._art._files)" % (kind, name),
+            "(f.decode_image(f.load(%r, %r)[0])))(ws.app('artwork')._art._files)" % (kind, name),
             strict=True)
         assert same, "the saved drawing does not read back as the page"
-        board.pyval("ws.artwork_app._art._files.delete(%r, %r) and None" % (kind, name),
+        board.pyval("ws.app('artwork')._art._files.delete(%r, %r) and None" % (kind, name),
                     strict=True)
         return worst
     finally:
-        board.pyval("[delattr(o, k) for o, k in ((ws.artwork_app._art, 'save'), "
+        board.pyval("[delattr(o, k) for o, k in ((ws.app('artwork')._art, 'save'), "
                     "(ws, '_paint_pix'), (ws, '_paint_probe'), (ws, '_paint_saves')) "
                     "if k in o.__dict__] and None")
         _home_desk(board)
@@ -403,10 +405,10 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
 def _home_desk(board):
     """Home, and on a windowed tier the desk again: there home is the
     fullscreen Library, and the next test expects the desk it booted to."""
-    board.pyexec("ws.go_home()", strict=True)
+    board.pyexec("ws.home.go_home()", strict=True)
     board.drain(1.5)
     if board.state().get("desk") is False:
-        board.pyexec("ws.open_desk()", strict=True)
+        board.pyexec("ws.home.open_desk()", strict=True)
         board.drain(1.0)
 
 
@@ -826,7 +828,7 @@ def shift_last_matches_the_reference(board, p4=False, rotated=False):
                                strict=True)
         got += board.pyval("ws._g['_sl_into']()", timeout=60.0, strict=True)
     finally:
-        board.pyexec("ws._dirty = True", strict=True)
+        board.pyexec("ws.mark_dirty()", strict=True)
         _home_desk(board)
     shifts, into = got[:len(cases)], got[len(cases):]
     assert [ok for ok, *_ in shifts] == [True] * len(cases), shifts
@@ -1396,7 +1398,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
     import calendar
     was = board.pyval("ws.system.get('tz')", strict=True)
     try:
-        board.pyval("ws.set_time_zone(%r) or 1" % tz, strict=True)
+        board.pyval("ws.toggles.set_time_zone(%r) or 1" % tz, strict=True)
         st, out = _sh(board, "pkg update", timeout=120)
         if st != 0 and any("WiFi" in l or "reach" in l or "memory" in l for l in out):
             pytest.skip("no network: %r" % out)
@@ -1404,7 +1406,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         assert board.pyval("__import__('moy_net').clock_state()", strict=True) == 1
         assert board.pyval("__import__('moybyte').clock_synced()", strict=True) is True
         lt, bar, after = board.pyval(
-            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer._clock_text(),"
+            "(tuple(__import__('wallclock').localtime()[:6]), ws.bar_layer.clock_text(),"
             " tuple(__import__('wallclock').localtime()[:6]))", strict=True)
         board_t = calendar.timegm(tuple(lt) + (0, 0, 0)) - east
         assert abs(board_t - time.time()) < 120, (lt, time.gmtime())
@@ -1414,7 +1416,7 @@ def the_clock_syncs_when_the_network_comes_up(board, tz="JST-9", east=9 * 3600):
         assert board.pyval("sorted(ws.leases.holders())", strict=True) == \
             rest_holders(board), "the radio stayed held"
     finally:
-        board.pyval("ws.set_time_zone(%r) or 1" % (was,), strict=True)
+        board.pyval("ws.toggles.set_time_zone(%r) or 1" % (was,), strict=True)
         if was is None:
             board.pyval("ws.system.delete('tz') or 1", strict=True)
 
@@ -1538,10 +1540,10 @@ def the_scheduler_stops_a_runaway_service(board):
     drawing; its stop that never returns is killed. The limits are shortened
     for the test and put back."""
     import time
-    board.pyexec("import scheduler as S, moy_guard\n"
-                 "ws._sq = (S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS)\n"
-                 "S.MOY_BG_ABORT_US = 50000\n"
-                 "S.MOY_SERVICE_STOP_MS = 100\n"
+    board.pyexec("import scheduler as S, sched_proc as P, sched_python as Y, moy_guard\n"
+                 "ws._sq = (Y.MOY_BG_ABORT_US, P.MOY_SERVICE_STOP_MS)\n"
+                 "Y.MOY_BG_ABORT_US = 50000\n"
+                 "P.MOY_SERVICE_STOP_MS = 100\n"
                  "SRC = 'import moybyte\\n"
                  "def spin():\\n    while True:\\n        pass\\n"
                  "def moy_start():\\n    moybyte.every(200, spin)\\n"
@@ -1568,8 +1570,8 @@ def the_scheduler_stops_a_runaway_service(board):
         line = board.cmd("state", wait_for="STATE ")
         assert line is not None, "the desk did not answer after the aborts"
     finally:
-        board.pyexec("import scheduler as S\n"
-                     "S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS = ws._sq\n"
+        board.pyexec("import scheduler as S, sched_proc as P, sched_python as Y\n"
+                     "Y.MOY_BG_ABORT_US, P.MOY_SERVICE_STOP_MS = ws._sq\n"
                      "S.SCHED.reset()",
                      strict=True)
 
@@ -1614,6 +1616,95 @@ def a_lua_service_runs_on_a_task_of_its_own(board):
                      "if p is not None and p.state != 'exited':\n"
                      "    S.SCHED.stop(ws._lp)",
                      strict=True)
+
+
+def a_lua_service_s_timers_run_through_a_vm_stop(board, seconds=3.0):
+    """One timer scheduler on glass (native/moy_kernel/moy_evq.h, TIMERS): a
+    Lua service's `every` is the kernel's timer, run by the service's own
+    task, so through a VM stop and start (`kstop 1 stop`, as
+    `vm_stops_leave_psram_flat` makes them) it goes on firing with no VM to
+    serve it. Each tick logs its count under the service's pid (the OS log is
+    the kernel's): one state counts on, never restarted, and no gap in the
+    ticks is near the stop's length."""
+    import time
+    board.pyexec("import scheduler as S, moy_log\n"
+                 "SRC = 'n = 0\\nmoybyte.every(100, function() n = n + 1; "
+                 "moybyte.log(moybyte.INFO, \"kept \" .. n); "
+                 "if n >= 300 then moybyte.exit(0) end end)\\n'\n"
+                 "ws._kq = moy_log.next()\n"
+                 "ws._kp = S.SCHED.start({'id': 't.keep', 'title': 'keep', "
+                 "'runtime': 'lua', 'src': SRC, 'permissions': []})\n"
+                 "ws._kh = S.SCHED.procs[ws._kp].native",
+                 strict=True)
+    seq, pid, h = board.pyval("(ws._kq, ws._kp, ws._kh)", strict=True)
+    assert pid is not None and h, (pid, h)
+    time.sleep(1.0)
+    at = len(board.lines)
+    board.cmd("kstop 1 stop", wait_for="REMOTE kstop")
+    line, at = _line_since(board, at, "KSTOP ", 60)
+    while line is not None and " down " not in line:
+        line, at = _line_since(board, at, "KSTOP ", 60)
+    assert line is not None, "the VM never stopped"
+    time.sleep(seconds)
+    _desk_back(board)
+    ticks = board.pyval(
+        "[(r[1], r[4]) for r in __import__('moy_log').read(%d, 1000) "
+        "if r[3] == %d and r[4].startswith('kept ')]" % (seq, pid), strict=True)
+    board.pyexec("import scheduler as S\n"
+                 "S.SCHED.adopt(%d, 't.keep', native=%d)\n"
+                 "S.SCHED.stop(%d)" % (pid, h, pid), strict=True)
+    ns = [int(t.split()[1]) for _, t in ticks]
+    assert len(ns) > 10 * (seconds + 1), ns
+    assert ns == list(range(ns[0], ns[0] + len(ns))), ns      # one state, counting on
+    gap = max(b[0] - a[0] for a, b in zip(ticks, ticks[1:])) / 1e6
+    print("\nKEPT TIMERS %d ticks through the stop, the longest gap %.2fs" % (len(ns), gap))
+    assert gap < 1.0, "the timer stopped for %.1fs" % gap
+
+
+def a_lua_app_s_every_runs_beside_a_python_app_s(board, title="Brick Siege Lua",
+                                                 seconds=2.0):
+    """One timer scheduler on glass (native/moy_kernel/moy_evq.h, TIMERS): a
+    Lua run's `moybyte.every` (native/moycore/moycore_moybyte.h, served as
+    each of the run's frames starts, wherever the frame runs) and a Python
+    process's `every` are both rows of the kernel's table, and both go off
+    while the run plays."""
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    with radio_room(title):
+        _lua_every_beside_python(board, title, seconds)
+
+
+def _lua_every_beside_python(board, title, seconds):
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.0)
+        board.pyexec("import scheduler as S, moy_evq\n"
+                     "SRC = 'import moybyte\\nn = [0]\\ndef tick():\\n    n[0] += 1\\n"
+                     "moybyte.every(30, tick)\\n'\n"
+                     "ws._ep = S.SCHED.start({'id': 't.py_every', 'title': 'py every', "
+                     "'src': SRC, 'permissions': []})\n"
+                     "ws._en = S.SCHED.procs[ws._ep].ns\n"
+                     "ws._ee = ws.run.player.lua.exec('N = 0\\nmoybyte.every(30, "
+                     "function() N = N + 1 end)', 'probe')\n"
+                     "ws._et = (moy_evq.timers(ws.run.player.pid), moy_evq.timers(ws._ep))",
+                     strict=True)
+        err, timers = board.pyval("(ws._ee, ws._et)", strict=True)
+        assert err is None and timers == (1, 1), (err, timers)
+        board.drain(seconds)
+        n_lua, n_py = board.pyval("(ws.run.player.lua.get_global('N'), ws._en['n'][0])",
+                                  strict=True)
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.procs.get(getattr(ws, '_ep', 0))\n"
+                     "if p is not None and p.state != 'exited':\n"
+                     "    S.SCHED.stop(ws._ep)")
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nONE SCHEDULER %s: Lua every %d, Python every %d in %.0fs"
+          % (title, n_lua, n_py, seconds))
+    assert n_lua >= 10 * seconds and n_py >= 10 * seconds, (n_lua, n_py)
 
 
 def an_asyncio_service_runs_beside_the_desk(board):
@@ -1893,13 +1984,13 @@ def a_leaked_session_leaves_the_panel_flushing(board):
     session. A files session begun and never ended, with a store op inside it,
     must leave the panel presenting every repaint, and the next frame ends it."""
     import time
-    files = "ws.files_app.ctx.files"
+    files = "ws.app('files').ctx.files"
     assert board.pyval(files + ".begin()", strict=True) == (True, None)
     n, err = board.pyval(files + ".count('drawings')", strict=True)
     assert err is None and isinstance(n, int), (n, err)
     d0 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     for _ in range(4):
-        board.pyval("setattr(ws, '_dirty', True)", strict=True)
+        board.pyval("ws.mark_dirty()", strict=True)
         time.sleep(0.25)
     d1 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
@@ -2020,7 +2111,7 @@ def draw_gates_are_installed(board, windowed=False):
     assert board.pyval("ws.sys_canvas._gate_ctx is not None") is True
     if windowed:
         ungated = board.pyval(
-            "[k for k, w in ws.wm._wins.items() if w.buf._gate_ctx is None]")
+            "[k for k, w in ws.wm.windows.items() if w.buf._gate_ctx is None]")
         assert ungated == [], ungated
 
 
@@ -2041,7 +2132,7 @@ def draw_gates_take_the_traffic(board, windowed=False):
     Restored before the assert, so a failure does not leave the next test on
     the wrong screen."""
     bufs = "[ws.sys_canvas]" + (
-        " + [w.buf for w in ws.wm._wins.values()]" if windowed else "")
+        " + [w.buf for w in ws.wm.windows.values()]" if windowed else "")
     # Counted from before the open: a page's first frame draws whole, while a
     # repaint of an unchanged verbs page is a rows frame that may draw nothing.
     board.pyexec("for _c in [ws.sys_canvas]: _c.gate_counts_reset()")
@@ -2049,7 +2140,7 @@ def draw_gates_take_the_traffic(board, windowed=False):
     board.drain(1.5)
     fills, texts = board.pyval(
         "[sum(c.gate_counts()[i] for c in %s) for i in (0, 1)]" % bufs)
-    board.cmd("py ws.exit()", wait_for="PY")
+    board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(0.5)
     assert fills > 0 and texts > 0, (fills, texts)
 
@@ -2178,7 +2269,7 @@ def sd_card_io_takes_no_internal_dma(board):
     if not board.pyval("__import__('moy_sd').sector_count()", strict=True):
         pytest.skip("no card in the slot")
     board.pyexec(_SD_SQUEEZE, strict=True)
-    got = board.pyval("(getattr(ws, '_with_sd', None) or (lambda fn: fn()))"
+    got = board.pyval("(getattr(ws, 'with_sd', None) or (lambda fn: fn()))"
                       "(ws._g['_sd_squeeze'])", timeout=30, strict=True)
     assert got["left"] < 512, ("the squeeze left a sector's worth: no power", got)
     assert got["read"] == "same", got
@@ -2227,15 +2318,15 @@ def web_console_is_baked_into_the_image(board):
 
 
 def _clear_to_console(board, clear):
-    """`clear` ws.exit()s to shut what the tour left open, then -- on the
+    """`clear` ws.spine.exit()s to shut what the tour left open, then -- on the
     windowed tier, the only one that clears -- the desk's PLAY: a launcher
     run goes fullscreen from console mode's home and exits back to it
     (docs/theme_and_shell_2026-11.md §8.1), whatever windows are left parked."""
     for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(0.5)
     if clear:
-        board.cmd("py ws.open_library()", wait_for="PY")
+        board.cmd("py ws.home.open_library()", wait_for="PY")
         board.drain(0.5)
 
 
@@ -2249,10 +2340,10 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     `door` is a real difference between the tiers, not a preference. "quit"
     is the kid-facing `cart_quit` flag the Player honors (the same flag the
     cart API's quit() verb sets), and on a fullscreen tier it pops all the way
-    to the launcher, which is what those boards pin. "shell" is `ws.exit()`,
+    to the launcher, which is what those boards pin. "shell" is `ws.spine.exit()`,
     the desk's own close: on the windowed tier a run started from a
     projects/Settings arrangement does not pop through the flag, so those boards
-    pin the launch and the close instead. `clear` ws.exit()s that many times
+    pin the launch and the close instead. `clear` ws.spine.exit()s that many times
     first, to shut whatever windows the tour above left open, and then enters
     console mode (`_clear_to_console`), so the run is the fullscreen one a
     kid starts from the home.
@@ -2279,7 +2370,7 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     elif door == "quit":
         board.cmd("py ws.input.cart_quit = True", wait_for="PY")
     else:
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(1.5)
     st = board.state()
     assert not st.get("cart"), "%s did not end the run: %r" % (door, st)
@@ -2294,43 +2385,6 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
 # radio link (multiplayer), Bench Lua draws every verb family.
 VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
-
-
-def _multiplayer_titles():
-    """The seed carts whose manifest asks for `multiplayer`: a run of one
-    arms the radio link."""
-    import json
-    titles = set()
-    for m in (ROOT / "system_carts").glob("*.moy/manifest.json"):
-        man = json.loads(m.read_text(encoding="utf-8"))
-        if "multiplayer" in ((man.get("moybyte") or {}).get("permissions") or ()):
-            titles.add(man.get("title"))
-    return titles
-
-
-@contextlib.contextmanager
-def radio_room(title):
-    """Hold the bench's one radio room for a run of `title` when it is a
-    multiplayer cart. Two consoles on the same multiplayer cart within radio
-    range form a match by design (docs/netplay_v1.md: being in the same room
-    is the pairing ceremony): the guest's re-run is no HOME launch (stop
-    `place`), a lockstep run stalls on the peer's inputs, and neither is
-    the solo run a check reads. `tools/board.py pass` runs every board's
-    suite at once, and the suites reach their Brick Siege Lua runs within
-    seconds of each other, so a run of one takes a machine-wide flock under
-    ~/.cache/moybyte for its length; the link stops when the run ends, and
-    the next board's run finds the room quiet. A console driven by hand
-    outside a suite is not in the lock: one left on a multiplayer cart is a
-    peer every suite run of it meets."""
-    if title not in _multiplayer_titles():
-        yield
-        return
-    import fcntl
-    cache = Path.home() / ".cache" / "moybyte"
-    cache.mkdir(parents=True, exist_ok=True)
-    with open(cache / "radio-room.lock", "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        yield
 
 
 def _in_the_room(check):
@@ -2453,7 +2507,7 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
         assert bool(st.get("front")) is front and not st.get("cart_error"), \
             "%s did not run again after the soft reset: %r" % (title, st.get("cart_error"))
     finally:
-        board.cmd("end" if st.get("front") else "py ws.exit()", wait_for="REMOTE")
+        board.cmd("end" if st.get("front") else "py ws.spine.exit()", wait_for="REMOTE")
         board.drain(1.5)
 
 
@@ -2524,7 +2578,7 @@ def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
         elif door == "quit":
             board.cmd("py ws.input.cart_quit = True", wait_for="PY")
         else:
-            board.cmd("py ws.exit()", wait_for="PY")
+            board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(1.5)
 
 
@@ -2572,7 +2626,7 @@ def idle_saver_and_wake(board):
         assert after["stack"] == stack
         retained = board.pyval("getattr(ws.sys_canvas or ws.run.canvas, "
                                "'RETAINED_FRAMES', 1)", strict=True)
-        assert board.pyval("ws._saver is None", strict=True) is True
+        assert board.pyval("ws.saver is None", strict=True) is True
         assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
     finally:
         board.cmd("power saver 0", wait_for="REMOTE power")
@@ -2783,7 +2837,7 @@ def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
     try:
         for _ in range(cycles):
             if hold_link:
-                assert board.pyexec("ws.wifi_hold('link')"), board.last_error
+                assert board.pyexec("ws.spine.wifi_hold('link')"), board.last_error
             # Written raw and waited for by the stop's own line: the stop can
             # print in the same burst as the run's echo, which `cmd` reads
             # past.
@@ -2847,8 +2901,8 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
     try:
         assert board.pyexec(
             "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
-            "ws._open_workspace(c)\n"
-            "ws.play(ws.launcher_layer)" % title), board.last_error
+            "ws.open_workspace(c)\n"
+            "ws.spine.play(ws.launcher_layer)" % title), board.last_error
         st = None
         for _ in range(20):
             time.sleep(0.5)
@@ -2859,7 +2913,7 @@ def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
         assert st.get("vm") is not False, st
         # A run with the VM up is the console's to end (the kernel's `end`
         # answers only a run in its front with the VM down).
-        assert board.pyexec("ws.exit()"), board.last_error
+        assert board.pyexec("ws.spine.exit()"), board.last_error
         for _ in range(30):
             time.sleep(0.5)
             st = board.state()
@@ -3025,7 +3079,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = True
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is True
-        assert board.pyval("ws.run.player.paused", strict=True) is True
+        assert board.pyval("ws.run.player.pace.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
         lit1 = _band_light(px, w, h, margin, rows)
@@ -3034,7 +3088,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = False
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is False
-        assert board.pyval("ws.run.player.paused", strict=True) is False
+        assert board.pyval("ws.run.player.pace.paused", strict=True) is False
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         f0 = st["frames"]
@@ -3601,7 +3655,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
     over, while a cart animates every frame and the WiFi radio is up -- the
     cache sync at each load runs with the other core busy. Every pass must
     return the same cycle count (a stale instruction cache would not)."""
-    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
+    board.cmd("py ws.spine.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         board.cmd("run star", wait_for="REMOTE run")
         board.drain(2.5)
@@ -3624,7 +3678,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
         assert drew > 0, "no frame drew while the loop ran"
         return r, drew
     finally:
-        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
+        board.cmd("py ws.spine.wifi_release('dev')", wait_for="PY", timeout=20)
 
 
 def wasm_low_water_with_radios_up(board, paths):
@@ -3642,14 +3696,14 @@ def wasm_low_water_with_radios_up(board, paths):
     with BLE as it found it."""
     ble_was_up = board.pyval("bool(getattr(%s, 'available', False))" % _ble(board),
                              strict=True)
-    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
+    board.cmd("py ws.spine.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
         board.drain(3.0)
         r = wasm_run(board, paths["hello"], "step", (20000,), loops=20)
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
     finally:
-        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
+        board.cmd("py ws.spine.wifi_release('dev')", wait_for="PY", timeout=20)
         if not ble_was_up:
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
@@ -4181,7 +4235,7 @@ def wasm_app_push(board, board_dir):
     # Pushed code is fixed code: the strikes an earlier run of these left
     # (the crash guard, #160) are forgiven, as a commit forgives them.
     for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
-        board.pyval("ws.app_guard.forgive(ws.app_cart_id(next(c for c in "
+        board.pyval("ws.app_guard.forgive(ws.spine.app_cart_id(next(c for c in "
                     "ws.carts.all if c['title'] == %r))) or 1" % title, strict=True)
     return root
 
@@ -4226,7 +4280,7 @@ def wasm_app_reaches_its_roles(board, root):
         board.leave_cart()
         board.drain(1.0)
     # The run's frames were the kernel's: its end healed the crash guard.
-    strikes = board.pyval("ws.app_guard.strikes(ws.app_cart_id(next(c for c in ws.carts.all "
+    strikes = board.pyval("ws.app_guard.strikes(ws.spine.app_cart_id(next(c for c in ws.carts.all "
                           "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
     assert strikes == 0, "the run's end left %r strikes" % strikes
     hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
@@ -4284,10 +4338,10 @@ def _app_ui_host_pmem(look, tier):
     ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
     for _ in range(9):
         quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1.0 / 30.0)
-    pm = list(ws.run.player._lua._run.pmem()[1])
-    ws.exit()
+    pm = list(ws.run.player.lua._run.pmem()[1])
+    ws.spine.exit()
     ui_draw.input_kind("keys")      # the host's own again
     return pm
 
@@ -4432,8 +4486,8 @@ def jet_fps(board, seconds=10.0):
     blit565 and HUD over it). Leaves uncap and diag as it found them."""
     from runtime.perf_line import parse_perf
     # `state`'s uncap is the running cart's; the switch the next run takes is
-    # `ws._uncap`, which is what `uncap` sets.
-    uncap_was = bool(board.pyval("getattr(ws, '_uncap', False)", timeout=10))
+    # `ws.uncap`, which is what `uncap` sets.
+    uncap_was = bool(board.pyval("getattr(ws, 'uncap', False)", timeout=10))
     with perf_diag(board):
         board.cmd("uncap 1", wait_for="REMOTE uncap")
         n0 = len(board.lines)
@@ -4548,7 +4602,7 @@ def wasm_files_push(board, board_dir, fresh=True):
     root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
     _push_folder(board, board_dir, out, root.rstrip("/") + "/" + FILES_FOLDER)
     if fresh:
-        board.pyval("ws._with_sd(lambda: __import__('moy_store_base')._rmtree("
+        board.pyval("ws.with_sd(lambda: __import__('moy_store_base')._rmtree("
                     "__import__('cart_files').folder_of(str(ws.carts_root) + '/' + %r))) or 1"
                     % FILES_FOLDER, timeout=30, strict=True)
     board.pyval(RESCAN, timeout=60)
@@ -4642,7 +4696,7 @@ def wasm_unsigned_cart_follows_its_consent(board, board_dir):
 
     def _native_and_greets(b):
         hello_read_its_greeting(b)
-        assert b.pyval("bool(ws.run.player._lua.interp)", strict=True) is False
+        assert b.pyval("bool(ws.run.player.lua.interp)", strict=True) is False
     _runs_clean(board, UNSIGNED_NATIVE_TITLE, check=_native_and_greets)
     err = _wasm_run_error(board, TAMPERED_TITLE)
     assert "refused: bad signature" in err, err
@@ -4686,7 +4740,7 @@ def _notice_on_launch(board, title, text=None):
             assert notice == text, notice
         else:
             assert notice.startswith(title + " needs ") and " MB " in notice, notice
-        assert board.pyval("ws.run.player._lua is None", strict=True) is True
+        assert board.pyval("ws.run.player.lua is None", strict=True) is True
         return notice
     finally:
         board.leave_cart()
@@ -4855,7 +4909,7 @@ INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
     """`title` runs clean (no blocking notice, no error) AND landed on the
-    interpreter tier: `ws.run.player._lua.interp` is true and the short system
+    interpreter tier: `ws.run.player.lua.interp` is true and the short system
     notice (`runtime/shell/console_notices.py`'s `_draw_notice`, the "MOYBYTE
     UPDATED" banner, never the achievement toast) named it with the sub-line
     `cause` says, exactly the same as a cart with no module at all
@@ -4869,8 +4923,8 @@ def _runs_on_interpreter(board, title, check=None, cause="missing"):
         assert st.get("cart") == title, st.get("cart")
         assert not st.get("cart_error"), st["cart_error"]
         assert not st.get("notice"), st["notice"]
-        assert board.pyval("bool(ws.run.player._lua.interp)", strict=True) is True
-        notice = board.pyval("list(ws._notice[:2]) if ws._notice else None",
+        assert board.pyval("bool(ws.run.player.lua.interp)", strict=True) is True
+        notice = board.pyval("list(ws.notice_up[:2]) if ws.notice_up else None",
                              strict=True)
         assert notice == [INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB[cause]], notice
         if check is not None:
@@ -5045,7 +5099,7 @@ def _deep_init_inits(board, path):
                  "            return f.read(1)\n"
                  "    except OSError:\n"
                  "        return b''\n", strict=True)
-    got = board.pyval("ws._with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
+    got = board.pyval("ws.with_sd(lambda: ws._g['_deep_inits'](__import__('cart_files')"
                       ".folder_of(%r) + '/inits'))" % path, timeout=30, strict=True)
     return got[0] if got else 0
 
@@ -5534,7 +5588,7 @@ def _p4_frame_proof(glass):
     kept = cf.kept_view(cf._scratch, cf.kept_off, n)
     bad = -1
     if glass:
-        win = ws.wm._wins.get("desktop")
+        win = ws.wm.windows.get("desktop")
         ox, oy, scale = ws.wm._player_view(win)
         fbw, fbh = comp.size()
         dst = moy_alloc.alloc(2 * fbw * fbh, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
@@ -5621,7 +5675,7 @@ def _ff_rect():
     wm = ws.wm
     r = getattr(ws, 'render_scale', 1)
     if getattr(wm, 'mode', None) == 'desktop':
-        ox, oy, scale = wm._player_view(wm._wins['desktop'])
+        ox, oy, scale = wm._player_view(wm.windows['desktop'])
     else:
         ox, oy, scale = wm.play_viewport()
     return ox * r, oy * r, scale * r

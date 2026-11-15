@@ -25,21 +25,37 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     native/moy_app/moy_app_lua_rows.h   the names a Lua run and a Lua service hold
     native/moy_app/moy_app_err.h    the answer codes and what each face makes of one
                                     (the errors)
+  native/moy_kernel/moy_evq_codes.h what each tier makes of the event queue's codes
   the Python console, between GENERATED markers
     runtime/shell/app_context.py    ROLES
     runtime/shell/app_perms.py      TABLE, each permission's tiers derived
     runtime/shell/shell_servers.py  DOOR_ARGS
     runtime/system/scheduler.py     _CALLS
     runtime/run/lua_ext.py          the Lua run's role names and console calls
-  runtime/host/face_errors.py       the host faces' answer codes, exceptions and err texts
+  runtime/system/face_errors.py     the Python faces' answer codes, exceptions and err texts
   docs/app_api_v1.md                the permission table, the call table and
                                     the role table (three regions)
   the binding faces, from each native/<dir>/face.json (tools/gen_os/face.py)
-    native/<dir>/modmoy_<m>_face.c  a module's generated MicroPython rows, which
+    native/<dir>/modmoy_<m>_face.h  a module's generated MicroPython rows, which
                                     its hand file's globals table expands
     runtime/host/<m>_face.py        the same rows over ctypes, with the
                                     structures and constants they name
     runtime/host/faces.py           each host face, in registration order
+  the override table's readers, from native/moy_ui/over.json (tools/gen_os/over.py)
+    native/moy_ui/moy_ui_over_keys.h  the keys, the block's bits, the table every
+                                    tier's reader walks
+    native/moy_ui/modmoy_ui_over.h  the board module's dict keys by qstr
+    runtime/toolkit/ui.py           _OVER_KEYS, the host's block (a GENERATED region)
+    docs/ui_api_2026-10.md          the keys' table and the block's (two regions)
+  the toolkit's verb faces, from native/moy_ui/face.json's `api` rows and the
+  ui rows (tools/gen_os/ui.py)
+    native/moy_ui/modmoy_ui_face.h  the board module's context form (api_<verb>)
+    runtime/host/moy_ui_face.py     the host's, over ctypes, with its argtypes
+    native/moy_ui/moy_ui_run_rows.h the RUN form's prototypes, and moy_ui_run_face.h its
+                                    bodies (included by moy_ui_run.c)
+    native/moy_ui/moy_ui_wasm_face.h  a compiled app's ui imports (included by moy_ui_wasm.c)
+    native/moycore/moycore_ui_rows.h  a Lua cart's ui verbs and their luaL_Reg rows
+    runtime/toolkit/ui.py           each public verb's body (a GENERATED region each)
   the moy-app plugin (sdk/moybyte_sdk, `moy app`)
     sdk/moybyte_sdk/os_table.py         what each tier's module or script reaches, with
                                     the permissions each answers under
@@ -71,23 +87,24 @@ from gen_os.table import *  # noqa: E402,F401,F403
 from gen_os.table import (APP_CONTEXT, APP_DOC, APP_H, APP_PERMS, APP_WASM_SDK_H, CHECK_C,  # noqa: E402
                           KERNEL_C, KERNEL_H, LUA_EXT, LUA_H, LUA_STUB, PLUGIN_TABLE, PY_STUBS, ROOT,
                           ROWS_H, SCHEDULER, SDK_H, SHELL_SERVERS, STUBS_C, UI_H, UI_SDK_H, WASI_OS_H,
-                          WASM_H, WILD_H, ERR_H, FACE_ERRORS, check, elf, load)
+                          WASM_H, WILD_H, ERR_H, EVQ_CODES_H, FACE_ERRORS, check, elf, load)
 from gen_os.elf import (evq_block, gen_check_c, gen_kernel_c, gen_kernel_h, gen_rows_h,  # noqa: E402,F401
                         gen_sdk_h, gen_stubs_c, gen_wild_h)
 from gen_os.wasi import gen_wasi_h  # noqa: E402
-from gen_os.errors import check_errors, gen_err_h, gen_face_errors  # noqa: E402
+from gen_os.errors import check_errors, gen_err_h, gen_evq_codes_h, gen_face_errors  # noqa: E402
 from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
-from gen_os import face  # noqa: E402
+from gen_os import face, over, ui  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
 
 # The files a GENERATED region is spliced into; every other output is the
 # generator's whole, and opens with gen_os.header's line.
-SPLICED = (APP_CONTEXT, APP_PERMS, SHELL_SERVERS, SCHEDULER, LUA_EXT, APP_DOC)
+SPLICED = (APP_CONTEXT, APP_PERMS, SHELL_SERVERS, SCHEDULER, LUA_EXT, APP_DOC, over.UI_PY,
+           over.DOC)
 
 
 def whole(outs):
@@ -115,13 +132,16 @@ def outputs(src=None):
             (WILD_H, gen_wild_h(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
             (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
-            (ERR_H, gen_err_h(src)), (FACE_ERRORS, gen_face_errors(src)),
+            (ERR_H, gen_err_h(src)), (EVQ_CODES_H, gen_evq_codes_h(src)),
+            (FACE_ERRORS, gen_face_errors(src)),
             (APP_CONTEXT, gen_app_context(src)), (APP_PERMS, gen_app_perms(src)),
             (SHELL_SERVERS, gen_door_args(src)), (SCHEDULER, gen_calls(src)),
             (LUA_EXT, gen_lua_ext(src)), (APP_DOC, gen_doc(src)),
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
             (UI_SDK_H, gen_sdk_ui_h(src)),
-            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src))) + face.outputs()
+            (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
+    outs += face.outputs() + over.outputs()
+    outs += ui.outputs(src, outs)
     whole(outs)
     return outs
 

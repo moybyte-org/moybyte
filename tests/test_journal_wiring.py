@@ -32,11 +32,11 @@ def _snap(cart_path, entry):
 def test_commit_code_journals_the_saved_source(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     path = ws.cart["path"]
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     new = "def _draw():\n    cls(2)  # edited\n"
     ws.editor.set_text(new)
-    assert ws.save_code() is True                      # persists AND journals
+    assert ws.saves.save_code() is True                      # persists AND journals
 
     ents = _entries(path)
     assert [e["file"] for e in ents] == ["main.py"]
@@ -48,7 +48,7 @@ def test_commit_sprites_journals(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     path = ws.cart["path"]
     ws.sheet.pset(0, 0, 5)                              # dirty the sheet
-    ws.save_sprites()
+    ws.saves.save_sprites()
 
     ents = [e for e in _entries(path) if e["file"] == "sprites.moygfx"]
     assert ents, "a sprite commit must journal"
@@ -60,8 +60,8 @@ def test_commit_config_journals(tmp_path):
         tmp_path, "def _draw():\n    cls(cfg('bg', 1))\n",
         edit=[{"key": "bg", "type": "int", "min": 0, "max": 15}])
     path = ws.cart["path"]
-    ws.config["bg"] = 7
-    ws._save_config()
+    ws.run.project.config["bg"] = 7
+    ws.saves.save_config()
 
     ents = [e for e in _entries(path) if e["file"] == "config.json"]
     assert ents, "a config commit must journal"
@@ -73,13 +73,13 @@ def test_commit_dedup_no_duplicate_journal_entry(tmp_path):
     # commit is content-identical, so nothing is written.
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     path = ws.cart["path"]
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     same = "def _draw():\n    cls(9)\n"
     ws.editor.set_text(same)
-    ws.save_code()
+    ws.saves.save_code()
     ws.editor.dirty = True                             # force the store write to re-run
-    ws.save_code()                                     # identical content
+    ws.saves.save_code()                                     # identical content
 
     ents = [e for e in _entries(path) if e["file"] == "main.py"]
     assert len(ents) == 1                              # deduped -- one durable step
@@ -92,8 +92,8 @@ def test_journal_failure_never_breaks_the_save(tmp_path, monkeypatch):
     path = ws.cart["path"]
     monkeypatch.setattr(moy_carts, "journal_append",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("journal disk full")))
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw():\n    cls(3)\n")
-    assert ws.save_code() is True                      # save still reports success
+    assert ws.saves.save_code() is True                      # save still reports success
     assert "cls(3)" in (Path(path) / "main.py").read_text()

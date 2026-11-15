@@ -232,7 +232,7 @@ def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
     if cfg.get("console"):
-        ws.open_library()          # the desk's PLAY: console mode
+        ws.home.open_library()          # the desk's PLAY: console mode
     blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
@@ -283,11 +283,11 @@ def capture(cfg, carts_dir):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
     sl.close_page()
 
-    ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    ws.toggles.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
     sl.open_page("tz")
     out["tz_picker"] = page(sl._sub)
     sl.close_page()
-    ws.set_time_zone(None, persist=False)
+    ws.toggles.set_time_zone(None, persist=False)
 
     sl._draw_page()
 
@@ -312,11 +312,13 @@ def capture(cfg, carts_dir):
     ws.usb_drive = None
     sl._draw_page()
 
-    ws.go_home()
+    ws.home.go_home()
     if cfg["windowed"]:
-        ws.open_library()
+        ws.home.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
+    for _ in range(2):              # its first frames lay its body out and cut it
+        ws.menu_ui._draw_sysmenu()
     for sel in range(len(m.items)):
         m.sel = sel
         out["sysmenu_%d" % sel] = _shot(ws, lambda: ws.menu_ui._draw_sysmenu())
@@ -325,7 +327,7 @@ def capture(cfg, carts_dir):
     for _ in range(2):              # its first frame lays its body out
         ws.menu_ui._draw_about()
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
-    ws._about = False
+    ws.about = False
 
     # The Achievements page (locked AND found cards, the console's and a
     # game's, a goal under way) with a badge opened and a goal's bar, the
@@ -349,14 +351,14 @@ def capture(cfg, carts_dir):
     sl.open_page("licences")
     out["licences"] = page(sl._sub)
     sl.close_page()
-    ws.go_home()
+    ws.home.go_home()
     ws.ach.award("konami")
     settle_badges(ws)
-    ws._toast_at -= 10000
-    out["banner"] = _shot(ws, lambda: ws._draw_toast())
-    ws._notice = ("Moybyte updated", "Now 0.8", "ok")
-    out["notice"] = _shot(ws, lambda: ws._draw_notice())
-    ws._notice = None
+    ws.toast_at -= 10000
+    out["banner"] = _shot(ws, lambda: ws.notices._draw_toast())
+    ws.notice_up = ("Moybyte updated", "Now 0.8", "ok")
+    out["notice"] = _shot(ws, lambda: ws.notices._draw_notice())
+    ws.notice_up = None
 
     # The firmware-update screen: every phase it can be in.
     uu = ws.update_ui
@@ -570,7 +572,7 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
     ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
     try:
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(_DT)
     finally:
         ui.info = real

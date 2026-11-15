@@ -60,7 +60,7 @@ def _ws_with(tmp_path, folder, **kw):
     ws.launcher.items.append(cart)
     ws.launcher.sel = len(ws.launcher.items) - 1
     ws.open_in_editor(cart)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     return ws
 
 
@@ -123,17 +123,17 @@ def test_save_code_writes_the_named_script_and_leaves_the_others(tmp_path):
 
 def test_the_code_tab_opens_on_main_and_switches_to_another_script(tmp_path):
     ws = _ws_with(tmp_path, _multi(tmp_path))
-    assert ws.code_file_name() == "main.lua"
-    assert ws.code_sources() == ["lib.lua", "main.lua", "extra.lua"]
+    assert ws.text.code_file_name() == "main.lua"
+    assert ws.text.code_sources() == ["lib.lua", "main.lua", "extra.lua"]
     assert ws.editor.text() == "function _draw() cls(0) end\n"
 
-    assert ws.open_code_file("lib.lua")
-    assert ws.code_file_name() == "lib.lua"
+    assert ws.text.open_code_file("lib.lua")
+    assert ws.text.code_file_name() == "lib.lua"
     assert "function helper()" in ws.editor.text()
 
-    assert not ws.open_code_file("nope.lua"), \
+    assert not ws.text.open_code_file("nope.lua"), \
         "a name the cart does not list is refused, never opened blank"
-    assert ws.code_file_name() == "lib.lua"
+    assert ws.text.code_file_name() == "lib.lua"
 
 
 def test_a_file_switch_hard_commits_the_file_being_left(tmp_path):
@@ -145,7 +145,7 @@ def test_a_file_switch_hard_commits_the_file_being_left(tmp_path):
     ws = _ws_with(tmp_path, d)
     ws.editor.set_text("-- half typed")
     ws.editor.dirty = True
-    ws.open_code_file("extra.lua")
+    ws.text.open_code_file("extra.lua")
     assert (d / "main.lua").read_text(encoding="utf-8") == "-- half typed"
     assert ws.editor.text() == "-- a tab\n", "the incoming buffer is the new file's"
 
@@ -153,9 +153,9 @@ def test_a_file_switch_hard_commits_the_file_being_left(tmp_path):
 def test_the_open_file_is_what_a_save_and_a_play_write(tmp_path):
     d = _multi(tmp_path)
     ws = _ws_with(tmp_path, d)
-    ws.open_code_file("extra.lua")
+    ws.text.open_code_file("extra.lua")
     ws.editor.set_text("-- edited in the tab\n")
-    assert ws.save_code(force=True)
+    assert ws.saves.save_code(force=True)
     assert (d / "extra.lua").read_text(encoding="utf-8") == "-- edited in the tab\n"
     assert (d / "main.lua").read_text(encoding="utf-8") == \
         "function _draw() cls(0) end\n"
@@ -169,7 +169,7 @@ def test_undo_is_scoped_to_the_open_file(tmp_path):
     revert the last commit to `main.lua`."""
     ws = _ws_with(tmp_path, _multi(tmp_path))
     assert ws.history.active_tab_files() == ("main.lua",)
-    ws.open_code_file("lib.lua")
+    ws.text.open_code_file("lib.lua")
     assert ws.history.active_tab_files() == ("lib.lua",)
 
 
@@ -180,11 +180,11 @@ def test_a_new_cart_opens_on_its_own_main_file(tmp_path):
     plain = _write_cart(tmp_path / "carts", "plain.moy",
                         "function _draw() end\n", title="Plain")
     ws = _ws_with(tmp_path, multi)
-    ws.open_code_file("extra.lua")
+    ws.text.open_code_file("extra.lua")
     other = moy_carts.load(str(plain))
     ws.open_in_editor(other)
-    ws.set_menu_view("code")
-    assert ws.code_file_name() == "main.lua"
+    ws.text.set_menu_view("code")
+    assert ws.text.code_file_name() == "main.lua"
     assert ws.editor.text() == "function _draw() end\n"
 
 
@@ -225,7 +225,7 @@ def test_a_crash_in_another_script_opens_that_script_on_that_line(tmp_path):
                 "-- line 1\nfunction helper()\n  local t = nil\n"
                 "  return t.x\nend\n", "before")])
     ws = _ws_with(tmp_path, d)
-    ws.run_code()
+    ws.saves.run_code()
     for _ in range(4):
         ws.input.begin_frame()
         ws.frame(DT)
@@ -233,9 +233,9 @@ def test_a_crash_in_another_script_opens_that_script_on_that_line(tmp_path):
     assert ws.run.player.crash_file == "lib.lua", ws.cart_error
     assert ws.run.player.crash_line == 4, ws.cart_error
 
-    assert ws._crash_to_code()
+    assert ws.crash_to_code()
     assert ws.menu_view == "code"
-    assert ws.code_file_name() == "lib.lua", \
+    assert ws.text.code_file_name() == "lib.lua", \
         "crash-to-code opened the wrong file"
     assert ws.editor.row == 3, "the caret is not on the line that raised"
     assert ws.code_err_row == 3
@@ -255,13 +255,13 @@ def test_a_crash_marker_never_lands_on_the_wrong_file(tmp_path):
                 "function helper()\n  local t = nil\n  return t.x\nend\n",
                 "before")])
     ws = _ws_with(tmp_path, d)
-    ws.run_code()
+    ws.saves.run_code()
     for _ in range(4):
         ws.input.begin_frame()
         ws.frame(DT)
-    assert ws._crash_to_code()
-    assert ws.code_file_name() == "lib.lua" and ws.code_err_row is not None
-    ws.open_code_file("main.lua")
+    assert ws.crash_to_code()
+    assert ws.text.code_file_name() == "lib.lua" and ws.code_err_row is not None
+    ws.text.open_code_file("main.lua")
     assert ws.code_err_row is None, \
         "the crashed file's marker followed the switch onto main.lua"
 
@@ -287,20 +287,20 @@ def test_tapping_the_code_tab_again_opens_the_scripts_and_a_row_switches(tmp_pat
     assert tab is not None
     _tap_box(drv, tab)
     assert cl._files_open
-    assert cl._files_sel == ws.code_sources().index("main.lua"), \
+    assert cl._files_sel == ws.text.code_sources().index("main.lua"), \
         "the menu opens on the file the tab is showing, not on row 0"
     b = next(cl._ov_host.box(i) for i in [r for r in _rows(ws) if r.startswith("extra.lua")])
     _tap_box(drv, b)
     assert not cl._files_open
-    assert ws.code_file_name() == "extra.lua"
+    assert ws.text.code_file_name() == "extra.lua"
     assert ws.editor.text() == "-- a tab\n"
 
 
 def _rows(ws):
     """The scripts menu's rows as it lists them: each script and its size."""
     out = []
-    for n in ws.code_sources():
-        size = ws.code_source_size(n)
+    for n in ws.text.code_sources():
+        size = ws.text.code_source_size(n)
         out.append(n + "\t" + "%.1f KB" % (size / 1024.0) if size is not None else n)
     return out
 
@@ -312,9 +312,9 @@ def test_the_scripts_menu_lists_each_script_and_its_size(tmp_path):
     drv.frame(DT)
     for row in _rows(ws):
         assert ws.code_layer._ov_host.box(row) is not None, row
-    assert ws.code_source_size("extra.lua") == len("-- a tab\n")
+    assert ws.text.code_source_size("extra.lua") == len("-- a tab\n")
     ws.code_layer.overlay_step(1)                   # the trackball's roll picks the next
-    assert ws.code_layer._files_sel == ws.code_sources().index("main.lua") + 1
+    assert ws.code_layer._files_sel == ws.text.code_sources().index("main.lua") + 1
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ def test_the_new_script_door_is_offered_only_where_it_would_run(tmp_path):
 
 def test_new_script_names_the_file_and_opens_it_in_the_code_tab(tmp_path):
     ws = _ws_with(tmp_path, _multi(tmp_path))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("New script")
@@ -384,7 +384,7 @@ def test_new_script_names_the_file_and_opens_it_in_the_code_tab(tmp_path):
 
     assert cl.prompt is None and cl.files is None
     assert ws.menu_view == "code"
-    assert ws.code_file_name() == "enemy_helpers.lua", \
+    assert ws.text.code_file_name() == "enemy_helpers.lua", \
         "a typed name is slugged under the cart's own runtime extension"
     assert ws.editor.text().startswith("-- enemy_helpers.lua")
 
@@ -393,7 +393,7 @@ def test_new_script_refuses_a_taken_name_and_an_unusable_one(tmp_path):
     """It stays OPEN and says why, rather than closing on a name it did not
     make -- the CART INFO modal's rule for a blank title."""
     ws = _ws_with(tmp_path, _multi(tmp_path))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("New script")
@@ -411,12 +411,12 @@ def test_a_projects_own_script_routes_to_the_code_tab_not_the_text_handle(
     non-main file through the text handle. A cart's own SCRIPT belongs on the
     Code tab now -- that is where PLAY, the journal and crash-to-code are."""
     ws = _ws_with(tmp_path, _multi(tmp_path))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("lib.lua")
     assert ws.menu_view == "code"
-    assert ws.code_file_name() == "lib.lua"
+    assert ws.text.code_file_name() == "lib.lua"
 
 
 def test_a_script_added_here_actually_runs(tmp_path):
@@ -430,25 +430,25 @@ def test_a_script_added_here_actually_runs(tmp_path):
     d = _write_cart(tmp_path / "carts", "grow.moy",
                     "seen = 0\nfunction _draw() cls(0) end\n")
     ws = _ws_with(tmp_path, d)
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
     cl._files_open("New script")
     cl.prompt.texts[0] = "helpers"
     cl._commit_prompt()
-    assert ws.code_file_name() == "helpers.lua"
+    assert ws.text.code_file_name() == "helpers.lua"
     ws.editor.set_text("function bump() seen = seen + 1 end\n")
-    assert ws.save_code(force=True)
+    assert ws.saves.save_code(force=True)
 
-    ws.open_code_file("main.lua")
+    ws.text.open_code_file("main.lua")
     ws.editor.set_text("seen = 0\nfunction _update() bump() end\n"
                        "function _draw() cls(0) end\n")
-    ws.run_code()
+    ws.saves.run_code()
     for _ in range(5):
         ws.input.begin_frame()
         ws.frame(DT)
     assert ws.cart_error is None, ws.cart_error
-    assert ws.run.player._lua.get_global("seen") == 5, \
+    assert ws.run.player.lua.get_global("seen") == 5, \
         "the added script's global never reached the cart's own chunk"
 
 
@@ -460,7 +460,7 @@ def test_new_script_last_in_the_scripts_menu_opens_make_it_mines_dialog(tmp_path
     cl.open_scripts()
     drv.frame(DT)
     assert cl._ov_host.box("New script") is not None
-    for _ in range(len(ws.code_sources())):
+    for _ in range(len(ws.text.code_sources())):
         cl.overlay_step(1)
     cl._popup_accept()
     assert ws.editor_app.tab == "cards" and ws.cards_layer.prompt is not None

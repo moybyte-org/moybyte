@@ -22,7 +22,7 @@ def _entries(cart_path):
 
 
 def _open_code(ws, text=None):
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     if text is not None:
         ws.editor.set_text(text)
@@ -107,7 +107,7 @@ def test_manual_save_still_awards_achievement(tmp_path):
     _open_code(ws, "def _draw():\n    cls(5)\n")
     notes = []
     ws.ach.award = lambda *a, **k: notes.append(a)
-    assert ws.save_code() is True                    # explicit SAVE
+    assert ws.saves.save_code() is True                    # explicit SAVE
     assert any(a and a[0] == "first_code" for a in notes)  # awards "Code Wizard"
 
 

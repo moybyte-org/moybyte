@@ -17,20 +17,20 @@ band -- the cart title + the RUN/SAVE/CLOSE icons -- is GONE. draw() now paints 
 unified zoned bar (the tab ladder + PLAY + X, no SAVE -- #111) over the top 18px like
 every other editor tab, so the body below it is fullscreen text + the symbol palette
 with no chrome of its own. PLAY runs (EditorApp.leave, itself now a hard-commit
-trigger) and persists (EditorApp.save_current -> ws.save_code, #111: a tab switch
+trigger) and persists (EditorApp.save_current -> ws.saves.save_code, #111: a tab switch
 and every other exit path commit too, not just PLAY), X exits -- all in the bar. The
 text area already began at y0 == 18 (below the bar), so nothing shifted.
 
 Boundary (the anti-spaghetti line, per the doc): the shared CodeEditor handle stays on
 Workstation -- `ws.editor` (device/test-pinned, ~38 refs, exactly like ws.paint), built
-by ws.set_menu_view. The SAVE/RUN API + the code-error state stay on ws too:
-ws.save_code / ws.run_code (device/test-pinned, save_code now reached via every exit
+by ws.text.set_menu_view. The SAVE/RUN API + the code-error state stay on ws too:
+ws.saves.save_code / ws.saves.run_code (device/test-pinned, save_code now reached via every exit
 path rather than a bar tap, #111; run_code stays PLAY's own explicit-run entry point),
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
 code-UI state (the host whose page draws the rows through `ui.text_view`); a
-typed byte is the input table's press (`typed`), one per physical press. ws.nav (the trackball-caret handler, called by both the host
+typed byte is the input table's press (`typed`), one per physical press. ws.router.nav (the trackball-caret handler, called by both the host
 + device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
 + the MicroPython-safe syntax highlighter live here (single source; console.py imports
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
@@ -270,7 +270,7 @@ class CodeLayer(Layer):
         ws = self.ws
         if ws.crash_popup is not None:
             ws.crash_popup = None
-            ws._dirty = True
+            ws.mark_dirty()
             return True
         return self.close_overlay()
 
@@ -349,7 +349,7 @@ class CodeLayer(Layer):
         self._ov_host = _ui_draw.AppHost()   # the overlays' UI context (look step 33)
 
     def reset(self):
-        """Called by ws.set_menu_view when the editor is (re)built: drops the
+        """Called by ws.text.set_menu_view when the editor is (re)built: drops the
         transient #89 modes so a freshly-opened editor is in a clean state.
 
         The key down as it opens is spent (`spend_key`), so a fresh editor
@@ -414,7 +414,7 @@ class CodeLayer(Layer):
         # the SAME bar every other tab does. System canvas + responsive layout, like the
         # launcher/Settings bar. This replaces the code editor's old title + RUN/SAVE/
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
-        self.ws.bar_layer._draw_status_strip("menu")
+        self.ws.bar_layer.draw_status_strip("menu")
         if self.ws.crash_popup:
             self._draw_crash_popup()       # the stop card's See why: what stopped
                                            # the run, hung under its line
@@ -529,7 +529,7 @@ class CodeLayer(Layer):
         ed = ws.editor
         # The unified bar's tab ladder + PLAY + X claims its slice FIRST (Stage 4
         # rollout), before any code-body tap -- there's no SAVE tap to dispatch (#111);
-        # ws.save_code fires automatically from set_tab/leave instead.
+        # ws.saves.save_code fires automatically from set_tab/leave instead.
         # The crash-to-code popup is dismissed by a tap ANYWHERE (consumed --
         # the tap under it must not edit/re-place the caret), before any other
         # claim, the bar included.
@@ -690,7 +690,7 @@ class CodeLayer(Layer):
         ws = self.ws
         ws.code_err = None
         ws.code_err_row = None
-        ws.crash_line = None
+        ws.run.player.crash_line = None
         ws.crash_popup = None
 
     def _recheck_err(self):
@@ -720,8 +720,8 @@ class CodeLayer(Layer):
         if ok:
             self._clear_err()
         else:
-            ws.crash_line = None       # superseded by the live syntax position
-            ws._set_code_error(msg, move=False)
+            ws.run.player.crash_line = None       # superseded by the live syntax position
+            ws.saves.set_code_error(msg, move=False)
 
     def _feed_char(self, code):
         # One typed/tapped character: into the find field while it's focused, else
@@ -918,7 +918,7 @@ class CodeLayer(Layer):
             n = min(len(self._jump_shown()), self._jump_rows())
             self._jump_sel = max(0, min(n - 1, self._jump_sel + d))
         elif self._files_open:
-            n = len(self.ws.code_sources()) + (1 if self.can_add_script() else 0)
+            n = len(self.ws.text.code_sources()) + (1 if self.can_add_script() else 0)
             self._files_sel = max(0, min(n - 1, self._files_sel + d))
         else:
             return False
@@ -1019,9 +1019,9 @@ class CodeLayer(Layer):
             # rebuilds the editor, and a popup left open would be drawn over a
             # file it no longer describes.
             self._files_open = False
-            names = self.ws.code_sources()
+            names = self.ws.text.code_sources()
             if self._files_sel < len(names):
-                self.ws.open_code_file(names[self._files_sel])
+                self.ws.text.open_code_file(names[self._files_sel])
             elif self._files_sel == len(names) and self.can_add_script():
                 self.new_script()
         self._ov_host.reset()
@@ -1062,8 +1062,8 @@ class CodeLayer(Layer):
             self.close_overlay()
             return
         self._cmp_open = self._jump_open = self._find_open = False
-        names = self.ws.code_sources()
-        cur = self.ws.code_file_name()
+        names = self.ws.text.code_sources()
+        cur = self.ws.text.code_file_name()
         self._files_sel = names.index(cur) if cur in names else 0
         self._files_open = bool(names)
         self._ov_host.reset()
@@ -1156,7 +1156,7 @@ class CodeLayer(Layer):
         if ws.code_layout.symbols != self.wants_symbols():
             # The last input moved between touch and keys: the symbol keys
             # come or go, and the code takes their rows (D-17).
-            ws._relayout_code()
+            ws.relayout_code()
         lay = ws.code_layout
         ed = ws.editor
         t = self._t = self._tones()
@@ -1309,7 +1309,7 @@ class CodeLayer(Layer):
         if t is not None:
             ink = t["sym_ink"]
         if _glyph_known(spec):
-            self.ws._glyph(spec, rect, ink, cv)
+            self.ws.glyph(spec, rect, ink, cv)
             return
         if not spec:
             return
@@ -1477,11 +1477,11 @@ class CodeLayer(Layer):
         script last where a second script would run."""
         ws = self.ws
         fs = lay.fs
-        names = ws.code_sources()
+        names = ws.text.code_sources()
         items = []
         icons = []
         for n in names:
-            size = ws.code_source_size(n)
+            size = ws.text.code_source_size(n)
             kb = ("%.1f KB" % (size / 1024.0)) if size is not None else ""
             items.append(n + "\t" + kb if kb else n)
             icons.append("code")

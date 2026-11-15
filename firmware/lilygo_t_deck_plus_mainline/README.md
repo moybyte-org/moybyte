@@ -22,7 +22,7 @@ inside the frame; stage 7's flush overlap fixed it. Two `pump=` fields look
 alike and are not one instrument: HITCH's `pump=%.1f`, and the `PUMP` line,
 which `_diag_pump` emits only when `comp.bounce_flush` is set, so **the `PUMP`
 line appearing at all is the proof the overlap is in an image.** The frame
-rates are #66's; "the compositor" below says what to watch if it regresses.
+rates are `docs/perf/ledger.md`'s; "the compositor" below says what to watch if it regresses.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration every board uses, and the whole shared console
@@ -774,7 +774,7 @@ Every one of these was learned by hanging or bricking a board.
   (`native/moy_flush/moy_flush.h`), which stops the feeder queuing bands and
   lets the queued ones finish before the radio's command goes out.
   The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
-  `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
+  `cover.png` off `/sd` on idle frames through `ws.with_sd`, like every other
   store read (`tests/test_cover_pipeline.py` pins the gate).
   Worth being honest about the size of this risk rather than repeating the
   folklore: what the boards rule records as having actually hung boards is
@@ -822,12 +822,12 @@ Every one of these was learned by hanging or bricking a board.
   (owner call 2026-10-23, `moy_kbd.c`'s THE MOVE KEYS): only a game
   (`cart_keys`) reads them as both. A roll of the trackball is those
   directions, and its click Enter, on every surface but a running cart, a
-  canvas and a caret (`Workstation.ball`, the "ball" input source;
+  canvas and a caret (`InputRouter.ball`, the "ball" input source;
   `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
   axis takes a firmer turn, so a roll along the home's row (the system
   button, the tabs, Wi-Fi, the battery and the clock) or the Editor's (the
   system button, the seven tabs, undo, redo, Play, the battery and the
-  clock) stays on it (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
+  clock) stays on it (`InputRouter.BALL_TURN`). The hint strips stay up under a tap: they name
   the keyboard's keys until another keyboard is used
   (`docs/ui_api_2026-10.md`, Hints). Which mode the keyboard is in is the
   input policy's (`runtime/shell/input_policy.py`): derived each frame from
@@ -913,7 +913,7 @@ The three readings any future flush change is read against:
   "closed the gap, bought no fps", and it retired the core-1 feeder unbuilt;
   #66's ledger carries it, so read that before repeating it). A `pump=` near
   the whole transfer would mean the no-acquire patch is not in the image.
-* **fps**, against the per-cart ledger in #66.
+* **fps**, against the per-cart ledger, `docs/perf/ledger.md`.
 
 If the serial dev channel is alive on this board (see the RX section — that is
 its own open question), the cheapest check needs no diag tick and no hitch:

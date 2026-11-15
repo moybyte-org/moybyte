@@ -798,16 +798,16 @@ def test_a_game_that_fits_only_without_the_music_is_asked_first(media, monkeypat
     devices.grants = None
     pl = ws.run.player
     asked, opened = [], []
-    monkeypatch.setattr(ws, "ask_stop_music", lambda cart: asked.append(cart))
+    monkeypatch.setattr(ws.notices, "ask_stop_music", lambda cart: asked.append(cart))
     info = [0] * 13
     monkeypatch.setattr(P._moy_play, "info", lambda run: info)
     monkeypatch.setattr(P._moy_play, "end", lambda run: None)
     cart = {"title": "Doom"}
     info[11] = "stops"
-    assert pl._music_keeps_the_vm(1, cart) is False
+    assert pl.pace.music_keeps_the_vm(1, cart) is False
     info[11] = "media"
     pl.pid = L.spawn("t.doom")
-    assert pl._music_keeps_the_vm(1, cart) is True and asked == [cart] and pl.declined
+    assert pl.pace.music_keeps_the_vm(1, cart) is True and asked == [cart] and pl.declined
     # Stop & play: the open waits for the run's end, a frame of the C's job.
     pid = L.spawn("t.music")
     _as(pid, lambda: moybyte.media.play(str(TONE)))
@@ -815,7 +815,7 @@ def test_a_game_that_fits_only_without_the_music_is_asked_first(media, monkeypat
     monkeypatch.setattr(dev_media, "_STEP", False)       # a board: the job ends the run later
     _as(devices.SHELL, moybyte.media.stop)
     assert N.pid() != 0
-    type(ws)._open_when_quiet(ws, moybyte.media, cart)
+    ws.notices._open_when_quiet(moybyte.media, cart)
     assert opened == []
     N.pump()                                             # the frame's job: the run ends
     S.SCHED._n = S.SCHED._i = 0

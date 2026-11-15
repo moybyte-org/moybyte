@@ -16,9 +16,9 @@ def _night(monkeypatch):
 def _windowed(ws, drv):
     """The front game's window out of full screen, where the desk plays it."""
     drv.frame(1 / 30)
-    win = ws.wm._wins["desktop"]
+    win = ws.wm.windows["desktop"]
     if win.saved is not None:
-        ws.wm._toggle_max(win)
+        ws.wm.toggle_max(win)
     drv.frame(1 / 30)
     return win
 
@@ -26,7 +26,7 @@ def _windowed(ws, drv):
 def _two(tmp_path, a="Star Catcher", b="Brick Siege"):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     open_cart(ws, a)
     wa = _windowed(ws, drv)
@@ -39,7 +39,7 @@ def test_a_second_game_joins_the_running_set_in_its_own_window(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     assert [p.key for p in ws.procs.list] == ["run:1"]
     p = ws.procs.list[0]
-    assert ws.wm._wins["run:1"] is wa and ws.wm._wins["desktop"] is wb
+    assert ws.wm.windows["run:1"] is wa and ws.wm.windows["desktop"] is wb
     assert p.title() == "Star Catcher" and ws.cart["title"] == "Brick Siege"
     assert ws.wm.stack.kinds()[-2:] == ["run:1", "desktop"]
     # its own owner tag, canvas and audio session
@@ -71,17 +71,17 @@ def test_a_hidden_game_is_held_and_hears_it(tmp_path):
     heard = []
     pl.ns["_minimise"] = lambda: heard.append("min")
     pl.ns["_restore"] = lambda: heard.append("res")
-    ws.wm._minimize(wa, True)
+    ws.wm.minimize(wa, True)
     ups, draws = p.ups, p.draws
     for _ in range(20):
         drv.frame(1 / 20)
     assert p.state == "minimised" and heard == ["min"]
     assert p.draws == draws and p.ups == ups      # paused: no update, no draw
-    assert pl.paused                            # its clock held
-    ws.wm._minimize(wa, False)
+    assert pl.pace.paused                            # its clock held
+    ws.wm.minimize(wa, False)
     drv.frame(1 / 30)
     assert heard == ["min", "res"] and p.state == "throttled"
-    assert not pl.paused and p.ups > ups
+    assert not pl.pace.paused and p.ups > ups
 
 
 def _app_proc(ws, drv, p):
@@ -95,12 +95,12 @@ def test_a_hidden_app_updates_every_frame_and_never_draws(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     p = ws.procs.list[0]
     _app_proc(ws, drv, p)
-    ws.wm._minimize(wa, True)
+    ws.wm.minimize(wa, True)
     drv.frame(1 / 30)
     ups, draws = p.ups, p.draws
     for _ in range(20):
         drv.frame(1 / 30)
-    assert p.state == "minimised" and not p.player.paused
+    assert p.state == "minimised" and not p.player.pace.paused
     assert p.ups - ups == 20 and p.draws == draws
 
 
@@ -108,29 +108,29 @@ def test_the_front_minimised_holds_a_game_and_steps_an_app(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     pl = ws.run.player
     n = [0]
-    pl._update = lambda dt: n.__setitem__(0, n[0] + 1)
-    ws.wm._minimize(wb, True)
+    pl.update = lambda dt: n.__setitem__(0, n[0] + 1)
+    ws.wm.minimize(wb, True)
     for _ in range(10):
         drv.frame(1 / 30)
-    assert ws.procs.front_minimised() and pl.paused and n[0] == 0
-    ws.wm._minimize(wb, False)
+    assert ws.procs.front_minimised() and pl.pace.paused and n[0] == 0
+    ws.wm.minimize(wb, False)
     drv.frame(1 / 30)
-    assert not pl.paused and n[0] >= 1
+    assert not pl.pace.paused and n[0] >= 1
     ws.cart["type"] = "app"
-    ws.wm._minimize(wb, True)
+    ws.wm.minimize(wb, True)
     drv.frame(1 / 30)
     n[0] = 0
     for _ in range(10):
         drv.frame(1 / 30)
-    assert not pl.paused and n[0] == 10
+    assert not pl.pace.paused and n[0] == 10
 
 
 def test_focusing_a_background_game_promotes_it(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     rect_a, rect_b = (wa.x, wa.y), (wb.x, wb.y)
-    ws.wm._move_focus("run:1")
-    assert ws.cart["title"] == "Star Catcher" and ws.wm._focus == "desktop"
-    assert ws.wm._wins["desktop"] is wa and ws.wm._wins["run:1"] is wb
+    ws.wm.move_focus("run:1")
+    assert ws.cart["title"] == "Star Catcher" and ws.wm.focus_key == "desktop"
+    assert ws.wm.windows["desktop"] is wa and ws.wm.windows["run:1"] is wb
     assert (wa.x, wa.y) == rect_a and (wb.x, wb.y) == rect_b
     p = ws.procs.list[0]
     assert p.title() == "Brick Siege" and p.player.detached
@@ -146,7 +146,7 @@ def test_closing_a_background_game_releases_its_run(tmp_path):
     pl = p.player
     ws.wm.close_window_kind("run:1")
     drv.frame(1 / 30)
-    assert ws.procs.list == [] and "run:1" not in ws.wm._wins
+    assert ws.procs.list == [] and "run:1" not in ws.wm.windows
     assert pl.ns is None and not pl.detached
     assert ws.procs.spare is p.run          # kept for the next one
     assert ws.cart["title"] == "Brick Siege"
@@ -157,10 +157,10 @@ def test_quit_in_a_background_game_closes_it_alone(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
     p = ws.procs.list[0]
     p.player.ns["_update"] = None
-    p.player._update = lambda dt: p.player.ns["quit"]()
+    p.player.update = lambda dt: p.player.ns["quit"]()
     drv.frame(1 / 30)
     assert ws.procs.list == [] and ws.cart["title"] == "Brick Siege"
-    assert "desktop" in ws.wm._wins
+    assert "desktop" in ws.wm.windows
 
 
 def test_a_crash_in_a_background_game_closes_it_with_a_notice(tmp_path):
@@ -169,10 +169,10 @@ def test_a_crash_in_a_background_game_closes_it_with_a_notice(tmp_path):
 
     def boom(dt):
         raise ValueError("boom")
-    p.player._update = boom
+    p.player.update = boom
     drv.frame(1 / 30)
     assert ws.procs.list == [] and ws.cart_error is None
-    assert ws.notice_active()
+    assert ws.notices.notice_active()
 
 
 def test_launching_a_running_game_brings_it_forward(tmp_path):
@@ -231,13 +231,13 @@ def _lua_desk(tmp_path, *games):
         _lua_game(carts, *g)
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     return ws, drv
 
 
 def _n(pl):
-    return pl._lua.get_global("N")
+    return pl.lua.get_global("N")
 
 
 def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
@@ -253,22 +253,22 @@ def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
     _windowed(ws, drv)
     assert [p.title() for p in ws.procs.list] == ["Lua Count"]
     p = ws.procs.list[0]
-    assert p.player._lua is not None and p.player.detached
-    ws.wm._minimize(wl, True)
+    assert p.player.lua is not None and p.player.detached
+    ws.wm.minimize(wl, True)
     drv.frame(1 / 30)
     held = _n(p.player)
     for _ in range(20):
         drv.frame(1 / 30)
-    assert p.state == "minimised" and p.player.paused
+    assert p.state == "minimised" and p.player.pace.paused
     assert _n(p.player) == held, "a held Lua game ran"
-    assert ws.run.player._lua is None and ws.cart["title"] == "Star Catcher"
-    ws.wm._minimize(wl, False)
+    assert ws.run.player.lua is None and ws.cart["title"] == "Star Catcher"
+    ws.wm.minimize(wl, False)
     for _ in range(4):
         drv.frame(1 / 30)
-    assert p.state == "throttled" and not p.player.paused
+    assert p.state == "throttled" and not p.player.pace.paused
     assert _n(p.player) > held
     # brought to the front, it is the one that plays and reads the keys
-    ws.wm._move_focus("run:1")
+    ws.wm.move_focus("run:1")
     assert ws.cart["title"] == "Lua Count" and not ws.run.player.detached
     n = _n(ws.run.player)
     drv.frame(1 / 30)
@@ -284,13 +284,13 @@ def test_two_lua_games_are_two_task_manager_rows_with_their_own_heaps(tmp_path):
     for _ in range(6):
         drv.frame(1 / 30)
     one = ws.procs.list[0].player
-    one._lua.exec("BIG = {} for i = 1, 4000 do BIG[i] = i end")
+    one.lua.exec("BIG = {} for i = 1, 4000 do BIG[i] = i end")
     rows = {r[1]: r for r in ws.procs.rows() if r[2] != "service"}
     assert set(rows) == {"Lua One", "Lua Two"}
     a, b = rows["Lua One"], rows["Lua Two"]
     assert a[6] != b[6] and a[6] is not None, "two runs, two pids"
     assert a[5] and b[5] and a[5] > b[5] + 16000, (a[5], b[5])
-    assert a[5] == one._lua.heap()
+    assert a[5] == one.lua.heap()
     # each is a row of the kernel's process table: its pid, the Lua tier, a
     # game, running, its engine bound
     from runtime import moy_play
@@ -343,7 +343,7 @@ def _wasm_game(carts, title):
 
 
 def _ticks(pl):
-    return pl._lua._run.pmem()[1][1]
+    return pl.lua._run.pmem()[1][1]
 
 
 def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
@@ -358,7 +358,7 @@ def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
     _wasm_game(carts, "Count Two")
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(1 / 30)
     open_cart(ws, "Count One")
     w1 = _windowed(ws, drv)
@@ -371,7 +371,7 @@ def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
     assert ws.cart["title"] == "Count Two" and two.cart_error is None, two.cart_error
     rows = [moy_play.proc_row(pl._run_handle) for pl in (one, two)]
     assert [r[1:4] for r in rows] == [(3, 2, 1)] * 2 and rows[0][0] != rows[1][0], rows
-    ws.wm._minimize(w1, True)
+    ws.wm.minimize(w1, True)
     drv.frame(1 / 30)
     held = _ticks(one)
     n2 = _ticks(two)
@@ -379,7 +379,7 @@ def test_two_compiled_games_run_side_by_side_each_in_its_session(tmp_path):
         drv.frame(1 / 30)
     assert _ticks(one) == held, "a held compiled game ran"
     assert _ticks(two) > n2
-    ws.wm._minimize(w1, False)
+    ws.wm.minimize(w1, False)
     for _ in range(4):
         drv.frame(1 / 30)
     assert _ticks(one) > held

@@ -14,7 +14,7 @@ under it, painted with the wave brush; the volume ladder; the step ops.
 It draws inside `EditorDesk`'s frame over the `MusicEditor` core the
 handheld Music tab edits (`ws.music_ui.musicedit`), so every change is the
 core's own undo step, reaches the running game at once (the bank is edited
-in place, E-02) and is saved with the bank (`ws.save_sounds`). The rows,
+in place, E-02) and is saved with the bank (`ws.saves.save_sounds`). The rows,
 tools and buttons are the verbs; the graph, the wave marks and the ladder
 are drawn in the theme's roles and the waves' MOY64 inks, and answer the
 pointer here."""
@@ -214,7 +214,7 @@ def draw(desk, cv, th, r, u):
     mu = ws.music_ui
     if mu.music_preview is not None and not mu._music_preview_active():
         mu.music_preview = None
-        ws._dirty = True
+        ws.mark_dirty()
     st = _state(desk)
     s = me.cur_sfx()
     g = geometry(r, u)
@@ -397,7 +397,7 @@ def _set_wave(desk, me, wv):
     if st is not None and st[1] != wv:
         _sfx_view(me)
         me.cycle_wave((wv - st[1]) % 8)
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
 
 
 def _do(desk, op):
@@ -440,7 +440,7 @@ def _do(desk, op):
         to = (me.step // PAGE + (1 if op == "page+" else -1)) * PAGE
         if 0 <= to < n:
             me.select_cursor(to)
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
 
 
 # -- the pointer -----------------------------------------------------------------
@@ -487,7 +487,7 @@ def pointer(desk, r, u, px, py, click, down):
         lv = max(0, min(LEVELS, LEVELS - (py - y) // g["vh"]))
         if stp[2] != lv:
             me.nudge_vol(lv - stp[2])
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
     return True
 
 
@@ -564,7 +564,7 @@ def keys(desk, i, ev):
         open_rename(desk)
     else:
         return False
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
     return True
 
 
@@ -578,7 +578,7 @@ def open_rename(desk):
     st = _state(desk)
     st["rename"] = (getattr(s, "name", None) or "") if s is not None else ""
     st["menu"] = False
-    desk.ws._dirty = True
+    desk.ws.mark_dirty()
 
 
 def rename(desk, u):
@@ -594,7 +594,7 @@ def rename(desk, u):
     if not ui.popover("sound name", min(box[2] - 16 * u, 300 * u)):
         st["rename"] = None
         ui.popover()
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
         return
     text, enter = ui.field("Name", st["rename"], SFX_NAME_MAX,
                            {"id": "sound name field", "hint": "no name"})
@@ -603,7 +603,7 @@ def rename(desk, u):
         _sfx_view(me)
         me.set_name(text)
         st["rename"] = None
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
     ui.popover()
 
 
@@ -620,7 +620,7 @@ def sounds_menu(desk, u):
     if not ui.popover("sound menu", 220 * u):
         st["menu"] = False
         ui.popover()
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
         return
     items = [row_label(me, k) for k in range(len(me.bank.sfx))] + ["New sound"]
     got = ui.menu("", items, ["music"] * len(me.bank.sfx) + ["new"])
@@ -634,7 +634,7 @@ def sounds_menu(desk, u):
             me.sfx_idx = k
             me.step = 0
         st["menu"] = False
-        desk.ws._dirty = True
+        desk.ws.mark_dirty()
 
 
 def row_label(me, k):

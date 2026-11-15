@@ -28,7 +28,7 @@ fullscreen tiers only (the windowed WM suppressed it). Do not re-grow it;
 ratchet.
 
 `BarLayer` reaches everything else through its `self.ws` back-ref (the shared draw
-toolkit ws._glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
+toolkit ws.glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
 `NAMES` (palette) is injected at construction -- the same circular-import dodge the
 other extracted UIs use, since console.py builds the one BarLayer instance a
 Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
@@ -203,7 +203,7 @@ STRIP_SELF = {
     "wm_desk.py": "the windows paint over the desk's bar",
     "console.py": ("a running tool's strip is on the game canvas inside the Player's"
                    " tick, or after the composite"),
-    "console_notices.py": "the pause card is an overlay: its bar over its scrim",
+    "shell_cards.py": "the pause card is an overlay: its bar over its scrim",
 }
 
 class BarLayer:
@@ -238,16 +238,16 @@ class BarLayer:
     hold. `_render_cart_bar(cv, key, i)` renders bar `i` of the zoned layout.
 
     Boundary decisions (deliberate, see the doc):
-      * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
+      * The shared draw toolkit (ws.glyph / ws.icon / ws.mini_btn / ws.bar_image)
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
-      * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
+      * `bar_img_cache` (per-kind icon Image cache backing ws.icon) stays on ws;
         `_bar_cache_gen` (the strip cache generation) lives here, bumped
         through invalidate(); the look's changes reach the strips through
         `ws.look.look_gen` in their key.
 
     The bar is CHROME the content composes, not a standalone stack layer: it's
     SYSTEM-domain on the launcher, Settings and every Editor tab (drawn on
-    sys_canvas) and GAME-domain on a running tool's strip (drawn on the fixed game canvas, `_zone_is_game`), and it draws
+    sys_canvas) and GAME-domain on a running tool's strip (drawn on the fixed game canvas, `zone_is_game`), and it draws
     at their rects (`bar_rects`), LAST over each content's paint, which lays
     out in what the bars leave (`content_rect`). The frame draws a surface's
     strip after its page (`draw_surface`, `STRIP_OF`), but for the surfaces
@@ -295,8 +295,8 @@ class BarLayer:
         # before, which is a perf floor, not a correctness problem.
         self._bar_strips = {}
         self._bar_cache_gen = 0
-        # Clock-text cache (#66): (second, string) -- see _clock_text.
-        self._clock_at = -1           # when the clock was read, and how long
+        # Clock-text cache (#66): (second, string) -- see clock_text.
+        self.clock_at = -1           # when the clock was read, and how long
         self._clock_hold = 0          # its text holds from then (_clock_text)
         self._clock_hm = (-1, -1)
         self._clock_cache = ""
@@ -347,7 +347,7 @@ class BarLayer:
         their own (the rotated compositor's `set_strips`; absent elsewhere):
         every bar in force, at the root's size. `cv` is the root, kept for the
         relayouts that publish again; every repaint that changes a strip's
-        pixels on it says so through `_strip_moved`."""
+        pixels on it says so through `strip_moved`."""
         if cv is not None:
             self._strip_cv = cv
         cv = self._strip_cv
@@ -358,7 +358,7 @@ class BarLayer:
         ss([(x * r, y * r, w * r, h * r) for x, y, w, h in
             bar_rects_of(cv.w // r, cv.h // r, self.ws.layout.status_h, bars_in_force())])
 
-    def _strip_moved(self, cv, x, y, w, h):
+    def strip_moved(self, cv, x, y, w, h):
         """New pixels landed in (x, y, w, h) of the bar on `cv`: when that is
         the published root, the strips there ride its next presented frame.
         A bar drawn through a viewport of the root is a window's, drawn
@@ -382,15 +382,15 @@ class BarLayer:
         if where is None:
             if not app:
                 return
-            got = ws._apps_by_id.get(layer.id)
+            got = ws.app(layer.id)
             if got is None or getattr(got, "glass", False) or ws.wm.desk_open():
                 return
             where = "app"
-        elif where == "tasks" and ws.windowed_chrome:
+        elif layer is ws.tasks_layer and ws.windowed_chrome:
             return                        # in a desk window its title strip is the bar
-        self._draw_status_strip(where)
+        self.draw_status_strip(where)
 
-    def _draw_status_strip(self, where):
+    def draw_status_strip(self, where):
         """The strip `where` names ("home" / "settings" / "menu" / "tool" /
         ...), drawn through the ONE generalized cache mechanism below
         (_draw_top_bar_cart) -- there is no per-`where` draw body here; the
@@ -415,15 +415,13 @@ class BarLayer:
             return ws.launcher_layer
         if where == "projects":
             return ws.projects_layer
-        if where == "settings":
-            return ws.settings_layer
-        if where == "tasks":
-            return ws.tasks_layer
         if where == "menu":
             return ws.editor_app
+        if STRIP_OF.get(where) == where:  # a registered app's own strip
+            return ws.app(where)          # (Settings', the task manager's)
         return None
 
-    def _zone_is_game(self, where):
+    def zone_is_game(self, where):
         """True for the surfaces that draw on the fixed 320x240 GAME canvas -- since
         the #39 step-3 conversions moved every Editor tab onto the responsive SYSTEM
         canvas, that's only the Part-4 "tool" bar (a running tool/app is on the game
@@ -505,7 +503,7 @@ class BarLayer:
         if game is None:
             if where == "app":
                 return self.ws.sys_canvas
-            game = self._zone_is_game(where)
+            game = self.zone_is_game(where)
         # an "app" strip on the game canvas: that canvas IS the system one
         if game:
             return self.ws.run.canvas
@@ -514,7 +512,7 @@ class BarLayer:
     def _bar_h(self, where):
         """The rows of a BAR_ROWS-row bar on `where`'s canvas: every bar's
         size is in those."""
-        if self._zone_is_game(where):
+        if self.zone_is_game(where):
             return _STATUS_H
         return self.ws.layout.status_h
 
@@ -547,7 +545,7 @@ class BarLayer:
     def _packed(self, where, game=None):
         self._sync_items()
         if game is None:
-            game = self._zone_is_game(where)
+            game = self.zone_is_game(where)
         if where == "tool" and not game:
             band = self.tool_band()
             if band is not None:
@@ -628,7 +626,7 @@ class BarLayer:
         if where == "tool" and self.ws.run.app_window_canvas:
             wh = self.ws.app_window_size()       # a window's: its title strip is the bar
             return self._kept_rect(0, 0, wh[0], wh[1])
-        if self._zone_is_game(where):
+        if self.zone_is_game(where):
             of = bars_in_force()
             g = self._cr_game
             if g[0] != cv.w or g[1] != cv.h or g[2] is not of:
@@ -665,7 +663,7 @@ class BarLayer:
                     return b, c[1]
         return None
 
-    def _zone_rect(self, where):
+    def zone_rect(self, where):
         """The rect LENT to `where`'s app for its draw_zone/zone_tap, in its
         bar's coordinates."""
         for bar in self._packed(where):
@@ -740,7 +738,7 @@ class BarLayer:
         WHOLE, then reused; a bar without the clock never re-renders on its
         tick. The strips are purely the DRAW; hit-testing goes through the
         packed cells / zone_tap, so caching can't desync taps."""
-        game = self._zone_is_game(where)
+        game = self.zone_is_game(where)
         cv = self._bar_canvas(where, game)
         packed = self._packed(where, game)
         fields = self._key_fields(packed)
@@ -821,7 +819,7 @@ class BarLayer:
         return b
 
     def _shown_now(self, where):
-        game = self._zone_is_game(where)
+        game = self.zone_is_game(where)
         cv = self._bar_canvas(where, game)
         self._key_fields(self._packed(where, game))
         key = self._keys.get(where)
@@ -902,22 +900,22 @@ class BarLayer:
             # buffer across re-renders when the size is unchanged; allocate a fresh
             # layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
-                self.ws.note_cost("bar.strip.alloc")
+                self.ws.perf.note_cost("bar.strip.alloc")
                 _release_layer(strip)              # the old size's / canvas's
                 strip = cv.new_layer(bw, bh)
                 slot[0] = strip
                 slot[2] = cv
-            self.ws.note_cost("bar.strip.render")
+            self.ws.perf.note_cost("bar.strip.render")
             self._render_cart_bar(strip, key, i)
         elif part:
-            self.ws.note_cost("bar.strip.part")
+            self.ws.perf.note_cost("bar.strip.part")
             self._render_cart_part(strip, key, i, part, slot[3])
         if fresh or part:
             slot[1] = _ui.block_gen(blk)
             slot[3] = key[12]
         cv.blit_strip(strip, bx, by)
         if fresh or part:
-            self._strip_moved(cv, bx, by, bw, bh)
+            self.strip_moved(cv, bx, by, bw, bh)
 
     def _cart_bar_key(self, where):
         """The cache key for the bar: every piece of state that changes ANY `where`
@@ -948,7 +946,7 @@ class BarLayer:
         ws = self.ws
         key[0] = where
         if need & 2:
-            key[1] = self._clock_text()
+            key[1] = self.clock_text()
         if need & 4:
             key[2] = _ui_draw.marks_on()
         key[3] = ws.look.look_gen
@@ -959,11 +957,11 @@ class BarLayer:
             owner = self._zone_owner(where)
             key[6] = owner.zone_gen if owner is not None else 0
         if need & 128:
-            key[7] = ws._wifi_icon_kind()      # the wifi status glyph
+            key[7] = ws.wifi_icon_kind()      # the wifi status glyph
         if need & 256:
             # the tool bar's title, and what the running app lent it (ui.bar)
             t = self._title(where) if ws.cart else None
-            lent = self._lent(key[0])
+            lent = self.lent(key[0])
             k8 = self._k8
             if k8[0] is not t or k8[1] is not lent:
                 k8[0] = t
@@ -1098,7 +1096,7 @@ class BarLayer:
         if name == "menu":
             return (tile[0] - t, y, tile[2] + 2 * t, h), rad, u
         if name == "clock":
-            w = _ui_draw.print_width(self._clock_text(), fs)
+            w = _ui_draw.print_width(self.clock_text(), fs)
             x0, x1 = r[0] - t - u, r[0] + w + t + u
         else:
             dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
@@ -1122,7 +1120,7 @@ class BarLayer:
         mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
         packed = self._packed(where)[i]
         edge, rect, dy, cells = packed
-        game = self._zone_is_game(where)
+        game = self.zone_is_game(where)
         # Part 4: a TOOL/APP runs WITH a minimal bar so it's EXITABLE: the OS
         # widgets, its TITLE in the zone (no tab ladder, no draw_zone: the
         # play-frame guardrail holds). Every other bar is the zoned bar: the
@@ -1144,7 +1142,7 @@ class BarLayer:
         if not inside:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
-            show_x = self._show_x(where)
+            show_x = self.show_x(where)
             self._ink_dx = self._status_dx(cells, self._cluster(game)) \
                 if looked and not across else None
             sel = None if game or across else self._selected_box(where, cells)
@@ -1240,17 +1238,17 @@ class BarLayer:
             return None
         bar, (x, y, w, h) = got
         return (bar[1][0] + x, bar[1][1] + y,
-                min(w, self._back_w(self._zone_is_game(where))), h)
+                min(w, self._back_w(self.zone_is_game(where))), h)
 
     def go_back(self, where):
         """The chevron's tap: back one level from `where` -- what Esc and B
         do there (`InputPolicy.back`); the home's goes to the desk."""
         ws = self.ws
         if where == "home":
-            ws.open_desk()
+            ws.home.open_desk()
         else:
             ws.input_policy.back()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _paint_back_title(self, cv, r, title, bar, game=False):
         """A page's place in the bar (DESIGN.md, Bar): the back chevron in
@@ -1265,7 +1263,7 @@ class BarLayer:
         side = 16 * u
         gy = (thick - side) // 2
         if not ws.draw_icon("back", (x, gy, side, side), ink, cv):
-            ws._glyph("arr_l", (x, gy, side, side), ink, cv, u)
+            ws.glyph("arr_l", (x, gy, side, side), ink, cv, u)
         if not title:
             return x + side
         tf = _ui_draw.font("title")
@@ -1290,14 +1288,14 @@ class BarLayer:
         cart's ("tool"), the registered app's on top ("app"), else None."""
         ws = self.ws
         if where == "tool":
-            return ws.run.player.bar_ctx()
+            return ws.run.player.face.bar_ctx()
         if where == "app":
-            app = ws._apps_by_id.get(ws.wm.top_kind())
+            app = ws.app(ws.wm.top_kind())
             host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
             return getattr(host, "ctx", None)
         return None
 
-    def _lent(self, where):
+    def lent(self, where):
         """(title, icon names, half-strength bits, back, chip) the running
         app lent `where`'s bar in its last frame (`ui.bar`), or None; a
         tool that names no icon is "" among the names, and `chip` its words."""
@@ -1320,7 +1318,7 @@ class BarLayer:
         """The lent tools' boxes in bar coordinates after a title ending at
         `end`: (rect, index, off) each, 16-pixel icons at a 22-pixel pitch
         from 12 past the title (DESIGN, the bar's tools)."""
-        lent = self._lent(where)
+        lent = self.lent(where)
         if lent is None or not lent[1]:
             return ()
         u = 1 if game else _layout_base.unit()
@@ -1349,7 +1347,7 @@ class BarLayer:
         chrome ink, a tool with nothing to do at half strength."""
         ws = self.ws
         th = ws.theme_colors
-        lent = self._lent(where)
+        lent = self.lent(where)
         chip = lent[4] if lent is not None else ""
         u = 1 if game else _layout_base.unit()
         for _hit, i, off, name, r in self._lent_rects(where, end, bar, game):
@@ -1366,7 +1364,7 @@ class BarLayer:
                     _ui_draw.print_font(was)
                 continue
             if not ws.draw_icon(name, r, ink, cv):
-                ws._glyph(name, r, ink, cv)
+                ws.glyph(name, r, ink, cv)
 
     def _title_end(self, where, zone, bar, game):
         """Where the back chevron's title ends in bar coordinates: what the
@@ -1392,7 +1390,7 @@ class BarLayer:
             self._paint_status(cv, r, text, game)
             return
         if name == "clock":
-            s = self._clock_text()
+            s = self.clock_text()
             if across:
                 L = ws.layout
                 fw = 8 if game else L.font_w
@@ -1400,7 +1398,7 @@ class BarLayer:
                 r = (r[0] + (r[2] - 2 * fw) // 2, r[1] + (r[3] - 2 * lh) // 2,
                      2 * fw, 2 * lh)
         elif name == "wifi":
-            s = ws._wifi_icon_kind()
+            s = ws.wifi_icon_kind()
             if s != "wifi":            # off is the quiet state: no glyph
                 return
         elif name == "title":
@@ -1432,7 +1430,7 @@ class BarLayer:
             sc = max(1, tht // 16)
             if ws.draw_icon("moy", (tx, ty, tw, tht), ink, cv):   # outlined, its set's
                 return
-            img = ws._icon_image_keyed("moy")          # its plate keyed on the tile
+            img = ws.icon_image_keyed("moy")          # its plate keyed on the tile
             if img is not None:
                 cv.spr(img, tx + (tw - 16 * sc) // 2, ty + (tht - 16 * sc) // 2, sc)
             return
@@ -1442,7 +1440,7 @@ class BarLayer:
         if name in ("wifi", "battery", "close"):
             kind = name
             if name == "wifi":
-                kind = ws._wifi_icon_kind()            # the true state: wifi_off with no link
+                kind = ws.wifi_icon_kind()            # the true state: wifi_off with no link
             dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
             x += dx                                    # its ink evened out (_status_dx)
             side = 16 * u                              # the theme's icon set, centred
@@ -1460,7 +1458,7 @@ class BarLayer:
             if name == "battery":
                 _battery(cv, gx, gy, side, u, ink)
             else:
-                ws._glyph(name, (gx, gy, side, side), ink, cv, u)
+                ws.glyph(name, (gx, gy, side, side), ink, cv, u)
             return
         if name == "separator":
             if across:
@@ -1468,7 +1466,7 @@ class BarLayer:
             else:
                 cv.rect(x + w // 2, (thick - 16 * u) // 2, 1, 16 * u, th["chrome_ink_dim"])
             return
-        s = self._clock_text() if name == "clock" else \
+        s = self.clock_text() if name == "clock" else \
             self._title(where) if name == "title" else (text or "")
         L = ws.layout
         if name == "clock" and across:
@@ -1539,7 +1537,7 @@ class BarLayer:
             g = 16 * _layout_base.unit()
             if game or not ws.draw_icon(it.icon, (x + (side - g) // 2, r[1] + (side - g) // 2,
                                                   g, g), ink, cv):
-                ws._icon(it.icon, x, r[1], cv, scale=max(1, side // 16), ink=ink)
+                ws.icon(it.icon, x, r[1], cv, scale=max(1, side // 16), ink=ink)
             x += step
 
     def status_hit(self, r, n, px):
@@ -1676,12 +1674,12 @@ class BarLayer:
         `page_title()`), the running cart's or the open project's, else the
         surface's name."""
         ws = self.ws
-        lent = self._lent(where)
+        lent = self.lent(where)
         if lent is not None and lent[0]:
             return lent[0]
         if where == "app":
             kind = ws.wm.top_kind()
-            app = ws._apps_by_id.get(kind)
+            app = ws.app(kind)
             t = app.page_title() if app is not None else None
             if t:
                 return t                    # a page of the app names its own
@@ -1691,10 +1689,10 @@ class BarLayer:
         if where in ("tool", "app", "menu") and ws.cart:
             return ws.cart.get("title") or ""
         if where == "home":
-            return ws.home_title()
+            return ws.home.home_title()
         return _TITLES.get(where, "")
 
-    def _show_x(self, where):
+    def show_x(self, where):
         """The `close` widget's X, where a layout places one: wherever there
         is a way back (`_way_back`)."""
         return self._way_back(where)
@@ -1756,7 +1754,7 @@ class BarLayer:
         elif cx == bx:
             cx, cw = bx + 1, cw - 1
         cv.clip(cx, cy, cw, ch)
-        looked = not self._zone_is_game(where) and not self._in_window(where)
+        looked = not self.zone_is_game(where) and not self._in_window(where)
         if not looked:
             _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
                                 _BAND_SIDE[edge])
@@ -1804,7 +1802,7 @@ class BarLayer:
         self._paint_look_cell(cv, where, "menu", (x - bx, y - by, w, h), None,
                               (0, 0, bw, bh), edge in ("left", "right"))
         cv.camera(0, 0)
-        self._strip_moved(cv, x, y, w, h)
+        self.strip_moved(cv, x, y, w, h)
         self._redraw_status(where)
 
     def _redraw_status(self, where):
@@ -1827,7 +1825,7 @@ class BarLayer:
                 self._paint_status(cv, r, text)
         cv.camera(0, 0)
         sx, sy, sw, sh = self._status_span((x - bx, y - by, w, h), bar)
-        self._strip_moved(cv, sx + bx, sy + by, sw, sh)
+        self.strip_moved(cv, sx + bx, sy + by, sw, sh)
 
     def _status_span(self, r, bar):
         """The status cell and the selected fill's reach past it, in its
@@ -1861,7 +1859,7 @@ class BarLayer:
         cv, bar, (x, y, w, h), looked = got
         edge, (bx, by, bw, bh), dy, _cells = bar
         th = ws.theme_colors
-        text = self._clock_text()
+        text = self.clock_text()
         across = edge in ("left", "right")
         if looked:
             cv.camera(-bx, -by)
@@ -1878,9 +1876,9 @@ class BarLayer:
             cv.print(text, x, by + 3 + dy, th["chrome_ink"], 1)
         if text != self._clock_drawn:
             self._clock_drawn = text
-            self._strip_moved(cv, x, y, w, h)
+            self.strip_moved(cv, x, y, w, h)
 
-    def _clock_text(self):
+    def clock_text(self):
         """The local HH:MM (`wallclock`: the console's time zone), or
         UNSYNCED while the clock does not hold real time -- a board before
         its first NTP answer, whose clock counts from power-on and would read
@@ -1889,14 +1887,14 @@ class BarLayer:
         the next minute, or each second while unsynced -- and its strings are
         made only when it did."""
         now = _ticks_ms()
-        if self._clock_at >= 0 and _ticks_diff(now, self._clock_at) < self._clock_hold:
+        if self.clock_at >= 0 and _ticks_diff(now, self.clock_at) < self._clock_hold:
             return self._clock_cache
         lt = _wc.localtime()
         if lt is None:
             self._date_cache = _NO_DATE
             self._clock_hm = (-1, -1)
             self._clock_cache = UNSYNCED
-            self._clock_at = now
+            self.clock_at = now
             self._clock_hold = 1000
             return UNSYNCED
         a, b = lt[3], lt[4]
@@ -1906,14 +1904,14 @@ class BarLayer:
         if a != self._clock_hm[0] or b != self._clock_hm[1]:
             self._clock_hm = (a, b)
             self._clock_cache = "%02d:%02d" % (a, b)
-        self._clock_at = now
+        self.clock_at = now
         self._clock_hold = (60 - lt[5]) * 1000
         return self._clock_cache
 
-    def _today(self):
+    def today(self):
         """(year, month, day) from the clock's per-second read, (0, 0, 0)
         where there is no wall clock."""
-        self._clock_text()
+        self.clock_text()
         return self._date_cache
 
     # -- the keys on the bar (owner call 2026-10-26) ---------------------------
@@ -1936,8 +1934,8 @@ class BarLayer:
         if self._in_window(where):
             return out
         packed = self._packed(where)
-        game = self._zone_is_game(where)
-        show_x = self._show_x(where)
+        game = self.zone_is_game(where)
+        show_x = self.show_x(where)
         back = self.draws_back(where)
         for bi in range(len(packed)):
             bar = packed[bi]
@@ -2028,7 +2026,7 @@ class BarLayer:
         """The keys walk off an end of the home's tab row onto the bar item
         beside it: `d` < 0 the one left of the tabs, else the one right.
         False where there is none (the row stops there)."""
-        if self.ws.bar_where() != "home":
+        if self.ws.router.bar_where() != "home":
             return False
         items = self.focus_items("home")
         split = self._tabs_split("home", items)
@@ -2044,7 +2042,7 @@ class BarLayer:
         self.focus = k
         self.focus_item = items[k]
         _ui_draw.on_bar(True)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def focus_leave(self):
         """The keys come off the bar, back where they came from."""
@@ -2052,7 +2050,7 @@ class BarLayer:
         self.focus = self.focus_where = self.focus_from = self.focus_item = None
         _ui_draw.on_bar(False)
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if where == "home":
             ws.launcher_layer.bar_focus(False)
         if came == "tabs":
@@ -2073,7 +2071,7 @@ class BarLayer:
         bar's."""
         where = self.focus_where
         items = self.focus_items(where)
-        if not items or self.ws.bar_where() != where:
+        if not items or self.ws.router.bar_where() != where:
             self.focus_leave()
             return False
         split = self._tabs_split(where, items)
@@ -2098,8 +2096,8 @@ class BarLayer:
                 owner.zone_opened = False
             self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
             ws = self.ws
-            ws._dirty = True
-            if ws.bar_where() != where or getattr(owner, "zone_opened", False):
+            ws.mark_dirty()
+            if ws.router.bar_where() != where or getattr(owner, "zone_opened", False):
                 # the tap left the surface (back, a door), or opened one of
                 # the zone's tabs, which takes the keys down into it as the
                 # home's row does
@@ -2168,14 +2166,14 @@ class BarLayer:
         # is, the rest a popover hung from the widget, in both modes -- wifi's
         # the Settings WIFI panel, the one wifi implementation. Consumed, so a tap never
         # leaks to the lent zone.
-        if name in _CLUSTER and self._cluster(self._zone_is_game(where)) \
+        if name in _CLUSTER and self._cluster(self.zone_is_game(where)) \
                 and bar[0] in ("top", "bottom"):
             ws.widget_tap("battery")         # the cluster opens the control center
             return True
         if name == "status":
             k = self.status_hit(hit[1], hit[2] or 0, px)
             if k is not None:
-                ws.open_status_menu(_ITEMS.at(k))
+                ws.notices.open_status_menu(_ITEMS.at(k))
             return True
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)
@@ -2187,17 +2185,17 @@ class BarLayer:
         # Section 6's test-play round trip -- go_home for a launcher-launched tool, but
         # the Editor tab if a tool is ever PLAYed from the editor); every other taskbar
         # app (Editor/Settings) uses the screen-string exit.
-        if name == "close" and self._show_x(where):
+        if name == "close" and self.show_x(where):
             if where == "home":
-                ws.open_desk()
+                ws.home.open_desk()
             elif where in ("tool", "app"):
-                ws._exit_to_caller()
+                ws.spine.exit_to_caller()
             else:
-                ws.exit()
+                ws.spine.exit()
             return True
         owner = self._zone_owner(where)
         if zone is not None and self.draws_back(where):
-            game = self._zone_is_game(where)
+            game = self.zone_is_game(where)
             if zone[0] <= px < zone[0] + self._back_w(game):
                 self.go_back(where)
                 return True
@@ -2207,7 +2205,7 @@ class BarLayer:
                 if _in(px, py, hit):
                     if not off:
                         _ui_draw.bar_tap(self._lent_ctx(where), i)
-                        ws._dirty = True
+                        ws.mark_dirty()
                     return True
             if owner is not None and not getattr(owner, "back_title", None):
                 zone = self.past_back(zone, game)

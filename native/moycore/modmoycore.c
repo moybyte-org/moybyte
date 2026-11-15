@@ -588,6 +588,34 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
+// own(pid) -> None, or the error text: an app run's `moybyte` table
+// (moycore_moybyte.h), its wakes process `pid`'s, its console calls through
+// the `__moybyte_call` registered before it, its wakes served as each of
+// the run's frames starts (moycore_lua_tick). call(fn, args)
+// -> None, or the error text: the run's global `fn` called with the values
+// of `args`, a JSON array (the window's events).
+static mp_obj_t mod_own(mp_obj_t pid)
+{
+    char err[192];
+    if (moycore_lua_own((uint32_t)mp_obj_get_int(pid), err, sizeof(err)) != 0) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_own_obj, mod_own);
+
+static mp_obj_t mod_call(mp_obj_t fn, mp_obj_t args)
+{
+    size_t n = 0;
+    const char *json = mp_obj_str_get_data(args, &n);
+    char err[192];
+    if (moycore_lua_call(mp_obj_str_get_str(fn), json, n, err, sizeof(err)) != 0) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_call_obj, mod_call);
+
 // load(chunks, layout=None) -> None, or the error text. `chunks` is a sequence of
 // (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
 // gives. Call AFTER any register()s and any exec()s. `layout`, a responsive
@@ -1161,7 +1189,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 //                                  a None chunkname the service's own;
 //                                  app: its app's run, moy_app's `run()`)
 //   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
-//   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
+//   svc_tasks() -> bool   svc_step() -> ms to the next deadline   svc_reset()
 
 static void svc_check(int rc)
 {
@@ -1243,11 +1271,11 @@ static mp_obj_t mod_svc_tasks(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_tasks_obj, mod_svc_tasks);
 
-static mp_obj_t mod_svc_step(mp_obj_t now)
+static mp_obj_t mod_svc_step(void)
 {
-    return mp_obj_new_int_from_uint(moycore_svc_step((uint32_t)mp_obj_get_int_truncated(now)));
+    return mp_obj_new_int_from_uint(moycore_svc_step());
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_step_obj, mod_svc_step);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_step_obj, mod_svc_step);
 
 static mp_obj_t mod_svc_reset(void)
 {
@@ -1263,6 +1291,8 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_p8_memory), MP_ROM_PTR(&mod_p8_memory_obj) },
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
+    { MP_ROM_QSTR(MP_QSTR_own),         MP_ROM_PTR(&mod_own_obj) },
+    { MP_ROM_QSTR(MP_QSTR_call),        MP_ROM_PTR(&mod_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_layout),      MP_ROM_PTR(&mod_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },

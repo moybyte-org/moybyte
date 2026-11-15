@@ -3,6 +3,7 @@ verbs native/moy_sh/moy_sh_board.c crosses with, answered over the console's
 own process rows and devfs; the commands it serves (runtime/shell/sh_roles.py)
 and the installed ones, over a real console and on the desktop MicroPython."""
 
+import types
 import json
 import subprocess
 
@@ -30,7 +31,11 @@ class _Procs:
 class _WS:
     def __init__(self):
         self.procs = _Procs()
-        self._dirty = False
+        self.carts = types.SimpleNamespace(synced=None, all=[])
+        self.dirty = False
+
+    def mark_dirty(self):
+        self.dirty = True
 
     def tasks_close(self, key):
         self.procs.closed.append(key)
@@ -76,7 +81,7 @@ def test_rescan_hands_sftp_s_cart_folders_to_the_shelf(monkeypatch):
     as the browser sync's on_sync hands them; none, every folder."""
     ws, door = _door(monkeypatch)
     seen = []
-    ws.rescan_carts = seen.append
+    ws.carts.synced = seen.append
     assert call(door, "rescan", "a.moy", "b.moy") == 0
     assert door(b"rescan") == 0
     assert seen == [["a.moy", "b.moy"], None]
@@ -335,8 +340,9 @@ def test_notify_sees_a_compiled_programs_post_before_the_frame_takes_it(console,
     from runtime import notifications as N
     monkeypatch.setattr(N, "NOTES", N.Notifications())
     waiting = []
-    monkeypatch.setattr(N._E, "notes_waiting", lambda: len(waiting))
-    monkeypatch.setattr(N._E, "notes_take", lambda: waiting.pop(0) if waiting else None)
+    kernel_waiting, kernel_take = N._E.notes_waiting, N._E.notes_take
+    monkeypatch.setattr(N._E, "notes_waiting", lambda: len(waiting) + kernel_waiting())
+    monkeypatch.setattr(N._E, "notes_take", lambda: waiting.pop(0) if waiting else kernel_take())
     _ws, door = console
     first = N._E.notes_id()
     waiting.append((first, 0, "local.svc", "Queued", ""))

@@ -30,13 +30,13 @@ def _home(tmp_path, arrangement, n=30, **kw):
     if kw:
         build_ws_with_shelf(tmp_path, n)
         ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-        ws.go_home()
-        ws.open_library()
+        ws.home.go_home()
+        ws.home.open_library()
     else:
         ws = build_ws_with_shelf(tmp_path, n)
     drv = host_app.ConsoleDriver(ws)
-    ws.set_home_arrangement(arrangement)
-    ws.set_home_tab("games")
+    ws.home.set_home_arrangement(arrangement)
+    ws.home.set_home_tab("games")
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     for _ in range(3):
@@ -72,7 +72,7 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
             "home": home, "bars": [{"edge": "top", "left": ["zone"],
                                     "right": ["clock", "close", "menu"]}]}}).encode())
         assert rc == 0
-        ws.set_home_tab("apps")
+        ws.home.set_home_tab("apps")
         ws.launcher.sel = 1
         want = ws.launcher.selected()
         ws.system.set("layout_theme", "hi" + home)
@@ -272,7 +272,7 @@ def test_the_arrangement_is_in_the_statics(tmp_path):
     ws, _drv = _home(tmp_path, "icons", 6)
     cv = ws.sys_canvas
     key = ws.launcher_layer._statics_key(cv)
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     assert ws.launcher_layer._statics_key(cv) != key
 
 

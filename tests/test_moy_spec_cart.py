@@ -323,7 +323,7 @@ def test_unknown_runtime_is_refused_cleanly(tmp_path):
     _open(ws, "Forth")
     assert ws.cart_error and "forth" in ws.cart_error
     # and the refusal must not have left a half-started world behind
-    assert ws.run.player._lua is None
+    assert ws.run.player.lua is None
 
 
 def test_lua_runtime_still_runs(tmp_path):
@@ -519,7 +519,7 @@ def test_launcher_draws_the_declared_icon_tiles(tmp_path):
                              type="game", icon=icon)
         Path(c["path"], "sprites.moygfx").write_text("\n".join(rows))
     ws = host_app.build_workstation(root)
-    ws.set_home_tab("mine")                     # made here: the kid's own
+    ws.home.set_home_tab("mine")                     # made here: the kid's own
     by_title = {c["title"]: c for c in ws.launcher.items if c.get("path")}
     big = ws.covers.icon_sheet_for(by_title["Big"])
     assert big is not None and (big.w, big.h) == (16, 16)
@@ -538,7 +538,7 @@ def test_icon_past_the_sheet_falls_back(tmp_path):
                          type="game", icon=[500, 1, 1])
     Path(c["path"], "sprites.moygfx").write_text("\n".join(["8" * 128] * 8))
     ws = host_app.build_workstation(root)
-    ws.set_home_tab("mine")
+    ws.home.set_home_tab("mine")
     cart = next(x for x in ws.launcher.items if x["title"] == "Missing")
     assert cart["icon"] == (500, 1, 1)          # carried verbatim...
     assert ws.covers.icon_sheet_for(cart) is None  # ...but never a blank tile
@@ -628,7 +628,7 @@ def test_a_flag_edit_reaches_the_running_cart_and_its_fset_stays_the_runs(tmp_pa
 
     def got():
         if lua:
-            return int(float(ws.run.player._lua.get_global("F")))
+            return int(float(ws.run.player.lua.get_global("F")))
         return ws.run.player.ns["F"]
 
     for _ in range(2):

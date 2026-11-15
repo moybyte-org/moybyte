@@ -26,7 +26,7 @@ def _lua_editable(ws):
     valid PYTHON, which is the whole point of the tests below."""
     cart = next(c for c in ws.carts.all if c.get("runtime") == "lua")
     ws.open_in_editor(cart)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     return cart["path"]
 
 
@@ -50,7 +50,7 @@ def _still_working(ws):
 
 
 def _paint_a_pixel(ws, color=11):
-    ws._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     pe.color = color
@@ -168,17 +168,17 @@ def test_the_pointer_frame_is_what_stores_the_held_finger(tmp_path):
     must not leave it stale True, which would stall every later commit."""
     ws = _ws(tmp_path)
     _editable(ws)
-    ws._open_paint()
+    ws.text.open_paint()
 
     ws.pointer.x, ws.pointer.y = 40, 120
     ws.pointer.down = True
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     assert ws.history.pointer_down is True
 
     ws.pointer.down = False
     ws.pointer.click = False
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     assert ws.history.pointer_down is False
 
 
@@ -188,20 +188,20 @@ def test_the_whole_ladder_commits_on_the_debounce(tmp_path):
     ws = _ws(tmp_path)
     _editable(ws)
 
-    ws._open_map()
-    ws.tilemap.mset(0, 0, 4)
-    assert ws.tilemap.dirty is True
+    ws.text.open_map()
+    ws.run.project.tilemap.mset(0, 0, 4)
+    assert ws.run.project.tilemap.dirty is True
     _go_idle(ws)
-    assert ws.tilemap.dirty is False
+    assert ws.run.project.tilemap.dirty is False
 
-    ws._open_scene()
+    ws.text.open_scene()
     se = ws.scene_ui.sceneedit
     se.place(16, 16)
     assert se.dirty is True
     _go_idle(ws)
     assert se.dirty is False
 
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     me.nudge_pitch(1)
     assert me.dirty is True
@@ -213,7 +213,7 @@ def test_a_config_edit_commits_on_the_debounce(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path)
     path = _editable(ws)
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     ws.run.project.config["fps"] = 12
 
     _go_idle(ws)
@@ -227,7 +227,7 @@ def test_a_code_edit_still_waits_for_source_that_parses(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path)
     path = _editable(ws)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.editor.set_text("def _draw(:\n")
     ws.editor.dirty = True
 
@@ -247,9 +247,9 @@ def test_the_debounce_still_refuses_source_that_does_not_parse(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path)
     path = _editable(ws)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.editor.set_text("def _draw():\n    cls(3)\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     good = moy_carts.load(path)["src"]
 
     ws.editor.set_text("def _draw():\n    cls(3)\n    x = (\n")
@@ -310,7 +310,7 @@ def test_a_broken_lua_chunk_commits_and_hard_commits(tmp_path):
 
     ws.editor.set_text("function _draw( cls(4)\n")
     ws.editor.dirty = True
-    ws.set_menu_view("cards")                     # tab leave: the commit is owed
+    ws.text.set_menu_view("cards")                     # tab leave: the commit is owed
     ws.frame(1 / 30)                              # ...and this frame pays it
     assert "cls(4)" in moy_carts.load(path)["src"]
 
@@ -323,7 +323,7 @@ def test_a_clean_tab_writes_nothing_when_the_debounce_fires(tmp_path, monkeypatc
     from runtime import moy_carts
     ws = _ws(tmp_path)
     _editable(ws)
-    ws._open_paint()
+    ws.text.open_paint()
 
     writes = []
     monkeypatch.setattr(moy_carts, "save_sprites",
@@ -341,7 +341,7 @@ def test_the_debounce_does_not_commit_once_the_editor_is_gone(tmp_path, monkeypa
     _paint_a_pixel(ws)
     ws.history.edit_ms = _ticks_ms() - ws.history.edit_debounce_ms - 1
 
-    ws.exit()                                    # context-X: hard-commits, goes home
+    ws.spine.exit()                                    # context-X: hard-commits, goes home
     assert ws.screen == "launcher"
 
     commits = []
@@ -359,13 +359,13 @@ def test_a_touch_in_an_editor_tab_arms_the_debounce(tmp_path):
     what left them committing on the tab switch instead."""
     ws = _ws(tmp_path)
     _editable(ws)
-    ws._open_paint()
+    ws.text.open_paint()
     ws.history.edit_ms = None
 
     ws.pointer.x, ws.pointer.y = 40, 120
     ws.pointer.down = True
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
 
     assert ws.history.edit_ms is not None
 
@@ -377,7 +377,7 @@ def test_the_launcher_does_not_arm_the_debounce(tmp_path):
     ws.pointer.x, ws.pointer.y = 40, 120
     ws.pointer.down = True
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
 
     assert ws.history.edit_ms is None
 

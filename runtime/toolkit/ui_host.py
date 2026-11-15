@@ -557,7 +557,7 @@ class Hold:
         changes nothing of it (`Workstation._animating`'s word)."""
         held = ws.held_pages
         if (self.key is None or held[1] is not self or self.key != key
-                or ws._animating(dt, pages)):
+                or ws.animating(dt, pages)):
             return False
         x, y, w, h = rect
         cv.blit_strip_rect(held[0], 0, 0, x, y, w, h)
@@ -569,7 +569,7 @@ class Hold:
         draws into its whole buffer (a pane's viewport is copied from as
         the buffer it lies in, so it is not). None otherwise, or with no
         room for it."""
-        if not still or ws._animating(dt) or not _whole_retained(cv):
+        if not still or ws.animating(dt) or not _whole_retained(cv):
             return None
         return held_layer(ws, cv)
 
@@ -696,7 +696,7 @@ class Hold:
         lies, so what the card draws outside its band (its corners and
         drop, blended over the page) is there as well."""
         w = _PF[_PF_WIN]
-        if self._drew != key or w == 1 or ws._animating(dt, pages):
+        if self._drew != key or w == 1 or ws.animating(dt, pages):
             return False
         if w == 2:
             return True
@@ -740,7 +740,7 @@ class Hold:
         self._ask[0] = self._ask[1] = None
         n = getattr(cv, "RETAINED_FRAMES", 0)
         if (ws is None or self.key is None or ws.held_pages[1] is not self or self.key != key
-                or n < 1 or n > self._at.size or plan[7] < n or ws._animating(dt)):
+                or n < 1 or n > self._at.size or plan[7] < n or ws.animating(dt)):
             return False
         f = _PAINT[0]
         for k in range(n):
@@ -754,7 +754,7 @@ class Hold:
         banner, overlay, cursor or pill over it, nothing animating)."""
         alone = getattr(ws.wm, "content_alone", None)
         ok = (still and not getattr(cv, "covered", False) and alone is not None
-              and alone() and not ws._animating(dt) and _whole_retained(cv))
+              and alone() and not ws.animating(dt) and _whole_retained(cv))
         self._shown = ws.frame_state.frames_drawn if ok else -1
 
     def opened(self, ws):
@@ -763,7 +763,7 @@ class Hold:
         (`last`), where that frame drew it (`shown`) and no change was
         reported since (the console's `_dirty_in`)."""
         f = ws.frame_state.frames_drawn
-        self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
+        self._over = f if self._shown == f - 1 and not ws.frame_state.dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
         """Whether this frame, the first of the dialog `opened` over the
@@ -774,7 +774,7 @@ class Hold:
         over = self._over
         self._over = -1
         self._src = None
-        if over != ws.frame_state.frames_drawn or ws._animating(dt) or not _whole_retained(cv):
+        if over != ws.frame_state.frames_drawn or ws.animating(dt) or not _whole_retained(cv):
             return False
         if cv.RETAINED_FRAMES == 1:
             return True

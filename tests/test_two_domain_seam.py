@@ -47,8 +47,8 @@ def _ws_distinct_320(tmp_path):
     from runtime import host_app
     from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
-    ws._relayout()
+    ws.bound_sys_canvas = make_system_canvas(320, 240, font_scale=1)
+    ws.relayout()
     ws.set_pointer(host_app.console.Pointer(320, 240))
     ws.input.pointer = ws.pointer
     return ws
@@ -81,7 +81,7 @@ def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
     # (a real system overlay -- dismiss it so the compare is the pure composite).
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     ws.frame(1 / 30)
     assert bytes(ws.sys_canvas._buf) == bytes(ws.run.canvas._buf)
 
@@ -239,7 +239,7 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)         # default 320x240, shared canvas
-    assert ws._sys_canvas is None
+    assert ws.bound_sys_canvas is None
     ws.look.set_font_scale(3)
     assert ws.look.font_scale == 3                            # remembered
     assert ws.look.effective_font_scale() == 1              # but not applied (can't scale)
@@ -261,8 +261,8 @@ def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):
     from runtime.host_canvas import make_system_canvas
     from runtime import console
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = make_system_canvas(300, 200, font_scale=1)  # forced sub-game
-    ws._relayout()
+    ws.bound_sys_canvas = make_system_canvas(300, 200, font_scale=1)  # forced sub-game
+    ws.relayout()
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                                        # composites a running cart

@@ -25,6 +25,7 @@ class _Console:
     def __init__(self, link):
         self.link = link
         self.holds = set()
+        self.spine = self            # the console's spine, answered here
 
     def wifi_hold(self, tag, pid=None):
         self.holds.add((tag, pid))

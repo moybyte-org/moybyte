@@ -307,7 +307,7 @@ def _ws(tmp_path, **kw):
 def _enter_code(ws):
     from runtime import host_app
     ws.screen = "menu"
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     return host_app.ConsoleDriver(ws)
 
 
@@ -761,16 +761,16 @@ def test_entering_the_code_tab_does_not_type_the_key_that_entered_it(tmp_path):
                        ("map", ord(" ")), ("code", 0x0D)):
         ws, src = _device_ws(tmp_path)
         ws.screen = "menu"
-        ws.set_menu_view(entry)
+        ws.text.set_menu_view(entry)
         _dframe(ws)
-        ws.set_menu_view("code")            # build the editor before measuring
+        ws.text.set_menu_view("code")            # build the editor before measuring
         _dframe(ws)
-        ws.set_menu_view(entry)
+        ws.text.set_menu_view(entry)
         _dframe(ws)
         before = ws.editor.text()
 
         src.last_key = key                  # the key that enters the tab
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
         _dframe(ws, 2)
         src.last_key = 0
         _dframe(ws)
@@ -787,7 +787,7 @@ def test_the_swallowed_key_still_types_when_it_is_pressed_again(tmp_path):
     ws.screen = "menu"
     before = ws.editor.text() if ws.editor is not None else None
     src.last_key = ord("m")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     _dframe(ws)
     before = ws.editor.text()
     src.last_key = 0
@@ -1095,7 +1095,7 @@ def test_a_flung_code_view_coasts_on_frames_its_gate_paints(tmp_path, monkeypatc
     ws.editor.set_text("\n".join("line %d = %d" % (i, i * 7) for i in range(300)))
 
     settle_badges(ws)
-    ws._toast_until = 0                # no unlock banner: the gate is the view's
+    ws.toast_until = 0                # no unlock banner: the gate is the view's
 
     def frame():
         now[0] += 33

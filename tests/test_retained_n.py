@@ -22,9 +22,9 @@ def test_helper_floors_at_two(tmp_path):
     raises it to 3."""
     ws = _ws(tmp_path)
     assert ws.sys_canvas.RETAINED_FRAMES == 1      # the host contract
-    assert ws.wm._retained_n() == 2
+    assert ws.wm.retained_n() == 2
     ws.sys_canvas.RETAINED_FRAMES = 3              # instance shadow
-    assert ws.wm._retained_n() == 3
+    assert ws.wm.retained_n() == 3
 
 
 def test_full_paint_debt_scales_to_n_minus_one(tmp_path):
@@ -50,7 +50,7 @@ def test_gesture_hist_seeds_n_entries(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     drv.frame(0.0)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     gx, gy = win.x + win.w // 2, win.y + 4
     ws.sys_canvas.RETAINED_FRAMES = 3
     drv.touch(gx, gy)

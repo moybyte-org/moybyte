@@ -437,7 +437,7 @@ upload's always does. Modes, owners and times are accepted and ignored
 times. A change under the carts folder (a cart folder written, made,
 removed or renamed) tells the shelf once the client has been quiet for
 300 ms or the session ends: the door's `rescan`, which re-reads those
-folders alone (`ws.rescan_carts`, as the browser sync does). System files
+folders alone (`ws.carts.synced`, as the browser sync does). System files
 stay writable: the owner is root on their own console.
 
 **What the files tree shows (2026-11-06).** Its root `/` is the console's

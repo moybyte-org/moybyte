@@ -25,7 +25,7 @@ the cart. Two of the cards' helpers stay here for the page: `_validate_field`
 tile's picture). `NAMES` (the palette) and `_err_text` are injected at
 construction, the circular-import dodge the other extracted UIs use.
 
-draw() calls ws.bar_layer._draw_status_strip("menu") LAST (chrome over
+draw() calls ws.bar_layer.draw_status_strip("menu") LAST (chrome over
 content), so the Editor's lent top-bar zone (the tab ladder + PLAY,
 EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
@@ -186,7 +186,7 @@ class CardsLayer(Layer):
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the geometry (#39 step 3) -- called by ws._relayout on a
+        """Rebuild the geometry (#39 step 3) -- called by ws.relayout on a
         font-scale change."""
         self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
@@ -200,14 +200,14 @@ class CardsLayer(Layer):
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         p = self.prompt
         hold = self._hold
         if p is not None and self.prompt_rows(dt):
             return
         how = hold.under(ws, None if p is None else self._held_key(p), self._page_rect(), dt)
         if how == _ui_draw.HOLD_PUT:
-            ws.bar_layer._draw_status_strip("menu")
+            ws.bar_layer.draw_status_strip("menu")
             self._draw_prompt(True, dt)
             hold.note()
             return
@@ -226,7 +226,7 @@ class CardsLayer(Layer):
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         # An open dialog draws OVER the bar too -- same order as the block
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
@@ -251,7 +251,7 @@ class CardsLayer(Layer):
                 ws, self._held_key(p), p.o["gen"], p.host, self._page_rect(),
                 _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._draw_prompt(True, dt)
         self._hold.note()
         return True
@@ -295,15 +295,15 @@ class CardsLayer(Layer):
             return self._fix_input(i)
         page = self.page()
         if (i.pressed("run") or i.pressed("a")) and not page.on_door():
-            ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+            ws.defer(ws.text.leave_menu)   # Enter PLAYs (a device's Enter is "a")
             return True
         if page.open_door(i):
             if self.prompt is not None:
                 self._hold.opened(ws)  # Cart info over the page as it was
             return True
         if page.keys(i):
-            ws._dirty = True
-        ws._leave_or_home(ws.exit)
+            ws.mark_dirty()
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -316,10 +316,10 @@ class CardsLayer(Layer):
             return self._files_pointer(px, py, click)
         if self._broken():
             if self._fix_host.point(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- the cards' helpers: a field's check, a picker's pictures -------------
@@ -444,8 +444,8 @@ class CardsLayer(Layer):
             self._open_files()
             return True
         if self._fix_host.keys(i):
-            ws._dirty = True
-        ws._leave_or_home(ws.exit)
+            ws.mark_dirty()
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def draw_choice(self, f, k, rect):
@@ -473,7 +473,7 @@ class CardsLayer(Layer):
         else:
             icons = f.get("icons") or []
             side = max(12, min(w, h) // 2)
-            ws._glyph(icons[k] if k < len(icons) else "dot",
+            ws.glyph(icons[k] if k < len(icons) else "dot",
                       (x + (w - side) // 2, y + (h - side) // 2, side, side),
                       ws.theme_colors["ink"], cv)
 
@@ -521,7 +521,7 @@ class CardsLayer(Layer):
         rows, msg = (), None
         try:
             kind = ws.carts_store.project_kind(path)
-            rows = tuple(ws._with_sd(
+            rows = tuple(ws.with_sd(
                 lambda: ws.carts_store.list_files(kind, ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- an unreadable folder lists none
             msg = self._err_text(exc)
@@ -529,7 +529,7 @@ class CardsLayer(Layer):
             rows = tuple(rows) + (_NEW_ROW,)
         self.files = self._listing(rows, msg)
         self._files_host.reset()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _listing(self, rows, msg):
         """The file list over the store's `rows`: `names` in the order the
@@ -575,7 +575,7 @@ class CardsLayer(Layer):
         self.files = None
         if self._page is not None:
             self._page.recount()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _files_open(self, name):
         """Route one project file. A script is the Code tab (that is where
@@ -594,7 +594,7 @@ class CardsLayer(Layer):
         if name in ws.carts_store.cart_sources(cart):
             self._close_files()
             ws.editor_app.set_tab("code")
-            ws.open_code_file(name)
+            ws.text.open_code_file(name)
             return
         tab = self._asset_tab(name)
         if tab is not None:
@@ -615,7 +615,7 @@ class CardsLayer(Layer):
             # Anything else in a subfolder no tab claims. Saying so beats
             # opening a blob as text.
             self.files["msg"] = "Nothing on this console opens that file."
-            ws._dirty = True
+            ws.mark_dirty()
             return
         mode = _modes.mode_for(name)
         self._close_files()
@@ -627,15 +627,15 @@ class CardsLayer(Layer):
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
-                ws.home_key()
+                ws.home.home_key()
             return True
         if self._files_host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def _files_pointer(self, px, py, click):
         if self._files_host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_files(self, rect, desk):
@@ -699,7 +699,7 @@ class CardsLayer(Layer):
         self.prompt = _Prompt(kind, title, fields, sub, ok)
         self.prompt.open(texts)
         self.prompt.host.held = self._hold.ok
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _open_meta(self):
         cart = self.ws.run.project.cart
@@ -719,7 +719,7 @@ class CardsLayer(Layer):
 
     def _close_prompt(self):
         self.prompt = None
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def typing(self):
         """A dialog's fields type (Cart info, New script)."""
@@ -749,11 +749,11 @@ class CardsLayer(Layer):
         author = p.texts[1].strip()
         if not title:
             p.say("Give it a title.")
-            ws._dirty = True
+            ws.mark_dirty()
             return                          # stay open: never persist a blank title
         if not ws.run.project.commit_manifest(title=title, author=author):
             p.say("It didn't save. Try again.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
 
@@ -789,18 +789,18 @@ class CardsLayer(Layer):
         name = self._newf_filename(p.texts[0])
         if name is None:
             p.say("Start its name with a letter.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
-        made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
+        made = ws.with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
             p.say("There's a file with that name.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
         self._close_files()
         ws.editor_app.set_tab("code")
-        ws.open_code_file(made)
+        ws.text.open_code_file(made)
 
     def _prompt_event(self, ev):
         if ev == "commit":
@@ -815,7 +815,7 @@ class CardsLayer(Layer):
     def _prompt_input(self, i):
         p = self.prompt
         if p.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         ch = p.host.inp[5]
         if ch == 27 or i.pressed("stop"):
             p.host.inp[5] = 0
@@ -826,7 +826,7 @@ class CardsLayer(Layer):
 
     def _prompt_pointer(self, px, py, click):
         if self.prompt.host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_prompt(self, held, dt):

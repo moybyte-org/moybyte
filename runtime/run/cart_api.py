@@ -447,7 +447,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # The console's own exit is the pause menu (`start`); quit() is the cart's.
         # ADDITIVE to the frozen kid API, works for ANY cart type. Sets a flag
         # the Player honors AFTER this frame's _update runs (player.tick), popping to
-        # the run caller via ws._exit_to_caller(). `quit` shadows the site builtin
+        # the run caller via ws.spine.exit_to_caller(). `quit` shadows the site builtin
         # inside the cart's exec namespace, resolving to this closure.
         input.cart_quit = True
 

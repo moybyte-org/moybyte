@@ -153,7 +153,7 @@ def test_every_run_reports_the_census_verdict_for_its_cart(tmp_path):
         if os.path.basename(cart["path"].rstrip("/")) in SEED_FREE:
             assert run["vm_free"] is True, cart["title"]
             seen += 1
-        ws.exit()
+        ws.spine.exit()
     assert seen >= 3, "the shelf no longer carries the VM-free seed games"
 
 

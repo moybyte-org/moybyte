@@ -206,7 +206,7 @@ holds go and `state`'s `wifi_held` names it (`http:12`). The station is held
 while any row is, and the rows are its one book: the kernel's WiFi driver
 powers the station on at the first row and off after the last
 (`native/moy_net/moy_net.h`'s THE BOOK), whoever takes them --
-`Workstation.wifi_hold` and `wifi_release`, a compiled program's `http`
+`Spine.wifi_hold` and `wifi_release`, a compiled program's `http`
 handle, the media service -- and a VM stop keeps the rows; the station's address coming and going is a NET record on the
 table's ring source `radio`, beside BLE's host (`between_apps.md` §4). The
 faces' events are NET, LORA, BLE, USB and
@@ -591,7 +591,7 @@ the stop's fit counts what the run holds as not given back
 (`moy_play_stop_fit`'s `media`), so a compiled game that fits with the music
 playing stops the VM and keeps it, and one that fits only without it is
 `KEEP_MEDIA`: the console asks first, "Stop the music to play <game>?", for a
-file's stream and a station's alike (the Player's `_music_keeps_the_vm`). The
+file's stream and a station's alike (`Pace.music_keeps_the_vm`). The
 kernel's own chrome draws no control for the stream; a run in the kernel's
 front with the VM up hands Super to the shell's pause menu, from which
 Music's status item is reached (`docs/theme_and_shell_2026-11.md` §1.5). A Python app making

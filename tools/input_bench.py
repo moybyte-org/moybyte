@@ -37,7 +37,7 @@ the tool is for. Numbers live in #66.
 
 **Input on wall-clock time.** The console plays a schedule against its own
 clock from inside its frame loop (`ws._ib`, installed over `ws.frame`,
-`ws.ball` and `ws.comp`), through an input-table source of its own
+`ws.router.ball` and `ws.comp`), through an input-table source of its own
 ("bench"): a finger is where a finger moving at that speed would be when a
 frame starts, a key goes down and up on its schedule, trackball pulses reach
 the console's own `ball`. A slow frame gets fewer, larger finger steps, as a
@@ -181,7 +181,7 @@ if ib is None:
     ib.wrapped = []                    # (object, attribute name) the bench set
     ib.ncv = []
     ib.of = ws.frame
-    ib.ob = ws.ball
+    ib.ob = ws.router.ball
     ib.oc = ws.comp
     ib.ov = getattr(ws.comp, 'overlap_stats', None)
     _lcd = getattr(ws.comp, '_lcd', None)
@@ -241,10 +241,10 @@ def _canvases():
     out = []
     wm = ws.wm
     for c in (getattr(ws.run, 'canvas', None), getattr(ws, 'sys_canvas', None),
-              getattr(wm, '_root_canvas', None)):
+              getattr(wm, 'root_canvas', None)):
         if c is not None and hasattr(c, '_clip_x0') and not any(c is o for o in out):
             out.append(c)
-    for w in (getattr(wm, '_wins', None) or {}).values():
+    for w in (getattr(wm, 'windows', None) or {}).values():
         b = getattr(w, 'buf', None)
         if b is not None and hasattr(b, '_clip_x0') and not any(b is o for o in out):
             out.append(b)
@@ -268,16 +268,16 @@ def _wrap():
             _timed(l, slot, nm == 'launcher')
         else:
             _timed(l, 0 if l is base else 4, l is base)
-    cf = getattr(wm, '_content_for', None)
-    for k in list(getattr(wm, '_order', []) or []):
-        w = wm._wins.get(k)
+    cf = getattr(wm, 'content_for', None)
+    for k in list(getattr(wm, 'z_order', []) or []):
+        w = wm.windows.get(k)
         c = cf(w.kind) if (w is not None and cf is not None) else None
         if c is not None and not getattr(c, '_ib_d', False):
             try:
                 _timed(c, 0, True)
             except Exception:
                 pass
-    rc = getattr(wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
+    rc = getattr(wm, 'root_canvas', None) or getattr(ws.run, 'canvas', None)
     if rc is not None and not getattr(rc, '_ib_d', False):
         for nm, slot in (('blit_strip', 1), ('blit_strip_rect', 1), ('copy_last', 6)):
             f = getattr(rc, nm, None)
@@ -454,7 +454,7 @@ def _bl(dx, dy, click=False):
     return r
 
 ws.frame = _fr
-ws.ball = _bl
+ws.router.ball = _bl
 
 def _ib_arm(ev, probe, ms, null=False):
     ib = ws._ib
@@ -510,13 +510,13 @@ def _ib_tail():
     return (ib.n, ib.bn, ib.p0, st[0], st[1])
 
 def _ib_speaks():
-    rc = getattr(ws.wm, '_root_canvas', None) or getattr(ws.run, 'canvas', None)
+    rc = getattr(ws.wm, 'root_canvas', None) or getattr(ws.run, 'canvas', None)
     return hasattr(ws, 'frame_change') or (rc is not None and hasattr(rc, 'shift_last'))
 
 def _ib_host(name):
     if name == 'settings':
         return ws.settings_layer._input_host()
-    a = ws._apps_by_id.get(name)
+    a = ws.app(name)
     return getattr(a, '_ui', None)
 
 import moy_ui as _mu
@@ -527,20 +527,20 @@ def _ib_off(name, x, y):
 
 def _ib_home(arr):
     if getattr(ws.wm, 'has_desk', False):
-        ws.open_library()
+        ws.home.open_library()
     else:
-        ws.go_home()
-    ws.set_home_arrangement(arr)
-    ws.set_home_tab('games')
+        ws.home.go_home()
+    ws.home.set_home_arrangement(arr)
+    ws.home.set_home_tab('games')
     ws.launcher.sel = 0
     ws.launcher._scroll_to_sel()
     ws.mark_dirty()
 
 def _ib_desk():
-    ws.go_home()
+    ws.home.go_home()
     if getattr(ws.wm, 'has_desk', False) and ws.wm.top_kind() != 'desktop':
         try:
-            ws.open_desk()
+            ws.home.open_desk()
         except Exception:
             pass
 
@@ -549,7 +549,7 @@ def _ib_app(app):
     if app == 'settings':
         ws.open_settings()
     else:
-        ws.open_app(ws._apps_by_id[app])
+        ws.spine.open_app(ws.app(app))
 
 def _ib_cart(title):
     for c in ws.carts.all:
@@ -572,7 +572,7 @@ def _ib_window():
     # the Editor a window, whatever this board last left it as (`win_full`):
     # the window is the WM's once a frame drew it, so this is a step after
     # _ib_editor; "Code full screen" is the rows that take it full (_ib_full)
-    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    _w = (getattr(ws.wm, 'windows', None) or {}).get('menu')
     if _w is not None and getattr(_w, 'full', None) is not None and _w.full():
         ws.wm.bring_forward('menu')
         ws.wm.full_key()
@@ -622,7 +622,7 @@ def _ib_picker():
 
 def _ib_full():
     # the window full screen (never a toggle: _ib_window left it a window)
-    _w = (getattr(ws.wm, '_wins', None) or {}).get('menu')
+    _w = (getattr(ws.wm, 'windows', None) or {}).get('menu')
     f = getattr(ws.wm, 'full_key', None)
     if f is not None and not (_w is not None and getattr(_w, 'full', None) is not None
                               and _w.full()):
@@ -687,7 +687,7 @@ _ib_s['tab'] = ws.launcher.tab
 _ib_s['theme'] = ws.look.file_text()
 _cl = getattr(ws, 'clipboard', None)
 _ib_s['clip'] = _cl.text() if _cl is not None else None
-_ib_s['full'] = set(k for k, w in (getattr(ws.wm, '_wins', None) or {}).items()
+_ib_s['full'] = set(k for k, w in (getattr(ws.wm, 'windows', None) or {}).items()
                     if getattr(w, 'full', None) is not None and w.full())
 _ib_s['win_full'] = ws.system.get('win_full', None)
 """
@@ -816,7 +816,7 @@ CLEANUP_STEPS = (
     "_cl = getattr(ws, 'clipboard', None)\n"
     "if _cl is not None and ws._ib_s.get('clip') is not None:\n"
     "    _cl.put_text(ws._ib_s['clip'])",
-    "for _k, _w in list((getattr(ws.wm, '_wins', None) or {}).items()):\n"
+    "for _k, _w in list((getattr(ws.wm, 'windows', None) or {}).items()):\n"
     "    if getattr(_w, 'full', None) is not None and _w.full() and _k not in ws._ib_s['full']:\n"
     "        ws.wm.bring_forward(_k)\n"
     "        ws.wm.full_key()",
@@ -836,13 +836,13 @@ CLEANUP_STEPS = (
     "            except OSError:\n"
     "                pass",
     "for _k, _v in (('carousel', None), ('grid', None), ('icons', None)):\n"
-    "    ws.set_home_arrangement(_k)\n"
+    "    ws.home.set_home_arrangement(_k)\n"
     "    if type(ws.launcher) is ws._ib_s['home']:\n"
     "        break",
-    "ws.set_home_tab(ws._ib_s['tab'])",
+    "ws.home.set_home_tab(ws._ib_s['tab'])",
     "if 'tn' in ws._ib_s:\n"
     "    ws.look.set_theme(ws._ib_s['tn'], persist=False)",
-    "ws.go_home()\nws.mark_dirty()",
+    "ws.home.go_home()\nws.mark_dirty()",
 )
 
 # A note long enough to scroll (under the editor handle's 8000 characters,
@@ -1697,7 +1697,7 @@ def surfaces():
         s.append(Surface("home " + arr, _home(arr), "ws.launcher._region.offset", px=True,
                          axis="h" if h else "v", keys=("right", "left") if h else ("down", "up"),
                          rect="band"))
-    s.append(Surface("PROJECTS", [("_ib_desk()\nws.open_projects()", 6.0)],
+    s.append(Surface("PROJECTS", [("_ib_desk()\nws.home.open_projects()", 6.0)],
                      "ws.projects_grid._region.offset", px=True, axis="h",
                      keys=("right", "left"), where="desk", rect="projects"))
     for app, label in (("settings", "Settings"), ("files", "Files"), ("getcarts", "Get Carts"),
@@ -1730,7 +1730,7 @@ def surfaces():
          "ws.editor.col = 0\nws.mark_dirty()", 1.0)], "ws.editor.left * 1000 + ws.editor.col",
         axis="h", keys=("right", "left"), inputs=("key_steps", "ball_slow", "ball_fast"),
         rect=CODE_RECT))
-    s.append(Surface("Theme Config text", [("_ib_desk()\nws.edit_theme()", 4.0),
+    s.append(Surface("Theme Config text", [("_ib_desk()\nws.text.edit_theme()", 4.0),
                                            ("ws._ib_theme0 = ws.editor.text()\n"
                                             "ws.editor.row = 0\nws.editor.col = 0\n"
                                             "ws.editor.top = 0\nws.mark_dirty()", 1.0)],
@@ -1768,7 +1768,7 @@ def surfaces():
     s.append(Surface("Pause card", [("_ib_desk()", 1.0), ("@run Star Catcher", 4.0),
                                     ("ws.pause.show()\nws.mark_dirty()", 1.5)],
                      "ws.pause.sel", inputs=("key_steps", "key_20"),
-                     teardown="ws.pause.open and ws.pause.close()\nws.exit()"))
+                     teardown="ws.pause.open and ws.pause.close()\nws.spine.exit()"))
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
@@ -1785,15 +1785,15 @@ def surfaces():
     s.append(Surface("Map", _ed(SCRATCH, "map", "art"), rect=RIGHT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
     s.append(Surface("Notes", _NOTES, "(lambda h: h.ed.top * 100000 + h.ed.row * 1000 + "
-                     "h.ed.col if h else -1)(ws.run.player._focus_editor)",
+                     "h.ed.col if h else -1)(ws.run.player.focus_editor)",
                      inputs=("fling", "drag", "key_steps", "key_held", "type", "type_fast",
                              "type_line", "ball_slow"),
-                     rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.exit()"))
+                     rect=(0.4, 0.2, 0.55, 0.6), teardown=_NOTES_OUT + "\nws.spine.exit()"))
     s.append(Surface("Text console", [("_ib_desk()", 1.0),
                                       ("ws.run_script('docs', ws._ib_script)", 4.0)],
                      "ws.script_console.top", inputs=("fling", "drag", "type", "type_fast",
                                                        "ball_slow"),
-                     teardown="ws.exit()"))
+                     teardown="ws.spine.exit()"))
     return s
 
 

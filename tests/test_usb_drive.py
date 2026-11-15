@@ -162,12 +162,12 @@ def ws(tmp_path):
     from runtime import host_app
     w = host_app.build_workstation(str(tmp_path / "carts"))
     w.rescans = 0
-    was = w.rescan_carts
+    was = w.carts.synced
 
     def rescan(folders=None):
         w.rescans += 1
         return was(folders)
-    w.rescan_carts = rescan
+    w.carts.synced = rescan
     return w
 
 
@@ -206,7 +206,7 @@ def test_the_console_opens_nothing_while_the_card_is_on_usb(ws):
     d.turn_on(ws)
     cart = ws.carts.all[0]
     ws.open(cart)
-    assert ws.cart is not cart and ws._notice[0] == "USB drive is on"
+    assert ws.cart is not cart and ws.notice_up[0] == "USB drive is on"
     d.turn_off(ws)
     assert not ws.usb_drive_refuses()
 

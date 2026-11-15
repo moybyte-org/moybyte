@@ -288,10 +288,10 @@ def _app_ui_host_words(tmp_path):
     ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
     for _ in range(9):
         quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1.0 / 30.0)
     words = tier_frame.from_canvas(ws.sys_canvas._buf, True)     # the host keeps panel order
-    ws.exit()
+    ws.spine.exit()
     return words
 
 

@@ -49,18 +49,18 @@ static size_t table_row_end(const uint8_t *cells, size_t cells_n, int nc, size_t
 // Whether this frame's pass draws row box b of a table: on a frame drawn
 // whole, or outside a shift frame's R, or where its floor reaches.
 static int row_draws(const moy_ui_ctx_t *c, moy_ui_box_t b) {
-    if (!mua_armed(c) || c->fl_stage == 0) {
+    if (!mua_armed(c) || c->fl.stage == 0) {
         return 1;
     }
-    if (!mua_rc_meets(mua_rc_of(b), mua_rc_of(c->sh_r))) {
-        return !(c->sh_dlg && c->fl_stage == 1);
+    if (!mua_rc_meets(mua_rc_of(b), mua_rc_of(c->sh.r))) {
+        return !(c->sh.dlg && c->fl.stage == 1);
     }
     return mua_floor_meets(c, b);
 }
 
 // The part open (moy_ui_api_table_part) closes: its ids no longer scoped.
 static void part_out(moy_ui_ctx_t *c) {
-    c->tp_open = 0;
+    c->tp.open = 0;
     c->scope = 0;
 }
 
@@ -68,15 +68,15 @@ static void part_out(moy_ui_ctx_t *c) {
 // rows run on past, over them.
 void mua_parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     part_out(c);
-    if (c->tp_id && c->tp_carry) {
+    if (c->tp.id && c->tp.carry) {
         // the stops in the parts of the rows the frame carried, as the last
         // frame drew them, moved with their rows
-        int dy = c->tp_y0 - c->tp_py0;
+        int dy = c->tp.y0 - c->tp.py0;
         for (int i = 0; i < c->n_prev && c->n_cur < MOY_UI_API_STOPS; i++) {
             const moy_ui_stop_t *q = &c->prev[i];
-            int k = q->row - c->tp_v0;
-            if (q->top != INT16_MIN || q->row < c->tp_v0 || q->row >= c->tp_e || k >= 64
-                || (c->tp_ans >> k) & 1u) {
+            int k = q->row - c->tp.v0;
+            if (q->top != INT16_MIN || q->row < c->tp.v0 || q->row >= c->tp.e || k >= 64
+                || (c->tp.ans >> k) & 1u) {
                 continue;
             }
             moy_ui_stop_t *t = &c->cur[c->n_cur++];
@@ -85,10 +85,10 @@ void mua_parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
             t->page = c->page_stop;
         }
     }
-    if (c->tp_id && c->tp_fade) {
-        mua_edge_fades(c, s, c->tp_view, c->tp_n * c->tp_rh, c->tp_off, MOY_UI_DEFAULT, 1, c->tp_rh);
+    if (c->tp.id && c->tp.fade) {
+        mua_edge_fades(c, s, c->tp.view, c->tp.n * c->tp.rh, c->tp.off, MOY_UI_DEFAULT, 1, c->tp.rh);
     }
-    c->tp_id = 0;
+    c->tp.id = 0;
 }
 
 // -- blocks of fields an app sets through the engine (moy_ui_api_block_*) ------
@@ -198,7 +198,7 @@ int32_t moy_ui_api_block_key(moy_ui_inst_t *I, moy_ui_span_t id) {
 static int page_open_on(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int top, int head, int rh,
                         int row, int count) {
     moy_ui_keep_t *k = mua_page_keep(c);
-    if (k == NULL || c->scroll != 0 || c->page_stop == NO_PAGE || c->sh_dlg) {
+    if (k == NULL || c->scroll != 0 || c->page_stop == NO_PAGE || c->sh.dlg) {
         return 0;
     }
     int vis = c->page.h;
@@ -233,7 +233,7 @@ static int page_open_on(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int top, int he
         c->grp_last.y = (int16_t)(c->grp_last.y - to);
     }
     c->scroll = (int16_t)to;
-    k->a = to;
+    k->scroll = to;
     k->drawn = to;
     return 1;
 }
@@ -306,7 +306,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     uint32_t id = mua_id_of(c, o, label);
     int disabled = o->disabled == 1;
-    moy_ui_keep_t *kp = disabled || !placed ? NULL : mua_keep(c, id, 1);
+    moy_ui_keep_t *kp = disabled || !placed ? NULL : mua_keep(c, id, MOY_UI_KEEP_PAGE);
     int carry = part && kp != NULL && !xa;
     if (cur >= count) {
         cur = count - 1;
@@ -353,9 +353,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (st < 0) {
         st = 0;
     }
-    int offset = kp != NULL ? kp->a : 0;
+    int offset = kp != NULL ? kp->scroll : 0;
     // what the last frame drew, for a shift frame's floor
-    int32_t was_drawn = kp != NULL ? kp->drawn : 0, was_b = kp != NULL ? kp->b : 0;
+    int32_t was_drawn = kp != NULL ? kp->drawn : 0, was_b = kp != NULL ? kp->rows : 0;
     int32_t was_gen = kp != NULL ? kp->gen : 0;
     int was_kd = kp != NULL ? kp->kd : 0, was_rh = kp != NULL ? kp->rh : 0;
     int opened = 0;
@@ -380,12 +380,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (kp != NULL) {
         // the rows' own scroll: a step glides it to the row, where the
         // frame has a clock (with none, it is there at once)
-        kp->b = content;
+        kp->rows = content;
         // a step or a tap moved it, else the app did (its own keys); a
         // table's first frame (no row height drawn yet) opens on its
         // current row, wherever the app put it
         int stepped = focused && ((xa ? c->step_x : c->step_y) || (st & MOY_UI_ST_ACTIVATED));
-        int moved = !stepped && cur >= 0 && ((carry && cur != c->tc_cur) || kp->rh == 0);
+        int moved = !stepped && cur >= 0 && ((carry && cur != c->tc.cur) || kp->rh == 0);
         int snap = o->snap == 1 && count > 0 && !o->has_offset;
         if (cur >= 0 && (stepped || moved) && !o->has_offset) {
             int to = (kp->sc.flags & MOY_UI_SCROLL_GLIDE) ? kp->sc.target : offset;
@@ -399,8 +399,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             }
             if (to != was && c->in[MOY_UI_IN_DT] > 0 && !moved) {
                 int32_t off = offset;   // the glide's first step is this frame's
-                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, ext);
-                moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, ext);
+                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->rows, ext);
+                moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->rows, ext);
                 offset = off;
             } else if (to != was) {
                 offset = to;            // the app moved its current row: it lands at once
@@ -417,8 +417,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 cur = near;
                 if (c->in[MOY_UI_IN_DT] > 0) {
                     int32_t off = offset;
-                    moy_ui_scroll_glide_to(&kp->sc, offset, near * rh, 1, kp->b, ext);
-                    moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, ext);
+                    moy_ui_scroll_glide_to(&kp->sc, offset, near * rh, 1, kp->rows, ext);
+                    moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->rows, ext);
                     offset = off;
                 } else {
                     offset = near * rh;
@@ -432,7 +432,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         if (!o->has_offset && offset < 0) {
             offset = 0;
         }
-        kp->a = offset;
+        kp->scroll = offset;
         kp->drawn = offset;
         kp->gen = o->gen;
         kp->rh = (int16_t)rh;
@@ -452,11 +452,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             c->reveal_id = id;
         }
     }
-    c->tbl_y0 = (int16_t)(view.y - offset);
-    c->tbl_rh = (int16_t)rh;
-    c->tbl_n = (int16_t)count;
-    c->tbl_view = view;
-    c->tbl_px = c->tbl_pw = 0;
+    c->tbl.y0 = (int16_t)(view.y - offset);
+    c->tbl.rh = (int16_t)rh;
+    c->tbl.n = (int16_t)count;
+    c->tbl.view = view;
+    c->tbl.px = c->tbl.pw = 0;
     if (st >= 0 && !disabled && !carry) {
         // (a carried table's rows are their record's: a row whose cells or
         // marks changed draws again)
@@ -493,11 +493,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
     }
     uint32_t geo = mua_hash((const uint8_t *)&g, sizeof(g), (uint32_t)rh);
-    int valid = kept && c->tc_id == id && c->tc_k >= 0 && c->tc_geo == geo
-                && mua_same_box(c->tc_view, view) && c->tc_rh == rh && c->tc_n == count;
+    int valid = kept && c->tc.id == id && c->tc.k >= 0 && c->tc.geo == geo
+                && mua_same_box(c->tc.view, view) && c->tc.rh == rh && c->tc.n == count;
     int mark = (st & MOY_UI_ST_FOCUS) != 0 && o->mark != 0;
-#define TC_CHANGED(i) (!valid || (i) < c->tc_r0 || (i) >= c->tc_r0 + c->tc_k \
-                       || c->tc_h[(i) - c->tc_r0] != hv[(i) - vis0])
+#define TC_CHANGED(i) (!valid || (i) < c->tc.r0 || (i) >= c->tc.r0 + c->tc.k \
+                       || c->tc.h[(i) - c->tc.r0] != hv[(i) - vis0])
     if ((g.pic || part) && !disabled && c->n_cur > 0 && c->cur[c->n_cur - 1].id == id) {
         // the app draws its pictures (its parts): with no gen, a picture
         // column's view never shifts; a part's rows carry their records
@@ -521,24 +521,24 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             }
             vs->sig = carry ? 0 : mua_hash(cells, cells_n, (uint32_t)nc);
         }
-        if (mua_armed(c) && c->fl_stage == 0 && id == c->sh_id) {
+        if (mua_armed(c) && c->fl.stage == 0 && id == c->sh.id) {
             // the view is R: its floor, from what the last frame drew
             table_r = 1;
-            int early = c->fl_early;
-            c->fl_stage = 1;
+            int early = c->fl.early;
+            c->fl.stage = 1;
             if (!early) {
-                c->fl_n = 0;
-                c->fl_pend = 0;
+                c->fl.n = 0;
+                c->fl.pend = 0;
             }
-            c->fl_p0 = c->fl_pn = 0;
-            c->fl_s0 = (uint8_t)c->n_cur;
-            moy_ui_box_t r = c->sh_r;
+            c->fl.p0 = c->fl.pn = 0;
+            c->fl.s0 = (uint8_t)c->n_cur;
+            moy_ui_box_t r = c->sh.r;
             const moy_ui_stop_t *q = mua_table_of(c->prev, c->n_prev, id);
             int same = carry ? valid && (was_kd & MOY_UI_KD_GEN)
                              : o->has_gen && (was_kd & MOY_UI_KD_GEN) && o->gen == was_gen;
-            if (q == NULL || !same || !mua_same_box(view, r) || offset - was_drawn != -c->sh_dy
+            if (q == NULL || !same || !mua_same_box(view, r) || offset - was_drawn != -c->sh.dy
                 || was_b != count * rh || was_rh != rh) {
-                c->fl_struct = 1;
+                c->fl.unlike = 1;
                 mua_floor_rows(c, r.y, r.y + r.h, 1);
             } else {
                 int base = view.y - offset;
@@ -564,16 +564,16 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                     }
                 }
             }
-        } else if (xa && mua_armed(c) && c->fl_stage == 1 && !c->sh_dlg && !c->fl_mute
-                   && mua_rc_meets(mua_rc_of(view), mua_rc_of(c->sh_r))) {
+        } else if (xa && mua_armed(c) && c->fl.stage == 1 && !c->sh.dlg && !c->fl.mute
+                   && mua_rc_meets(mua_rc_of(view), mua_rc_of(c->sh.r))) {
             mua_floor_add(c, mua_rc_of(view), 1);   // inside a page that moved or holds: whole
-        } else if (carry && mua_armed(c) && c->fl_stage == 1 && !c->sh_dlg && !c->fl_mute
-                   && mua_rc_meets(mua_rc_of(view), mua_rc_of(c->sh_r))) {
+        } else if (carry && mua_armed(c) && c->fl.stage == 1 && !c->sh.dlg && !c->fl.mute
+                   && mua_rc_meets(mua_rc_of(view), mua_rc_of(c->sh.r))) {
             // inside the R of a page that moved or holds: the rows whose
             // cells or marks changed join its floor, over the page's ground
-            // the host moved its rows by the table's move (sh_in_dy)
-            int inner = c->sh_in_id == id && offset - c->tc_off == -c->sh_in_dy;
-            if (!valid || (offset != c->tc_off && !inner)) {
+            // the host moved its rows by the table's move (sh.in_dy)
+            int inner = c->sh.in_id == id && offset - c->tc.off == -c->sh.in_dy;
+            if (!valid || (offset != c->tc.off && !inner)) {
                 mua_floor_add(c, mua_rc_of(view), 1);
             } else {
                 int base = view.y - offset, reach = mua_mark_room(c);
@@ -593,9 +593,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                         mua_floor_add(c, w, 1);
                     }
                 }
-                if (cur != c->tc_cur || mark != c->tc_mark) {
+                if (cur != c->tc.cur || mark != c->tc.mark) {
                     for (int w = 0; w < 2; w++) {
-                        int i = w ? cur : c->tc_cur;
+                        int i = w ? cur : c->tc.cur;
                         rc_t q = {vr.x0, base + i * rh - reach, vr.x1, base + (i + 1) * rh + reach};
                         if (i >= 0 && mua_rc_cut(&q, vr)) {
                             mua_floor_add(c, q, 1);
@@ -624,7 +624,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     // a table that keeps its parts: its floor from the paint the buffer
     // holds; any other table's is its view
     kept_ring_t *kr = NULL;
-    int keeping = part && placed && kp != NULL && !disabled && o->has_keep && c->kt_k > 0
+    int keeping = part && placed && kp != NULL && !disabled && o->has_keep && c->kf.k > 0
                   && (kr = mua_ring_of(c, 1)) != NULL;
     if (keeping) {
         // each part's record: a row's own, or with `across` each cell's
@@ -661,26 +661,26 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         mua_kept_table(c, kr, o, id, geo, view, offset, rh, count, cur, at, mark, vis0, nr, np, kh,
                        a0 + lead - offset, sp, xa);
     } else {
-        c->kf[0] = view;
-        c->kf_n = (uint8_t)(view.w > 0 && view.h > 0);
-        c->kf_i = c->kf_copy = c->kf_took = c->kf_ci = c->kf_sh = 0;
-        c->kf_held = MOY_UI_KF_HELD;
+        c->kf.box[0] = view;
+        c->kf.n = (uint8_t)(view.w > 0 && view.h > 0);
+        c->kf.i = c->kf.copy = c->kf.took = c->kf.ci = c->kf.sh = 0;
+        c->kf.held = MOY_UI_KF_HELD;
     }
-    int16_t tc_y0 = c->tc_y0;              // the last frame's, for the parts' stops
+    int16_t tc_y0 = c->tc.y0;              // the last frame's, for the parts' stops
     if (carry) {
-        c->tc_y0 = (int16_t)(view.y - offset);
-        c->tc_id = id;
-        c->tc_geo = geo;
-        c->tc_view = view;
-        c->tc_off = offset;
-        c->tc_rh = (int16_t)rh;
-        c->tc_n = (int16_t)count;
-        c->tc_cur = (int16_t)cur;
-        c->tc_mark = (uint8_t)mark;
-        c->tc_r0 = (int16_t)vis0;
-        c->tc_k = (int16_t)(kept ? nk : -1);
+        c->tc.y0 = (int16_t)(view.y - offset);
+        c->tc.id = id;
+        c->tc.geo = geo;
+        c->tc.view = view;
+        c->tc.off = offset;
+        c->tc.rh = (int16_t)rh;
+        c->tc.n = (int16_t)count;
+        c->tc.cur = (int16_t)cur;
+        c->tc.mark = (uint8_t)mark;
+        c->tc.r0 = (int16_t)vis0;
+        c->tc.k = (int16_t)(kept ? nk : -1);
         if (kept) {
-            memcpy(c->tc_h, hv, (size_t)nk * sizeof(hv[0]));
+            memcpy(c->tc.h, hv, (size_t)nk * sizeof(hv[0]));
         }
     }
     clip_t k;
@@ -694,8 +694,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         int grp = stacked && c->grp_open;
         moy_ui_box_t gcard = mua_card_of(c);
         if (g.pic && !part) {
-            c->tbl_px = g.x[0];
-            c->tbl_pw = g.w[0];
+            c->tbl.px = g.x[0];
+            c->tbl.pw = g.w[0];
         }
         if (head_h) {
             moy_ui_table_head(s, (moy_ui_box_t){b.x, (int16_t)(b.y + cap_h), b.w, (int16_t)head_h},
@@ -754,10 +754,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     if (table_r) {
         mua_ground_due(c, s);
-        if (c->fl_lost && c->inst->audit_on) {
+        if (c->fl.lost && c->inst->audit_on) {
             c->inst->audit_fail++;
         }
-        c->fl_stage = 2;
+        c->fl.stage = 2;
         c->pic_tbl = 1;
     }
     if (part && !disabled) {
@@ -766,31 +766,31 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         if (stacked) {
             mua_rc_cut(&pv, mua_rc_of(c->page));
         }
-        c->tp_id = id;
-        c->tp_view = mua_box_of(pv);
-        c->tp_x1 = (uint8_t)xa;
-        c->tp_x0 = (int16_t)(view.x + lead - offset);
-        c->tp_spill = (int16_t)sp;
-        c->tp_mid2 = xa ? 2 * view.x + view.w : 2 * view.y + view.h;
-        c->tp_dist = 0;
-        c->tp_y0 = (int16_t)(xa ? view.y : view.y + lead - offset);
-        c->tp_rh = (int16_t)rh;
-        c->tp_i = (int16_t)vis0;
-        c->tp_e = (int16_t)vis1;
-        c->tp_x = g.x[0];
-        c->tp_w = g.w[0];
-        c->tp_n = (int16_t)count;
-        c->tp_off = offset;
-        c->tp_v0 = (int16_t)vis0;
-        c->tp_ans = 0;
-        c->tp_py0 = tc_y0;
-        c->tp_carry = (uint8_t)(carry && valid && mua_armed(c) && c->fl_stage != 0);
-        c->tp_keep = (uint8_t)keeping;
-        c->tp_np = (uint8_t)(o->has_across && nc < 256 ? nc : 1);
+        c->tp.id = id;
+        c->tp.view = mua_box_of(pv);
+        c->tp.x1 = (uint8_t)xa;
+        c->tp.x0 = (int16_t)(view.x + lead - offset);
+        c->tp.spill = (int16_t)sp;
+        c->tp.mid2 = xa ? 2 * view.x + view.w : 2 * view.y + view.h;
+        c->tp.dist = 0;
+        c->tp.y0 = (int16_t)(xa ? view.y : view.y + lead - offset);
+        c->tp.rh = (int16_t)rh;
+        c->tp.i = (int16_t)vis0;
+        c->tp.e = (int16_t)vis1;
+        c->tp.x = g.x[0];
+        c->tp.w = g.w[0];
+        c->tp.n = (int16_t)count;
+        c->tp.off = offset;
+        c->tp.v0 = (int16_t)vis0;
+        c->tp.ans = 0;
+        c->tp.py0 = tc_y0;
+        c->tp.carry = (uint8_t)(carry && valid && mua_armed(c) && c->fl.stage != 0);
+        c->tp.keep = (uint8_t)keeping;
+        c->tp.np = (uint8_t)(o->has_across && nc < 256 ? nc : 1);
         // (rows side by side, and rows the app scrolls itself, fade at no edge)
-        c->tp_fade = (uint8_t)(placed && !xa && !o->has_offset && pv.x0 < pv.x1 && pv.y0 < pv.y1);
+        c->tp.fade = (uint8_t)(placed && !xa && !o->has_offset && pv.x0 < pv.x1 && pv.y0 < pv.y1);
         if (xa) {
-            c->tp_w = (int16_t)(ph > 0 && ph < view.h ? ph : view.h);   // a row's height
+            c->tp.w = (int16_t)(ph > 0 && ph < view.h ? ph : view.h);   // a row's height
         }
     }
     out[0] = cur;
@@ -799,47 +799,47 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
 
 int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t out[8]) {
     part_out(c);
-    while (c->tp_id && c->tp_i < c->tp_e) {
-        int i = c->tp_i++;
-        int sp = c->tp_spill;
-        int x = c->tp_x1 ? c->tp_x0 + i * c->tp_rh : c->tp_x;
-        int y = c->tp_x1 ? c->tp_y0 : c->tp_y0 + i * c->tp_rh;
-        int w = c->tp_x1 ? c->tp_rh : c->tp_w, h = c->tp_x1 ? c->tp_w : c->tp_rh;
+    while (c->tp.id && c->tp.i < c->tp.e) {
+        int i = c->tp.i++;
+        int sp = c->tp.spill;
+        int x = c->tp.x1 ? c->tp.x0 + i * c->tp.rh : c->tp.x;
+        int y = c->tp.x1 ? c->tp.y0 : c->tp.y0 + i * c->tp.rh;
+        int w = c->tp.x1 ? c->tp.rh : c->tp.w, h = c->tp.x1 ? c->tp.w : c->tp.rh;
         // what shows of the cell, and of the room past it a part may draw in
         rc_t q = {x - sp, y - sp, x + w + sp, y + h + sp};
-        if (!c->tp_x1 && !sp) {
-            q.x0 = c->tp_view.x;
-            q.x1 = c->tp_view.x + c->tp_view.w;
+        if (!c->tp.x1 && !sp) {
+            q.x0 = c->tp.view.x;
+            q.x1 = c->tp.view.x + c->tp.view.w;
         }
-        if (!mua_rc_cut(&q, mua_rc_of(c->tp_view)) || !row_draws(c, mua_box_of(q))) {
+        if (!mua_rc_cut(&q, mua_rc_of(c->tp.view)) || !row_draws(c, mua_box_of(q))) {
             continue;
         }
-        if (!c->tp_x1 && !sp) {
+        if (!c->tp.x1 && !sp) {
             q.x0 = x;
             q.x1 = x + w;
-            if (!mua_rc_cut(&q, mua_rc_of(c->tp_view))) {
+            if (!mua_rc_cut(&q, mua_rc_of(c->tp.view))) {
                 continue;
             }
         }
-        if (c->tp_keep) {
+        if (c->tp.keep) {
             // a kept table's part draws inside the floor rect it meets (one:
             // the floor's rects lie further apart than a part's reach)
             int k = 0;
-            while (k < c->kf_n && !mua_rc_meets(q, mua_rc_of(c->kf[k]))) {
+            while (k < c->kf.n && !mua_rc_meets(q, mua_rc_of(c->kf.box[k]))) {
                 k++;
             }
-            if (k == c->kf_n || (c->kf_took & (1u << k)) || !mua_rc_cut(&q, mua_rc_of(c->kf[k]))) {
+            if (k == c->kf.n || (c->kf.took & (1u << k)) || !mua_rc_cut(&q, mua_rc_of(c->kf.box[k]))) {
                 continue;
             }
         }
-        int along = c->tp_x1 ? 2 * x + w : 2 * y + h;
-        c->tp_dist = (int32_t)(((int64_t)(along - c->tp_mid2) * 128) / (c->tp_rh > 0 ? c->tp_rh : 1));
-        c->tp_open = 1;
-        c->tp_row = (int16_t)i;
-        if (i - c->tp_v0 < 64) {
-            c->tp_ans |= (uint64_t)1 << (i - c->tp_v0);
+        int along = c->tp.x1 ? 2 * x + w : 2 * y + h;
+        c->tp.dist = (int32_t)(((int64_t)(along - c->tp.mid2) * 128) / (c->tp.rh > 0 ? c->tp.rh : 1));
+        c->tp.open = 1;
+        c->tp.row = (int16_t)i;
+        if (i - c->tp.v0 < 64) {
+            c->tp.ans |= (uint64_t)1 << (i - c->tp.v0);
         }
-        c->scope = mua_hash((const uint8_t *)&i, sizeof(i), c->tp_id);
+        c->scope = mua_hash((const uint8_t *)&i, sizeof(i), c->tp.id);
         out[0] = x;                     // the cell whole
         out[1] = y;
         out[2] = w;
@@ -855,7 +855,61 @@ int32_t moy_ui_api_table_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int32_t o
 }
 
 int32_t moy_ui_api_table_dist(const moy_ui_ctx_t *c) {
-    return c->tp_open ? c->tp_dist : 0;
+    return c->tp.open ? c->tp.dist : 0;
+}
+
+// -- a field's edit ------------------------------------------------------------------
+//
+// The text a field held when focus came onto it, or as Enter last left it,
+// under its context and id in its instance (moy_ui_inst's `edits`, taken at
+// the first edit): MOY_UI_API_EDITS at once, a new edit taking the place of
+// the one used least recently where every place is taken. The field's
+// record (moy_ui_keep_t, MOY_UI_KEEP_FIELD) says whether its edit is in
+// progress and carries a cancel.
+
+typedef struct mua_edit {
+    const void *ctx;                // NULL: free
+    uint32_t id, seq;
+    uint16_t n;
+    uint8_t buf[MOY_UI_API_UNDO];
+} mua_edit_t;
+
+static mua_edit_t *edit_of(moy_ui_inst_t *I, const moy_ui_ctx_t *c, uint32_t id, int make) {
+    mua_edit_t *e = I->edits, *pick = NULL;
+    for (int i = 0; e != NULL && i < MOY_UI_API_EDITS; i++) {
+        if (e[i].ctx == c && e[i].id == id) {
+            e[i].seq = ++I->edit_seq;
+            return &e[i];
+        }
+        if (pick == NULL || (pick->ctx != NULL && (e[i].ctx == NULL || e[i].seq < pick->seq))) {
+            pick = &e[i];
+        }
+    }
+    if (!make) {
+        return NULL;
+    }
+    if (e == NULL) {
+        e = I->edits = (mua_edit_t *)KEPT_ALLOC(MOY_UI_API_EDITS * sizeof(mua_edit_t));
+        if (e == NULL) {
+            return NULL;
+        }
+        memset(e, 0, MOY_UI_API_EDITS * sizeof(mua_edit_t));
+        pick = &e[0];
+    }
+    pick->ctx = c;
+    pick->id = id;
+    pick->n = 0;
+    pick->seq = ++I->edit_seq;
+    return pick;
+}
+
+void mua_edits_drop(moy_ui_inst_t *I, const moy_ui_ctx_t *c, uint32_t id) {
+    mua_edit_t *e = I->edits;
+    for (int i = 0; e != NULL && i < MOY_UI_API_EDITS; i++) {
+        if (e[i].ctx == c && (id == 0 || e[i].id == id)) {
+            e[i].ctx = NULL;
+        }
+    }
 }
 
 int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
@@ -887,20 +941,29 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     int done = 0;
     uint32_t id = at >= 0 ? c->cur[at].id : 0;
     moy_ui_inst_t *I = c->inst;
-    if (c->fe_cancel == 2 && id != 0 && id == c->fe_id) {
-        if (I->fe_ctx == c && I->fe_n <= cap) {
-            memcpy(buf, I->fe_buf, I->fe_n);    // a cancel: the text the edit began from
-            len = I->fe_n;
-        }
-        c->fe_cancel = 0;
+    // its record: made when focus comes onto it, kept while its edit is in
+    // progress or it holds focus
+    int focused = (st & MOY_UI_ST_FOCUS) && id != 0 && !c->elsewhere;
+    moy_ui_keep_t *fk = id != 0 ? mua_keep(c, id, focused ? MOY_UI_KEEP_FIELD : 0) : NULL;
+    if (fk != NULL && fk->kind != MOY_UI_KEEP_FIELD) {
+        fk = NULL;
+    } else if (fk != NULL && !focused && fk->cancel == 1) {
+        fk->cancel = 0;                     // a cancel its focus left before it was given
     }
-    if ((st & MOY_UI_ST_FOCUS) && id != 0 && !c->elsewhere && c->fe_cancel != 2
-        && (id != c->fe_id || I->fe_ctx != c)
-        && len <= sizeof I->fe_buf) {
-        c->fe_id = id;                      // focus came onto it: an edit begins here
-        I->fe_ctx = c;
-        memcpy(I->fe_buf, buf, len);
-        I->fe_n = (uint16_t)len;
+    mua_edit_t *e = fk != NULL ? edit_of(I, c, id, 0) : NULL;
+    if (fk != NULL && fk->cancel == 2) {
+        if (e != NULL && e->n <= cap) {
+            memcpy(buf, e->buf, e->n);      // a cancel: the text the edit began from
+            len = e->n;
+        }
+        fk->cancel = 0;
+    }
+    if (focused && fk != NULL && e == NULL && len <= MOY_UI_API_UNDO) {
+        e = edit_of(I, c, id, 1);           // focus came onto it: an edit begins here
+        if (e != NULL) {
+            memcpy(e->buf, buf, len);
+            e->n = (uint16_t)len;
+        }
     }
     if ((st & MOY_UI_ST_FOCUS) && c->typed) {
         int k = c->typed;
@@ -934,23 +997,27 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {
         done = 1;
     }
-    if (id != 0 && id == c->fe_id && I->fe_ctx == c) {
-        if (done && len <= sizeof I->fe_buf) {
-            memcpy(I->fe_buf, buf, len);    // Enter keeps what it confirmed
-            I->fe_n = (uint16_t)len;
+    if (fk != NULL) {
+        if (e != NULL && done && len <= sizeof e->buf) {
+            memcpy(e->buf, buf, len);       // Enter keeps what it confirmed
+            e->n = (uint16_t)len;
         }
-        c->fe_live = (uint8_t)(len != I->fe_n || memcmp(buf, I->fe_buf, len) != 0);
+        fk->live = (uint8_t)(e != NULL && (len != e->n || memcmp(buf, e->buf, len) != 0));
+        if (!fk->live && !focused) {
+            mua_edits_drop(I, c, id);       // focus left it with nothing to give back
+            fk->id = 0;
+        }
     }
     if (at >= 0) {
         // a field's stop keeps its text's hash in its gen: text that changed
         // with no key typed into it (the app's own) draws its row again
         int32_t h = (int32_t)mua_hash(buf, len, 0x51ed270bu);
         c->cur[at].gen = h;
-        int j = at - c->fl_s0;
-        const moy_ui_stop_t *q = mua_armed(c) && c->fl_stage == 1 && !c->fl_struct && !c->fl_mute
-                                 && j >= 0 && j < c->fl_pn ? &c->prev[c->fl_p0 + j] : NULL;
+        int j = at - c->fl.s0;
+        const moy_ui_stop_t *q = mua_armed(c) && c->fl.stage == 1 && !c->fl.unlike && !c->fl.mute
+                                 && j >= 0 && j < c->fl.pn ? &c->prev[c->fl.p0 + j] : NULL;
         if (q != NULL && q->id == c->cur[at].id && q->gen != h && !mua_floor_holds(c, b)) {
-            if (c->sh_dlg) {
+            if (c->sh.dlg) {
                 mua_dlg_widen(c, b.y, b.y + b.h);
             } else {
                 mua_floor_add(c, mua_rc_of(b), 1);
@@ -1004,7 +1071,7 @@ void mua_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 }
 
 void moy_ui_api_wash(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
-    c->fl_dirty = 1;                    // over the page: the next frame draws it whole
+    c->fl.dirty = 1;                    // over the page: the next frame draws it whole
     mua_wash(c, s);
 }
 
@@ -1027,11 +1094,11 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     mua_group_close(c, s);
     // a dialog's rows frame (dialog_plan) draws it through its floor;
     // otherwise it is an overlay, drawn whole over the page
-    int rows = c->fl_on && c->sh_dlg && c->fl_stage == 0;
+    int rows = c->fl.on && c->sh.dlg && c->fl.stage == 0;
     if (!rows) {
-        c->fl_susp++;
+        c->fl.susp++;
     }
-    c->fl_dirty = 1;
+    c->fl.dirty = 1;
     c->has_at = 0;
     if (kind < 0 || kind >= 5) {
         kind = 1;
@@ -1039,7 +1106,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     int fs = c->fs, rh = mua_row_h(c);
     uint32_t id = mua_hash(title.p, title.n, DIALOG_SALT);
     moy_ui_keep_t *kb = mua_keep_of(c, id);
-    int body = kb != NULL && kb->b > 0 ? kb->b : rh;
+    int body = kb != NULL && kb->rows > 0 ? kb->rows : rh;
     if (!c->modal) {
         c->owe = 1;                     // its first frame: focus opens in it on the next
     }
@@ -1068,18 +1135,18 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         card.y = sf.y;
     }
     uint32_t btn = mua_hash(buttons, len, id);
-    c->dlg_held = (uint8_t)(o->wash == 0 && o->has_gen);
-    c->dlg_gen = o->gen;
-    c->dlg_btn = btn;
+    c->dlg.held = (uint8_t)(o->wash == 0 && o->has_gen);
+    c->dlg.gen = o->gen;
+    c->dlg.btn = btn;
     if (rows) {
-        c->fl_stage = 1;
-        if (id != c->sh_id || !mua_same_box(card, c->dw_card) || !c->dlg_held || o->gen != c->dw_gen
-            || btn != c->dw_btn) {
-            c->fl_mute = 1;             // not the dialog planned: nothing this frame
+        c->fl.stage = 1;
+        if (id != c->sh.id || !mua_same_box(card, c->dw.card) || !c->dlg.held || o->gen != c->dw.gen
+            || btn != c->dw.btn) {
+            c->fl.mute = 1;             // not the dialog planned: nothing this frame
             c->owe = 1;
         }
     }
-    if (o->wash != 0 && !c->fl_mute) {
+    if (o->wash != 0 && !c->fl.mute) {
         mua_wash(c, s);                     // everything under a dialog dims (D-01)
     }
     clip_t mk;
@@ -1087,8 +1154,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     EACH_PIECE(c, mk, s, cast) {
         moy_ui_modal(s, card, title, fs, c->cls, rh);
     }
-    c->dlg_id = id;
-    c->dlg_card = card;
+    c->dlg.id = id;
+    c->dlg.card = card;
     // the buttons at its foot, right-aligned, recorded left to right, a
     // focus ring's reach and 4 pixels clear between them
     int gap = (reach / fs + 4 > 8 ? reach / fs + 4 : 8) * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
@@ -1131,7 +1198,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     inner.w = (int16_t)(w - 2 * (pad - lp));
     inner.y = (int16_t)(card.y + top);
     inner.h = (int16_t)bh;
-    c->dlg_foot = (int16_t)(inner.y + inner.h);
+    c->dlg.foot = (int16_t)(inner.y + inner.h);
     mua_nest_open(c, 2, id, inner, body, 0, NULL);
     if (rows) {
         // the last frame's stops from its body's page stop on: the
@@ -1140,9 +1207,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         while (p0 < c->n_prev && !((c->prev[p0].flags & STOP_PAGE) && c->prev[p0].id == id)) {
             p0++;
         }
-        c->fl_p0 = (uint8_t)(p0 < c->n_prev ? p0 + 1 : c->n_prev);
-        c->fl_pn = (uint8_t)(c->n_prev - c->fl_p0);
-        c->fl_s0 = c->n_cur;
+        c->fl.p0 = (uint8_t)(p0 < c->n_prev ? p0 + 1 : c->n_prev);
+        c->fl.pn = (uint8_t)(c->n_prev - c->fl.p0);
+        c->fl.s0 = c->n_cur;
     }
     int pick = -1;
     moy_ui_over_t none;
@@ -1171,7 +1238,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         int off = o->disabled == 1 && i == nb - 1;
         uint32_t bid = mua_hash(t.p, t.n, id);
         if (!off && o->focus.p != NULL && o->focus.n == t.n && memcmp(o->focus.p, t.p, t.n) == 0) {
-            c->dlg_open = bid;          // focus opens here when the dialog opens
+            c->dlg.open = bid;          // focus opens here when the dialog opens
         }
         int st = off ? 0 : mua_stop(c, bid, bb, STOP_DLG_BTN, t);
         if (st < 0) {
@@ -1198,6 +1265,6 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         x += bw[i] + gap;
     }
     c->page_stop = body_stop;
-    c->dlg_pick = (int8_t)pick;
+    c->dlg.pick = (int8_t)pick;
     return pick;
 }

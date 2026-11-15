@@ -12,7 +12,7 @@
 package opened in the console's Editor with two tabs and nothing a cart has
 -- no Code, Blocks, Map, Music and no Play: an edit applies live, so there is
 nothing to run. Appearance's Edit theme… opens it (`Appearance.edit_file`,
-which makes `custom` from a seed first), `Workstation.edit_theme` hands it
+which makes `custom` from a seed first), `Text.edit_theme` hands it
 to the Editor (`EditorApp.open_theme`), and Done (‹, K, Esc) brings the
 Editor back to where it was opened from.
 
@@ -497,7 +497,7 @@ def draw_zone(app, cv, rect):
     y = rect[1] + (rect[3] - ic) // 2
     bx = back[0] + (back[2] - ic) // 2 if _floor(app) else back[0] + 2 * fs
     if not ws.draw_icon("back", (bx, y, ic, ic), ink, cv):
-        ws._glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
+        ws.glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
     sets = ws.icon_spec() is not None
     for tab, label, icon, r, labelled in tabs:
         if tab == app.tab:
@@ -505,7 +505,7 @@ def draw_zone(app, cv, rect):
             tink = ink if mark is None else mark
             if labelled:
                 _ui_draw.tab(cv, th, r, False, label, True, tink,
-                             ws._icon_image_keyed(icon),
+                             ws.icon_image_keyed(icon),
                              icon_draw=app._set_icon(cv, tink) if sets else None, kind=icon)
                 continue
             _icon_in(ws, cv, icon, r, tink)
@@ -534,7 +534,7 @@ def _icon_in(ws, cv, icon, r, ink):
     x = r[0] + (r[2] - ic) // 2
     y = r[1] + (r[3] - ic) // 2
     if not ws.draw_icon(icon, (x, y, ic, ic), ink, cv):
-        ws._icon(icon, x, y, cv, ink=ink)
+        ws.icon(icon, x, y, cv, ink=ink)
 
 
 def zone_targets(app, rect):
@@ -594,7 +594,7 @@ def draw_row(app, cv, rect):
         kind = next((i for t, _l, i, _r, _o in tabs if t == app.tab), None)
         draw = app._set_icon(cv, open_kind=kind, open_ink=_ui_draw.current_ink(cv, th),
                              lead=True)
-    icon_for = getattr(ws, "_icon_image_keyed", None)
+    icon_for = getattr(ws, "icon_image_keyed", None)
     for t, label, icon, r, on in tabs:
         _ui_draw.tab(cv, th, r, t == app.tab, label, on, band_ink,
                      icon_for(icon) if icon_for is not None else None,
@@ -775,7 +775,7 @@ class ConfigLayer(CodeLayer):
             ink = th["value"] if not _contrast(th) else th["ink"]
             x0 = lay.x0 - 2 * fs
             if not ws.draw_icon("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv):
-                ws._glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
+                ws.glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
             was = _ui_draw.print_font(_ui_draw.font("caption")[0])
             try:
                 cv.print(_ui_draw.print_cut(text, max(0, tx + tw - x0 - ic - 4 * fs), fs),
@@ -1089,7 +1089,7 @@ class SpritesLayer(Layer):
                 ox = x + (t - box) // 2
                 oy = y + (t - box) // 2
                 if not ws.draw_icon(kind, (ox, oy, box, box), th["ink"], cv):
-                    ws._icon(kind, ox, oy, cv, ink=th["ink"])
+                    ws.icon(kind, ox, oy, cv, ink=th["ink"])
             if lay.desk:
                 was = _ui_draw.print_font(cap[0])
                 try:
@@ -1167,7 +1167,7 @@ class SpritesLayer(Layer):
             cv.spr(img, x, y, max(1, box // 16))
             return
         if not ws.draw_icon(kind, (x, y, box, box), th["ink"], cv):
-            ws._icon(kind, x, y, cv, ink=th["ink"])
+            ws.icon(kind, x, y, cv, ink=th["ink"])
 
     def _palette(self, cv, th, lay, doc):
         keyline, white = self.ws.look.live.fixed[2:]

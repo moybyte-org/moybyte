@@ -902,7 +902,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.run.player, "_lua", None)
+    lua = getattr(ws.run.player, "lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:N_PMEM]
     if lua is not None:
@@ -916,7 +916,7 @@ def _pmem(ws):
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(_DT)
 
 
@@ -973,7 +973,7 @@ def parts_runs(tmp_path_factory):
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _script(ws)
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -1744,7 +1744,7 @@ def files_runs(request, tmp_path_factory):
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _files_script(ws)
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -1838,7 +1838,7 @@ def parts_root(tmp_path_factory):
 def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monkeypatch,
                                                                   desk):
     """A Python app's frame begins with the window flag; a Lua and a compiled
-    app's snapshot carries it to the RUN face's begin (moy_ui_wasm.c)."""
+    app's snapshot carries it to the RUN face's begin (moy_ui_run.c)."""
     from runtime import wasm_binding
     seen = []
     root, titles = parts_root
@@ -1847,7 +1847,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         ws = host_app.build_workstation(root, **kw)
         ws.pointer.visible = False
         open_cart(ws, title)
-        host = ws.run.player._uh
+        host = ws.run.player.face._uh
         if host is not None:
             real = host.run
 
@@ -1862,12 +1862,12 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         if name == "python":
             assert seen and set(seen) == {desk}, seen
         else:
-            run = ws.run.player._lua
+            run = ws.run.player.lua
             snap = getattr(run, "snap", None)
             if snap is None:
                 snap = run._run.snap
             assert snap[wasm_binding.SNAP_FACE] & 1 == (1 if desk else 0), name
-        ws.exit()
+        ws.spine.exit()
 
 
 # -- the Appearance verbs (step 20): tabs, a grid of cards --------------------------------
@@ -2049,7 +2049,7 @@ def look_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2214,7 +2214,7 @@ def pop_runs(request, tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2449,7 +2449,7 @@ def menu_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -2688,7 +2688,7 @@ def restyle_runs(tmp_path_factory):
             shots.append((_pixels(ws), _pmem(ws)))
         out[name] = shots
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 

@@ -50,7 +50,7 @@ class InputPolicy:
         """A menu holds a handheld's keys over the surface: the pause menu,
         the delete confirm, the system menu, About."""
         ws = self.ws
-        return not ws.windowed_chrome and (ws._modal_layer() is not None or ws._about)
+        return not ws.windowed_chrome and (ws.modal_layer() is not None or ws.about)
 
     def _typing_popover(self):
         """The popover component a field types in (the Wi-Fi panel's
@@ -115,7 +115,7 @@ class InputPolicy:
             s = self.holder()
             took = s is not None and s.cancel()
         if took:
-            ws._dirty = True
+            ws.mark_dirty()
         return bool(took)
 
     # -- back ------------------------------------------------------------------
@@ -128,7 +128,7 @@ class InputPolicy:
         ws = self.ws
         if leave is None:
             leave = not ws.windowed_chrome
-        ws._dirty = True
+        ws.mark_dirty()
         if ws.pause.open and not ws.sysmenu.open:
             ws.pause.back()
         elif ws.confirm.open:
@@ -136,9 +136,9 @@ class InputPolicy:
         elif ws.sysmenu.open:
             ws.sysmenu.close()
             ws.popover_touch()
-        elif ws._about:
+        elif ws.about:
             ws.menu_ui.about.close()
-        elif ws.plays_fullscreen() or ws._game_pauses():
+        elif ws.plays_fullscreen() or ws.game_pauses():
             ws.system_key()
         else:
             kind = ws.wm.input_kind()
@@ -157,7 +157,7 @@ class InputPolicy:
         if i.typed != 27 or not i.text_mode:
             return False
         ws = self.ws
-        if ws._modal_layer() is not None or ws.sysmenu.open:
+        if ws.modal_layer() is not None or ws.sysmenu.open:
             return False
         s = self.holder()
         if s is None or not (self.has_page(s) or getattr(s, "ESC_LEAVES", False)):
@@ -177,7 +177,7 @@ class InputPolicy:
         own on its first page, which its bar's chevron leaves)."""
         ws = self.ws
         return (s is None or s.ESC_LEAVES or self.has_page(s)
-                or ws.plays_fullscreen() or ws._game_pauses())
+                or ws.plays_fullscreen() or ws.game_pauses())
 
     def step(self, s):
         """One step back inside surface `s`, never out of it: the toolkit's
@@ -186,7 +186,7 @@ class InputPolicy:
         h = s.ui_host()
         if h is not None and _ui_draw.app_back(h.ctx, True):
             h.owed = True
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return True
         return bool(s.back())
 
@@ -203,19 +203,17 @@ class InputPolicy:
         caller, the Editor home or to the app that opened it, an app that
         minimises on the desk to its chip."""
         ws = self.ws
-        if kind == "settings":
+        s = ws.layer_of(kind)
+        if s is not None and s.leave():
+            return                        # its own way back (`Layer.leave`)
+        if kind == "menu":
+            ws.spine.exit()
+        elif kind == "desktop" or ws.app(kind) is not None:
             ws.leave_surface(kind)
-            ws._exit_settings()
-        elif kind == "tasks":
-            ws.close_tasks()
-        elif kind == "menu":
-            ws.exit()
-        elif kind == "desktop" or kind in ws._apps_by_id:
-            ws.leave_surface(kind)
-            app = ws._apps_by_id.get(kind)
+            app = ws.app(kind)
             if app is not None and app.BACK_MINIMISES and ws.wm.minimise_kind(kind):
                 return
-            ws._exit_to_caller()
+            ws.spine.exit_to_caller()
 
     # -- the trackball ---------------------------------------------------------
 
@@ -226,9 +224,9 @@ class InputPolicy:
         but one whose `ball_steps` says otherwise: a running game, a canvas
         whose cursor it moves (the sprite tab and Paint until a popover
         opens, the map, the scene) and a caret, which takes it as arrows
-        (`Workstation.nav`). The desk's windows are pointed at."""
+        (`InputRouter.nav`). The desk's windows are pointed at."""
         ws = self.ws
-        if ws._modal_layer() is not None or ws._about:
+        if ws.modal_layer() is not None or ws.about:
             return True
         if ws.windowed_chrome:
             return False

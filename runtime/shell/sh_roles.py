@@ -163,7 +163,7 @@ def _perm_carts(ws):
     import app_perms
     out = []
     for cart in ws.carts.all:
-        if ws.is_system_app(cart):
+        if ws.spine.is_system_app(cart):
             continue
         perms = app_perms.asked(cart.get("permissions"), app_perms.tiers_of(cart))
         if perms:
@@ -436,17 +436,17 @@ def r_settings(d, a):
         except ValueError:
             value = words
         rows.set(a[1], value)
-        ws.apply_system_keys((a[1],))
+        ws.spine.apply_system_keys((a[1],))
         return 0
     if verb == "unset" and len(a) == 2:
         if not rows.delete(a[1]):
             d.err("settings", "%s: not set" % a[1])
             return 1
-        ws.apply_system_keys((a[1],))
+        ws.spine.apply_system_keys((a[1],))
         return 0
     if verb == "reload" and len(a) == 1:
-        ws.load_system()
-        ws._dirty = True
+        ws.spine.load_system()
+        ws.mark_dirty()
         return 0
     return _usage(d, "settings", "[list] | get KEY | set KEY VALUE... | unset KEY | reload")
 

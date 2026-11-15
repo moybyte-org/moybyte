@@ -979,7 +979,7 @@ class EspNowLink:
     def _say_desync(self, ws):
         """The match's desync on the screen: two worlds that disagree are
         said, never left to paint two plausible games."""
-        notice = getattr(ws, "notice", None)
+        notice = getattr(getattr(ws, "notices", None), "notice", None)
         if notice is None:
             return
         try:
@@ -1027,7 +1027,8 @@ class EspNowLink:
         so does its tick: the lower of the two consoles' (`announce`)."""
         if not self.active:
             return False
-        cfg = getattr(ws, "config", None) if ws is not None else None
+        proj = getattr(getattr(ws, "run", None), "project", None)
+        cfg = getattr(proj, "config", None)
         try:
             self._m.set_config(json.dumps(cfg) if cfg else None)
         except Exception:  # noqa: BLE001
@@ -1108,7 +1109,7 @@ def launch_cart(ws, title):
         return False
     open_now = getattr(ws, "cart", None)
     if open_now and str(open_now.get("title") or "").lower() == want:
-        return bool(ws._start())
+        return bool(ws.start())
     items = getattr(ws.launcher, "items", [])
     for i in range(len(items)):
         it = items[i]
@@ -1116,7 +1117,7 @@ def launch_cart(ws, title):
             continue
         if want == str(it.get("title") or "").lower():
             ws.launcher.sel = i
-            ws.launch_selected()
+            ws.home.launch_selected()
             return True
     return False
 

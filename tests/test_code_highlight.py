@@ -115,10 +115,10 @@ def _make_ws_with_cart(tmp_path, src, title="E"):
 
 def test_syntax_error_marks_the_offending_line_and_jumps_caret(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("a = 1\nb = 2\ndef _draw(:\n    cls(0)\n")   # broken line 3
-    ws.run_code()
+    ws.saves.run_code()
 
     assert ws.menu_view == "code"          # stayed in the editor
     assert ws.code_err_row == 2            # 0-based -> source line 3
@@ -128,10 +128,10 @@ def test_syntax_error_marks_the_offending_line_and_jumps_caret(tmp_path):
 
 def test_code_view_renders_error_without_raising(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(0)\n")
-    ws.run_code()
+    ws.saves.run_code()
     blank = bytes(ws.run.canvas._buf)
     ws.frame(1 / 30)                       # draws highlight + inline marker, must not raise
     assert bytes(ws.run.canvas._buf) != blank
@@ -139,13 +139,13 @@ def test_code_view_renders_error_without_raising(tmp_path):
 
 def test_fixing_and_saving_clears_the_marker(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(0)\n")
-    assert ws.save_code() is False
+    assert ws.saves.save_code() is False
     assert ws.code_err_row is not None
     ws.editor.set_text("def _draw():\n    cls(0)\n")   # fixed
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.code_err is None and ws.code_err_row is None
 
 
@@ -156,8 +156,8 @@ def test_runtime_crash_marks_offending_line_when_editor_opens(tmp_path):
     ws = _make_ws_with_cart(tmp_path, src)
     ws.frame(1 / 30)                       # crash is captured, must not raise
     assert ws.cart_error and "boom" in ws.cart_error
-    assert ws.crash_line == 3
-    ws.set_menu_view("code")               # tap CODE -> editor opens on the bad line
+    assert ws.run.player.crash_line == 3
+    ws.text.set_menu_view("code")               # tap CODE -> editor opens on the bad line
     ws.screen = "menu"
     assert ws.code_err_row == 2            # 0-based -> source line 3
     assert ws.editor.row == 2
@@ -166,8 +166,8 @@ def test_runtime_crash_marks_offending_line_when_editor_opens(tmp_path):
 def test_clean_cart_has_no_crash_line(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(3)\n")
     ws.frame(1 / 30)
-    assert ws.crash_line is None
-    ws.set_menu_view("code")
+    assert ws.run.player.crash_line is None
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     assert ws.code_err_row is None
 
@@ -209,7 +209,7 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     assert "~" in _LUA_SYMBOLS and "=" in _LUA_SYMBOLS
     assert ";" not in _LUA_SYMBOLS
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     assert ws.code_layer._symbols() == _CODE_SYMBOLS
     line = "n = #petals  -- count"
@@ -232,7 +232,7 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
     from runtime import chrome
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
     ws.look.set_theme("moy", persist=False, variant="light")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1b6e34,
             _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5b6074, _HL_BUILTIN: 0x1662a8}

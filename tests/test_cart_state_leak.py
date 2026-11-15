@@ -88,7 +88,7 @@ def _run_and_exit(tmp_path, title, src, runtime=None, main=None):
     for _ in range(3):
         ws.frame(1 / 60)
         assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     return ws
 
 

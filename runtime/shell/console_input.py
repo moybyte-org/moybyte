@@ -1,9 +1,9 @@
 # Map (grep -n a name to jump there):
-#   InputVerbs                  the key and pointer routers, nav, the trackball, the bar's keys
-#   InputVerbs.handle_input     the frame's keys down the layer stack
-#   InputVerbs.handle_pointer   the pointer published and routed down the same stack
-#   InputVerbs.ball             a trackball roll as W A S D steps
-#   InputVerbs._bar_keys        the bar's own keys
+#   InputRouter                  the key and pointer routers, nav, the trackball, the bar's keys
+#   InputRouter.handle_input     the frame's keys down the layer stack
+#   InputRouter.handle_pointer   the pointer published and routed down the same stack
+#   InputRouter.ball             a trackball roll as W A S D steps
+#   InputRouter._bar_keys        the bar's own keys
 """The Workstation's INPUT verbs: the per-frame key router (`handle_input`,
 which walks the layer stack top-down and hands the keys to the first layer
 that claims them), the pointer router (`handle_pointer`, which publishes the
@@ -13,8 +13,8 @@ W A S D (`ball_frame`/`ball` and the roll/coast steppers under them), the
 bar's key routing (`bar_where`/`_bar_keys`/`bar_open_x`), the caret step and
 `focused_cart_editor`. What the keys mean on the surface holding them -- text
 mode, cancel, back, the trackball's steps -- is the input policy's
-(runtime/shell/input_policy.py), which the router asks. A mixin of
-`Workstation`; the state it reads is created in console.py's `_init_state`.
+(runtime/shell/input_policy.py), which the router asks. The console's
+`ws.router`; the state it reads is created in console.py's `_init_state`.
 """
 
 from moy_input import SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
@@ -27,7 +27,10 @@ import ui_draw as _ui_draw
 START_HOLD_MS = 500
 
 
-class InputVerbs:
+class InputRouter:
+
+    def __init__(self, ws):
+        self.ws = ws
 
     _start_down = 0               # when the console's key went down; 0: not armed
 
@@ -38,7 +41,8 @@ class InputVerbs:
         focused, a cart's `textmode()`), so the surface reads its keys in its
         mode; after, for what the keys moved, so the key that took a text
         surface is swallowed by the switch."""
-        policy = self.input_policy
+        ws = self.ws
+        policy = ws.input_policy
         policy.sync()
         self._route_keys()
         policy.sync()
@@ -49,14 +53,15 @@ class InputVerbs:
         # A modal overlay (About / system menu, #52) sits above the content, so it eats
         # this frame's keys before they can leak to the screen underneath; the active
         # content layer is at the bottom and always consumes.
-        i = self.input
+        ws = self.ws
+        i = ws.input
         # Whether a change was reported since the last painted frame, before
         # this input's own (`Hold.opened`). Stored only on a change: a store
         # on the Workstation looks through all its classes for a property,
         # about 60 us on a T-Deck.
-        d = self._dirty or self._press_owed
-        if d != self._dirty_in:
-            self._dirty_in = d
+        d = ws.frame_state.dirty or ws._press_owed
+        if d != ws.frame_state.dirty_in:
+            ws.frame_state.dirty_in = d
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
         # ran. A no-op (empty loop) with no extra controllers registered, so the
@@ -65,17 +70,17 @@ class InputVerbs:
         if _pr is not None:
             _pr.begin_frame()
         # The input in use follows the last one used (the hints' keys).
-        if self._news is not None:
-            src = self._news()
+        if ws._news is not None:
+            src = ws._news()
             if src is not None:
-                self.input_used(src)
+                ws.input_used(src)
         # A desk keyboard's letters are a GAME's buttons only while it owns
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
-        kc = self.wm.keys_to_cart()
-        ck = kc and not self.run.player._is_tool
-        if ck != self._cart_keys:
-            self._cart_keys = ck
+        kc = ws.wm.keys_to_cart()
+        ck = kc and not ws.run.player.is_app()
+        if ck != ws._cart_keys:
+            ws._cart_keys = ck
             i.cart_keys = ck
         # Super (the `start` button) is the console's from every surface, before
         # any layer, and acts when it comes up: a tap is the system menu, or
@@ -85,7 +90,7 @@ class InputVerbs:
         # chord), as the host's Super does. On a T-Deck a tap inside a field
         # is its cancel (`InputPolicy.cancel`).
         if i.pressed("start"):
-            desk = self._editor_desk
+            desk = ws.built_editor_desk
             if desk is not None and i.held("select") and desk.select_start():
                 return                  # the desk Editor's Select+Start: Play
             self._start_down = _ticks_ms() or 1
@@ -96,14 +101,14 @@ class InputVerbs:
                     self._start_down = 0        # a chord: the key does nothing
                 elif _ticks_diff(_ticks_ms(), self._start_down) >= START_HOLD_MS:
                     self._start_down = 0
-                    self.open_tasks()
+                    ws.open_tasks()
                     return
             else:
                 self._start_down = 0
-                if not (_ui_draw.input_kind() == "tdeck" and self.input_policy.cancel()):
-                    self.system_key()
+                if not (_ui_draw.input_kind() == "tdeck" and ws.input_policy.cancel()):
+                    ws.system_key()
                 return
-        policy = self.input_policy
+        policy = ws.input_policy
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every
@@ -125,7 +130,7 @@ class InputVerbs:
         # nothing last frame (the end of a list) mark nothing: no frame.
         rw = getattr(i, "rep_word", 0)
         pressed = (i.any_pressed() or bool(getattr(i, "key_repeats", 0))
-                   or (rw != 0 and not _ui_draw.steps_dead(rw, self)))
+                   or (rw != 0 and not _ui_draw.steps_dead(rw, ws)))
         # The arrows of a keyboard with arrows (the host's, the browser's, a
         # BLE one) or a d-pad step a caret where one has the keys -- the Code
         # tab, a cart's focused editor handle -- as the T-Deck's ball does
@@ -134,15 +139,15 @@ class InputVerbs:
             return
         if (pressed or i.last_key or getattr(i, "wheel_y", 0) or getattr(i, "wheel_x", 0)
                 or getattr(i, "pointer_buttons", 0)):
-            if not kc and not self.wm.popover_takes_keys():
+            if not kc and not ws.wm.popover_takes_keys():
                 if pressed or i.last_key or getattr(i, "wheel_y", 0) \
                         or getattr(i, "wheel_x", 0):
-                    self._dirty = True
+                    ws.frame_state.dirty = True
                 else:
                     # A pointer press alone: frame() marks it, unless what
                     # it pressed was a popover's change the WM paints alone
                     # (`popover_touch`) -- a bar widget opening its popover.
-                    self._press_owed = True
+                    ws._press_owed = True
         # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
         # stops for _edit_debounce_ms, so the store write lands in a gap. Marked
@@ -152,22 +157,22 @@ class InputVerbs:
         # rather than typed at, and a debounce they could not arm would fire
         # mid-stroke.
         if ((i.last_key or pressed)
-                and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
-                and self.wm.top_is("menu")):
-            self.history.edit_ms = _ticks_ms()
+                and (ws.editor_app.tab in COMMIT_TABS or ws.editor_app.tab in THEME_TABS)
+                and ws.wm.top_is("menu")):
+            ws.history.edit_ms = _ticks_ms()
         # Ctrl+Z and Ctrl+Y are the bar's UNDO and REDO on every Editor tab:
         # its own steps, then the journal's (`history_router`).
         k = i.typed
-        if ((k == 0x1A or k == 0x19) and self.wm.input_kind() == "menu"
-                and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
-                and self._modal_layer() is None):
+        if ((k == 0x1A or k == 0x19) and ws.wm.input_kind() == "menu"
+                and (ws.editor_app.tab in COMMIT_TABS or ws.editor_app.tab in THEME_TABS)
+                and ws.modal_layer() is None):
             if k == 0x1A:
-                self.history.undo()
+                ws.history.undo()
             else:
-                self.history.redo()
-            self._dirty = True
+                ws.history.redo()
+            ws.frame_state.dirty = True
             return
-        bl = self.bar_layer
+        bl = ws.bar_layer
         edge = _ui_draw.edge_take()
         if ((bl.focus is not None or edge or (pressed and i.steps("up")))
                 and self._bar_keys(i, pressed, edge)):
@@ -180,15 +185,15 @@ class InputVerbs:
         # (`InputPolicy.back`), whatever the surface. A game's B is its own;
         # its Esc pauses it.
         back = None
-        if pressed and not self.windowed_chrome:
+        if pressed and not ws.windowed_chrome:
             if i.pressed("stop"):
                 back = True
             elif i.pressed("b"):
                 back = policy.holder()
         if policy.typed_escape(i):
             return
-        for layer in self.wm.visible_stack_rev():
-            if back is not None and layer is self._content_layer():
+        for layer in ws.wm.visible_stack_rev():
+            if back is not None and layer is ws.content_layer():
                 if (policy.takes_stop(policy.holder()) if back is True
                         else policy.takes_b(back)):
                     policy.back()
@@ -208,8 +213,9 @@ class InputVerbs:
         """The frame's pointer, routed (`_route_taps`), then a look at the
         keyboard's mode for what a tap moved (a field tapped, a surface
         left), so it holds from the next key on."""
+        ws = self.ws
         self._route_taps()
-        self.input_policy.sync()
+        ws.input_policy.sync()
 
     def _route_taps(self):
         # Router (docs/history/shell_layers_refactor_v1.md §3): publish the game-space pointer
@@ -218,7 +224,8 @@ class InputVerbs:
         # claims the tap handle it. A modal overlay (About / system menu) sits above the
         # content, so it consumes the tap (and clears the game pointer's tap so a running
         # cart never also sees a tap the menu swallowed) before it can leak underneath.
-        p = self.pointer
+        ws = self.ws
+        p = ws.pointer
         if p is None:
             return
         # #184: this whole call is ONE lump (`hp`) to the device loop, and a
@@ -227,11 +234,11 @@ class InputVerbs:
         # per-layer routing walk, with the dearest layer named. Overwritten in
         # place (never reallocated): this runs every loop iteration, and a fresh
         # list per frame would be measurement that creates the churn it measures.
-        _perf = self.perf_capture      # the hp split is diag data; the HUD
+        _perf = ws.perf_capture      # the hp split is diag data; the HUD
         _pt0 = 0                       # must not pay the 6 stamps per frame
         if _perf:
             _pt0 = _ticks_us()
-            _pf = self._pf_ptr
+            _pf = ws._pf_ptr
             _pf[0] = _pf[1] = _pf[2] = 0
             _pf[3] = _pf[4] = None
             _pf[5] = 0
@@ -241,7 +248,7 @@ class InputVerbs:
         # focus, the game-space pointer publishes with click/down stripped, so a
         # background running cart never eats the taps meant for the editor beside
         # it. The fullscreen-stack WM has no hook -> unchanged.
-        _pp = getattr(self.wm, "player_has_pointer", None)
+        _pp = getattr(ws.wm, "player_has_pointer", None)
         # The idle publish is REUSED, not rebuilt (#66 lever 1, 2026-09-08).
         # While a healthy GAME owns the glass and the pointer did nothing this
         # frame -- no click, no held finger, not moved -- the game pointer this
@@ -255,41 +262,41 @@ class InputVerbs:
         # it keeps the unconditional publish. Under an app the publish is kept
         # the same way, and the layer walk below still runs.
         kept = False
-        if (_pp is None and not click and not p.down and not self._ptr_was_down
-                and px == self._ptr_last_x and py == self._ptr_last_y
-                and self.cart_error is None
-                and self.input.game_pointer is self._gp_idle):
+        if (_pp is None and not click and not p.down and not ws._ptr_was_down
+                and px == ws._ptr_last_x and py == ws._ptr_last_y
+                and ws.run.player.cart_error is None
+                and ws.input.game_pointer is ws._gp_idle):
             # Same geometry? These seven reads are exactly what the fullscreen
             # WM's game_xy consumes; its memo checks the same key, but through
             # two calls and a property (~0.2 ms a loop on the S3).
-            k = self._gp_key
-            run = self.run
+            k = ws._gp_key
+            run = ws.run
             gc = run.canvas
-            sc = self._sys_canvas
+            sc = ws.bound_sys_canvas
             if sc is None:
                 sc = gc
             if (gc is k[1] and sc is k[2]
                     and run.view is k[0]
                     and gc.w == k[3] and gc.h == k[4]
                     and sc.w == k[5] and sc.h == k[6]):
-                if self.wm.top_is_player():
+                if ws.wm.top_is_player():
                     if _perf:
-                        self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
+                        ws._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
                     return
                 kept = True
         if not kept:
-            gx, gy = self._game_xy(px, py)
+            gx, gy = ws.game_xy(px, py)
             _live = _pp() if _pp is not None else True
             gp = (gx, gy, click and _live, p.down and _live)
-            self.input.game_pointer = gp
+            ws.input.game_pointer = gp
             if click or p.down:
-                self._gp_idle = None              # a tap/hold: next frame republishes
+                ws._gp_idle = None              # a tap/hold: next frame republishes
             else:
-                self._gp_idle = gp
-                k = self._gp_key
-                run = self.run
+                ws._gp_idle = gp
+                k = ws._gp_key
+                run = ws.run
                 gc = run.canvas
-                sc = self._sys_canvas
+                sc = ws.bound_sys_canvas
                 if sc is None:
                     sc = gc
                 k[0] = run.view
@@ -300,7 +307,7 @@ class InputVerbs:
                 k[5] = sc.w
                 k[6] = sc.h
         if _perf:
-            self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
+            ws._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
         # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and
         # the pointer is doing NOTHING (no click, no held finger, not moved
         # since last frame), the layer walk below routes nothing -- the cart
@@ -308,38 +315,41 @@ class InputVerbs:
         # reclaims ~1ms/frame on the S3. Any edge (move/click/down) walks, so
         # taps, drags and hover all behave exactly as before; the crash panel
         # (cart_error) always walks so EDIT stays reachable.
-        if (not click and not p.down and not self._ptr_was_down
-                and px == self._ptr_last_x and py == self._ptr_last_y
-                and self.cart_error is None and self.wm.top_is_player()):
+        if (not click and not p.down and not ws._ptr_was_down
+                and px == ws._ptr_last_x and py == ws._ptr_last_y
+                and ws.run.player.cart_error is None and ws.wm.top_is_player()):
             return
         # _ptr_was_down makes the RELEASE frame walk: the windowed WM moves
         # focus on down->up, and that frame has no click, no down, no movement.
-        self._ptr_was_down = p.down
-        self._ptr_last_x = px
-        self._ptr_last_y = py
+        ws._ptr_was_down = p.down
+        ws._ptr_last_x = px
+        ws._ptr_last_y = py
         # ...and a touch in an editor tab re-arms that same debounce. Past the idle
         # fast-path above, so a frame the pointer did nothing in pays nothing. The
         # held-finger flag is stored UNCONDITIONALLY (the pointer is global, not a
         # tab's) so it can never be left stale True by a gesture that ended
         # somewhere else; the router refuses to commit under it.
-        self.history.pointer_down = p.down
-        if (click or p.down) and (self.menu_view in COMMIT_TABS
-                                  or self.menu_view in THEME_TABS) \
-                and self.wm.top_is("menu"):
-            self.history.edit_ms = _ticks_ms()
+        ws.history.pointer_down = p.down
+        if (click or p.down) and (ws.editor_app.tab in COMMIT_TABS
+                                  or ws.editor_app.tab in THEME_TABS) \
+                and ws.wm.top_is("menu"):
+            ws.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
         # REGISTERED app's bar band belongs to the bar, and the router routes it
         # BEFORE the app's own handle_pointer -- checked inside the walk (not
         # ahead of it) so an open overlay above the content still gets the tap
         # first, exactly as when each app hand-wrote this as its first statement.
         # Only a CLICK can reach the bar, so a move/hover frame pays one compare.
-        _appbar = self._apps_by_id if (click and not self.windowed_chrome) else None
+        _appbar = ws._apps_by_id if (click and not ws.windowed_chrome) else None
         # Memoized, pre-reversed visible stack (Stage 6c) -- no per-frame allocation.
-        for layer in self.wm.visible_stack_rev():
+        for layer in ws.wm.visible_stack_rev():
             if _appbar is not None:
                 _app = _appbar.get(layer.id)
-                if _app is not None and not getattr(_app, "glass", False):
-                    _bar = self._app_bar_route(_app, px, py)
+                # An app on the host's "app" strip; one on a strip of its
+                # own (Settings') or none (the task manager's) routes its bar.
+                if _app is not None and _app.BAR == "app" \
+                        and not getattr(_app, "glass", False):
+                    _bar = ws._app_bar_route(_app, px, py)
                     if _bar is not None:            # the band is the bar's
                         if _bar:
                             return
@@ -351,7 +361,7 @@ class InputVerbs:
             _tk = _ticks_us()
             _claimed = layer.handle_pointer(px, py, click)
             _lus = _ticks_diff(_ticks_us(), _tk)
-            _pf = self._pf_ptr
+            _pf = ws._pf_ptr
             _pf[5] += 1
             if _lus > _pf[2]:
                 _pf[2], _pf[3] = _lus, layer.id
@@ -360,7 +370,7 @@ class InputVerbs:
                 _pf[0] = _ticks_diff(_ticks_us(), _pt0)
                 return
         if _perf:
-            self._pf_ptr[0] = _ticks_diff(_ticks_us(), _pt0)
+            ws._pf_ptr[0] = _ticks_diff(_ticks_us(), _pt0)
 
     def _tick_pointer_dt(self, p):
         """Charge this frame's loop tick to the pointer SAMPLE, for kinetic
@@ -396,7 +406,8 @@ class InputVerbs:
         the AXS driver's per-controller bound. The rule meanwhile killed
         real flicks dead: a lift's 400ms silence crossed the threshold and
         decayed the velocity to zero before the release ever fired.)"""
-        fs = self.frame_state
+        ws = self.ws
+        fs = ws.frame_state
         dt = fs.frame_dt_ms
         if getattr(p, "fresh", True):
             fs.pointer_dt_ms = min(dt + fs.stale_ptr_ms, 100.0)
@@ -408,7 +419,7 @@ class InputVerbs:
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
     # player.py); the "desktop" content layer routes to it via _PlayerLayer. The tool
-    # bar's draw/tap stay on the shell, reached via _draw_tool_bar / _tool_bar_tap.)
+    # bar's draw/tap stay on the shell, reached via draw_tool_bar / tool_bar_tap.)
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). It belongs to
@@ -420,25 +431,26 @@ class InputVerbs:
         #
         # Returns True when it was CONSUMED, which is the board loop's
         # question: the same pulses drive the cursor when no caret wants them.
+        ws = self.ws
         if not (dx or dy):
             return False
         # Shift held extends the selection, as SELECT mode does.
-        select = True if getattr(self.input, "mods", 0) & _SHIFT else None
-        view = self.menu_view
-        if (self.wm.top_is("menu") and view in ("code", "theme_config")    # Stage 6d
-                and self.editor is not None):
-            cl = self.code_layer if view == "code" else self.theme_config_layer
+        select = True if getattr(ws.input, "mods", 0) & _SHIFT else None
+        view = ws.editor_app.tab
+        if (ws.wm.top_is("menu") and view in ("code", "theme_config")    # Stage 6d
+                and ws.editor is not None):
+            cl = ws.code_layer if view == "code" else ws.theme_config_layer
             cl.stop_autoscroll()
             if dy and cl.overlay_step(dy):
-                self._dirty = True         # a row of an open overlay picked
+                ws.frame_state.dirty = True         # a row of an open overlay picked
                 return True
-            self.editor.move(dy, dx, select)
-            self._dirty = True             # caret moved -> redraw (#44)
+            ws.editor.move(dy, dx, select)
+            ws.frame_state.dirty = True             # caret moved -> redraw (#44)
             return True
         handle = self.focused_cart_editor()
         if handle is not None:
             handle.nav(dx, dy, select)
-            self._dirty = True
+            ws.frame_state.dirty = True
             return True
         return False
 
@@ -474,8 +486,9 @@ class InputVerbs:
         else the roll is the cursor's and the click the pointer's. Answers
         bit 1 when the roll was taken, bit 2 when the click was (the pointer
         then sees no click)."""
+        ws = self.ws
         took = 0
-        steps = (dx or dy or click) and self.input_policy.ball_steps()
+        steps = (dx or dy or click) and ws.input_policy.ball_steps()
         if dx or dy:
             if steps:
                 self._ball_roll(dx, dy)
@@ -485,26 +498,26 @@ class InputVerbs:
         if click and steps:
             took |= 2
         if took:
-            p = self.pointer
+            p = ws.pointer
             if p is not None:
                 if took & 2:
                     p.click = False
                 if p.visible:
                     p.visible = False
-                    self._dirty = True
-        src = self._ball_src
-        if self._ball_down is not None:
-            src.set_button(self._ball_down, False)
-            self._ball_down = None
+                    ws.frame_state.dirty = True
+        src = ws._ball_src
+        if ws._ball_down is not None:
+            src.set_button(ws._ball_down, False)
+            ws._ball_down = None
         if took & 2:
             if src is None:
-                src = self._ball_src = self.input.source("ball")
+                src = ws._ball_src = ws.input.source("ball")
             src.set_button("run", True)
-            self._ball_down = "run"
-        r = self._coast_r
+            ws._ball_down = "run"
+        r = ws._coast_r
         if r.flinging:
-            self._ball_coast_tick(self.input_policy.ball_steps())
-        self.ball_owed = self._ball_down is not None or r.flinging
+            self._ball_coast_tick(ws.input_policy.ball_steps())
+        ws.ball_owed = ws._ball_down is not None or r.flinging
         return took
 
     def _ball_coast_tick(self, on):
@@ -512,16 +525,17 @@ class InputVerbs:
         scroller advanced by the loop's dt (none the frame a roll fed it),
         decaying as a page's fling does; off a surface that steps, or below
         a step a second, it stops."""
-        r = self._coast_r
+        ws = self.ws
+        r = ws._coast_r
         if not on:
             r.stop()
             return
-        r.tick(0.0 if self._coast_fed else self.frame_state.frame_dt_ms)
-        self._coast_fed = False
-        k = r.offset // self.COAST_UNIT - self._coast_got
+        r.tick(0.0 if ws._coast_fed else ws.frame_state.frame_dt_ms)
+        ws._coast_fed = False
+        k = r.offset // self.COAST_UNIT - ws._coast_got
         if k > 0:
-            self._coast_got += k
-            self._ball_steps(self._coast_dir, k, coast=False)
+            ws._coast_got += k
+            self._ball_steps(ws._coast_dir, k, coast=False)
 
     def _ball_roll(self, dx, dy):
         """Pulses toward the steps a roll owes: a reversal or a pause starts
@@ -532,33 +546,34 @@ class InputVerbs:
         along the home's row never drops to its cards); once it stops, a
         turn steps as any roll does. The steps go to the input table as this
         frame's counts (`_ball_steps`)."""
+        ws = self.ws
         now = _ticks_ms()
-        if _ticks_diff(now, self._ball_at) > self.BALL_IDLE_MS:
-            self._ball_ax = self._ball_ay = 0
-        self._ball_at = now
-        if (dx if self._ball_axis == 1 else dy if self._ball_axis == 2 else 0):
-            self._ball_axis_at = now
-        elif _ticks_diff(now, self._ball_axis_at) > self.BALL_ROLLING_MS:
-            self._ball_axis = 0
-        ax, ay = self._ball_ax, self._ball_ay
+        if _ticks_diff(now, ws._ball_at) > self.BALL_IDLE_MS:
+            ws._ball_ax = ws._ball_ay = 0
+        ws._ball_at = now
+        if (dx if ws._ball_axis == 1 else dy if ws._ball_axis == 2 else 0):
+            ws._ball_axis_at = now
+        elif _ticks_diff(now, ws._ball_axis_at) > self.BALL_ROLLING_MS:
+            ws._ball_axis = 0
+        ax, ay = ws._ball_ax, ws._ball_ay
         ax = dx if (dx > 0) != (ax > 0) and dx else ax + dx
         ay = dy if (dy > 0) != (ay > 0) and dy else ay + dy
         n = self.BALL_STEP
-        nx = self.BALL_TURN if self._ball_axis == 2 else n
-        ny = self.BALL_TURN if self._ball_axis == 1 else n
+        nx = self.BALL_TURN if ws._ball_axis == 2 else n
+        ny = self.BALL_TURN if ws._ball_axis == 1 else n
         if abs(ax) >= abs(ay) and abs(ax) >= nx:
-            self._ball_axis, self._ball_axis_at = 1, now
+            ws._ball_axis, ws._ball_axis_at = 1, now
             k = int(abs(ax) // n)
             self._ball_steps("right" if ax > 0 else "left", k)
             ax = ax - k * n if ax > 0 else ax + k * n
             ay = 0
         elif abs(ay) >= ny and abs(ay) > abs(ax):
-            self._ball_axis, self._ball_axis_at = 2, now
+            ws._ball_axis, ws._ball_axis_at = 2, now
             k = int(abs(ay) // n)
             self._ball_steps("down" if ay > 0 else "up", k)
             ay = ay - k * n if ay > 0 else ay + k * n
             ax = 0
-        self._ball_ax, self._ball_ay = ax, ay
+        ws._ball_ax, ws._ball_ay = ax, ay
 
     def _ball_steps(self, name, k, coast=True):
         """`k` steps of `name` into this frame's counts; `ball_stepped`
@@ -567,42 +582,43 @@ class InputVerbs:
         the time since its last step, become the coast's velocity instead:
         BALL_COAST thousandths of a step a ms each, delivered on by
         `_ball_coast_tick` until it decays."""
+        ws = self.ws
         if k <= 0:
             return
-        if coast and self._coast:
+        if coast and ws._coast:
             now = _ticks_ms()
-            ms = max(1, _ticks_diff(now, self._ball_rate_at))
-            self._ball_rate_at = now
-            keep = max(1, self._coast_rate * ms // 1000)
-            r = self._coast_r
-            if name != self._coast_dir:
+            ms = max(1, _ticks_diff(now, ws._ball_rate_at))
+            ws._ball_rate_at = now
+            keep = max(1, ws._coast_rate * ms // 1000)
+            r = ws._coast_r
+            if name != ws._coast_dir:
                 r.stop()
             if k > keep:
-                self._coast_dir = name
+                ws._coast_dir = name
                 if not r.flinging:
-                    r.offset = self._coast_got = 0
-                r.fling((k - keep) * self._coast * self.COAST_UNIT / 1000.0)
-                self._coast_fed = True
+                    r.offset = ws._coast_got = 0
+                r.fling((k - keep) * ws._coast * self.COAST_UNIT / 1000.0)
+                ws._coast_fed = True
                 k = keep
-        self.input.add_steps(name, k)
-        self.ball_stepped += k
+        ws.input.add_steps(name, k)
+        ws.ball_stepped += k
 
     def bar_where(self):
         """The `where` of the bar over the fullscreen surface that holds the
         keys -- the home, Settings, the Editor, an app -- or None: the desk,
         a running cart, a surface with no bar."""
-        if self.windowed_chrome:
+        ws = self.ws
+        if ws.windowed_chrome:
             return None
-        if self.pause.open and self.pause.shows_bar():
+        if ws.pause.open and ws.pause.shows_bar():
             return "pause"
-        kind = self.wm.top_kind()
+        kind = ws.wm.top_kind()
         if kind == "launcher":
             return "home"
-        if kind in ("settings", "menu"):
+        if kind == "menu":
             return kind
-        if kind in self._apps_by_id:
-            return "app"
-        return None
+        app = ws.app(kind)
+        return app.BAR if app is not None else None
 
     def _bar_keys(self, i, pressed, edge):
         """The keys on the bar (`BarLayer.focus_keys`), and the ways onto
@@ -613,28 +629,29 @@ class InputVerbs:
         a dialog, which hold the keys. True where the bar took them.
         `handle_input` calls it only while the bar holds the keys or one of
         those ways is taken."""
-        bl = self.bar_layer
+        ws = self.ws
+        bl = ws.bar_layer
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
             return False
-        held = (self._modal_layer() is not None and not self._pause_bar()) or self._about
+        held = (ws.modal_layer() is not None and not self._pause_bar()) or ws.about
         if bl.focus is not None:
             took = False
             if pressed and not held:
                 if bl.focus_where == "home":
-                    self.ach_ui.konami_watch(i)
+                    ws.ach_ui.konami_watch(i)
                 took = bl.focus_keys(i)
             # the strips name the bar's keys while it holds them, not under
             # a popover one of its items opened
-            _ui_draw.on_bar(bl.focus is not None and self._modal_layer() is None
-                            and not self._about)
+            _ui_draw.on_bar(bl.focus is not None and ws.modal_layer() is None
+                            and not ws.about)
             return took
         if held:
             return False
         where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
-        layer = self.pause if where == "pause" else self._content_layer()
+        layer = ws.pause if where == "pause" else ws.content_layer()
         if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
             if not layer.ball_steps():
@@ -647,22 +664,24 @@ class InputVerbs:
                               self.bar_open_x(where)) or not pressed:
             return False
         if where == "home":
-            self.ach_ui.konami_watch(i)
+            ws.ach_ui.konami_watch(i)
         return True
 
     def _pause_bar(self):
         """The pause menu holds the keys and the bar shows over it, nothing
         else over them: the bar's keys are the pause menu's to share."""
-        return (self.pause.open and self.pause.shows_bar() and not self.sysmenu.open
-                and not self.confirm.open)
+        ws = self.ws
+        return (ws.pause.open and ws.pause.shows_bar() and not ws.sysmenu.open
+                and not ws.confirm.open)
 
     def bar_open_x(self, where):
         """Where on `where`'s bar the keys land (an x in its bar's
         coordinates): the Editor's open tab's chip; None, the first item."""
+        ws = self.ws
         if where != "menu":
             return None
-        box = self.editor_app.tab_box(self.editor_app.tab)
-        got = self.bar_layer.cell("menu", "zone")
+        box = ws.editor_app.tab_box(ws.editor_app.tab)
+        got = ws.bar_layer.cell("menu", "zone")
         if box is None or got is None:
             return None
         return box[0] - got[0][1][0] + box[2] // 2
@@ -670,15 +689,16 @@ class InputVerbs:
     def _caret_step(self, i):
         """A direction pressed while a caret has the keys: `nav` it, and
         no layer sees the press. False where no caret wants it."""
+        ws = self.ws
         dx = i.steps("right") - i.steps("left")
         dy = i.steps("down") - i.steps("up")
         if (getattr(i, "mods", 0) & (_CTRL | _ALT)) == _CTRL | _ALT:
             return False              # Ctrl+Alt+arrows move the desk Editor's dividers
-        if not (dx or dy) or self.pause.open or self.confirm.open or self.sysmenu.open \
-                or self.wm.popover_takes_keys():
+        if not (dx or dy) or ws.pause.open or ws.confirm.open or ws.sysmenu.open \
+                or ws.wm.popover_takes_keys():
             return False
-        if not ((self.wm.top_is("menu") and self.menu_view in ("code", "theme_config")
-                 and self.editor is not None)
+        if not ((ws.wm.top_is("menu") and ws.editor_app.tab in ("code", "theme_config")
+                 and ws.editor is not None)
                 or self.focused_cart_editor() is not None):
             return False
         self.nav(dx, dy)
@@ -687,4 +707,5 @@ class InputVerbs:
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""
-        return self.run.player.focused_editor()
+        ws = self.ws
+        return ws.run.player.focused_editor()

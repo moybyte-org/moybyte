@@ -25,8 +25,8 @@ so this is what it finds.
                    whose inflater the boards compile.
   Files(cart)      a cart's written files by the C store
                    (native/moy_store/moy_files.c), with files_key,
-                   files_path_of, files_folder and files_live: the parity
-                   suite's view of it beside runtime/carts/cart_files.py. Host only.
+                   files_path_of, files_folder and files_live: the suites'
+                   view of it. Host only.
   shares([board]), share_held(row), kill_below(held)
                    THE SHARES' rows (moy_play.h), as on a board; with
                    share_use(board), share_take and share_give (host only)
@@ -376,9 +376,9 @@ def files_folder(cart_path):
 
 
 class Files:
-    """A cart's written files by the C store (moy_files.h), the shape of
-    runtime/carts/cart_files.py's CartFiles: where, read, write, erase, name, and
-    `shipped`, a read of the cart's own folder. Host only."""
+    """A cart's written files by the C store (moy_files.h): where, read,
+    write, erase, name, and `shipped`, a read of the cart's own folder. Host
+    only."""
 
     def __init__(self, cart_path):
         self._d = d = _files_lib()
@@ -393,8 +393,7 @@ class Files:
         return out.value.decode()
 
     def read(self, path, offset, n):
-        """CartFiles.read: bytes, with `n` 0 how many remain, None with no
-        written copy."""
+        """Bytes, with `n` 0 how many remain, None with no written copy."""
         out = ctypes.create_string_buffer(max(n, 1))
         r = self._d.moy_files_read_written(self._f, path, len(path), offset, out, n)
         if r < 0:

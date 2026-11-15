@@ -63,11 +63,11 @@ FIELDS = (
     ("tick", "%d/%d", ""),              # #217 logic rate / draw divisor; `-` = no paced game
     ("miss", "%d", ""),                 # #217 frames whose tick debt was written off, this sample
     ("busy", "%dms", "ms"),             # mean loop ms excluding the pacing sleep
-    ("draw", "%.0f", ""),               # ws._draw_ms   } the shared console's
-    ("flush", "%.0f", ""),              # ws._flush_ms  } EMA phase split
-    ("logic", "%.0f", ""),              # ws._upd_ms    } (cart update)
-    ("render", "%.0f", ""),             # ws._cart_ms   } (cart draw)
-    ("chrome", "%.0f", ""),             # ws._chrome_ms } (bar/cursor/overlays)
+    ("draw", "%.0f", ""),               # ws.draw_ms   } the shared console's
+    ("flush", "%.0f", ""),              # ws.flush_ms  } EMA phase split
+    ("logic", "%.0f", ""),              # ws.upd_ms    } (cart update)
+    ("render", "%.0f", ""),             # ws.cart_ms   } (cart draw)
+    ("chrome", "%.0f", ""),             # ws.chrome_ms } (bar/cursor/overlays)
     ("wmr", "%d", ""),                  # windowed WM: drag backdrop restore ms
     ("wmw", "%d", ""),                  # windowed WM: window-stack pass ms
     ("wms", "%d", ""),                  # windowed WM: window content stamp ms

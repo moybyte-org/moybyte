@@ -87,7 +87,7 @@ slideshow, the web view) costs nothing.
 the stop card since docs/history/look_2026-10.md step 33. A cart that fails to start
 or raises mid-frame stops under the stop card, whose See why exits into the
 Editor's Code tab with the caret on the crashing line, the inline marker set,
-and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
+and a tap/type-dismissible popover hung under it (`ws.crash_to_code`). On a cart of several scripts
 (SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
@@ -435,7 +435,7 @@ cart ever reads it. It is the `start` button (`Workstation.system_key`,
 | input | the console key |
 |---|---|
 | a BLE or USB keyboard | its GUI key tapped (the simulator's Super, Cmd or Meta): it acts on its release, and only when no other key went down while it was held, so Super leads chords (`native/moy_input/moy_input.h`'s key events, 2026-10-21) |
-| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`); inside a text field being typed into, Mic is the field's Cancel instead (owner call 2026-10-18: K types a letter there, and Mic never types), an app's `ui.field` while it has an edit in progress (`InputPolicy.cancel`, which asks the surface holding the keys: `Player.cancel` for a cart, a shell app's AppHost, Settings' Name and Wi-Fi password) |
+| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`); inside a text field being typed into, Mic is the field's Cancel instead (owner call 2026-10-18: K types a letter there, and Mic never types), an app's `ui.field` while it has an edit in progress (`InputPolicy.cancel`, which asks the surface holding the keys: `AppFace.cancel` for a cart, a shell app's AppHost, Settings' Name and Wi-Fi password) |
 | a gamepad | Start |
 | the browser page | a Meta tap (on a Mac Cmd is Ctrl, so there it is the page's ☰ and Esc), the page's ☰, and Esc during play (a page rarely sees Super) |
 | touch | the bar's Moy button, where a bar shows |

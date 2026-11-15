@@ -69,7 +69,7 @@ def _press(drv, *names):
 
 
 def _key(ws, title):
-    return ws.app_cart_id(next(c for c in ws.carts.all if c.get("title") == title))
+    return ws.spine.app_cart_id(next(c for c in ws.carts.all if c.get("title") == title))
 
 
 def _menu(ws, drv):
@@ -171,7 +171,7 @@ def test_several_ask_and_the_choice_is_reused(tmp_path):
     _press(drv, "down", "a")
     assert not c.open and ws.cart.get("title") == "Notes"
     assert ws.system.get(I.KEY, None) == {"text/markdown": _key(ws, "Notes")}
-    ws.go_home()
+    ws.home.go_home()
     _frames(drv)
     assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
@@ -190,7 +190,7 @@ def test_the_menu_changes_the_choice(tmp_path):
     assert ws.system.get(I.KEY, None) == {"text/markdown": _key(ws, "Jot")}
     got = _jot_ns(ws)["got"]
     assert len(got) == 1
-    ws.go_home()
+    ws.home.go_home()
     _frames(drv)
     assert moybyte.open_with("Documents/todo.md")
     _frames(drv)
@@ -245,7 +245,7 @@ def test_the_receiver_holds_one_file_read_write_for_its_run(tmp_path):
     assert h.read() == "# milk\n"
     assert h.write("# eggs\n")
     assert ws.carts_store.load_file("docs", "todo", ws.carts_root) == "# eggs\n"
-    ws.exit()
+    ws.spine.exit()
     _frames(drv)
     assert h.read() is None and not h.write("x"), "the grant ended with the run"
 
@@ -407,7 +407,7 @@ def test_a_cancelled_picker_hands_none_and_the_grant_ends_with_the_run(tmp_path)
     _press(drv, "a")
     h = _jot_ns(ws)["got"][-1]
     assert h.read() == "0,"
-    ws.go_home()
+    ws.home.go_home()
     _frames(drv)
     assert h.read() is None and not h.live
 
@@ -420,7 +420,7 @@ def test_files_open_with_asks_and_the_pick_becomes_the_choice(tmp_path):
     files = next(c for c in ws.carts.all if c.get("title") == "Files")
     ws.open(files)
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     from runtime import files_app
     app.open_place(files_app.DOCUMENTS, keep="todo")
     assert "WITH" in app._action_labels()
@@ -437,7 +437,7 @@ def test_files_open_with_says_so_where_no_app_opens_it(tmp_path):
     ws.carts_store.save_file("music", "tune", "{}", ws.carts_root)
     ws.open(next(c for c in ws.carts.all if c.get("title") == "Files"))
     _frames(drv)
-    app = ws.files_app
+    app = ws.app("files")
     from runtime import files_app
     app.open_place(files_app.MUSIC, keep="tune")
     app._act("WITH")

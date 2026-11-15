@@ -63,11 +63,11 @@ def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):
     ws = build_ws(tmp_path)
     _frames(ws)
     cart = next(c for c in ws.carts.all if c.get("type") == "game")
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     pl = ws.run.player
     pl._notice = pl.cart_error = chrome_ops.newer_text(["tilemap2"])
-    pl._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
-    ws.play(ws.launcher_layer)
+    pl.notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
+    ws.spine.play(ws.launcher_layer)
     p = ws.pause
     assert p.open and p.stopped and not ws.wm.top_is_player()
     assert p.rows == (p.UPDATES, p.HOME)
@@ -79,7 +79,7 @@ def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):
 
 def test_a_fresh_run_puts_a_stop_card_down(tmp_path):
     ws = _stopped(tmp_path)
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert not ws.pause.open
 
 
@@ -96,7 +96,7 @@ def test_the_month_from_a_date():
 
 def test_the_calendar_popover_pages_and_marks_today(tmp_path):
     ws = no_unlock_banner(build_ws(tmp_path))
-    ws.bar_layer._today = lambda: (2026, 10, 23)
+    ws.bar_layer.today = lambda: (2026, 10, 23)
     _frames(ws)
     ws.widget_tap("clock")
     _frames(ws)
@@ -135,7 +135,7 @@ def test_the_power_popovers_sliders_change_the_volume(tmp_path):
         def any_pressed(self):
             return True
 
-    ws._sysmenu_layer.handle_input(_K("right"))
+    ws.sysmenu_layer.handle_input(_K("right"))
     _frames(ws)
     assert sl.level("volume")[0] == 4
 
@@ -262,10 +262,10 @@ def test_the_saver_is_black_with_the_cover_and_its_title(tmp_path):
     _frames(ws)
     ws.saver_state(True)
     cv = ws.sys_canvas
-    assert ws._saver.frame(0) is True
+    assert ws.saver.frame(0) is True
     corner = bytes(cv._buf[0:2])
     assert corner == bytes(cv._buf[2 * (cv.w * cv.h - 1):2 * (cv.w * cv.h)])
-    assert ws._saver.frame(0) is False            # one frame every six seconds
+    assert ws.saver.frame(0) is False            # one frame every six seconds
 
 
 def test_the_text_console_marks_the_answer_and_says_when_the_script_ended(tmp_path):
@@ -294,7 +294,8 @@ def test_the_dialog_caps_say_real_tdeck_keys():
     Esc or Ctrl (ACT_KEYS in native/moy_ui/moy_ui_parts.c)."""
     from tools.board_config import runtime_file
     for name in ("cards_layer.py", "block_editor_ui.py", "popover.py", "text_console.py",
-                 "web_console_ui.py", "code_layer.py", "console_notices.py"):
+                 "web_console_ui.py", "code_layer.py", "console_notices.py",
+                 "shell_cards.py"):
         src = runtime_file(name).read_text()
         for word in ('"Tab"', '"Esc"', '"Ctrl', '"Mic"', '"K"'):
             assert word not in src, "%s spells %s: name the action" % (name, word)

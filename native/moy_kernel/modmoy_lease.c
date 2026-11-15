@@ -1,6 +1,6 @@
 // moy_lease's MicroPython binding: the lease table (moy_lease.h) as the module
 // `moy_lease`, its names those face.json lists: the rows here are the hand
-// ones, the rest are generated into modmoy_lease_face.c. A pin set is a tuple
+// ones, the rest are generated into modmoy_lease_face.h. A pin set is a tuple
 // of pin numbers; a refusal raises OSError (EBUSY, EINVAL for what the board
 // does not offer, EBADF for a stale handle, ENOSPC, ENOMEM).
 //
@@ -34,7 +34,7 @@
 
 #include "moy_lease.h"
 
-#include "modmoy_lease_face.c"
+#include "modmoy_lease_face.h"
 
 static mp_obj_t pins_tuple(uint64_t pins) {
     mp_obj_t items[MOY_LEASE_PIN_MAX];

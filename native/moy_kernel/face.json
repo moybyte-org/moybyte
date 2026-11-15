@@ -94,6 +94,7 @@
       {"py": "queued(pid)", "c": "moy_evq_queued", "example": [901]},
       {"py": "screen_open(pid, w, h, depth)", "c": "moy_screen_slot_open", "example": [901, 0, 0, 1]},
       {"py": "screen_close(pid)", "c": "moy_screen_slot_close", "example": [901]},
+      {"py": "screen_told(pid)", "c": "moy_screen_slot_told", "example": [901]},
       {"py": "screen_frame(pid, held, pressed, ms, max_ms, words=None)", "hand": true},
       {"py": "screen_pixels(pid)", "hand": true},
       {"py": "ready()", "c": "moy_evq_ready", "example": []},
@@ -107,7 +108,8 @@
       {"py": "vm(up=None)", "hand": true},
       {"py": "timer(pid, ms, every=0)", "hand": true},
       {"py": "timer_cancel(pid, tid)", "c": "moy_evq_timer_cancel", "trunc": ["id"], "example": [901, 5]},
-      {"py": "alarm(pid, ms)", "hand": true},
+      {"py": "timer_set(pid, tid, ms)", "c": "moy_evq_timer_set", "trunc": ["id"], "example": [901, 5, 0]},
+      {"py": "alarm(pid, ms, wakes=True)", "hand": true},
       {"py": "clock(step_ms)", "c": "moy_evq_clock", "absent": ["mp"]},
       {"py": "woke()", "c": "moy_evq_woke", "example": []},
       {"py": "termed()", "c": "moy_evq_termed", "example": []},
@@ -116,6 +118,8 @@
       {"py": "items_reset()", "c": "moy_items_reset", "example": []},
       {"py": "notes_id()", "c": "moy_notes_id", "example": []},
       {"py": "notes_waiting()", "c": "moy_notes_waiting", "example": []},
+      {"py": "notes_post(pid, summary, body)", "c": "moy_notes_post", "span": ["summary", "body"], "example": [901, "Hi", ""]},
+      {"py": "notes_system(summary, body)", "c": "moy_notes_system", "span": ["summary", "body"], "example": ["Hi", ""]},
       {"py": "notes_take()", "hand": true},
       {"py": "notes_goal(pid, ach_id, goal)", "c": "moy_notes_goal", "span": ["id"], "example": [901, "win", 3]},
       {"py": "notes_award(pid, ach_id)", "c": "moy_notes_award", "span": ["id"], "example": [901, "win"]},
@@ -132,6 +136,8 @@
       {"py": "status_reset()", "c": "moy_status_reset", "example": []},
       {"py": "timers(pid)", "c": "moy_evq_timers", "example": [901]},
       {"py": "timers_run()", "hand": true},
+      {"py": "fired()", "c": "moy_evq_fired", "example": []},
+      {"py": "wake_id()", "c": "moy_evq_id", "example": []},
       {"py": "next_call()", "hand": true},
       {"py": "answer(ticket, ans)", "hand": true},
       {"py": "drop(pid)", "c": "moy_vmq_drop", "example": [901]},
@@ -142,7 +148,6 @@
       {"py": "wants()", "c": "moy_evq_wants", "example": []},
       {"py": "listening(name)", "c": "moy_evq_listening", "example": ["tick"]},
       {"py": "reset()", "hand": true},
-      {"py": "TIMER_ID", "hand": true, "doc": "0x40000000: no small int on a board, where it reads -0x40000000 (a mask all the same)"},
       {"py": "SYSTEM", "hand": true}
     ]
   }

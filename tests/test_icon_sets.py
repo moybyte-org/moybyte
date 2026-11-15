@@ -232,7 +232,7 @@ def test_the_bar_draws_the_themes_set(tmp_path):
     assert ws.icon_spec() == ("smooth", "default", None)
     cv = ws.sys_canvas
     cv.rect(0, 0, 40, 20, 0)
-    ws._icon("wifi", 0, 0, cv, 1, ink=7)
+    ws.icon("wifi", 0, 0, cv, 1, ink=7)
     smooth = _pixels(cv, (0, 0, 16, 16))
     cv.rect(0, 0, 40, 20, 0)
     iconsets.draw(cv, "wifi", (0, 0, 16, 16), 7, ("smooth", "default", None))

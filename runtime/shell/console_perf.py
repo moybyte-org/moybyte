@@ -1,9 +1,10 @@
 """The Workstation's perf METERS: the per-frame timing fields and the query
 API the device diag reads (`perf_sample`/`perf_breakdown`/`perf_backdrop`/
 `perf_pointer`/`perf_batch`/...), the perf-capture frame tail that fills
-them, and the expensive-event counter `note_cost`. A mixin of `Workstation`;
+them, and the expensive-event counter `note_cost`. The console's `ws.perf`;
 every field it writes is a flat attribute the frame loop and both WMs read
-directly, but for what changes every frame, which lives on `FrameState`.
+directly, but for what changes every frame, which lives on `FrameState`
+(console_frame.py).
 """
 
 from chrome import (_ticks_ms, _ticks_us, _ticks_diff)
@@ -21,25 +22,12 @@ _CONSOLE_METERS = ("draw", "flush", "logic", "render", "chrome", "wmr", "wmw",
                    "wms", "home", "tick", "miss")
 
 
-class FrameState:
-    """The fields the frame loop writes every frame, on a plain object the
-    Workstation holds as `frame_state` and never rebinds. A store on the
-    Workstation looks through all its classes for a property setter (about
-    57 us on a T-Deck); a store here costs under 2. A base class or a
-    property would bring that walk back; `__slots__` changes nothing on
-    MicroPython."""
-
-    def __init__(self):
-        self.frames_drawn = 0       # frames that drew and flushed (test witness)
-        self.since_draw = 0.0       # seconds since the last drawn frame
-        self.fps = 0.0              # smoothed frames/sec DRAWN (EMA, #217)
-        self.frame_dt_ms = 33.0     # last loop tick in ms (kinetic velocity, #113)
-        self.pointer_dt_ms = 33.0   # ...as charged to the pointer SAMPLE
-                                    # (_tick_pointer_dt), None on a repeat
-        self.stale_ptr_ms = 0.0     # the repeats' time, banked for the next sample
-
-
 class PerfMeters:
+
+    def __init__(self, ws):
+        self.ws = ws
+        self._perf_sched = None     # the scheduler whose misses the PERF line counts
+        self._perf_miss = 0
 
     def _init_perf(self):
         """The perf/diag measurement fields (#43/#44/#66/#68)."""
@@ -49,19 +37,19 @@ class PerfMeters:
         # show_fps per painted game frame, and the Player reads `steady` at
         # every run start. load_system replaces these with the store's values
         # at boot.
+        ws = self.ws
         for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
-            setattr(self, _key, _default)
-        self.frame_state = FrameState()
+            setattr(ws, _key, _default)
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
         # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
-        # records the per-frame split in ms -- _flush_ms is the compositor's panel
-        # DMA flush (comp.flush(); ~0 on the host's _NullComp), _draw_ms is the
+        # records the per-frame split in ms -- flush_ms is the compositor's panel
+        # DMA flush (comp.flush(); ~0 on the host's _NullComp), draw_ms is the
         # rest (cart _update/_draw + the console's own draw = total minus flush).
         # All EMA-smoothed like frame_state.fps so the numbers read steady, not
         # single-frame jitter. This tells us whether the wall is the SPI flush or the per-frame
         # MicroPython draw cost on device. Measurement only -- no render-path change.
-        self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
-        self._uncap = False           # the serial `uncap` diag (the tick model): a cart
+        ws.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
+        ws.uncap = False           # the serial `uncap` diag (the tick model): a cart
                                       # started while it is on draws every loop frame
         # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
         # HUD: when either perf_hud OR perf_capture is set, frame() records the
@@ -69,61 +57,61 @@ class PerfMeters:
         # (moy_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
         # numbers into the offline diag log without painting the HUD on screen.
         # Default False -> host behaviour is byte-identical (no extra ticks calls).
-        self.perf_capture = False     # measure flush/draw without drawing the HUD
-        self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
-        self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
-        # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
+        ws.perf_capture = False     # measure flush/draw without drawing the HUD
+        ws.flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
+        ws.draw_ms = 0.0           # smoothed draw ms (total frame - flush)
+        # DRAWBRK phase split of draw_ms (#43 follow-up): where the per-frame draw
         # cost actually goes -- cart _update, cart _draw, and the console chrome
         # (bar + cursor + overlays, the remainder). Surfaced via perf_breakdown().
-        self._upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
-        self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
-        self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
-        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
+        ws.upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
+        ws.cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
+        ws._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
+        ws.chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
         # The hitch logger's hp() detail (#184): the pointer walk, split.
         # _pf_ptr is a fixed 6-slot scratch overwritten in place by
         # handle_pointer -- [total_us, pre_us, worst_us, worst_id, claim_id,
         # n_visited].
-        self._pf_ptr = [0, 0, 0, None, None, 0]
+        ws._pf_ptr = [0, 0, 0, None, None, 0]
         # The DRAWBRK split's per-frame scratch, MICROSECONDS: Player.tick
         # writes it on the cart path under capture, frame() zeroes it on every
         # captured frame, _frame_perf_end converts once at the EMA.
-        self._pf_upd = 0      # cart _update(dt) (game LOGIC)
-        self._pf_cart = 0     # cart _draw() + the backdrop restore (RENDERING)
-        self._pf_audio = 0    # audio.tick(dt) (mixer feed)
-        self._pf_bg = 0       # the backdrop restore's share of _pf_cart
-        self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
-        self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
-        self._ptr_was_down = False  # ...and whether it was held (release edge)
-        self._gp_idle = None      # the idle game_pointer we last published, and
-        self._gp_key = [None] * 7  # the geometry it was mapped through: the
+        ws.pf_upd = 0      # cart _update(dt) (game LOGIC)
+        ws.pf_cart = 0     # cart _draw() + the backdrop restore (RENDERING)
+        ws.pf_audio = 0    # audio.tick(dt) (mixer feed)
+        ws.pf_bg = 0       # the backdrop restore's share of _pf_cart
+        ws._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
+        ws._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
+        ws._ptr_was_down = False  # ...and whether it was held (release edge)
+        ws._gp_idle = None      # the idle game_pointer we last published, and
+        ws._gp_key = [None] * 7  # the geometry it was mapped through: the
                                    # declared view, both canvases, their dims
         # Per-frame method probes, cached by the object they were taken on
         # (#66 lever 1): getattr on a method allocates a bound method each call.
-        self._rs_cv = None        # _reset_canvas_state's canvas / reset_state
-        self._rs_fn = None
-        self._fb_cv = None        # _flush_batches' game canvas / flush_batch
-        self._fb_cv_fn = None
-        self._fb_sc = None        # ...and the system canvas's
-        self._fb_sc_fn = None
-        self._lb_wm = None        # frame()'s WM / letterbox_inplace
-        self._lb_fn = None
-        self._loading_host = None  # the loading pill's UI context (_draw_loading_toast)
-        self._loading_rect = None  # ...and the rect it drew last
-        self._dsf_comp = None     # _disarm_fn's compositor / disarm_scale_fold
-        self._dsf_fn = None
-        self._probe_sc = None     # frame()'s system-canvas probe (view) and the
+        ws._rs_cv = None        # _reset_canvas_state's canvas / reset_state
+        ws._rs_fn = None
+        ws._fb_cv = None        # _flush_batches' game canvas / flush_batch
+        ws._fb_cv_fn = None
+        ws._fb_sc = None        # ...and the system canvas's
+        ws._fb_sc_fn = None
+        ws._lb_wm = None        # frame()'s WM / letterbox_inplace
+        ws._lb_fn = None
+        ws._loading_host = None  # the loading pill's UI context (_draw_loading_toast)
+        ws._loading_rect = None  # ...and the rect it drew last
+        ws._dsf_comp = None     # _disarm_fn's compositor / disarm_scale_fold
+        ws._dsf_fn = None
+        ws._probe_sc = None     # frame()'s system-canvas probe (view) and the
                                   # game canvas's `buf`, re-taken only when the
                                   # object changes
-        self._probe_view = None
-        self._probe_gc = None
-        self._probe_buf = None
+        ws._probe_view = None
+        ws._probe_gc = None
+        ws._probe_buf = None
         # #184 deferred transitions: [armed, fn] entries queued by defer().
         # A tap handler schedules its heavy transition here instead of running
         # it inside the pointer walk; frame() paints the acknowledgment first
         # (arming the entry after the flush), then runs it at the next frame's
         # top -- so the pressed state is ON GLASS during the load stall.
-        self._deferred = []
-        self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
+        ws.deferred = []
+        ws._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
 
     def note_cost(self, what):
@@ -150,7 +138,8 @@ class PerfMeters:
         session sees a thrashing cache immediately; and tests assert BUDGETS over a
         run of frames (tests/test_top_bar.py, tests/test_cover_pipeline.py), which
         turns this whole bug class from a perf mystery into a test failure."""
-        d = self.costs
+        ws = self.ws
+        d = ws.costs
         d[what] = d.get(what, 0) + 1
 
     def _frame_perf_end(self, frame_t0):
@@ -166,38 +155,39 @@ class PerfMeters:
         the shell's frame budget was being argued from: `chrome` is a residual
         (draw - upd - cart - audio), and integer-ms differences truncate toward
         zero with every term's loss landing in the last one."""
-        _upd = self._pf_upd                     # us
-        _cart = self._pf_cart                   # us
-        _audio = self._pf_audio                 # us
+        ws = self.ws
+        _upd = ws.pf_upd                     # us
+        _cart = ws.pf_cart                   # us
+        _audio = ws.pf_audio                 # us
         _flush_t0 = _ticks_us()
-        self.comp.flush()
+        ws.comp.flush()
         _flush = _ticks_diff(_ticks_us(), _flush_t0)
         _total = _ticks_diff(_ticks_us(), frame_t0)
         _draw = _total - _flush
         if _draw < 0:
             _draw = 0
-        self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)
-        self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)
+        ws.flush_ms = _ema(ws.flush_ms, _flush / 1000.0)
+        ws.draw_ms = _ema(ws.draw_ms, _draw / 1000.0)
         # Everything below is the DEEP tail (the DRAWBRK split + the HITCH
         # logger's raw copies): diag-session data, and 6 boxed floats + ~8 EMA
         # calls of churn per frame -- perf_hud alone stops here (the chip shows
         # fps/draw/flush, all set above).
-        if not self.perf_capture:
+        if not ws.perf_capture:
             return
         # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
         # console chrome (remainder = bar + cursor + overlays).
         _chrome = _draw - _upd - _cart - _audio
         if _chrome < 0:
             _chrome = 0
-        self._upd_ms = _ema(self._upd_ms, _upd / 1000.0)
-        self._cart_ms = _ema(self._cart_ms, _cart / 1000.0)
-        self._audio_ms = _ema(self._audio_ms, _audio / 1000.0)
-        self._chrome_ms = _ema(self._chrome_ms, _chrome / 1000.0)
+        ws.upd_ms = _ema(ws.upd_ms, _upd / 1000.0)
+        ws.cart_ms = _ema(ws.cart_ms, _cart / 1000.0)
+        ws._audio_ms = _ema(ws._audio_ms, _audio / 1000.0)
+        ws.chrome_ms = _ema(ws.chrome_ms, _chrome / 1000.0)
         # #172: the declared-backdrop restore. NOT a fourth peer of the split --
-        # it is already inside _cart_ms (Player.tick charges it to render, where
+        # it is already inside cart_ms (Player.tick charges it to render, where
         # the cart's own cls would have landed). Tracked separately only so
         # DRAWBRK can say how much of render is the backdrop.
-        self._bg_ms = _ema(self._bg_ms, self._pf_bg / 1000.0)
+        ws._bg_ms = _ema(ws._bg_ms, ws.pf_bg / 1000.0)
 
     def perf_sample(self):
         """Snapshot of the current per-frame perf numbers for offline sampling:
@@ -207,13 +197,14 @@ class PerfMeters:
         (or perf_hud) is on -- run_desktop sets perf_capture=True at boot. Backend-
         agnostic + host-safe: pure reads, no drawing, no hardware. Returns None
         when no cart is actively running (nothing useful to sample)."""
-        running = (self.wm.top_is_player() and self.cart is not None  # Stage 6d
-                   and self.cart_error is None)
+        ws = self.ws
+        running = (ws.wm.top_is_player() and ws.run.project.cart is not None  # Stage 6d
+                   and ws.run.player.cart_error is None)
         if not running:
             return None
-        cart = self.cart
+        cart = ws.run.project.cart
         name = cart.get("title") or cart.get("path") or "?"
-        return (name, self.frame_state.fps, self._flush_ms, self._draw_ms)
+        return (name, ws.frame_state.fps, ws.flush_ms, ws.draw_ms)
 
     def perf_push(self, loop, front=False):
         """The console's half of the PERF line into the kernel's sampler
@@ -231,8 +222,8 @@ class PerfMeters:
         `front`: a kernel run took the frame (moy_play's front), so no
         console frame runs to measure: the half names the cart and leaves
         every meter of the console's absent."""
-        ws = self
-        cart = self.cart
+        ws = self.ws
+        cart = ws.run.project.cart
         loop.perf_cart(cart.get("title") if cart else None)
         if front:
             for name in _CONSOLE_METERS:
@@ -240,27 +231,27 @@ class PerfMeters:
             loop.perf("net", self.perf_net())
             loop.perf("lock", self.perf_lock())
             return
-        loop.perf("draw", self._draw_ms)
-        loop.perf("flush", self._flush_ms)
-        loop.perf("logic", self._upd_ms)
-        loop.perf("render", self._cart_ms)
-        loop.perf("chrome", self._chrome_ms)
-        v = getattr(ws, "_pf_wm_restore", None)
+        loop.perf("draw", ws.draw_ms)
+        loop.perf("flush", ws.flush_ms)
+        loop.perf("logic", ws.upd_ms)
+        loop.perf("render", ws.cart_ms)
+        loop.perf("chrome", ws.chrome_ms)
+        v = getattr(ws, "pf_wm_restore", None)
         if v is not None:
-            ws._pf_wm_restore = None
+            ws.pf_wm_restore = None
         loop.perf("wmr", v)
-        v = getattr(ws, "_pf_wm_windows", None)
+        v = getattr(ws, "pf_wm_windows", None)
         if v is not None:
-            ws._pf_wm_windows = None
+            ws.pf_wm_windows = None
         loop.perf("wmw", v)
-        v = getattr(ws, "_pf_wm_stamp", None)
+        v = getattr(ws, "pf_wm_stamp", None)
         if v is not None:
-            ws._pf_wm_stamp = None
+            ws.pf_wm_stamp = None
         loop.perf("wms", v)
-        loop.perf("home", getattr(ws, "_pf_home", None))
+        loop.perf("home", getattr(ws, "pf_home", None))
         loop.perf("net", self.perf_net())
         loop.perf("lock", self.perf_lock())
-        pl = self.run.player
+        pl = ws.run.player
         if pl is None or not pl.tick_ms:
             self._perf_sched = None
             self._perf_miss = 0
@@ -268,7 +259,7 @@ class PerfMeters:
             loop.perf("miss", None)
             return
         sc = pl.sched
-        if sc is not getattr(self, "_perf_sched", None):
+        if sc is not self._perf_sched:
             self._perf_sched = sc
             self._perf_miss = 0
         miss = sc.misses - self._perf_miss
@@ -290,14 +281,16 @@ class PerfMeters:
         CONSUMES its sample window (netplay.LockstepSession.tps) -- perf_sample()
         stays the `is a cart running?` probe half a dozen diag helpers call, and
         must not carry a number that a second caller would spend."""
-        np = self.netplay
+        ws = self.ws
+        np = ws.netplay
         return None if np is None else np.tps(_ticks_ms())
 
     def perf_lock(self):
         """The PERF line's `lock=`: where a match's tick rate went
         (LockstepSession.lock), None with no session. Its one reader, beside
         perf_net."""
-        np = self.netplay
+        ws = self.ws
+        np = ws.netplay
         return None if np is None else np.lock(_ticks_ms())
 
     def perf_breakdown(self):
@@ -307,7 +300,8 @@ class PerfMeters:
         diag's DRAWBRK line to find where the per-frame draw cost actually goes (cart
         logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
         perf_capture/perf_hud on."""
-        return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
+        ws = self.ws
+        return (ws.upd_ms, ws.cart_ms, ws._audio_ms, ws.chrome_ms)
 
     def perf_backdrop(self):
         """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s
@@ -318,7 +312,8 @@ class PerfMeters:
         first thing. Measured on its own so that it cannot surface as CHROME
         (on the T-Deck it read as ~4.7ms of shell cost while it did). Feeds
         DRAWBRK's `bg=`."""
-        return self._bg_ms
+        ws = self.ws
+        return ws._bg_ms
 
     def perf_pointer(self):
         """(total_ms, pre_ms, worst_ms, worst_id, claim_id, n) for the last
@@ -330,7 +325,8 @@ class PerfMeters:
         tap, `n` how many layers were visited. total - pre - worst says whether
         the cost was one layer or spread; a total far BELOW the loop's own hp=
         says the time went somewhere outside this method entirely."""
-        pf = self._pf_ptr
+        ws = self.ws
+        pf = ws._pf_ptr
         if not pf[5]:
             return None
         return (pf[0] / 1000.0, pf[1] / 1000.0, pf[2] / 1000.0,
@@ -342,7 +338,8 @@ class PerfMeters:
         read flushes=N / maxrun=1 -- so this PROVES the batch stayed intact at runtime,
         which pixel-parity can't. Counters reset per frame in frame() when perf capture is
         on; a lone item still counts as a (flushes=1, maxrun=1) direct blit."""
-        cv = self.run.canvas
+        ws = self.ws
+        cv = ws.run.canvas
         return (getattr(cv, "_batch_flushes", 0),
                 getattr(cv, "_batch_sprites", 0),
                 getattr(cv, "_batch_maxrun", 0))

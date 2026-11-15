@@ -14,6 +14,7 @@ FACES = (
     ("moy_log", "moy_log", False),
     ("moy_mic", "moy_mic", False),
     ("moy_midi", "moy_midi", False),
+    ("moy_store", "moy_store_binding", True),
     ("moy_ufiles", "moy_ufiles_binding", True),
     ("moy_ui", "moy_ui_binding", True),
 )

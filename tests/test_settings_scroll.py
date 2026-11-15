@@ -177,7 +177,7 @@ def test_the_windowed_page_scrolls(tmp_path):
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
     _force_ota_rows(ws)
     drv = _drv(ws)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     lay = win.ctx.layout
     ox, oy = win.x + 1, win.y + 1 + win.title_h
     sl = ws.settings_layer

@@ -435,16 +435,16 @@ def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
     assert type(ws.launcher) is Carousel                 # the default
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     ws.launcher.sel = 2
     want = ws.launcher.selected()
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     g = ws.launcher
     assert type(g) is Launcher and g.tab == "apps" and g.selected() is want
     home = ws.launcher_layer
     assert home.zone_verbs() == ("open",)                # the same bar verbs
     assert [t for t, _r, _on in home.tab_rects()] == ["games", "mine", "apps", "make"]
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     drv.frame(1 / 30)
     drv.press("down")
     drv.frame(1 / 30)
@@ -465,8 +465,8 @@ def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
     assert ws.screen == "desktop" and g.sel == game     # a card's tap runs it
-    ws._exit_to_caller()
-    ws.set_home_tab("make")
+    ws.spine.exit_to_caller()
+    ws.home.set_home_tab("make")
     assert g.items[0]["type"] == "new" and g.tile_rect(0)[3] == g.tile_rect(1)[3]
 
 
@@ -566,7 +566,7 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
     drv.click(r[0] + r[2] // 2, r[1] + r[3] // 2)
     drv.frame(1 / 30)
     assert ws.launcher.tab == "apps"
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     drv.frame(1 / 30)
     hints = home._zone_action_rects(None)
     assert home.zone_verbs() == ("play", "change", "search")
@@ -591,7 +591,7 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
 
     ws = _ws_with_carts(tmp_path, 10)
     home = ws.launcher_layer
-    ws.set_home_tab("games")
+    ws.home.set_home_tab("games")
     try:
         ui_draw.input_kind(kind)
         items, verbs = home._hint_groups()
@@ -601,7 +601,7 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         else:
             assert verbs == ["play", "change", "search", "favourite"]
             assert items[::2] == ["confirm", "C", "search", "F"]   # `/`, Sym G
-        ws.set_home_tab("make")
+        ws.home.set_home_tab("make")
         assert home._hint_groups()[1] == ["new"], "the + New card"
         # a project selected
         monkeypatch.setattr(home, "zone_verbs", lambda: ("new", "change", "copy", "delete"))
@@ -728,8 +728,8 @@ def _desk_home(tmp_path):
                                     font_scale=1, windowed=True, panel_diagonal_in=7.0)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    ws.open_library()
-    ws.set_home_tab("games")
+    ws.home.open_library()
+    ws.home.set_home_tab("games")
     drv.frame(1 / 30)
     return ws, drv
 
@@ -797,7 +797,7 @@ def test_the_details_buttons_are_the_tabs_verbs_and_the_hero_plays(tmp_path):
 
 def test_the_details_read_the_play_records(tmp_path):
     ws, drv = _desk_home(tmp_path)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     home = ws.launcher_layer
     it = ws.launcher.selected()
     assert home._facts(it) == [("Played", "Not yet"), ("By", "Moybyte")]

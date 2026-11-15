@@ -1,6 +1,6 @@
 // moy_fetch's MicroPython binding: the `http` device API's driver (moy_fetch.h)
 // as the module `moy_http`, its names those face.json lists: the row here is
-// the hand one, the rest are generated into modmoy_http_face.c. A refusal is
+// the hand one, the rest are generated into modmoy_http_face.h. A refusal is
 // a negative errno (Linux's numbers), which the Python face
 // (runtime/system/devices.py) raises.
 //
@@ -16,7 +16,7 @@
 #include "moy_fetch.h"
 #include "moy_ota.h"
 
-#include "modmoy_http_face.c"
+#include "modmoy_http_face.h"
 
 static mp_obj_t http_state(mp_obj_t h) {
     int status = 0, err = 0;

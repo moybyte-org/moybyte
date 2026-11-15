@@ -1,6 +1,7 @@
 // moy_store's MicroPython binding: the store's crash-safe write and file verbs
-// (moy_fs.h) as the module runtime/carts/moy_fs.py delegates to wherever it imports
-// -- every board, the browser and the desktop MicroPython. Names follow
+// (moy_fs.h) as the module runtime/carts/moy_fs.py names -- every board, the
+// browser and the desktop MicroPython; CPython's face of the same module is
+// runtime/host/moy_store_binding.py. Names follow
 // moy_fs.py's: publish is its _write_atomic, read_recover its _read_recover,
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
@@ -634,7 +635,7 @@ static mp_obj_t mod_unmark(mp_obj_t path) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_unmark_obj, mod_unmark);
 
-// _remove and _mkdir: an error is the caller's to ignore, as the twin does.
+// _remove and _mkdir: an error is the caller's to ignore.
 static mp_obj_t mod_remove(mp_obj_t path) {
     const char *p = path_arg(path);
     GUARD_BEGIN
@@ -1223,13 +1224,39 @@ static mp_obj_t mod_pack(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pack_obj, 4, 4, mod_pack);
 
-// unpack(archive, dest) -> (files, top folder)
-static mp_obj_t mod_unpack(mp_obj_t archive, mp_obj_t dest) {
-    const char *a = path_arg(archive), *d = path_arg(dest);
+// pack_paths(base, rels, folder, dest, history) -> files written
+static mp_obj_t mod_pack_paths(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    const char *base = path_arg(args[0]), *dest = path_arg(args[3]);
+    const char *folder = mp_obj_str_get_str(args[2]);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(args[1], &n, &items);
+    const char **rels = m_new(const char *, n ? n : 1u);
+    for (size_t i = 0; i < n; i++) {
+        rels[i] = mp_obj_str_get_str(items[i]);
+    }
+    int history = mp_obj_is_true(args[4]);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_pack_paths(base, rels, n, folder, dest, history);
+    GUARD_END
+    m_del(const char *, rels, n ? n : 1u);
+    if (rc < 0) {
+        raise_rc(-rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(rc);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pack_paths_obj, 5, 5, mod_pack_paths);
+
+// unpack(archive, dest, history=False) -> (files, top folder)
+static mp_obj_t mod_unpack(size_t n_args, const mp_obj_t *args) {
+    const char *a = path_arg(args[0]), *d = path_arg(args[1]);
+    int history = n_args > 2 && mp_obj_is_true(args[2]);
     char top[128];
     int rc = 0;
     GUARD_BEGIN
-    rc = moy_unpack(a, d, top, sizeof top);
+    rc = moy_unpack_all(a, d, top, sizeof top, history);
     GUARD_END
     if (rc < 0) {
         raise_rc(-rc);
@@ -1237,7 +1264,7 @@ static mp_obj_t mod_unpack(mp_obj_t archive, mp_obj_t dest) {
     mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc), mp_obj_new_str(top, strlen(top)) };
     return mp_obj_new_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_unpack_obj, mod_unpack);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_unpack_obj, 2, 3, mod_unpack);
 
 static mp_obj_t mod_adopt(mp_obj_t stage, mp_obj_t target) {
     const char *s = path_arg(stage), *t = path_arg(target);
@@ -1772,6 +1799,7 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_skip), MP_ROM_PTR(&mod_skip_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack), MP_ROM_PTR(&mod_pack_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pack_paths), MP_ROM_PTR(&mod_pack_paths_obj) },
     { MP_ROM_QSTR(MP_QSTR_unpack), MP_ROM_PTR(&mod_unpack_obj) },
     { MP_ROM_QSTR(MP_QSTR_adopt), MP_ROM_PTR(&mod_adopt_obj) },
     { MP_ROM_QSTR(MP_QSTR_journal_append), MP_ROM_PTR(&mod_journal_append_obj) },

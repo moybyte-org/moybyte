@@ -264,7 +264,7 @@ def test_running_cart_reads_scene_into_init(tmp_path):
     assert ns["named2"] == 1                             # scene('level2') peeked
     assert ns["switched"] == 1                           # load_scene switched + returned
     assert ws.run.project.play_scenes.active == "level2"     # the switch stuck for this run
-    assert ws.scenes.active == "main"                    # the Editor's are not the run's
+    assert ws.run.project.scenes.active == "main"                    # the Editor's are not the run's
 
 
 # A cart that does NOT switch -- it just records how many actors the ACTIVE scene has.
@@ -284,7 +284,7 @@ def test_active_scene_resets_on_rerun(tmp_path):
                           scenes={"main": MAIN_SCENE, "level2": LEVEL2_SCENE})
     assert ws.ns["n"] == 3                               # active == main (3 actors)
     ws.run.project.play_scenes.load_scene("level2")          # a leftover switch (1 actor)
-    ws._start()                                          # re-run the SAME project
+    ws.start()                                          # re-run the SAME project
     assert ws.run.project.play_scenes.active == "main"       # a fresh copy, at its default...
     assert ws.ns["n"] == 3                               # ...so _init saw main again
 

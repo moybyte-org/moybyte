@@ -81,7 +81,7 @@ def _pixels(ws):
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(_DT)
 
 
@@ -117,7 +117,7 @@ def test_a_page_draws_the_same_pixels_in_every_runtime_under_moy(tmp_path, varia
             _frame(drv)
             got.append(_pixels(ws))
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
         shots[name] = got
     assert set(shots) == set(titles) and all(len(v) == 3 for v in shots.values())
     ref = shots["python"]

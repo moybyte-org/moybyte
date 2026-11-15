@@ -21,14 +21,14 @@ from array import array
 
 import moy_evq as _E
 import moybyte as _moybyte
-from elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
+from elf_run import IN_WORDS, LinkedUi, fill_words, key_ring, key_sent, read_buttons, sent
 
 # The longest a tick waits for a present (elf_run.WAIT_US_MAX's).
 WAIT_MS_MAX = 50
 SENT, SHOWN = 1, 2                      # moy_screen_slot.h's MOY_SCREEN_SLOT_*
 
 
-class WasiApp:
+class WasiApp(LinkedUi):
     """A WASI app's run in the Player (this module's head)."""
 
     own_ui = True                       # its toolkit is its own: a paste is its message
@@ -105,6 +105,7 @@ class WasiApp:
             self._pressed = 0
             self._ms = 0
             key_sent(self._keys)
+            sent(self._words)
         if got > 0 and got & SHOWN:
             self._shown = True
             self.presented += 1

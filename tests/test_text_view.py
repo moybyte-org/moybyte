@@ -187,7 +187,7 @@ def _console(tmp_path, windowed):
                                         windowed=True, panel_diagonal_in=7.0)
     else:
         ws = host_app.build_workstation(carts)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
@@ -222,7 +222,7 @@ class Pair:
 
     @staticmethod
     def root(ws):
-        return ws.wm._root_canvas if hasattr(ws.wm, "_root_canvas") else ws.sys_canvas
+        return ws.wm.root_canvas if hasattr(ws.wm, "root_canvas") else ws.sys_canvas
 
     def frame(self, n=1, force=None):
         # on the desk a board's buffers keep the WM asking for frames the
@@ -231,7 +231,7 @@ class Pair:
         for _ in range(n):
             for ws, drv in ((self.a, self.da), (self.b, self.db)):
                 if force:
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.pointer.visible = False
                 k = ws.frame_state.frames_drawn
                 ws.code_layer._host.shifting = ws.theme_config_layer._host.shifting = False
@@ -460,7 +460,7 @@ def test_a_whole_frame_mid_drag_leaves_each_buffer_one_catch_up(tmp_path, bufs):
         whole.append(p.n)
         draw(dt)
     d._draw = counted
-    cx, cy, cw, ch = p.a.wm._wins["menu"].content_rect()
+    cx, cy, cw, ch = p.a.wm.windows["menu"].content_rect()
     x, y = cx + cw // 5, cy + 3 * ch // 5
     p.both("touch", x, y)
     p.frame()
@@ -486,7 +486,7 @@ def test_the_gutter_widening_draws_whole(tmp_path, bufs):
 def _config_session(p):
     """theme Config: typing, the caret moving through the JSON, a held key
     scrolling it, Backspace held."""
-    p.run("ws.open_app(ws._apps_by_id['appearance'])")
+    p.run("ws.spine.open_app(ws.app('appearance'))")
     p.frame(3)
     p.run("assert ws.look.edit_file()")
     p.frame(4)
@@ -659,7 +659,7 @@ def _cart_pixels(ws):
 
 
 def _cart_pmem(ws):
-    lua = getattr(ws.run.player, "_lua", None)
+    lua = getattr(ws.run.player, "lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:3]
     if lua is not None:
@@ -701,12 +701,12 @@ def test_the_terminal_is_one_app_in_python_and_lua(tmp_path):
             elif k == 77:
                 drv.touch_up()
             quiesce(ws)
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
             assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
             shots.append((_cart_pixels(ws), _cart_pmem(ws)))
         runs[name] = shots
-        ws.exit()
+        ws.spine.exit()
     py, lua = runs["python"], runs["lua"]
     for k in range(len(py)):
         assert py[k][1][0] == lua[k][1][0], (k, py[k][1], lua[k][1])

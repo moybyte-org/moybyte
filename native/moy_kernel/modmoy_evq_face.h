@@ -78,6 +78,12 @@ static mp_obj_t face_moy_evq_screen_close(mp_obj_t a0) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_screen_close_obj, face_moy_evq_screen_close);
 
+static mp_obj_t face_moy_evq_screen_told(mp_obj_t a0) {
+    uint32_t pid = (uint32_t)mp_obj_get_int(a0);
+    return mp_obj_new_int_from_uint(moy_screen_slot_told(pid));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_screen_told_obj, face_moy_evq_screen_told);
+
 static mp_obj_t face_moy_evq_ready(void) {
     return mp_obj_new_int_from_uint(moy_evq_ready());
 }
@@ -113,6 +119,14 @@ static mp_obj_t face_moy_evq_timer_cancel(mp_obj_t a0, mp_obj_t a1) {
     return mp_obj_new_bool(moy_evq_timer_cancel(pid, id));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_evq_timer_cancel_obj, face_moy_evq_timer_cancel);
+
+static mp_obj_t face_moy_evq_timer_set(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
+    uint32_t pid = (uint32_t)mp_obj_get_int(a0);
+    uint32_t id = (uint32_t)mp_obj_get_int_truncated(a1);
+    uint32_t ms = (uint32_t)mp_obj_get_int(a2);
+    return mp_obj_new_bool(moy_evq_timer_set(pid, id, ms));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(face_moy_evq_timer_set_obj, face_moy_evq_timer_set);
 
 static mp_obj_t face_moy_evq_woke(void) {
     return mp_obj_new_int_from_uint(moy_evq_woke());
@@ -159,6 +173,25 @@ static mp_obj_t face_moy_evq_notes_waiting(void) {
     return mp_obj_new_int_from_uint(moy_notes_waiting());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_evq_notes_waiting_obj, face_moy_evq_notes_waiting);
+
+static mp_obj_t face_moy_evq_notes_post(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
+    uint32_t pid = (uint32_t)mp_obj_get_int(a0);
+    size_t summary_n;
+    const char *summary = mp_obj_str_get_data(a1, &summary_n);
+    size_t body_n;
+    const char *body = mp_obj_str_get_data(a2, &body_n);
+    return mp_obj_new_int(moy_notes_post(pid, summary, (size_t)summary_n, body, (size_t)body_n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(face_moy_evq_notes_post_obj, face_moy_evq_notes_post);
+
+static mp_obj_t face_moy_evq_notes_system(mp_obj_t a0, mp_obj_t a1) {
+    size_t summary_n;
+    const char *summary = mp_obj_str_get_data(a0, &summary_n);
+    size_t body_n;
+    const char *body = mp_obj_str_get_data(a1, &body_n);
+    return mp_obj_new_int(moy_notes_system(summary, (size_t)summary_n, body, (size_t)body_n));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_evq_notes_system_obj, face_moy_evq_notes_system);
 
 static mp_obj_t face_moy_evq_notes_goal(mp_obj_t a0, mp_obj_t a1, mp_obj_t a2) {
     uint32_t pid = (uint32_t)mp_obj_get_int(a0);
@@ -242,6 +275,16 @@ static mp_obj_t face_moy_evq_timers(mp_obj_t a0) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_timers_obj, face_moy_evq_timers);
 
+static mp_obj_t face_moy_evq_fired(void) {
+    return mp_obj_new_int_from_uint(moy_evq_fired());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_evq_fired_obj, face_moy_evq_fired);
+
+static mp_obj_t face_moy_evq_wake_id(void) {
+    return mp_obj_new_int_from_uint(moy_evq_id());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_evq_wake_id_obj, face_moy_evq_wake_id);
+
 static mp_obj_t face_moy_evq_drop(mp_obj_t a0) {
     uint32_t pid = (uint32_t)mp_obj_get_int(a0);
     moy_vmq_drop(pid);
@@ -294,12 +337,14 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_listening_obj, face_moy_evq_listen
     { MP_ROM_QSTR(MP_QSTR_queued), MP_ROM_PTR(&face_moy_evq_queued_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_screen_open), MP_ROM_PTR(&face_moy_evq_screen_open_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_screen_close), MP_ROM_PTR(&face_moy_evq_screen_close_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_screen_told), MP_ROM_PTR(&face_moy_evq_screen_told_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&face_moy_evq_ready_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&face_moy_evq_step_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&face_moy_evq_held_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_forget), MP_ROM_PTR(&face_moy_evq_forget_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_serve), MP_ROM_PTR(&face_moy_evq_serve_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_timer_cancel), MP_ROM_PTR(&face_moy_evq_timer_cancel_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_timer_set), MP_ROM_PTR(&face_moy_evq_timer_set_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_woke), MP_ROM_PTR(&face_moy_evq_woke_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_termed), MP_ROM_PTR(&face_moy_evq_termed_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_items_hand), MP_ROM_PTR(&face_moy_evq_items_hand_obj) }, \
@@ -307,6 +352,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_listening_obj, face_moy_evq_listen
     { MP_ROM_QSTR(MP_QSTR_items_reset), MP_ROM_PTR(&face_moy_evq_items_reset_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_notes_id), MP_ROM_PTR(&face_moy_evq_notes_id_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_notes_waiting), MP_ROM_PTR(&face_moy_evq_notes_waiting_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_notes_post), MP_ROM_PTR(&face_moy_evq_notes_post_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_notes_system), MP_ROM_PTR(&face_moy_evq_notes_system_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_notes_goal), MP_ROM_PTR(&face_moy_evq_notes_goal_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_notes_award), MP_ROM_PTR(&face_moy_evq_notes_award_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_notes_progress), MP_ROM_PTR(&face_moy_evq_notes_progress_obj) }, \
@@ -318,6 +365,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_listening_obj, face_moy_evq_listen
     { MP_ROM_QSTR(MP_QSTR_status_sweep), MP_ROM_PTR(&face_moy_evq_status_sweep_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_status_reset), MP_ROM_PTR(&face_moy_evq_status_reset_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_timers), MP_ROM_PTR(&face_moy_evq_timers_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_fired), MP_ROM_PTR(&face_moy_evq_fired_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_wake_id), MP_ROM_PTR(&face_moy_evq_wake_id_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&face_moy_evq_drop_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_vm_stop), MP_ROM_PTR(&face_moy_evq_vm_stop_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_live), MP_ROM_PTR(&face_moy_evq_live_obj) }, \

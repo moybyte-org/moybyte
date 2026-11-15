@@ -45,7 +45,7 @@ def _open_game(ws):
 
 def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     """#184: a PLAY tap SCHEDULES the cart start -- the pointer walk only
-    queues it (ws._deferred), the next frame paints the LOADING toast, and
+    queues it (ws.deferred), the next frame paints the LOADING toast, and
     that frame's TAIL (after the flush presented the toast) runs the start.
     So after one frame() the STATE has transitioned but the CANVAS still
     holds the acknowledgment frame -- exactly what the panel retains on
@@ -60,10 +60,10 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     x, y, w, h = chips["play"]
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
     assert ws.screen == "launcher"       # the tap only SCHEDULED the start
-    assert ws._deferred                  # ...which is queued for the frame
+    assert ws.deferred                  # ...which is queued for the frame
     ws.frame(1 / 30)
     assert ws.screen == "desktop"        # the frame tail ran it
-    assert not ws._deferred
+    assert not ws.deferred
     # The canvas still shows the acknowledgment frame: the pill, flat, over
     # the card being opened (GAPS 51), saying what opens.
     x, y, w, h = ws._loading_rect
@@ -114,7 +114,7 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
     ws.set_pointer(console.Pointer(320, 240))
-    ws.load_system()
+    ws.spine.load_system()
     use_theme(ws, "night", "dark")
     assert ws.look.wallpaper_carts() == []                     # none installed
     assert ws.look.wallpaper_id is None                        # the theme's fill
@@ -202,7 +202,7 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     assert ws.wm.top_kind() == "appearance"
     before = ws.look.wallpaper_id
     drv.frame(1 / 30)          # its first frame: focus opens on the theme in use
-    ws.appearance_app._ui.focus("Wallpaper")
+    ws.app("appearance")._ui.focus("Wallpaper")
     drv.frame(1 / 30)
     for key in ("a", "right", "a"):   # WALLPAPER's page, the next card, use it
         drv.press(key)
@@ -223,6 +223,31 @@ def test_settings_back_returns_home(tmp_path):
     settings_back(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
+
+
+@pytest.mark.parametrize("way", ("bar", "policy", "spine"))
+def test_settings_opened_over_a_cart_resumes_it(tmp_path, way):
+    """Settings opened over a running cart (the in-cart bar's gear) goes back
+    to that cart by every way out -- the bar's back, the input policy's leave
+    (B, Esc), the spine's exit -- the same run, not a fresh one or the home."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open(select_on_home(ws, "Star Catcher"))
+    drv.frame(1 / 30)
+    run = ws.run.player.ns
+    assert ws.screen == "desktop" and run is not None
+    ws.open_settings()
+    drv.frame(1 / 30)
+    assert ws.screen == "settings"
+    if way == "bar":
+        settings_back(ws, drv)
+    elif way == "policy":
+        ws.input_policy.leave(ws.wm.top_kind())
+    else:
+        ws.spine.exit()
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop" and ws.run.player.ns is run
 
 
 def _settings_page(tmp_path):
@@ -301,14 +326,14 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
     monkeypatch.setattr(S._ui, "icon", icon)
     monkeypatch.setattr(S._ui, "slider", slider)
     ws.settings_layer.set_level("volume", 0)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert ("mute", True) in icons, "the theme's set draws the muted speaker"
     assert sliders["Volume"] == (0, 7, {"steps": True})
     assert sliders["Brightness"] == (0, 7, {"steps": True})
     ws.settings_layer.set_level("volume", 4)
     icons.clear()
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert not any(n == "mute" for n, _ok in icons)
 
@@ -397,7 +422,7 @@ def test_back_into_a_cart_stores_the_name_and_hands_back_button_mode(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     _type_name(ws, drv, "Kit")
-    ws._exit_settings()
+    ws.exit_settings()
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
     assert _stored_name(tmp_path) == "Kit"
@@ -407,7 +432,7 @@ def test_back_into_a_cart_stores_the_name_and_hands_back_button_mode(tmp_path):
 def test_an_app_switch_stores_a_name_being_typed(tmp_path):
     ws, drv = _settings_page(tmp_path)
     _type_name(ws, drv, "Kit")
-    assert ws.open_app(ws._apps_by_id["appearance"])
+    assert ws.spine.open_app(ws.app("appearance"))
     assert _stored_name(tmp_path) == "Kit"
     drv.frame(1 / 30)
     assert not ws.input.text_mode
@@ -416,7 +441,7 @@ def test_an_app_switch_stores_a_name_being_typed(tmp_path):
 def test_going_home_stores_a_name_being_typed(tmp_path):
     ws, drv = _settings_page(tmp_path)
     _type_name(ws, drv, "Kit")
-    ws.go_home()
+    ws.home.go_home()
     assert _stored_name(tmp_path) == "Kit"
 
 
@@ -436,8 +461,8 @@ def test_a_reboot_stores_a_name_being_typed_first(tmp_path):
 def test_the_pre_2026_07_bottom_dock_is_gone(tmp_path):
     """The six-slot HOME/CODE/DRAW/MAP/RUN/SET bottom dock was DELETED on
     2026-08-21. It was the pre-2026-07 tool-switcher shell's navigation, and its
-    slots still routed into that shell's entry points (ws._open_menu /
-    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tab
+    slots still routed into that shell's entry points (ws.text.open_menu /
+    ws.text.open_paint); the 2026-07 shell navigates by the zoned bar, the Make tab
     and the context-X. The launcher had dropped it in #46, the windowed WM
     suppressed it, so `settings_layer` was its last caller -- which is why it was
     still visible on the fullscreen tiers (T-Deck/Guition) and nowhere else.
@@ -491,7 +516,7 @@ def test_only_make_manages_carts(tmp_path):
     but an empty Mine's "+ New"."""
     ws = _ws(tmp_path)
     for tab in ("games", "mine", "apps"):
-        ws.set_home_tab(tab)
+        ws.home.set_home_tab(tab)
         real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
         ws.launcher.sel = real[0] if real else 0
         verbs = ws.launcher_layer.zone_verbs()
@@ -541,14 +566,14 @@ def test_play_reaches_the_tabbed_home_in_console_mode(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     assert ws.screen == "desk"
-    ws.open_library()                           # the desk's PLAY
+    ws.home.open_library()                           # the desk's PLAY
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.screen == "launcher"
     assert [tid for tid, _r, _on in ws.launcher_layer.tab_rects()] == [
         "games", "mine", "apps", "make"]
     assert ws.launcher.tab == "games"
     assert all(c.get("type") != "app" for c in ws.launcher.items)
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     assert "Calc" in [c.get("title") for c in ws.launcher.items]
 
 
@@ -569,10 +594,10 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
                                ("MyGame", "game", _ONE_CARD)):
         moy_carts.create(title, carts_dir, src="def _draw():\n    cls(1)\n",
                          type=ctype, edit=edit)
-        ws.go_home()
+        ws.home.go_home()
         ws.launcher.set_items(shelf(carts_dir))
         select_on_home(ws, title)
-        ws.launch_selected()                        # the launcher tap
+        ws.home.launch_selected()                        # the launcher tap
         assert ws.screen == "desktop", title        # RAN, never the Editor
         assert ws.cart is not None and ws.cart.get("type") == ctype
 
@@ -598,7 +623,7 @@ def test_go_home_keeps_wallpaper(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    ws.go_home()
+    ws.home.go_home()
     assert ws.screen == "launcher"
     assert ws.look.wallpaper_id == wp
 
@@ -618,10 +643,10 @@ def test_perf_breakdown_splits_draw_into_phases(tmp_path):
     for _ in range(5):
         drv.frame(1 / 30)
     assert ws.screen == "desktop"
-    upd, cart, audio, chrome = ws.perf_breakdown()
+    upd, cart, audio, chrome = ws.perf.perf_breakdown()
     assert all(isinstance(v, float) and v >= 0 for v in (upd, cart, audio, chrome))
     # the split is the components of draw_ms; their sum tracks it within rounding.
-    assert abs((upd + cart + audio + chrome) - ws._draw_ms) <= 2.0
+    assert abs((upd + cart + audio + chrome) - ws.draw_ms) <= 2.0
 
 
 # -- #46: the launcher draws no bottom dock (and since 2026-08-21 none exists) --
@@ -634,7 +659,7 @@ def _spy_draw(ws):
     on both screens, so "strip" counts the launcher/Settings bar (where home/settings)
     and "incart" counts the running-cart bar (where == "desktop")."""
     seen = {"incart": 0, "strip": 0}
-    ostrip = ws.bar_layer._draw_status_strip
+    ostrip = ws.bar_layer.draw_status_strip
 
     def strip(where):
         if where == "desktop":
@@ -643,7 +668,7 @@ def _spy_draw(ws):
             seen["strip"] += 1
         return ostrip(where)
 
-    ws.bar_layer._draw_status_strip = strip
+    ws.bar_layer.draw_status_strip = strip
     return seen
 
 
@@ -677,7 +702,7 @@ def test_a_game_shows_no_bar_playing_or_stopped(tmp_path):
     drv.frame(1 / 30)
     assert seen["incart"] == 0        # playing: NO bar over the game
     ws.cart_error = "boom"            # a crash brings up the stop card
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert seen["incart"] == 0
@@ -696,14 +721,14 @@ def test_backspace_reaches_the_cart_as_a_plain_key_and_never_exits(tmp_path):
     assert ws.screen == "desktop"
     calls = [0]
     keys = []
-    orig_upd = ws._update
+    orig_upd = ws.run.player.update
 
     def counting(dt):
         calls[0] += 1
         keys.append(ws.input.last_key)
         if orig_upd:
             orig_upd(dt)
-    ws._update = counting
+    ws.run.player.update = counting
 
     drv.frame(1 / 30)
     assert calls[0] == 1               # playing: the cart ticks
@@ -749,13 +774,13 @@ def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     ws.open()
     assert ws.screen == "desktop"
     calls = [0]
-    orig_upd = ws._update
+    orig_upd = ws.run.player.update
 
     def counting(dt):
         calls[0] += 1
         if orig_upd:
             orig_upd(dt)
-    ws._update = counting
+    ws.run.player.update = counting
     for _ in range(3):                 # three quick BACKSPACE taps in a row...
         drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
     assert ws.screen == "desktop"      # ...does NOT exit (triple-tap gesture is gone)
@@ -773,7 +798,7 @@ def _make_tool_ws(tmp_path):
     moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
     ws.launcher.set_items(shelf(carts_dir))
     select_on_home(ws, "MyTool")
-    ws.launch_selected()                             # a tool always LAUNCHES (Part 2)
+    ws.home.launch_selected()                             # a tool always LAUNCHES (Part 2)
     assert ws.screen == "desktop"
     return ws, drv
 
@@ -789,12 +814,12 @@ def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path)
     # 1) The minimal bar IS drawn while the tool plays (a game draws NO bar). Spy the
     #    "tool" status strip across a play frame.
     where_seen = []
-    orig = ws.bar_layer._draw_status_strip
+    orig = ws.bar_layer.draw_status_strip
 
     def spy(where):
         where_seen.append(where)
         return orig(where)
-    ws.bar_layer._draw_status_strip = spy
+    ws.bar_layer.draw_status_strip = spy
     drv.frame(1 / 30)
     assert "tool" in where_seen                       # the tool bar shows during play
 
@@ -831,7 +856,7 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
             return _orig(cv, rect)
         owner.draw_zone = spy
     for _ in range(5):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
@@ -842,7 +867,7 @@ def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
     """A cart calls quit() (make_api) to END itself and return to the launcher -- the
     self-exit a cart may offer (the console's own is the pause menu). The verb is ADDITIVE to
     the frozen kid API and works for ANY cart type; the Player honors the flag AFTER the
-    cart's _update runs (player.tick) and pops to the run caller (ws._exit_to_caller)."""
+    cart's _update runs (player.tick) and pops to the run caller (ws.spine.exit_to_caller)."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -912,10 +937,10 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     _open_game(ws)                     # launcher launch: caller = the home root
     assert ws.screen == "desktop"
-    ws._open_menu()                    # tap EDIT -> into the Editor (Config/code)
+    ws.text.open_menu()                    # tap EDIT -> into the Editor (Config/code)
     assert ws.screen == "menu"
     tab = ws.menu_view
-    ws._leave_menu()                   # PLAY: run the cart, caller = the Editor now
+    ws.text.leave_menu()                   # PLAY: run the cart, caller = the Editor now
     assert ws.screen == "desktop"      # ...still runs fullscreen (transition preserved)
     drv.frame(1 / 30)
     drv.system_key()                   # the console's key: the pause menu
@@ -935,15 +960,15 @@ def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     ws = _ws(tmp_path)
     ws.launcher.sel = 0
     ws.open()                          # launcher launch
-    ws._open_menu()                    # into the Editor
-    ws._leave_menu()                   # PLAY: caller = the Editor
+    ws.text.open_menu()                    # into the Editor
+    ws.text.leave_menu()                   # PLAY: caller = the Editor
     assert ws.returns.caller() == "menu"
     ws.open_settings()                 # Settings over the running cart (crash-bar gear)
     assert ws.screen == "settings"
-    ws._exit_settings()                # Back resumes the cart...
+    ws.exit_settings()                # Back resumes the cart...
     assert ws.screen == "desktop"
     assert ws.returns.caller() == "menu"   # ...and the caller is PRESERVED (the fix)
-    ws._exit_to_caller()               # so the cart's exit still returns to the Editor
+    ws.spine.exit_to_caller()               # so the cart's exit still returns to the Editor
     assert ws.screen == "menu"
 
 
@@ -990,13 +1015,13 @@ def test_ota_channel_toggle_persists(tmp_path):
     ws.open_settings()
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
     assert "ota_channel" in keys and "update_online" in keys
-    assert ws._ota_channel() == "stable"           # default
+    assert ws.toggles.ota_channel() == "stable"           # default
 
     ws.settings_layer.set_msel = keys.index("ota_channel")
     ws.settings_layer.settings_adjust(1)
-    assert ws._ota_channel() == "unstable" and ws.system.get("ota_channel") == "unstable"
+    assert ws.toggles.ota_channel() == "unstable" and ws.system.get("ota_channel") == "unstable"
     ws.settings_layer.settings_adjust(-1)                          # any direction flips (two channels)
-    assert ws._ota_channel() == "stable"
+    assert ws.toggles.ota_channel() == "stable"
 
     ws.settings_layer.settings_adjust(1)                           # -> unstable, then check it persisted
     ws2 = host_app.build_workstation(carts_dir)
@@ -1030,17 +1055,17 @@ def test_boot_splash_holds_then_reveals_launcher(tmp_path):
     from runtime import host_app, console
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    assert ws._splash_until is None                 # not armed by construction
+    assert ws.splash_until is None                 # not armed by construction
 
     ws.arm_splash(500)
-    assert ws._splash_until is not None
+    assert ws.splash_until is not None
     drv.frame(1 / 30)                                # paints the boot logo, no error
-    assert ws._splash_until is not None             # still within the hold
+    assert ws.splash_until is not None             # still within the hold
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4               # Moy + wordmark => many colors
 
-    ws._splash_until = console._ticks_ms() - 1       # force the deadline into the past
+    ws.splash_until = console._ticks_ms() - 1       # force the deadline into the past
     drv.frame(1 / 30)                                # this frame expires it...
-    assert ws._splash_until is None
+    assert ws.splash_until is None
     drv.frame(1 / 30)                                # ...and the launcher renders after
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
@@ -1169,25 +1194,25 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     ws.open()
     assert ws.screen == "desktop"
     assert ws.wm.keys_to_cart()
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.input.clear_edges()
     ws.input.last_key = ord("q")
-    ws.handle_input()
-    assert not ws._dirty, "cart-bound key dirtied the shell"
+    ws.router.handle_input()
+    assert not ws.frame_state.dirty, "cart-bound key dirtied the shell"
     ws.input.last_key = 0
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.screen == "launcher"
     assert not ws.wm.keys_to_cart()
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.input.set_held("right", True)
     ws.input.begin_frame()
-    ws.handle_input()
-    assert ws._dirty, "launcher nav key must repaint"
+    ws.router.handle_input()
+    assert ws.frame_state.dirty, "launcher nav key must repaint"
 
 
 def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path):
     """Nothing the shell does while opening, running and quitting a cart may
-    reach the store except through `ws._with_sd`.
+    reach the store except through `ws.with_sd`.
 
     On the T-Deck the gate drains the panel and brackets the session because
     that board's SD card shares the panel's SPI host: an sdspi transaction
@@ -1220,7 +1245,7 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
         finally:
             depth[0] -= 1
 
-    ws._with_sd = gate
+    ws.with_sd = gate
 
     def note(kind, path):
         p = str(path)
@@ -1248,7 +1273,7 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
         _open_game(ws)
         for _ in range(3):
             drv.frame(1 / 30)
-        ws._exit_to_caller()                      # the pause menu's Quit
+        ws.spine.exit_to_caller()                      # the pause menu's Quit
         for _ in range(8):
             drv.frame(1 / 30)                     # ...and the repaint burst
     finally:
@@ -1259,7 +1284,7 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
         os.rename = real["rename"]
         os.mkdir = real["mkdir"]
 
-    assert not escapes, "the store was touched outside ws._with_sd:\n  " + \
+    assert not escapes, "the store was touched outside ws.with_sd:\n  " + \
         "\n  ".join(sorted(set(escapes)))
     # ...and the gate is never taken re-entrantly, because moy_lcd's sd_guard
     # is a BOOL: an inner session's exit would clear the bracket while the
@@ -1331,7 +1356,7 @@ def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.screen == "launcher"
     m = ws.sysmenu
-    layer = ws._sysmenu_layer
+    layer = ws.sysmenu_layer
 
     class _K:
         last_key = 0
@@ -1389,8 +1414,8 @@ def test_a_surface_switch_closes_the_popover_and_its_lease(tmp_path):
         drv.frame(1 / 30)
         assert ws.wm.mode == mode
         m = ws.sysmenu
-        for switch in (ws.go_home,
-                       lambda: ws.open_app(ws._apps_by_id["calc"])):
+        for switch in (ws.home.go_home,
+                       lambda: ws.spine.open_app(ws.app("calc"))):
             ws.widget_tap("wifi")
             drv.frame(1 / 30)
             assert m.open and m.widget == "wifi"

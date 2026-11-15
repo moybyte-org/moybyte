@@ -66,10 +66,10 @@ static void text_paint(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, 
                        moy_ui_span_t find) {
     rc_t in = mua_rc_of(b);
     uint32_t bit = 1;
-    for (int i = 0; i < c->fl_n; i++, bit <<= 1) {
-        rc_t f = mua_rc_of(c->fl[i]);
+    for (int i = 0; i < c->fl.n; i++, bit <<= 1) {
+        rc_t f = mua_rc_of(c->fl.box[i]);
         if (f.x0 >= in.x0 && f.y0 >= in.y0 && f.x1 <= in.x1 && f.y1 <= in.y1) {
-            c->fl_pend &= ~bit;
+            c->fl.pend &= ~bit;
         }
     }
     int32_t *st = ((moy_canvas_row_t *)s->dst)->st;
@@ -173,7 +173,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         b = (moy_ui_box_t){c->page.x, (int16_t)top, c->page.w, (int16_t)(h > 0 ? h : 0)};
         used = b.h;
     }
-    if (mua_armed(c) && c->sh_in_id == mua_hash(id.p, id.n, TEXT_SALT) && c->fl_stage != 1) {
+    if (mua_armed(c) && c->sh.in_id == mua_hash(id.p, id.n, TEXT_SALT) && c->fl.stage != 1) {
         moy_ui_api_shift_break(c);      // planned inside a page this pass did not draw round it
     }
     int pad = TEXT_PAD * fs;
@@ -236,8 +236,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     }
     int32_t content = total * lh;
     content = content > 32767 ? 32767 : content;
-    int32_t was_b = k0 != NULL ? k0->b : 0;
-    int was_foot = k0 != NULL && was_b > 0 && k0->a >= was_b - b.h;
+    int32_t was_b = k0 != NULL ? k0->rows : 0;
+    int was_foot = k0 != NULL && was_b > 0 && k0->scroll >= was_b - b.h;
     // its rows are its own gens (the view's record): the region carries a
     // gen whatever the app gives, so its frames may move and draw rows
     moy_ui_over_t og = *o;
@@ -265,8 +265,8 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
         if (aim_to >= 0 && aim_to != scroll && !(k->sc.flags & MOY_UI_SCROLL_DRAG)) {
             if (k0 == NULL || c->in[MOY_UI_IN_DT] <= 0) {
                 // a view's first frame, or a frame with no time: it lands
-                k->a = aim_to;
-                moy_ui_scroll_land(&k->sc, &k->a);
+                k->scroll = aim_to;
+                moy_ui_scroll_land(&k->sc, &k->scroll);
                 c->scroll = scroll = aim_to;
             } else {
                 // past its frame's start the pixels have moved for it: it
@@ -381,9 +381,9 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     }
     out[1] = nrows;
     moy_ui_text_t *t = w != NULL ? &w->t : NULL;
-    if (mua_armed(c) && c->fl_stage == 1) {
-        if (c->sh_in_id == rid) {
-            mua_view_in_floor(c, c->sh_r.y + c->sh_r.h);    // its move inside R
+    if (mua_armed(c) && c->fl.stage == 1) {
+        if (c->sh.in_id == rid) {
+            mua_view_in_floor(c, c->sh.r.y + c->sh.r.h);    // its move inside R
         }
         // a floor frame: the rows whose gen moved join the floor
         // the foot's fade, where the rows' height moved under it this frame
@@ -393,7 +393,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
             mua_floor_add(c, (rc_t){b.x, b.y + b.h - fh, b.x + b.w, b.y + b.h}, 1);
         }
         int planned = t != NULL && moy_ui_text_plan(t, v, trows, nrows, err, find);
-        if (!planned || c->sh_view == rid) {
+        if (!planned || c->sh.view == rid) {
             // no record to say which rows moved, or a move drawn as rows: all of them
             mua_floor_add(c, mua_rc_of(b), 1);
         } else {
@@ -415,7 +415,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
                 i = j;
             }
         }
-        if (c->fl_lost) {
+        if (c->fl.lost) {
             moy_ui_api_shift_break(c);  // a floor too broken up to hold: the pass draws whole
         }
     }
@@ -449,7 +449,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     // its caret's line in view, and its foot draws no fade over the code
     c->y = (int16_t)content;
     if (k != NULL) {
-        k->b = content;
+        k->rows = content;
     }
     c->no_foot = opt[MOY_UI_TXO_MARK] != 0;
     mua_nest_close(c, s, 1);
@@ -497,7 +497,7 @@ int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t
     int32_t aim;
     if (line < 0) {
         // the foot, where the view stood at it and the lines grew
-        if (!(k->b > 0 && k->a >= k->b - w->h) || content <= k->b) {
+        if (!(k->rows > 0 && k->scroll >= k->rows - w->h) || content <= k->rows) {
             return 0;
         }
         aim = most;
@@ -505,13 +505,13 @@ int moy_ui_api_text_aim(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t line, int32_t
         aim = line * w->lh;
         aim = aim > most ? most : aim;
     }
-    if (aim == k->a) {
+    if (aim == k->scroll) {
         return 0;
     }
-    k->b = content;
-    k->a = aim;
+    k->rows = content;
+    k->scroll = aim;
     k->over = 0;
-    moy_ui_scroll_land(&k->sc, &k->a);
+    moy_ui_scroll_land(&k->sc, &k->scroll);
     return 1;
 }
 
@@ -551,7 +551,7 @@ int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines
     content = content > 32767 ? 32767 : content;
     int32_t most = content - w->h;
     most = most < 0 ? 0 : most;
-    int32_t y0 = row * w->lh, aim = k->a;
+    int32_t y0 = row * w->lh, aim = k->scroll;
     if (col < 0 || y0 < aim) {
         aim = y0;                       // its line's top, or a row above the view
     } else if (y0 + w->lh > aim + w->h) {
@@ -559,13 +559,13 @@ int moy_ui_api_text_reveal(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_lines
     }
     aim = aim > most ? most : aim;
     aim = aim < 0 ? 0 : aim;
-    if (aim == k->a) {
+    if (aim == k->scroll) {
         return 0;
     }
-    k->b = content;
-    k->a = aim;
+    k->rows = content;
+    k->scroll = aim;
     k->over = 0;
-    moy_ui_scroll_land(&k->sc, &k->a);
+    moy_ui_scroll_land(&k->sc, &k->scroll);
     return 1;
 }
 

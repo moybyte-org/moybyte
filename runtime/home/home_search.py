@@ -29,7 +29,7 @@ class HomeSearch:
         """Mic while a query is typed: the box closes, cleared."""
         if not self.ws.search_typing:
             return False
-        self.ws.close_search(clear=True)
+        self.ws.home.close_search(clear=True)
         return True
 
     def _search_label(self, query, typing):
@@ -37,7 +37,7 @@ class HomeSearch:
         follows it while typed, `_draw_search`), or, where the input in use
         cannot type, that a keyboard is needed (#239 is the on-screen
         keyboard)."""
-        if typing and not query and not self.ws.can_type():
+        if typing and not query and not self.ws.text.can_type():
             return self.ws.no_keyboard_text
         return "Search: " + query
 
@@ -62,7 +62,7 @@ class HomeSearch:
         label = _ui_draw.print_fit(self._search_label(query, typing), line[2] // 2, fs)
         cv.print(label, x, y, ink, 1)
         x += _ui_draw.print_width(label, fs)
-        if typing and ws.can_type():
+        if typing and ws.text.can_type():
             # the field's caret: a unit wide, a unit over and under the ink
             x += fs
             cv.rect(x, y + fs, fs, ws.layout.line_h - 2 * fs, th["value"])
@@ -85,7 +85,7 @@ class HomeSearch:
         x1 = next((a for v, a, _b in spans if v == "tabs"), line[0] + line[2])
         if not _in(px, py, (line[0], line[1], x1 - line[0], line[3])):
             return False
-        self.ws.close_search(clear=True)
+        self.ws.home.close_search(clear=True)
         return True
 
     def _handle_search_typing(self, i):
@@ -100,14 +100,14 @@ class HomeSearch:
         ws = self.ws
         k = ws.input.typed
         if i.pressed("b"):                          # a gamepad's B: the strip's Close
-            ws.close_search(clear=True)
+            ws.home.close_search(clear=True)
         elif k:
             if k in (10, 13):                       # ENTER -> stop typing, keep results
-                ws.close_search(clear=False)
+                ws.home.close_search(clear=False)
             elif k == 27:                           # ESC -> cancel back to the full grid
-                ws.close_search(clear=True)
+                ws.home.close_search(clear=True)
             elif k == 8:                            # BACKSPACE -> delete
-                ws.set_search_query(ws.search_query[:-1])
+                ws.home.set_search_query(ws.search_query[:-1])
             elif 32 <= k <= 126 and len(ws.search_query) < 24:
-                ws.set_search_query(ws.search_query + chr(k))
+                ws.home.set_search_query(ws.search_query + chr(k))
         return True

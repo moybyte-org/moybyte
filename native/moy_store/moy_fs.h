@@ -1,7 +1,7 @@
 // The store's crash-safe write and its file verbs, over moy_vol
 // (docs/history/kernel_store_2026-10.md section 5).
 //
-// runtime/carts/moy_fs.py is the reference and its header the crash-safety story;
+// runtime/carts/moy_fs.py names these on every tier and its header is the crash-safety story;
 // this is that story on the medium, byte for byte: the marker line
 // "#moyfs1 <chars> <crc32> <path>\n" in `<root>/.publish`, the backup
 // `<path>.bak` led by its stamp line "#moyfs1 <chars> <crc32>\n", the file in
@@ -11,7 +11,7 @@
 //
 // Paths are absolute (the host resolves each with moy_vol_at). Every call
 // returns 0 or an errno value; MOY_FS_NONE is "nothing trustworthy", the
-// Python twin's None. A buffer is n bytes and a NUL, freed by moy_buf_free.
+// module's None. A buffer is n bytes and a NUL, freed by moy_buf_free.
 
 #ifndef MOY_FS_H
 #define MOY_FS_H

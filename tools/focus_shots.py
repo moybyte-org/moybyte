@@ -118,7 +118,7 @@ class Sheet(AppLayer):
         if self.keys:
             b = _BTN[self.keys.pop(0)]
             inp[0] = inp[1] = b
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif self.press is not None:
             box = ui_draw._C.api_box(self.ctx, self.press)
             if box is not None:
@@ -286,11 +286,11 @@ def _sheet_setup(page, focus, keys, press, apps=None):
         app = Sheet(ws, page)
         if apps is not None:
             apps.append(app)
-        ws.register_app(app)
+        ws.spine.register_app(app)
         app.open()
         ws.wm.goto(app.id)
         L._settle(g, ws, 2)
-        if app.id in getattr(ws.wm, "_wins", {}):
+        if app.id in getattr(ws.wm, "windows", {}):
             L._place(ws, app.id, *DESK_WIN)
             L._settle(g, ws, 2)
         ui_draw._C.api_focus(app.ctx, focus)
@@ -309,7 +309,7 @@ def _sheet_setup(page, focus, keys, press, apps=None):
 
 def _open(app_id, then=None):
     def setup(g, ws):
-        ws.open_app(ws._apps_by_id[app_id])
+        ws.spine.open_app(ws.app(app_id))
         L._settle(g, ws, 2)
         if then is not None:
             then(g, ws)
@@ -343,7 +343,7 @@ def _bar_focus(name):
 
 
 def _desk_power(g, ws):
-    ws.open_desk()
+    ws.home.open_desk()
     L._settle(g, ws, 2)
     ws._golden_popover = True
     ws.widget_tap("battery")

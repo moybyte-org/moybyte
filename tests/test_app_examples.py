@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from runtime import app_perms, host_app, moy_evq, notifications, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 
 from ws_helpers import build_ws, select_on_home
@@ -56,7 +57,7 @@ def test_the_python_app_scrolls_its_list_and_keeps_its_choice(tmp_path):
     _frames(drv)
     assert ns["cur"] == 30
     assert ns["prefs"].get("cur") == 30
-    ws.exit()
+    ws.spine.exit()
     _frames(drv)
     ns, drv = _open(ws, "Shopping")         # a new run reads its prefs back
     assert ns["cur"] == 30
@@ -64,7 +65,7 @@ def test_the_python_app_scrolls_its_list_and_keeps_its_choice(tmp_path):
 
 @pytest.fixture
 def echo(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     cart = _install(ws, "echo_lua.moy")
@@ -133,11 +134,11 @@ def _pinger(ws, off=()):
         _serve()
         S.SCHED.tick(0)
         _frames(drv, 1)
-    return ws.run.player._lua
+    return ws.run.player.lua
 
 
 def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     echo = S.start_cart(ws, _install(ws, "echo_lua.moy"))
@@ -157,7 +158,7 @@ def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):
 
 
 def test_the_lua_app_posts_no_notification_without_the_permission(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     lua = _pinger(ws, off=("notifications",))

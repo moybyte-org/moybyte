@@ -1,6 +1,6 @@
 ---
 name: on-glass
-description: Drive an attached Moybyte board -- find its port, check who holds it, run a board pass (build, flash, suite, one table), flash it, push and run a cart, take a screenshot, read state/pmem/heap, run its on-glass suite, and get the desk back when it is wedged. Use before opening any serial port or writing a script that talks to a board.
+description: Drive an attached Moybyte board -- find its port, check who holds it, run a board pass (build, flash, suite, perf, one table), flash it, push and run a cart, take a screenshot, read state/pmem/heap, run its on-glass suite, and get the desk back when it is wedged. Use before opening any serial port or writing a script that talks to a board.
 ---
 
 # On glass
@@ -83,7 +83,7 @@ holds no frame of it: shoot the screen on a P4, and on an S3 nothing shows
 one. The frame is taken in one command between two frames, then sent
 deflated in bands.
 
-**Carts.** A folder cart pushes as it is. A compiled cart needs its per-chip
+**Carts.** A folder cart pushes as it is (over the cable; `tools/push_cart_wifi.py` hands the board a URL it pulls the folder from over Wi-Fi). A compiled cart needs its per-chip
 module, built and signed on the host — the chip is `[board] chip` (`esp32s3`
 for tdeck/guition_s3, `esp32p4` for p4/guition_p4):
 
@@ -96,19 +96,37 @@ python3 experiments/wasm_aot/doom/build_cart.py --out /tmp/carts   # never commi
 ## A board pass
 
 ```bash
-tools/board.py pass tdeck p4          # build each image from THIS tree, flash, boot, suite
+tools/board.py pass tdeck p4          # build each image from THIS tree, flash, boot, suite, perf
 tools/board.py pass --all -k wasm     # every console board; -k goes to pytest
 tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the suite only
 tools/board.py pass --all --build-only    # every image, the Zero's too, no board: preflight's firmware lane
 tools/board.py pass --all --shot      # ...and a screenshot of each at the end
+tools/board.py pass tdeck --no-perf   # no perf stage after the suite
+tools/board.py perf-baseline tdeck --image COMMIT   # the perf stage alone, on the image the board has (built from COMMIT)
 ```
 
 It is one job, however many boards: run it in the background and take its
-one notice; the table and the pass's wall time are its last lines. One row a
+one notice; the table, each board's perf block and the pass's wall time are
+its last lines. One row a
 board: the commit its image was built from (`+`: tracked changes on top), the
 headroom the build printed, passed/skipped/failed, the time each step took
 (`wait` is the build's wait for the machine's configure lock) and the failing tests by
-name; every step's log is a file under the directory it prints. A
+name; every step's log is a file under the directory it prints.
+
+**The perf stage** (`tools/perf_pass.py`, about three minutes a board) runs
+after each suite, one board at a time (two consoles in one two-player cart
+form a match, and a LINKED cart is not measured): the desk idle (drawn fps, the collector's stops, loop ms),
+the heap, a window drag on a windowed tier, the #66 roster's drawn fps (PERF
+DIAG off, as the ledger records it) and frame ms (the kernel's LOOP work behind one
+drawn frame, under PERF DIAG), and Jet
+Teapot uncapped. Each run is one JSON record, in the log directory as
+`<board>.perf.json` and appended to `~/.cache/moybyte-perf/<board>.jsonl`; the
+block under the table sets each metric beside the board's last run at another
+commit and marks `<<< WORSE` a move past its noise band (the module header has
+the rule). It is a report, never a gate: the exit code stays the suites'.
+`perf-baseline` records a board without a suite, the first run on a board has
+nothing to compare with, and a number is published by regenerating
+`docs/perf/ledger.md` with the command the pass prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
 check). Run it
@@ -116,7 +134,8 @@ from a worktree (`tools/worktree.py new NAME`): in the main checkout a build is
 refused without `--main`, because its `dist/` is what every other session
 flashes. It skips a board whose port is held, naming the holder, never touches
 the Zero, and leaves each board at its launcher, the T-Deck at volume 0. The
-`board-pass` agent (`.claude/agents/board-pass.md`) runs it and reports the table.
+`board-pass` agent (`.claude/agents/board-pass.md`) runs it and reports the
+table and the perf blocks.
 
 **Where the time goes.** A pass, every board's `build.sh` and
 `tools/preflight.sh` print their steps' times as they end and append them to

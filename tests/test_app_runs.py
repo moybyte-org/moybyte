@@ -227,10 +227,10 @@ def test_a_lua_app_and_a_compiled_app_at_once_each_reach_only_their_own(tmp_path
             _frame(ws)
             assert calls.get("k") == "compiled"
             assert calls.put("k", "compiled") == 0
-        lua = ws.run.player._lua
+        lua = ws.run.player.lua
         lua.exec("OUT = table.concat(SEEN, ',')")
         assert lua.get_global("OUT") == "lua,lua,lua"
-        assert ws.run.player._app_ctx.grant != gc
+        assert ws.run.player.app_ctx.grant != gc
         assert moy_app.Prefs(app, gc).get("k") == "compiled"
     finally:
         c.close()
@@ -262,8 +262,8 @@ function _draw() cls(0) end
         ws.consent.turn(aid, "prefs", False)
         ws.open()
         _frame(ws)
-        assert ws.run.player._lua.get_global("NAME") == "nil"
-        assert ws.run.player._app_ctx.grant != g, "each run of an app holds a row of its own"
+        assert ws.run.player.lua.get_global("NAME") == "nil"
+        assert ws.run.player.app_ctx.grant != g, "each run of an app holds a row of its own"
         assert calls.get("k") == DENIED, "a run kept a role Settings turned off"
     finally:
         c.close()
@@ -291,7 +291,7 @@ def test_a_lua_app_reads_the_clipboard_and_the_theme_as_python_does(tmp_path):
     assert select_on_home(ws, "Lua Look") is not None
     ws.open()
     _frame(ws)
-    lua, g = ws.run.player._lua, ws.run.player._app_ctx.grant
+    lua, g = ws.run.player.lua, ws.run.player.app_ctx.grant
     clip, look = moy_app.Clipboard(ws.app_abi, g), moy_app.Theme(ws.app_abi, g)
     assert lua.get_global("PUT") == 1
     assert clip.text() == lua.get_global("CLIP") == "from lua"
@@ -316,7 +316,7 @@ function _draw() cls(0) end
     assert select_on_home(ws, "Lua Bare") is not None
     ws.open()
     _frame(ws)
-    assert ws.run.player._lua.get_global("NAMES") == "nil,table"
+    assert ws.run.player.lua.get_global("NAMES") == "nil,table"
 
 
 def test_a_lua_app_hears_its_window_events_and_reads_what_it_was_handed(tmp_path):
@@ -339,5 +339,5 @@ function _draw() cls(0) end
     assert pl.window_event("_minimise") and pl.window_event("_restore")
     g = Grant("text/plain", "r", "todo.txt", data="milk")
     assert pl.window_event("moy_open", g)
-    assert pl._lua.get_global("MIN") == 1
-    assert pl._lua.get_global("OPENED") == "text/plain todo.txt milk"
+    assert pl.lua.get_global("MIN") == 1
+    assert pl.lua.get_global("OPENED") == "text/plain todo.txt milk"

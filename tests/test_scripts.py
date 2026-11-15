@@ -183,7 +183,7 @@ def test_the_windowed_log_coasts_on_frames_its_gate_paints(tmp_path, monkeypatch
 
     for _ in range(6):
         frame()
-    win = ws.wm._wins[ws.wm._order[-1]]
+    win = ws.wm.windows[ws.wm.z_order[-1]]
     foot = con.top
     assert foot > 30, "the log does not start at its foot"
     x, y = win.x + win.w // 2, win.y + win.title_h + 60
@@ -208,9 +208,9 @@ def test_the_x_exits_and_flushes_nothing(tmp_path):
     ws = _ws(tmp_path)
     src = "print('hello')\n"
     con = _run(ws, "note.py", src)
-    assert ws._running_cart_shows_bar(), "a script runs WITH the exitable bar"
+    assert ws.running_cart_shows_bar(), "a script runs WITH the exitable bar"
     before = sorted(moy_carts.list_files("docs", ws.carts_root))
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     _frame(ws)
     assert not ws.wm.top_is_player()
     assert sorted(moy_carts.list_files("docs", ws.carts_root)) == before
@@ -226,7 +226,7 @@ def test_a_python_script_runs_through_the_real_player(tmp_path):
     assert ws.cart["runtime"] == "python"
     assert ws.cart["permissions"] == ["files", "prefs", "console"]
     assert ws.cart["title"] == "hi"
-    assert ws.run.player._script and ws.run.player._is_tool
+    assert ws.run.player.script and ws.run.player.is_app()
     assert ws.run.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
 
 
@@ -254,7 +254,7 @@ def test_running_a_script_creates_no_folder_and_writes_nothing(tmp_path):
     ok, _why = ws.run_script("docs", "hi.py")
     assert ok
     _frame(ws, 3)
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     _frame(ws)
     assert sorted(os.listdir(root)) == before_carts
     assert sorted(os.listdir(docs)) == before_docs
@@ -337,7 +337,7 @@ def _files_app(ws):
     select_on_home(ws, "Files")
     ws.open()
     _frame(ws)
-    return ws.files_app
+    return ws.app("files")
 
 
 def test_files_offers_RUN_on_a_script_and_not_on_a_note(tmp_path):

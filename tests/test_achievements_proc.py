@@ -28,6 +28,7 @@ import time
 import pytest
 
 from runtime import moy_evq, moybyte, notifications, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime import achievements as A
 
@@ -43,13 +44,13 @@ _SINCE = [0]
 
 def _lua_twin(ws):
     """The Lua process in the seed's folder, and the console's load of it."""
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     dst = os.path.join(ws.carts_root, "moybyte.achievements.moy")
     shutil.rmtree(dst)
     shutil.copytree(LUA_TWIN, dst)
     ws.carts.rescan()
-    ws.load_achievements()
+    ws.notices.load_achievements()
     assert S.SCHED.procs[ws.ach.pid].native
 
 
@@ -110,18 +111,18 @@ def test_a_shell_award_reaches_the_prefs_and_posts(ws):
     notify = ws.app_context("probe", ("notify",)).notify
     notify.award("first_paint")
     assert not ws.ach.has(A.SYSTEM, "first_paint") and S.SCHED.mail_of(ws.ach.pid) == 1
-    assert ws._toast_until == 0
+    assert ws.toast_until == 0
     make_drv(ws).frame(1 / 30)
     assert ws.ach.has(A.SYSTEM, "first_paint") and S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.toast == (A.HEAD_BADGE, "Little Artist", "paint", False)
-    assert ws._toast_until
+    assert ws.toast_until
     notes = notifications.NOTES
     assert [(n.app, n.summary, n.body, n.pid) for n in notes.list] == [
         ("Achievements", A.HEAD_BADGE, "Little Artist", ws.ach.pid)]
     assert notes.banner is None             # the unlock banner is its banner
     day, title, icon, hint = _row(ws)["system"]["found"]["first_paint"]
     assert (title, icon, hint) == ("Little Artist", "paint", "Save a drawing")
-    assert day == ws._today_ymd()
+    assert day == ws.notices.today_ymd()
 
 
 def test_the_tick_serves_a_message_the_frame_did_not(ws):
@@ -221,7 +222,7 @@ def test_the_page_lists_by_game_and_keeps_a_deleted_games_badges(ws):
     groups = ws.ach.groups()
     assert [g[:2] for g in groups] == [(A.SYSTEM, "Moybyte"), (GAME, "Harpoon Pop")]
     hp = {b[0]: b for b in groups[1][2]}
-    assert hp["first_clear"][6] == ws._today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
+    assert hp["first_clear"][6] == ws.notices.today_ymd() and hp["high_tide"][4:] == (5, False, None, 2)
     assert hp["untouchable"][5] is True and hp["untouchable"][6] is None
     assert ws.ach.count() == 2 and ws.ach.total() == len(A.SHELL) + 4
     cart = next(c for c in ws.carts.all if c.get("id") == GAME)
@@ -425,8 +426,8 @@ def test_with_the_process_stopped_messages_go_nowhere_and_reads_hold(ws):
     assert S.SCHED.mail_of(ws.ach.pid) == 0
     assert ws.ach.award("konami") is False
     assert ws.ach.has(A.SYSTEM, "first_run") and ws.ach.count() == 1   # its prefs
-    assert ws.ach.today() == ws._today_ymd()
-    ws.load_achievements()                  # a store load starts it again
+    assert ws.ach.today() == ws.notices.today_ymd()
+    ws.notices.load_achievements()                  # a store load starts it again
     assert ws.ach.running() and ws.ach.has(A.SYSTEM, "first_run")
 
 
@@ -434,7 +435,7 @@ def test_a_load_restarts_the_process_and_keeps_what_it_found(ws):
     first = ws.ach.pid
     ws.ach.award("first_run")
     S.SCHED.tick(0)
-    ws.load_achievements()
+    ws.notices.load_achievements()
     assert ws.ach.pid != first and S.SCHED.procs[first].state == S.EXITED
     assert ws.ach.has(A.SYSTEM, "first_run")
 
@@ -481,13 +482,13 @@ def test_an_idle_message_wake_costs_a_frame_nothing():
         L.current(was)
     out = [0] * 4
     assert w.list == [] and w.queued == 0
-    assert w.due(0, out) == 0
+    assert w.pending(out) == 0
     assert s.tick(0) == 0                   # nothing to run: returns at once
     assert w.post(pid, "ping", ("run", None)) and w.queued == 1
     assert not w.post(pid, "pong", ("konami",))     # it does not listen on it
     assert not w.post(pid + 99, "ping", ("run", None))
     assert upcalls == []                    # neither the wake nor the post asks for one
-    assert w.due(0, out) == 0               # a message is no due wake: the frame's start serves it
+    assert w.pending(out) == 0               # a message is no due wake: the frame's start serves it
     s.mail()
     assert got == [("system", "run", None)] and w.queued == 0
     for i in range(moy_evq.SENDER + 3):
@@ -516,7 +517,7 @@ def test_a_lua_game_awards_its_own_badges(tmp_path):
     `moybyte.send`) as a service does: the Python face's verbs, run as the
     run's process, so the OS stamps the game's app id and the game reaches
     its own manifest's badges and no other's."""
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     notifications.NOTES.reset()
     ws = build_ws(tmp_path)

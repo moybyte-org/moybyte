@@ -116,15 +116,15 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
                                         windowed=True)
     else:
         ws = host_app.build_workstation(str(root / "carts"))
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     ws.pointer.visible = False
     if chip:
-        ws.set_show_fps(True, persist=False)
+        ws.toggles.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
-        ws.run.player.holds = lambda cv: False
+        ws.run.player.face.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -152,19 +152,19 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
                                 moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
                                 ws.carts_root)
         _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
-        assert ws.open_app(ws._apps_by_id["myart"])
+        assert ws.spine.open_app(ws.app("myart"))
     elif app == "getcarts":
         repo, net = _shelf_net()
         ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = net
-        app_ = ws._apps_by_id["getcarts"]
+        app_ = ws.app("getcarts")
         app_._inst = _SameFree(app_._inst)
-        assert ws.open_app(app_) is not False
+        assert ws.spine.open_app(app_) is not False
     else:
         if app == "storybook":
             seed_stories(ws)
-        app_ = ws._apps_by_id[app]
-        assert ws.open_app(app_) is not False
+        app_ = ws.app(app)
+        assert ws.spine.open_app(app_) is not False
         if app == "files":
             # the list of projects, every cover made: which rows a frame's
             # floor reaches decides which covers are asked for first
@@ -180,7 +180,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
 
 def _owes(ws):
     """Whether an app of the console has idle work owed."""
-    for app in ws._apps:
+    for app in ws.app_layers:
         if getattr(app, "idle_owed", False):
             return True
     return False
@@ -219,7 +219,7 @@ class Pair:
         _NOW[0] += 33
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             if not idle:
-                ws._dirty = True
+                ws.mark_dirty()
             ws.pointer.visible = False
             k = ws.frame_state.frames_drawn
             self._drive(ws, drv)
@@ -401,12 +401,12 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     line's move of the log and a drag of it are shift frames (on a desk the
     drag's finger lies outside the log, so its frames draw rows), and every
     frame is a whole repaint's bytes. On a desk the run's canvas is its
-    window's own (`Player.holds`), which holds the log whatever the glass's
+    window's own (`AppFace.holds`), which holds the log whatever the glass's
     buffers do."""
     p = Pair(tmp_path, "console", bufs, desk, chip=True)
     assert p.a.show_fps
     if desk:
-        assert p.a.run.player.holds(p.a.run.canvas)
+        assert p.a.run.player.face.holds(p.a.run.canvas)
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k
@@ -431,7 +431,7 @@ def test_a_notes_fling_coasts_on_painted_frames_and_a_key_draws_rows(tmp_path, b
     p = Pair(tmp_path, "notes", bufs, desk)
     sx, sy, sw, sh = p.a.run.player.ns["sheet"]
     if desk:
-        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+        ox, oy, _w, _h = p.a.wm.windows["desktop"].content_rect()
         sx += ox
         sy += oy
     for ws in (p.a, p.b):
@@ -509,7 +509,7 @@ class _NoMark:
 
 
 def _app(ws, app):
-    a = ws._apps_by_id[app]
+    a = ws.app(app)
     return getattr(a, "_inst", a)
 
 

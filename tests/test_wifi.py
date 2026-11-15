@@ -499,8 +499,8 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------
 #
-# Off unless something holds it. `ws.wifi_hold(tag)` powers the radio up and
-# the last `ws.wifi_release(tag)` powers it down, so a console on a shelf spends
+# Off unless something holds it. `ws.spine.wifi_hold(tag)` powers the radio up and
+# the last `ws.spine.wifi_release(tag)` powers it down, so a console on a shelf spends
 # nothing on WiFi; what persists is the credential, never the link. The five
 # holders each have a test in the suite that owns them (the web console in
 # test_moy_webhost, the update screen in test_web_update, the link in
@@ -517,17 +517,17 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     assert w.radio is False, "a fresh console has its radio off"
 
     # A hold powers it up at once, and a second holder shares it.
-    assert ws.wifi_hold("update") is True
+    assert ws.spine.wifi_hold("update") is True
     assert w.radio is True
-    ws.wifi_hold("settings")
-    ws.wifi_hold("settings")                # idempotent per tag
-    ws.wifi_release("update")
+    ws.spine.wifi_hold("settings")
+    ws.spine.wifi_hold("settings")                # idempotent per tag
+    ws.spine.wifi_release("update")
     assert w.radio is True, "one holder left: the radio stays"
     w.connect("Home WiFi", "hunter2")
     assert w.status()[0] is True
 
     # The last one out powers it down, link and all.
-    ws.wifi_release("settings")
+    ws.spine.wifi_release("settings")
     assert w.radio is False
     assert w.status() == (False, None, None)
     assert ws.leases.holders() == []
@@ -537,7 +537,7 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     # lease: "off in general" is the rule.
     w.scan()
     assert w.radio is True
-    ws.wifi_release("link")
+    ws.spine.wifi_release("link")
     assert w.radio is False
 
 
@@ -546,8 +546,8 @@ def test_a_console_with_no_wifi_service_takes_no_lease(tmp_path):
 
     ws = build_ws(tmp_path)
     ws.wifi = None
-    assert ws.wifi_hold("web") is False
-    ws.wifi_release("web")                  # and never raises
+    assert ws.spine.wifi_hold("web") is False
+    ws.spine.wifi_release("web")                  # and never raises
 
 
 def _network_cart(carts_dir):
@@ -576,7 +576,7 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
     assert ws.leases.holders() == ["cart:%d" % ws.run.player.pid]   # the run's process
     assert ws.wifi.radio is True
 
-    ws.go_home()
+    ws.home.go_home()
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
@@ -590,12 +590,12 @@ def test_a_processs_tag_names_its_process(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for tag in ("cart", "http", "media", "native", "net"):
         with pytest.raises(ValueError):
-            ws.wifi_hold(tag)
-    assert ws.wifi_hold("http", 7) and ws.wifi_hold("settings")
+            ws.spine.wifi_hold(tag)
+    assert ws.spine.wifi_hold("http", 7) and ws.spine.wifi_hold("settings")
     assert sorted(ws.leases.holders()) == ["http:7", "settings"]
-    ws.wifi_release("settings")
+    ws.spine.wifi_release("settings")
     assert ws.wifi.radio is True
-    ws.wifi_release("http", 7)
+    ws.spine.wifi_release("http", 7)
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -607,7 +607,7 @@ def test_a_plain_cart_never_touches_the_radio(tmp_path):
     assert ws.cart_error is None
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wifi.radio is False
 
 
@@ -628,13 +628,13 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     # visit, or the radio would stay on until somebody opened Settings again.
     sl.open_page("wifi")
     assert ws.wifi.radio is True
-    ws.go_home()
+    ws.home.go_home()
     assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     ws.open_settings()
     sl.open_page("wifi")
-    ws._exit_settings()
+    ws.exit_settings()
     assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 

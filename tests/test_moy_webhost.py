@@ -656,6 +656,9 @@ def test_a_host_the_kernel_kept_serving_is_adopted(serving):
     class _WS:
         wifi = None
 
+        def __init__(self):
+            self.spine = self       # the console's spine, answered here
+
         def wifi_hold(self, tag):
             held.append(tag)
     assert again.adopt(_WS()) is True and held == ["web"]
@@ -1076,13 +1079,13 @@ def test_the_row_shows_the_ADDRESS_not_just_ON(tmp_path):
     reading "ON" would be telling the kid to go find the IP somewhere else."""
     ws = _ws(tmp_path)
     ws.webhost = _FakeHost()
-    assert ws.webhost_label() == "OFF"
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is True
-    assert ws.webhost_label() == "192.168.1.151"   # scheme stripped
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is False
-    assert ws.webhost_label() == "OFF"
+    assert ws.web.label() == "OFF"
+    ws.web.toggle()
+    assert ws.web.serving() is True
+    assert ws.web.label() == "192.168.1.151"   # scheme stripped
+    ws.web.toggle()
+    assert ws.web.serving() is False
+    assert ws.web.label() == "OFF"
 
 
 def test_a_failed_start_shows_its_reason_and_does_not_raise(tmp_path):
@@ -1091,16 +1094,16 @@ def test_a_failed_start_shows_its_reason_and_does_not_raise(tmp_path):
     a toggle; the row is this feature's only surface, so it carries the news."""
     ws = _ws(tmp_path)
     ws.webhost = _FakeHost(fail="no wifi")
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is False
-    assert "no wifi" in ws.webhost_label()
+    ws.web.toggle()
+    assert ws.web.serving() is False
+    assert "no wifi" in ws.web.label()
 
 
 def test_the_verbs_are_safe_with_no_service(tmp_path):
     ws = _ws(tmp_path)
-    assert ws.webhost_serving() is False
-    assert ws.webhost_label() == "OFF"
-    ws.toggle_webhost()                     # must not raise
+    assert ws.web.serving() is False
+    assert ws.web.label() == "OFF"
+    ws.web.toggle()                     # must not raise
 
 
 
@@ -1217,9 +1220,7 @@ def test_the_sign_in_folder_is_read_at_START_not_at_construction(tmp_path):
     class _WS:
         wifi = None
         carts_root = None
-
-        def rescan_carts(self, folders=None):
-            pass
+        carts = None
 
         def launch_named(self, name):
             return None
@@ -1294,11 +1295,11 @@ def test_turning_the_row_on_parks_the_glass_and_off_returns_it(tmp_path):
     and turning it off gives the console back."""
     ws = _mode_ws(tmp_path)
     assert ws.wm.top_kind() == "launcher"
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "webconsole" and ws.web.parked is True
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "launcher" and ws.web.parked is False
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
 
 
 def test_a_failed_start_does_not_park(tmp_path):
@@ -1308,9 +1309,9 @@ def test_a_failed_start_does_not_park(tmp_path):
     ws = _ws(tmp_path)
     ws.webhost = _ModeHost(fail="no wifi")
     ws.open_settings()
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "settings" and ws.web.parked is False
-    assert "no wifi" in ws.webhost_label()
+    assert "no wifi" in ws.web.label()
 
 
 def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
@@ -1321,11 +1322,11 @@ def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
     closes for one saying goodbye (the test after this one)."""
     ws = _mode_ws(tmp_path)
     assert ws.wifi.radio is False
-    ws.toggle_webhost()
-    assert ws.webhost_serving() and "web" in ws.leases.holders()
+    ws.web.toggle()
+    assert ws.web.serving() and "web" in ws.leases.holders()
     assert ws.wifi.radio is True
-    ws.toggle_webhost()
-    assert not ws.webhost_serving()
+    ws.web.toggle()
+    assert not ws.web.serving()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -1336,8 +1337,8 @@ def test_a_failed_start_holds_no_radio(tmp_path):
     ws = _ws(tmp_path)
     ws.webhost = _ModeHost(fail="no wifi")
     ws.open_settings()
-    ws.toggle_webhost()
-    assert "no wifi" in ws.webhost_label()
+    ws.web.toggle()
+    assert "no wifi" in ws.web.label()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -1350,14 +1351,14 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(tmp_path):
     kernel's STOPPED event fires."""
     ws = _ws(tmp_path)
     h = wh.WebHost(str(_store(tmp_path)), port=0,
-                   on_stop=lambda: ws.wifi_release("web"))
+                   on_stop=lambda: ws.spine.wifi_release("web"))
     h.update = None
     ws.webhost = h
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="10.0.0.5")
     ws.web.park()
 
-    ws.stop_web_console()                   # the connection screen's TURN OFF
+    ws.web.stop()                   # the connection screen's TURN OFF
     assert h.serving is False and h.closing == "off"
     assert not ws.web.parked
     assert "web" in ws.leases.holders(), "let go before the goodbye was said"
@@ -1377,7 +1378,7 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
     h = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="127.0.0.1")
     assert h.serving
     h.stop()                                # a bare stop: the socket is gone
@@ -1393,8 +1394,8 @@ def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
     ws = _mode_ws(tmp_path)
     seen = []
     ws.web.ui.on_enter = lambda: seen.append(("on_enter", ws.web.parked))
-    ws.go_home = lambda: seen.append(("go_home", ws.web.parked))
-    ws.park_web_console()
+    ws.home.go_home = lambda: seen.append(("go_home", ws.web.parked))
+    ws.web.park()
     assert seen == [("on_enter", True), ("go_home", True)]
 
 
@@ -1404,10 +1405,10 @@ def test_go_home_re_parks_exactly_while_the_flag_is_set(tmp_path):
     cart, the bar's X, a crash and the pause menu's Quit to all land back here."""
     ws = _mode_ws(tmp_path)
     ws.web.parked = True
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "webconsole"
     ws.web.parked = False
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1415,7 +1416,7 @@ def test_turn_off_stops_the_host_before_it_gives_the_glass_back(tmp_path):
     """ORDER again, and the reason the mode exists: unparking first would put a
     kid on a launcher over a store a browser is still free to write."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     seen = []
     unpark = ws.web.unpark
 
@@ -1424,17 +1425,17 @@ def test_turn_off_stops_the_host_before_it_gives_the_glass_back(tmp_path):
         unpark()
 
     ws.web.unpark = _unpark
-    ws.stop_web_console()
+    ws.web.stop()
     assert seen == [False], "the glass came back while the host still served"
-    assert ws.web.parked is False and ws.webhost_serving() is False
+    assert ws.web.parked is False and ws.web.serving() is False
 
 
 def test_the_parked_screen_owns_the_glass_and_claims_every_event(tmp_path):
     """A parked surface that let events through would route them to a launcher
     the kid cannot see."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    layer = ws._content_layer()
+    ws.web.toggle()
+    layer = ws.content_layer()
     assert layer.id == "webconsole" and layer.domain == "system"
     assert layer.handle_pointer(0, 0, False) is True
     assert layer in ws.wm.draw_stack()
@@ -1444,15 +1445,15 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     """#44: nothing here animates, so an idle connection screen costs the board
     zero painted frames -- and it may sit on a desk for an hour."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.frame(1 / 30.0)
-    ws._splash_until = None                  # the boot logo animates on its own
+    ws.splash_until = None                  # the boot logo animates on its own
     settle_badges(ws)
-    ws._toast_until = 0
-    ws._dirty = False
+    ws.toast_until = 0
+    ws.frame_state.dirty = False
     ws.pointer.visible = False
-    ws._last_ptr = ws._ptr_state()
-    assert ws._animating(1 / 30.0) is False, "the connection screen animates"
+    ws.last_ptr = ws.ptr_state()
+    assert ws.animating(1 / 30.0) is False, "the connection screen animates"
     assert ws._needs_redraw(1 / 30.0) is False
 
 
@@ -1475,12 +1476,12 @@ def _turn_off_by_its_button(ws):
     ui = ws.web.ui
     ui_draw.input_kind("touch")
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
         x, y, w, h = ui.host.box("Turn off")
         ui.handle_pointer(x + 2, y + 2, True)
         for _ in range(2):                   # the press, then its release
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
     finally:
         ui_draw.input_kind("keys")
@@ -1492,14 +1493,14 @@ def test_the_page_always_shows_the_address_and_how_to_sign_in(tmp_path, monkeypa
     33). The token stays in the code: it is a credential, never shown as text."""
     from runtime import ui
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     said = []
     real = ui.label
     monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append((t, (o or {}).get("face"))),
                                                          real(t, o))[1])
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30.0)
-    url = ws.web_console_url()
+    url = ws.web.url()
     host = url.replace("http://", "").split("#")[0]
     assert (host.rstrip("/"), "mono") in said
     assert (ws.web.sign_in_hint(), "caption") in said
@@ -1511,13 +1512,13 @@ def test_back_and_the_turn_off_button_turn_it_off(tmp_path):
     screen -- a mode with no visible way out is a trap. Back (K on the
     T-Deck, Esc) turns it off; a touch glass adds the button."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.web.ui.handle_input(_Back())
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
     assert ws.wm.top_kind() == "launcher"
-    ws.toggle_webhost()
+    ws.web.toggle()
     _turn_off_by_its_button(ws)
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1527,11 +1528,11 @@ def test_turn_off_still_turns_OFF_when_the_host_died_underneath(tmp_path):
     way out that turns it on, on the one screen whose whole job is being the
     way out."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.webhost.stop()                        # the host dies under the screen
-    assert ws.webhost_serving() is False and ws.web.parked is True
+    assert ws.web.serving() is False and ws.web.parked is True
     ws.web.ui.handle_input(_Back())
-    assert ws.webhost_serving() is False, "turning it off restarted the host"
+    assert ws.web.serving() is False, "turning it off restarted the host"
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1540,8 +1541,8 @@ def test_the_qr_encodes_the_paired_url(tmp_path):
     reconstructed address -- and re-encodes only when it changes."""
     from runtime import moy_qr
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    url = ws.web_console_url()
+    ws.web.toggle()
+    url = ws.web.url()
     first = ws.web.ui.matrix(url)
     assert first == moy_qr.encode(url)
     assert ws.web.ui.matrix(url) is first, "re-encoded an unchanged url"
@@ -1556,12 +1557,12 @@ def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
     from ws_helpers import build_desktop_ws
     ws = build_desktop_ws(tmp_path)
     ws.webhost = _ModeHost()
-    ws.open_desk()
+    ws.home.open_desk()
     assert ws.wm.desk_open() is True
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "webconsole"
     assert ws.wm.desk_open() is False, "the connection screen became a window"
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.desk_open() is True, "the desk is home on this tier"
     assert "webconsole" not in ws.wm.stack.kinds(), \
         "the connection screen stayed under the desk"
@@ -1679,9 +1680,9 @@ def test_launch_named_takes_a_title_or_a_folder(tmp_path):
     ws = _ws(tmp_path)
     for name in ("Star Catcher", "star_catcher", "moybyte.star_catcher.moy",
                  "star catch"):
-        assert ws.launch_named(name) == "Star Catcher", name
-        ws.go_home()
-    assert ws.launch_named("no such cart anywhere") is None
+        assert ws.home.launch_named(name) == "Star Catcher", name
+        ws.home.go_home()
+    assert ws.home.launch_named("no such cart anywhere") is None
 
 
 def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
@@ -1690,8 +1691,8 @@ def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
     ws = _ws(tmp_path)
     titles = [c["title"] for c in ws.launcher.items if c.get("path")]
     for t in titles:
-        assert ws.launch_named(t) == t, titles
-        ws.go_home()
+        assert ws.home.launch_named(t) == t, titles
+        ws.home.go_home()
 
 
 def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
@@ -1700,18 +1701,18 @@ def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
     takes the poll down with the whole session."""
     ws = _ws(tmp_path)
     for junk in (7, 3.5, True, {"a": 1}, ["x"]):
-        assert ws.launch_named(junk) is None, junk
+        assert ws.home.launch_named(junk) is None, junk
         assert ws.wm.top_kind() == "launcher", junk
     # None is not junk -- it is the dev channel's `run` with no argument, which
     # plays the first real cart.
-    assert ws.launch_named(None) is not None
+    assert ws.home.launch_named(None) is not None
 
 
 def test_launch_named_never_picks_a_pseudo_tile(tmp_path):
     """The pinned Make/+New cards carry no store path; running one would open
     an editor at a browser's request."""
     ws = _ws(tmp_path)
-    title = ws.launch_named("")
+    title = ws.home.launch_named("")
     assert title and any(c.get("path") and c["title"] == title
                          for c in ws.launcher.items)
 
@@ -1721,12 +1722,12 @@ def test_a_cart_launched_from_the_browser_exits_BACK_to_the_screen(tmp_path):
     through go_home, so the exit gesture, the bar's X and a crash all land back
     on the connection screen rather than on a shelf the browser is rewriting."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    assert ws.launch_named("Star Catcher") == "Star Catcher"
+    ws.web.toggle()
+    assert ws.home.launch_named("Star Catcher") == "Star Catcher"
     assert ws.wm.top_kind() == "desktop", "the cart did not start"
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "webconsole"
-    assert ws.webhost_serving() is True, "the exit stopped the host"
+    assert ws.web.serving() is True, "the exit stopped the host"
 
 
 def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
@@ -1734,11 +1735,11 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
     browser-launched cart plays must clear the mode, not leave the flag set for
     the next exit to trip over."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    ws.launch_named("Star Catcher")
-    ws.toggle_webhost()
+    ws.web.toggle()
+    ws.home.launch_named("Star Catcher")
+    ws.web.toggle()
     assert ws.web.parked is False
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1746,8 +1747,8 @@ def test_the_dev_channel_run_uses_the_same_lookup():
     """ONE author for the cart lookup: a name that works over serial works from
     the page, and neither can grow its own idea of what a cart is called."""
     src = runtime_file("dev_channel.py").read_text()
-    assert "ws.launch_named(" in src
-    assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
+    assert "ws.home.launch_named(" in src
+    assert "ws.home.launch_selected()" not in src, "the dev channel re-grew a lookup"
 
 
 # -- the goodbye ------------------------------------------------------------
@@ -1945,18 +1946,18 @@ def test_the_console_parks_when_the_join_arrives_and_not_before(tmp_path):
     ws = _ws(tmp_path)
     nb._link(None)
     ws.webhost = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.webhost.joining and not ws.web.parked
-    assert ws.webhost_label() == "JOINING..."
+    assert ws.web.label() == "JOINING..."
     nb._link("10.2.0.4")
     ws.webhost.poll()
     try:
-        assert ws.web.parked and ws.webhost_serving()
+        assert ws.web.parked and ws.web.serving()
         assert nb.wc_state()[1] is True, "the park is the kernel's flag"
     finally:
-        ws.toggle_webhost()
+        ws.web.toggle()
         nb._link(None)
-    assert not ws.web.parked and ws.webhost_label() == "OFF"
+    assert not ws.web.parked and ws.web.label() == "OFF"
 
 
 def test_the_goodbye_ends_with_the_switch_off(tmp_path):

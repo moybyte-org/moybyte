@@ -228,15 +228,15 @@ VM_SVC = """
 import moycore, moy_evq
 src = "local p = moybyte.key_make('node'); moybyte.exit(#p + #moybyte.key_shared('node', p))"
 h = moycore.svc_start(9, "t.keys", src)
-moycore.svc_step(0)
+moycore.svc_step()
 t = moy_evq.next_call()
 print(t[1:])
 moy_evq.answer(t[0], '"%s"')
-moycore.svc_step(1)
+moycore.svc_step()
 t = moy_evq.next_call()
 print(t[1:])
 moy_evq.answer(t[0], '"%s"')
-moycore.svc_step(2)
+moycore.svc_step()
 print(moycore.svc_info(h)[:2])
 moycore.svc_reap(h)
 """ % ("ab" * 32, "cd" * 32)

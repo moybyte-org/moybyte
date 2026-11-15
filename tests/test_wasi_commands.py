@@ -80,7 +80,7 @@ def term(tmp_path, built):
         man["moybyte"]["permissions"] = ["prefs", "clipboard"]
         (svc / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     app.draw(0)
     app.draw(0)                         # the grid takes the view's width
@@ -356,7 +356,7 @@ def test_a_module_that_imports_what_a_command_cannot_is_refused(term, tmp_path):
     man = json.loads(open(os.path.join(dst, "manifest.json")).read())
     man.update(id="wasi.game", moybyte={"type": "command"})
     open(os.path.join(dst, "manifest.json"), "w").write(json.dumps(man))
-    ws.rescan_carts()
+    ws.carts.synced()
     got = out(app, "wasi.game/game; echo status $?")
     assert got[-1] == "status 126" and "acommandonthisconsolecannot" in "".join(got).replace(" ", ""), got
 

@@ -1881,10 +1881,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     dup = _C.api_dup(ctx)
     if dup is not None:
         print("ui: two stops share the id %r; the later is no stop" % dup)
-    lost = _C.api_lost(ctx)
-    if lost:
-        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
-              "input (a long list is one ui.list or ui.table)" % lost)
+    say_lost(ctx)
     if rect is None:
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
@@ -1903,7 +1900,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
 
 
 # The context of the running cart's own frames, a Lua, compiled, WASI or native
-# app's (native/moy_ui/moy_ui_wasm.c's), as `bar_lent` and `bar_tap` take it.
+# app's (native/moy_ui/moy_ui_run.c's), as `bar_lent` and `bar_tap` take it.
 RUN_UI = "run"
 
 
@@ -1959,6 +1956,18 @@ def paste(ctx, text):
         _C.api_run_paste(text)
     else:
         _C.api_paste(ctx, text)
+
+
+def say_lost(ctx):
+    """Log, once each, the stops the frame `ctx` drew last drew past the ones
+    it records and the widgets that asked for kept state past the ids it
+    keeps (native/moy_ui's api_lost)."""
+    lost = _C.api_lost(ctx)
+    if lost & 0xFFFF:
+        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
+              "input (a long list is one ui.list or ui.table)" % (lost & 0xFFFF))
+    if lost >> 16:
+        print("ui: %d widgets past the kept ids draw with no kept state" % (lost >> 16))
 
 
 def app_back(ctx, take=True):
@@ -2060,7 +2069,7 @@ def on_bar(on=None):
 # The board's tap floor (#203): its chrome stands over its font scale on the
 # handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
 # (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app
-# run's face word carries it, `Player.ui_face`): a list's rows meet the floor
+# run's face word carries it, `AppFace.ui_face`): a list's rows meet the floor
 # and a bubble takes its tap metrics and faces.
 _TAP_FLOOR = [False]
 

@@ -110,8 +110,8 @@ def test_sockets_need_the_network_permission(term):
 def test_the_first_socket_holds_the_radio_until_the_end(term, monkeypatch):
     ws, app = term
     calls = []
-    monkeypatch.setattr(ws, "wifi_hold", lambda tag, pid: calls.append(("hold", tag, pid)) or True)
-    monkeypatch.setattr(ws, "wifi_release", lambda tag, pid: calls.append(("release", tag, pid)))
+    monkeypatch.setattr(ws.spine, "wifi_hold", lambda tag, pid: calls.append(("hold", tag, pid)) or True)
+    monkeypatch.setattr(ws.spine, "wifi_release", lambda tag, pid: calls.append(("release", tag, pid)))
     seen = []
 
     def handle(conn):

@@ -56,7 +56,7 @@ Attributed with tools/p4_attrib.py's wrap hook over the same driver (cold):
   back_to_desk, 6 painted frames      open_picker, 5 painted frames
     cover_load      32 x  1572ms        cover_load      32 x  1561ms
     launcher.draw    6 x   400 excl     picker.draw      6 x   416 excl
-    wallpaper.draw   6 x   222          ws._relayout     1 x    25
+    wallpaper.draw   6 x   222          ws.relayout     1 x    25
     cover_prefetch 200 x  1338 incl     cover_prefetch 195 x  1334 incl
 
 A cover's blob read + parse is ~49ms and there are ~29 carts; each pop-in
@@ -127,9 +127,9 @@ def _tab(t):
 
 # name -> (setup verbs run BEFORE recording, the click verb itself)
 SCENARIOS = {
-    "open_projects": ([], "ws.open_projects()"),
+    "open_projects": ([], "ws.home.open_projects()"),
     "open_settings": ([], "ws.open_settings()"),
-    "open_project":  (["ws.open_projects()"], COIN),
+    "open_project":  (["ws.home.open_projects()"], COIN),
     "ws_art":        ([COIN], _tab("paint")),
     "pane_map":      ([COIN, _tab("paint")], _tab("map")),
     "ws_blocks":     ([COIN, _tab("paint")], _tab("blocks")),
@@ -137,13 +137,13 @@ SCENARIOS = {
     "ws_world":      ([COIN], _tab("scene")),
     "ws_sound":      ([COIN], _tab("music")),
     "ws_settings":   ([COIN], _tab("cards")),
-    "back_to_desk":  (["ws.open_settings()"], "ws.go_home()"),
+    "back_to_desk":  (["ws.open_settings()"], "ws.home.go_home()"),
     # The SECOND home visit (2026-07-27): the first visit paints live and the
     # retained-frame cache captures it (launcher_layer._capture_retained); the
     # revisit must present as ONE stamp. This is the common kid loop (play ->
     # home -> pick next), which the reset-per-scenario harness otherwise
     # never measures.
-    "home_revisit":  (["ws.open_library()", "ws.open_settings()"], "ws.go_home()"),
+    "home_revisit":  (["ws.home.open_library()", "ws.open_settings()"], "ws.home.go_home()"),
 }
 
 rows = []

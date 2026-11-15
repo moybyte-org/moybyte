@@ -368,6 +368,7 @@ def _processes_reset():
     if E is not None and sys.modules["runtime.face_ctypes"].loaded():
         E.notes_reset()             # the kernel's notifications and badges (moy_notes.h)
         E.items_reset()             # ...and the items handed to processes (moy_items.h)
+        E.reset()                   # ...and every process's queue and timers (moy_evq.h)
     SI = sys.modules.get("runtime.status_items")
     if SI is not None:
         SI.ITEMS.sync()
@@ -415,7 +416,7 @@ def _processes_fresh():
     item it did not have; a badge the shell sent as a test ended was served
     in the next test's console, whose banner took a tap meant for the page. Each test starts, and leaves, the shell current,
     the gates unbound (the front's among them, `front.FRONT`), no
-    notification, no status item and no achievements process, as a fresh VM has them before its
+    notification, no status item, no event queue and no achievements process, as a fresh VM has them before its
     console boots. The scheduler is one per VM too: a `Scheduler` built over
     the shared wakes takes their hooks (a badge's goal read from ITS rows, so
     a game of the next test's coalesced with no goal), and a crashed

@@ -46,7 +46,7 @@ def test_every_surface_is_a_layer(tmp_path):
     Editor tab is a `layers.Layer`, so the owner asks it without `getattr`."""
     ws = build_ws(tmp_path)
     for d in app_decls.APPS:
-        assert isinstance(ws._apps_by_id[d["id"]], layers.AppLayer), d["id"]
+        assert isinstance(ws.app(d["id"]), layers.AppLayer), d["id"]
     for kind in ("settings", "tasks", "launcher", "desktop", "update"):
         assert isinstance(ws.surface_of(kind), layers.Layer), kind
     for tab in COMMIT_TABS + ("paint",):
@@ -56,20 +56,20 @@ def test_every_surface_is_a_layer(tmp_path):
 # -- a field in focus types; Mic gives its draft back -------------------------
 
 def _files_rename(ws):
-    f = ws.files_app
+    f = ws.app("files")
     f.rename_text = "note"
     f.dialog = "rename"
     return lambda: f.rename_text, "note"
 
 
 def _appearance_name(ws):
-    a = ws.appearance_app
+    a = ws.app("appearance")
     a._open_name()
     return lambda: a.name_text, ""
 
 
 def _music_add(ws):
-    m = ws.jukebox_app
+    m = ws.app("jukebox")
     m._go("add")
     # Music's own cancel closes Add a station, its draft with it
     return lambda: m.url if m.page == "add" else "", ""
@@ -83,7 +83,7 @@ FIELDS = {"files": _files_rename, "appearance": _appearance_name,
 def test_a_shell_apps_field_types_and_mic_gives_it_back(tmp_path, app_id):
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
-    assert ws.open_app(ws._apps_by_id[app_id])
+    assert ws.spine.open_app(ws.app(app_id))
     _frames(drv)
     assert not ws.input.text_mode, "the app's rows are no text surface"
     read, was = FIELDS[app_id](ws)
@@ -100,7 +100,7 @@ def test_a_shell_apps_field_types_and_mic_gives_it_back(tmp_path, app_id):
 
 def _focus_name(ws, drv):
     ws.settings_layer._want = "Name"
-    ws._dirty = True                  # the next frame draws, and focuses it
+    ws.mark_dirty()                  # the next frame draws, and focuses it
     _frames(drv)
 
 
@@ -123,7 +123,7 @@ def test_settings_name_types_and_mic_gives_it_back(tmp_path):
 
 def test_the_terminal_and_the_code_tab_type_always(tmp_path):
     ws = build_ws(tmp_path)
-    assert ws.terminal_app.typing() and ws.code_layer.typing()
+    assert ws.app("terminal").typing() and ws.code_layer.typing()
 
 
 # -- a menu over a field is game mode, and the field types again after -------
@@ -131,7 +131,7 @@ def test_the_terminal_and_the_code_tab_type_always(tmp_path):
 def test_a_menu_over_a_field_is_game_mode_and_typing_comes_back(tmp_path):
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_app(ws.files_app)
+    ws.spine.open_app(ws.app("files"))
     _files_rename(ws)
     _frames(drv)
     assert ws.input.text_mode
@@ -180,7 +180,7 @@ def test_esc_b_and_the_chevron_end_in_one_state(tmp_path, app_id):
         if app_id == "settings":
             ws.open_settings()
         else:
-            assert ws.open_app(ws._apps_by_id[app_id])
+            assert ws.spine.open_app(ws.app(app_id))
         _frames(drv)
         back(ws, drv)
         ends[how] = _state(ws)
@@ -190,29 +190,29 @@ def test_esc_b_and_the_chevron_end_in_one_state(tmp_path, app_id):
 def test_a_desk_windows_chevron_and_esc_step_its_page(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
-    ws.open_app(ws.storybook_app)
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("storybook"))
     _frames(drv)
-    app = ws.storybook_app
+    app = ws.app("storybook")
     for how in ("esc", "window"):
         app.page = "deck"
         assert ws.app_has_page("storybook")
         if how == "esc":
             drv.escape()
         else:
-            ws.wm._win_back(ws.wm._wins["storybook"])
+            ws.wm._win_back(ws.wm.windows["storybook"])
         _frames(drv)
-        assert app.page == "stories" and "storybook" in ws.wm._wins, how
+        assert app.page == "stories" and "storybook" in ws.wm.windows, how
 
 
 # -- a pending edit survives every exit -----------------------------------
 
 def _exit_home(ws, drv):
-    ws.go_home()
+    ws.home.go_home()
 
 
 def _exit_jump(ws, drv):
-    ws.open_app(ws.appearance_app)
+    ws.spine.open_app(ws.app("appearance"))
 
 
 # Back is no exit for an edit in progress: its first step gives the field its
@@ -237,7 +237,7 @@ def test_a_name_still_typed_survives_every_exit(tmp_path, how):
 def test_a_name_still_typed_survives_the_window_x(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_settings()
     _frames(drv)
     _focus_name(ws, drv)
@@ -259,7 +259,7 @@ def test_ctrl_z_and_y_on_every_editor_tab_are_the_bars(tmp_path, tab, key, monke
     open_cart(ws, "Star Catcher")
     ws.open_in_editor(ws.cart)
     _frames(drv)
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     _frames(drv)
     calls = []
     monkeypatch.setattr(ws.history, "undo", lambda: calls.append("undo"))

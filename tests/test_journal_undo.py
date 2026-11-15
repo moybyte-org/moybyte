@@ -20,10 +20,10 @@ def _make_ws_with_cart(tmp_path, src, title="Undoable"):
 
 
 def _open_code_and_commit(ws, text):
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text(text)
-    assert ws.save_code() is True          # persist + journal one durable step
+    assert ws.saves.save_code() is True          # persist + journal one durable step
 
 
 def test_undo_redo_walk_through_the_console(tmp_path):
@@ -93,7 +93,7 @@ def test_control_bytes_never_corrupt_the_buffer(tmp_path):
     # A stray Ctrl+Z/Ctrl+Y must NOT be typed into the source (they dispatch, or no-op
     # at a floor, but never insert a character).
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(0)\n")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     ws.editor.set_text(V1)
     before = ws.editor.text()

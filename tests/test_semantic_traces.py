@@ -522,7 +522,7 @@ def run_side(kind):
         proj.tilemap = tilemap
         ws.run.project = proj
         ws.input = inp
-        ws.pmem = pmem
+        ws.run.project.pmem = pmem
         ws.run.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
@@ -2237,22 +2237,22 @@ def roles_trace(ws):
     nv = ctx.nav
     say("nav", nv.is_system_app(cart), cart in nv.projects())
     say("open_app", nv.open_app("calc"), nv.open_app("nope"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit", nv.edit(cart, "code"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit_file", nv.edit_file(cart, "manifest.json"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_image", nv.open_image("pic", "drawings"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_text", nv.open_text("missing.md", "docs"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("run_script", _n(nv.run_script("docs", "nope.py")))
-    ws.go_home()
+    ws.home.go_home()
     say("cover", nv.cover({"title": "Nowhere"}))
     say("cover_gen", isinstance(nv.cover_gen(), int))
     nv.play(cart)
     say("play", ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
 
     # -- notify
     # award is a message to the achievements process, served at the start of
@@ -2311,6 +2311,12 @@ def roles_trace(ws):
     s0 = cl.seq()
     say("clip put", cl.put_text("hello"), cl.put_text("x" * 4097))
     say("clip", cl.text(), cl.kind(), cl.seq() - s0)
+
+    # -- Settings' radios and the USB drive
+    u = ctx.usb
+    say("radios", ctx.wifi.station() is getattr(ws, "wifi", None),
+        ctx.bt.keyboard() is None, u.drive() is None,
+        u.turn_on(), u.turn_off(), u.poll())
 
     # -- install
     i = ctx.install
@@ -2462,7 +2468,7 @@ def _roles_trace_board(exe, tmp_path, driver=None):
 
 
 ROLES_TRACE = """\
-roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
+roles artwork bt carts clipboard damage files install nav notify prefs surface theme usb wallpaper wifi
 damage 1 2 0
 surface True True 1 1 False True True
 pointer True True
@@ -2522,6 +2528,7 @@ copies attach 'Trace Cart' True ['wall','game']
 clip empty ''
 clip put True False
 clip hello text 1
+radios True True True None None None
 install True True False None True True True
 lease True None
 op 7
@@ -2731,7 +2738,7 @@ def _app_roles_trace(tmp_path, lua):
         ws.input.begin_frame()
         ws.frame(1.0 / 30.0)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    trace = (ws.run.player._lua.get_global("TRACE") if lua
+    trace = (ws.run.player.lua.get_global("TRACE") if lua
              else ws.run.player.ns["TRACE"])
     return trace.split("\n"), ws.look.theme_name
 
@@ -2751,17 +2758,17 @@ def roles_trace(ws):
     for name in files:
         with open(d + "/" + name, "w") as f:
             f.write(files[name])
-    ws.rescan_carts()
+    ws.carts.synced()
     cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
     __import__("app_perms").made_here(ws, cart)
-    ws.select_cart(cart)
+    ws.home.select_cart(cart)
     ws.open()
     for _ in range(6):
         moy_loop.step()
     if ws.run.player.cart_error is not None:
         print("T ERROR " + str(ws.run.player.cart_error))
         return
-    for line in ws.run.player._lua.get_global("TRACE").split("\n"):
+    for line in ws.run.player.lua.get_global("TRACE").split("\n"):
         print("T " + line)
     print("T theme " + ws.look.theme_name)
 '''

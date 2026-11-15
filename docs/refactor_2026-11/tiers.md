@@ -63,6 +63,8 @@ App-ABI rows (crypto, clipboard, theme, files) have the same shape: `modmoy_app.
    - `cap`: an `out`'s first capacity, and `grow: true` where FULL retries eightfold (`moy_app_lua.c:197` `row_call_cap`);
    - `example`: arguments a probe calls the row with, for §3's test.
 
+   The `ui.*` rows carry these as phase 8 landed them (2026-11-15): `py_sig`, `enum` (per tier's table, its count and default), `base`, `list`, `lua_ret` (the door rows' `nil`, `bool` and `value`, and the toolkit's own `index` and `words`, an out's words whose count the engine verb's prototype gives, so no `out_shape`) and `end_form`, with the faces' particulars under one `ui` field; the engine verbs they draw through are `native/moy_ui/face.json`'s `api` rows, each emitting the context form and the RUN form (T16). `tools/gen_os/ui.py`'s docstring is the fields' authority.
+
 2. **`native/<module>/face.json`**, a new per-module file, for the private faces. Each row names its C function. The generator **reads the prototype from the module's header** with the C-prototype parser `gen_os_table.py:494` `parse()` already has, so nothing restates the C types. The row adds only what the C types cannot say:
    - **types**:
      - `u32`/`i32`/`u8`/`bool`/`f32` follow from the prototype;
@@ -87,13 +89,10 @@ App-ABI rows (crypto, clipboard, theme, files) have the same shape: `modmoy_app.
 
 **Callbacks** (`moy_evq` handlers, `moycore.register`, `moy_input` sinks) are rows marked `hand: true`. The generator only checks that the hand function exists in both faces.
 
-**Override schema.** `+native/moy_ui/over.json` lists each key: name, kind (flag, colour, int, int2, int4, text, text list, enum), its flag bit and word order. It generates:
-- the `MOY_UI_O_*` defines;
-- `moy_ui_over_block` (the decoder);
-- `ui.py`'s `_block` (the encoder);
-- `modmoy_ui.c`'s `over_slot`/`over_dict`, still a single walk of the dict map, so it still allocates nothing;
-- `moycore_ui_over`;
-- the docs' key table.
+**Override schema.** `native/moy_ui/over.json` lists each key: name, kind (flag, colour, int, int2, int4, text, text list, enum), its flag bit and word order. It generates:
+- the `MOY_UI_O_*` defines and the key table (`moy_ui_over_keys.h`), which every reader walks as one loop: `moy_ui_over_block` (the decoder), `ui.py`'s `_block` (the encoder, over `_OVER_KEYS`), `modmoy_ui.c`'s `over_dict` (still a single walk of the dict map, so it still allocates nothing) and `moycore_ui_over`, each handing a key's words to `moy_ui_over_put`, the one place a key's meaning lives;
+- `modmoy_ui.c`'s `over_slot` (`modmoy_ui_over.h`);
+- the docs' key table and the block's.
 
 ### 2.3 What stays hand-written
 
@@ -144,7 +143,7 @@ So the console demonstrably runs off-board on MicroPython.
 1. **Generator first, no module switched.**
    - Split `tools/gen_os_table.py` (2,006 lines, ~20 outputs) into a package `tools/gen_os/`: the loader and rules, the C prototype parser, one emitter per tier (finding T11).
    - Add `face.json` reading and the emitters for:
-     - `native/<m>/modmoy_<m>_face.c`: an `#include`-able file defining the functions and a `MOY_FACE_<M>_ROWS` macro the hand globals table expands;
+     - `native/<m>/modmoy_<m>_face.h`: an `#include`-able file defining the functions and a `MOY_FACE_<M>_ROWS` macro the hand globals table expands;
      - `runtime/host/<m>_face.py`: the ctypes rows plus wrappers.
    - Committed output plus a drift test, as now.
 2. **The parity test** (`tests/test_face_parity.py`), parametrized over every `face.json`:
@@ -199,7 +198,7 @@ So the console demonstrably runs off-board on MicroPython.
   - Override codecs: `ui.py:187`, `modmoy_ui.c:2380-2632`, `moycore_ui.h:137`, `moy_ui_over_block`, and the defines in `moy_ui_api.h:262-300`.
   - Enum lookup by hand on two tiers: `ui.py:349` and `moycore_ui.h:308`.
 - **Do:**
-  - Extend the `ui.*` rows with §2.2's fields and add `+native/moy_ui/over.json`.
+  - Extend the `ui.*` rows with §2.2's fields and add `native/moy_ui/over.json`.
   - Generate the `ui_api_*` MicroPython functions, the ctypes `api_*` and argtypes, `moy_ui_run_*`, `moy_ui_wasm_*`, `moycore_ui_*` plus its `luaL_Reg`, and the `ui.py` bodies between markers.
   - Keep `label_text` and the verbs marked `hand`.
 - **Lines:** about −2.5k (46 verbs × ~55 glue lines) and −600 (the codecs).
@@ -265,7 +264,7 @@ So the console demonstrably runs off-board on MicroPython.
   - Per-module `_check`/`check` copies: 4 in `runtime/host`, 5 in `native/*/modmoy_*.c`, each with its own errno table (for example `moy_lease.py:98`).
 - **Do:**
   - One `errors` section in the table: code → (Python exception, errno, message, Lua message).
-  - Generate `moy_app_err.h` (C plus Lua) and `runtime/host/face_errors.py`.
+  - Generate `moy_app_err.h` (C plus Lua) and `runtime/system/face_errors.py`.
   - Decide FULL's meaning once: it means two different things today.
 - **Lines:** about −150.
 - **Risk:** low. Make the FULL decision explicit in the commit.

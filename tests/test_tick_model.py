@@ -443,7 +443,7 @@ def _open(ws, title):
 
 def _count(ws):
     calls = {"upd": 0, "draw": 0, "dts": []}
-    u0, d0 = ws.run.player._update, ws.run.player._draw
+    u0, d0 = ws.run.player.update, ws.run.player.draw
 
     def upd(dt):
         calls["upd"] += 1
@@ -456,8 +456,8 @@ def _count(ws):
         if d0:
             d0()
 
-    ws.run.player._update = upd
-    ws.run.player._draw = draw
+    ws.run.player.update = upd
+    ws.run.player.draw = draw
     return calls
 
 
@@ -507,10 +507,10 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     ws = _ws(tmp_path)
     # A tool/app cart the PLAYER runs -- one a registered system app claims
     # opens that app's layer instead, and ticks nothing here.
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     tool = next(c["title"] for c in ws.launcher.items
                 if c.get("type") in ("tool", "app")
-                and not ws.is_system_app(c))
+                and not ws.spine.is_system_app(c))
     _open(ws, tool)
     assert ws.run.player.tick_ms == 0
     calls = _count(ws)
@@ -528,12 +528,12 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     def boom(dt):
         raise RuntimeError("kaboom")
 
-    ws.run.player._update = boom
+    ws.run.player.update = boom
     _frames(ws, 4, 1 / 60)
     assert ws.cart_error is not None
     assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
     drawn0 = ws.frame_state.frames_drawn
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 60)
     assert ws.frame_state.frames_drawn - drawn0 == 1
 
@@ -542,9 +542,9 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
     assert ws.run.player.tick_ms == 33
-    ws.go_home()
+    ws.home.go_home()
     assert ws.run.player.tick_ms == 0 and not ws.input.kept_names()
-    ws._dirty = True
+    ws.mark_dirty()
     drawn0 = ws.frame_state.frames_drawn
     ws.frame(1 / 60)
     assert ws.frame_state.frames_drawn - drawn0 == 1
@@ -559,13 +559,13 @@ def test_a_press_between_ticks_reaches_the_next_tick_exactly_once(tmp_path):
     _open(ws, PACED_GAME)
     btnp = ws.run.player.ns["btnp"]
     seen = []
-    u0 = ws.run.player._update
+    u0 = ws.run.player.update
 
     def upd(dt):
         seen.append(bool(btnp("right")))
         u0(dt)
 
-    ws.run.player._update = upd
+    ws.run.player.update = upd
     _frames(ws, 2, 1 / 60)                        # frames 1-2: one tick, on frame 2
     ws.input.set_held("right", True)
     ws.input.begin_frame()
@@ -601,7 +601,7 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     assert not ws.wm.top_is_player()
     ws.input.begin_frame()
     ws.frame(1 / 60)
-    assert not ws.input.kept_names() and ws.run.player._keyp_latch == 0
+    assert not ws.input.kept_names() and ws.run.player.keyp_latch == 0
     ws.input.begin_frame()
     assert not ws.input.pressed("a"), "the shell reads this frame's edges only"
 
@@ -611,13 +611,13 @@ def test_a_typed_key_edge_latches_to_the_tick(tmp_path):
     _open(ws, PACED_GAME)
     keyp = ws.run.player.ns["keyp"]
     seen = []
-    u0 = ws.run.player._update
+    u0 = ws.run.player.update
 
     def upd(dt):
         seen.append(keyp())
         u0(dt)
 
-    ws.run.player._update = upd
+    ws.run.player.update = upd
     _frames(ws, 2, 1 / 60)
     ws.input.last_key = ord("x")
     ws.input.begin_frame()
@@ -634,7 +634,7 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
     assert ws.steady is True                      # the kid default
     _open(ws, PACED_GAME)
     assert ws.run.player.sched.steady is True
-    ws.set_steady(False)
+    ws.toggles.set_steady(False)
     assert ws.system.get("steady") is False
     assert ws.run.player.sched.steady is False
     keys = [r[0] for r in ws.settings_layer._settings_rows()]
@@ -644,7 +644,7 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
 def test_a_stored_frameskip_key_is_dropped_on_load(tmp_path):
     ws = _ws(tmp_path)
     ws.system.set("frameskip", True)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.text("frameskip") is None
     assert ws.steady is True
 
@@ -689,7 +689,7 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     ws = _ws(tmp_path)
     _open(ws, PACED_GAME)
     np = _FakeSession()
-    ws.run.player._netplay = np
+    ws.run.player.netplay = np
     calls = _count(ws)
     drawn0 = ws.frame_state.frames_drawn
     _frames(ws, 5, 1 / 30)
@@ -701,7 +701,7 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     assert ws.frame_state.frames_drawn - drawn0 == 3
     assert set(calls["dts"]) == {np.dt}
     assert ws.run.player.sched.div == 1 and ws.run.player.sched.ticks == 0
-    ws.run.player._netplay = None
+    ws.run.player.netplay = None
 
 
 # -- the loop and the wire ----------------------------------------------------
@@ -775,7 +775,7 @@ def test_an_imported_p8_cart_is_paced_by_the_host_now(tmp_path):
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert ws.run.player.tick_ms == 16
     _frames(ws, 30, 1 / 30)
-    assert ws.run.player._lua.get_global("ticks") == 60
+    assert ws.run.player.lua.get_global("ticks") == 60
     assert ws.run.player.sched.misses == 0
 
 
@@ -785,9 +785,9 @@ def test_the_rate_comes_from_the_manifest_and_junk_is_thirty(tmp_path):
     pl = ws.run.player
     for fps, rate in ((60, 60), (30, 30), (0, 30), (None, 30), ("junk", 30),
                       (45, 30)):
-        pl._arm_pacing({"fps": fps})
+        pl.pace.arm({"fps": fps})
         assert pl.sched.rate == rate, fps
-    pl._arm_pacing({})
+    pl.pace.arm({})
     assert pl.sched.rate == 30
 
 
@@ -851,10 +851,10 @@ def _player_with(lua, fused_cost):
     -- the loop's own measurement of a fused frame."""
     from runtime.player import Player
     p = Player.__new__(Player)
-    p._lua = lua
+    p.lua = lua
     p._lua_split = getattr(lua, "frame_split", None)   # _start_runtime binds it
-    p._tick_edges = None
-    p._keyp_latch = 0
+    p.tick_edges = None
+    p.keyp_latch = 0
     p.sched = TickScheduler()
     p.sched.start(60, True)
     p.ws = type("W", (), {"input": type("I", (), {"cart_keyp": 0, "cart_key": 0})()})()
@@ -865,7 +865,7 @@ def _player_with(lua, fused_cost):
             while time.time() - t0 < fused_cost:
                 pass
 
-    p._update = _update
+    p.update = _update
     return p
 
 

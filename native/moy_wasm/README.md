@@ -306,7 +306,7 @@ of its own stepped the same way (`runtime/host/moyhost_wasm.c`'s
 
 A cart whose manifest says `"type": "service"` and `"runtime": "wasm"` and
 carries no source is a WASI service, the scheduler's as any service is
-(`runtime/system/scheduler.py`, COMPILED SERVICES; `moy_wasi.h`, A
+(`runtime/system/sched_compiled.py`, COMPILED SERVICES; `moy_wasi.h`, A
 SERVICE): a run with no shell session, its argv its cart's id, no env, no
 preopen, stdin empty, stdout and stderr the OS log's lines under its pid,
 its calls run in place on its own task with no hop. `service_start()` opens
@@ -723,7 +723,7 @@ check out for a reason that is not tamper evidence (an unsigned module, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
 `runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
 (`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
-UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notice(
+UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notices.notice(
 INTERP_NOTICE_TITLE, sub, "warn")`, where `sub` is `self.interp_cause`
 ("missing", "unsigned" or "firmware") read through `INTERP_NOTICE_SUB`. It
 never blocks the crash panel: the cart is already playing by the time the

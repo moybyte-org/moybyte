@@ -23,7 +23,7 @@ TH = fixture_colors("machine")
 # --- test doubles --------------------------------------------------------------
 
 def _glyph_draw(kind, rect, color, cv):
-    """A leaf-safe stand-in for ws._glyph: deterministic, rect + colour only."""
+    """A leaf-safe stand-in for ws.glyph: deterministic, rect + colour only."""
     x, y, w, h = rect
     cv.rect(x + 1, y + 1, max(1, w - 2), max(1, h - 2), color)
     cv.rectb(x, y, w, h, color)

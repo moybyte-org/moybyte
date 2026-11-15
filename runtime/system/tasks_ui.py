@@ -99,6 +99,8 @@ class TasksLayer(Layer):
 
     id = "tasks"
     domain = "system"
+    TITLE = TITLE                   # its window's and its chip's (the app table)
+    BAR = None                      # its bar has no keys
     back_title = TITLE              # the bar's chevron and title (BarLayer)
     zone_gen = 0                    # ...whose cache key: the title never moves
 
@@ -164,6 +166,15 @@ class TasksLayer(Layer):
 
     B_BACK = True
 
+    def is_app(self, cart):
+        """No cart is the task manager: it opens from the system menu."""
+        return False
+
+    def leave(self):
+        """Back where it was opened from (`Workstation.close_tasks`)."""
+        self.ws.close_tasks()
+        return True
+
     def ui_host(self):
         return self.host
 
@@ -177,13 +188,13 @@ class TasksLayer(Layer):
         ws = self.ws
         if i.pressed("home"):
             ws.close_tasks()
-            ws.home_key()
+            ws.home.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
             ws.input_policy.back(leave=True)
             return True
         if self.host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -191,7 +202,7 @@ class TasksLayer(Layer):
         if click and ws.bar_layer.handle_bar_tap("tasks", px, py):
             return True
         if self.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- draw ---------------------------------------------------------------
@@ -327,7 +338,7 @@ class TasksLayer(Layer):
 
     def _do(self, verb, row):
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if verb == HOME:
             ws.close_tasks(home=True)
             return

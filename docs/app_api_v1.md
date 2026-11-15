@@ -256,7 +256,7 @@ The same calls draw the same pixels on every tier
 (`tests/test_app_layout.py`): a Python app's frame is drawn by its Player
 (`ui_draw.CART_APP`, the boundary keeping only its `print` and its own
 colours), a Lua, compiled, WASI or native run's by the RUN face over the
-word its snapshot carries (`Player.ui_face`, `moy_ui_wasm.h`'s
+word its snapshot carries (`AppFace.ui_face`, `moy_ui_run.h`'s
 `MOYCORE_UI_FACE_*`). The rest of its drawing stays a cart's: `print` in
 petme128, colours MOY64. A game's `ui`, and a fixed app's, draws as a
 cart's.
@@ -791,7 +791,7 @@ later one a strike, and `MOY_BG_STRIKES` (3) strikes suspend the process
 until it is resumed. Python aborts a callback still running after
 `MOY_BG_ABORT_US` (300 ms) and counts a strike; Lua yields a runaway
 callback with a count hook; a watchdog strikes and kills a compiled wake
-that stops polling. `runtime/system/scheduler.py`'s header is the ladder.
+that stops polling. `runtime/system/sched_python.py`'s header is the ladder.
 
 **Start, stop, restart.** A service runs from its start until it is stopped,
 exits, crashes, or strikes out. It starts by `autostart` (the permission: at
@@ -869,9 +869,9 @@ every tier: a board's `time.time()` and Lua's `os.time()` count from 2000;
 an id `moybyte.cancel` takes, refuses without the permission (Python's
 `OSError`, a Lua error), and lights the screen if the console had gone dark,
 so a background app can wake its player
-(`docs/os_2026-11/between_apps.md` §3). A Lua service's alarm is the
-kernel's, heard as the system's message `"moybyte.at"`
-(`native/moycore/moycore_svc.c`, ALARMS), and so is a compiled program's
+(`docs/os_2026-11/between_apps.md` §3). A Lua program's alarm is the
+kernel's, heard as the system's message `"moybyte.at"` and handed to its
+function (`native/moycore/moycore_moybyte.h`), and so is a compiled program's
 on every tier (a wasm app's `moybyte_at(t)`, a WASI program's and a C
 program's `moy_at`): the call answers the alarm's id on the program's own
 task, with or without the VM (`native/moy_kernel/moy_evq.h`, `moy_evq_at`,
@@ -886,23 +886,25 @@ program's own task with or without the VM (`native/moy_app/moy_app.c`,
 Python half holds, ABSENT (a WASI or C program's `ENOENT`) while NTP has not
 answered.
 
-**Timers** need no permission. A Python and a Lua program pass a function
+**Timers** need no permission. Every program's timers and alarms are the
+kernel's (`native/moy_kernel/moy_evq.h`, TIMERS), one table and one id
+space for every tier. A Python and a Lua program pass a function
 (`moybyte.every(ms, fn)`, `moybyte.after(ms, fn)`, §7); a compiled program
 asks for the timer (`moybyte_every(ms)` and `moybyte_after(ms)` in a wasm
 app, `moy_every` and `moy_after` in a WASI or C program), which answers its
 id, and hears each time it goes off as the system's message
 `"moybyte.timer"` carrying that id. `cancel` (`moybyte_cancel(id)`,
 `moy_cancel(id)`) ends a timer or an alarm of the program's own, answering 1,
-or 0 where it has none of that id. A compiled program's timers and alarms
-are the kernel's (`native/moy_kernel/moy_evq.h`, TIMERS), sixteen at once:
-they go off, and are set and cancelled, with no console, so a service's run
-on through an S3's VM stop. The program listens on those two names for
-itself while it holds one, two of the eight names a process may listen on
-(`moy_evq.h`, `MOY_EVQ_LISTEN`); a tick its queue cannot take is dropped. A compiled
-program holds 16 timers and alarms at once (`moybyte.TIMERS_MAX`, a Lua
-service's alarms counted the same): one more answers FULL (`-2` to a wasm
-app, `ERANGE` to a WASI or C program, as a short buffer reads). Each is its
-process's, and the process's end cancels what it left.
+or 0 where it has none of that id. A compiled program's and a Lua service's
+go off, and are set and cancelled, with no console, so a service's run on
+through an S3's VM stop. A program outside the VM listens on those two
+names for itself while it holds one, two of the eight names a process may
+listen on (`moy_evq.h`, `MOY_EVQ_LISTEN`); a tick its queue cannot take is
+dropped. A program holds 16 timers and alarms at once
+(`moybyte.TIMERS_MAX`): one more answers FULL (`-2` to a wasm app, `ERANGE`
+to a WASI or C program, as a short buffer reads; an OSError in Python, an
+error in Lua). Each is its process's, and the process's end cancels what it
+left.
 
 ```python
 import moybyte, time
@@ -1061,6 +1063,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moy_present` | none |  |  | `moybyte.os.present` | `moy_present` |
 | `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
 | `moy_ui_font_pull` | none |  |  | `moybyte.os.ui_font_pull` | `moy_ui_font_pull` |
+| `moy_ui_tell` | none |  |  | `moybyte.os.ui_tell` | `moy_ui_tell` |
 | `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
 | `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
 | `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
@@ -1078,10 +1081,11 @@ service's alike, each name under the permission a Python app's is under
 In a Lua app the console calls (`notify`, `open_with`, `share`, `send`,
 `award`, `progress`, `pick`, `status_panel`) are the moybyte module's own functions run as
 the app's process, their arguments any values JSON carries; a wake
-(`on`, `every`, `after`, `at`) calls its function in the app's state at the
-start of a frame, as a Python app's, and `moybyte.log(level, text)` writes
-the OS log with `moybyte.ERR`, `WARNING` and `INFO` (`runtime/run/lua_ext.py`,
-PRELUDE_MOYBYTE). The theme's reads (`theme.token(role)`, `gen`, `light`,
+(`on`, `every`, `after`, `at`) is the kernel's under the app's process and
+calls its function in the app's state as each of its frames starts, and
+`moybyte.log(level, text)` writes the OS log with `moybyte.ERR`, `WARNING`
+and `INFO`: the one C table a Lua service holds too
+(`native/moycore/moycore_moybyte.h`). The theme's reads (`theme.token(role)`, `gen`, `light`,
 `name`, `variant`) are every Lua app's, as Python's `theme()` is; a Lua app
 hears `_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`,
 the item a table whose `read()` answers its text and whose `write(text)`
@@ -1366,7 +1370,7 @@ foreground command's at its job's next step; a background command's answers
 AGAIN after 5 s, its door serving nothing while it runs. The files, nav,
 prefs, clipboard, device and item rows, and `share`, are the role table's
 for a grant its start makes, over the roles its granted permissions name
-(`runtime/system/scheduler.py`, `compiled_run`), as a C program's are: a
+(`runtime/system/sched_compiled.py`, `compiled_run`), as a C program's are: a
 permission it lacks answers ACCES and a buffer too small RANGE. The files
 rows reach the store's documents in the folder its `files` permission
 names, the folder its WASI files (§5) are rooted at. A WASI program has no
@@ -1478,11 +1482,15 @@ class MyAppLayer(AppLayer):      # from layers import AppLayer
 ```
 
 That is the whole list: the console registers it from the declaration
-(`ws.register_app`), and the launcher's claim, the router, the back-stack,
+(`ws.spine.register_app`), and the launcher's claim, the router, the back-stack,
 the window and its chip, the resize floor (`min_size`, or the layout's
 `MIN_W`/`MIN_H`), text mode (what its page has focused) and the exitable
 bar all follow; a new `runtime/`
-module reaches every board unless a `board.toml` denies it (#161).
+module reaches every board unless a `board.toml` denies it (#161). The shell's
+own two, Settings and the task manager, register through the same call with
+no cart as their identity: they join the router, the app table and
+`ws.app(id)`, not the launcher's claims, and what the frame asks of them is the
+`Layer` protocol's (`moved`, `leave`, ...), never their id.
 `tests/test_app_registry.py` fails a hand-written app name anywhere else, and
 `tests/test_app_api.py` holds the Calc set.
 
@@ -1504,6 +1512,9 @@ module reaches every board unless a `board.toml` denies it (#161).
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | the shell | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `clipboard` | `put_text()`, `text()`, `kind()`, `seq()` |
 | `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, and where carts come from on a page a board serves; the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`) | the shell | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()` |
+| `ctx.wifi` | the console's Wi-Fi station, which Settings' Wi-Fi panel scans, joins and forgets through (`station()`), and the radio lease the panel holds while it is open (`hold()`, `release()`, under the grant's app id); never a cart's | the shell | `hold()`, `release()`, `station()` |
+| `ctx.bt` | the Bluetooth keyboard service Settings' keyboard picker drives, or None on a board with none: the touch-only boards' keyboard itself, the T-Deck's second one (`keyboard()`); never a cart's | the shell | `keyboard()` |
+| `ctx.usb` | the USB drive, which lends the card to a computer (`runtime/system/usb_drive.py`): the drive or None (`drive()`), turning it on and off, and its state as the computer moved it (`poll()`); never a cart's | the shell | `drive()`, `turn_on()`, `turn_off()`, `poll()` |
 <!-- END GENERATED -->
 
 Every context holds a grant, a row of `native/moy_app`'s grant table keyed by

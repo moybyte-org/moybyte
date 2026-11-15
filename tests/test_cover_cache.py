@@ -370,7 +370,7 @@ def test_both_grids_are_wired_to_the_collaborators_bound_method(tmp_path):
     """A card's paint costs ONE call, exactly what it cost with the method on
     the kernel -- no forward, no lookup chain (architecture doc 3e)."""
     ws = build_ws(tmp_path)
-    for grid in (ws.launcher, ws._home_grid("grid", [])):
+    for grid in (ws.launcher, ws.home._home_grid("grid", [])):
         assert grid.cover_for.__self__ is ws.covers
         assert grid.cover_for.__func__ is type(ws.covers).cover_for
 
@@ -499,14 +499,14 @@ def test_a_run_releases_the_caches_only_on_the_diet_tier(tmp_path):
     ws = build_ws(tmp_path)
     _land(ws, cart)
     live = next(c for c in ws.carts.all if c["path"] == cart["path"])
-    ws._open_workspace(live)
+    ws.open_workspace(live)
     assert ws.covers.diet is False
     warm = ws.covers.gen
-    ws._start()
+    ws.start()
     assert ws.covers.gen == warm            # nothing dropped
 
     ws.covers.diet = True
-    ws._start()
+    ws.start()
     assert ws.covers.gen > warm             # ...and now it did
 
 

@@ -45,13 +45,13 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
         else:
             use_theme(ws, theme)
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
-    ws.open_library()
+    ws.home.open_library()
     ws.wallpaper.is_animating = lambda dt: False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)          # a banner's deadline is the wall clock's
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas
+    root = ws.wm.root_canvas
     root.RETAINED_FRAMES = bufs
     held = [bytes(root._buf)]
     stats = {"frames": 0}
@@ -69,7 +69,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
         return held[-1]
 
     for _ in range(40):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
     return ws, drv, frame, stats
 
@@ -92,14 +92,14 @@ def _session(ws, drv, frame):
         ws.mark_dirty()
         run(3 if k % 2 else 1)
     run(20)
-    ws.bar_layer._clock_text = lambda: "10:31"   # the bar moves, the parts do not
+    ws.bar_layer.clock_text = lambda: "10:31"   # the bar moves, the parts do not
     ws.mark_dirty()
     run(6)
     home.handle_input(_Key("left"))
     ws.mark_dirty()
     run(6)
     for t in ("mine", "apps", "make", "games"):
-        ws.set_home_tab(t)
+        ws.home.set_home_tab(t)
         run(6)
     bx, by, bw, bh = ws.launcher.band_rect()
     cy = by + bh // 2
@@ -128,7 +128,7 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
     calls = {"still": 0, "strip": 0}
     home = ws.launcher_layer
     real = home._try_still_frame
-    strip = ws.bar_layer._draw_status_strip
+    strip = ws.bar_layer.draw_status_strip
 
     def counted(cv, dt):
         n = calls["strip"]
@@ -143,7 +143,7 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
         calls["strip"] += 1
         return strip(where)
     home._try_still_frame = counted
-    ws.bar_layer._draw_status_strip = strips
+    ws.bar_layer.draw_status_strip = strips
     copied = []
     cv = ws.sys_canvas
     real_copy = cv.copy_last
@@ -180,18 +180,18 @@ def test_a_change_settles_every_buffer_then_rests(tmp_path, monkeypatch, bufs):
     retained frame holds the glass's picture."""
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
     for t in ("apps", "games"):           # the tab's covers in the cache
-        ws.set_home_tab(t)
+        ws.home.set_home_tab(t)
         quiet = 0
         for _ in range(200):              # until the covers stop popping in
             quiet = quiet + 1 if frame() is None else 0
             if quiet >= 5:
                 break
-    ws.set_home_tab("apps")
+    ws.home.set_home_tab("apps")
     shots = [s for s in (frame() for _ in range(10)) if s is not None]
     assert len(shots) == bufs, len(shots)
     assert frame() is None
     home = ws.launcher_layer
-    root = ws.wm._root_canvas
+    root = ws.wm.root_canvas
     assert home._lib_key == home._retained_key(root)
     assert bytes(home._lib_cache._buf) == shots[-1]
 
@@ -216,7 +216,7 @@ def test_the_retained_frame_waits_for_an_idle_frame(tmp_path, monkeypatch, bufs)
         assert frame() is None
     assert caps == [1]
     assert bytes(home._lib_cache._buf) == shots[-1]
-    assert home._lib_key == home._retained_key(ws.wm._root_canvas)
+    assert home._lib_key == home._retained_key(ws.wm.root_canvas)
 
 
 @pytest.mark.parametrize("bufs", [2, 3])
@@ -226,9 +226,9 @@ def test_coming_back_settles_every_buffer(tmp_path, monkeypatch, bufs):
     ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
     ws.open_settings()
     for _ in range(10):
-        ws._dirty = True
+        ws.mark_dirty()
         frame()
-    ws.open_library()
+    ws.home.open_library()
     shots = [s for s in (frame() for _ in range(10)) if s is not None]
     assert len(shots) == bufs, len(shots)
     home = ws.launcher_layer

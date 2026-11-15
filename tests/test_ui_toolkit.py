@@ -196,8 +196,8 @@ def test_blocks_outline_drag_scrolls(tmp_path):
         if it.get("path"):
             ws.launcher.sel = i
             break
-    ws.change_selected()
-    ws.set_menu_view("blocks")
+    ws.home.change_selected()
+    ws.text.set_menu_view("blocks")
     bu = ws.block_ui
     be = bu.blocks_ed
     if be is None:

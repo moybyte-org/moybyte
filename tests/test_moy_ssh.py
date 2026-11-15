@@ -466,14 +466,32 @@ def ended(h, n, wait=10.0):
     raise AssertionError("the server ended %s connections, not %d" % (stats(h).get("ended"), n))
 
 
+def settled(h, quiet=0.5, wait=10.0):
+    """The STATS line once no connection has ended for `quiet` seconds: the
+    harness prints one per event, and a connection an earlier test left
+    closing can end after a count was read."""
+    deadline = time.time() + wait
+    last, since = stats(h), time.time()
+    while time.time() < deadline:
+        time.sleep(0.05)
+        s = stats(h)
+        if s != last:
+            last, since = s, time.time()
+        elif time.time() - since >= quiet:
+            return s
+    return last
+
+
 def test_every_session_gives_back_what_it_took(harness):
-    n = int(stats(harness)["ended"])
+    n = int(settled(harness)["ended"])
     for i in range(3):
         assert ssh(harness, PASSWORD, "moy@127.0.0.1", "echo %d" % i).returncode == 0
-    held = int(ended(harness, n + 3)["heap_now"])
+    ended(harness, n + 3)
+    held = int(settled(harness)["heap_now"])
     for i in range(3):
         assert ssh(harness, PASSWORD, "moy@127.0.0.1", "ls / | wc -l").returncode == 0
-    s = ended(harness, n + 6)
+    ended(harness, n + 6)
+    s = settled(harness)
     assert int(s["heap_now"]) == held
     assert int(s["session_peak"]) > 0
 
@@ -486,8 +504,8 @@ def refused(h, wait=3.0):
             socket.create_connection(("127.0.0.1", h["port"]), timeout=1).close()
         except ConnectionRefusedError:
             return True
-        except ConnectionResetError:
-            pass                    # the listener closed under this connect: ask again
+        except (ConnectionResetError, TimeoutError):
+            pass                    # closed under this connect, or a busy listener: ask again
         time.sleep(0.1)
     return False
 

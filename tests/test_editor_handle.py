@@ -359,7 +359,7 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
     ed = ws.run.player.ns["open_editor"]("unsaved")
     ed.set_text("do not lose me")
     assert ed.dirty() is True
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert moy_carts.load_file("docs", "unsaved", ws.carts_root) \
         == "do not lose me"
     ws.input_policy.sync()                     # the next frame's look at the mode

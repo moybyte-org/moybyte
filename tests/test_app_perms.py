@@ -260,7 +260,7 @@ def _write_cart(carts_dir, name, perms, required=(), src=APP_SRC):
 
 def _start(ws, title):
     cart = next(c for c in ws.carts.all if c["title"] == title)
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     ok = ws.run.player.start(ws.run.project)
     return ok, cart
 
@@ -337,7 +337,7 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     nothing consented in particular); its author gives it permissions; PLAY
     grants them, with no prompt."""
     ws = build_ws(tmp_path)
-    ws.new_cart_and_edit()
+    ws.home.new_cart_and_edit()
     new = ws.run.project.cart
     man_path = Path(new["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
@@ -346,7 +346,7 @@ def test_a_cart_written_in_the_editor_runs_on_its_manifest_unasked(tmp_path):
     (Path(new["path"]) / "main.py").write_text(APP_SRC)
     ws.carts.rescan()
     cart = next(c for c in ws.carts.all if c["path"] == new["path"])
-    ws._open_workspace(cart)
+    ws.open_workspace(cart)
     assert ws.run.player.start(ws.run.project), ws.run.player.cart_error
     assert ws.run.player.ns["prefs"] is not None
     assert not ws.confirm.open
@@ -373,12 +373,12 @@ def _store_ws(tmp_path, repo):
     ci.save_sources(str(tmp_path / "carts"), [repo.url("index.json")])
     ws.cart_net = MemNet(repo.routes())
     ws.pointer.visible = False
-    return ws, ws._apps_by_id["getcarts"]
+    return ws, ws.app("getcarts")
 
 
 def _frames(ws, n=3):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(DT)
 
 
@@ -394,7 +394,7 @@ def _settle(ws, app):
 def _get(ws, app, cid):
     """Open Get Carts, open `cid`'s page and press Get; frames until the
     install asks or ends."""
-    ws.open_app(app)
+    ws.spine.open_app(app)
     for _ in range(40):
         _frames(ws, 1)
         if app.phase != "checking":

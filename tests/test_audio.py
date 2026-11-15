@@ -435,7 +435,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path, monkeypatch):
     ws = console.Workstation(host_app._NullComp(), Canvas(320, 240), InputState(),
                              moy_carts.scan(root))
     ws.make_api = host_app.make_api
-    ws.set_home_tab("mine")                  # Noisy is the kid's own
+    ws.home.set_home_tab("mine")                  # Noisy is the kid's own
     ws.open()
     ws.frame(1 / 30)
     assert ws.cart_error is None             # silent no-op, not a crash
@@ -892,7 +892,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws.open()
     assert ws.cart_error is None and ws.run.audio is not None
 
-    ws._open_music()
+    ws.text.open_music()
     assert ws.screen == "menu" and ws.menu_view == "music"
     me = ws.music_ui.musicedit
     assert me is not None
@@ -929,7 +929,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
 
     # Leaving the editor stops any preview and returns to the cart.
     page.act("hear")                          # start a preview again
-    ws._leave_menu()
+    ws.text.leave_menu()
     assert ws.music_ui.music_preview is None and ws.screen == "desktop"
 
 
@@ -938,7 +938,7 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
     # The Song tab; a frame draws it.
@@ -964,7 +964,7 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
 
@@ -1002,7 +1002,7 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     page = ws.music_ui.page()
     page._view()
@@ -1033,7 +1033,7 @@ def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
     drv = host_app.ConsoleDriver(ws)
 
@@ -1060,7 +1060,7 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
-    ws._open_music()
+    ws.text.open_music()
     me = ws.music_ui.musicedit
 
     me.select_cursor(0)
@@ -1071,16 +1071,16 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
     ws.input.last_key = 0x1A                # Ctrl+Z held (level, not an edge)
     for _ in range(5):                      # ... across five frames
         ws.input.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     assert len(me._undo) == 1               # exactly ONE undo fired
     assert me.cur_step()[0] == 40
 
     ws.input.last_key = 0                   # release ...
     ws.input.begin_frame()
-    ws.handle_input()
+    ws.router.handle_input()
     ws.input.last_key = 0x1A                # ... and a fresh press is a new edge
     ws.input.begin_frame()
-    ws.handle_input()
+    ws.router.handle_input()
     assert len(me._undo) == 0               # the second undo landed
     ws.input.last_key = 0
 
@@ -1343,12 +1343,12 @@ def test_the_music_tab_repaints_on_input_and_never_at_rest(tmp_path):
 
     def frame(inp):
         ws.input = real
-        ws._open_music()
+        ws.text.open_music()
         ws.frame(1 / 30)
-        ws._dirty = False
+        ws.frame_state.dirty = False
         ws.input = inp
         ws.music_ui._music_input()
-        dirty = ws._dirty
+        dirty = ws.frame_state.dirty
         ws.input = real
         ws.music_ui._stop_music_preview()
         return dirty

@@ -168,7 +168,7 @@ def test_the_rows_strip_names_its_keys(tmp_path):
     try:
         _press(drv, "up")
         ws.launcher_layer._full_streak = 0
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         ui_draw.hints = real
@@ -178,29 +178,29 @@ def test_the_rows_strip_names_its_keys(tmp_path):
 def _stepped(ws):
     """The steps `_ball_roll` delivers, as (name, n), instead of the table."""
     got = []
-    ws._ball_steps = lambda name, k, coast=True: got.append((name, k))
+    ws.router._ball_steps = lambda name, k, coast=True: got.append((name, k))
     return got
 
 
 def test_a_sideways_roll_that_drifts_down_stays_on_the_row(tmp_path):
     ws, _drv = _home(tmp_path)
     got = _stepped(ws)
-    ws._ball_roll(2, 0)
+    ws.router._ball_roll(2, 0)
     assert got == [("right", 1)]
-    ws._ball_roll(0, 1)
-    ws._ball_roll(0, 1)
-    ws._ball_roll(0, 1)
+    ws.router._ball_roll(0, 1)
+    ws.router._ball_roll(0, 1)
+    ws.router._ball_roll(0, 1)
     assert got == [("right", 1)], "a pulse or three across a roll is drift"
-    ws._ball_roll(0, 1)
+    ws.router._ball_roll(0, 1)
     assert got[1:] == [("down", 2)], "a turn of BALL_TURN pulses steps"
 
 
 def test_a_turn_after_the_roll_stops_steps_at_once(tmp_path):
     ws, _drv = _home(tmp_path)
     got = _stepped(ws)
-    ws._ball_roll(2, 0)
-    ws._ball_axis_at -= ws.BALL_ROLLING_MS + 1
-    ws._ball_roll(0, -2)
+    ws.router._ball_roll(2, 0)
+    ws._ball_axis_at -= ws.router.BALL_ROLLING_MS + 1
+    ws.router._ball_roll(0, -2)
     assert got == [("right", 1), ("up", 1)]
 
 
@@ -243,7 +243,7 @@ def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path, monkey
         drv.pan(0, 0)
         for _ in range(4):
             frame()
-        clock[0] += ws.BALL_IDLE_MS + 1
+        clock[0] += ws.router.BALL_IDLE_MS + 1
     roll(1)
     assert _at(ws) == "cluster"
     roll(-1)

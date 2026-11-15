@@ -10,6 +10,7 @@ import os
 import pytest
 
 from runtime import host_app, moy_evq, scheduler as S
+from runtime import sched_lua
 from runtime import intents as I
 from ws_helpers import open_cart
 
@@ -60,7 +61,7 @@ def _wasm_cart(tmp_path, root):
 
 
 def _lua_cart(root, text):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     dst = os.path.join(root, "sharer.moy")
     os.makedirs(dst)
@@ -110,18 +111,18 @@ def test_a_share_from_a_carts_load_opens_notes_at_the_frame_boundary(tmp_path, m
         asker = player.pid
         assert said == [True], "the request is accepted"
         assert ws.cart["title"] == "Sharer", "nothing opens inside the cart's call"
-        assert runs and player._lua is runs[0] and not closed
+        assert runs and player.lua is runs[0] and not closed
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(_DT)
         player = ws.run.player
         assert closed == runs, "the asking run was closed"
         assert ws.cart["title"] == "Notes" and player.cart_error is None
         assert player._app_id == "moybyte.notes" and not player._wasm
-        assert player._lua is None and player.pid != asker, "the runtime is Notes'"
+        assert player.lua is None and player.pid != asker, "the runtime is Notes'"
         assert not moy_evq.has(asker), "the asker's queue went with its run"
         assert asker not in I.INTENTS.held
         if tier == "wasm":
             assert runs[0]._run._r is None, "the module's instance was freed"
     finally:
-        ws.exit()
+        ws.spine.exit()

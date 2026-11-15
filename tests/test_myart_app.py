@@ -23,7 +23,7 @@ def _draw(ws, name, w=320, h=240, c=8):
 
 def _frames(ws, n=3):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 
@@ -32,14 +32,14 @@ def _idle(ws, n=40):
     makes the pictures its cards owe (an unlock banner on a wall clock
     would hold the frames painting)."""
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(n):
         ws.frame(_DT)
 
 
 def _open(ws):
-    app = ws._apps_by_id["myart"]
-    assert ws.open_app(app)
+    app = ws.app("myart")
+    assert ws.spine.open_app(app)
     _frames(ws)
     assert ws.wm.top_kind() == "myart"
     _idle(ws)
@@ -56,7 +56,7 @@ def _key(ws, k):
 
 def test_my_art_is_a_registered_app_the_desk_and_home_leave_out(tmp_path):
     ws = _ws(tmp_path)
-    assert "myart" in ws._apps_by_id
+    assert ws.app("myart") is not None
     assert "myart" in ws.wm.HIDDEN_APPS
     wall = [c for c in ws.carts.all if c.get("type") == "wallpaper"
             and c.get("title") == "Wallpaper"]
@@ -94,11 +94,11 @@ def test_a_reopen_decodes_only_the_drawings_that_changed(tmp_path, monkeypatch):
     monkeypatch.setattr(artwork, "read_cover", read_cover)
     app = _open(ws)
     assert len(decoded) == 2
-    ws.go_home()
+    ws.home.go_home()
     _frames(ws)
     _open(ws)
     assert len(decoded) == 2, "a drawing no app wrote was decoded again"
-    ws.go_home()
+    ws.home.go_home()
     path = moy_carts.file_path("drawings", "rocket", ws.carts_root)
     was = os.stat(path).st_mtime
     _draw(ws, "rocket", c=2)            # another app writes it meanwhile
@@ -117,7 +117,7 @@ def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
         _draw(ws, "pic%d" % i, c=c)
     made = []
     real = artwork.read_cover
-    app = ws._apps_by_id["myart"]
+    app = ws.app("myart")
     draw = app.draw
 
     def drawing(dt):
@@ -133,7 +133,7 @@ def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
         return real(blob, pix, w, h)
     monkeypatch.setattr(artwork, "read_cover", read_cover)
     monkeypatch.setattr(app, "draw", drawing)
-    assert ws.open_app(app)
+    assert ws.spine.open_app(app)
     _frames(ws)
     assert made == [] and app.idle_owed, "the cards drew without their pictures"
     _idle(ws)
@@ -215,7 +215,7 @@ def test_open_takes_the_drawing_to_paint(tmp_path):
     _frames(ws)
     assert ws.wm.top_kind() == "artwork"
     assert ws.artwork.doc_name() == "rocket"
-    assert ws.artwork_app.doc.pix[0] == 3
+    assert ws.app("artwork").doc.pix[0] == 3
 
 
 def test_new_drawing_opens_paint_on_a_fresh_drawing(tmp_path):
@@ -226,7 +226,7 @@ def test_new_drawing_opens_paint_on_a_fresh_drawing(tmp_path):
     _frames(ws)
     assert ws.wm.top_kind() == "artwork"
     assert ws.artwork.doc_name() not in (None, "rocket")
-    assert (ws.artwork_app.doc.W, ws.artwork_app.doc.H) == (320, 240)
+    assert (ws.app("artwork").doc.W, ws.app("artwork").doc.H) == (320, 240)
 
 
 def test_the_desk_window_opens_at_its_designed_size(tmp_path):
@@ -245,7 +245,7 @@ def test_a_settled_page_paints_nothing(tmp_path):
     for _ in range(4):
         drv.frame(_DT)
     quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     for _ in range(4):
         drv.frame(_DT)
     drawn = ws.frame_state.frames_drawn

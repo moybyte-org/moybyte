@@ -302,7 +302,7 @@ class FakeWS:
         self.screen = "home"
         self.wifi = None
         self.carts = _FakeCarts()
-        self._apps = ()
+        self.app_layers = ()
         self._psave_ms = 0
         self._psave_asleep = False
 

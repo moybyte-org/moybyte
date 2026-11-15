@@ -311,7 +311,7 @@ def lua_trace(tmp_path):
     ws.input.begin_frame()
     ws.frame(1.0 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    text = ws.run.player._lua.get_global("TRACE")
+    text = ws.run.player.lua.get_global("TRACE")
     got = {}
     for line in (text or "").splitlines():
         name, _, raw = line.partition(" ")
@@ -438,7 +438,7 @@ def wasm_trace(tmp_path):
     ws = host_app.build_workstation(root)
     open_cart(ws, "Every Row Wasm")
     for _ in range(2):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1.0 / 30)
     path = os.path.join(os.path.dirname(root), "apps", "every_row", "trace")
     assert os.path.exists(path), ws.run.player.cart_error
@@ -459,7 +459,7 @@ def wasi_trace(tmp_path):
         "moybyte": {"type": "command", "permissions": _perms()}},
         probe_wat(rows, "moybyte.os", G.wasi_name, True))
     ws = build_workstation(str(tmp_path / "carts"))
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     app.draw(0)
     app.draw(0)

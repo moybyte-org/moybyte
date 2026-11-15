@@ -1,7 +1,7 @@
 // The shelf's record and its removal: what the store installed, and a cart
 // taken off it with everything it wrote. One implementation for every face:
 // runtime/carts/cart_index.py's load_record, remove and find_installed call
-// it (moy_store.shelf_* on a VM, runtime/host/moy_shelf_binding.py over
+// it (moy_store.shelf_* on a VM, runtime/host/moy_store_binding.py over
 // ctypes on CPython), and the C shell's `pkg list` and `pkg remove` serve it
 // with no VM (native/moy_sh/moy_sh_store.c).
 //

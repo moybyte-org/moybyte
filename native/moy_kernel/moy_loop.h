@@ -80,8 +80,8 @@ enum {
 
 // The upcalls the loop makes, and their classes.
 enum {
-    MOY_UP_INPUT = 0,           // ws.handle_input()
-    MOY_UP_POINTER = 1,         // ws.handle_pointer()
+    MOY_UP_INPUT = 0,           // ws.router.handle_input()
+    MOY_UP_POINTER = 1,         // ws.router.handle_pointer()
     MOY_UP_FRAME = 2,           // ws.frame(dt) -> the console's frames drawn
     MOY_UP_WORD = 3,            // a dev-channel line the kernel's words left
     MOY_UP_SERVICE = 4,         // a kernel service's Python half

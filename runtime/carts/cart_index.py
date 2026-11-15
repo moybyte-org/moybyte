@@ -155,13 +155,9 @@ import moy_carts as _store
 import cart_files as _cart_files
 import cart_listing as _cl
 
-# The record and the removal are native/moy_store/moy_shelf.h's on every tier:
-# the image's moy_store, or the same C over ctypes on CPython.
-try:
-    import moy_store as _shelf
-    _shelf.shelf_record
-except (ImportError, AttributeError):  # CPython
-    from runtime import moy_shelf_binding as _shelf
+# The record and the removal are native/moy_store/moy_shelf.h's on every tier
+# (the module `moy_store`).
+import moy_store as _shelf
 
 
 INDEX_VERSION = 1

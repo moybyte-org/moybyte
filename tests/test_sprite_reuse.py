@@ -168,7 +168,7 @@ def _tap(ws, rect):
     x, y, w, h = rect
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
 
 
@@ -180,7 +180,7 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
 
     # Cart A: open the paint editor, paint a recognizable tile, PUT it to shared.
     _open_cart(ws, "Pixel Pet")
-    ws._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
     src_tile = ws.paint.n
     for i in range(ws.sheet.TILE):              # paint a diagonal a kid would notice
@@ -195,9 +195,9 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
     assert _tile_pixels(shared, src_tile) == painted
 
     # Cart B: a different cart, same tile id starts blank. GET imports from shared.
-    ws.go_home()
+    ws.home.go_home()
     _open_cart(ws, "Tap Only Red")
-    ws._open_paint()
+    ws.text.open_paint()
     ws.paint.n = src_tile
     assert [ws.sheet.tget(src_tile, lx, ly)
             for ly in range(ws.sheet.TILE) for lx in range(ws.sheet.TILE)] != painted
@@ -208,9 +208,9 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
             for ly in range(ws.sheet.TILE) for lx in range(ws.sheet.TILE)] == painted
 
     # And committing cart B persists it (the round-trip survives a reload from disk).
-    # There's no SAVE button (#111) -- ws.save_sprites is the hard-commit verb every
+    # There's no SAVE button (#111) -- ws.saves.save_sprites is the hard-commit verb every
     # exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
-    ws.save_sprites()
+    ws.saves.save_sprites()
     reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"])
     assert _tile_pixels(reloaded, src_tile) == painted
 
@@ -218,7 +218,7 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
 def test_get_reports_when_shared_sheet_is_empty(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
-    ws._open_paint()
+    ws.text.open_paint()
     _tap(ws, ws.paint_layer.layout.get_btn)                 # nothing saved yet
     assert ws.paint_status in ("NO SHARED", "SHARED EMPTY")
     # The current tile was left untouched (no spurious write).
@@ -234,7 +234,7 @@ def _look_tab(tmp_path, theme="moy", variant="light"):
     ws = no_unlock_banner(host_app.build_workstation(str(tmp_path / "carts")))
     ws.look.set_theme(theme, persist=False, variant=variant)
     _open_cart(ws, "Star Catcher")
-    ws._open_paint()
+    ws.text.open_paint()
     drv = host_app.ConsoleDriver(ws)
     ws.pointer.visible = False
     _frames(drv, 2)
@@ -243,7 +243,7 @@ def _look_tab(tmp_path, theme="moy", variant="light"):
 
 def _frames(drv, n=1):
     for _ in range(n):
-        drv.ws._dirty = True
+        drv.ws.mark_dirty()
         drv.frame(1 / 30)
 
 

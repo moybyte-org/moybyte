@@ -34,8 +34,8 @@ def _ws(tmp_path):
     ws = build_ws(tmp_path)
     ws.look.select_wallpaper(None, persist=False)
     settle_badges(ws)
-    ws._toast_until = 0
-    ws._splash_until = None
+    ws.toast_until = 0
+    ws.splash_until = None
     return ws
 
 
@@ -78,7 +78,7 @@ def test_a_load_replaces_the_rows_in_place(tmp_path):
     alias = ws.system                       # what the writers/Prefs/the guard hold
     moy_carts.save_system({"font_scale": 1, "marker": "from-the-card"},
                           ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system is alias
     assert ws.prefs.rows is alias
     assert alias.get("marker") == "from-the-card"
@@ -90,7 +90,7 @@ def test_a_load_replaces_what_was_there(tmp_path):
     ws = _ws(tmp_path)
     ws.system.set("stale", 1)
     moy_carts.save_system({"marker": 2}, ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.text("stale") is None
     assert ws.system.get("marker") == 2
     assert not ws.system.dirty()            # what was read is what is on the card
@@ -127,7 +127,7 @@ def test_a_safe_start_ignores_the_file_and_leaves_it_alone(tmp_path, monkeypatch
     ws = _ws(tmp_path)
     ws.prefs.safe = system_store.safe_mode()
     moy_carts.save_system({"wallpaper": "aurora", "marker": 1}, ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.system.get("marker") is None and ws.system.get("wallpaper") is None
     assert ws.look.wallpaper_id is None            # no wallpaper cart runs
     ws.system.set("theme", "berry")
@@ -154,7 +154,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
     moy_carts.save_system(
         {crash_guard.KEY: {"strikes": {"some_app": 2}, "open": None}},
         ws.carts_root)
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.app_guard.strikes("some_app") == 2
     assert ws.app_guard.arm("some_app") is True     # its third and last
     assert ws.app_guard.disabled("some_app") is True
@@ -198,13 +198,13 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
     that skipped it is the documented panic, so the handle is the only route."""
     ws = _ws(tmp_path)
     sessions = []
-    inner = ws._with_sd
+    inner = ws.with_sd
 
     def counting(fn):
         sessions.append(1)
         return inner(fn)
 
-    ws._with_sd = counting
+    ws.with_sd = counting
     ws.system.set("k", 1)
     ws.prefs.load()
     assert len(sessions) == 2
@@ -217,12 +217,12 @@ def test_a_stepped_save_is_two_sessions_and_yields_to_a_newer_write(tmp_path):
     that lands, whole."""
     ws = _ws(tmp_path)
     sessions = []
-    inner = ws._with_sd
+    inner = ws.with_sd
 
     def counting(fn):
         sessions.append(1)
         return inner(fn)
-    ws._with_sd = counting
+    ws.with_sd = counting
     ws.system.set("k", 1, False)
     steps = ws.prefs.save_steps()
     next(steps)
@@ -244,7 +244,7 @@ def test_a_read_only_console_attempts_no_write(tmp_path):
     failure to report, and not a call to make."""
     ws = _ws(tmp_path)
     attempts = []
-    ws._with_sd = lambda fn: attempts.append(1)
+    ws.with_sd = lambda fn: attempts.append(1)
     ws.can_manage = False
     ws.system.set("k", 1)
     assert attempts == []
@@ -270,12 +270,12 @@ def test_a_failing_write_is_not_fatal(tmp_path):
 
 def test_an_unlock_arms_the_toast_deadline(tmp_path):
     ws = _ws(tmp_path)
-    assert ws._toast_until == 0
+    assert ws.toast_until == 0
     assert ws.ach.award("first_open") is True
     settle_badges(ws)                       # the achievements process's post
-    assert ws._toast_until, "the unlock hook did not arm the banner"
+    assert ws.toast_until, "the unlock hook did not arm the banner"
     assert ws.ach.toast[1] == "First Steps"
-    assert ws._animating(DT) is True
+    assert ws.animating(DT) is True
 
 
 def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
@@ -285,12 +285,12 @@ def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
     ws = _ws(tmp_path)
     ws.ach.award("first_open")
     settle_badges(ws)
-    first = ws._toast_until
-    ws._toast_until = first - 1000          # as if 1s of it had elapsed
+    first = ws.toast_until
+    ws.toast_until = first - 1000          # as if 1s of it had elapsed
     ws.ach.award("konami")
     settle_badges(ws)
     assert ws.ach.toast[1] == "Secret Coder"
-    assert ws._toast_until >= first
+    assert ws.toast_until >= first
 
 
 def test_the_three_eggs_arm_the_banner_once(tmp_path):
@@ -312,21 +312,21 @@ def test_the_three_eggs_arm_the_banner_once(tmp_path):
                     au._konami_step(name)
         run()
         settle_badges(ws)
-        assert ws._toast_until and ws.ach.toast[3], trigger     # a secret's banner
-        assert ws._animating(DT) is True, trigger
+        assert ws.toast_until and ws.ach.toast[3], trigger     # a secret's banner
+        assert ws.animating(DT) is True, trigger
         settle_badges(ws)
-        ws._toast_until = 0
+        ws.toast_until = 0
         run()
         settle_badges(ws)
-        assert ws._toast_until == 0, trigger
+        assert ws.toast_until == 0, trigger
 
 
 def test_the_banner_animates_until_its_deadline_and_then_stops(tmp_path):
     ws = _ws(tmp_path)
-    ws._toast_until = host_app.console._ticks_ms() + 5000
-    assert ws._animating(DT) is True
-    ws._toast_until = host_app.console._ticks_ms() - 1
-    assert ws._animating(DT) is False
+    ws.toast_until = host_app.console._ticks_ms() + 5000
+    assert ws.animating(DT) is True
+    ws.toast_until = host_app.console._ticks_ms() - 1
+    assert ws.animating(DT) is False
 
 
 def test_the_wm_gates_the_banner_on_its_deadline(tmp_path):
@@ -334,14 +334,14 @@ def test_the_wm_gates_the_banner_on_its_deadline(tmp_path):
     same expiry -- an overlay that animates but never composites (or the
     reverse) is the failure mode of two independent predicates."""
     ws = _ws(tmp_path)
-    layer = ws._toast_layer
-    assert ws.wm._overlay_sig() & 32 == 0
+    layer = ws.toast_layer
+    assert ws.wm.overlay_sig() & 32 == 0
     assert layer not in ws.wm.overlay_stack()
-    ws._toast_until = host_app.console._ticks_ms() + 5000
-    assert ws.wm._overlay_sig() & 32 == 32
+    ws.toast_until = host_app.console._ticks_ms() + 5000
+    assert ws.wm.overlay_sig() & 32 == 32
     assert layer in ws.wm.overlay_stack()
-    ws._toast_until = host_app.console._ticks_ms() - 1
-    assert ws.wm._overlay_sig() & 32 == 0
+    ws.toast_until = host_app.console._ticks_ms() - 1
+    assert ws.wm.overlay_sig() & 32 == 0
     assert layer not in ws.wm.overlay_stack()
 
 
@@ -351,11 +351,11 @@ def test_the_frame_gates_never_call_into_the_achievement_objects(tmp_path):
     ws = _ws(tmp_path)
     ws.ach = _Tripwire("ach")
     ws.ach_ui = _Tripwire("ach_ui")
-    assert ws._animating(DT) is False
-    assert ws.wm._overlay_sig() >= 0
-    ws._toast_until = host_app.console._ticks_ms() + 5000
-    assert ws._animating(DT) is True
-    assert ws.wm._overlay_sig() & 32 == 32
+    assert ws.animating(DT) is False
+    assert ws.wm.overlay_sig() >= 0
+    ws.toast_until = host_app.console._ticks_ms() + 5000
+    assert ws.animating(DT) is True
+    assert ws.wm.overlay_sig() & 32 == 32
 
 
 def test_the_toast_still_draws_while_its_deadline_is_up(tmp_path):
@@ -366,7 +366,7 @@ def test_the_toast_still_draws_while_its_deadline_is_up(tmp_path):
     ws.pointer.visible = False
     ws.ach.award("first_open")
     settle_badges(ws)
-    assert ws._toast_layer in ws.wm.overlay_stack()
+    assert ws.toast_layer in ws.wm.overlay_stack()
     drv.frame(DT)                           # draws it -- an unset payload raises
-    ws._toast_until = host_app.console._ticks_ms() - 1
-    assert ws._toast_layer not in ws.wm.overlay_stack()
+    ws.toast_until = host_app.console._ticks_ms() - 1
+    assert ws.toast_layer not in ws.wm.overlay_stack()

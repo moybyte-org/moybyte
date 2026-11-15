@@ -13,7 +13,15 @@
 #define MOY_PACK_INFLATE 1
 #endif
 #if MOY_PACK_INFLATE
+#if defined(__has_include)
+#if __has_include("lib/uzlib/uzlib.h")
 #include "lib/uzlib/uzlib.h"
+#else
+#include "uzlib.h"
+#endif
+#else
+#include "lib/uzlib/uzlib.h"
+#endif
 #endif
 
 #define DEPTH 6
@@ -214,6 +222,28 @@ static int walk(zw_t *z, const char *path, const char *rel, int depth) {
 }
 
 int moy_pack(const char *cart, const char *folder, const char *dest, int history) {
+    const char *all[1] = { "" };
+    return moy_pack_paths(cart, all, 1, folder, dest, history);
+}
+
+// One member of `moy_pack_paths`: the folder or file `rel` under `base`.
+static int add_member(zw_t *z, const char *base, const char *rel, const char *folder) {
+    if (rel[0] == 0) {
+        return walk(z, base, folder, 0);
+    }
+    char *p = moy_arena_join(&z->a, base, rel), *r = moy_arena_join(&z->a, folder, rel);
+    if (p == NULL || r == NULL) {
+        return MOY_ENOMEM;
+    }
+    moy_vol_stat_t st;
+    if (moy_fs_stat(p, &st) != 0) {
+        return 0;                       // an absent member: left out
+    }
+    return st.is_dir ? walk(z, p, r, 0) : add_file(z, p, r);
+}
+
+int moy_pack_paths(const char *base, const char *const *rels, size_t n, const char *folder,
+                   const char *dest, int history) {
     zw_t z;
     memset(&z, 0, sizeof z);
     z.history = history;
@@ -227,7 +257,10 @@ int moy_pack(const char *cart, const char *folder, const char *dest, int history
         return -rc;
     }
     z.buf = moy_store_alloc(CHUNK);
-    rc = z.buf == NULL ? MOY_ENOMEM : walk(&z, cart, folder, 0);
+    rc = z.buf == NULL ? MOY_ENOMEM : 0;
+    for (size_t i = 0; rc == 0 && i < n; i++) {
+        rc = add_member(&z, base, rels[i], folder);
+    }
     uint32_t cen = z.at;
     for (size_t i = 0; rc == 0 && i < z.len; i++) {
         zent_t *e = &z.e[i];
@@ -285,7 +318,7 @@ static uint32_t rd32(const uint8_t *p) {
 
 // moy_sync.safe_segments's rule: no empty, "." or ".." segment, no absolute
 // path, nothing the wire skips.
-static int safe(const char *p, size_t n) {
+static int safe(const char *p, size_t n, int history) {
     if (n == 0 || p[0] == '/' || p[0] == '\\') {
         return 0;
     }
@@ -294,7 +327,7 @@ static int safe(const char *p, size_t n) {
         if (i == n || p[i] == '/' || p[i] == '\\') {
             size_t k = i - s;
             if (k == 0 || (k == 1 && p[s] == '.') || (k == 2 && p[s] == '.' && p[s + 1] == '.')
-                || moy_store_skip(p + s, k, 0)) {
+                || moy_store_skip(p + s, k, history)) {
                 return 0;
             }
             s = i + 1;
@@ -410,6 +443,11 @@ static int read_at(moy_vol_file_t *f, uint32_t at, uint8_t *buf, size_t n) {
 // members, a few dozen bytes each), and each member streamed to its file:
 // an archive of any size costs its directory, two CHUNKs and the WINDOW.
 int moy_unpack(const char *archive, const char *dest, char *top, size_t cap) {
+    return moy_unpack_all(archive, dest, top, cap, 0);
+}
+
+int moy_unpack_all(const char *archive, const char *dest, char *top, size_t cap,
+                   int history) {
     if (cap) {
         top[0] = 0;
     }
@@ -514,7 +552,7 @@ int moy_unpack(const char *archive, const char *dest, char *top, size_t cap) {
         const char *rel = tn ? nm + tn + 1u : nm;
         size_t rn = tn ? nl - tn - 1u : nl;
         uint8_t h[30];
-        if (!safe(rel, rn) || (uint64_t)local + 30u > zn || read_at(f, local, h, 30) != 0
+        if (!safe(rel, rn, history) || (uint64_t)local + 30u > zn || read_at(f, local, h, 30) != 0
             || rd32(h) != 0x04034b50u) {
             continue;
         }

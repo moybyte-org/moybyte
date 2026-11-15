@@ -52,7 +52,7 @@ def start_keyboards(ws, keyboard, ble_keyboard, _census):
     if ble_keyboard is not None:
         # A second keyboard beside the physical one (#26). Both write into the
         # same InputState, so the console never asks which one a key came
-        # from; Settings finds it because _bt_service() checks ws.ble_keyboard
+        # from; Settings finds it because its bt role (BtServer) checks ws.ble_keyboard
         # before ws.keyboard. Its radio starts here only for a keyboard
         # picked in Settings, so that one reconnects from boot; with none
         # picked, Settings starts it when the panel opens.

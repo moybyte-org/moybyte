@@ -5,6 +5,7 @@ registry of runtime/system/moybyte.py -- on CPython through the host's binding
 and on the desktop MicroPython through the module the boards import."""
 
 import array
+import time
 import ctypes
 import subprocess
 
@@ -12,6 +13,7 @@ import pytest
 
 import runtime  # noqa: F401
 from runtime import moy_input as mi
+from runtime import moy_evq
 from runtime import moybyte
 from runtime.ticks import _ticks_ms, _ticks_add
 from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
@@ -496,30 +498,47 @@ def wakes():
     return w
 
 
-def test_timers_wake_no_earlier_than_asked(wakes):
+def _fired(wakes):
+    """The registry's timers the kernel's run finds gone off (moy_evq.h,
+    TIMERS: a VM queue's timer posts nothing and is taken by its id)."""
+    moy_evq.timers_run()
+    got = []
+    wid = moy_evq.fired()
+    while wid:
+        if wid in wakes.by_id:
+            got.append(wid)
+        wid = moy_evq.fired()
+    return got
+
+
+def test_timers_are_the_kernel_s_and_wake_no_earlier_than_asked(wakes):
     hits = []
-    now = _ticks_ms()
     e = wakes.every(100, lambda: hits.append("e"))
-    a = wakes.after(250, lambda: hits.append("a"))
-    out = [0] * 4
-    assert wakes.due(_ticks_add(now, 50), out) == 0
-    assert wakes.due(_ticks_add(now, 101), out) == 1 and out[0] == e
-    assert wakes.due(_ticks_add(now, 150), out) == 0
-    n = wakes.due(_ticks_add(now, 260), out)
-    assert sorted(out[:n]) == sorted([e, a])
-    for wid in out[:n]:
+    a = wakes.after(300, lambda: hits.append("a"))
+    pid = wakes.by_id[e][moybyte._OWNER]
+    assert moy_evq.timers(pid) >= 2 and e != a
+    assert _fired(wakes) == []
+    time.sleep(0.12)
+    assert _fired(wakes) == [e]
+    time.sleep(0.25)
+    got = _fired(wakes)
+    assert sorted(got) == sorted([e, a])
+    for wid in got:
         wakes.call(wid)
     assert sorted(hits) == ["a", "e"]
     assert a not in wakes.by_id                 # an `after` is spent by its call
+    wakes.cancel(e)
+    assert e not in wakes.by_id and not moy_evq.timer_cancel(pid, e)
 
 
 def test_a_late_every_keeps_its_period_and_does_not_burst(wakes):
-    now = _ticks_ms()
-    wakes.every(10, lambda: None)
-    out = [0] * 4
-    assert wakes.due(_ticks_add(now, 1000), out) == 1
-    assert wakes.due(_ticks_add(now, 1005), out) == 0
-    assert wakes.due(_ticks_add(now, 1011), out) == 1
+    e = wakes.every(10, lambda: None)
+    time.sleep(0.1)
+    assert _fired(wakes) == [e]                 # ten periods missed, one call
+    assert _fired(wakes) == []
+    time.sleep(0.02)
+    assert _fired(wakes) == [e]
+    wakes.cancel(e)
 
 
 def test_an_on_wake_is_due_while_its_source_has_records_and_reads_them(wakes):
@@ -536,19 +555,19 @@ def test_an_on_wake_is_due_while_its_source_has_records_and_reads_them(wakes):
     wid = wakes.on("keys", on_key)
     out = [0] * 4
     p.set_button("a", True)
-    assert wakes.due(_ticks_ms(), out) == 0
+    assert wakes.pending(out) == 0
     k.key(ord("x"))
-    assert wakes.due(_ticks_ms(), out) == 1 and out[0] == wid
+    assert wakes.pending(out) == 1 and out[0] == wid
     wakes.call(wid)
     assert got == [mi.EV_KEY_DOWN, mi.EV_TEXT, mi.EV_KEY_UP]
-    assert wakes.due(_ticks_ms(), out) == 0
+    assert wakes.pending(out) == 0
     # A name that is no input source is a message name (the service model,
     # docs/os_2026-11/processes.md section 1): a message wake on its
     # process's event queue, never a due input wake; only no name at all is
     # refused.
     mid = wakes.on("lora", on_key)
     assert wakes.by_id[mid] in wakes.mail and wakes.by_id[mid] not in wakes.list
-    assert wakes.due(_ticks_ms(), out) == 0
+    assert wakes.pending(out) == 0
     wakes.cancel(mid)
     with pytest.raises(ValueError):
         wakes.on("", on_key)
@@ -637,7 +656,7 @@ w = moybyte.WAKES
 gc.collect()
 before = gc.mem_alloc()
 for i in range(200):
-    w.due(time.ticks_ms(), out)
+    w.pending(out)
 print("DUE", gc.mem_alloc() - before)
 '''
 
