@@ -42,6 +42,7 @@ def repo(tmp_path, monkeypatch):
     main = tmp_path / "main"
     main.mkdir()
     git(main, "init", "-q")
+    commit(main, ".gitignore", ".venv\n.build\nfirmware/*/.build\n", "ignores")
     commit(main, "README", "hi\n", "first")
     (main / ".venv" / "bin").mkdir(parents=True)
     (main / ".venv" / "bin" / "python").write_text("venv")
@@ -228,3 +229,12 @@ def test_prune_keeps_a_worktree_made_moments_ago(repo, capsys):
     assert worktree.main(["prune"], start=str(repo)) == 0
     assert "kept fresh: made 0 min ago" in capsys.readouterr().out
     assert os.path.isdir(wt_path(repo, "fresh"))
+
+
+def test_prune_keeps_a_worktree_with_untracked_files(repo, capsys):
+    new(repo, "notes")
+    (wt_path(repo, "notes") / "notes.txt").write_text("a finding\n")
+    capsys.readouterr()
+    assert prune(repo) == 0
+    assert "kept notes: 1 untracked file(s)" in capsys.readouterr().out
+    assert os.path.isdir(wt_path(repo, "notes"))
