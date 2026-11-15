@@ -155,7 +155,7 @@ from editor_handle import EditorHandle
 # (player_diag), imported by name so a call costs what it did in this file.
 from player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES, _compiled,
                         INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, INTERP_NOTICE_SUB_DEFAULT,
-                        _Refused, newer_notice, fit_notice, _cart_fit, _fits,
+                        _Refused, newer_notice, fit_notice, _cart_fit, _fits, _cart_unbuilt,
                         _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where)
 from player_diag import PlayerDiag, _heap_stats, _moycore_sram
 from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
@@ -1502,6 +1502,8 @@ class Player(PlayerDiag):
                 # a compiled or native cart's load footprint against what this
                 # console can give it, before anything loads.
                 cart = ws.cart or {}
+                if runtime == "elf" and _cart_unbuilt(make, cart):
+                    raise _Refused(_ui_draw.s("say.chip_text"), _ui_draw.s("say.chip"))
                 missing = _cart_missing(make, cart)
                 if missing:
                     raise _Refused(newer_notice(missing),

@@ -227,6 +227,19 @@ def _cart_missing(make, cart):
         return None
 
 
+def _cart_unbuilt(make, cart):
+    """True when a native cart carries no module for this console's chip
+    (the runtime's `module`): it is refused before it loads, with the
+    notice that says so, as a cart too big for the console is."""
+    fn = getattr(make, "module", None)
+    if fn is None:
+        return False
+    try:
+        return fn(cart) is None
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return False
+
+
 def _out_of_memory(exc):
     """True for a start that failed for want of memory."""
     return isinstance(exc, MemoryError) or _OUT_OF_MEMORY in _err_text(exc)
