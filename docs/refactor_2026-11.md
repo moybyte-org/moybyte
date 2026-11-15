@@ -517,6 +517,12 @@ Closes T1, T9, T10, T13, N9, T16; measures X8. Decided: §6, decision 2.
 - X8: the build's printed headroom for the Zero and the T-Deck is read
   before and after, and the difference goes to the phase's issue.
 
+**Decided: conditional rows (owner, 2026-11-15).** A row the boards build
+only under a C condition (`moy_net`'s serving and Wi-Fi halves) is generated
+like any other: the face's `when` names the condition, the row names its
+group, and the MicroPython face carries the group inside `#if`, so the web
+build's absent names stay absent rather than becoming hand rows.
+
 **Mechanical or not.** Mechanical. What can go subtly wrong is integer
 truncation, None, and allocation on a frame path; the four columns and the
 no-allocation rows are there for that.

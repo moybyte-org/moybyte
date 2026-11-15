@@ -22,7 +22,7 @@ only that the result can be read. Every image comes from the real toolkit.
 W=$(mktemp -d)
 .venv/bin/python tools/focus_shots.py docs/media/focus_2026-11 --runs today --work $W
 # from a scratch worktree with marks_prototype.patch applied and
-# tools/gen_ui_tables.py run, writing into this folder:
+# tools/gen_os_table.py run, writing into this folder:
 .venv/bin/python tools/focus_shots.py OUT --runs proposal --work $W
 .venv/bin/python tools/focus_shots.py OUT --runs checks   # the L-check table
 # back here:
@@ -343,7 +343,7 @@ are geometric, so only the rendered test can hold them.
 look keys in `native/moy_ui/style.json`, their reader and drawer in
 `native/moy_ui/moy_ui_depth.c`, the engine fixes of change list (a), and the
 seed declarations above. The tool renders it from a scratch worktree with the
-patch applied (`git apply`, then `tools/gen_ui_tables.py`), so the theme
+patch applied (`git apply`, then `tools/gen_os_table.py`), so the theme
 picker shows the active theme as a seed. The control center's inset is the
 shell's Python, and the tool patches it at run time (`_cc_inset`). The
 prototype is the evidence for the design, not the build: it finds a row by its

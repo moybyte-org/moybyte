@@ -530,7 +530,7 @@ comes when a surface first paints text on it.
 **The seeds.** The shipped themes are the three seed packages of §1.3
 (`moy`, the default, `blocks` and `contrast`), `native/moy_ui/themes/*.json`
 in format 2, each with its modes' tables, embedded in every image by
-`tools/gen_ui_tables.py`; `native/moy_ui/moy_theme.c` loads them and
+`tools/gen_os_table.py`; `native/moy_ui/moy_theme.c` loads them and
 `runtime/shell/chrome.py`'s `theme_colors(name, variant)` is its Python face.
 `runtime/shell/appearance.py`'s `set_theme` installs a set and writes it into
 native/moy_app's live token table. The persisted settings are `theme` and
