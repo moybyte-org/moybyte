@@ -35,7 +35,8 @@ import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import glass_binding
 from runtime import native_parts
-from tools import gen_ui_tables, native_check
+from tools import native_check
+from tools.gen_os import style as gen_ui_tables
 from runtime import moy_ui_binding
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -420,8 +421,7 @@ def _chained_lib(tmp_path):
         return {(parts[p], states[st]): sh.surf[sh.stid[p][st] - 1].edge
                 for p in range(len(parts)) for st in range(len(states))
                 if sh.stid[p][st]}, sh.n_surf
-    Shape = moy_ui_binding._shape_type(len(TH["metrics"]), len(moy_ui.parts()),
-                                       len(moy_ui.theme_states()), 64)
+    Shape = moy_ui_binding.moy_ui_shape_t
     resolve.shape = shape
     return resolve
 

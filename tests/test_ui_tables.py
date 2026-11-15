@@ -1,7 +1,7 @@
 """native/moy_ui's tables are generated from its data and committed
 (docs/history/kernel_toolkit_2026-10.md §2.1, §10 "style is data").
 
-* The drift test: tools/gen_ui_tables.py run over the tree's style.json and
+* The drift test: tools/gen_os/style.py run over the tree's style.json and
   strings reproduces the committed moy_ui_tables.h/.c and
   native/moy_spine/moy_str_table.h/.c byte for byte.
 * The data test: a copy of style.json with one state's token, one metric and
@@ -16,7 +16,7 @@ import os
 import shutil
 
 from runtime import glass_binding
-from tools import gen_ui_tables
+from tools.gen_os import style as gen_ui_tables
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UI = os.path.join(ROOT, "native", "moy_ui")
@@ -26,7 +26,7 @@ ABSENT = -(1 << 31)
 def test_the_committed_tables_are_the_datas():
     for path, text in gen_ui_tables.outputs():
         with open(path) as f:
-            assert f.read() == text, "%s is stale: run tools/gen_ui_tables.py" % path
+            assert f.read() == text, "%s is stale: run tools/gen_os_table.py" % path
 
 
 def _lib(d, cache):

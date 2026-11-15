@@ -96,7 +96,7 @@ from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
-from gen_os import face, over, ui  # noqa: E402
+from gen_os import face, over, style, ui  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
@@ -140,7 +140,7 @@ def outputs(src=None):
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
             (UI_SDK_H, gen_sdk_ui_h(src)),
             (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
-    outs += face.outputs() + over.outputs()
+    outs += face.outputs() + over.outputs() + style.outputs()
     outs += ui.outputs(src, outs)
     whole(outs)
     return outs
