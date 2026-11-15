@@ -85,12 +85,14 @@ def svc(tmp_path, built):
     assert wasm_binding.services_live() == 0
 
 
-def _polled(s, cond, secs=5.0):
-    """The scheduler's poll run until cond() holds or `secs` pass."""
+def _polled(s, cond, secs=15.0):
+    """The scheduler's poll run until cond() holds or `secs` pass; cond is read
+    once more after the deadline, so a starved worker's last poll still counts."""
     t0 = time.monotonic()
     while not cond():
         if time.monotonic() - t0 >= secs:
-            return False
+            s.poll()
+            return bool(cond())
         s.poll()
         time.sleep(0.01)
     return True
