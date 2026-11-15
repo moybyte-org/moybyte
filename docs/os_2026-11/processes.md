@@ -907,7 +907,7 @@ start runs it again.
   badges found on a board and on its page between two syncs keep only the
   later side's (a per-badge union was weighed on 2026-11-08 and left out).
   There is no migration: a console's old
-  `achievements.json` is never read again (CLAUDE.md, no store migrations).
+  `achievements.json` is never read again (CLAUDE.md: a format change goes through the one door, never a legacy reader).
 - **The `notify` role is the console's face of it.** In
   `native/os_calls.json` its rows' `server` is `"proc:achievements"` and the
   grant stays `never`: `award` (one of the console's own, the eggs' and the

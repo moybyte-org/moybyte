@@ -90,14 +90,15 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
   loops iterate the VIEWPORT, so its evidence had no power; §14's focused-window
   content freeze is what survived. One invalidation mechanism, not six.
 - `docs/board_ports_2026-08.md` declines a driver registry/ABI and codegen.
-- **No store migrations until there are users (2026-09-07).** A store FORMAT
-  change ships as strict readers plus a seed version bump: seed content
-  re-seeds, a legacy file reads as ABSENT (`None`) until wiped by hand. Three
-  one-shot passes were deleted for it (the `.moytext`→`.md` rewrite, the
-  `notes.json` notebook, the RLE→deflate picture job) with their sidecars and
-  legacy readers. The door a migration would use is `sweep_store`'s
-  `prune_retired`, and the bar is its own (generation-gated, one small read
-  warm) — the picture pass missed it and cost a Guition a 196-second boot.
+- **A store format change goes through ONE door (owner, 2026-11-11; it
+  replaced 2026-09-07's "no migrations until there are users").** The store
+  carries a stamp (`store.ver`, `moy_seed.STORE_FORMAT`), and `sweep_store` is
+  the door. A format change ships as a `FORMAT_STEPS` step with a test over
+  `tests/fixtures/store_trial/`. The backup archive (`runtime/carts/moy_backup.py`)
+  is written before any step, and no step runs if it can't be. The bar is the
+  warm read of that one stamp. A legacy reader beside the door is still
+  refused: the three one-shot passes deleted on 2026-09-07 stay deleted, and
+  the picture pass that missed the warm bar cost a Guition a 196-second boot.
 - The kernel is C and our apps stay Python (owner, 2026-10-06 and 2026-09-27):
   `native/moy_kernel/README.md` holds the kernel's decisions and why.
 - `docs/os_2026-11.md` is the OS design (owner, 2026-11-01, tracker #246):
