@@ -2,6 +2,28 @@
 // moy_app's generated role rows, included by modmoy_app.c after role_app, text_in, check
 // and raise_rc: MOY_FACE_APP_<ROLE> is a role's part of its type's locals table.
 
+static mp_obj_t role_theme_gen_of(mp_obj_t self, int32_t (*fn)(moy_appabi_t *, uint32_t)) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    int32_t v = fn(a, g);
+    if (v < 0) {
+        raise_rc(-v);
+    }
+    return mp_obj_new_int(v);
+}
+
+static mp_obj_t role_theme_name_of(mp_obj_t self,
+                                   int (*fn)(moy_appabi_t *, uint32_t, char *, size_t, size_t *)) {
+    uint32_t g;
+    moy_appabi_t *a = role_app(self, &g);
+    size_t n = 0;
+    check(fn(a, g, NULL, 0, &n));
+    vstr_t v;
+    vstr_init_len(&v, n);
+    check(fn(a, g, v.buf, n, &n));
+    return mp_obj_new_str_from_vstr(&v);
+}
+
 static mp_obj_t theme_token(mp_obj_t self, mp_obj_t role) {
     uint32_t g;
     moy_appabi_t *a = role_app(self, &g);
@@ -16,13 +38,7 @@ static mp_obj_t theme_token(mp_obj_t self, mp_obj_t role) {
 static MP_DEFINE_CONST_FUN_OBJ_2(theme_token_obj, theme_token);
 
 static mp_obj_t theme_gen(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    int32_t v = moy_app_theme_gen(a, g);
-    if (v < 0) {
-        raise_rc(-v);
-    }
-    return mp_obj_new_int(v);
+    return role_theme_gen_of(self, moy_app_theme_gen);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_gen_obj, theme_gen);
 
@@ -38,26 +54,12 @@ static mp_obj_t theme_light(mp_obj_t self) {
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_light_obj, theme_light);
 
 static mp_obj_t theme_name(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    size_t n = 0;
-    check(moy_app_theme_name(a, g, NULL, 0, &n));
-    vstr_t v;
-    vstr_init_len(&v, n);
-    check(moy_app_theme_name(a, g, v.buf, n, &n));
-    return mp_obj_new_str_from_vstr(&v);
+    return role_theme_name_of(self, moy_app_theme_name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_name_obj, theme_name);
 
 static mp_obj_t theme_variant(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    size_t n = 0;
-    check(moy_app_theme_variant(a, g, NULL, 0, &n));
-    vstr_t v;
-    vstr_init_len(&v, n);
-    check(moy_app_theme_variant(a, g, v.buf, n, &n));
-    return mp_obj_new_str_from_vstr(&v);
+    return role_theme_name_of(self, moy_app_theme_variant);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_variant_obj, theme_variant);
 
@@ -75,14 +77,7 @@ static mp_obj_t clipboard_put_text(mp_obj_t self, mp_obj_t text) {
 static MP_DEFINE_CONST_FUN_OBJ_2(clipboard_put_text_obj, clipboard_put_text);
 
 static mp_obj_t clipboard_text(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    size_t n = 0;
-    check(moy_app_clip_text(a, g, NULL, 0, &n));
-    vstr_t v;
-    vstr_init_len(&v, n);
-    check(moy_app_clip_text(a, g, v.buf, n, &n));
-    return mp_obj_new_str_from_vstr(&v);
+    return role_theme_name_of(self, moy_app_clip_text);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(clipboard_text_obj, clipboard_text);
 
@@ -101,13 +96,7 @@ static mp_obj_t clipboard_kind(mp_obj_t self) {
 static MP_DEFINE_CONST_FUN_OBJ_1(clipboard_kind_obj, clipboard_kind);
 
 static mp_obj_t clipboard_seq(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    int32_t v = moy_app_clip_seq(a, g);
-    if (v < 0) {
-        raise_rc(-v);
-    }
-    return mp_obj_new_int(v);
+    return role_theme_gen_of(self, moy_app_clip_seq);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(clipboard_seq_obj, clipboard_seq);
 

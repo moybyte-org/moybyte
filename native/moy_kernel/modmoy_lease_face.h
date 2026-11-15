@@ -81,7 +81,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_lease_edge_close_obj, face_moy_lease_e
 
 static mp_obj_t face_moy_lease_pin_state(mp_obj_t a0) {
     int pin = (int)mp_obj_get_int(a0);
-    return mp_obj_new_int_from_uint(moy_lease_pin_state(pin));
+    return MP_OBJ_NEW_SMALL_INT(moy_lease_pin_state(pin));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_lease_pin_state_obj, face_moy_lease_pin_state);
 

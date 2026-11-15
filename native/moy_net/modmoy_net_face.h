@@ -55,7 +55,7 @@ static mp_obj_t face_moy_net_web_state(void) {
         mp_obj_new_bool(out.serving),
         mp_obj_new_bool(out.closing),
         mp_obj_new_bool(out.parked),
-        mp_obj_new_int_from_uint(out.port),
+        MP_OBJ_NEW_SMALL_INT(out.port),
         mp_obj_new_int_from_uint(out.requests),
         mp_obj_new_int(out.err),
     };
@@ -96,7 +96,7 @@ static mp_obj_t face_moy_net_wc_poll(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_wc_poll_obj, face_moy_net_wc_poll);
 
 static mp_obj_t face_moy_net_dns_port(void) {
-    return mp_obj_new_int_from_uint(moy_dns_port());
+    return MP_OBJ_NEW_SMALL_INT(moy_dns_port());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_dns_port_obj, face_moy_net_dns_port);
 
@@ -157,8 +157,8 @@ static mp_obj_t face_moy_net_ota_state(void) {
     moy_ota_state_t out;
     moy_ota_state(&out);
     mp_obj_t t_[7] = {
-        mp_obj_new_int_from_uint(out.phase),
-        mp_obj_new_int_from_uint(out.sink),
+        MP_OBJ_NEW_SMALL_INT(out.phase),
+        MP_OBJ_NEW_SMALL_INT(out.sink),
         mp_obj_new_int_from_uint(out.dl_done),
         mp_obj_new_int_from_uint(out.dl_total),
         mp_obj_new_int_from_uint(out.done),

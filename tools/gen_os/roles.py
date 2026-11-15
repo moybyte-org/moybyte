@@ -28,7 +28,7 @@ Any other code raises what the error table names (the hand file's check
 and raise_rc; face_errors.exception)."""
 
 from . import TableError, header
-from .cproto import param_name
+from .cproto import c_decl, param_name
 from .table import load as load_src, params, role_of, verb_of
 
 SHAPES = ("value", "value_nil", "bool", "taken", "enum")
@@ -81,11 +81,9 @@ def methods(face, hdr, src=None):
 
 # ---- MicroPython ------------------------------------------------------------------
 
-def _mp_method(m):
-    cname = "%s_%s" % (m.role, m.verb)
-    args = ["mp_obj_t self"] + ["mp_obj_t %s" % n for n in m.names]
-    o = ["static mp_obj_t %s(%s) {" % (cname, ", ".join(args)),
-         "    uint32_t g;", "    moy_appabi_t *a = role_app(self, &g);"]
+def _mp_body(m, fn):
+    """The lines of m's MicroPython body, its C function called as `fn`."""
+    o = ["    uint32_t g;", "    moy_appabi_t *a = role_app(self, &g);"]
     call, out = ["a", "g"], None
     for n, t in m.ins:
         if t == "int":
@@ -97,22 +95,22 @@ def _mp_method(m):
         else:
             out = n
     if out:
-        f = "%s(%s)" % (m.fn, ", ".join(call + ["%s", "%s", "&n"]))
+        f = "%s(%s)" % (fn, ", ".join(call + ["%s", "%s", "&n"]))
         o += ["    size_t n = 0;", "    check(%s);" % (f % ("NULL", "0")),
               "    vstr_t v;", "    vstr_init_len(&v, n);",
               "    check(%s);" % (f % ("v.buf", "n")),
               "    return mp_obj_new_str_from_vstr(&v);"]
     elif m.shape == "value_nil":
         o += ["    int32_t v = 0;",
-              "    int rc = %s(%s, &v);" % (m.fn, ", ".join(call)),
+              "    int rc = %s(%s, &v);" % (fn, ", ".join(call)),
               "    if (rc == MOY_APP_ABSENT) {", "        return mp_const_none;", "    }",
               "    check(rc);", "    return mp_obj_new_int(v);"]
     elif m.shape == "taken":
-        o += ["    int rc = %s(%s);" % (m.fn, ", ".join(call)),
+        o += ["    int rc = %s(%s);" % (fn, ", ".join(call)),
               "    if (rc != MOY_APP_BAD) {", "        check(rc);", "    }",
               "    return mp_obj_new_bool(rc == MOY_APP_OK);"]
     else:
-        o += ["    int32_t v = %s(%s);" % (m.fn, ", ".join(call)),
+        o += ["    int32_t v = %s(%s);" % (fn, ", ".join(call)),
               "    if (v < 0) {", "        raise_rc(-v);", "    }"]
         if m.shape == "bool":
             o.append("    return mp_obj_new_bool(v);")
@@ -123,6 +121,42 @@ def _mp_method(m):
             o.append("    return mp_const_none;")
         else:
             o.append("    return mp_obj_new_int(v);")
+    return o
+
+
+def _fn_type(m, name):
+    """A pointer to a function of m's C prototype, named `name`."""
+    return "%s (*%s)(%s)" % (m.ret, name, ", ".join(t for t, _ in m.cps))
+
+
+def _mp_shared(ms):
+    """{method: helper name} and the helpers' lines: the methods whose bodies are one
+    body once their C function is a parameter call one helper, as the hand file's
+    name_read did."""
+    groups = {}
+    for m in ms:
+        key = (tuple(_mp_body(m, "fn")), _fn_type(m, "fn"), tuple(m.names))
+        groups.setdefault(key, []).append(m)
+    helper, o = {}, []
+    for (body, ftype, names), g in groups.items():
+        if len(g) < 2:
+            continue
+        name = "role_%s_%s_of" % (g[0].role, g[0].verb)
+        args = ["mp_obj_t self"] + ["mp_obj_t %s" % n for n in names] + [ftype]
+        o += c_decl("static mp_obj_t " + name, args, " {") + list(body) + ["}", ""]
+        for m in g:
+            helper[m] = name
+    return helper, o
+
+
+def _mp_method(m, helper=None):
+    cname = "%s_%s" % (m.role, m.verb)
+    args = ["mp_obj_t self"] + ["mp_obj_t %s" % n for n in m.names]
+    o = ["static mp_obj_t %s(%s) {" % (cname, ", ".join(args))]
+    if helper:
+        o.append("    return %s(%s);" % (helper, ", ".join(["self"] + m.names + [m.fn])))
+    else:
+        o += _mp_body(m, m.fn)
     o.append("}")
     o.append("static MP_DEFINE_CONST_FUN_OBJ_%d(%s_obj, %s);" % (1 + len(m.names), cname, cname))
     return o
@@ -135,8 +169,10 @@ def gen_mp(mod, face, hdr, src=None):
          % (mod, mod[4:]),
          "// and raise_rc: MOY_FACE_%s_<ROLE> is a role's part of its type's locals table."
          % mod[4:].upper(), ""]
+    helper, shared = _mp_shared(ms)
+    o += shared
     for m in ms:
-        o += _mp_method(m) + [""]
+        o += _mp_method(m, helper.get(m)) + [""]
     for role in face["roles"]:
         ent = ["    { MP_ROM_QSTR(MP_QSTR_%s), MP_ROM_PTR(&%s_%s_obj) }," % (m.verb, role, m.verb)
                for m in ms if m.role == role]

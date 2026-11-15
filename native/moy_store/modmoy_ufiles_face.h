@@ -37,16 +37,21 @@ static MP_DEFINE_STR_OBJ(face_moy_ufiles_HISTORY_EXT_obj, MOY_UF_HISTORY_EXT);
 static MP_DEFINE_STR_OBJ(face_moy_ufiles_DOC_EXT_obj, MOY_UF_DOC_EXT);
 static MP_DEFINE_STR_OBJ(face_moy_ufiles_PROJECT_KIND_obj, MOY_UF_PROJECT_KIND);
 
-static mp_obj_t face_moy_ufiles_project_dir(size_t n_args, const mp_obj_t *argv) {
-    const char *root = n_args > 1 ? mp_obj_str_get_str(argv[1]) : "/sd/moybyte/carts";
-    const char *kind = mp_obj_str_get_str(argv[0]);
+static mp_obj_t face_moy_ufiles_moy_uf_path_take(int which, const char *root, const char *kind,
+                                                 const char *name) {
     moy_buf_t out = { NULL, 0 };
     int r_ = 0;
     GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_PROJECT, root, kind, "", &out);
+    r_ = moy_uf_path(which, root, kind, name, &out);
     GUARD_END
     face_raise_uf(r_);
     return face_moy_ufiles_take(&out, 1);
+}
+
+static mp_obj_t face_moy_ufiles_project_dir(size_t n_args, const mp_obj_t *argv) {
+    const char *root = n_args > 1 ? mp_obj_str_get_str(argv[1]) : "/sd/moybyte/carts";
+    const char *kind = mp_obj_str_get_str(argv[0]);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_PROJECT, root, kind, "");
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_project_dir_obj, 1, 2, face_moy_ufiles_project_dir);
 
@@ -54,38 +59,20 @@ static mp_obj_t face_moy_ufiles_project_file_path(size_t n_args, const mp_obj_t 
     const char *root = n_args > 2 ? mp_obj_str_get_str(argv[2]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
     const char *name = mp_obj_str_get_str(argv[1]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_PROJECT_FILE, root, kind, name, &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_PROJECT_FILE, root, kind, name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_project_file_path_obj, 2, 3, face_moy_ufiles_project_file_path);
 
 static mp_obj_t face_moy_ufiles_files_root(size_t n_args, const mp_obj_t *argv) {
     const char *root = n_args > 0 ? mp_obj_str_get_str(argv[0]) : "/sd/moybyte/carts";
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_FILES, root, "", "", &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_FILES, root, "", "");
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_files_root_obj, 0, 1, face_moy_ufiles_files_root);
 
 static mp_obj_t face_moy_ufiles_file_kind_dir(size_t n_args, const mp_obj_t *argv) {
     const char *root = n_args > 1 ? mp_obj_str_get_str(argv[1]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_KIND, root, kind, "", &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_KIND, root, kind, "");
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_file_kind_dir_obj, 1, 2, face_moy_ufiles_file_kind_dir);
 
@@ -93,13 +80,7 @@ static mp_obj_t face_moy_ufiles_file_path(size_t n_args, const mp_obj_t *argv) {
     const char *root = n_args > 2 ? mp_obj_str_get_str(argv[2]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
     const char *name = mp_obj_str_get_str(argv[1]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_FILE, root, kind, name, &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_FILE, root, kind, name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_file_path_obj, 2, 3, face_moy_ufiles_file_path);
 
@@ -107,13 +88,7 @@ static mp_obj_t face_moy_ufiles_history_path(size_t n_args, const mp_obj_t *argv
     const char *root = n_args > 2 ? mp_obj_str_get_str(argv[2]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
     const char *name = mp_obj_str_get_str(argv[1]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_HISTORY, root, kind, name, &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_HISTORY, root, kind, name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_history_path_obj, 2, 3, face_moy_ufiles_history_path);
 
@@ -121,13 +96,7 @@ static mp_obj_t face_moy_ufiles_trash_path(size_t n_args, const mp_obj_t *argv) 
     const char *root = n_args > 2 ? mp_obj_str_get_str(argv[2]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
     const char *name = mp_obj_str_get_str(argv[1]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_TRASH, root, kind, name, &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_TRASH, root, kind, name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_trash_path_obj, 2, 3, face_moy_ufiles_trash_path);
 
@@ -135,13 +104,7 @@ static mp_obj_t face_moy_ufiles_history_trash_path(size_t n_args, const mp_obj_t
     const char *root = n_args > 2 ? mp_obj_str_get_str(argv[2]) : "/sd/moybyte/carts";
     const char *kind = mp_obj_str_get_str(argv[0]);
     const char *name = mp_obj_str_get_str(argv[1]);
-    moy_buf_t out = { NULL, 0 };
-    int r_ = 0;
-    GUARD_BEGIN
-    r_ = moy_uf_path(MOY_UF_PATH_HISTORY_TRASH, root, kind, name, &out);
-    GUARD_END
-    face_raise_uf(r_);
-    return face_moy_ufiles_take(&out, 1);
+    return face_moy_ufiles_moy_uf_path_take(MOY_UF_PATH_HISTORY_TRASH, root, kind, name);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(face_moy_ufiles_history_trash_path_obj, 2, 3, face_moy_ufiles_history_trash_path);
 

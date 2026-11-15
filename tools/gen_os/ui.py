@@ -885,10 +885,12 @@ def _enum_py(p, cn, n):
     return "%s.index(%s) if %s in %s else %d" % (e["py"], n, n, e["py"], e["default"])
 
 
-def _lua_row(p, fix=None):
+def _lua_row(p, fix=None, packs=None):
     """(the body's lines up to its run call, the lines that answer) of p's Lua verb, its
-    fixed arguments from `fix` (p's own by default)."""
+    fixed arguments from `fix` (p's own by default), a sequence's packer from `packs`
+    ({param: C}; its own by default)."""
     fix = p.fix if fix is None else fix
+    packs = packs or {}
     v = p.api
     o = []
     lua_in = p.u.get("lua_in", {})
@@ -927,7 +929,7 @@ def _lua_row(p, fix=None):
             o.append("    moy_ui_span_t %s = moycore_ui_span(L, %d);" % (a.cn, i))
             call.append(a.cn)
         elif a.kind in ("opts", "bytes") and (a.cn in lists or a.cn in pack):
-            fn = "moycore_ui_" + pack.get(a.cn, "items")
+            fn = packs.get(a.cn, _packer(p, a.cn))
             o.append("    size_t %s_n = 0;" % a.cn)
             if a.cn in lua_opt:
                 o.append("    const char *%s = lua_isnoneornil(L, %d) ? \"\" : "
@@ -992,6 +994,17 @@ def _lua_row(p, fix=None):
     raise TableError("%s: lua_ret %s" % (p.r["name"], lret))
 
 
+def _packer(p, cn):
+    """The C packer of p's sequence parameter `cn`."""
+    return "moycore_ui_" + p.u.get("pack", {}).get(cn, "items")
+
+
+def _packed(p):
+    """p's sequence parameters a Lua verb packs."""
+    return [a.cn for a in p.run_params() if a.kind in ("opts", "bytes")
+            and (a.cn in p.r.get("list", ()) or a.cn in p.u.get("pack", {}))]
+
+
 def shared(ps, body):
     """The rows of `ps` whose bodies are one body once their fixed arguments are
     parameters, as {first row's verb: (the group's rows, its fixed C names)}: such
@@ -1013,13 +1026,17 @@ def _lua_shared(g, names):
     rets = {tuple(_lua_row(p)[1]) for p in g} - {("    return 0;",)}
     if len(rets) > 1:
         return None
-    pre = _lua_row(g[0], {n: n for n in names})[0]
+    # A sequence packed by more than one packer across the group: a parameter too.
+    packs = [cn for cn in _packed(g[0]) if len({_packer(p, cn) for p in g}) > 1]
+    pre = _lua_row(g[0], {n: n for n in names}, {cn: cn + "_pack" for cn in packs})[0]
     ret = list(rets.pop()) if rets else ["    return 0;"]
     head = "static int moycore_ui_%s_of(lua_State *L, %s)" % (
-        v, ", ".join("int32_t " + n for n in names))
+        v, ", ".join(["int32_t " + n for n in names]
+                     + ["const char *(*%s_pack)(lua_State *, int, size_t *)" % cn
+                        for cn in packs]))
     o = [head, "{"] + pre + ret + ["}", ""]
     for p in g:
-        args = ", ".join(["L"] + [p.fix[n] for n in names])
+        args = ", ".join(["L"] + [p.fix[n] for n in names] + [_packer(p, cn) for cn in packs])
         o += ["static int moycore_ui_%s(lua_State *L)" % p.verb, "{"]
         if ret != ["    return 0;"] and _lua_row(p)[1] == ["    return 0;"]:
             o += ["    moycore_ui_%s_of(%s);" % (v, args), "    return 0;"]
@@ -1035,7 +1052,8 @@ def gen_lua(ps):
          "// converters; MOYCORE_UI_VERBS is the `ui` table's luaL_Reg rows, every verb's.",
          "#ifndef MOYCORE_UI_ROWS_H", "#define MOYCORE_UI_ROWS_H", ""]
     mine = [p for p in ps if "lua" not in p.hand]
-    groups = shared(mine, lambda p, fix: _lua_row(p, fix)[0])
+    groups = shared(mine, lambda p, fix: _lua_row(p, fix, {cn: cn + "_pack"
+                                                           for cn in _packed(p)})[0])
     done = set()
     for p in mine:
         if p.verb in done:

@@ -19,7 +19,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_input_pin_clock_obj, face_moy_input_pi
 
 static mp_obj_t face_moy_input_hid_usage(mp_obj_t a0) {
     int32_t ev = (int32_t)mp_obj_get_int(a0);
-    return mp_obj_new_int_from_uint(moy_hid_usage(ev));
+    return MP_OBJ_NEW_SMALL_INT(moy_hid_usage(ev));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_input_hid_usage_obj, face_moy_input_hid_usage);
 

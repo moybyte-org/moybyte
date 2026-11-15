@@ -87,7 +87,7 @@ import re
 from . import TableError, header
 from . import roles as _roles
 from . import structs as _structs
-from .cproto import param_name, parse, wrap
+from .cproto import c_decl, param_name, parse, wrap
 from .table import ROOT
 
 NATIVE = os.path.join(ROOT, "native")
@@ -492,6 +492,8 @@ def _mp_val(ct, v):
         return "mp_obj_new_bool(%s)" % v
     if b in ("float", "double"):
         return "mp_obj_new_float(%s)" % v
+    if b in ("uint8_t", "uint16_t", "int8_t", "int16_t"):
+        return "MP_OBJ_NEW_SMALL_INT(%s)" % v
     if b == "uint64_t":
         return "mp_obj_new_int_from_ull(%s)" % v
     if b in ("int64_t", "long"):
@@ -513,7 +515,36 @@ def _c_default(d, ct):
     return d
 
 
-def _mp_row(m, face, hdr, r):
+def _take_key(r):
+    """What a take row's call is, past its arguments: rows sharing it share a helper."""
+    if r.row.get("hand") or not r.row.get("take") or r.row.get("when"):
+        return None
+    return (r.fn, r.row.get("guard"), r.row["err"], tuple(r.row["take"].items()))
+
+
+def _mp_take(m, face, r, name):
+    """The helper the take rows sharing r's call call: the call, its guard, its
+    raise and the buffer taken."""
+    ps = []
+    for kind, cn, ct, _ in r.c:
+        if kind != "take":
+            ps.append(ct + ("" if ct.endswith("*") else " ") + cn)
+    (cn, how), = r.row["take"].items()
+    call = [("&" + c) if kind == "take" else c for kind, c, _, _ in r.c]
+    o = c_decl("static mp_obj_t " + name, ps, " {")
+    o.append("    %s %s = { NULL, 0 };" % (face["buf"]["c"], cn))
+    callx = "%s(%s)" % (r.fn, ", ".join(call))
+    if r.row.get("guard"):
+        g = r.row["guard"]
+        o += ["    %s r_ = 0;" % _base(r.ret), "    %s_BEGIN" % g, "    r_ = %s;" % callx,
+              "    %s_END" % g]
+        callx = "r_"
+    o += ["    face_raise_%s(%s);" % (r.row["err"], callx),
+          "    return face_%s_take(&%s, %d);" % (m, cn, how == "text"), "}", ""]
+    return o
+
+
+def _mp_row(m, face, hdr, r, helper=None):
     fn = "face_%s_%s" % (m, r.name)
     need, total, _ = r.arity
     var = total > 3 or need != total
@@ -555,8 +586,9 @@ def _mp_row(m, face, hdr, r):
         elif kind == "fix":
             call.append(r.row["fix"][cn])
         elif kind == "take":
-            o.append("    %s %s = { NULL, 0 };" % (face["buf"]["c"], cn))
-            call.append("&" + cn)
+            if not helper:
+                o.append("    %s %s = { NULL, 0 };" % (face["buf"]["c"], cn))
+                call.append("&" + cn)
         else:
             dflt = r.params[k][1]
             expr = _mp_in(ct, cn, r.row, arg[k])
@@ -571,11 +603,13 @@ def _mp_row(m, face, hdr, r):
     ret = r.row.get("ret") or _base(r.ret)
     err = r.row.get("err")
     guard = r.row.get("guard")
-    if guard:
+    if guard and not helper:
         o += ["    %s r_ = 0;" % _base(r.ret), "    %s_BEGIN" % guard, "    r_ = %s;" % callx,
               "    %s_END" % guard]
         callx = "r_"
-    if r.row.get("take"):
+    if helper:
+        o += c_decl("    return " + helper, call, ";")
+    elif r.row.get("take"):
         (cn, how), = r.row["take"].items()
         o.append("    face_raise_%s(%s);" % (err, callx))
         o.append("    return face_%s_take(&%s, %d);" % (m, cn, how == "text"))
@@ -687,9 +721,15 @@ def gen_mp(m, face):
             o.append("static MP_DEFINE_STR_OBJ(face_%s_%s_obj, %s);" % (m, pn, cn))
     if any(cn in strs for cn, _ in consts(face)):
         o.append("")
-    for r in mp:
+    keys = [_take_key(r) for r in mp]
+    helper = {}
+    for r, key in zip(mp, keys):
+        if key is not None and keys.count(key) > 1 and key not in helper:
+            helper[key] = "face_%s_%s_take" % (m, r.fn)
+            o += _mp_take(m, face, r, helper[key])
+    for r, key in zip(mp, keys):
         if not r.row.get("when"):
-            o += _mp_row(m, face, hdr, r)
+            o += _mp_row(m, face, hdr, r, helper.get(key))
             o.append("")
     ent = []
     for r in mp:
