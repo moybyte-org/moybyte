@@ -101,6 +101,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
     id = "launcher"
     domain = "system"
     strip = "home"            # the bar strip it draws and taps (BarLayer's `where`)
+    ON_WALLPAPER = True
     searchable = True         # Games carries SEARCH (the query is the home's)
 
     def __init__(self, ws, names):

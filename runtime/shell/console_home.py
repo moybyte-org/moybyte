@@ -330,7 +330,7 @@ class Home:
         # instead of editing this file.
         for _app in ws.app_layers:
             ws.leave_surface(_app.id)
-        ws.leave_surface("settings")    # a Name still typed, its radio lease
+        ws.leave_surface(ws.settings_layer.id)  # a Name still typed, its radio lease
         _editor_app = getattr(ws, "editor_app", None)
         if _editor_app is not None and (ws.text.editing_icons
                                         or _editor_app.project is ws.run.project):

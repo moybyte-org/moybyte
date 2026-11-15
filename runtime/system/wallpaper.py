@@ -772,7 +772,8 @@ class Wallpaper:
                 # The safe area is the layout's content rect: the wallpaper
                 # cart draws its world there, clear of the bar.
                 lay = ws.layout
-                safe = ws.screen in ("launcher", "settings")
+                top = ws.layer_of(ws.screen)
+                safe = top is not None and top.ON_WALLPAPER
                 # Two-domain tiers (#39/#58): the wallpaper cart draws on the 320x240
                 # GAME canvas but the content rect is SYSTEM-layout units (36px bar
                 # at font 2) -- shifting 240 game rows by that cut the scene's bottom

@@ -99,6 +99,8 @@ class TasksLayer(Layer):
 
     id = "tasks"
     domain = "system"
+    TITLE = TITLE                   # its window's and its chip's (the app table)
+    BAR = None                      # its bar has no keys
     back_title = TITLE              # the bar's chevron and title (BarLayer)
     zone_gen = 0                    # ...whose cache key: the title never moves
 
@@ -163,6 +165,15 @@ class TasksLayer(Layer):
         self._focus = True           # the first frame puts the focus on the list
 
     B_BACK = True
+
+    def is_app(self, cart):
+        """No cart is the task manager: it opens from the system menu."""
+        return False
+
+    def leave(self):
+        """Back where it was opened from (`Workstation.close_tasks`)."""
+        self.ws.close_tasks()
+        return True
 
     def ui_host(self):
         return self.host

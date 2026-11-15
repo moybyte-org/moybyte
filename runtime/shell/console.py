@@ -1229,8 +1229,6 @@ class Workstation:
         self._content_layers = {
             "launcher": self.launcher_layer,
             "projects": self.projects_layer,
-            "settings": self.settings_layer,
-            "tasks": self.tasks_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.run.player
@@ -1691,13 +1689,14 @@ class Workstation:
         return True
 
     def open_settings(self):
-        if self.wm.bring_forward("settings"):
+        sid = self.settings_layer.id
+        if self.wm.bring_forward(sid):
             return                     # the desk's Settings window, as it was
-        if not self.wm.top_is("settings"):        # Stage 6d: ask the stack top
+        if not self.wm.top_is(sid):    # Stage 6d: ask the stack top
             self._settings_return = self.wm.top_kind()  # resume here on exit (cart vs home)
         self.frame_state.dirty = True             # screen change repaints (#44)
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
-        self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
+        self.wm.goto(sid)              # Stage 6e: push Settings onto the back-stack
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
 
     def open_log(self, pid=None):
@@ -1723,11 +1722,11 @@ class Workstation:
         note = _NOTES.up()
         if note is not None:
             _NOTES.dismiss()
-        if self.wm.top_is("tasks"):
+        if self.wm.top_is(layer.id):
             if note is not None:
                 layer.open(note)
             return
-        if self.wm.bring_forward("tasks"):
+        if self.wm.bring_forward(layer.id):
             if note is not None:
                 layer.open(note)
         else:
@@ -1740,7 +1739,7 @@ class Workstation:
                         and self.cart_error is None:
                     pl.pause()
                     layer.held = True
-            self.wm.activate("tasks")
+            self.wm.activate(layer.id)
 
     def close_tasks(self, home=False):
         """The task manager goes: back where it was opened from (a held
@@ -1749,7 +1748,7 @@ class Workstation:
         layer = self.tasks_layer
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
-            _ck("tasks")
+            _ck(layer.id)
             if home:
                 self.home.home_key()
             return
@@ -1759,7 +1758,7 @@ class Workstation:
             layer.held = False
             if back == "desktop" and not home:
                 self.run.player.resume()
-        if home or back is None or back == "tasks" or not self.wm.stack.has(back):
+        if home or back is None or back == layer.id or not self.wm.stack.has(back):
             if self.wm.stack.has("desktop") and self.procs._detachable():
                 self.procs.detach()     # the run that played joins the running set
             self.home.go_home()
@@ -1819,7 +1818,7 @@ class Workstation:
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
             self.frame_state.dirty = True
-            _ck("settings")
+            _ck(self.settings_layer.id)
             return
         # Close Settings back to wherever it was opened from: resume the running cart
         # if we came from one (the gear on the in-cart/crash bar), else the launcher home.
@@ -3017,23 +3016,17 @@ class Workstation:
                      or (self.built_editor_desk is not None
                          and self.built_editor_desk.key == "sound")):
             return True
-        # A live wallpaper animates the home/settings/desk backdrop.
-        if kind in ("launcher", "settings", "desk") and self.wallpaper.is_animating(dt):
+        # A live wallpaper animates the desk's backdrop and a surface's that
+        # shows it (the home's, Settings').
+        top = self._content_layers.get(kind)
+        if (kind == "desk" or (top is not None and top.ON_WALLPAPER)) \
+                and self.wallpaper.is_animating(dt):
             return True
-        # The P4 Bluetooth keyboard picker advances through scan/pair/discovery
-        # asynchronously. A static wallpaper would otherwise close the redraw
-        # gate after its first frame and hide newly-found devices/status changes.
-        if kind == "settings" and self.settings_layer.bluetooth_animating():
-            return True
-        # The System log page follows the ring: a new record draws it again.
-        if kind == "settings" and self.settings_layer.log_moved():
-            return True
-        # The USB drive page follows the drive: a computer took the card or
-        # let it go.
-        if kind == "settings" and self.settings_layer.usb_moved():
-            return True
-        # The task manager's rows moved: a sample, a state, a run.
-        if kind == "tasks" and self.tasks_layer.moved():
+        # A surface that follows an async state draws again when it moved
+        # (`Layer.moved`): Settings' Bluetooth scan, System log and USB drive,
+        # the task manager's rows. A static wallpaper would otherwise close the
+        # redraw gate after the first frame and hide what moved.
+        if top is not None and top.moved():
             return True
         # A verbs page the last painted frame drew coasts on a fling or eases
         # on a glide (`api_moving`): its next frame is due with nothing dirty.
@@ -3234,14 +3227,15 @@ class Workstation:
                                and self.ach.toast is not None)
                               or (self.notice_up is not None and self.notices.notice_active(now))
                               or (_NOTES.banner is not None and _NOTES.up(now) is not None))
-        # Input focus moved (a window clicked, a screen left): Settings stores
-        # a Name still being typed.
+        # Input focus moved (a window clicked, a screen left): the surface it
+        # left keeps what was typed (`Layer.blur`: Settings stores a Name).
         h = self.wm.input_holder()
         if h != self._holder:
             was = self._holder
             self._holder = h
-            if was == "settings":
-                self.settings_layer.commit_name()
+            lyr = self._content_layers.get(was)
+            if lyr is not None:
+                lyr.blur()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.

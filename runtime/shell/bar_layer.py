@@ -386,7 +386,7 @@ class BarLayer:
             if got is None or getattr(got, "glass", False) or ws.wm.desk_open():
                 return
             where = "app"
-        elif where == "tasks" and ws.windowed_chrome:
+        elif layer is ws.tasks_layer and ws.windowed_chrome:
             return                        # in a desk window its title strip is the bar
         self.draw_status_strip(where)
 
@@ -415,12 +415,10 @@ class BarLayer:
             return ws.launcher_layer
         if where == "projects":
             return ws.projects_layer
-        if where == "settings":
-            return ws.settings_layer
-        if where == "tasks":
-            return ws.tasks_layer
         if where == "menu":
             return ws.editor_app
+        if STRIP_OF.get(where) == where:  # a registered app's own strip
+            return ws.app(where)          # (Settings', the task manager's)
         return None
 
     def zone_is_game(self, where):

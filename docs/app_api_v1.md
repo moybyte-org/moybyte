@@ -1482,7 +1482,11 @@ That is the whole list: the console registers it from the declaration
 the window and its chip, the resize floor (`min_size`, or the layout's
 `MIN_W`/`MIN_H`), text mode (what its page has focused) and the exitable
 bar all follow; a new `runtime/`
-module reaches every board unless a `board.toml` denies it (#161).
+module reaches every board unless a `board.toml` denies it (#161). The shell's
+own two, Settings and the task manager, register through the same call with
+no cart as their identity: they join the router, the app table and
+`ws.app(id)`, not the launcher's claims, and what the frame asks of them is the
+`Layer` protocol's (`moved`, `leave`, ...), never their id.
 `tests/test_app_registry.py` fails a hand-written app name anywhere else, and
 `tests/test_app_api.py` holds the Calc set.
 

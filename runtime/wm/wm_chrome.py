@@ -420,7 +420,7 @@ class WindowChrome:
     def _page_named(self, win):
         """The page a shell app names in its window's title (a story's,
         Settings' Achievements), or None."""
-        app = self.ws.settings_layer if win.kind == "settings" else self.ws.app(win.kind)
+        app = self.ws.app(win.kind)
         return app.page_title() if app is not None else None
 
     def _win_title(self, win):

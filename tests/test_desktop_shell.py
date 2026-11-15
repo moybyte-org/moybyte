@@ -225,6 +225,31 @@ def test_settings_back_returns_home(tmp_path):
     assert ws.screen == "launcher"
 
 
+@pytest.mark.parametrize("way", ("bar", "policy", "spine"))
+def test_settings_opened_over_a_cart_resumes_it(tmp_path, way):
+    """Settings opened over a running cart (the in-cart bar's gear) goes back
+    to that cart by every way out -- the bar's back, the input policy's leave
+    (B, Esc), the spine's exit -- the same run, not a fresh one or the home."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open(select_on_home(ws, "Star Catcher"))
+    drv.frame(1 / 30)
+    run = ws.run.player.ns
+    assert ws.screen == "desktop" and run is not None
+    ws.open_settings()
+    drv.frame(1 / 30)
+    assert ws.screen == "settings"
+    if way == "bar":
+        settings_back(ws, drv)
+    elif way == "policy":
+        ws.input_policy.leave(ws.wm.top_kind())
+    else:
+        ws.spine.exit()
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop" and ws.run.player.ns is run
+
+
 def _settings_page(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)

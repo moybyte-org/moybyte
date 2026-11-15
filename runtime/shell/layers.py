@@ -51,12 +51,23 @@ class Layer:
     page step, after the toolkit's), `close` (leaving it, by any route),
     `page_title` and `ball_steps`. `B_BACK`: its B is the host's back, as
     every app's is; a surface whose B is a button of its own leaves it
-    False. `ESC_LEAVES`: Esc on its first page leaves it."""
+    False. `ESC_LEAVES`: Esc on its first page leaves it.
+
+    The FRAME PROTOCOL is what the console's frame asks of a surface,
+    whichever it is, so no surface is named there: `moved` (it changed on
+    its own since it drew, and draws again), `ON_WALLPAPER` (it shows the
+    live wallpaper behind it, whose animation keeps frames coming), `BAR`
+    (the strip the bar's keys walk while a registered app is on top: the
+    host's "app" strip, its own, or None for none), `leave` (its own way
+    back past its first page, else the host's) and `blur` (the keys went
+    to another surface)."""
 
     id = "layer"
     domain = "system"
     B_BACK = False
     ESC_LEAVES = True
+    ON_WALLPAPER = False
+    BAR = "app"
 
     def __init__(self, ws):
         self.ws = ws
@@ -113,6 +124,19 @@ class Layer:
     def ball_steps(self):
         """Whether the trackball steps the surface as W A S D do."""
         return True
+
+    def moved(self):
+        """Whether what it shows moved on its own since it drew (an async
+        state it follows): the frame draws it again with nothing dirty."""
+        return False
+
+    def leave(self):
+        """Leave it past its first page by its own way back: True where it
+        has one, False for the host's (the caller, the Editor's home)."""
+        return False
+
+    def blur(self):
+        """The keys went to another surface: what is typed is kept."""
 
 
 class AppLayer(Layer):

@@ -27,6 +27,13 @@ count:
      attribute does not raise behind a defaulted probe -- it silently returns
      the default -- so every probed name is checked against a console that has
      built and drawn a frame.
+
+  5. SETTINGS AND THE TASK MANAGER ARE REGISTERED APPS, NOT KINDS ANYONE
+     COMPARES. No module compares a kind to "settings" or "tasks" (`==`,
+     `in`, `top_is`): what the frame, the bar and the input
+     policy need of a surface is its Layer's protocol (`moved`,
+     `ON_WALLPAPER`, `BAR`, `leave`, `blur`), and a verb that is about one
+     of them names the registered object (`ws.settings_layer.id`).
 """
 
 import ast
@@ -340,3 +347,52 @@ def test_the_absent_list_stays_absent_and_stays_used(tmp_path):
             "%s exists on a host console now -- drop the exemption" % name)
         assert name in probed, (
             "nothing probes %s any more -- drop the exemption" % name)
+
+
+# -- Settings and the task manager are registered apps ---------------------------
+
+# The Editor's "settings" is its Cards workspace's key, another vocabulary
+# that shares the word.
+_KIND_OWNERS = {
+    "runtime/editors/editor_desk.py": "the Editor's workspace key",
+    "runtime/editors/editor_panes.py": "the Editor's workspace key",
+}
+_SHELL_KINDS = ("settings", "tasks")
+
+
+def _names_a_shell_kind(node):
+    if isinstance(node, ast.Constant):
+        return node.value in _SHELL_KINDS
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return any(_names_a_shell_kind(e) for e in node.elts)
+    return False
+
+
+def test_no_module_compares_a_kind_to_settings_or_tasks():
+    found = []
+    for rel in _tracked("runtime", "device", "firmware"):
+        if rel in _KIND_OWNERS:
+            continue
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                if any(_names_a_shell_kind(x) for x in [node.left] + node.comparators):
+                    found.append("%s:%d" % (rel, node.lineno))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr == "top_is"
+                  and any(_names_a_shell_kind(a) for a in node.args)):
+                found.append("%s:%d" % (rel, node.lineno))
+    assert not found, (
+        "a kind compared to Settings' or the task manager's id outside them: give "
+        "the surface a Layer hook, or name the registered object:\n  %s"
+        % "\n  ".join(found))
+
+
+def test_the_kind_owners_still_compare():
+    """Each exemption is still needed: a file that stopped comparing leaves the
+    list."""
+    for rel in _KIND_OWNERS:
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        assert any(isinstance(n, ast.Compare)
+                   and any(_names_a_shell_kind(x) for x in [n.left] + n.comparators)
+                   for n in ast.walk(tree)), rel

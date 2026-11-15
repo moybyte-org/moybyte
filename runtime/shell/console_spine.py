@@ -354,7 +354,7 @@ class Spine:
         (`_go_home_or_back`: the Editor Files opened on a project returns to the
         Files shelf, not to the launcher)."""
         ws = self.ws
-        if ws.wm.top_is("settings"):            # Stage 6d: ask the stack top
+        if ws.wm.top_is(ws.settings_layer.id):  # Stage 6d: ask the stack top
             ws.exit_settings()
         elif not ws.wm.top_is("launcher"):
             self._go_home_or_back()
@@ -371,6 +371,13 @@ class Spine:
         Declaration order IS dispatch precedence, which is why `order` lives in
         the manifest rather than being implied by a dict.
         """
+        for app, ms, cart in self._declared_apps():
+            self.register_app(app, min_size=ms, cart=cart)
+
+    def _declared_apps(self):
+        """(app, min_size, cart) for each declared app, built as it is
+        reached, then the shell's own two, which no cart is: Settings (its
+        context carries the radios and the USB drive) and the task manager."""
         ws = self.ws
         for d in APPS:
             cls = _resolve_app_entry(d["entry"])
@@ -387,9 +394,11 @@ class Spine:
             if service is not None:
                 ws.artwork = service
             ms = d.get("min_size")
-            self.register_app(app, min_size=(tuple(ms) if ms else None))
+            yield app, (tuple(ms) if ms else None), True
+        yield ws.settings_layer, None, False
+        yield ws.tasks_layer, None, False
 
-    def register_app(self, app, min_size=None):
+    def register_app(self, app, min_size=None, cart=True):
         """Register a SYSTEM APP (docs/app_api_v1.md). `app` is a content Layer
         `layers.AppLayer`, exposing:
 
@@ -403,7 +412,10 @@ class Spine:
         units (the ui.py convention). When omitted, MIN_W/MIN_H on
         the app's layout are adopted. TITLE supplies window/taskbar text. A
         launcher tap on the claimed cart opens the app instead of the Player;
-        everything else (window chrome, theme tokens, toolkit) comes free."""
+        everything else (window chrome, theme tokens, toolkit) comes free.
+        `cart` False: no cart is the app (Settings, the task manager), so it
+        joins the router, the app table and `ws.app`, but not `app_layers`,
+        the apps a launcher tap, the desk's tiles and the Apps tab walk."""
         ws = self.ws
         if min_size is None:
             layout = getattr(app, "layout", None)
@@ -414,7 +426,8 @@ class Spine:
         if not isinstance(app, Layer):
             raise TypeError("an app is a layers.AppLayer: " + str(app.id))
         ws.apps.register(app.id, getattr(app, "TITLE", app.id.upper()), min_size)
-        ws.app_layers.append(app)
+        if cart:
+            ws.app_layers.append(app)
         ws._apps_by_id[app.id] = app
         ws._content_layers[app.id] = app
         hook = getattr(ws.wm, "on_app_registered", None)

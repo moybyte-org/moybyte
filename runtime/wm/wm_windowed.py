@@ -1696,9 +1696,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
         A LIVE WALLPAPER does belong here (owner report 2026-07-31: "they only
         move when I move a window... but it doesn't happen while Settings is on
-        top"). _animating's own wallpaper leg keys on the TOP process kind --
-        `kind in ("launcher", "settings", "desk")` -- a list written before apps
-        were windows, so Settings kept the desk alive and Appearance (or Files,
+        top"). _animating's own wallpaper leg keys on the TOP process -- the
+        desk, or a surface that shows the wallpaper (`Layer.ON_WALLPAPER`) --
+        a rule written before apps were windows, so Settings kept the desk
+        alive and Appearance (or Files,
         Paint, Storybook...) silently froze it. On THIS tier the desk backdrop is
         visible behind every window, so its liveness cannot depend on who is on
         top. Unlike the gesture leg, re-rendering here is CORRECT: a live
@@ -1710,8 +1711,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True                 # a parked desk's wallpaper is not drawn
         if ws.procs.list:
             return True                 # a running set's game steps every frame
-        if "tasks" in self.windows and ws.tasks_layer.moved():
-            return True                 # the task manager's rows moved
+        for k in self.windows:
+            lyr = ws.layer_of(k)
+            if lyr is not None and lyr.moved():
+                return True             # a window's surface moved on its own
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.run.player.paused
                 and (ws.run.player.update is not None or ws.run.player.draw is not None)

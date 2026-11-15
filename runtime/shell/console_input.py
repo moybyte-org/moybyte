@@ -345,7 +345,10 @@ class InputRouter:
         for layer in ws.wm.visible_stack_rev():
             if _appbar is not None:
                 _app = _appbar.get(layer.id)
-                if _app is not None and not getattr(_app, "glass", False):
+                # An app on the host's "app" strip; one on a strip of its
+                # own (Settings') or none (the task manager's) routes its bar.
+                if _app is not None and _app.BAR == "app" \
+                        and not getattr(_app, "glass", False):
                     _bar = ws._app_bar_route(_app, px, py)
                     if _bar is not None:            # the band is the bar's
                         if _bar:
@@ -612,11 +615,10 @@ class InputRouter:
         kind = ws.wm.top_kind()
         if kind == "launcher":
             return "home"
-        if kind in ("settings", "menu"):
+        if kind == "menu":
             return kind
-        if ws.app(kind) is not None:
-            return "app"
-        return None
+        app = ws.app(kind)
+        return app.BAR if app is not None else None
 
     def _bar_keys(self, i, pressed, edge):
         """The keys on the bar (`BarLayer.focus_keys`), and the ways onto

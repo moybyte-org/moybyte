@@ -361,7 +361,7 @@ class Notices:
         if c and c.get("entry") and c.get("path"):
             c = next((a for a in ws.carts.all if a.get("path") == c["path"]), None)
         if c and c.get("path") and c.get("type") != "service":
-            if ws.wm.top_is("tasks") and ws.procs.handheld():
+            if ws.wm.top_is(ws.tasks_layer.id) and ws.procs.handheld():
                 ws.close_tasks()
             ws.open(c)
 
@@ -390,7 +390,7 @@ class Notices:
         if pl is not None and pl.pid == pid:
             if not procs.handheld():
                 ws.wm.bring_forward("desktop")
-            elif ws.wm.top_is("tasks"):
+            elif ws.wm.top_is(ws.tasks_layer.id):
                 ws.close_tasks()
             return True
         for p in procs.list:

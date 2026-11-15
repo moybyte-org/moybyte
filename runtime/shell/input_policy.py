@@ -203,12 +203,10 @@ class InputPolicy:
         caller, the Editor home or to the app that opened it, an app that
         minimises on the desk to its chip."""
         ws = self.ws
-        if kind == "settings":
-            ws.leave_surface(kind)
-            ws.exit_settings()
-        elif kind == "tasks":
-            ws.close_tasks()
-        elif kind == "menu":
+        s = ws.layer_of(kind)
+        if s is not None and s.leave():
+            return                        # its own way back (`Layer.leave`)
+        if kind == "menu":
             ws.spine.exit()
         elif kind == "desktop" or ws.app(kind) is not None:
             ws.leave_surface(kind)

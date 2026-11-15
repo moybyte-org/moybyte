@@ -855,7 +855,7 @@ class SystemMenuUI:
             sid = ("menu.clear_search" if (self.ws.search_typing or self.ws.search_query)
                    else "menu.search")
             rows.append(_row("item", sid, self.ws.home.toggle_search))
-        if not ws.wm.top_is("tasks"):
+        if not ws.wm.top_is(ws.tasks_layer.id):
             rows.append(_row("item", "menu.tasks", ws.open_tasks))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))

@@ -292,6 +292,9 @@ class SettingsLayer(Layer):
 
     id = "settings"
     domain = "system"
+    TITLE = "Settings"              # its window's and its chip's (the app table)
+    BAR = "settings"                # its bar strip, whose zone it lends
+    ON_WALLPAPER = True
     zone_gen = 0
     back_title = "Settings"
     # Its pages are the public UI API's, whose frames say what they change:
@@ -507,6 +510,27 @@ class SettingsLayer(Layer):
         """The System log page is up and a record came since it drew: the
         console's animation gate draws it again."""
         return self.page == "log" and self.syslog.moved()
+
+    def moved(self):
+        """The Bluetooth picker's scan or pairing moves, a record came to the
+        System log page, or the USB drive's state moved under its page."""
+        return self.bluetooth_animating() or self.log_moved() or self.usb_moved()
+
+    def is_app(self, cart):
+        """No cart is Settings: it opens from the bar's gear and the menu."""
+        return False
+
+    def leave(self):
+        """Back to what it was opened over (`Workstation.exit_settings`), what
+        it holds written first."""
+        ws = self.ws
+        ws.leave_surface(self.id)
+        ws.exit_settings()
+        return True
+
+    def blur(self):
+        """The keys went to another window: a Name still typed is stored."""
+        self.commit_name()
 
     # -- the cursor, as a row index ---------------------------------------------
 

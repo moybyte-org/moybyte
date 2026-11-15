@@ -49,9 +49,11 @@ from ws_helpers import settle_badges  # noqa: E402
 
 # Every (module, class) on the app side of the seam: the registered apps, from
 # the generated declaration -- so a NEW app is covered by these tests the
-# moment it is declared, with no list to remember here (Phase 5's point).
+# moment it is declared, with no list to remember here (Phase 5's point) --
+# and Settings, the shell's own app whose context carries its radios and the
+# USB drive.
 def _app_targets():
-    out = []
+    out = [("settings_layer", "SettingsLayer")]
     for d in APPS:
         mod, _, cls = str(d["entry"]).partition(":")
         out.append((mod, cls))
@@ -153,7 +155,8 @@ def test_an_app_declares_nothing_it_does_not_use(mod, cls):
 def test_the_context_carries_only_the_declared_roles(tmp_path):
     ws = _ws(tmp_path)
     for _mod, cls in APP_TARGETS:
-        app = next(a for a in ws.app_layers if type(a).__name__ == cls)
+        app = next(a for a in list(ws.app_layers) + [ws.settings_layer]
+                   if type(a).__name__ == cls)
         ctx = app.ctx
         declared = set(_declared(_mod, cls))
         for role in _ac.ROLES:

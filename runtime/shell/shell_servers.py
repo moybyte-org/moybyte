@@ -566,7 +566,8 @@ class InstallServer:
         m = getattr(ws, "sysmenu", None)
         if m is not None and m.open and m.widget == "wifi":
             return True
-        return bool(ws.wm.top_is("settings") and ws.settings_layer.showing("wifi"))
+        sl = ws.settings_layer
+        return bool(ws.wm.top_is(sl.id) and sl.showing("wifi"))
 
     def consent(self, g):
         """The console's consent records (`app_perms.Consent`): what the

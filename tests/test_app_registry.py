@@ -97,7 +97,8 @@ def test_the_shell_registers_exactly_the_declared_apps(tmp_path):
 def test_console_has_no_per_app_registration_line():
     """`register_app` may appear exactly twice in the Workstation's spine half
     (runtime/shell/console_spine.py, where the declaration loop lives): its own
-    definition and the ONE call inside that loop."""
+    definition and the ONE call inside that loop, over the declared apps and
+    the shell's own two (`_declared_apps`)."""
     src = _read("runtime/shell/console_spine.py")
     tree = ast.parse(src)
     calls = [n for n in ast.walk(tree)

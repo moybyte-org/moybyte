@@ -1313,12 +1313,9 @@ class WindowPaint:
         k = win.kind
         if k == "update":
             return False
-        if k == "settings" and ws.settings_layer.bluetooth_animating():
-            return False
-        if k == "settings" and ws.settings_layer.usb_moved():
-            return False
-        if k == "tasks" and ws.tasks_layer.moved():
-            return False
+        lyr = ws.layer_of(k)
+        if lyr is not None and lyr.moved():
+            return False                  # what it shows moved on its own
         if k == "menu" and ws.menu_view == "music" \
                 and ws.music_ui.music_preview is not None:
             return False
