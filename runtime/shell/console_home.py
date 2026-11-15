@@ -318,23 +318,8 @@ class Home:
         # torn down (self.editor/self.run.project etc.) -- a HOME-key tap reaches
         # here directly, bypassing any per-app CLOSE affordance, and must never
         # drop an edit still sitting in its idle-debounce window.
-        #
-        # This used to be a hand-written ladder naming four apps and four
-        # DIFFERENT verbs (writer.flush / the story's deck commit / sheets.flush /
-        # artwork._save) -- the bar-contract bug class one level down: an app that
-        # persists on a debounce and is not on the list loses the kid's work,
-        # silently. `close()` is the uniform LEAVING hook now
-        # (docs/app_api_v1.md), reached through `leave_surface`; it is
-        # change-gated, so this costs nothing for a surface with nothing
-        # pending, and a future app gets it by implementing one method
-        # instead of editing this file.
-        for _app in ws.app_layers:
-            ws.leave_surface(_app.id)
-        ws.leave_surface(ws.settings_layer.id)  # a Name still typed, its radio lease
+        ws.leave_every_surface()
         _editor_app = getattr(ws, "editor_app", None)
-        if _editor_app is not None and (ws.text.editing_icons
-                                        or _editor_app.project is ws.run.project):
-            ws.leave_surface("menu")
         # The parked Editor's workspace (console mode): its window comes back
         # to it, so neither it nor the run state it holds is torn down.
         keep = ws.wm.is_parked("menu") and (

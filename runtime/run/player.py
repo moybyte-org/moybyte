@@ -471,6 +471,16 @@ class Player(PlayerDiag):
             return run(0, ())
         return run(ctx.grant, _moy_app.policy(self.granted)[0])
 
+    def flush_editors(self):
+        """Write every handle this run opened that holds an edit: the run is
+        being left (`_PlayerLayer.close`). The handles stay open."""
+        for ed in self.editors:
+            try:
+                if ed.dirty():
+                    ed.save()
+            except Exception:  # noqa: BLE001 -- a leaving step must never raise
+                pass
+
     def _release_editors(self):
         """Hard-flush and drop every handle this run opened."""
         eds = self.editors

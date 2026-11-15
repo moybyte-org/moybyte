@@ -449,25 +449,21 @@ class UpdateUI:
         elif ph == "done":
             # Brief pause so the kid sees "UPDATED!", then reboot into the new image.
             if _ticks_diff(_ticks_ms(), self._upd_at) >= 1200:
-                self._commit_open_editor()
+                self._leave_every_surface()
                 try:
                     u.reset()
                 except Exception:
                     self._upd_phase = "error"
                     self._upd_msg = "reset failed"
 
-    def _commit_open_editor(self):
-        """A reboot is an exit path too (#154). On the windowed tier an Editor
-        window can still be open beside this screen holding an edit inside its
-        idle-debounce window, and nothing else on the way to reset() would persist
-        it -- so hard-commit it the way go_home does. Guarded: a store hiccup must
-        not strand a board whose bootloader already points at the new slot."""
-        ws = self.ws
-        app = getattr(ws, "editor_app", None)
-        if app is None or app.project is not ws.run.project:
-            return
+    def _leave_every_surface(self):
+        """A reboot is an exit path too (#154): every surface's edit is written
+        before it (`Workstation.leave_every_surface`), an Editor window or an
+        app open beside this screen with an edit inside its idle-debounce
+        window among them. Guarded: a store hiccup must not strand a board
+        whose bootloader already points at the new slot."""
         try:
-            app.save_current()
+            self.ws.leave_every_surface()
         except Exception as exc:  # noqa: BLE001
             print("Moybyte pre-reboot commit failed:", exc)
 
