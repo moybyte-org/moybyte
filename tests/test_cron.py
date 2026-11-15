@@ -52,8 +52,10 @@ def _tick():
     S.SCHED.tick(1_000_000)
 
 
-def _logged(pid):
-    return [(r[2], r[4]) for r in L.read(0, 1 << 30) if r[3] == pid]
+def _logged(pid, seq):
+    """What process `pid` logged from record `seq` on: the ring is the
+    process's, and a pid an earlier test's process held logged there too."""
+    return [(r[2], r[4]) for r in L.read(seq, 1 << 30) if r[3] == pid]
 
 
 def _sh():
@@ -237,7 +239,7 @@ def test_a_crontab_line_fires_and_its_output_reaches_the_log(monkeypatch, tmp_pa
     _settle(tab)
     pids = sorted({r[3] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "cron"})
     assert len(pids) == 1
-    assert _logged(pids[0]) == [(L.INFO, "echo tick; echo oops >&2"), (L.INFO, "tick"),
+    assert _logged(pids[0], seq) == [(L.INFO, "echo tick; echo oops >&2"), (L.INFO, "tick"),
                                 (L.ERR, "oops"), (L.INFO, "exit 0")]
     assert tab.due_at == _at(2026, 11, 8, 10, 0)           # the next minute armed
     assert pids[0] not in S.SCHED.procs                    # the job's row went
@@ -314,7 +316,7 @@ def test_the_shell_s_at_and_cron(monkeypatch, tmp_path):
     _tick()
     _settle(tab)
     pids = sorted({r[3] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "at"})
-    assert [_logged(p) for p in pids] == [[(L.INFO, "echo tea time"), (L.INFO, "tea time"),
+    assert [_logged(p, seq) for p in pids] == [[(L.INFO, "echo tea time"), (L.INFO, "tea time"),
                                             (L.INFO, "exit 0")]]
     assert tab.ats == {}
     (ws.system / "crontab").write_text("15 10 * * * echo a\nnope\n")
@@ -335,6 +337,7 @@ def test_kill_interrupts_a_parked_job(monkeypatch, tmp_path):
     tab = C.Cron()
     tab.bind(ws)
     monkeypatch.setattr(C, "CRON", tab)
+    seq = L.next()
     tab.queue.append(("at", "sleep 5; echo never"))
     tab.pump()
     assert tab.job is not None and tab.poll is not None
@@ -346,7 +349,7 @@ def test_kill_interrupts_a_parked_job(monkeypatch, tmp_path):
     t0 = time.monotonic()
     _settle(tab)
     assert time.monotonic() - t0 < 2
-    assert _logged(pid)[-1] == (L.INFO, "exit 130")
+    assert _logged(pid, seq)[-1] == (L.INFO, "exit 130")
     moy_sh.jobs()
 
 
