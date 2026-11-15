@@ -236,25 +236,19 @@ def fill_words(ws, words, ptr, ring, lay=None, pid=0):
 
 
 def add_steps(inp, words):
-    """The frame's steps beyond its presses (the input table's `rep_word`:
-    a held direction's repeats and the trackball's steps, a byte each; and a
-    held key's typing repeats) added to those `words` hold for a message not
-    yet posted (IN_REP, IN_KEYREP; `sent` clears them)."""
+    """The frame's steps beyond its presses (the input table's `rep_word`, a
+    byte a direction, and a held key's typing repeats) added to those
+    `words` hold while their message waits unread (IN_REP, IN_KEYREP; a
+    frame or two, so no byte carries); `sent` clears them."""
     rw = getattr(inp, "rep_word", 0)
     if rw:
-        was = words[IN_REP] & 0xFFFFFFFF
-        out = 0
-        for sh in (0, 8, 16, 24):
-            n = ((was >> sh) & 0xFF) + ((rw >> sh) & 0xFF)
-            out |= (n if n < 0xFF else 0xFF) << sh
-        words[IN_REP] = out - 0x100000000 if out >> 31 else out
+        v = (words[IN_REP] + rw) & 0xFFFFFFFF
+        words[IN_REP] = v - 0x100000000 if v >> 31 else v
     kn = getattr(inp, "key_repeats", 0)
     if kn:
         key = inp.repeat_key & 0xFFFF
         was = words[IN_KEYREP]
-        if was and was & 0xFFFF == key:
-            kn += was >> 16
-        words[IN_KEYREP] = key | (kn if kn < 0x7FFF else 0x7FFF) << 16
+        words[IN_KEYREP] = key | (kn + (was >> 16 if was & 0xFFFF == key else 0)) << 16
 
 
 def sent(words):
@@ -262,16 +256,28 @@ def sent(words):
     words[IN_REP] = words[IN_KEYREP] = words[IN_ASK] = 0
 
 
-def ui_ask(pid, words, told, ask, take):
-    """An app drawing with the toolkit it links (sdk/src/moyui_link.c) asked
-    what a Lua run's toolkit is asked (ui_draw.run_typing, run_cancel,
-    run_back): whether its last frame told `told` (moy_ui_tell, TOLD_*), and
-    where `take`, the ask `ask` (ASK_*) on the next frame message."""
-    if words is None or not _E.screen_told(pid) & told:
-        return False
-    if take and ask:
-        words[IN_ASK] |= ask
-    return True
+class LinkedUi:
+    """What the Player asks a run's toolkit (ui_draw.run_typing, run_cancel,
+    run_back), asked of an app drawing with the toolkit it links
+    (sdk/src/moyui_link.c): what its last frame told (moy_ui_tell, TOLD_*),
+    a cancel or a back taken going in on the next frame message (ASK_*)."""
+
+    def _ask(self, told, ask, take):
+        words = self._words
+        if not self._live or words is None or not _E.screen_told(self.pid) & told:
+            return False
+        if take:
+            words[IN_ASK] |= ask
+        return True
+
+    def ui_typing(self):
+        return self._ask(TOLD_TYPING, 0, False)
+
+    def ui_cancel(self, take=True):
+        return self._ask(TOLD_CANCEL, ASK_CANCEL, take)
+
+    def ui_back(self, take=True):
+        return self._ask(TOLD_BACK, ASK_BACK, take)
 
 
 def stop_text(code, fault=None):
@@ -473,7 +479,7 @@ def make_elf_runtime(ws):
     return ElfRuntime(ws, moy_elf)
 
 
-class ElfGame:
+class ElfGame(LinkedUi):
     """A native game's run in the Player (A GAME in this module's head)."""
 
     own_ui = True                       # an app's toolkit is its own: a paste is its message
@@ -547,18 +553,6 @@ class ElfGame:
         if got & FRAME_SHOWN:
             self._shown = True
             self.presented += 1
-
-    def ui_typing(self):
-        """Whether the app's page has a field in focus (ui_ask)."""
-        return self._live and ui_ask(self.pid, self._words, TOLD_TYPING, 0, False)
-
-    def ui_cancel(self, take=True):
-        """The host's cancel into the app's page (ui_ask)."""
-        return self._live and ui_ask(self.pid, self._words, TOLD_CANCEL, ASK_CANCEL, take)
-
-    def ui_back(self, take=True):
-        """The host's back into the app's page (ui_ask)."""
-        return self._live and ui_ask(self.pid, self._words, TOLD_BACK, ASK_BACK, take)
 
     def _end(self):
         self._live = False

@@ -1967,8 +1967,7 @@ def say_lost(ctx):
         print("ui: a frame drew %d stops past the ones it records; they take no focus or "
               "input (a long list is one ui.list or ui.table)" % (lost & 0xFFFF))
     if lost >> 16:
-        print("ui: %d widgets asked for kept state past the ids a frame keeps; they draw "
-              "with none (no scroll, no row, no edit to cancel)" % (lost >> 16))
+        print("ui: %d widgets past the kept ids draw with no kept state" % (lost >> 16))
 
 
 def app_back(ctx, take=True):

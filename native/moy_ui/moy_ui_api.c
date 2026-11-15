@@ -1277,12 +1277,6 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     // above, else down (a dialog's field, its buttons under it), so the keys
     // stop typing.
     moy_ui_keep_t *fk = f != NULL && (f->flags & STOP_FIELD) ? mua_keep_of(c, f->id) : NULL;
-    for (int i = 0; i < MOY_UI_API_KEEP; i++) {
-        moy_ui_keep_t *k = &c->keep[i];
-        if (k->kind == MOY_UI_KEEP_FIELD && k != fk) {
-            k->cancel = 0;
-        }
-    }
     if (fk != NULL && fk->kind == MOY_UI_KEEP_FIELD && fk->cancel) {
         fk->cancel = 0;
         if (fk->live) {

@@ -92,5 +92,5 @@ def test_seventeen_kept_ids_in_one_context_are_told(tmp_path, capsys):
     for _ in range(3):
         drv.frame(1 / 30)
     said = [ln for ln in capsys.readouterr().out.splitlines() if "kept state" in ln]
-    assert said and said[0].startswith("ui: 1 widgets asked for kept state"), said
+    assert said and said[0].startswith("ui: 1 widgets past the kept ids"), said
     assert len(said) == 1, "told once per count"

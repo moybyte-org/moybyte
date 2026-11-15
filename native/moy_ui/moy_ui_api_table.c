@@ -947,6 +947,8 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     moy_ui_keep_t *fk = id != 0 ? mua_keep(c, id, focused ? MOY_UI_KEEP_FIELD : 0) : NULL;
     if (fk != NULL && fk->kind != MOY_UI_KEEP_FIELD) {
         fk = NULL;
+    } else if (fk != NULL && !focused && fk->cancel == 1) {
+        fk->cancel = 0;                     // a cancel its focus left before it was given
     }
     mua_edit_t *e = fk != NULL ? edit_of(I, c, id, 0) : NULL;
     if (fk != NULL && fk->cancel == 2) {
