@@ -943,6 +943,16 @@ static int in_list(const char *list, const char *s, size_t n) {
     return 0;
 }
 
+// Whether the defer list is "*": the setup form's host (route, below).
+static int defers_all(void) {
+    for (const char *k = W->defer; *k; k += strlen(k) + 1u) {
+        if (k[0] == '*' && k[1] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void pack(out_t *o, const char *root, const char *kinds, int bytes) {
     body(o, "{", 1);
     int first = 1;
@@ -1293,6 +1303,15 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
                  W->why);
         json(o, 503, doc);
         return ROUTE_DONE;
+    }
+    // THE SETUP FORM'S HOST (device/zero_setup.py) defers every path ("*"),
+    // and no other host does: it runs before the board has a sign-in, on the
+    // setup network that is open by design (docs/os_2026-11/threat_model.md).
+    // Every request parks for the VM in the clear, and no built-in route --
+    // the store's, /auth, /gpio -- is served.
+    if (defers_all()) {
+        o->bn = bn;
+        return ROUTE_PARKED;
     }
     const char *q = memchr(t, '?', tn);
     size_t pn = q ? (size_t)(q - t) : tn;
