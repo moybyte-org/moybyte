@@ -82,8 +82,9 @@ def push(a):
                 % (where.rsplit("/", 1)[0], where), strict=True)
         dest = where + "/" + os.path.basename(a.archive)
         link = push_cart.raw_link(b, push_cart.serial_cfg(a.board))
-        if not push_cart.push_file_raw(b, a.archive, dest, link, a.verbose):
-            sys.exit("the push did not land")
+        if not b.pyexec(push_cart.HELPERS):
+            sys.exit("could not install the upload helpers")
+        push_cart.push_file_raw(b, a.archive, dest, link, a.verbose)
         print("restored %s files" % remote_line(b, "restore " + dest))
     finally:
         b.close()

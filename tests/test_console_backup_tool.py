@@ -65,3 +65,50 @@ def test_pull_reads_an_archive_back_on_the_vm_a_board_runs(tmp_path):
         b.close()
     assert got == len(data)
     assert out.read_bytes() == data
+
+
+class PushBoard:
+    """A console for push: the upload helpers `push_file_raw` calls exist only
+    once the tool has installed them, as on a board."""
+
+    def __init__(self):
+        self.helpers = False
+        self.words = []
+
+    def pyval(self, expr, timeout=30.0, strict=False):
+        if "backups_dir" in expr:
+            return "/sd/moybyte/files/Backups"
+        return 1
+
+    def pyexec(self, code, timeout=30.0, strict=False):
+        self.helpers = code == console_backup.push_cart.HELPERS
+        return True
+
+    def cmd(self, word, wait_for=None, timeout=None, retry=True):
+        self.words.append(word)
+        return "REMOTE restore 600"
+
+    def close(self):
+        pass
+
+
+def test_push_installs_the_upload_helpers_and_restores_an_archive_already_there(
+        tmp_path, monkeypatch):
+    pc = console_backup.push_cart
+    b = PushBoard()
+    sent = []
+
+    def push_file_raw(board, src, dst, link, verbose=False):
+        assert board.helpers, "the raw push renames through ws._g's helpers"
+        sent.append(dst)
+        return False                     # already current on the console
+
+    monkeypatch.setattr(pc, "connect", lambda *a: b)
+    monkeypatch.setattr(pc, "raw_link", lambda *a: None)
+    monkeypatch.setattr(pc, "serial_cfg", lambda *a: None)
+    monkeypatch.setattr(pc, "push_file_raw", push_file_raw)
+    archive = tmp_path / "moybyte-backup.zip"
+    archive.write_bytes(b"PK")
+    console_backup.main(["push", str(archive), "--board", "p4"])
+    assert sent == ["/sd/moybyte/files/Backups/moybyte-backup.zip"]
+    assert b.words == ["restore /sd/moybyte/files/Backups/moybyte-backup.zip"]
