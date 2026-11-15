@@ -22,8 +22,8 @@
 #define MOY_SEED_MAX (4u << 20)     // what one cart may inflate to
 
 // The folder a cart titled `title` is seeded into: `<ns>.<slug>.moy`
-// (runtime/carts/moy_store_base.py's cart_folder). Writes up to `cap` bytes and a
-// NUL, returns the length the whole needs.
+// (moy_store_base.cart_folder is its call, the `folder` row). Writes up to
+// `cap` bytes and a NUL, returns the length the whole needs.
 size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
                        size_t cap);
 

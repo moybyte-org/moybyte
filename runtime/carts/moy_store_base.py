@@ -334,7 +334,7 @@ def builtin_name(path):
 def cart_folder(name, ns=None):
     """The folder a cart named `name` (a title, or a slug already) is stored
     in: `<ns>.<slug>` and the extension, or the bare slug with no `ns`."""
-    return (slug(ns) + "." if ns else "") + slug(name) + CART_EXT
+    return _store.folder(name, ns)
 
 
 def store_path(root, rel):

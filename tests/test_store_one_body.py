@@ -107,6 +107,41 @@ def test_no_store_module_keeps_a_body_of_a_row_the_c_exports():
     assert bodies == [], "a body of a row the C store exports: %s" % bodies
 
 
+# A name runtime/carts keeps for what a row computes: its def is the row's call
+# and nothing else. `slug` stays a body of its own, since callers name a
+# slug without the folder around it and the C has no row for one.
+FRONTS = {"cart_folder": "folder"}
+
+
+def test_a_name_kept_for_a_row_is_the_call_of_that_row():
+    """`cart_folder` computes what the store's `folder` row computes: the def
+    returns that row's call, whether or not some other body recomputes it."""
+    rows = _rows()
+    folder = os.path.dirname(os.path.abspath(moy_seed.__file__))
+    found, bad = set(), []
+    for f in sorted(os.listdir(folder)):
+        if not f.endswith(".py"):
+            continue
+        with open(os.path.join(folder, f)) as fh:
+            tree = ast.parse(fh.read())
+        alias = _aliases(tree)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef) or fn.name not in FRONTS:
+                continue
+            found.add(fn.name)
+            row = FRONTS[fn.name]
+            assert row in rows
+            body = [n for n in fn.body
+                    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+            call = body[0].value if len(body) == 1 and isinstance(body[0], ast.Return) else None
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id in alias and call.func.attr == row):
+                bad.append("%s: %s" % (f, fn.name))
+    assert found == set(FRONTS), "a front the test names is gone: %s" % (set(FRONTS) - found)
+    assert bad == [], "a body of a row the C store exports: %s" % bad
+
+
 def _tree(base, skip_thumbs=False):
     out = {}
     for d, dirs, files in os.walk(base):
