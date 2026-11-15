@@ -19,7 +19,8 @@
 //                                  (None: not reached): exit, vm, imports, ws,
 //                                  wired, frame
 //   moy_kernel.kpool()             (high-water bytes, misses) of the kernel's
-//                                  small-block pool (moy_kernel.h)
+//                                  small-block pool (moy_kernel.h), None
+//                                  on a board that keeps none
 //   moy_kernel.time_imports(rows)  DEV: the memory census's import timer
 //                                  (device/mem_census.py), installed as
 //                                  builtins.__import__ by the census
@@ -253,15 +254,16 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_time_imports_obj, mod_time_imports);
 static mp_obj_t mod_kpool(void) {
     size_t high;
     uint32_t misses;
-    moy_kpool_stats(&high, &misses);
+    if (!moy_kpool_stats(&high, &misses)) {
+        return mp_const_none;
+    }
     mp_obj_t t[2] = { mp_obj_new_int_from_uint(high), mp_obj_new_int_from_uint(misses) };
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_kpool_obj, mod_kpool);
 
 static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_kpool), MP_ROM_PTR(&mod_kpool_obj) },
-    { MP_ROM_QSTR(MP_QSTR_time_imports), MP_ROM_PTR(&mod_time_imports_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kpool), MP_ROM_PTR(&mod_kpool_obj) },    { MP_ROM_QSTR(MP_QSTR_time_imports), MP_ROM_PTR(&mod_time_imports_obj) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_kernel) },
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },

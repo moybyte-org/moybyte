@@ -22,8 +22,15 @@
 #include "esp_clk_tree.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "soc/soc_caps.h"
 
-#if defined(MOY_BUS_I2C_PORT) && MOY_BUS_I2C_PORT == 1
+// The device bus takes the controller the kernel's own bus (MOY_BUS_I2C_PORT)
+// leaves. A chip with one controller (the C3) has only port 0, so a board on
+// one has no kernel bus to declare beside it.
+#if SOC_I2C_NUM < 2 && defined(MOY_BUS_I2C_PORT)
+#error "one I2C controller: the kernel's bus and the device bus cannot both have it"
+#endif
+#if (defined(MOY_BUS_I2C_PORT) && MOY_BUS_I2C_PORT == 1) || SOC_I2C_NUM < 2
 #define MOY_DEVBUS_I2C_PORT I2C_NUM_0
 #else
 #define MOY_DEVBUS_I2C_PORT I2C_NUM_1

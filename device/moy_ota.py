@@ -199,7 +199,7 @@ class OtaUpdater(SlotHealth):
         self._wifi = wifi         # the wifi service; None -> no online update
         self._go_online = go_online  # callable: best-effort connect from saved creds
         self._f = None            # a copied image, open across steps
-        self._buf = bytearray(INSTALL_CHUNK)
+        self._buf = None          # a copied image's slice, made by its first step()
         self.path = None          # the image being installed, or a *_STAGED marker
         self.error = None         # the last failure (what the screen shows)
         self.absent = False       # the channel has nothing for this board yet
@@ -370,6 +370,11 @@ class OtaUpdater(SlotHealth):
         f = self._f
         if f is None:
             return False
+        # Made at the first step, not with the updater: a board that never
+        # installs from a copy (the C3 Zero has no slot to install into)
+        # never pays INSTALL_CHUNK of its heap for it.
+        if self._buf is None:
+            self._buf = bytearray(INSTALL_CHUNK)
         mv = memoryview(self._buf)[:max_bytes]
         try:
             n = self._with_sd(lambda: f.readinto(mv))

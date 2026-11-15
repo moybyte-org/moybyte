@@ -7,6 +7,12 @@
 #include "esp_heap_caps.h"
 #include "moy_kernel.h"
 
+#ifdef MOY_HAS_PSRAM
+#define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define PSRAM_CAPS MALLOC_CAP_8BIT       // no PSRAM: the one internal heap (moy_platform.h)
+#endif
+
 void *moy_kalloc(size_t n, unsigned flags) {
     void *p = NULL;
     if (flags & MOY_KMEM_SMALL) {
@@ -18,7 +24,7 @@ void *moy_kalloc(size_t n, unsigned flags) {
     uint32_t dma = (flags & MOY_KMEM_DMA) ? MALLOC_CAP_DMA : 0u;
     bool zero = (flags & MOY_KMEM_ZERO) != 0u;
     if (flags & MOY_KMEM_PSRAM) {
-        uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT | dma;
+        uint32_t caps = PSRAM_CAPS | dma;
         p = zero ? heap_caps_calloc(1, n, caps) : heap_caps_malloc(n, caps);
         if (p == NULL && ((flags & MOY_KMEM_INTERNAL_OK)
                           || ((flags & MOY_KMEM_INTERNAL_IF_NONE)
@@ -38,7 +44,7 @@ void *moy_kalloc(size_t n, unsigned flags) {
 void *moy_krealloc(void *p, size_t n, unsigned flags) {
     uint32_t dma = (flags & MOY_KMEM_DMA) ? MALLOC_CAP_DMA : 0u;
     if (flags & MOY_KMEM_PSRAM) {
-        return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT | dma);
+        return heap_caps_realloc(p, n, PSRAM_CAPS | dma);
     }
     if (flags & MOY_KMEM_INTERNAL) {
         return heap_caps_realloc(p, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | dma);

@@ -26,10 +26,12 @@ bool moy_task_spawn_as(moy_task_id_t id, const char *name, uint32_t stack, int p
     uint32_t depth = r->stack == MOY_TASK_GIVEN ? stack : (uint32_t)r->stack;
     UBaseType_t p = (UBaseType_t)resolve(r->prio, prio, (int)uxTaskPriorityGet(NULL));
     BaseType_t c = (BaseType_t)resolve(r->core, core, (int)xPortGetCoreID());
+    #ifdef MOY_HAS_PSRAM
     if (r->psram) {
         return xTaskCreatePinnedToCoreWithCaps(fn, n, depth, arg, p, out, c,
                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS;
     }
+    #endif
     return xTaskCreatePinnedToCore(fn, n, depth, arg, p, out, c) == pdPASS;
 }
 
