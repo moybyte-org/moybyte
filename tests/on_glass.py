@@ -1616,6 +1616,90 @@ def a_lua_service_runs_on_a_task_of_its_own(board):
                      strict=True)
 
 
+def a_lua_service_s_timers_run_through_a_vm_stop(board, seconds=3.0):
+    """One timer scheduler on glass (native/moy_kernel/moy_evq.h, TIMERS): a
+    Lua service's `every` is the kernel's timer, run by the service's own
+    task, so through a VM stop and start (`kstop 1 stop`, as
+    `vm_stops_leave_psram_flat` makes them) it goes on firing with no VM to
+    serve it. Each tick logs its count under the service's pid (the OS log is
+    the kernel's): one state counts on, never restarted, and no gap in the
+    ticks is near the stop's length."""
+    import time
+    board.pyexec("import scheduler as S, moy_log\n"
+                 "SRC = 'n = 0\\nmoybyte.every(100, function() n = n + 1; "
+                 "moybyte.log(moybyte.INFO, \"kept \" .. n); "
+                 "if n >= 300 then moybyte.exit(0) end end)\\n'\n"
+                 "ws._kq = moy_log.next()\n"
+                 "ws._kp = S.SCHED.start({'id': 't.keep', 'title': 'keep', "
+                 "'runtime': 'lua', 'src': SRC, 'permissions': []})\n"
+                 "ws._kh = S.SCHED.procs[ws._kp].native",
+                 strict=True)
+    seq, pid, h = board.pyval("(ws._kq, ws._kp, ws._kh)", strict=True)
+    assert pid is not None and h, (pid, h)
+    time.sleep(1.0)
+    at = len(board.lines)
+    board.cmd("kstop 1 stop", wait_for="REMOTE kstop")
+    line, at = _line_since(board, at, "KSTOP ", 60)
+    while line is not None and " down " not in line:
+        line, at = _line_since(board, at, "KSTOP ", 60)
+    assert line is not None, "the VM never stopped"
+    time.sleep(seconds)
+    _desk_back(board)
+    ticks = board.pyval(
+        "[(r[1], r[4]) for r in __import__('moy_log').read(%d, 1000) "
+        "if r[3] == %d and r[4].startswith('kept ')]" % (seq, pid), strict=True)
+    board.pyexec("import scheduler as S\n"
+                 "S.SCHED.adopt(%d, 't.keep', native=%d)\n"
+                 "S.SCHED.stop(%d)" % (pid, h, pid), strict=True)
+    ns = [int(t.split()[1]) for _, t in ticks]
+    assert len(ns) > 10 * (seconds + 1), ns
+    assert ns == list(range(ns[0], ns[0] + len(ns))), ns      # one state, counting on
+    gap = max(b[0] - a[0] for a, b in zip(ticks, ticks[1:])) / 1e6
+    print("\nKEPT TIMERS %d ticks through the stop, the longest gap %.2fs" % (len(ns), gap))
+    assert gap < 1.0, "the timer stopped for %.1fs" % gap
+
+
+def a_lua_app_s_every_runs_beside_a_python_app_s(board, title="Brick Siege Lua",
+                                                 seconds=2.0):
+    """One timer scheduler on glass (native/moy_kernel/moy_evq.h, TIMERS): a
+    Lua run's `moybyte.every` (native/moycore/moycore_moybyte.h, served as
+    each of the run's frames starts, wherever the frame runs) and a Python
+    process's `every` are both rows of the kernel's table, and both go off
+    while the run plays."""
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.0)
+        board.pyexec("import scheduler as S, moy_evq\n"
+                     "SRC = 'import moybyte\\nn = [0]\\ndef tick():\\n    n[0] += 1\\n"
+                     "moybyte.every(30, tick)\\n'\n"
+                     "ws._ep = S.SCHED.start({'id': 't.py_every', 'title': 'py every', "
+                     "'src': SRC, 'permissions': []})\n"
+                     "ws._en = S.SCHED.procs[ws._ep].ns\n"
+                     "ws._ee = ws.run.player.lua.exec('N = 0\\nmoybyte.every(30, "
+                     "function() N = N + 1 end)', 'probe')\n"
+                     "ws._et = (moy_evq.timers(ws.run.player.pid), moy_evq.timers(ws._ep))",
+                     strict=True)
+        err, timers = board.pyval("(ws._ee, ws._et)", strict=True)
+        assert err is None and timers == (1, 1), (err, timers)
+        board.drain(seconds)
+        n_lua, n_py = board.pyval("(ws.run.player.lua.get_global('N'), ws._en['n'][0])",
+                                  strict=True)
+    finally:
+        board.pyexec("import scheduler as S\n"
+                     "p = S.SCHED.procs.get(getattr(ws, '_ep', 0))\n"
+                     "if p is not None and p.state != 'exited':\n"
+                     "    S.SCHED.stop(ws._ep)")
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nONE SCHEDULER %s: Lua every %d, Python every %d in %.0fs"
+          % (title, n_lua, n_py, seconds))
+    assert n_lua >= 10 * seconds and n_py >= 10 * seconds, (n_lua, n_py)
+
+
 def an_asyncio_service_runs_beside_the_desk(board):
     """The shell's asyncio loop (runtime/system/aio.py) on glass: a service
     whose main is `asyncio.run(main())` steps on the scheduler, each step its
