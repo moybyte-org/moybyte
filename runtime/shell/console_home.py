@@ -351,7 +351,7 @@ class Home:
                     _ui.reset()
         ws.wm.goto(ws.wm.root_kind())   # this mode's root, everything above it gone
         if not keep:
-            ws.cart = None
+            ws.run.project.cart = None
             # #66 fragmentation fix: ns = None alone kept the world alive through
             # player.update's closure; release clears the dict in place + collects.
             ws.run.player.release_world()
@@ -369,7 +369,7 @@ class Home:
                 ws.carts.reslim(_fat)
                 ws.run.fat_cart = None
             ws.run.project = Project(ws)
-        ws.cart_error = None
+        ws.run.player.cart_error = None
         ws.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         ws.ach_ui._clock_taps = 0
         # #197: while WASM MODE is on, HOME is the connection screen. Here and

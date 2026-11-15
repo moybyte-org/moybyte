@@ -130,7 +130,7 @@ class Text:
         new-cart template. A brand-new / template-only cart returns False, so a kid
         can freely start authoring it with blocks."""
         ws = self.ws
-        cart = ws.cart
+        cart = ws.run.project.cart
         if cart is None:
             return False
         src = cart.get("src") or ""
@@ -170,14 +170,14 @@ class Text:
         """The scripts the Code tab can open, in load order. One entry for a
         one-file cart -- and at one entry the switcher draws nothing at all."""
         ws = self.ws
-        if ws.cart is None or ws.carts_store is None:
+        if ws.run.project.cart is None or ws.carts_store is None:
             return []
-        return ws.carts_store.cart_sources(ws.cart)
+        return ws.carts_store.cart_sources(ws.run.project.cart)
 
     def code_source_size(self, name):
         """Script `name`'s size in bytes, or None where the cart has none."""
         ws = self.ws
-        text = ws.carts_store.source_text(ws.cart, name) if ws.cart else None
+        text = ws.carts_store.source_text(ws.run.project.cart, name) if ws.run.project.cart else None
         return len(text) if text is not None else None
 
     def code_file_name(self):
@@ -187,7 +187,7 @@ class Text:
         ws = self.ws
         if ws.code_file:
             return ws.code_file
-        cart = ws.cart or {}
+        cart = ws.run.project.cart or {}
         if cart.get("runtime") == "wasm":
             srcs = self.code_sources()
             return srcs[0] if srcs else None
@@ -204,7 +204,7 @@ class Text:
         line. Reusing the tab-switch discipline rather than inventing a second
         one is the whole reason this is three lines and not a subsystem."""
         ws = self.ws
-        if ws.cart is None or name not in self.code_sources():
+        if ws.run.project.cart is None or name not in self.code_sources():
             return False
         if name == self.code_file_name():
             return True

@@ -20,7 +20,7 @@ import types
 import pytest
 
 from runtime import moy_input
-from runtime.console_perf import FrameState
+from runtime.console_frame import FrameState
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
                                  heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
@@ -1373,8 +1373,9 @@ class _StoreWS2(FakeWS):
         self.rescans = 0
         self.launched = []
         self.noted = []
+        self.carts.synced = self._synced
 
-    def rescan_carts(self):
+    def _synced(self, folders=None):
         self.rescans += 1
 
     def launch_named(self, name):

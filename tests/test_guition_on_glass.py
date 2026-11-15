@@ -608,7 +608,7 @@ def _skip_unparked(board, why):
     test read an idle board, and `test_perf_line_is_the_one_format` failed with
     "no PERF lines in 5s" -- a real failure, of the previous test's tidying.
     The finally at the bottom does this for the paths that reach it."""
-    board.cmd("py ws.stop_web_console(); print('WEBOFF')",
+    board.cmd("py ws.web.stop(); print('WEBOFF')",
               wait_for="WEBOFF", timeout=8.0)
     # A push that reached the board leaves its handler rescanning the store,
     # and on this board's TF card that is a minute during which nothing
@@ -711,7 +711,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         # Leave the board as found: unpark the glass and stop the host.
         # stop_web_console, not toggle -- a toggle would START a host that
         # died under the parked screen (the reason the verb exists).
-        board.cmd("py ws.stop_web_console(); print('WEBOFF')",
+        board.cmd("py ws.web.stop(); print('WEBOFF')",
                   wait_for="WEBOFF", timeout=8.0)
 
 

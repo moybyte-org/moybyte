@@ -1619,7 +1619,7 @@ class DevChannel:
             # past the sender's ten-second wait, and whatever the sender asks
             # next queues behind it on the line.
             print("moy-ok")
-            rescan = getattr(ws, "rescan_carts", None)
+            rescan = getattr(getattr(ws, "carts", None), "synced", None)
             if rescan is not None:
                 rescan()
         elif cmd == "moy-run":

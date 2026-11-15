@@ -919,7 +919,7 @@ def _push(a, cart, names, local, work):
         # new cart is not on the shelf -- and `run <title>` does not find it --
         # until the store is scanned again.
         if not a.no_rescan:
-            n = b.pyval("len(ws.rescan_carts() or ())", timeout=60)
+            n = b.pyval("len(ws.carts.synced() or ())", timeout=60)
             print("store rescanned" if n is not None else
                   "the rescan did not answer -- reset the board to rescan")
         # A cart that arrived as files is asked on its first run, and the

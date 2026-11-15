@@ -64,9 +64,9 @@ def web(chan, ws, parts, line):
             print("WEB no service")
         else:
             if not wh.serving and not getattr(wh, "joining", False):
-                ws.toggle_webhost()
+                ws.web.toggle()
             _settle(wh)
-            url = ws.web_console_url() or wh.url()
+            url = ws.web.url() or wh.url()
             print("WEB %s %s" % (url, wh.error or ""))
     except Exception as exc:  # noqa: BLE001
         print("WEB ERR %s: %s" % (type(exc).__name__, exc))

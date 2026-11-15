@@ -29,7 +29,7 @@ class Saves:
         error. Broken code that reaches disk is caught at the next run, as
         crash-to-code. Non-SD carts (no path) just no-op True."""
         ws = self.ws
-        if not (ws.editor and ws.cart):
+        if not (ws.editor and ws.run.project.cart):
             return False
         src = ws.editor.text()
         name = ws.text.code_file_name()
@@ -37,10 +37,10 @@ class Saves:
         # error before run_code execs it into a hard failure. The gate is the
         # cart's RUNTIME's: a lua cart used to be handed to the PYTHON compiler
         # here, which refused every commit of its Code tab with a Python message.
-        ok, msg = ws.carts_store.runtime_compile_check(ws.cart, src)
+        ok, msg = ws.carts_store.runtime_compile_check(ws.run.project.cart, src)
         if not ok:
             if not force:
-                ws.cart_error = "Syntax error -- " + msg
+                ws.run.player.cart_error = "Syntax error -- " + msg
                 self.set_code_error(msg)    # mark the bad line in the editor (#24)
                 return False
             self.set_code_error(msg, move=False)   # badge it, leave the caret alone
@@ -48,7 +48,7 @@ class Saves:
             ws.code_err = None             # parses now -> clear the inline marker
             ws.code_err_row = None
             ws.run.player.crash_line = None           # a re-run will re-detect any crash
-        if not (ws.cart.get("path") and ws.can_manage):
+        if not (ws.run.project.cart.get("path") and ws.can_manage):
             if ok:
                 ws.ach.award("first_code")   # Code Wizard: valid code saved
             return True
@@ -96,7 +96,7 @@ class Saves:
             # in-RAM apply (validated above), into the slot the OPEN file came
             # out of -- a cart with no path never reaches the store write, so
             # this is the only thing that makes a PLAY run what was just typed.
-            ws.carts_store.set_source(ws.cart, ws.text.code_file_name(),
+            ws.carts_store.set_source(ws.run.project.cart, ws.text.code_file_name(),
                                         ws.editor.text())
         if ws.start():
             ws.ach.award("first_run")         # Lift Off!: a cart was RUN
@@ -174,7 +174,7 @@ class Saves:
         """Import the current tile FROM the shared sheet into this cart's sheet
         (same tile id). The kid then SAVEs the cart sheet to keep it."""
         ws = self.ws
-        if not (ws.paint and ws.sheet):
+        if not (ws.paint and ws.run.project.sheet):
             return False
         shared = self._load_shared_sheet()
         if shared is None:
@@ -184,7 +184,7 @@ class Saves:
             ws.paint_status = "SHARED EMPTY"   # nothing painted there yet
             return False
         n = ws.paint.n
-        if ws.sheet.copy_tile(shared, n, dst_n=n) is None:
+        if ws.run.project.sheet.copy_tile(shared, n, dst_n=n) is None:
             ws.paint_status = "CAN'T GET"
             return False
         ws.paint_status = "GOT SPR " + str(n)
@@ -195,7 +195,7 @@ class Saves:
         can GET it. Loads the shared sheet, drops this tile in at the same id, and
         writes it back."""
         ws = self.ws
-        if not (ws.paint and ws.sheet):
+        if not (ws.paint and ws.run.project.sheet):
             return False
         if not (ws.carts_root and ws.can_manage):
             ws.paint_status = None             # writes deferred -- nothing to persist
@@ -205,7 +205,7 @@ class Saves:
             ws.paint_status = "CAN'T PUT"
             return False
         n = ws.paint.n
-        if shared.copy_tile(ws.sheet, n, dst_n=n) is None:
+        if shared.copy_tile(ws.run.project.sheet, n, dst_n=n) is None:
             ws.paint_status = "CAN'T PUT"
             return False
         try:

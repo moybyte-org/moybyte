@@ -164,7 +164,7 @@ def give_store_back(board, before):
 # is one that arrived as files, which the console asks about on its first
 # run (runtime/shell/app_perms.py, `asks_first`), and a suite runs it on its
 # manifest as written.
-RESCAN = ("len(ws.rescan_carts() or ()) + len([ws.consent.made("
+RESCAN = ("len(ws.carts.synced() or ()) + len([ws.consent.made("
           "__import__('app_perms').app_id(c)) for c in ws.carts.all])")
 
 

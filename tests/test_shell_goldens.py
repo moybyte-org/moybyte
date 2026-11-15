@@ -843,8 +843,8 @@ def _surface_plan(ws, cfg):
     def park():
         if ws.webhost is None:
             ws.webhost = _GoldenWebHost()
-        if not ws.webhost_serving():
-            ws.toggle_webhost()          # the real funnel: start, then park
+        if not ws.web.serving():
+            ws.web.toggle()          # the real funnel: start, then park
 
     def run_script():
         # From HOME, so the windowed tier runs it in console mode (where a
@@ -948,8 +948,8 @@ def _open_with(ws, home):
     import moybyte
     from runtime import host_app, intents
     from ws_helpers import shelf
-    if ws.webhost_serving():
-        ws.toggle_webhost()              # the web console's page goes with it
+    if ws.web.serving():
+        ws.web.toggle()              # the web console's page goes with it
     home()
     root = str(ws.carts_root)
     cart = host_app.moy_carts.create("Jot", root, src="def _draw():\n    cls(1)\n",

@@ -682,7 +682,7 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None, port=None):
     return WebHost(carts_root, port=port, with_sd=with_sd,
                    dial=lambda: dial_saved(getattr(ws, "wifi", None)),
                    auth_source=lambda: _system_dir(ws),
-                   on_sync=lambda folders: ws.rescan_carts(folders),
+                   on_sync=lambda folders: ws.carts.synced(folders),
                    on_run=lambda name: ws.home.launch_named(name),
                    on_stop=lambda: ws.spine.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),

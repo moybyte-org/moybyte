@@ -685,6 +685,6 @@ def test_wait_reads_a_background_command_s_exit_code(term, tmp_path):
         "format": "moy-1", "title": "exits", "id": "local.exits", "runtime": "python",
         "main": "main.py", "moybyte": {"type": "command"}}))
     (d / "main.py").write_text("def main(argv):\n    return 5\n")
-    ws.rescan_carts()
+    ws.carts.synced()
     run(app, "exits & wait $!; echo status $?")
     assert "status 5" in plain(app)

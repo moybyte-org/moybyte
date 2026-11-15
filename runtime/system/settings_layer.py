@@ -1374,7 +1374,7 @@ class SettingsLayer(Layer):
             self._toggle_diag_row(key)
             return
         if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
-            ws.toggle_webhost()
+            ws.web.toggle()
             return
         if kind == "crash":                     # LAST CRASH: any step/tap opens the record
             self.open_page("crash")
@@ -1543,7 +1543,7 @@ class SettingsLayer(Layer):
             v = str(rec.get("kind") or "?")[:8] if rec else ("Dump" if core_dump() else "None")
             return v[:1].upper() + v[1:]
         if kind == "webhost":
-            return ws.webhost_label() if ws.webhost_serving() else "Off"
+            return ws.web.label() if ws.web.serving() else "Off"
         if kind == "paired":
             return self._paired_words
         if kind == "diag":
@@ -1639,7 +1639,7 @@ class SettingsLayer(Layer):
         elif kind == "webhost":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                ws.toggle_webhost()
+                ws.web.toggle()
         elif kind == "diag":
             on = v
             self._kinds[s] = "toggle"

@@ -478,7 +478,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     wh = getattr(ws, "webhost", None)
     try:
         if wh is not None and wh.adopt(ws):
-            ws.park_web_console()
+            ws.web.park()
             log("boot", "web console still serving: adopted")
     except Exception as exc:  # noqa: BLE001 -- the console boots regardless
         log("boot", "web console adopt failed: %s" % exc)

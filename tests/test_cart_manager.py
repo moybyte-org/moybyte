@@ -19,10 +19,8 @@ already draw that -- but four things a whole-screen hash cannot see:
     `not carts_root or not can_manage` each; they take the shared `StoreHandle`
     now, the same object `SystemStore` and `app_context`'s storage roles hold.
 
-  * **`rescan_carts` is the one surviving forward**, because `moy_webhost`
-    captures `lambda folders: ws.rescan_carts(folders)` at CONSTRUCTION -- a name that resolves
-    then and never again is exactly the 3d blind spot the façade ratchet exists
-    for, so the shape is pinned here as well as counted there.
+  * **`moy_webhost` captures `lambda folders: ws.carts.synced(folders)` at
+    CONSTRUCTION**, so `synced` keeps its one fixed parameter.
 """
 
 import ast
@@ -154,13 +152,13 @@ def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path, monkeypatch):
 
 
 def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
-    """`moy_webhost` builds `on_sync=lambda folders: ws.rescan_carts(folders)`
+    """`moy_webhost` builds `on_sync=lambda folders: ws.carts.synced(folders)`
     when the webhost is CONSTRUCTED and calls it per batch with the folders the
     batch changed (None: every one) -- the name has to keep resolving on the
     console, which is why this one forward stayed. Driven in the webhost's own
     shape rather than by calling the method directly."""
     ws = build_ws(tmp_path)
-    on_sync = lambda folders: ws.rescan_carts(folders)   # noqa: E731 -- the webhost's shape
+    on_sync = lambda folders: ws.carts.synced(folders)   # noqa: E731 -- the webhost's shape
     made = _mk(str(ws.carts_root), "Pushed")
     on_sync((made["path"].rsplit("/", 1)[-1],))
     ws.home.set_home_tab("mine")                   # made here: the kid's own
@@ -277,11 +275,11 @@ def test_every_store_writing_verb_rescans_only_its_folder(tmp_path, monkeypatch)
     assert _paths(ws.carts.all) == _paths(shelf(root))
 
 
-def test_the_rescan_forward_has_a_fixed_signature():
-    """A `*a, **kw` shim allocates a tuple per call (the #63/#66 churn class).
-    The façade ratchet counts forwards; this pins the one that has a live
-    caller outside the tree's own tests."""
-    sig = inspect.signature(console.Workstation.rescan_carts)
+def test_the_sync_verb_has_a_fixed_signature():
+    """A `*a, **kw` shim allocates a tuple per call (the #63/#66 churn class);
+    `moy_webhost`'s `on_sync` lambda calls this one with the folders."""
+    from runtime.cart_manager import CartManager
+    sig = inspect.signature(CartManager.synced)
     assert list(sig.parameters) == ["self", "folders"]
 
 

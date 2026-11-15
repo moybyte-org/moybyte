@@ -149,7 +149,7 @@ class UsbDrive(object):
         self.on = False
         self.why = None
         self._open()
-        ws.rescan_carts()
+        ws.carts.synced()
         ws.request_frame()
 
     def poll(self, ws):

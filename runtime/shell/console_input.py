@@ -157,14 +157,14 @@ class InputRouter:
         # rather than typed at, and a debounce they could not arm would fire
         # mid-stroke.
         if ((i.last_key or pressed)
-                and (ws.menu_view in COMMIT_TABS or ws.menu_view in THEME_TABS)
+                and (ws.editor_app.tab in COMMIT_TABS or ws.editor_app.tab in THEME_TABS)
                 and ws.wm.top_is("menu")):
             ws.history.edit_ms = _ticks_ms()
         # Ctrl+Z and Ctrl+Y are the bar's UNDO and REDO on every Editor tab:
         # its own steps, then the journal's (`history_router`).
         k = i.typed
         if ((k == 0x1A or k == 0x19) and ws.wm.input_kind() == "menu"
-                and (ws.menu_view in COMMIT_TABS or ws.menu_view in THEME_TABS)
+                and (ws.editor_app.tab in COMMIT_TABS or ws.editor_app.tab in THEME_TABS)
                 and ws.modal_layer() is None):
             if k == 0x1A:
                 ws.history.undo()
@@ -264,7 +264,7 @@ class InputRouter:
         kept = False
         if (_pp is None and not click and not p.down and not ws._ptr_was_down
                 and px == ws._ptr_last_x and py == ws._ptr_last_y
-                and ws.cart_error is None
+                and ws.run.player.cart_error is None
                 and ws.input.game_pointer is ws._gp_idle):
             # Same geometry? These seven reads are exactly what the fullscreen
             # WM's game_xy consumes; its memo checks the same key, but through
@@ -317,7 +317,7 @@ class InputRouter:
         # (cart_error) always walks so EDIT stays reachable.
         if (not click and not p.down and not ws._ptr_was_down
                 and px == ws._ptr_last_x and py == ws._ptr_last_y
-                and ws.cart_error is None and ws.wm.top_is_player()):
+                and ws.run.player.cart_error is None and ws.wm.top_is_player()):
             return
         # _ptr_was_down makes the RELEASE frame walk: the windowed WM moves
         # focus on down->up, and that frame has no click, no down, no movement.
@@ -330,8 +330,8 @@ class InputRouter:
         # tab's) so it can never be left stale True by a gesture that ended
         # somewhere else; the router refuses to commit under it.
         ws.history.pointer_down = p.down
-        if (click or p.down) and (ws.menu_view in COMMIT_TABS
-                                  or ws.menu_view in THEME_TABS) \
+        if (click or p.down) and (ws.editor_app.tab in COMMIT_TABS
+                                  or ws.editor_app.tab in THEME_TABS) \
                 and ws.wm.top_is("menu"):
             ws.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
@@ -433,7 +433,7 @@ class InputRouter:
             return False
         # Shift held extends the selection, as SELECT mode does.
         select = True if getattr(ws.input, "mods", 0) & _SHIFT else None
-        view = ws.menu_view
+        view = ws.editor_app.tab
         if (ws.wm.top_is("menu") and view in ("code", "theme_config")    # Stage 6d
                 and ws.editor is not None):
             cl = ws.code_layer if view == "code" else ws.theme_config_layer
@@ -695,7 +695,7 @@ class InputRouter:
         if not (dx or dy) or ws.pause.open or ws.confirm.open or ws.sysmenu.open \
                 or ws.wm.popover_takes_keys():
             return False
-        if not ((ws.wm.top_is("menu") and ws.menu_view in ("code", "theme_config")
+        if not ((ws.wm.top_is("menu") and ws.editor_app.tab in ("code", "theme_config")
                  and ws.editor is not None)
                 or self.focused_cart_editor() is not None):
             return False

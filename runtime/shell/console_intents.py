@@ -50,7 +50,7 @@ class Intents:
         window holds the input, else None (the shell's)."""
         ws = self.ws
         pl = ws.run.player
-        if pl is None or pl.pid is None or ws.cart is None:
+        if pl is None or pl.pid is None or ws.run.project.cart is None:
             return None
         return pl.pid if ws.wm.input_holder() == _FRONT_KEY else None
 
@@ -193,8 +193,8 @@ class Intents:
             return None
         ws.open(cart)
         pl = ws.run.player
-        if pl is None or ws.cart is None or pl.cart_error is not None \
-                or ws.spine.app_cart_id(ws.cart) != ws.spine.app_cart_id(cart):
+        if pl is None or ws.run.project.cart is None or pl.cart_error is not None \
+                or ws.spine.app_cart_id(ws.run.project.cart) != ws.spine.app_cart_id(cart):
             return None
         if not pl.window_event("moy_open", g):
             return None

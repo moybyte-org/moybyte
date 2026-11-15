@@ -1792,7 +1792,7 @@ def prepared(ws, cart, service=False):
         have = app_perms.services(ws)
     else:
         rec, have = None, ()
-    env_of = getattr(ws.notices, "service_env", None)
+    env_of = getattr(getattr(ws, "notices", None), "service_env", None)
     return run, rec, have, env_of(run) if env_of is not None else None
 
 

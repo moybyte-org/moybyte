@@ -451,8 +451,8 @@ class ShellDoor:
 
     def v_rescan(self, *names):
         """The cart folders SFTP changed, by name: the shelf re-reads them, as
-        it does a browser sync's (`ws.rescan_carts`)."""
-        self.ws.rescan_carts(list(names) or None)
+        it does a browser sync's (`ws.carts.synced`)."""
+        self.ws.carts.synced(list(names) or None)
         return 0
 
     def v_lookup(self, name):

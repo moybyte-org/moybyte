@@ -162,12 +162,12 @@ def ws(tmp_path):
     from runtime import host_app
     w = host_app.build_workstation(str(tmp_path / "carts"))
     w.rescans = 0
-    was = w.rescan_carts
+    was = w.carts.synced
 
     def rescan(folders=None):
         w.rescans += 1
         return was(folders)
-    w.rescan_carts = rescan
+    w.carts.synced = rescan
     return w
 
 

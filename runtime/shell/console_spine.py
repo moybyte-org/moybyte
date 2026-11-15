@@ -209,7 +209,7 @@ class Spine:
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
         ws = self.ws
-        if ws.cart_error is not None and ws.web.parked and ws.crash_to_code():
+        if ws.run.player.cart_error is not None and ws.web.parked and ws.crash_to_code():
             return                     # a parked console goes home; else the stop card
         if ws.run.player.notice is not None:
             ws.pause.stop()          # a cart this console cannot run: its card over
@@ -471,7 +471,7 @@ class Spine:
         self.note_app_caller()        # a jump OUT of an app comes back to it
         ws.app_carts[app.id] = cart
         if not self._project_held():
-            ws.cart = cart
+            ws.run.project.cart = cart
         ws.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
         ws.wm.activate(app.id)

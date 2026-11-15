@@ -399,7 +399,8 @@ from console_input import InputRouter
 from console_home import Home
 from console_text import Text
 from console_canvas import CanvasBinding
-from console_perf import FrameState, PerfMeters, _ema
+from console_frame import FrameState
+from console_perf import PerfMeters, _ema
 from console_settings import SettingsToggles
 from console_saves import Saves
 from console_notices import Notices
@@ -1629,15 +1630,6 @@ class Workstation:
             ed._scroll()
 
 
-    # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
-    #
-    # The switch itself lives in web_console.py; these keep the names its
-    # callers already speak. Fixed signatures, one delegation each (#209).
-
-    def web_console_url(self):
-        """`web.url()` -- the dev channel's `web` and the tests."""
-        return self.web.url()
-
     def saver_state(self, on):
         """The kernel's ladder entered or left its SAVER rung. Never over a
         running cart: the game keeps the glass."""
@@ -1647,33 +1639,6 @@ class Workstation:
         else:
             self.saver = None
             self.frame_state.dirty = True
-
-    def park_web_console(self):
-        """`web.park()` -- the layers.py contract comment and the tests."""
-        return self.web.park()
-
-    def stop_web_console(self):
-        """`web.stop()` -- the Guition on-glass suite's serial vocabulary."""
-        return self.web.stop()
-
-    def webhost_serving(self):
-        """`web.serving()` -- settings_layer, tools/push_cart_wifi.py."""
-        return self.web.serving()
-
-    def webhost_label(self):
-        """`web.label()` -- the Settings row, tools/push_cart_wifi.py."""
-        return self.web.label()
-
-    def toggle_webhost(self):
-        """`web.toggle()` -- settings_layer, the dev channel, push_cart_wifi."""
-        return self.web.toggle()
-
-    def rescan_carts(self, folders=None):
-        """`carts.synced(folders)` -- moy_webhost captures this name in its
-        `on_sync` lambda at construction, and the Guition on-glass suite's
-        sync test depends on the shelf following a browser batch with no
-        reboot."""
-        return self.carts.synced(folders)
 
     # `updater` is a PROPERTY so that injecting one INVALIDATES the two cached
     # availability answers below. Four places inject an updater -- three boards

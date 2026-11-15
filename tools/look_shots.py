@@ -554,8 +554,8 @@ def _web(g, ws):
     _settings(g, ws)
     if ws.webhost is None:
         ws.webhost = _LookWebHost()
-    if not ws.webhost_serving():
-        ws.toggle_webhost()
+    if not ws.web.serving():
+        ws.web.toggle()
 
 
 class _LookWebHost:
