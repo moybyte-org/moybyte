@@ -89,6 +89,9 @@ def gen_err_h(src):
     for e in rows:
         if "err" in e:
             o.append("#define MOY_APP_ERR_%s %s" % (e["code"], _c(e["err"])))
+    plain = [e for e in rows if "err" in e and "%" not in e["err"]]
+    o += ["", "// The codes whose err is plain text: X(code), its text MOY_APP_ERR_<code>.",
+          "#define MOY_APP_ERR_TEXTS(X) %s" % " ".join("X(%s)" % e["code"] for e in plain)]
     o += ["", "#endif", ""]
     return "\n".join(o)
 

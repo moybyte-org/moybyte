@@ -83,7 +83,7 @@
 // foreground run's is, owned by its pid) opens the same names a Lua app's
 // state opens (native/moy_app/moy_app_lua.h): `files`, `io` and
 // `os.remove`/`os.rename` with files, `prefs`, `set_theme`, `open_app`, and
-// none it is not granted. A row the table answers here (MOY_APP_LUA_HERE:
+// none it is not granted. A row the table answers here (how "here" in MOY_APP_LUA_NAMES:
 // the store's and the settings') runs on the service's own task, its time
 // not counted against the call's budget, and hops where it answers that it
 // needs the VM. Every other row runs on the VM's task: on the service's own

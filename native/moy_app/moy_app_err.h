@@ -62,4 +62,7 @@ enum {
 #define MOY_APP_ERR_IO "[Errno %d] %s"
 #define MOY_APP_ERR_BAD "a refused argument"
 
+// The codes whose err is plain text: X(code), its text MOY_APP_ERR_<code>.
+#define MOY_APP_ERR_TEXTS(X) X(NOMEM) X(NOSTORE) X(BAD)
+
 #endif

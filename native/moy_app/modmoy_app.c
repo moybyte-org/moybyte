@@ -1176,18 +1176,19 @@ static mp_obj_t pair(mp_obj_t v, mp_obj_t err) {
 
 // The `err` of a code; a grant problem raises.
 static mp_obj_t err_of(store_t *st, int rc) {
+    if (rc == MOY_APP_NOSTORE) {
+        return st->app->no_store;
+    }
+    if (rc == MOY_APP_IO) {
+        mp_obj_t e = mp_obj_new_exception_arg1(&mp_type_OSError,
+                                               MP_OBJ_NEW_SMALL_INT(moy_app_why(st->a)));
+        return mp_obj_str_make_new(&mp_type_str, 1, 0, &e);
+    }
     switch (rc) {
-        case MOY_APP_NOSTORE:
-            return st->app->no_store;
-        case MOY_APP_IO: {
-            mp_obj_t e = mp_obj_new_exception_arg1(&mp_type_OSError,
-                                                   MP_OBJ_NEW_SMALL_INT(moy_app_why(st->a)));
-            return mp_obj_str_make_new(&mp_type_str, 1, 0, &e);
-        }
-        case MOY_APP_BAD:
-            return mp_obj_new_str(MOY_APP_ERR_BAD, sizeof(MOY_APP_ERR_BAD) - 1);
-        case MOY_APP_NOMEM:
-            return mp_obj_new_str(MOY_APP_ERR_NOMEM, sizeof(MOY_APP_ERR_NOMEM) - 1);
+#define X(code) \
+    case MOY_APP_##code: return mp_obj_new_str(MOY_APP_ERR_##code, sizeof(MOY_APP_ERR_##code) - 1);
+        MOY_APP_ERR_TEXTS(X)
+#undef X
         default:
             raise_rc(rc);
     }

@@ -58,7 +58,7 @@ SPEC_TIERS = ("python", "lua", "wasm")
 
 ROW_FIELDS = {"name", "kind", "server", "perm", "grant", "in", "ret", "how", "door", "wasm", "wasi", "elf",
               "lua", "lua_own", "py", "py_face", "hdr", "c", "va", "glibc", "fail", "noreturn", "retired",
-              "u", "example"}
+              "u", "example", "lua_ret", "lua_in", "lua_enum", "out_shape"}
 ELF_FIELDS = {"hdr", "c", "va", "glibc", "fail", "noreturn", "retired", "u"}
 # The Python faces a row's Lua names stand beside where Python holds its
 # service as objects, not the row's verbs (a row's py_face): the device faces
