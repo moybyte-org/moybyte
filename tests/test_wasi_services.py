@@ -471,6 +471,23 @@ def test_a_wasi_service_talks_on_a_port_of_the_radio_link_by_handle(svc, perms):
     assert not link.active
 
 
+def test_a_wasi_service_poll_whose_deadline_is_due_answers_its_clock(svc):
+    """poll_oneoff with a timeout already due (a service late for its tick
+    polls with 0) answers the clock's event at once, with no event queued:
+    a deadline passed before the wait on the event queue begins is not a
+    wait with no deadline, which would hold the service's ticks until
+    something is sent to it."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["due"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("due ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    assert [t for t in _texts(since, pid) if t.startswith("due ")] == ["due 1000 of 1000"]
+    assert s.stop(pid)
+
+
 def test_the_fixture_is_a_service():
     with open(os.path.join(FIXTURE, "manifest.json")) as f:
         man = json.load(f)

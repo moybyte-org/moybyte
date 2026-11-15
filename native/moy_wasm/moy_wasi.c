@@ -2006,8 +2006,9 @@ static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
 }
 
 // The one kernel wait on the run's event queue until an event is queued or
-// `us` passes (<0: no deadline), in slices: W_OK with *woke where an event
-// came, W_INTR as soon as the run has ended.
+// `us` passes (<0: no deadline, 0: due already, the queue read once), in
+// slices: W_OK with *woke where an event came, W_INTR as soon as the run has
+// ended.
 static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *woke) {
     int64_t end = us < 0 ? 0 : moy_now_us() + us;
     *woke = false;
@@ -2081,7 +2082,8 @@ static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint
     int64_t end = (int64_t)c.b[0] >= 0 ? moy_now_us() + (int64_t)c.b[0] : -1;
     while (r == W_OK && c.a[5]) {
         bool woke;
-        r = evq_rest(e, w, end < 0 ? -1 : end - moy_now_us(), &woke);
+        int64_t now = moy_now_us();
+        r = evq_rest(e, w, end < 0 ? -1 : end > now ? end - now : 0, &woke);
         if (r != W_OK || !woke) {
             break;                      // the clock's event stands
         }
