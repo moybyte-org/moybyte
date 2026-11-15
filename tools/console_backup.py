@@ -39,7 +39,7 @@ def remote_line(b, word, timeout=600.0):
 
 def read_back(b, path, out, log=print):
     """The console's file `path` written to `out`, a PIECE at a time."""
-    if b.pyval("ws.__dict__.__setitem__('_bk', open(%r, 'rb')) or 1" % path) != 1:
+    if b.pyval("setattr(ws, '_bk', open(%r, 'rb')) or 1" % path) != 1:
         sys.exit("the console cannot open %s" % path)
     got = 0
     try:
