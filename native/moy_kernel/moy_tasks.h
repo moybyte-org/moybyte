@@ -4,7 +4,7 @@
 // through which lock, is native/moy_kernel/README.md's.
 //
 // THE TABLE (MOY_TASKS, board only): X(id, name, stack bytes, priority, core,
-// stack in PSRAM). A value the table leaves to the spawner is MOY_TASK_GIVEN
+// stack in PSRAM, on a board that has it: moy_platform.h). A value the table leaves to the spawner is MOY_TASK_GIVEN
 // (moy_task_spawn_as passes it: a name, a stack, a priority or a core);
 // MOY_TASK_CALLER takes the spawning task's priority or core. A row whose
 // stack the spawner hands in whole is moy_task_spawn_static's.
@@ -55,12 +55,12 @@
 #define MOY_AUDIO_PRIO (configMAX_PRIORITIES - 3)
 #endif
 
-// A Lua service: core 0 on the P4s; core 1 on the S3s, the VM's (core 0 has
-// the flush feed and fold, input and the radios), with its stack in PSRAM so
-// a service holds no internal SRAM past its control block (the shares'
-// internal cap, moy_play.h). Its task never touches flash itself: its file
-// rows hop to the VM's task.
-#if CONFIG_IDF_TARGET_ESP32P4
+// A Lua service: core 0 on the P4s and on a single-core chip; core 1 on the
+// S3s, the VM's (core 0 has the flush feed and fold, input and the radios),
+// with its stack in PSRAM so a service holds no internal SRAM past its control
+// block (the shares' internal cap, moy_play.h). Its task never touches flash
+// itself: its file rows hop to the VM's task.
+#if CONFIG_IDF_TARGET_ESP32P4 || CONFIG_FREERTOS_NUMBER_OF_CORES == 1
 #define MOY_TASK_SVC_CORE 0
 #define MOY_TASK_SVC_PSRAM 0
 #else

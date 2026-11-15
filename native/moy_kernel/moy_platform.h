@@ -14,6 +14,12 @@
 //                  is no lock at all and a caller is stepped, never blocked.
 // Each is defined (to 1) only where it holds: test it with #ifdef or #if.
 //
+// WHAT IT HAS: MOY_HAS_PSRAM, a board whose image is built with PSRAM
+// (CONFIG_SPIRAM), defined (to 1) only there. Without it (the ESP32-C3 has no
+// PSRAM to fit) a block or a task stack placed in PSRAM is the one internal
+// heap's (moy_kmem.h, moy_tasks.h), and the kernel keeps no small-block pool
+// (moy_kernel.h).
+//
 // INCLUDE IT FIRST, before any system header. A host built -std=c99 sees no
 // POSIX unless asked, and the clock below is POSIX's; this header asks, and
 // the ask only takes before the C library's first header.
@@ -37,6 +43,13 @@
 #if defined(__has_include)
 #if __has_include("esp_heap_caps.h")
 #define MOY_ON_BOARD 1
+#endif
+#endif
+
+#ifdef MOY_ON_BOARD
+#include "sdkconfig.h"
+#if CONFIG_SPIRAM
+#define MOY_HAS_PSRAM 1
 #endif
 #endif
 

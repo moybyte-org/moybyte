@@ -246,6 +246,95 @@ def test_the_map_cache_patch_REFUSES_a_tree_that_is_not_repr_C(tmp_path):
     assert f.read_text(encoding="utf-8").count(_MAP_C_STOCK) == 1
 
 
+# -- the split-heap growth reserve ----------------------------------------------
+#
+# The port's hook as v1.28 ships it, and a harness that compiles the patched
+# function against stub heaps: what a growth may take is arithmetic, so it is
+# run, on both pools the patch picks between.
+
+_GCCOLLECT_STOCK = """\
+size_t gc_get_max_new_split(void) {
+    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+}
+"""
+
+_GC_SPLIT_HARNESS = """\
+#include <stddef.h>
+#include <stdio.h>
+#define MALLOC_CAP_DEFAULT 1u
+#define MALLOC_CAP_SPIRAM 2u
+static size_t s_largest, s_default, s_spiram;
+static size_t heap_caps_get_largest_free_block(unsigned c) { (void)c; return s_largest; }
+static size_t heap_caps_get_free_size(unsigned c) {
+    return c == MALLOC_CAP_SPIRAM ? s_spiram : s_default;
+}
+#include "gccollect.c"
+int main(int argc, char **argv) {
+    (void)argc;
+    sscanf(argv[1], "%zu", &s_largest);
+    sscanf(argv[2], "%zu", &s_default);
+    sscanf(argv[3], "%zu", &s_spiram);
+    printf("%zu\\n", gc_get_max_new_split());
+    return 0;
+}
+"""
+
+
+@pytest.fixture
+def split_reserve(tmp_path):
+    """The patched hook, compiled per (CONFIG_SPIRAM, reserve): a callable
+    (largest, internal free, PSRAM free) -> what one growth may take."""
+    if shutil.which("gcc") is None:
+        pytest.skip("no host C compiler")
+    port = tmp_path / "ports" / "esp32"
+    port.mkdir(parents=True)
+    (port / "gccollect.c").write_text(_GCCOLLECT_STOCK, encoding="utf-8")
+    r = sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    (port / "sdkconfig.h").write_text("", encoding="utf-8")
+    (port / "harness.c").write_text(_GC_SPLIT_HARNESS, encoding="utf-8")
+
+    def build(spiram, reserve):
+        exe = port / ("h_%d_%d" % (spiram, reserve))
+        defs = ["-DMOYBYTE_GC_SPLIT_RESERVE=%d" % reserve] if reserve else []
+        defs += ["-DCONFIG_SPIRAM=1"] if spiram else []
+        subprocess.run(["gcc", "-I", str(port)] + defs + ["-o", str(exe), str(port / "harness.c")],
+                       check=True)
+        return lambda largest, internal, psram: int(subprocess.run(
+            [str(exe), str(largest), str(internal), str(psram)],
+            capture_output=True, text=True, check=True).stdout)
+    return build
+
+
+def test_the_split_reserve_keeps_psram_where_the_board_has_it(split_reserve):
+    grow = split_reserve(spiram=True, reserve=3 << 20)
+    assert grow(4 << 20, 1 << 20, 5 << 20) == 2 << 20      # PSRAM free less the reserve
+    assert grow(1 << 20, 1 << 20, 5 << 20) == 1 << 20      # the largest block, when smaller
+    assert grow(4 << 20, 9 << 20, 3 << 20) == 0            # at the reserve: no growth
+
+
+def test_the_split_reserve_keeps_the_internal_heap_on_a_board_without_psram(split_reserve):
+    grow = split_reserve(spiram=False, reserve=48 << 10)
+    assert grow(60 << 10, 100 << 10, 0) == 52 << 10        # internal free less the reserve
+    assert grow(30 << 10, 100 << 10, 0) == 30 << 10
+    assert grow(40 << 10, 40 << 10, 0) == 0
+
+
+def test_no_reserve_defined_is_the_stock_hook(split_reserve):
+    assert split_reserve(spiram=False, reserve=0)(60 << 10, 100 << 10, 0) == 60 << 10
+
+
+def test_the_split_reserve_patch_is_idempotent(tmp_path):
+    port = tmp_path / "ports" / "esp32"
+    port.mkdir(parents=True)
+    f = port / "gccollect.c"
+    f.write_text(_GCCOLLECT_STOCK, encoding="utf-8")
+    assert sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path)).returncode == 0
+    once = f.read_text(encoding="utf-8")
+    assert sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path)).returncode == 0
+    assert f.read_text(encoding="utf-8") == once
+
+
 # -- size-class run hints for gc_alloc -----------------------------------------
 #
 # The stock lines tools/patch_gc_run_hints.py anchors on, in stock order, so a
@@ -1750,6 +1839,25 @@ def test_a_flipped_take_or_denial_starts_genhdr_afresh(tmp_path):
     assert _config_guard(bd, out) is True
     (bd / "board.toml").write_text(toml, encoding="utf-8")
     assert _config_guard(bd, out) is False          # deny -> take
+
+
+def test_a_flipped_denial_drops_the_frozen_content_too(tmp_path):
+    """frozen_content.c cites the qstrs the C provided, a module's own name
+    among them, so a denial left it naming `MP_QSTR_moy_ssh` after genhdr had
+    forgotten it, and the build stopped there."""
+    bd, out = _config_board(tmp_path)
+    _config_guard(bd, out)
+    frozen = out / "frozen_content.c"
+    frozen.write_text("// cites MP_QSTR_moy_kernel\n", encoding="utf-8")
+    _config_guard(bd, out)
+    assert frozen.exists()                            # the same configuration keeps it
+    toml = (bd / "board.toml").read_text(encoding="utf-8")
+    take = '[[native.shared.take]]\nmodule = "moy_kernel"'
+    (bd / "board.toml").write_text(
+        toml.replace(take, '[[native.shared.deny]]\nmodule = "moy_kernel"'),
+        encoding="utf-8")
+    _config_guard(bd, out)
+    assert not frozen.exists()
 
 
 def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):

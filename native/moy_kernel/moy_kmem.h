@@ -14,7 +14,10 @@
 // the block. With none of SMALL, PSRAM or INTERNAL (MOY_KMEM_LIBC) it is the C
 // library's malloc, placed by ESP-IDF's own rule.
 //
-// Off a board every block is the C library's, whatever the flags say.
+// On a board built without PSRAM (moy_platform.h's MOY_HAS_PSRAM) MOY_KMEM_PSRAM
+// asks the one internal heap, so a call's flags still name the placement a
+// PSRAM board gives its block. Off a board every block is the C library's,
+// whatever the flags say.
 // moy_kfree takes any block moy_kalloc gave, NULL included. moy_krealloc
 // grows or shrinks a block made without MOY_KMEM_SMALL, in the heaps its
 // flags name (PSRAM or INTERNAL; neither: the C library's), unzeroed.

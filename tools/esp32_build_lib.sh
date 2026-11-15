@@ -601,19 +601,22 @@ moybyte_patch_gc_grow_step() {
 # S3 board one fragmented Python allocation took every remaining byte of
 # PSRAM and every big cart then failed at load with Lua's "not enough
 # memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
-# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM always stay outside
-# the Python heap; a board that defines nothing reserves nothing. A GUARDED
-# SED on the one-line port hook, like repr_c. Reads MPY_DIR.
+# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of the C side's heap always stay
+# outside the Python heap: PSRAM on a board that has it, and on a build without
+# PSRAM (the C3 Zero) the one internal heap, which WiFi, lwIP and the native
+# tier allocate from and which stock growth takes to the last byte. A board
+# that defines nothing reserves nothing. A GUARDED SED on the one-line port
+# hook, like repr_c. Reads MPY_DIR.
 moybyte_patch_gc_split_reserve() {
   local f="${MPY_DIR}/ports/esp32/gccollect.c"
   if ! grep -q "MOYBYTE_GC_SPLIT_RESERVE" "${f}"; then
-    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n    size_t psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n    if (psram <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < psram - MOYBYTE_GC_SPLIT_RESERVE ? avail : psram - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
-    sed -i 's|^size_t gc_get_max_new_split(void) {|#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
-    grep -q "psram - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
+    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n#if CONFIG_SPIRAM\n    size_t pool = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n#else\n    size_t pool = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);  /* no PSRAM: the internal heap is the C side'"'"'s */\n#endif\n    if (pool <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < pool - MOYBYTE_GC_SPLIT_RESERVE ? avail : pool - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
+    sed -i 's|^size_t gc_get_max_new_split(void) {|#include "sdkconfig.h"\n#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
+    grep -q "pool - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
       echo "!! gc split reserve patch did not apply -- gccollect.c's gc_get_max_new_split changed shape" >&2
       exit 1
     }
-    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of PSRAM (#66)"
+    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of the C side's heap (#66)"
   fi
 }
 
@@ -960,8 +963,9 @@ moybyte_sdkconfig_report_inert() {
   fi
 }
 
-# The #168 size guard: the app image ($2) must fit the ota_0 slot read from
-# the board's OWN partition table ($1) -- read, not restated, so the check
+# The #168 size guard: the app image ($2) must fit the app slot read from
+# the board's OWN partition table ($1) -- ota_0, or the factory slot of a
+# table with no OTA slots (the C3 Zero) -- read, not restated, so the check
 # cannot drift from the layout it is checking -- and leave the board ($4) at
 # least its headroom floor ($3 bytes, `[image] headroom_floor_kib` in its
 # board.toml). Both FAIL the build. An image that does not fit cannot be
@@ -973,19 +977,22 @@ moybyte_sdkconfig_report_inert() {
 # anyway (an experiment, never a release).
 moybyte_app_size_guard() {
   local csv="$1" app_bin="$2" floor_bytes="$3" board="$4"
-  local slot_hex slot_bytes size_bytes headroom
-  slot_hex="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
+  local slot slot_hex slot_bytes size_bytes headroom
+  for slot in ota_0 factory; do
+    slot_hex="$(awk -F',' -v s="${slot}" '$1 ~ "^[[:space:]]*" s "[[:space:]]*$" { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
+    [ -z "${slot_hex}" ] || break
+  done
   slot_bytes="${MOYBYTE_APP_SLOT_BYTES:-$(( ${slot_hex:-0x400000} ))}"
   size_bytes="$(wc -c < "${app_bin}" | tr -d '[:space:]')"
   headroom=$(( slot_bytes - size_bytes ))
-  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
-    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))" \
+  printf 'App image: %s bytes of a %s-byte %s slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
+    "${size_bytes}" "${slot_bytes}" "${slot}" "${headroom}" "$(( headroom / 1024 ))" \
     "$(( floor_bytes / 1024 ))" "${board}"
   if [ "${headroom}" -lt 0 ]; then
     echo "" >&2
-    echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+    echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its app slot" >&2
     echo "!!   board:    ${board}" >&2
-    echo "!!   slot:     ${slot_bytes} bytes (ota_0/ota_1, $(basename "${csv}"))" >&2
+    echo "!!   slot:     ${slot_bytes} bytes (${slot}, $(basename "${csv}"))" >&2
     echo "!!   image:    ${size_bytes} bytes" >&2
     echo "!!   OVERFLOW: $(( -headroom )) bytes ($(( (-headroom) / 1024 )) KB)" >&2
     echo "!! Trim it (the baked web console -- see tools/gen_web_blob.py)" >&2
@@ -1065,7 +1072,9 @@ moybyte_native_config() {
 # back to py, a module the board file now denies -- links a module table that
 # names code it no longer has (`undefined reference to moy_kernel_module`).
 # $1 is the build dir: when the native configuration is not the one it was last
-# built with, its genhdr starts afresh. The record is written here, before the
+# built with, its genhdr starts afresh, and so does frozen_content.c, which
+# cites the qstrs the C provided (a denied module's own name among them:
+# `'MP_QSTR_moy_ssh' undeclared` once the C3 Zero denied it). The record is written here, before the
 # build, so a build that fails half-way still leaves genhdr and the record
 # naming the same configuration. A build dir with no record has none to trust.
 # Reads BUILD_PYTHON SCRIPT_DIR.
@@ -1074,7 +1083,7 @@ moybyte_native_config_guard() {
   want="$(moybyte_native_config)"
   if [ "$(cat "${bout}/moy_native_config" 2>/dev/null)" != "${want}" ]; then
     echo "== native configuration changed: starting ${bout}/genhdr afresh"
-    rm -rf "${bout}/genhdr"
+    rm -rf "${bout}/genhdr" "${bout}/frozen_content.c"
   fi
   mkdir -p "${bout}"
   printf '%s\n' "${want}" > "${bout}/moy_native_config"

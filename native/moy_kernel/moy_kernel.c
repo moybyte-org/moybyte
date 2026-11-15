@@ -735,20 +735,23 @@ bool moy_kpool_free(void *p) {
     return true;
 }
 
-void moy_kpool_stats(size_t *high, uint32_t *misses) {
+bool moy_kpool_stats(size_t *high, uint32_t *misses) {
     *high = 0;
     *misses = s_kpool_misses;
-    if (s_kpool_heap != NULL) {
-        multi_heap_info_t i;
-        multi_heap_get_info(s_kpool_heap, &i);
-        *high = MOY_KPOOL_BYTES - i.minimum_free_bytes;
+    if (s_kpool_heap == NULL) {
+        return false;
     }
+    multi_heap_info_t i;
+    multi_heap_get_info(s_kpool_heap, &i);
+    *high = MOY_KPOOL_BYTES - i.minimum_free_bytes;
+    return true;
 }
 
 static void moy_kernel_reserve(void) {
     if (s_resume == NULL) {
         s_resume = kernel_psram(sizeof(resume_t));
     }
+    #ifdef MOY_HAS_PSRAM
     if (s_kpool == NULL) {
         s_kpool = moy_kalloc(MOY_KPOOL_BYTES, MOY_KMEM_PSRAM);
         s_kpool_heap = s_kpool != NULL ? multi_heap_register(s_kpool, MOY_KPOOL_BYTES) : NULL;
@@ -756,6 +759,7 @@ static void moy_kernel_reserve(void) {
             multi_heap_set_lock(s_kpool_heap, &s_kpool_mux);
         }
     }
+    #endif
     moy_play_reserve(kernel_psram);
     moy_aud_reserve();
     #ifdef MOY_KERNEL_PANEL

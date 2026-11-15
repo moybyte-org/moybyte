@@ -380,6 +380,15 @@ def test_mark_valid_swallows_a_board_that_cannot(board):
     assert board.u.mark_valid() is False
 
 
+def test_a_factory_image_is_not_asked_to_confirm(board, monkeypatch):
+    """One app slot (the C3 Zero) has no rollback to cancel, and ESP-IDF logs
+    an error for being asked, so the confirm does not ask."""
+    esp = _Esp32(running="factory")
+    _install_esp32(monkeypatch, esp)
+    assert board.u.mark_valid() is False
+    assert esp.marked == 0
+
+
 def test_the_online_row_needs_both_a_slot_and_a_radio(board):
     assert board.u.online_available() is False        # no wifi injected
     board.u.set_wifi(object())
