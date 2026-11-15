@@ -578,6 +578,7 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_aes_ccm_open,
         (void *)moy_os_moy_name,
         (void *)moy_os_moy_clock,
+        (void *)moy_os_moy_ui_tell,
     },
 };
 
@@ -708,4 +709,5 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_aes_ccm_open",
     "moy_name",
     "moy_clock",
+    "moy_ui_tell",
 };

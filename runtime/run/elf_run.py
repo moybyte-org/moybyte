@@ -71,7 +71,12 @@ from array import array
 IN_X, IN_Y, IN_PTR, IN_KEY, IN_FACE, IN_SWAP = range(6)
 IN_ROOM_X, IN_ROOM_Y, IN_ROOM_W, IN_ROOM_H = range(6, 10)
 IN_LAYOUT_W, IN_LAYOUT_H, IN_LAYOUT_FS = range(10, 13)
-IN_WORDS = 13
+IN_REP, IN_KEYREP, IN_ASK = range(13, 16)
+IN_WORDS = 16
+# moy_os.h's MOY_OS_ASK_* (the ask word's bits) and MOY_OS_TOLD_* (what the
+# toolkit an app links told after its last frame: moy_ui_tell).
+ASK_CANCEL, ASK_BACK = 1, 2
+TOLD_TYPING, TOLD_CANCEL, TOLD_BACK = 1, 2, 4
 
 
 def elf_defines(path, name):
@@ -227,6 +232,46 @@ def fill_words(ws, words, ptr, ring, lay=None, pid=0):
         words[IN_LAYOUT_W] = lay[0]
         words[IN_LAYOUT_H] = lay[1]
         words[IN_LAYOUT_FS] = lay[2]
+    add_steps(inp, words)
+
+
+def add_steps(inp, words):
+    """The frame's steps beyond its presses (the input table's `rep_word`:
+    a held direction's repeats and the trackball's steps, a byte each; and a
+    held key's typing repeats) added to those `words` hold for a message not
+    yet posted (IN_REP, IN_KEYREP; `sent` clears them)."""
+    rw = getattr(inp, "rep_word", 0)
+    if rw:
+        was = words[IN_REP] & 0xFFFFFFFF
+        out = 0
+        for sh in (0, 8, 16, 24):
+            n = ((was >> sh) & 0xFF) + ((rw >> sh) & 0xFF)
+            out |= (n if n < 0xFF else 0xFF) << sh
+        words[IN_REP] = out - 0x100000000 if out >> 31 else out
+    kn = getattr(inp, "key_repeats", 0)
+    if kn:
+        key = inp.repeat_key & 0xFFFF
+        was = words[IN_KEYREP]
+        if was and was & 0xFFFF == key:
+            kn += was >> 16
+        words[IN_KEYREP] = key | (kn if kn < 0x7FFF else 0x7FFF) << 16
+
+
+def sent(words):
+    """A posted frame message carried the steps and the asks."""
+    words[IN_REP] = words[IN_KEYREP] = words[IN_ASK] = 0
+
+
+def ui_ask(pid, words, told, ask, take):
+    """An app drawing with the toolkit it links (sdk/src/moyui_link.c) asked
+    what a Lua run's toolkit is asked (ui_draw.run_typing, run_cancel,
+    run_back): whether its last frame told `told` (moy_ui_tell, TOLD_*), and
+    where `take`, the ask `ask` (ASK_*) on the next frame message."""
+    if words is None or not _E.screen_told(pid) & told:
+        return False
+    if take and ask:
+        words[IN_ASK] |= ask
+    return True
 
 
 def stop_text(code, fault=None):
@@ -497,9 +542,23 @@ class ElfGame:
             self._pressed = 0
             self._ms = 0
             key_sent(self._keys)
+            if words is not None:
+                sent(words)
         if got & FRAME_SHOWN:
             self._shown = True
             self.presented += 1
+
+    def ui_typing(self):
+        """Whether the app's page has a field in focus (ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_TYPING, 0, False)
+
+    def ui_cancel(self, take=True):
+        """The host's cancel into the app's page (ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_CANCEL, ASK_CANCEL, take)
+
+    def ui_back(self, take=True):
+        """The host's back into the app's page (ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_BACK, ASK_BACK, take)
 
     def _end(self):
         self._live = False

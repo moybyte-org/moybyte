@@ -78,6 +78,12 @@ static mp_obj_t face_moy_evq_screen_close(mp_obj_t a0) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_screen_close_obj, face_moy_evq_screen_close);
 
+static mp_obj_t face_moy_evq_screen_told(mp_obj_t a0) {
+    uint32_t pid = (uint32_t)mp_obj_get_int(a0);
+    return mp_obj_new_int_from_uint(moy_screen_slot_told(pid));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_screen_told_obj, face_moy_evq_screen_told);
+
 static mp_obj_t face_moy_evq_ready(void) {
     return mp_obj_new_int_from_uint(moy_evq_ready());
 }
@@ -294,6 +300,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_evq_listening_obj, face_moy_evq_listen
     { MP_ROM_QSTR(MP_QSTR_queued), MP_ROM_PTR(&face_moy_evq_queued_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_screen_open), MP_ROM_PTR(&face_moy_evq_screen_open_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_screen_close), MP_ROM_PTR(&face_moy_evq_screen_close_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_screen_told), MP_ROM_PTR(&face_moy_evq_screen_told_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_ready), MP_ROM_PTR(&face_moy_evq_ready_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_step), MP_ROM_PTR(&face_moy_evq_step_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&face_moy_evq_held_obj) }, \

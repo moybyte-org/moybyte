@@ -94,6 +94,7 @@
       {"py": "queued(pid)", "c": "moy_evq_queued", "example": [901]},
       {"py": "screen_open(pid, w, h, depth)", "c": "moy_screen_slot_open", "example": [901, 0, 0, 1]},
       {"py": "screen_close(pid)", "c": "moy_screen_slot_close", "example": [901]},
+      {"py": "screen_told(pid)", "c": "moy_screen_slot_told", "example": [901]},
       {"py": "screen_frame(pid, held, pressed, ms, max_ms, words=None)", "hand": true},
       {"py": "screen_pixels(pid)", "hand": true},
       {"py": "ready()", "c": "moy_evq_ready", "example": []},

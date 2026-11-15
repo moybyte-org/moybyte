@@ -1061,6 +1061,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moy_present` | none |  |  | `moybyte.os.present` | `moy_present` |
 | `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
 | `moy_ui_font_pull` | none |  |  | `moybyte.os.ui_font_pull` | `moy_ui_font_pull` |
+| `moy_ui_tell` | none |  |  | `moybyte.os.ui_tell` | `moy_ui_tell` |
 | `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
 | `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
 | `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |

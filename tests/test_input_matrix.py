@@ -27,10 +27,13 @@ layers the picture, which must be the Python app's after the same gesture,
 the Python app's cell passing (tests/test_ui_linked.py holds the three to
 the same pixels at rest).
 
-A cell that fails today is in FAILING under the phase whose change clears it
-(phase 5, the input owner; phase 8, the toolkit's widget state). Each is a
-strict expected failure, so the phase that clears a cell has to take it out;
-emptying a phase's set is that phase's guard.
+A compiled or ELF app's toolkit is a copy linked into its module: the
+console's input owner reaches it through the frame message's steps and asks
+and the answers the module tells after each frame (sdk/src/moyui_link.c,
+native/moy_kernel/moy_screen_slot.h's THE TOOLKIT'S ANSWERS), as it reaches a
+Lua run's through the run face.
+
+Every cell passes: a cell is never marked as an expected failure.
 """
 
 import os
@@ -71,31 +74,6 @@ GESTURES = {
 
 CELLS = [(layer, row, col) for layer in LAYERS for row in ROWS for col in COLUMNS
          if col in GESTURES[row]]
-
-# The cells that fail today, by the phase whose change clears them. A cell
-# here is a strict xfail: when it passes, take it out.
-FAILING = {
-    "phase 5": {
-        # A compiled (WASI) or ELF app's page draws through a toolkit linked
-        # into the module, whose focus, popover and edit the console cannot
-        # see or reach: the input owner asks the run's context
-        # (`ui_draw.run_typing`, `run_cancel`, `run_back`), which such an app
-        # leaves closed (native/moy_ui/moy_ui_wasm.c). So a focused field
-        # leaves the keyboard in move mode, Esc, B and Mic reach neither its
-        # edit nor its popover, and the trackball steps no list of it -- until
-        # the module's ABI carries the toolkit's answers out and the host's
-        # cancel and back in (moy-spec's proposals/wasm-runtime.md).
-        *[(layer, row, "mic") for layer in ("wasm_app", "elf_app")
-          for row in ("field", "popover")],
-        *[(layer, "field", col) for layer in ("wasm_app", "elf_app")
-          for col in ("kbd_move", "esc")],
-        *[(layer, "popover", col) for layer in ("wasm_app", "elf_app")
-          for col in ("esc", "gamepad")],
-        ("wasm_app", "list", "trackball"),
-        ("elf_app", "list", "trackball"),
-    },
-    "phase 8": set(),
-}
 
 # The page's widget rect, in the page's content rect: 8 in from its corner.
 INSET = 8
@@ -662,23 +640,7 @@ def _reference(tmp_path, row, col, monkeypatch, built):
     return _REF[key]
 
 
-def _phase_of(cell):
-    for phase, cells in FAILING.items():
-        if cell in cells:
-            return phase
-    return None
-
-
-def _params():
-    out = []
-    for cell in CELLS:
-        phase = _phase_of(cell)
-        marks = [pytest.mark.xfail(strict=True, reason="cleared by " + phase)] if phase else []
-        out.append(pytest.param(*cell, id="-".join(cell), marks=marks))
-    return out
-
-
-@pytest.mark.parametrize("layer,row,col", _params())
+@pytest.mark.parametrize("layer,row,col", CELLS, ids=["-".join(c) for c in CELLS])
 def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     what = GESTURES[row][col]
     if layer in ("wasm_app", "elf_app"):
@@ -693,12 +655,21 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     try:
         if layer in ("wasm_app", "elf_app"):
             before = rig.shot()
-            gesture(rig, col, what)
+            if what == "cancel":
+                # A cancel draws the page as it was before the typing, so the
+                # typing has to show first: a cancel that did nothing would
+                # draw the same.
+                rig.desk_type(TYPED)
+                typed = rig.shot() != before
+                assert typed, "%s: typing into the field draws nothing" % layer
+                gesture(rig, col, "dismiss")
+            else:
+                gesture(rig, col, what)
             after = rig.shot()
             assert ref[2], "the Python app's own cell fails: so does this layer's"
             # Booleans, not the shots: a failed == over two frames' bytes
             # makes pytest diff them, which runs for hours.
-            drew = ref[1] != ref[0] and after == ref[1]
+            drew = (ref[1] != ref[0] or what == "cancel") and after == ref[1]
             assert drew, ("%s: the %s's %s by %s does not draw what the Python app's does"
                           % (layer, row, what, col))
             rests = before == ref[0]
@@ -711,12 +682,3 @@ def test_cell(tmp_path, monkeypatch, built, layer, row, col):
             "%s: %s by %s: %r -> %r" % (layer, what, col, before, after))
     finally:
         rig.ws.spine.exit()
-
-
-def test_every_failing_cell_is_a_cell_and_names_one_phase():
-    seen = set()
-    for phase, cells in FAILING.items():
-        assert phase in ("phase 5", "phase 8"), phase
-        assert cells <= set(CELLS), cells - set(CELLS)
-        assert not cells & seen, cells & seen
-        seen |= cells

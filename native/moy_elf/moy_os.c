@@ -1220,7 +1220,8 @@ int moy_os_moy_term_size(int *cols, int *rows) {
 //
 // A game's screen is its pid's slot (native/moy_kernel/moy_screen_slot.h),
 // opened with the game and closed at its stop: moy_present copies the
-// module's pixels in, waiting while the console holds the last frame.
+// module's pixels in, waiting while the console holds the last frame, and
+// moy_ui_tell leaves the toolkit's answers beside them.
 
 int moy_os_moy_screen(int *w, int *h) {
     thr_t *t = moy_os_enter();
@@ -1252,6 +1253,19 @@ int moy_os_moy_present(const void *px, size_t n) {
     if (r != 0) {
         // a game's slot gone is its stop
         moy_os_errno_set(r == -ENODEV ? EINTR : -r);
+        r = -1;
+    }
+    moy_os_leave(t);
+    return r;
+}
+
+// The toolkit's answers after a frame (moy_screen_slot.h, THE TOOLKIT'S
+// ANSWERS), into the game's slot for the console's input owner to read.
+int moy_os_moy_ui_tell(uint32_t answers) {
+    thr_t *t = moy_os_enter();
+    int r = t != NULL && t->p->game ? moy_screen_slot_tell(t->p->pid, answers) : -ENODEV;
+    if (r != 0) {
+        moy_os_errno_set(ENODEV);
         r = -1;
     }
     moy_os_leave(t);

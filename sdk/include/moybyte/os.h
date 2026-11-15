@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 126
+#define MOY_OS_VERSION 127
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -727,6 +727,17 @@ static inline uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, 
     return (uint32_t)r;
 }
 
+int32_t __moy_os_ui_tell(uint32_t answers)
+    __attribute__((import_module("moybyte.os"), import_name("ui_tell")));
+static inline int moy_ui_tell(uint32_t answers) {
+    int32_t r = __moy_os_ui_tell(answers);
+    if (r < 0) {
+        errno = (int)-r;
+        return -1;
+    }
+    return (int)r;
+}
+
 int32_t __moy_os_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap)
     __attribute__((import_module("moybyte.os"), import_name("aes_ctr")));
 static inline int32_t moy_aes_ctr(const void *key, size_t key_len, const void *data, size_t data_len, void *text, size_t text_cap) {
@@ -799,6 +810,7 @@ int moy_screen(int *w, int *h);
 int moy_present(const void *px, size_t n);
 uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap);
 uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap);
+int moy_ui_tell(uint32_t answers);
 
 // The app's calls (docs/app_api_v1.md, the call table): each the console's
 // row of the same name, under the process's permissions. A text is

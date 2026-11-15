@@ -74,6 +74,7 @@
     X(status_state, "(ii)i") \
     X(ui_font_pull, "(ii*~)i") \
     X(ui_pull, "(i*~)i") \
+    X(ui_tell, "(i)i") \
     X(x25519, "(*~*~*~)i") \
 
 // The rows served where they are called (how "here" or "seq"): C on the

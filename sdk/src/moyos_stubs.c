@@ -1286,3 +1286,13 @@ int32_t moy_clock(int32_t local)
     return ((moy_os_fn_moy_clock *)__moy_os->fn[125])(local);
 }
 #endif
+
+#if MOY_OS_ROW(126)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_ui_tell(uint32_t answers);
+MOY_OS_USED(126);
+int moy_ui_tell(uint32_t answers)
+{
+    return ((moy_os_fn_moy_ui_tell *)__moy_os->fn[126])(answers);
+}
+#endif

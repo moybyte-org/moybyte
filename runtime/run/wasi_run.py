@@ -21,7 +21,8 @@ from array import array
 
 import moy_evq as _E
 import moybyte as _moybyte
-from elf_run import IN_WORDS, fill_words, key_ring, key_sent, read_buttons
+from elf_run import (ASK_BACK, ASK_CANCEL, IN_WORDS, TOLD_BACK, TOLD_CANCEL, TOLD_TYPING,
+                     fill_words, key_ring, key_sent, read_buttons, sent, ui_ask)
 
 # The longest a tick waits for a present (elf_run.WAIT_US_MAX's).
 WAIT_MS_MAX = 50
@@ -105,11 +106,24 @@ class WasiApp:
             self._pressed = 0
             self._ms = 0
             key_sent(self._keys)
+            sent(self._words)
         if got > 0 and got & SHOWN:
             self._shown = True
             self.presented += 1
         if self._rt.done(self.pid):
             self._end()
+
+    def ui_typing(self):
+        """Whether the app's page has a field in focus (elf_run.ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_TYPING, 0, False)
+
+    def ui_cancel(self, take=True):
+        """The host's cancel into the app's page (elf_run.ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_CANCEL, ASK_CANCEL, take)
+
+    def ui_back(self, take=True):
+        """The host's back into the app's page (elf_run.ui_ask)."""
+        return self._live and ui_ask(self.pid, self._words, TOLD_BACK, ASK_BACK, take)
 
     def _end(self):
         self._live = False

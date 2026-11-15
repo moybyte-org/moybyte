@@ -8,13 +8,13 @@ import face_ctypes as _f
 
 __all__ = (
     "close", "has", "app", "listen", "hears", "post", "route", "queued", "screen_open",
-    "screen_close", "ready", "step", "held", "forget", "serve", "timer_cancel", "clock",
-    "woke", "termed", "items_hand", "items_end", "items_reset", "notes_id", "notes_waiting",
-    "notes_goal", "notes_award", "notes_progress", "notes_end", "notes_reset", "status_add",
-    "status_show", "status_remove", "status_sweep", "status_reset", "timers", "drop",
-    "vm_stop", "live", "want", "wanted", "wants", "listening", "OK", "STALE", "FULL", "NOMEM",
-    "DENIED", "DEAF", "EMPTY", "RANGE", "FINE", "WARNED", "STRUCK", "SUSPENDED", "SLICE_US",
-    "ABORT_US", "STRIKES", "DEPTH", "SENDER", "BATCH", "WANT_MAIL", "WANT_POLL",
+    "screen_close", "screen_told", "ready", "step", "held", "forget", "serve", "timer_cancel",
+    "clock", "woke", "termed", "items_hand", "items_end", "items_reset", "notes_id",
+    "notes_waiting", "notes_goal", "notes_award", "notes_progress", "notes_end", "notes_reset",
+    "status_add", "status_show", "status_remove", "status_sweep", "status_reset", "timers",
+    "drop", "vm_stop", "live", "want", "wanted", "wants", "listening", "OK", "STALE", "FULL",
+    "NOMEM", "DENIED", "DEAF", "EMPTY", "RANGE", "FINE", "WARNED", "STRUCK", "SUSPENDED",
+    "SLICE_US", "ABORT_US", "STRIKES", "DEPTH", "SENDER", "BATCH", "WANT_MAIL", "WANT_POLL",
 )
 
 OK = 0
@@ -72,6 +72,7 @@ _SIGS = (
     ("moy_evq_queued", [_c.c_uint32], _c.c_uint32),
     ("moy_screen_slot_open", [_c.c_uint32, _c.c_int, _c.c_int, _c.c_int], _c.c_int),
     ("moy_screen_slot_close", [_c.c_uint32], None),
+    ("moy_screen_slot_told", [_c.c_uint32], _c.c_uint32),
     ("moy_evq_ready", [], _c.c_uint32),
     ("moy_evq_step", [_c.c_uint32], _c.c_uint32),
     ("moy_super_held", [_c.c_uint32], _c.c_bool),
@@ -151,6 +152,10 @@ def screen_open(pid, w, h, depth):
 
 def screen_close(pid):
     _lib().moy_screen_slot_close(int(pid))
+
+
+def screen_told(pid):
+    return _lib().moy_screen_slot_told(int(pid))
 
 
 def ready():

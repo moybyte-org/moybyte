@@ -1297,7 +1297,7 @@ class Player(PlayerDiag):
             return False
         lua = self.lua
         if lua is not None:
-            return not getattr(lua, "own_ui", False) and _ui_draw.run_typing()
+            return lua.ui_typing() if getattr(lua, "own_ui", False) else _ui_draw.run_typing()
         ui = self.ui
         return ui is not None and _ui_draw.app_typing(ui[0])
 
@@ -1489,8 +1489,9 @@ class Player(PlayerDiag):
         cancel through `back`."""
         if not self.is_tool or self.cart_error is not None:
             return False
-        if self.lua is not None:
-            took = _ui_draw.run_cancel(True)
+        lua = self.lua
+        if lua is not None:
+            took = lua.ui_cancel(True) if getattr(lua, "own_ui", False) else _ui_draw.run_cancel(True)
         else:
             ui = self.ui
             took = ui is not None and _ui_draw.app_cancel(ui[0], True)
@@ -1503,7 +1504,10 @@ class Player(PlayerDiag):
     def _app_back(self, take):
         if not self.is_tool or self.cart_error is not None:
             return False
-        if self.lua is not None:       # the run's own context
+        lua = self.lua
+        if lua is not None:             # the run's own context, or the toolkit it links
+            if getattr(lua, "own_ui", False):
+                return lua.ui_back(take)
             return bool(_ui_draw.run_back(take))
         ui = self.ui
         return ui is not None and bool(_ui_draw.app_back(ui[0], take))
