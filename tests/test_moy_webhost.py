@@ -551,6 +551,62 @@ def test_a_request_the_vm_answers_is_parked_and_answered(serving):
     assert seen == ["hop"]
 
 
+class _Parking:
+    """_exchange's host for a bare kernel listener: each parked request is
+    noted and answered 200, as the VM's poll would."""
+
+    def __init__(self, port):
+        self.port = port
+        self.seen = []
+
+    def poll(self):
+        nb.web_poll()
+        req = nb.web_take()
+        if req is not None:
+            self.seen.append((req[0], req[1].split("?", 1)[0]))
+            nb.web_answer(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                          b"Connection: close\r\n\r\nok")
+
+
+def test_the_setup_forms_host_parks_every_request_in_the_clear(tmp_path):
+    """The setup form's host defers "*" (device/zero_setup.py) and runs before
+    the board has a sign-in. A board refuses a sealed route whatever its
+    sign-in, and a deferred route was sealed, so every request the setup form
+    got was 401 {"error": "session"} and no Zero could be set up. A sign-in
+    folder here stands for the board's closed default, which the host's
+    open default (no folder) would hide."""
+    (tmp_path / "system").mkdir()
+    port = free_port()
+    nb.web_start(port, "/", None, None, str(tmp_path / "system"), ["*"])
+    try:
+        h = _Parking(port)
+        for raw in (b"GET / HTTP/1.1\r\n\r\n",
+                    b"GET /generate_204 HTTP/1.1\r\n\r\n",
+                    b"GET /carts.json HTTP/1.1\r\n\r\n",
+                    b"POST /setup HTTP/1.1\r\nContent-Length: 3\r\n\r\na=b"):
+            got = _exchange(h, raw)
+            assert b"200" in h_status(got), got
+        assert h.seen == [("GET", "/"), ("GET", "/generate_204"), ("GET", "/carts.json"),
+                          ("POST", "/setup")]
+    finally:
+        nb.web_stop()
+
+
+def test_a_consoles_deferred_route_stays_sealed(tmp_path):
+    """Only "*" opens the deferral: a console's named one (/run) still asks
+    for a session before the VM sees it."""
+    (tmp_path / "system").mkdir()
+    port = free_port()
+    nb.web_start(port, str(_store(tmp_path)), None, None, str(tmp_path / "system"), ["/run"])
+    try:
+        h = _Parking(port)
+        got = _exchange(h, b"POST /run HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+        assert b"401" in h_status(got) and b"session" in got
+        assert h.seen == []
+    finally:
+        nb.web_stop()
+
+
 def test_a_parked_request_nobody_takes_is_a_503(tmp_path):
     """A VM gone mid-request (a soft reset) must not leave the browser hanging:
     the kernel answers it itself once the window is out."""
