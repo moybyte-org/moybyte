@@ -272,7 +272,7 @@ class BarLayer:
     at their rects (`bar_rects`), LAST over each content's paint, which lays
     out in what the bars leave (`content_rect`). The frame draws a surface's
     strip after its page (`draw_surface`, `STRIP_OF`), but for the surfaces
-    `STRIP_SELF` names, which call _draw_status_strip(where) themselves; the
+    `STRIP_SELF` names, which call draw_status_strip(where) themselves; the
     pointer methods delegate their bar slice to
     handle_bar_tap(where, ...), which takes
     canvas coordinates and hit-test in the coordinates of the bar they land on.

@@ -1,13 +1,11 @@
 # Unix-port user-module glue (#63): moy_gfx is VM-neutral C (py/obj.h + py/runtime.h
-# only), so it also builds into ports/unix -- used by the host-side MicroPython
-# bench that runs the REAL C kernel + REAL allocator without ESP32 hardware.
+# only), so it also builds into ports/unix -- the board-model MicroPython the
+# host suites run (`make unix-micropython`), the REAL C kernel and allocator
+# without ESP32 hardware.
 #
-# This must stay the twin of micropython.cmake. When six verbs became CALLS into
-# vendored libmoy (#97), the cmake side gained those sources and this side did
-# not, so the unix port stopped linking -- modmoy_gfx.c references moy_tri,
-# moy_spr, moy_map_draw and friends with nothing defining them. Nothing caught
-# it: the firmware tests grep frozen source rather than compile it, and
-# bench_unix_mp.py is run by hand.
+# This must stay the twin of micropython.cmake: a source the cmake side lists
+# and this side does not (libmoy's, which modmoy_gfx.c calls into for moy_tri,
+# moy_spr, moy_map_draw and friends) leaves the unix port unlinkable.
 #
 # libmoy_kernels.c is the shim that pulls libmoy's three .c files into one
 # translation unit at -O3 (its header says why the pragma cannot live in the

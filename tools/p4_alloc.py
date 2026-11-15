@@ -379,9 +379,9 @@ def _wrap_phases():
     ws._wrapa(ws.wm, '_win_chrome', 'wm.chrome')
     ws._wrapa(ws.wm, '_blit_backdrop_cache', 'desk.cache')
     ws._wrapa(ws, '_composite_game', 'composite')
-    ws._wrapa(ws, '_journal_idle_tick', 'journal')
-    ws._wrapa(ws, 'handle_input', 'input')
-    ws._wrapa(ws, 'handle_pointer', 'pointer')
+    ws._wrapa(ws.history, 'idle_tick', 'journal')
+    ws._wrapa(ws.router, 'handle_input', 'input')
+    ws._wrapa(ws.router, 'handle_pointer', 'pointer')
     for _l in ws.wm.visible_stack_rev():
         _n = getattr(_l, 'id', None) or type(_l).__name__
         ws._wrapa(_l, 'draw', 'layer:' + str(_n))
@@ -405,7 +405,7 @@ DRILL_SETTINGS = [
     "ws.wm.content_for('settings')::_rows_page::set.rows_page",
     "ws.wm.content_for('settings')::_row::set.row",
     "ws.wm.content_for('settings')::_grouped::set.groups",
-    "ws.bar_layer::_draw_status_strip::bar.status",
+    "ws.bar_layer::draw_status_strip::bar.status",
     "ws.sys_canvas::print::cv.print",
     "ws.sys_canvas::rect::cv.rect",
 ]
