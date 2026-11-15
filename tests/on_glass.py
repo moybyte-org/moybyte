@@ -1899,7 +1899,7 @@ def a_leaked_session_leaves_the_panel_flushing(board):
     assert err is None and isinstance(n, int), (n, err)
     d0 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     for _ in range(4):
-        board.pyval("setattr(ws, '_dirty', True)", strict=True)
+        board.pyval("ws.mark_dirty()", strict=True)
         time.sleep(0.25)
     d1 = board.pyval("ws.frame_state.frames_drawn", strict=True)
     assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
