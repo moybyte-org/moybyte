@@ -29,7 +29,7 @@ WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
 ERR_H = os.path.join(ROOT, "native", "moy_app", "moy_app_err.h")
-FACE_ERRORS = os.path.join(ROOT, "runtime", "system", "face_errors.py")
+FACE_ERRORS = str(runtime_file("face_errors.py"))
 EVQ_CODES_H = os.path.join(ROOT, "native", "moy_kernel", "moy_evq_codes.h")
 WASI_OS_H = os.path.join(ROOT, "native", "moy_wasm", "moy_wasi_os_rows.h")
 # The module a WASI program imports a "wasi" row from.
