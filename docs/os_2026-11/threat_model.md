@@ -247,4 +247,8 @@ What holds less than a reader would assume. Each is how the code stands.
 - **The browser's profile**: a device key is that profile's, and on the
   project site the console's store is the browser's own storage.
 - **The vendored code's own bugs** (Dropbear, WAMR, mbedTLS, Lua): they are
-  the console's, fixed in our forks and re-vendored.
+  the console's, fixed in our forks and re-vendored. Every `*_vendor.json`
+  pin is checked weekly against OSV.dev, NVD and its upstream's GitHub
+  advisories (`tools/vendor_advisories.py`); one it reports is bumped past or
+  acknowledged with a reason in `tools/vendor_advisories_ack.json`. Lua has
+  no pin, so nothing checks it.

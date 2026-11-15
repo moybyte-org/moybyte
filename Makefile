@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr vendor-advisories
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -452,6 +452,13 @@ vendor-jet:
 #   make vendor-jet-carts CARTS_REPO=/path/to/carts COMMIT=<sha>
 vendor-jet-carts:
 	$(PYTHON) tools/vendor_jet_carts.py $(if $(CARTS_REPO),--carts $(CARTS_REPO)) $(if $(COMMIT),--commit $(COMMIT))
+
+# Each vendor pin above against OSV.dev, NVD and its upstream's GitHub security
+# advisories; fails on one tools/vendor_advisories_ack.json does not acknowledge.
+# Needs the network; .github/workflows/vendor-advisories.yml runs it weekly.
+#   make vendor-advisories
+vendor-advisories:
+	$(PYTHON) tools/vendor_advisories.py
 
 # The T-Deck build (mainline MicroPython -- the only T-Deck build since the
 # fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the

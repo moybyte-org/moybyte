@@ -1083,7 +1083,8 @@ would change behaviour or reach further than the audits' mechanical core:
 **Vendored.** Lua, both libmoy copies, WAMR, dash, mbedTLS, monocypher,
 Dropbear, the DSI vendor drivers, `tools/p8_lua_port.py`, the SDK's libc.
 Fixed upstream or in the fork and re-vendored. Every scan in this plan
-excludes them.
+excludes them. `tools/vendor_advisories.py` checks each `*_vendor.json` pin
+against the public advisory sources weekly.
 
 **Two by design**
 

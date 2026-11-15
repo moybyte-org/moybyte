@@ -1,0 +1,39 @@
+# Each vendor pin (`*_vendor.json`) against the public advisory sources:
+# tools/vendor_advisories.py asks OSV.dev, NVD and the upstream repositories'
+# GitHub security advisories which known vulnerabilities reach the pinned
+# version or commit, and fails on one that tools/vendor_advisories_ack.json
+# does not acknowledge. Weekly and on demand, never per push: the answer moves
+# with the advisory databases, not with this tree. A schedule runs on the
+# default branch's copy of this file.
+
+name: Vendor advisories
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check every pin
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          set -o pipefail
+          { echo '```'; status=0; python tools/vendor_advisories.py 2>&1 || status=$?; echo '```'; exit $status; } | tee -a "$GITHUB_STEP_SUMMARY"

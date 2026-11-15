@@ -1,0 +1,146 @@
+[
+ {
+  "ghsa_id": "GHSA-wj3p-xhqm-pffc",
+  "cve_id": "CVE-2026-54914",
+  "summary": "Heap Buffer Overflow in WAMR WASI poll_oneoff Output Buffer",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2026-07-16T13:47:23Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": ""
+    },
+    "vulnerable_version_range": "<=2.4.4",
+    "patched_versions": ""
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-frwm-5hpr-2hq2",
+  "cve_id": "CVE-2026-54913",
+  "summary": "Missing `ref.null` heap-type validation in `load_init_expr` leaks host stack memory to the WebAssembly guest",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2026-08-04T07:24:40Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "c/c++",
+     "name": "wasm-micro-runtime"
+    },
+    "vulnerable_version_range": "<=2.4.4",
+    "patched_versions": ""
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-jjv3-x3jf-cg49",
+  "cve_id": "CVE-2026-54912",
+  "summary": "WAMR fast interpreter loader heap buffer overflow via constant deduplication mismatch",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2026-08-04T07:24:56Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "c/c++",
+     "name": "wasm-micro-runtime"
+    },
+    "vulnerable_version_range": "<=2.4.4",
+    "patched_versions": "2.4.5"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-2f2p-wf5w-82qr",
+  "cve_id": "CVE-2025-64704",
+  "summary": "Segmentation fault in v128.store instruction ",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2025-11-25T13:51:00Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": "iwasm"
+    },
+    "vulnerable_version_range": "<=2.4.3",
+    "patched_versions": ""
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-gvx3-gg3x-rjcx",
+  "cve_id": "CVE-2025-64713",
+  "summary": "frame_offset_bottom array bounds overflow in fast Interpreter mode when handling GET_GLOBAL(I32) followed by if opcode",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2025-11-25T13:51:20Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": ""
+    },
+    "vulnerable_version_range": " 2.4.2",
+    "patched_versions": ""
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-xj5p-r8jq-pw47",
+  "cve_id": "CVE-2025-58749",
+  "summary": "When `address >= 2GiB` in `memory.fill` , `iwasm` cannot exit normally in `LLVM-JIT` mode.",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2025-09-16T01:05:17Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": "iwasm"
+    },
+    "vulnerable_version_range": "2.4.1",
+    "patched_versions": "2.4.2"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-vh64-mfvw-pxqp",
+  "cve_id": "CVE-2025-54126",
+  "summary": "`--addr-pool` option allows all IPv4 addresses when subnet mask is not specified",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2025-07-29T02:31:14Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": "iwasm"
+    },
+    "vulnerable_version_range": "2.4.0",
+    "patched_versions": "2.4.1"
+   }
+  ]
+ },
+ {
+  "ghsa_id": "GHSA-8fc8-4g25-c8m7",
+  "cve_id": "CVE-2025-43853",
+  "summary": "Filesystem sandbox escape with symlink when using uvwasi feature",
+  "state": "published",
+  "withdrawn_at": null,
+  "published_at": "2025-05-15T03:03:19Z",
+  "vulnerabilities": [
+   {
+    "package": {
+     "ecosystem": "",
+     "name": "iwasm"
+    },
+    "vulnerable_version_range": "< 2.2.0",
+    "patched_versions": "2.3.0"
+   }
+  ]
+ }
+]

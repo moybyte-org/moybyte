@@ -13,7 +13,9 @@ and the hash of every copied file are in
 archive is GitHub's mirror's tag archive (`mkj/dropbear`): Dropbear's
 release server answers the tool's fetch with HTTP 403. The release tarball
 holds the same tree, and `--tarball` takes it too, checked against its own
-pinned SHA-256 (`tools/vendor_dropbear.py`).
+pinned SHA-256 (`tools/vendor_dropbear.py`). `make vendor-advisories`
+(`tools/vendor_advisories.py`, weekly in CI) checks the release against the
+public advisory sources, as it checks every vendor pin.
 
 ## What is copied
 
