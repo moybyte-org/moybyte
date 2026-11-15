@@ -487,7 +487,7 @@ Closes T1, T9, T10, T13, N9, T16; measures X8. Decided: §6, decision 2.
   the error table to raise from, constants, defaults, no-allocation rows,
   the targets a row is absent on).
 - The generator emits, committed and drift-tested: the MicroPython face
-  (`modmoy_<m>_face.c`, included by the hand file's globals table), the
+  (`modmoy_<m>_face.h`, included by the hand file's globals table), the
   ctypes face, the mirrored structures (T9, N9: from the headers), the
   constants (T13, N9) and the one table `runtime/__init__.py` registers host
   faces from (T10).

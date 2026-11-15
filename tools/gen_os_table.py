@@ -36,7 +36,7 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
   docs/app_api_v1.md                the permission table, the call table and
                                     the role table (three regions)
   the binding faces, from each native/<dir>/face.json (tools/gen_os/face.py)
-    native/<dir>/modmoy_<m>_face.c  a module's generated MicroPython rows, which
+    native/<dir>/modmoy_<m>_face.h  a module's generated MicroPython rows, which
                                     its hand file's globals table expands
     runtime/host/<m>_face.py        the same rows over ctypes, with the
                                     structures and constants they name

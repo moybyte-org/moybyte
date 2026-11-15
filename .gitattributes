@@ -1,7 +1,7 @@
 # The files tools/gen_os_table.py writes whole, from native/os_calls.json and
 # native/*/face.json: GitHub collapses them in a diff. A new output gets a
 # pattern here; tests/test_os_table.py fails one without.
-native/*/modmoy_*_face.c linguist-generated=true
+native/*/modmoy_*_face.h linguist-generated=true
 runtime/host/*_face.py linguist-generated=true
 runtime/host/faces.py linguist-generated=true
 runtime/system/face_errors.py linguist-generated=true

@@ -143,7 +143,7 @@ So the console demonstrably runs off-board on MicroPython.
 1. **Generator first, no module switched.**
    - Split `tools/gen_os_table.py` (2,006 lines, ~20 outputs) into a package `tools/gen_os/`: the loader and rules, the C prototype parser, one emitter per tier (finding T11).
    - Add `face.json` reading and the emitters for:
-     - `native/<m>/modmoy_<m>_face.c`: an `#include`-able file defining the functions and a `MOY_FACE_<M>_ROWS` macro the hand globals table expands;
+     - `native/<m>/modmoy_<m>_face.h`: an `#include`-able file defining the functions and a `MOY_FACE_<M>_ROWS` macro the hand globals table expands;
      - `runtime/host/<m>_face.py`: the ctypes rows plus wrappers.
    - Committed output plus a drift test, as now.
 2. **The parity test** (`tests/test_face_parity.py`), parametrized over every `face.json`:

@@ -466,8 +466,8 @@ def _mp_row(m, face, hdr, r):
 
 
 def mp_path(m, face):
-    return os.path.join(NATIVE, face["dir"], "modmoy_%s_face.c" % m[4:] if m.startswith("moy_")
-                        else "mod%s_face.c" % m)
+    return os.path.join(NATIVE, face["dir"], "modmoy_%s_face.h" % m[4:] if m.startswith("moy_")
+                        else "mod%s_face.h" % m)
 
 
 def hand_c(m, face):

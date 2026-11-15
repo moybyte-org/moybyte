@@ -18,7 +18,7 @@
 #include "moy_seal.h"
 #include "moy_ota.h"
 
-#include "modmoy_net_face.c"
+#include "modmoy_net_face.h"
 #pragma weak moy_c6_version
 
 // The board's network halves: the HTTP server's parser and its responses, the

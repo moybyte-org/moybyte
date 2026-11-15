@@ -1,6 +1,6 @@
 // moy_input's MicroPython binding: the input table (moy_input.h) as the module
 // `moy_input`, its names those face.json lists: the rows here are the hand
-// ones, the rest are generated into modmoy_input_face.c.
+// ones, the rest are generated into modmoy_input_face.h.
 //
 //   NAMES, HOST_NAMES             the buttons, libmoy's order then the console's
 //   InputTable(), HostInputTable() a table over all fifteen names, or the host's
@@ -30,7 +30,7 @@
 #include "moy_hid.h"
 #include "moy_input.h"
 
-#include "modmoy_input_face.c"
+#include "modmoy_input_face.h"
 
 // The board's drivers: keyboard(), touch(), trackball() and ble(), and the
 // frame's stage over them. A build that has none -- the browser's, whose input

@@ -2,7 +2,7 @@
 // event queues (moy_evq.h), the supervisor (moy_super.h) and the queue of
 // calls into the VM (moy_vmq.h) -- as the module `moy_evq`, its names those
 // face.json lists: the rows here are the hand ones, the rest are generated
-// into modmoy_evq_face.c.
+// into modmoy_evq_face.h.
 //
 //   open(pid, app, receives="", vm=False, alarms=False, notify=False)
 //                      a process's queue (receives: one name a line;
@@ -57,7 +57,7 @@
 #include "moy_super.h"
 #include "moy_vmq.h"
 
-#include "modmoy_evq_face.c"
+#include "modmoy_evq_face.h"
 
 #define ARGS_MAX 4096
 
