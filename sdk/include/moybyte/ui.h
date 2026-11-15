@@ -4,7 +4,7 @@
 // linked into the module (sdk/src/moyui_link.c, native/moy_ui), drawing on
 // the app's own RGB565 screen. Each ui row is app.h's, the same call a
 // compiled app imports, answered inline by the copy's RUN face
-// (native/moy_ui/moy_ui_wasm.h). A frame is moy_ui_link_frame, the rows,
+// (native/moy_ui/moy_ui_run.h). A frame is moy_ui_link_frame, the rows,
 // then moy_ui_link_show:
 //
 //     moy_frame_t f;

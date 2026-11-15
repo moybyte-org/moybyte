@@ -1903,7 +1903,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
 
 
 # The context of the running cart's own frames, a Lua, compiled, WASI or native
-# app's (native/moy_ui/moy_ui_wasm.c's), as `bar_lent` and `bar_tap` take it.
+# app's (native/moy_ui/moy_ui_run.c's), as `bar_lent` and `bar_tap` take it.
 RUN_UI = "run"
 
 

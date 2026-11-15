@@ -1,5 +1,5 @@
 // The front of the toolkit a native app links (moybyte/ui.h): the app's own
-// copy of native/moy_ui, its RUN face (moy_ui_wasm.c) drawing on a canvas of
+// copy of native/moy_ui, its RUN face (moy_ui_run.c) drawing on a canvas of
 // the app's own, the RGB565 screen moy_present hands to the console. What
 // the RUN face reads from a compiled run's engine it reads from here: the
 // frame's input words (moycore_ui_snap), its milliseconds
@@ -22,7 +22,7 @@
 #include "moy_text.h"
 #include "moy_ui.h"
 #include "moy_ui_api.h"
-#include "moy_ui_wasm.h"
+#include "moy_ui_run.h"
 #include "moybyte/frame.h"
 #include "moybyte/os.h"
 #include "moybyte/ui.h"

@@ -4,8 +4,8 @@ The toolkit's bodies in C, with style and strings as data (#224 sprint 6;
 the design record is `docs/history/kernel_toolkit_2026-10.md`), and the engine of the public UI
 API (`docs/ui_api_2026-10.md`). `runtime/toolkit/ui.py` (the verbs) and
 `runtime/toolkit/ui_draw.py` (the rect-taking widgets the chrome keeps) are its
-Python faces, `native/moycore/moycore_ui.h` its Lua face and
-`moy_ui_wasm.c` its rows for a compiled app.
+Python faces, `native/moycore/moycore_ui.h` its Lua face over the RUN face
+`moy_ui_run.c`, and `moy_ui_wasm.c` its rows for a compiled app.
 
 | file | holds |
 |---|---|
@@ -30,7 +30,8 @@ Python faces, `native/moycore/moycore_ui.h` its Lua face and
 | `moy_ui_api_table.c` | a table's rows and parts (`moy_ui_api_table`, `moy_ui_api_table_part`), the blocks of fields an app sets through the engine as they change (`moy_ui_api_block_set`: the fields set since a generation, what they show hashed), a text field and a dialog over its wash |
 | `moy_ui_api_pop.c` | popovers, menus, card grids, an empty page, tools and the app's bar |
 | `moy_ui_api_host.c` | a shift frame's plan (`moy_ui_api_shift_plan`), the lag log, and an app's host (`moy_ui_api_host_begin`) |
-| `moy_ui_wasm.h`, `moy_ui_wasm.c` | the RUN sink and the RUN face: the run's one context over its snapshot, the verbs a Lua cart's `ui` calls and the `ui` rows a compiled app imports (`native/os_calls.json`'s `ui` role; `moy_ui_wasm_rows.h`, generated from it, is their count, prototypes and natives) |
+| `moy_ui_run.h`, `moy_ui_run.c` | the RUN sink and the RUN face: the run's one context over its snapshot, the verbs a Lua cart's `ui` calls and the rows below decode onto (one context per run, where a Python app's verbs pass their own: two entry forms on purpose) |
+| `moy_ui_wasm.h`, `moy_ui_wasm.c` | the `ui` rows a compiled app imports (`native/os_calls.json`'s `ui` role; `moy_ui_wasm_rows.h`, generated from it, is their count, prototypes and natives), each decoded onto the RUN face |
 | `modmoy_ui.c` | the module `moy_ui` the boards and the browser import (its `themes`, `theme_roles`, `theme`, `theme_look`, `theme_look_fields`, `theme_place`, `theme_block`, `theme_rgb`, `theme_shape`, `surface`, `parts`, `theme_states`, `theme_install`, `theme_installed`, `theme_fonts`, `theme_sheets` and `theme_layout` face the loader, `sheet_check`, `sheet_load`, `sheet_clear`, `sheet_cells`, `sheet_set` and `sheet_caps` the role sheet, `font_load`, `font_free`, `font_reset`, `font_info` and `font_file` the font rows behind `moy_text` (`native/moy_gfx/moy_text.h`), `use_font` and `font` the font each role's text draws in, `print_font` the one a canvas's print draws in and `cart_text` the app-cart boundary (`docs/theme_and_shell_2026-11.md` §3.7), `use_shape` installs a theme's shape, `buttons_set`, `buttons_clear` and `buttons_app` the live theme's button leaves and `button_style` resolves a button kind against them, `theme_reads` is the contrast floor, `paint` is the painter's sink op and `frame`, `frame_buttons` and `frame_band` draw and lay out a window frame; `use_depth`, `frame_geom`, `frame_icon`, `frame_under`, `cast` and `bar_part` are the depth's; `api_size`, `api_begin` and the `api_` verbs are the public UI API's engine, `api_text_view`, `api_text_at` and `api_text_cover` the text view's verb, hit test and overlays, `text_words`, `text_runs` and `text_tones` its word table, colour runs and tones); its `s`, `str_set` and `str_reset` read and write the spine's string table |
 
 ## Which edits are data, which need C

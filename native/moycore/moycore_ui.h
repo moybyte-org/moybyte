@@ -87,7 +87,7 @@
 #include "lua.h"
 #include "lauxlib.h"
 
-#include "moy_ui_wasm.h"
+#include "moy_ui_run.h"
 #include "moycore_lua.h"
 
 static void *moycore_ui_canvas(void)

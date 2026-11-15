@@ -136,7 +136,7 @@ from widgets import _err_text, _in
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
-# The words of `ui_face` (native/moy_ui/moy_ui_wasm.h's MOYCORE_UI_FACE_*).
+# The words of `ui_face` (native/moy_ui/moy_ui_run.h's MOYCORE_UI_FACE_*).
 _FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_TAP, _FACE_FS_SHIFT = 1, 2, 4, 8, 8
 
 from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
@@ -1244,7 +1244,7 @@ class Player(PlayerDiag):
 
     def ui_face(self):
         """How the run's `ui` frame draws, as one word (native/moy_ui/
-        moy_ui_wasm.h's MOYCORE_UI_FACE_*) a Lua, compiled, WASI or native
+        moy_ui_run.h's MOYCORE_UI_FACE_*) a Lua, compiled, WASI or native
         run's snapshot carries, so its verbs draw what this Player's
         `_ui_begin` draws for a Python app: whether the surface is a window's
         body, whether the frame lays out on the desk's rows, whether it is a

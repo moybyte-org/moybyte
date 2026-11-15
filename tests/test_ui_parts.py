@@ -1838,7 +1838,7 @@ def parts_root(tmp_path_factory):
 def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monkeypatch,
                                                                   desk):
     """A Python app's frame begins with the window flag; a Lua and a compiled
-    app's snapshot carries it to the RUN face's begin (moy_ui_wasm.c)."""
+    app's snapshot carries it to the RUN face's begin (moy_ui_run.c)."""
     from runtime import wasm_binding
     seen = []
     root, titles = parts_root

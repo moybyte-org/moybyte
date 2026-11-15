@@ -171,7 +171,7 @@ def snap_shared(s, inp, start, idx, pointer_state, out, since_ms, face=0,
     THE FACE: how the run's `ui` frame draws, the Player's `ui_face()`
     (`run_face`): whether its surface is a window's body (the page's ground is
     then the window's), the desk's rows, the shell's look for a responsive
-    app, and the font scale -- what native/moy_ui/moy_ui_wasm.c's RUN face
+    app, and the font scale -- what native/moy_ui/moy_ui_run.c's RUN face
     reads to draw the page a Python app's frame draws.
 
     THE ROOM: the rect (x, y, w, h) the run's `ui` frame lies in, the

@@ -256,7 +256,7 @@ The same calls draw the same pixels on every tier
 (`tests/test_app_layout.py`): a Python app's frame is drawn by its Player
 (`ui_draw.CART_APP`, the boundary keeping only its `print` and its own
 colours), a Lua, compiled, WASI or native run's by the RUN face over the
-word its snapshot carries (`Player.ui_face`, `moy_ui_wasm.h`'s
+word its snapshot carries (`Player.ui_face`, `moy_ui_run.h`'s
 `MOYCORE_UI_FACE_*`). The rest of its drawing stays a cart's: `print` in
 petme128, colours MOY64. A game's `ui`, and a fixed app's, draws as a
 cart's.

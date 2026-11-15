@@ -78,7 +78,7 @@ def _lua_names():
 
 # This module's share of the host's one library (runtime/host/host_native.py): the
 # Lua run, the kernel's Player and the public UI API's Lua and RUN faces
-# (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_wasm.h).
+# (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_run.h).
 PART = native_build.Part("lua", list(_RASTER) + [
     "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
     "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
@@ -95,7 +95,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
     "moy_ui_api_text.c", "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c",
     "moy_ui_api_host.c",
     "moy_ui_text.h", "moy_ui_text.c",
-    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy_ui_wasm.c",
+    "moy_ui_run.h", "moy_ui_run.c", "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy_ui_wasm.c",
     "moy_theme.h", "moy_theme.c",
     "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
     "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
@@ -113,7 +113,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
 WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
-    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
+    "moy_ui_run.h", "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
     "moy_wasi.c", "moy_wasi.h", "moy_wasi_os_rows.h", "moy_evq.h", "moy_screen_slot.h", "moy_vmq.h", "moy_super.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc_exit.h"),
     (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI, _KERNEL,
      os.path.join(_NATIVE, "moy_wasm"), os.path.join(_NATIVE, "moy_sh"), os.path.join(_AUDIO, "libmoy"),

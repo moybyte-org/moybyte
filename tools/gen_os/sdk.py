@@ -125,7 +125,7 @@ def gen_sdk_ui_h(src):
          "// linked into the module (sdk/src/moyui_link.c, native/moy_ui), drawing on\n"
          "// the app's own RGB565 screen. Each ui row is app.h's, the same call a\n"
          "// compiled app imports, answered inline by the copy's RUN face\n"
-         "// (native/moy_ui/moy_ui_wasm.h). A frame is moy_ui_link_frame, the rows,\n"
+         "// (native/moy_ui/moy_ui_run.h). A frame is moy_ui_link_frame, the rows,\n"
          "// then moy_ui_link_show:\n"
          "//\n"
          "//     moy_frame_t f;\n"

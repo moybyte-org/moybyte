@@ -1062,7 +1062,7 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     come back after. A responsive app's mode (`CART_APP`) keeps its print
     and its colours inside while its `ui` verbs' sinks are outside. A
     run's page on the RUN face draws as a cart's, petme128, unless its
-    snapshot's face names the look (`moy_ui_wasm.h`).
+    snapshot's face names the look (`moy_ui_run.h`).
     A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
     Notes) runs outside it: its page is the verbs' and its note the editor
     handle's, both in the look's colours and faces; a copy of it is a

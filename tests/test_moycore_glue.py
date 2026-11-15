@@ -1384,7 +1384,7 @@ def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
 
 def test_the_ui_face_crosses_whole(w):
     """The Player's ui_face() is the snapshot's face word as it is: the RUN
-    face reads its bits and its font scale (moy_ui_wasm.h)."""
+    face reads its bits and its font scale (moy_ui_run.h)."""
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
     ws.run.player.face = 1 | 2 | 4 | 3 << 8
