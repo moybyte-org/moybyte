@@ -1,12 +1,33 @@
 """The app ABI: the C rows, the door's table, the wasm and ui imports."""
 
 
+from . import TableError
 from .table import FLOOR_ROLE, cap_packed, door_rows, ident, params, role_of, roles, upper, verb_of, wasm_sig
 from .cproto import HEAD, c_decl, wrap
 
 
 def c_rows(src):
     return [r for r in door_rows(src) if r["server"] == "c"]
+
+
+def door_c_rows(src):
+    """The C rows the ROLE door serves: every C row but an object's and the
+    toolkit's."""
+    return [r for r in c_rows(src) if not r.get("object") and r.get("how") != "direct"]
+
+
+def door_fields(r):
+    """A C row's fields as the door checks them: i a number, * a span (an out
+    whose capacity crosses is a number)."""
+    out = ""
+    for _n, t in params(r):
+        if t == "out":
+            out += "i" if cap_packed(r) else ""
+        elif t == "cart":
+            raise TableError("%s: a cart is no C row's field" % r["name"])
+        else:
+            out += "i" if t == "int" else "*"
+    return out
 
 
 def gen_app_h(src):
@@ -52,6 +73,16 @@ def gen_app_h(src):
         crow = "MOY_ROW_%s" % upper(r["name"]) if r["server"] == "c" else "-1"
         o.append('    { "%s", MOY_ROLE_%s, %s }, \\' % (r["name"], upper(role_of(r)), crow))
     o += ["}", "",
+          "// The C rows the ROLE door serves (moy_app.c's door_c), each X(row, its",
+          "// body door_<role>_<verb>, its fields): one character a field, i a number,",
+          "// * a text or bytes, checked before the body runs. A C row not here (an",
+          "// object, the toolkit's) the door refuses BAD.",
+          "#define MOY_APP_DOOR_ROWS(X) \\"]
+    o += ['    X(MOY_ROW_%s, %s, "%s") \\' % (upper(r["name"]), ident(r["name"]), door_fields(r))
+          for r in door_c_rows(src)]
+    o += ["", "// The most fields a C row takes.",
+          "#define MOY_APP_DOOR_FIELDS %d" % max(len(door_fields(r)) for r in door_c_rows(src)),
+          "",
           "// The permission each role is granted by: a role absent here is never",
           "// granted.",
           "#define MOY_APP_PERMS { \\"]

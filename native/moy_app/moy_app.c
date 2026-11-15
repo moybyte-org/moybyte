@@ -1734,19 +1734,43 @@ static int32_t arg_int(args_t *f) {
                      | (uint32_t)q[3] << 24);
 }
 
-// A text field NUL-terminated into `out` (MOY_UF_NAME_MAX + 1 bytes): NULL for
-// an empty one where `optional`.
-static const char *arg_text(args_t *f, char out[MOY_UF_NAME_MAX + 1u], int optional) {
-    size_t m;
-    const uint8_t *q = arg_field(f, &m);
-    if (q == NULL || m > MOY_UF_NAME_MAX || memchr(q, 0, m) != NULL) {
-        f->bad = 1;
-        return NULL;
+// A row's fields as its MOY_APP_DOOR_ROWS string names them, checked before
+// its body runs: a span, or a number.
+typedef struct {
+    const uint8_t *p;
+    size_t n;
+    int32_t i;
+} fld_t;
+
+// The fields `sig` names, read off the packed arguments: false where the
+// arguments are not exactly those.
+static bool fields(args_t *f, const char *sig, fld_t *v) {
+    for (int k = 0; sig[k] != 0; k++) {
+        if (sig[k] == 'i') {
+            v[k].i = arg_int(f);
+        } else {
+            v[k].p = arg_field(f, &v[k].n);
+        }
     }
-    memcpy(out, q, m);
-    out[m] = 0;
-    return optional && m == 0u ? NULL : out;
+    return !f->bad && f->at == f->n;
 }
+
+// A span NUL-terminated into `out` (MOY_UF_NAME_MAX + 1 bytes): false for one
+// too long or holding a NUL.
+static bool text(const fld_t *x, char out[MOY_UF_NAME_MAX + 1u]) {
+    if (x->n > MOY_UF_NAME_MAX || memchr(x->p, 0, x->n) != NULL) {
+        return false;
+    }
+    memcpy(out, x->p, x->n);
+    out[x->n] = 0;
+    return true;
+}
+
+// A row's body: its grant `g`, its row, the packed arguments `f` and their
+// fields `v`, and the answer's buffer.
+#define DOOR(name) \
+    static int32_t door_##name(moy_appabi_t *a, uint32_t g, int row, args_t *f, \
+                               const fld_t *v, uint8_t *ans, size_t cap)
 
 static int32_t ans_put(uint8_t *ans, size_t cap, const void *data, size_t len) {
     if (len > cap || len > 0x7fffffffu) {
@@ -1791,63 +1815,30 @@ static void le32(uint8_t *q, uint32_t v) {
     q[3] = (uint8_t)(v >> 24);
 }
 
-// The C rows that take no argument: a field handed one is BAD.
-static int no_args(int row) {
-    switch (row) {
-        case MOY_ROW_THEME_TOKEN:
-        case MOY_ROW_FILES_LIST: case MOY_ROW_FILES_COUNT: case MOY_ROW_FILES_LOAD:
-        case MOY_ROW_FILES_HISTORY: case MOY_ROW_FILES_HISTORY_OPS:
-        case MOY_ROW_FILES_SAVE: case MOY_ROW_FILES_DELETE: case MOY_ROW_FILES_DUPLICATE:
-        case MOY_ROW_FILES_RESTORE: case MOY_ROW_FILES_RENAME: case MOY_ROW_FILES_NEW_NAME:
-        case MOY_ROW_FILES_HISTORY_COMMIT:
-        case MOY_ROW_PREFS_GET: case MOY_ROW_PREFS_SET: case MOY_ROW_PREFS_CLEAR:
-        case MOY_ROW_WALLPAPER_SAVE_COPY: case MOY_ROW_ARTWORK_FOLLOW:
-        case MOY_ROW_CLIPBOARD_PUT_TEXT:
-        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL:
-        case MOY_ROW_MOYBYTE_SEND: case MOY_ROW_MOYBYTE_LOG:
-        case MOY_ROW_MOYBYTE_ON: case MOY_ROW_MOYBYTE_AT:
-        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
-        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
-        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
-        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
-        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
-        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
-        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
-        case MOY_ROW_MOYBYTE_DEV_GET:
-        case MOY_ROW_MOYBYTE_RANDOM: case MOY_ROW_MOYBYTE_SHA256:
-        case MOY_ROW_MOYBYTE_HMAC_SHA256: case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
-        case MOY_ROW_MOYBYTE_AES_GCM_OPEN: case MOY_ROW_MOYBYTE_X25519:
-        case MOY_ROW_MOYBYTE_ED25519_PUBLIC: case MOY_ROW_MOYBYTE_ED25519_SIGN:
-        case MOY_ROW_MOYBYTE_ED25519_VERIFY: case MOY_ROW_MOYBYTE_AES_CTR:
-        case MOY_ROW_MOYBYTE_AES_CCM_SEAL: case MOY_ROW_MOYBYTE_AES_CCM_OPEN:
-        case MOY_ROW_MOYBYTE_CLOCK:
-            return 0;
-        default:
-            return 1;
-    }
-}
-
 // A compiled process's timers (moybyte.every, after, cancel): the kernel's,
 // of the process the grant names (its owner, the pid a compiled run's grant
 // is made for), so they go off and are set with no VM. A timer answers its
 // id, FULL past MOY_EVQ_TIMERS; a cancel 1 where one of its own went, else 0.
-static int32_t timer_row(moy_appabi_t *a, uint32_t h, int row, int32_t v) {
-    const moy_grant_t *g = grant_row(a, h);
-    if (g == NULL || g->owner == 0u || moy_evq_timer == NULL) {
+DOOR(moybyte_every) {
+    int32_t t = v[0].i;
+    const moy_grant_t *gr = grant_row(a, g);
+    if (gr == NULL || gr->owner == 0u || moy_evq_timer == NULL) {
         return -MOY_APP_STALE;
     }
     a->counts[row]++;
     if (row == MOY_ROW_MOYBYTE_CANCEL) {
-        return moy_evq_timer_cancel(g->owner, (uint32_t)v) ? 1 : 0;
+        return moy_evq_timer_cancel(gr->owner, (uint32_t)t) ? 1 : 0;
     }
-    uint32_t ms = v > 0 ? (uint32_t)v : 0u;
+    uint32_t ms = t > 0 ? (uint32_t)t : 0u;
     if (row == MOY_ROW_MOYBYTE_EVERY && ms == 0u) {
         ms = 1u;
     }
     uint32_t id = 0;
-    int rc = moy_evq_timer(g->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
+    int rc = moy_evq_timer(gr->owner, ms, row == MOY_ROW_MOYBYTE_EVERY ? ms : 0u, &id);
     return rc == MOY_EVQ_OK ? (int32_t)id : evq_answer(rc);
 }
+#define door_moybyte_after door_moybyte_every
+#define door_moybyte_cancel door_moybyte_every
 
 // A compiled process's messages (moybyte.send, recv) and its log lines
 // (moybyte.log): the kernel's, as the process the grant names, run on the
@@ -1865,26 +1856,19 @@ static uint32_t owner_of(moy_appabi_t *a, uint32_t h, int row) {
     return g->owner;
 }
 
-static int32_t send_row(moy_appabi_t *a, uint32_t h, args_t *f) {
-    size_t an, nn, jn;
-    const uint8_t *ap = arg_field(f, &an);
-    const uint8_t *np = arg_field(f, &nn);
-    const uint8_t *jp = arg_field(f, &jn);
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_SEND);
+DOOR(moybyte_send) {
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u || moy_evq_send_text == NULL) {
         return -MOY_APP_STALE;
     }
     uint32_t took = 0;
-    int rc = moy_evq_send_text(pid, (const char *)ap, an, (const char *)np, nn,
-                               (const char *)jp, jn, &took);
+    int rc = moy_evq_send_text(pid, (const char *)v[0].p, v[0].n, (const char *)v[1].p, v[1].n,
+                               (const char *)v[2].p, v[2].n, &took);
     return rc == MOY_EVQ_OK ? (int32_t)took : evq_answer(rc);
 }
 
-static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
-    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_RECV);
+DOOR(moybyte_recv) {
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u || moy_evq_read == NULL) {
         return -MOY_APP_STALE;
     }
@@ -1898,38 +1882,27 @@ static int32_t recv_row(moy_appabi_t *a, uint32_t h, uint8_t *ans, size_t cap) {
 // names already; an `at` (a wall time, Unix seconds) the alarm's id, which
 // `cancel` takes, DENIED without `alarms` (its queue's MOY_EVQ_ALARMS),
 // FULL past MOY_EVQ_TIMERS. An alarm wakes the screen (moy_evq_woke).
-static int32_t on_row(moy_appabi_t *a, uint32_t h, args_t *f) {
-    size_t nn;
-    const uint8_t *np = arg_field(f, &nn);
-    int32_t on = arg_int(f);
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_ON);
+DOOR(moybyte_on) {
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u || moy_evq_listen == NULL) {
         return -MOY_APP_STALE;
     }
     char name[MOY_EVQ_NAME];
-    if (nn == 0u || nn >= sizeof name || memchr(np, 0, nn) != NULL) {
+    if (v[0].n == 0u || v[0].n >= sizeof name || memchr(v[0].p, 0, v[0].n) != NULL) {
         return -MOY_APP_BAD;
     }
-    memcpy(name, np, nn);
-    name[nn] = 0;
-    int rc = moy_evq_listen(pid, name, on != 0);
-    return evq_answer(rc);
+    memcpy(name, v[0].p, v[0].n);
+    name[v[0].n] = 0;
+    return evq_answer(moy_evq_listen(pid, name, v[1].i != 0));
 }
 
-static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
-    int32_t t = arg_int(f);
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_AT);
+DOOR(moybyte_at) {
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u || moy_evq_at == NULL) {
         return -MOY_APP_STALE;
     }
     uint32_t id = 0;
-    int rc = moy_evq_at(pid, t, &id);
+    int rc = moy_evq_at(pid, v[0].i, &id);
     return rc == MOY_EVQ_OK ? (int32_t)id : evq_answer(rc);
 }
 
@@ -1940,38 +1913,35 @@ static int32_t at_row(moy_appabi_t *a, uint32_t h, args_t *f) {
 // MOY_STATUS_CAP, BAD for an empty or long icon or a state out of range),
 // a state 0, a remove 0, each ABSENT for a handle that is no compiled item
 // of the process's. Its panel is described through the VM (status_panel).
-static int32_t status_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
-    size_t in = 0;
-    const uint8_t *icon = NULL;
-    int32_t item = 0;
-    if (row == MOY_ROW_MOYBYTE_STATUS_SHOW) {
-        icon = arg_field(f, &in);
-    } else {
-        item = arg_int(f);
-    }
-    int32_t state = row != MOY_ROW_MOYBYTE_STATUS_REMOVE ? arg_int(f) : 0;
-    int32_t order = row == MOY_ROW_MOYBYTE_STATUS_SHOW ? arg_int(f) : 0;
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, row);
-    if (pid == 0u || moy_status_add == NULL) {
+static uint32_t status_pid(moy_appabi_t *a, uint32_t g, int row) {
+    uint32_t pid = owner_of(a, g, row);
+    return moy_status_add != NULL ? pid : 0u;
+}
+
+DOOR(moybyte_status_show) {
+    uint32_t pid = status_pid(a, g, row);
+    int32_t state = v[1].i;
+    if (pid == 0u) {
         return -MOY_APP_STALE;
-    }
-    if (row == MOY_ROW_MOYBYTE_STATUS_REMOVE) {
-        return moy_status_remove(pid, item);
-    }
-    if (row == MOY_ROW_MOYBYTE_STATUS_STATE) {
-        return moy_status_show(pid, item, state);
     }
     if (state < 0 || state > 2) {
         return -MOY_APP_BAD;
     }
-    int got = moy_status_add(pid, (const char *)icon, in, order, true);
+    int got = moy_status_add(pid, (const char *)v[0].p, v[0].n, v[2].i, true);
     if (got > 0) {
         moy_status_show(pid, got, state);
     }
     return got;
+}
+
+DOOR(moybyte_status_state) {
+    uint32_t pid = status_pid(a, g, row);
+    return pid == 0u ? -MOY_APP_STALE : moy_status_show(pid, v[0].i, v[1].i);
+}
+
+DOOR(moybyte_status_remove) {
+    uint32_t pid = status_pid(a, g, row);
+    return pid == 0u ? -MOY_APP_STALE : moy_status_remove(pid, v[0].i);
 }
 
 // A compiled process's notification and badges (moybyte.notify, award,
@@ -1979,30 +1949,26 @@ static int32_t status_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
 // achievements process (moy_notes.h), as the process the grant names, on its
 // own task. A notify answers its id (DENIED without `notifications`), an
 // award or a progress what its badge's last send answered.
-static int32_t note_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
-    size_t n0, n1 = 0;
-    const uint8_t *p0 = arg_field(f, &n0);
-    const uint8_t *p1 = NULL;
-    int32_t v = 0;
-    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
-        p1 = arg_field(f, &n1);
-    } else if (row == MOY_ROW_MOYBYTE_PROGRESS) {
-        v = arg_int(f);
-    }
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, row);
-    if (pid == 0u || moy_notes_post == NULL) {
-        return -MOY_APP_STALE;
-    }
-    if (row == MOY_ROW_MOYBYTE_NOTIFY) {
-        return moy_notes_post(pid, (const char *)p0, n0, (const char *)p1, n1);
-    }
-    if (row == MOY_ROW_MOYBYTE_AWARD) {
-        return moy_notes_award(pid, (const char *)p0, n0);
-    }
-    return moy_notes_progress(pid, (const char *)p0, n0, v);
+static uint32_t note_pid(moy_appabi_t *a, uint32_t g, int row) {
+    uint32_t pid = owner_of(a, g, row);
+    return moy_notes_post != NULL ? pid : 0u;
+}
+
+DOOR(moybyte_notify) {
+    uint32_t pid = note_pid(a, g, row);
+    return pid == 0u ? -MOY_APP_STALE
+           : moy_notes_post(pid, (const char *)v[0].p, v[0].n, (const char *)v[1].p, v[1].n);
+}
+
+DOOR(moybyte_award) {
+    uint32_t pid = note_pid(a, g, row);
+    return pid == 0u ? -MOY_APP_STALE : moy_notes_award(pid, (const char *)v[0].p, v[0].n);
+}
+
+DOOR(moybyte_progress) {
+    uint32_t pid = note_pid(a, g, row);
+    return pid == 0u ? -MOY_APP_STALE
+           : moy_notes_progress(pid, (const char *)v[0].p, v[0].n, v[1].i);
 }
 
 // A compiled process's item_read and item_write: an item handed to it as a
@@ -2012,20 +1978,12 @@ static int32_t note_row(moy_appabi_t *a, uint32_t h, int row, args_t *f) {
 // "r" answers 0 (nothing written), a read past `cap` FULL. An item the table
 // does not hold, or a store this task cannot reach, is the door's (the
 // console's ConsoleCalls), on the VM's task.
-static int32_t item_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
-                        size_t cap) {
-    int32_t item = arg_int(f);
-    size_t dn = 0;
-    const uint8_t *d = NULL;
-    if (row == MOY_ROW_MOYBYTE_ITEM_READ) {
-        (void)arg_int(f);           // the answer's capacity, the door's to read
-    } else {
-        d = arg_field(f, &dn);
-    }
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, row);
+DOOR(moybyte_item_read) {
+    int32_t item = v[0].i;
+    // an item_read's second field is the answer's capacity, the door's to read
+    const uint8_t *d = row == MOY_ROW_MOYBYTE_ITEM_WRITE ? v[1].p : NULL;
+    size_t dn = row == MOY_ROW_MOYBYTE_ITEM_WRITE ? v[1].n : 0u;
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u) {
         return -MOY_APP_STALE;
     }
@@ -2052,22 +2010,18 @@ static int32_t item_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t
     if (f->here || s_door == NULL) {
         return -MOY_APP_NEEDS_VM;
     }
-    return s_door(h, f->trow, f->p, f->n, ans, cap);
+    return s_door(g, f->trow, f->p, f->n, ans, cap);
 }
+#define door_moybyte_item_write door_moybyte_item_read
 
-static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
-    int32_t level = arg_int(f);
-    size_t n;
-    const uint8_t *t = arg_field(f, &n);
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    uint32_t pid = owner_of(a, h, MOY_ROW_MOYBYTE_LOG);
+DOOR(moybyte_log) {
+    int32_t level = v[0].i;
+    uint32_t pid = owner_of(a, g, row);
     if (pid == 0u || moy_log_write == NULL) {
         return -MOY_APP_STALE;
     }
-    moy_log_write(level < 0 || level >= LOG_LEVELS ? LOG_INFO : level, pid, (const char *)t,
-                  n < LOG_TEXT_MAX ? n : LOG_TEXT_MAX);
+    moy_log_write(level < 0 || level >= LOG_LEVELS ? LOG_INFO : level, pid, (const char *)v[1].p,
+                  v[1].n < LOG_TEXT_MAX ? v[1].n : LOG_TEXT_MAX);
     return 0;
 }
 
@@ -2077,67 +2031,84 @@ static int32_t log_row(moy_appabi_t *a, uint32_t h, args_t *f) {
 // or handle is the door's Python half's (runtime/system/dev_handles.py),
 // NEEDS_VM where the call runs where it was made, so the tier hops it, and
 // handed to the door on the VM's task.
-static int32_t dev_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
-                       size_t cap) {
-    const moy_grant_t *g = grant_row(a, h);
-    if (g == NULL) {
-        return -MOY_APP_STALE;
+static const moy_grant_t *dev_grant(moy_appabi_t *a, uint32_t g, int row) {
+    const moy_grant_t *gr = grant_row(a, g);
+    if (gr != NULL) {
+        a->counts[row]++;
     }
-    a->counts[row]++;
-    size_t n0, n1;
-    const uint8_t *p0 = NULL, *p1 = NULL;
-    int32_t hd = 0;
-    if (row == MOY_ROW_MOYBYTE_DEV_OPEN) {
-        p0 = arg_field(f, &n0);
-        p1 = arg_field(f, &n1);
-    } else {
-        hd = arg_int(f);
-        if (row == MOY_ROW_MOYBYTE_DEV_READ) {
-            (void)arg_int(f);                   // the answer's capacity, the door's
-        } else if (row != MOY_ROW_MOYBYTE_DEV_CLOSE) {
-            p0 = arg_field(f, &n0);
-            if (row == MOY_ROW_MOYBYTE_DEV_XFER) {
-                (void)arg_int(f);
-            }
-        }
-    }
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
-    int32_t r = DEV_PASS;
-    uint32_t pid = g->owner;
-    if (pid != 0u && moy_dev_open != NULL) {
-        switch (row) {
-            case MOY_ROW_MOYBYTE_DEV_OPEN:
-                r = moy_dev_open(pid, g->devs, (const char *)p0, n0, (const char *)p1, n1);
-                break;
-            case MOY_ROW_MOYBYTE_DEV_CLOSE:
-                r = moy_dev_close(pid, hd);
-                break;
-            case MOY_ROW_MOYBYTE_DEV_READ:
-                r = moy_dev_read(pid, hd, ans, cap);
-                break;
-            case MOY_ROW_MOYBYTE_DEV_WRITE:
-                r = moy_dev_write(pid, hd, p0, n0);
-                break;
-            case MOY_ROW_MOYBYTE_DEV_XFER:
-                r = moy_dev_xfer(pid, hd, p0, n0, ans, cap);
-                break;
-            case MOY_ROW_MOYBYTE_DEV_SET:
-                r = moy_dev_set(pid, hd, (const char *)p0, n0);
-                break;
-            default:
-                r = moy_dev_get(pid, hd, (const char *)p0, n0);
-                break;
-        }
-    }
+    return gr;
+}
+
+// Whether the kernel's table may serve grant `gr`'s process: else every
+// handle is the door's.
+static bool dev_kernel(const moy_grant_t *gr) {
+    return gr->owner != 0u && moy_dev_open != NULL;
+}
+
+// The kernel's answer `r`, or the door's Python half's where it passed.
+static int32_t dev_tail(uint32_t g, args_t *f, int32_t r, uint8_t *ans, size_t cap) {
     if (r != DEV_PASS) {
         return r;
     }
     if (f->here || s_door == NULL) {
         return -MOY_APP_NEEDS_VM;
     }
-    return s_door(h, f->trow, f->p, f->n, ans, cap);
+    return s_door(g, f->trow, f->p, f->n, ans, cap);
+}
+
+DOOR(moybyte_dev_open) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_open(gr->owner, gr->devs,
+                                                          (const char *)v[0].p, v[0].n,
+                                                          (const char *)v[1].p, v[1].n)
+                      : DEV_PASS, ans, cap);
+}
+
+DOOR(moybyte_dev_close) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_close(gr->owner, v[0].i) : DEV_PASS,
+                      ans, cap);
+}
+
+// A read's second field is the answer's capacity: `cap`.
+DOOR(moybyte_dev_read) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_read(gr->owner, v[0].i, ans, cap) : DEV_PASS,
+                      ans, cap);
+}
+
+DOOR(moybyte_dev_write) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_write(gr->owner, v[0].i, v[1].p, v[1].n)
+                      : DEV_PASS, ans, cap);
+}
+
+DOOR(moybyte_dev_xfer) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_xfer(gr->owner, v[0].i, v[1].p, v[1].n, ans,
+                                                          cap)
+                      : DEV_PASS, ans, cap);
+}
+
+DOOR(moybyte_dev_set) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_set(gr->owner, v[0].i, (const char *)v[1].p,
+                                                         v[1].n)
+                      : DEV_PASS, ans, cap);
+}
+
+DOOR(moybyte_dev_get) {
+    const moy_grant_t *gr = dev_grant(a, g, row);
+    return gr == NULL ? -MOY_APP_STALE
+           : dev_tail(g, f, dev_kernel(gr) ? moy_dev_get(gr->owner, v[0].i, (const char *)v[1].p,
+                                                         v[1].n)
+                      : DEV_PASS, ans, cap);
 }
 
 // A compiled process's moybyte.service_running and service_stop: its app's
@@ -2191,10 +2162,9 @@ uint32_t moy_wasi_service_term(const char *id, size_t n);
 #pragma weak moy_wasi_service_term
 #pragma weak moy_evq_term
 
-static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
-                       size_t cap) {
-    const moy_grant_t *g = grant_row(a, h);
-    if (g == NULL) {
+DOOR(moybyte_service_running) {
+    const moy_grant_t *gr = grant_row(a, g);
+    if (gr == NULL) {
         return -MOY_APP_STALE;
     }
     a->counts[row]++;
@@ -2207,16 +2177,16 @@ static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
     uint32_t pid = 0u;
     size_t tier = 0;
     for (; tier < sizeof of / sizeof of[0]; tier++) {
-        if (of[tier] != NULL && (pid = of[tier](g->id, g->id_len)) != 0u) {
+        if (of[tier] != NULL && (pid = of[tier](gr->id, gr->id_len)) != 0u) {
             break;
         }
     }
-    if (pid != 0u && pid != g->owner && pid <= (uint32_t)INT32_MAX) {
+    if (pid != 0u && pid != gr->owner && pid <= (uint32_t)INT32_MAX) {
         if (row == MOY_ROW_MOYBYTE_SERVICE_RUNNING) {
             return (int32_t)pid;
         }
         uint32_t gone = term[tier] != NULL && moy_evq_term != NULL
-                        ? term[tier](g->id, g->id_len) : 0u;
+                        ? term[tier](gr->id, gr->id_len) : 0u;
         if (gone != 0u) {
             moy_evq_term(gone);
             return 1;
@@ -2225,8 +2195,9 @@ static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
     if (f->here || s_door == NULL) {
         return -MOY_APP_NEEDS_VM;
     }
-    return s_door(h, f->trow, f->p, f->n, ans, cap);
+    return s_door(g, f->trow, f->p, f->n, ans, cap);
 }
+#define door_moybyte_service_stop door_moybyte_service_running
 
 // moybyte.clock: the wall clock in Unix seconds (moy_net_time, the one epoch
 // every tier stamps with), on the caller's own task. Its local time is the
@@ -2234,23 +2205,18 @@ static int32_t svc_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t 
 // NEEDS_VM where the call runs where it was made, so the tier hops it, and
 // handed to the door on the VM's task, which answers ABSENT while NTP has
 // not answered.
-static int32_t clock_row(moy_appabi_t *a, uint32_t h, int row, args_t *f, uint8_t *ans,
-                         size_t cap) {
-    if (grant_row(a, h) == NULL) {
+DOOR(moybyte_clock) {
+    if (grant_row(a, g) == NULL) {
         return -MOY_APP_STALE;
     }
-    int32_t local = arg_int(f);
-    if (f->bad || f->at != f->n) {
-        return -MOY_APP_BAD;
-    }
     a->counts[row]++;
-    if (!local) {
+    if (!v[0].i) {
         return (int32_t)moy_net_time();
     }
     if (f->here || s_door == NULL) {
         return -MOY_APP_NEEDS_VM;
     }
-    return s_door(h, f->trow, f->p, f->n, ans, cap);
+    return s_door(g, f->trow, f->p, f->n, ans, cap);
 }
 
 int moy_app_grant_devs(moy_appabi_t *a, uint32_t h, uint32_t mask) {
@@ -2312,343 +2278,324 @@ uint32_t moy_app_dev_bit(const char *perm, size_t n) {
     return moy_dev_perm_bit != NULL ? moy_dev_perm_bit(perm, n) : 0u;
 }
 
-// The C rows a compiled app reaches through the door.
-static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *ans,
-                      size_t cap) {
+// -- the C rows a compiled app reaches through the door ---------------------------------
+
+DOOR(damage_all) {
+    return ans_rc(moy_app_damage_all(a, g));
+}
+
+DOOR(damage_again) {
+    return ans_rc(moy_app_damage_again(a, g));
+}
+
+// `n` numbers into the answer, each little-endian.
+static int32_t ans_ints(const int32_t *x, int n, uint8_t *ans, size_t cap) {
+    uint8_t q[20];
+    for (int i = 0; i < n; i++) {
+        le32(q + 4 * i, (uint32_t)x[i]);
+    }
+    return ans_put(ans, cap, q, 4u * (size_t)n);
+}
+
+DOOR(surface_size) {
+    int32_t wh[2] = {0, 0};
+    int rc = moy_app_surface_size(a, g, &wh[0], &wh[1]);
+    return rc != MOY_APP_OK ? -rc : ans_ints(wh, 2, ans, cap);
+}
+
+DOOR(surface_font_scale) {
+    return moy_app_surface_font_scale(a, g);
+}
+
+DOOR(surface_chrome_scale) {
+    return moy_app_surface_chrome_scale(a, g);
+}
+
+DOOR(surface_windowed) {
+    return moy_app_surface_windowed(a, g);
+}
+
+DOOR(surface_bar_h) {
+    return moy_app_surface_bar_h(a, g);
+}
+
+DOOR(surface_content_rect) {
+    int32_t r[4] = {0, 0, 0, 0};
+    int rc = moy_app_surface_content_rect(a, g, r);
+    return rc != MOY_APP_OK ? -rc : ans_ints(r, 4, ans, cap);
+}
+
+DOOR(surface_pointer) {
+    int32_t p[5] = {0, 0, 0, 0, 0};
+    int rc = moy_app_surface_pointer(a, g, p);
+    return rc != MOY_APP_OK ? -rc : ans_ints(p, 5, ans, cap);
+}
+
+DOOR(theme_token) {
+    int32_t t = 0;
+    int rc = moy_app_theme_token(a, g, v[0].i, &t);
+    if (rc != MOY_APP_OK) {
+        return -rc;
+    }
+    return t == MOY_TOKEN_ABSENT ? -MOY_APP_ABSENT : t;
+}
+
+DOOR(theme_gen) {
+    return moy_app_theme_gen(a, g);
+}
+
+DOOR(theme_light) {
+    return moy_app_theme_light(a, g);
+}
+
+DOOR(theme_name) {
+    char out[MOY_UF_NAME_MAX + 1u];
+    size_t len = 0;
+    int rc = (row == MOY_ROW_THEME_NAME ? moy_app_theme_name
+              : moy_app_theme_variant)(a, g, out, sizeof out, &len);
+    return rc == MOY_APP_OK ? ans_put(ans, cap, out, len) : -rc;
+}
+#define door_theme_variant door_theme_name
+
+DOOR(files_readable) {
+    return moy_app_files_readable(a, g);
+}
+
+DOOR(files_ready) {
+    return moy_app_files_ready(a, g);
+}
+
+DOOR(files_begin) {
+    return ans_rc(moy_app_files_begin(a, g));
+}
+
+DOOR(files_end) {
+    return ans_rc(moy_app_files_end(a, g));
+}
+
+DOOR(files_list) {
+    char k[MOY_UF_NAME_MAX + 1u];
+    moy_buf_t b = {NULL, 0};
+    uint32_t cnt;
+    if (!text(&v[0], k)) {
+        return -MOY_APP_BAD;
+    }
+    return ans_buf(a, moy_app_files_list(a, g, k, &b, &cnt), &b, ans, cap);
+}
+
+DOOR(files_count) {
+    char k[MOY_UF_NAME_MAX + 1u];
+    uint32_t cnt;
+    if (!text(&v[0], k)) {
+        return -MOY_APP_BAD;
+    }
+    int rc = moy_app_files_count(a, g, k, &cnt);
+    return rc == MOY_APP_OK ? (int32_t)(cnt & 0x7fffffffu) : -rc;
+}
+
+DOOR(files_load) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u];
+    moy_buf_t b = {NULL, 0};
+    int bin;
+    if (!text(&v[0], k) || !text(&v[1], nm)) {
+        return -MOY_APP_BAD;
+    }
+    int rc = row == MOY_ROW_FILES_LOAD ? moy_app_files_load(a, g, k, nm, &b, &bin)
+             : row == MOY_ROW_FILES_HISTORY ? moy_app_files_history(a, g, k, nm, &b)
+             : moy_app_files_history_ops(a, g, k, nm, &b);
+    return ans_buf(a, rc, &b, ans, cap);
+}
+#define door_files_history door_files_load
+#define door_files_history_ops door_files_load
+
+DOOR(files_save) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u], out[MOY_UF_NAME_MAX + 1u];
+    if (!text(&v[0], k) || !text(&v[1], nm)) {
+        return -MOY_APP_BAD;
+    }
+    int rc = moy_app_files_save(a, g, k, nm, (const char *)v[2].p, v[2].n, out);
+    return ans_name(rc, out, ans, cap);
+}
+
+DOOR(files_delete) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u], out[MOY_UF_NAME_MAX + 1u];
+    if (!text(&v[0], k) || !text(&v[1], nm)) {
+        return -MOY_APP_BAD;
+    }
+    int rc = (row == MOY_ROW_FILES_DELETE ? moy_app_files_delete
+              : row == MOY_ROW_FILES_DUPLICATE ? moy_app_files_duplicate
+              : moy_app_files_restore)(a, g, k, nm, out);
+    return ans_name(rc, out, ans, cap);
+}
+#define door_files_duplicate door_files_delete
+#define door_files_restore door_files_delete
+
+DOOR(files_rename) {
     char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u], t[MOY_UF_NAME_MAX + 1u];
     char out[MOY_UF_NAME_MAX + 1u];
+    if (!text(&v[0], k) || !text(&v[1], nm) || !text(&v[2], t)) {
+        return -MOY_APP_BAD;
+    }
+    return ans_name(moy_app_files_rename(a, g, k, nm, t, out), out, ans, cap);
+}
+
+// An empty title is none.
+DOOR(files_new_name) {
+    char k[MOY_UF_NAME_MAX + 1u], t[MOY_UF_NAME_MAX + 1u], out[MOY_UF_NAME_MAX + 1u];
+    if (!text(&v[0], k) || !text(&v[1], t)) {
+        return -MOY_APP_BAD;
+    }
+    return ans_name(moy_app_files_new_name(a, g, k, v[1].n ? t : NULL, out), out, ans, cap);
+}
+
+DOOR(files_trash_list) {
     moy_buf_t b = {NULL, 0};
-    const uint8_t *d;
-    size_t dn, en, len = 0;
-    const uint8_t *e;
     uint32_t cnt;
-    int rc, bin;
+    return ans_buf(a, moy_app_files_trash_list(a, g, &b, &cnt), &b, ans, cap);
+}
+
+DOOR(files_empty_trash) {
+    return ans_rc(moy_app_files_empty_trash(a, g));
+}
+
+// An empty list of operations or keyframe is none.
+DOOR(files_history_commit) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u];
+    int prune = 0;
+    if (!text(&v[0], k) || !text(&v[1], nm)) {
+        return -MOY_APP_BAD;
+    }
+    return ans_rc(moy_app_files_history_commit(
+        a, g, k, nm, v[2].n ? (const char *)v[2].p : NULL, v[2].n,
+        v[3].n ? (const char *)v[3].p : NULL, v[3].n, &prune));
+}
+
+DOOR(prefs_get) {
+    size_t len = 0;
+    int rc = moy_app_prefs_get(a, g, (const char *)v[0].p, v[0].n, (char *)ans, cap, &len);
+    return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
+}
+
+DOOR(prefs_set) {
+    return ans_rc(moy_app_prefs_set(a, g, (const char *)v[0].p, v[0].n, (const char *)v[1].p,
+                                    v[1].n));
+}
+
+DOOR(prefs_clear) {
+    return ans_rc(moy_app_prefs_clear(a, g, (const char *)v[0].p, v[0].n));
+}
+
+DOOR(wallpaper_load_copy) {
+    moy_buf_t b = {NULL, 0};
+    return ans_buf(a, moy_app_wallpaper_load_copy(a, g, &b), &b, ans, cap);
+}
+
+DOOR(wallpaper_save_copy) {
+    return ans_rc(moy_app_wallpaper_save_copy(a, g, (const char *)v[0].p, v[0].n));
+}
+
+// The kind's and the name's lengths, each before its bytes.
+DOOR(artwork_current) {
+    char k[MOY_UF_NAME_MAX + 1u], nm[MOY_UF_NAME_MAX + 1u];
+    size_t kl = 0, nl = 0;
+    int rc = moy_app_artwork_current(a, g, k, sizeof k, &kl, nm, sizeof nm, &nl);
+    if (rc != MOY_APP_OK) {
+        return -rc;
+    }
+    if (8u + kl + nl > cap) {
+        return -MOY_APP_FULL;
+    }
+    le32(ans, (uint32_t)kl);
+    memcpy(ans + 4, k, kl);
+    le32(ans + 4 + kl, (uint32_t)nl);
+    memcpy(ans + 8 + kl, nm, nl);
+    return (int32_t)(8u + kl + nl);
+}
+
+DOOR(artwork_follow) {
+    return ans_rc(moy_app_artwork_follow(a, g, (const char *)v[0].p, v[0].n,
+                                         (const char *)v[1].p, v[1].n, (const char *)v[2].p,
+                                         v[2].n));
+}
+
+DOOR(clipboard_put_text) {
+    return ans_rc(moy_app_clip_put_text(a, g, (const char *)v[0].p, v[0].n));
+}
+
+DOOR(clipboard_text) {
+    size_t len = 0;
+    int rc = moy_app_clip_text(a, g, (char *)ans, cap, &len);
+    return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
+}
+
+DOOR(clipboard_kind) {
+    return moy_app_clip_kind(a, g);
+}
+
+DOOR(clipboard_seq) {
+    return moy_app_clip_seq(a, g);
+}
+
+DOOR(moybyte_random) {
+    return ans_crypto(moy_crypto_random(v[0].i, ans, cap));
+}
+
+DOOR(moybyte_sha256) {
+    return ans_crypto(moy_crypto_sha256(v[0].p, v[0].n, ans, cap));
+}
+
+DOOR(moybyte_hmac_sha256) {
+    return ans_crypto(moy_crypto_hmac_sha256(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_aes_gcm_seal) {
+    return ans_crypto(moy_crypto_aes_gcm_seal(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_aes_gcm_open) {
+    return ans_crypto(moy_crypto_aes_gcm_open(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_aes_ctr) {
+    return ans_crypto(moy_crypto_aes_ctr(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_x25519) {
+    return ans_crypto(moy_crypto_x25519(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_aes_ccm_seal) {
+    return ans_crypto(moy_crypto_aes_ccm_seal(v[0].p, v[0].n, v[1].p, v[1].n, v[2].i, ans, cap));
+}
+
+DOOR(moybyte_aes_ccm_open) {
+    return ans_crypto(moy_crypto_aes_ccm_open(v[0].p, v[0].n, v[1].p, v[1].n, v[2].i, ans, cap));
+}
+
+DOOR(moybyte_ed25519_public) {
+    return ans_crypto(moy_crypto_ed25519_public(v[0].p, v[0].n, ans, cap));
+}
+
+DOOR(moybyte_ed25519_sign) {
+    return ans_crypto(moy_crypto_ed25519_sign(v[0].p, v[0].n, v[1].p, v[1].n, ans, cap));
+}
+
+DOOR(moybyte_ed25519_verify) {
+    return ans_crypto(moy_crypto_ed25519_verify(v[0].p, v[0].n, v[1].p, v[1].n, v[2].p, v[2].n));
+}
+
+// Row `row`'s fields checked against MOY_APP_DOOR_ROWS and its body run. A C
+// row the door does not serve (an object the Python binding hands out, a
+// codec over pixels, the toolkit's) is BAD.
+static int32_t door_c(moy_appabi_t *a, uint32_t g, int row, args_t *f, uint8_t *ans,
+                      size_t cap) {
+    fld_t v[MOY_APP_DOOR_FIELDS] = {{NULL, 0u, 0}};
     switch (row) {
-        case MOY_ROW_DAMAGE_ALL:
-            return ans_rc(moy_app_damage_all(a, g));
-        case MOY_ROW_DAMAGE_AGAIN:
-            return ans_rc(moy_app_damage_again(a, g));
-        case MOY_ROW_SURFACE_SIZE: {
-            int32_t w = 0, h = 0;
-            uint8_t q[8];
-            rc = moy_app_surface_size(a, g, &w, &h);
-            if (rc != MOY_APP_OK) {
-                return -rc;
-            }
-            le32(q, (uint32_t)w);
-            le32(q + 4, (uint32_t)h);
-            return ans_put(ans, cap, q, sizeof q);
-        }
-        case MOY_ROW_SURFACE_FONT_SCALE:
-            return moy_app_surface_font_scale(a, g);
-        case MOY_ROW_SURFACE_CHROME_SCALE:
-            return moy_app_surface_chrome_scale(a, g);
-        case MOY_ROW_SURFACE_WINDOWED:
-            return moy_app_surface_windowed(a, g);
-        case MOY_ROW_SURFACE_BAR_H:
-            return moy_app_surface_bar_h(a, g);
-        case MOY_ROW_SURFACE_CONTENT_RECT: {
-            int32_t r[4] = {0, 0, 0, 0};
-            uint8_t q[16];
-            rc = moy_app_surface_content_rect(a, g, r);
-            if (rc != MOY_APP_OK) {
-                return -rc;
-            }
-            for (int i = 0; i < 4; i++) {
-                le32(q + 4 * i, (uint32_t)r[i]);
-            }
-            return ans_put(ans, cap, q, sizeof q);
-        }
-        case MOY_ROW_SURFACE_POINTER: {
-            int32_t p[5] = {0, 0, 0, 0, 0};
-            uint8_t q[20];
-            rc = moy_app_surface_pointer(a, g, p);
-            if (rc != MOY_APP_OK) {
-                return -rc;
-            }
-            for (int i = 0; i < 5; i++) {
-                le32(q + 4 * i, (uint32_t)p[i]);
-            }
-            return ans_put(ans, cap, q, sizeof q);
-        }
-        case MOY_ROW_THEME_TOKEN: {
-            int32_t v = 0, r = arg_int(f);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = moy_app_theme_token(a, g, r, &v);
-            if (rc != MOY_APP_OK) {
-                return -rc;
-            }
-            return v == MOY_TOKEN_ABSENT ? -MOY_APP_ABSENT : v;
-        }
-        case MOY_ROW_THEME_GEN:
-            return moy_app_theme_gen(a, g);
-        case MOY_ROW_THEME_LIGHT:
-            return moy_app_theme_light(a, g);
-        case MOY_ROW_THEME_NAME:
-        case MOY_ROW_THEME_VARIANT:
-            rc = (row == MOY_ROW_THEME_NAME ? moy_app_theme_name
-                  : moy_app_theme_variant)(a, g, out, sizeof out, &len);
-            return rc == MOY_APP_OK ? ans_put(ans, cap, out, len) : -rc;
-        case MOY_ROW_FILES_READABLE:
-            return moy_app_files_readable(a, g);
-        case MOY_ROW_FILES_READY:
-            return moy_app_files_ready(a, g);
-        case MOY_ROW_FILES_BEGIN:
-            return ans_rc(moy_app_files_begin(a, g));
-        case MOY_ROW_FILES_END:
-            return ans_rc(moy_app_files_end(a, g));
-        case MOY_ROW_FILES_LIST:
-            arg_text(f, k, 0);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = moy_app_files_list(a, g, k, &b, &cnt);
-            return ans_buf(a, rc, &b, ans, cap);
-        case MOY_ROW_FILES_COUNT:
-            arg_text(f, k, 0);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = moy_app_files_count(a, g, k, &cnt);
-            return rc == MOY_APP_OK ? (int32_t)(cnt & 0x7fffffffu) : -rc;
-        case MOY_ROW_FILES_LOAD:
-        case MOY_ROW_FILES_HISTORY:
-        case MOY_ROW_FILES_HISTORY_OPS:
-            arg_text(f, k, 0);
-            arg_text(f, nm, 0);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = row == MOY_ROW_FILES_LOAD ? moy_app_files_load(a, g, k, nm, &b, &bin)
-                 : row == MOY_ROW_FILES_HISTORY ? moy_app_files_history(a, g, k, nm, &b)
-                 : moy_app_files_history_ops(a, g, k, nm, &b);
-            return ans_buf(a, rc, &b, ans, cap);
-        case MOY_ROW_FILES_SAVE:
-            arg_text(f, k, 0);
-            arg_text(f, nm, 0);
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = moy_app_files_save(a, g, k, nm, (const char *)d, dn, out);
-            return ans_name(rc, out, ans, cap);
-        case MOY_ROW_FILES_DELETE:
-        case MOY_ROW_FILES_DUPLICATE:
-        case MOY_ROW_FILES_RESTORE:
-            arg_text(f, k, 0);
-            arg_text(f, nm, 0);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = (row == MOY_ROW_FILES_DELETE ? moy_app_files_delete
-                  : row == MOY_ROW_FILES_DUPLICATE ? moy_app_files_duplicate
-                  : moy_app_files_restore)(a, g, k, nm, out);
-            return ans_name(rc, out, ans, cap);
-        case MOY_ROW_FILES_RENAME:
-            arg_text(f, k, 0);
-            arg_text(f, nm, 0);
-            arg_text(f, t, 0);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_name(moy_app_files_rename(a, g, k, nm, t, out), out, ans, cap);
-        case MOY_ROW_FILES_NEW_NAME: {
-            arg_text(f, k, 0);
-            const char *title = arg_text(f, t, 1);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_name(moy_app_files_new_name(a, g, k, title, out), out, ans, cap);
-        }
-        case MOY_ROW_FILES_TRASH_LIST:
-            rc = moy_app_files_trash_list(a, g, &b, &cnt);
-            return ans_buf(a, rc, &b, ans, cap);
-        case MOY_ROW_FILES_EMPTY_TRASH:
-            return ans_rc(moy_app_files_empty_trash(a, g));
-        case MOY_ROW_FILES_HISTORY_COMMIT: {
-            int prune = 0;
-            arg_text(f, k, 0);
-            arg_text(f, nm, 0);
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_files_history_commit(
-                a, g, k, nm, dn ? (const char *)d : NULL, dn, en ? (const char *)e : NULL,
-                en, &prune));
-        }
-        case MOY_ROW_PREFS_GET:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            rc = moy_app_prefs_get(a, g, (const char *)d, dn, (char *)ans, cap, &len);
-            return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
-        case MOY_ROW_PREFS_SET:
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_prefs_set(a, g, (const char *)d, dn, (const char *)e, en));
-        case MOY_ROW_PREFS_CLEAR:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_prefs_clear(a, g, (const char *)d, dn));
-        case MOY_ROW_WALLPAPER_LOAD_COPY:
-            rc = moy_app_wallpaper_load_copy(a, g, &b);
-            return ans_buf(a, rc, &b, ans, cap);
-        case MOY_ROW_WALLPAPER_SAVE_COPY:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_wallpaper_save_copy(a, g, (const char *)d, dn));
-        case MOY_ROW_ARTWORK_CURRENT: {
-            size_t kl = 0, nl = 0;
-            rc = moy_app_artwork_current(a, g, k, sizeof k, &kl, nm, sizeof nm, &nl);
-            if (rc != MOY_APP_OK) {
-                return -rc;
-            }
-            if (8u + kl + nl > cap) {
-                return -MOY_APP_FULL;
-            }
-            le32(ans, (uint32_t)kl);
-            memcpy(ans + 4, k, kl);
-            le32(ans + 4 + kl, (uint32_t)nl);
-            memcpy(ans + 8 + kl, nm, nl);
-            return (int32_t)(8u + kl + nl);
-        }
-        case MOY_ROW_ARTWORK_FOLLOW: {
-            size_t on, nn;
-            d = arg_field(f, &dn);
-            const uint8_t *o = arg_field(f, &on);
-            e = arg_field(f, &nn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_artwork_follow(a, g, (const char *)d, dn, (const char *)o,
-                                                 on, (const char *)e, nn));
-        }
-        case MOY_ROW_CLIPBOARD_PUT_TEXT:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_rc(moy_app_clip_put_text(a, g, (const char *)d, dn));
-        case MOY_ROW_CLIPBOARD_TEXT:
-            rc = moy_app_clip_text(a, g, (char *)ans, cap, &len);
-            return rc != MOY_APP_OK ? -rc : len > cap ? -MOY_APP_FULL : (int32_t)len;
-        case MOY_ROW_CLIPBOARD_KIND:
-            return moy_app_clip_kind(a, g);
-        case MOY_ROW_CLIPBOARD_SEQ:
-            return moy_app_clip_seq(a, g);
-        case MOY_ROW_MOYBYTE_EVERY: case MOY_ROW_MOYBYTE_AFTER: case MOY_ROW_MOYBYTE_CANCEL: {
-            int32_t v = arg_int(f);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return timer_row(a, g, row, v);
-        }
-        case MOY_ROW_MOYBYTE_DEV_OPEN: case MOY_ROW_MOYBYTE_DEV_CLOSE:
-        case MOY_ROW_MOYBYTE_DEV_READ: case MOY_ROW_MOYBYTE_DEV_WRITE:
-        case MOY_ROW_MOYBYTE_DEV_XFER: case MOY_ROW_MOYBYTE_DEV_SET:
-        case MOY_ROW_MOYBYTE_DEV_GET:
-            return dev_row(a, g, row, f, ans, cap);
-        case MOY_ROW_MOYBYTE_SERVICE_RUNNING: case MOY_ROW_MOYBYTE_SERVICE_STOP:
-            return svc_row(a, g, row, f, ans, cap);
-        case MOY_ROW_MOYBYTE_CLOCK:
-            return clock_row(a, g, row, f, ans, cap);
-        case MOY_ROW_MOYBYTE_SEND:
-            return send_row(a, g, f);
-        case MOY_ROW_MOYBYTE_RECV:
-            return recv_row(a, g, ans, cap);
-        case MOY_ROW_MOYBYTE_LOG:
-            return log_row(a, g, f);
-        case MOY_ROW_MOYBYTE_ON:
-            return on_row(a, g, f);
-        case MOY_ROW_MOYBYTE_AT:
-            return at_row(a, g, f);
-        case MOY_ROW_MOYBYTE_STATUS_SHOW: case MOY_ROW_MOYBYTE_STATUS_STATE:
-        case MOY_ROW_MOYBYTE_STATUS_REMOVE:
-            return status_row(a, g, row, f);
-        case MOY_ROW_MOYBYTE_NOTIFY: case MOY_ROW_MOYBYTE_AWARD: case MOY_ROW_MOYBYTE_PROGRESS:
-            return note_row(a, g, row, f);
-        case MOY_ROW_MOYBYTE_ITEM_READ: case MOY_ROW_MOYBYTE_ITEM_WRITE:
-            return item_row(a, g, row, f, ans, cap);
-        case MOY_ROW_MOYBYTE_RANDOM: {
-            int32_t want = arg_int(f);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(moy_crypto_random(want, ans, cap));
-        }
-        case MOY_ROW_MOYBYTE_SHA256:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(moy_crypto_sha256(d, dn, ans, cap));
-        case MOY_ROW_MOYBYTE_HMAC_SHA256:
-        case MOY_ROW_MOYBYTE_AES_GCM_SEAL:
-        case MOY_ROW_MOYBYTE_AES_GCM_OPEN:
-        case MOY_ROW_MOYBYTE_AES_CTR:
-        case MOY_ROW_MOYBYTE_X25519:
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(row == MOY_ROW_MOYBYTE_HMAC_SHA256
-                              ? moy_crypto_hmac_sha256(d, dn, e, en, ans, cap)
-                              : row == MOY_ROW_MOYBYTE_AES_GCM_SEAL
-                              ? moy_crypto_aes_gcm_seal(d, dn, e, en, ans, cap)
-                              : row == MOY_ROW_MOYBYTE_AES_GCM_OPEN
-                              ? moy_crypto_aes_gcm_open(d, dn, e, en, ans, cap)
-                              : row == MOY_ROW_MOYBYTE_AES_CTR
-                              ? moy_crypto_aes_ctr(d, dn, e, en, ans, cap)
-                              : moy_crypto_x25519(d, dn, e, en, ans, cap));
-        case MOY_ROW_MOYBYTE_AES_CCM_SEAL:
-        case MOY_ROW_MOYBYTE_AES_CCM_OPEN: {
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            int32_t tag = arg_int(f);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(row == MOY_ROW_MOYBYTE_AES_CCM_SEAL
-                              ? moy_crypto_aes_ccm_seal(d, dn, e, en, tag, ans, cap)
-                              : moy_crypto_aes_ccm_open(d, dn, e, en, tag, ans, cap));
-        }
-        case MOY_ROW_MOYBYTE_ED25519_PUBLIC:
-            d = arg_field(f, &dn);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(moy_crypto_ed25519_public(d, dn, ans, cap));
-        case MOY_ROW_MOYBYTE_ED25519_SIGN:
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(moy_crypto_ed25519_sign(d, dn, e, en, ans, cap));
-        case MOY_ROW_MOYBYTE_ED25519_VERIFY: {
-            d = arg_field(f, &dn);
-            e = arg_field(f, &en);
-            const uint8_t *s = arg_field(f, &len);
-            if (f->bad || f->at != f->n) {
-                return -MOY_APP_BAD;
-            }
-            return ans_crypto(moy_crypto_ed25519_verify(d, dn, e, en, s, len));
-        }
+#define X(r, body, sig) \
+    case r: return fields(f, sig, v) ? door_##body(a, g, r, f, v, ans, cap) : -MOY_APP_BAD;
+        MOY_APP_DOOR_ROWS(X)
+#undef X
         default:
-            // An object the Python binding hands out, or a codec over pixels.
             return -MOY_APP_BAD;
     }
 }
@@ -2660,9 +2607,6 @@ static int32_t role(moy_appabi_t *a, uint32_t g, uint32_t row, const uint8_t *ar
     }
     int c_row = TABLE[row].c_row;
     if (c_row != MOY_APP_SHELL) {
-        if (n != 0u && no_args(c_row)) {
-            return -MOY_APP_BAD;
-        }
         args_t f = {arg, n, 0u, 0, row, here};
         int32_t v = door_c(a, g, c_row, &f, ans, cap);
         return f.bad ? -MOY_APP_BAD : v;

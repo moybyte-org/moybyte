@@ -380,6 +380,96 @@ enum {
     { "moybyte.clock", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_CLOCK }, \
 }
 
+// The C rows the ROLE door serves (moy_app.c's door_c), each X(row, its
+// body door_<role>_<verb>, its fields): one character a field, i a number,
+// * a text or bytes, checked before the body runs. A C row not here (an
+// object, the toolkit's) the door refuses BAD.
+#define MOY_APP_DOOR_ROWS(X) \
+    X(MOY_ROW_DAMAGE_ALL, damage_all, "") \
+    X(MOY_ROW_DAMAGE_AGAIN, damage_again, "") \
+    X(MOY_ROW_SURFACE_SIZE, surface_size, "") \
+    X(MOY_ROW_SURFACE_FONT_SCALE, surface_font_scale, "") \
+    X(MOY_ROW_SURFACE_CHROME_SCALE, surface_chrome_scale, "") \
+    X(MOY_ROW_SURFACE_WINDOWED, surface_windowed, "") \
+    X(MOY_ROW_SURFACE_BAR_H, surface_bar_h, "") \
+    X(MOY_ROW_SURFACE_CONTENT_RECT, surface_content_rect, "") \
+    X(MOY_ROW_SURFACE_POINTER, surface_pointer, "") \
+    X(MOY_ROW_THEME_TOKEN, theme_token, "i") \
+    X(MOY_ROW_THEME_GEN, theme_gen, "") \
+    X(MOY_ROW_THEME_LIGHT, theme_light, "") \
+    X(MOY_ROW_THEME_NAME, theme_name, "") \
+    X(MOY_ROW_THEME_VARIANT, theme_variant, "") \
+    X(MOY_ROW_FILES_READABLE, files_readable, "") \
+    X(MOY_ROW_FILES_READY, files_ready, "") \
+    X(MOY_ROW_FILES_BEGIN, files_begin, "") \
+    X(MOY_ROW_FILES_END, files_end, "") \
+    X(MOY_ROW_FILES_LIST, files_list, "*") \
+    X(MOY_ROW_FILES_COUNT, files_count, "*") \
+    X(MOY_ROW_FILES_LOAD, files_load, "**") \
+    X(MOY_ROW_FILES_SAVE, files_save, "***") \
+    X(MOY_ROW_FILES_DELETE, files_delete, "**") \
+    X(MOY_ROW_FILES_DUPLICATE, files_duplicate, "**") \
+    X(MOY_ROW_FILES_RENAME, files_rename, "***") \
+    X(MOY_ROW_FILES_NEW_NAME, files_new_name, "**") \
+    X(MOY_ROW_FILES_TRASH_LIST, files_trash_list, "") \
+    X(MOY_ROW_FILES_RESTORE, files_restore, "**") \
+    X(MOY_ROW_FILES_EMPTY_TRASH, files_empty_trash, "") \
+    X(MOY_ROW_FILES_HISTORY, files_history, "**") \
+    X(MOY_ROW_FILES_HISTORY_OPS, files_history_ops, "**") \
+    X(MOY_ROW_FILES_HISTORY_COMMIT, files_history_commit, "****") \
+    X(MOY_ROW_PREFS_GET, prefs_get, "*") \
+    X(MOY_ROW_PREFS_SET, prefs_set, "**") \
+    X(MOY_ROW_PREFS_CLEAR, prefs_clear, "*") \
+    X(MOY_ROW_WALLPAPER_LOAD_COPY, wallpaper_load_copy, "") \
+    X(MOY_ROW_WALLPAPER_SAVE_COPY, wallpaper_save_copy, "*") \
+    X(MOY_ROW_ARTWORK_CURRENT, artwork_current, "") \
+    X(MOY_ROW_ARTWORK_FOLLOW, artwork_follow, "***") \
+    X(MOY_ROW_CLIPBOARD_PUT_TEXT, clipboard_put_text, "*") \
+    X(MOY_ROW_CLIPBOARD_TEXT, clipboard_text, "") \
+    X(MOY_ROW_CLIPBOARD_KIND, clipboard_kind, "") \
+    X(MOY_ROW_CLIPBOARD_SEQ, clipboard_seq, "") \
+    X(MOY_ROW_MOYBYTE_NOTIFY, moybyte_notify, "**") \
+    X(MOY_ROW_MOYBYTE_SEND, moybyte_send, "***") \
+    X(MOY_ROW_MOYBYTE_AWARD, moybyte_award, "*") \
+    X(MOY_ROW_MOYBYTE_PROGRESS, moybyte_progress, "*i") \
+    X(MOY_ROW_MOYBYTE_ON, moybyte_on, "*i") \
+    X(MOY_ROW_MOYBYTE_EVERY, moybyte_every, "i") \
+    X(MOY_ROW_MOYBYTE_AFTER, moybyte_after, "i") \
+    X(MOY_ROW_MOYBYTE_CANCEL, moybyte_cancel, "i") \
+    X(MOY_ROW_MOYBYTE_LOG, moybyte_log, "i*") \
+    X(MOY_ROW_MOYBYTE_RECV, moybyte_recv, "") \
+    X(MOY_ROW_MOYBYTE_ITEM_READ, moybyte_item_read, "ii") \
+    X(MOY_ROW_MOYBYTE_ITEM_WRITE, moybyte_item_write, "i*") \
+    X(MOY_ROW_MOYBYTE_AT, moybyte_at, "i") \
+    X(MOY_ROW_MOYBYTE_SERVICE_STOP, moybyte_service_stop, "") \
+    X(MOY_ROW_MOYBYTE_SERVICE_RUNNING, moybyte_service_running, "") \
+    X(MOY_ROW_MOYBYTE_RANDOM, moybyte_random, "i") \
+    X(MOY_ROW_MOYBYTE_SHA256, moybyte_sha256, "*") \
+    X(MOY_ROW_MOYBYTE_HMAC_SHA256, moybyte_hmac_sha256, "**") \
+    X(MOY_ROW_MOYBYTE_AES_GCM_SEAL, moybyte_aes_gcm_seal, "**") \
+    X(MOY_ROW_MOYBYTE_AES_GCM_OPEN, moybyte_aes_gcm_open, "**") \
+    X(MOY_ROW_MOYBYTE_X25519, moybyte_x25519, "**") \
+    X(MOY_ROW_MOYBYTE_DEV_OPEN, moybyte_dev_open, "**") \
+    X(MOY_ROW_MOYBYTE_DEV_CLOSE, moybyte_dev_close, "i") \
+    X(MOY_ROW_MOYBYTE_DEV_READ, moybyte_dev_read, "ii") \
+    X(MOY_ROW_MOYBYTE_DEV_WRITE, moybyte_dev_write, "i*") \
+    X(MOY_ROW_MOYBYTE_DEV_XFER, moybyte_dev_xfer, "i*i") \
+    X(MOY_ROW_MOYBYTE_DEV_SET, moybyte_dev_set, "i*") \
+    X(MOY_ROW_MOYBYTE_DEV_GET, moybyte_dev_get, "i*") \
+    X(MOY_ROW_MOYBYTE_ED25519_PUBLIC, moybyte_ed25519_public, "*") \
+    X(MOY_ROW_MOYBYTE_ED25519_SIGN, moybyte_ed25519_sign, "**") \
+    X(MOY_ROW_MOYBYTE_ED25519_VERIFY, moybyte_ed25519_verify, "***") \
+    X(MOY_ROW_MOYBYTE_STATUS_SHOW, moybyte_status_show, "*ii") \
+    X(MOY_ROW_MOYBYTE_STATUS_STATE, moybyte_status_state, "ii") \
+    X(MOY_ROW_MOYBYTE_STATUS_REMOVE, moybyte_status_remove, "i") \
+    X(MOY_ROW_MOYBYTE_AES_CTR, moybyte_aes_ctr, "**") \
+    X(MOY_ROW_MOYBYTE_AES_CCM_SEAL, moybyte_aes_ccm_seal, "**i") \
+    X(MOY_ROW_MOYBYTE_AES_CCM_OPEN, moybyte_aes_ccm_open, "**i") \
+    X(MOY_ROW_MOYBYTE_CLOCK, moybyte_clock, "i") \
+
+// The most fields a C row takes.
+#define MOY_APP_DOOR_FIELDS 4
+
 // The permission each role is granted by: a role absent here is never
 // granted.
 #define MOY_APP_PERMS { \
