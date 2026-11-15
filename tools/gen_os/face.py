@@ -36,6 +36,8 @@ A face.json maps a module's name to its face:
   errors    {name: {"codes": {rc: "Exxx"}, "other": "Exxx"}}: a C answer code
             raised as OSError(errno), 0 answering
   api       the toolkit's engine verbs (native/moy_ui's alone): tools/gen_os/ui.py's
+  roles     {role: C prefix}: the role objects whose C rows (native/os_calls.json)
+            both faces generate as methods, tools/gen_os/roles.py's
   rows      one per Python name, in the globals' order. `py` is its Python
             signature ("read(seq=0, n=32)"); `hand` a row both faces write by
             hand (its name and arity are still checked); otherwise `c` is the
@@ -68,6 +70,7 @@ import os
 import re
 
 from . import TableError, header
+from . import roles as _roles
 from . import structs as _structs
 from .cproto import param_name, parse, wrap
 from .table import ROOT
@@ -79,7 +82,7 @@ FACES_PY = os.path.join(HOST, "faces.py")
 FIRST = ("moy_spine",)
 
 MOD_FIELDS = {"about", "c", "host", "binding", "lazy", "registered", "headers", "consts", "structs", "errors",
-              "rows", "api", "when"}
+              "rows", "api", "when", "roles"}
 ROW_FIELDS = {"py", "hand", "c", "span", "wbuf", "ret", "neg_out", "trunc", "null", "out", "err", "noalloc", "example",
               "absent", "doc", "when"}
 FACES = ("host", "mp")
@@ -780,9 +783,10 @@ def gen_host(m, face):
     o = [header("native/%s/face.json" % face["dir"], "#"),
          '"""%s\'s generated %s over ctypes: %s.' % (m, what, face["about"]),
          'The module `%s` is runtime/host/%s.py."""' % (m, face["host"]),
-         ""] + (["import ctypes as _c"] if gen or structs else []) + (
+         ""] + (["import ctypes as _c"] if gen or structs or face.get("roles") else []) + (
          ["import errno as _errno"] if face.get("errors") else []) + (
-         ["", "import face_ctypes as _f"] if gen or face.get("errors") else []) + [
+         ["", "import face_ctypes as _f"] if gen or face.get("errors") else []) + (
+         ["", "import face_errors as _E"] if face.get("roles") else []) + [
          "", "__all__ = ("] + wrap(['"%s"' % n for n in public]) + [")", ""]
     for cn, pn in consts(face):
         if cn in hdr.strings():
@@ -801,6 +805,8 @@ def gen_host(m, face):
         o += ["", "", "def _raise_%s(rc):" % name, "    if rc:",
               "        _f.raise_errno(_%s.get(rc, _errno.%s))" % (name.upper(), e["other"]),
               "", ""]
+    if face.get("roles"):
+        o += _roles.host_rows(face, hdr) + [""]
     if not gen:
         while o[-1] == "":
             o.pop()
@@ -852,6 +858,9 @@ def outputs(faces=None):
         if not generated(face):
             continue
         out.append((mp_path(m, face), gen_mp(m, face)))
+    for m, face in faces.items():
+        if face.get("roles"):
+            out.append((mp_path(m, face), _roles.gen_mp(m, face, Headers(face))))
     for m, face in faces.items():
         if face.get("host") and (generated(face) or face.get("structs")) and "api" not in face:
             out.append((host_path(m, face), gen_host(m, face)))

@@ -42,12 +42,12 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 from face_errors import ABSENT, BAD, IO, NOSTORE, OK
+import moy_app_face as _face
 from moy_app_face import (
     moy_app_policy_t as _Policy, moy_app_run_t as _Run, moy_app_surface_t as _Surf,
     moy_grant_t as _Grant)
 from moy_store_face import moy_buf_t as _Buf
 KINDS_N, TOKENS_N = 4, 38
-NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
 DOC_MAX = 255
@@ -113,11 +113,6 @@ _SIGS = (
      c.c_int),
     ("moy_app_theme_read", [_P, c.POINTER(c.c_int32)], _U32),
     ("moy_app_theme_colors", [_P, _U32, _PU32], c.c_int),
-    ("moy_app_theme_token", [_P, _U32, c.c_int, c.POINTER(c.c_int32)], c.c_int),
-    ("moy_app_theme_gen", [_P, _U32], c.c_int32),
-    ("moy_app_theme_light", [_P, _U32], c.c_int32),
-    ("moy_app_theme_name", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
-    ("moy_app_theme_variant", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_damage_all", [_P, _U32], c.c_int),
     ("moy_app_damage_again", [_P, _U32], c.c_int),
     ("moy_app_damage_take", [_P], _U32),
@@ -125,10 +120,6 @@ _SIGS = (
     ("moy_app_prefs_get", [_P, _U32, _PCHAR, _SIZE, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_prefs_set", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE], c.c_int),
     ("moy_app_prefs_clear", [_P, _U32, _PCHAR, _SIZE], c.c_int),
-    ("moy_app_clip_put_text", [_P, _U32, _PCHAR, _SIZE], c.c_int),
-    ("moy_app_clip_text", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
-    ("moy_app_clip_kind", [_P, _U32], c.c_int32),
-    ("moy_app_clip_seq", [_P, _U32], c.c_int32),
     ("moy_app_artwork_current", [_P, _U32, _P, _SIZE, _PSIZE, _P, _SIZE, _PSIZE],
      c.c_int),
     ("moy_app_artwork_follow", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE, _PCHAR, _SIZE],
@@ -362,7 +353,7 @@ def binding(sanitize=False):
     if path is None:
         return None
     lib = c.CDLL(path)
-    for name, args, res in _SIGS:
+    for name, args, res in _SIGS + _face.ROLE_SIGS:
         fn = getattr(lib, name)
         fn.argtypes = args
         fn.restype = res
@@ -626,6 +617,8 @@ def binding(sanitize=False):
         return o
 
     class _Role:
+        _lib = lib
+
         def __init__(self, app, g):
             if not isinstance(app, App):
                 raise TypeError("an App")
@@ -675,38 +668,12 @@ def binding(sanitize=False):
             _check(rc)
             return Pointer(v[0], v[1], bool(v[2]), bool(v[3]), bool(v[4]))
 
-    class Theme(_Role):
+    class Theme(_Role, _face.ThemeRows):
         def colors(self):
             gen = c.c_uint32()
             _check(lib.moy_app_theme_colors(self._app._p, self._g, c.byref(gen)))
             return self._app._colors_at(gen.value,
                                         bool(lib.moy_app_theme_near(self._app._p, self._g)))
-
-        def token(self, role):
-            v = c.c_int32()
-            rc = lib.moy_app_theme_token(self._app._p, self._g, int(role), c.byref(v))
-            if rc == ABSENT:
-                return None
-            _check(rc)
-            return v.value
-
-        def gen(self):
-            return _scalar(lib.moy_app_theme_gen(self._app._p, self._g))
-
-        def light(self):
-            return bool(_scalar(lib.moy_app_theme_light(self._app._p, self._g)))
-
-        def _name(self, fn):
-            buf = c.create_string_buffer(NAME_MAX + 1)
-            n = c.c_size_t()
-            _check(fn(self._app._p, self._g, buf, NAME_MAX + 1, c.byref(n)))
-            return buf.raw[:n.value].decode("utf-8", "surrogateescape")
-
-        def name(self):
-            return self._name(lib.moy_app_theme_name)
-
-        def variant(self):
-            return self._name(lib.moy_app_theme_variant)
 
         def set(self, *a, **kw):
             return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
@@ -787,33 +754,8 @@ def binding(sanitize=False):
             Prefs._flushed(self, rc)
             return rc == OK
 
-    class Clipboard(_Role):
-        def put_text(self, text):
-            b = str(text).encode("utf-8", "surrogateescape")
-            rc = lib.moy_app_clip_put_text(self._app._p, self._g, b, len(b))
-            if rc != BAD:
-                _check(rc)
-            return rc == OK
-
-        def text(self):
-            n = c.c_size_t()
-            _check(lib.moy_app_clip_text(self._app._p, self._g, None, 0, c.byref(n)))
-            buf = c.create_string_buffer(n.value or 1)
-            _check(lib.moy_app_clip_text(self._app._p, self._g, buf, n.value,
-                                         c.byref(n)))
-            return buf.raw[:n.value].decode("utf-8", "surrogateescape")
-
-        def kind(self):
-            k = lib.moy_app_clip_kind(self._app._p, self._g)
-            if k < 0:
-                _raise(-k)
-            return "text" if k == 1 else None
-
-        def seq(self):
-            s = lib.moy_app_clip_seq(self._app._p, self._g)
-            if s < 0:
-                _raise(-s)
-            return s
+    class Clipboard(_Role, _face.ClipboardRows):
+        pass
 
     def _names(raw, count, pairs):
         parts = raw.split("\0")

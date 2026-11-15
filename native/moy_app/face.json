@@ -3,6 +3,8 @@
     "about": "the app ABI's C rows, native/moy_app",
     "host": "moy_app_binding",
     "binding": true,
-    "structs": ["moy_app_run_t", "moy_app_surface_t", "moy_grant_t", "moy_app_policy_t"]
+    "headers": ["moy_app.h"],
+    "structs": ["moy_app_run_t", "moy_app_surface_t", "moy_grant_t", "moy_app_policy_t"],
+    "roles": {"theme": "moy_app_theme_", "clipboard": "moy_app_clip_"}
   }
 }

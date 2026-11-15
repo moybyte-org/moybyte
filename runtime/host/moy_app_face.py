@@ -4,6 +4,8 @@ The module `moy_app` is runtime/host/moy_app_binding.py."""
 
 import ctypes as _c
 
+import face_errors as _E
+
 __all__ = (
 )
 
@@ -56,3 +58,104 @@ class moy_app_policy_t(_c.Structure):
         ("nkinds", _c.c_uint8),
         ("kinds", _c.c_int8 * 4),
     ]
+
+
+
+
+def _check(rc):
+    if rc != _E.OK:
+        raise _E.exception(rc)
+
+
+ROLE_SIGS = (
+    ("moy_app_theme_token", [_c.c_void_p, _c.c_uint32, _c.c_int,
+                             _c.POINTER(_c.c_int32)], _c.c_int),
+    ("moy_app_theme_gen", [_c.c_void_p, _c.c_uint32], _c.c_int32),
+    ("moy_app_theme_light", [_c.c_void_p, _c.c_uint32], _c.c_int32),
+    ("moy_app_theme_name", [_c.c_void_p, _c.c_uint32, _c.c_void_p, _c.c_size_t,
+                            _c.POINTER(_c.c_size_t)], _c.c_int),
+    ("moy_app_theme_variant", [_c.c_void_p, _c.c_uint32, _c.c_void_p, _c.c_size_t,
+                               _c.POINTER(_c.c_size_t)], _c.c_int),
+    ("moy_app_clip_put_text", [_c.c_void_p, _c.c_uint32, _c.c_char_p, _c.c_size_t], _c.c_int),
+    ("moy_app_clip_text", [_c.c_void_p, _c.c_uint32, _c.c_void_p, _c.c_size_t,
+                           _c.POINTER(_c.c_size_t)], _c.c_int),
+    ("moy_app_clip_kind", [_c.c_void_p, _c.c_uint32], _c.c_int32),
+    ("moy_app_clip_seq", [_c.c_void_p, _c.c_uint32], _c.c_int32),
+)
+
+
+class ThemeRows:
+    """The theme role's generated rows; the role class sets _app, _g and _lib."""
+
+    def token(self, role):
+        f, a, g = self._lib.moy_app_theme_token, self._app._p, self._g
+        v = _c.c_int32()
+        rc = f(a, g, int(role), _c.byref(v))
+        if rc == _E.ABSENT:
+            return None
+        _check(rc)
+        return v.value
+
+    def gen(self):
+        f, a, g = self._lib.moy_app_theme_gen, self._app._p, self._g
+        v = f(a, g)
+        if v < 0:
+            raise _E.exception(-v)
+        return v
+
+    def light(self):
+        f, a, g = self._lib.moy_app_theme_light, self._app._p, self._g
+        v = f(a, g)
+        if v < 0:
+            raise _E.exception(-v)
+        return bool(v)
+
+    def name(self):
+        f, a, g = self._lib.moy_app_theme_name, self._app._p, self._g
+        n = _c.c_size_t()
+        _check(f(a, g, None, 0, _c.byref(n)))
+        buf = _c.create_string_buffer(n.value or 1)
+        _check(f(a, g, buf, n.value, _c.byref(n)))
+        return buf.raw[:n.value].decode("utf-8", "surrogateescape")
+
+    def variant(self):
+        f, a, g = self._lib.moy_app_theme_variant, self._app._p, self._g
+        n = _c.c_size_t()
+        _check(f(a, g, None, 0, _c.byref(n)))
+        buf = _c.create_string_buffer(n.value or 1)
+        _check(f(a, g, buf, n.value, _c.byref(n)))
+        return buf.raw[:n.value].decode("utf-8", "surrogateescape")
+
+
+class ClipboardRows:
+    """The clipboard role's generated rows; the role class sets _app, _g and _lib."""
+
+    def put_text(self, text):
+        f, a, g = self._lib.moy_app_clip_put_text, self._app._p, self._g
+        text_b = str(text).encode("utf-8", "surrogateescape")
+        rc = f(a, g, text_b, len(text_b))
+        if rc != _E.BAD:
+            _check(rc)
+        return rc == _E.OK
+
+    def text(self):
+        f, a, g = self._lib.moy_app_clip_text, self._app._p, self._g
+        n = _c.c_size_t()
+        _check(f(a, g, None, 0, _c.byref(n)))
+        buf = _c.create_string_buffer(n.value or 1)
+        _check(f(a, g, buf, n.value, _c.byref(n)))
+        return buf.raw[:n.value].decode("utf-8", "surrogateescape")
+
+    def kind(self):
+        f, a, g = self._lib.moy_app_clip_kind, self._app._p, self._g
+        v = f(a, g)
+        if v < 0:
+            raise _E.exception(-v)
+        return {1: "text"}.get(v)
+
+    def seq(self):
+        f, a, g = self._lib.moy_app_clip_seq, self._app._p, self._g
+        v = f(a, g)
+        if v < 0:
+            raise _E.exception(-v)
+        return v

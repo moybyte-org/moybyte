@@ -885,6 +885,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &surface_locals
     );
 
+// The str of `o` (str() of anything else): a text row's argument.
+static const char *text_in(mp_obj_t o, size_t *n) {
+    if (!mp_obj_is_str(o)) {
+        o = mp_obj_str_make_new(&mp_type_str, 1, 0, &o);
+    }
+    return mp_obj_str_get_data(o, n);
+}
+
+// The theme's and the clipboard's rows (moy_app/face.json's roles).
+#include "modmoy_app_face.h"
+
 // theme
 
 // The colour dict of the token table's generation `gen`, rebuilt only when it
@@ -922,54 +933,6 @@ static mp_obj_t theme_colors(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(theme_colors_obj, theme_colors);
 
-static mp_obj_t theme_token(mp_obj_t self, mp_obj_t role) {
-    uint32_t g;
-    int32_t v;
-    moy_appabi_t *a = role_app(self, &g);
-    int rc = moy_app_theme_token(a, g, (int)mp_obj_get_int(role), &v);
-    if (rc == MOY_APP_ABSENT) {
-        return mp_const_none;
-    }
-    check(rc);
-    return MP_OBJ_NEW_SMALL_INT(v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(theme_token_obj, theme_token);
-
-static mp_obj_t theme_gen(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    return scalar(moy_app_theme_gen(a, g));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(theme_gen_obj, theme_gen);
-
-static mp_obj_t theme_light(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    return mp_obj_new_bool(MP_OBJ_SMALL_INT_VALUE(scalar(moy_app_theme_light(a, g))));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(theme_light_obj, theme_light);
-
-typedef int (*name_fn_t)(moy_appabi_t *, uint32_t, char *, size_t, size_t *);
-
-static mp_obj_t name_read(mp_obj_t self, name_fn_t fn) {
-    uint32_t g;
-    char buf[MOY_APP_NAME_MAX + 1];
-    size_t n = 0;
-    moy_appabi_t *a = role_app(self, &g);
-    check(fn(a, g, buf, sizeof(buf), &n));
-    return mp_obj_new_str(buf, n);
-}
-
-static mp_obj_t theme_name(mp_obj_t self) {
-    return name_read(self, moy_app_theme_name);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(theme_name_obj, theme_name);
-
-static mp_obj_t theme_variant(mp_obj_t self) {
-    return name_read(self, moy_app_theme_variant);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(theme_variant_obj, theme_variant);
-
 SERVED(theme, THEME, set)
 SERVED(theme, THEME, set_variant)
 SERVED(theme, THEME, change)
@@ -981,11 +944,7 @@ SERVED(theme, THEME, name_check)
 
 static const mp_rom_map_elem_t theme_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_colors), MP_ROM_PTR(&theme_colors_obj) },
-    { MP_ROM_QSTR(MP_QSTR_token), MP_ROM_PTR(&theme_token_obj) },
-    { MP_ROM_QSTR(MP_QSTR_gen), MP_ROM_PTR(&theme_gen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_light), MP_ROM_PTR(&theme_light_obj) },
-    { MP_ROM_QSTR(MP_QSTR_name), MP_ROM_PTR(&theme_name_obj) },
-    { MP_ROM_QSTR(MP_QSTR_variant), MP_ROM_PTR(&theme_variant_obj) },
+    MOY_FACE_APP_THEME
     { MP_ROM_QSTR(MP_QSTR_set), MP_ROM_PTR(&theme_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_variant), MP_ROM_PTR(&theme_set_variant_obj) },
     { MP_ROM_QSTR(MP_QSTR_change), MP_ROM_PTR(&theme_change_obj) },
@@ -1073,59 +1032,8 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 // clipboard
 
-static mp_obj_t clip_put_text(mp_obj_t self, mp_obj_t text) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    size_t n;
-    const char *s = mp_obj_is_str(text) ? mp_obj_str_get_data(text, &n)
-                    : mp_obj_str_get_data(mp_obj_str_make_new(&mp_type_str, 1, 0, &text), &n);
-    int rc = moy_app_clip_put_text(a, g, s, n);
-    if (rc != MOY_APP_BAD) {
-        check(rc);
-    }
-    return mp_obj_new_bool(rc == MOY_APP_OK);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(clip_put_text_obj, clip_put_text);
-
-static mp_obj_t clip_text(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    size_t len = 0;
-    check(moy_app_clip_text(a, g, NULL, 0, &len));
-    vstr_t v;
-    vstr_init_len(&v, len);
-    check(moy_app_clip_text(a, g, v.buf, len, &len));
-    return mp_obj_new_str_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(clip_text_obj, clip_text);
-
-static mp_obj_t clip_kind(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    int32_t k = moy_app_clip_kind(a, g);
-    if (k < 0) {
-        raise_rc(-k);
-    }
-    return k == MOY_CLIP_TEXT ? MP_OBJ_NEW_QSTR(MP_QSTR_text) : mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(clip_kind_obj, clip_kind);
-
-static mp_obj_t clip_seq(mp_obj_t self) {
-    uint32_t g;
-    moy_appabi_t *a = role_app(self, &g);
-    int32_t s = moy_app_clip_seq(a, g);
-    if (s < 0) {
-        raise_rc(-s);
-    }
-    return MP_OBJ_NEW_SMALL_INT(s);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(clip_seq_obj, clip_seq);
-
 static const mp_rom_map_elem_t clip_locals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_put_text), MP_ROM_PTR(&clip_put_text_obj) },
-    { MP_ROM_QSTR(MP_QSTR_text), MP_ROM_PTR(&clip_text_obj) },
-    { MP_ROM_QSTR(MP_QSTR_kind), MP_ROM_PTR(&clip_kind_obj) },
-    { MP_ROM_QSTR(MP_QSTR_seq), MP_ROM_PTR(&clip_seq_obj) },
+    MOY_FACE_APP_CLIPBOARD
 };
 static MP_DEFINE_CONST_DICT(clip_locals, clip_locals_table);
 

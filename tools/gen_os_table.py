@@ -41,6 +41,11 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     runtime/host/<m>_face.py        the same rows over ctypes, with the
                                     structures and constants they name
     runtime/host/faces.py           each host face, in registration order
+  the role objects' rows, from a face.json's `roles` and native/os_calls.json
+  (tools/gen_os/roles.py)
+    native/moy_app/modmoy_app_face.h  the theme's and the clipboard's C rows as
+                                    methods of the board module's role types
+    runtime/host/moy_app_face.py    the same over ctypes (ThemeRows, ClipboardRows)
   the override table's readers, from native/moy_ui/over.json (tools/gen_os/over.py)
     native/moy_ui/moy_ui_over_keys.h  the keys, the block's bits, the table every
                                     tier's reader walks
@@ -65,8 +70,8 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
 The generator is the package tools/gen_os/: table.py (the source, its views
 and its rules), cproto.py (a row's C prototype, parsed), and one emitter per
 tier (elf.py, wasi.py, app.py, lua.py, py.py, docs.py, sdk.py), and face.py,
-the binding faces from their own sources. This file is
-its entry point and outputs() its one list.
+the binding faces from their own sources (roles.py their role objects'
+rows). This file is its entry point and outputs() its one list.
 
 The output is committed: no build runs this, and tests/test_os_table.py
 regenerates it and fails on any difference. A file it writes whole opens
