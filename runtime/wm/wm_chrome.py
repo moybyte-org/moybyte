@@ -22,6 +22,7 @@ own.
 from chrome import NAMES, MIN_TAP_MM   # not palette: chrome is the device-safe home
 import layout_base as _layout_base
 import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
 import iconsets as _iconsets
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
@@ -219,7 +220,7 @@ class WindowChrome:
             sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
             return
         if not ws.draw_icon("app", slot, ink, sc):
-            ws.glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+            _bar_glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
     def _theme_doc(self, win):
         """The theme the Editor's window holds in its theme mode, or None."""
@@ -779,7 +780,7 @@ class WindowChrome:
                     s = max(1, 18 // iw)
                     sc.spr(img, slot[0] + (18 - iw * s) // 2, slot[1] + (18 - iw * s) // 2, s)
                 else:
-                    self.ws.glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+                    _bar_glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
             sc.print(label, x + 38, y + (h - line_h) // 2, ink, 1)
 
     def chip_tap(self, key):

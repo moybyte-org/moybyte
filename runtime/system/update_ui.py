@@ -28,7 +28,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws.frame_state.dirty,
                              ws.home.go_home,
-                             ws.mini_btn, ws.toggles.ota_channel
+                             ws.toggles.ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
                              begin_download/download_step/reset). This is the one
@@ -46,6 +46,7 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 
 import ui as _ui
 from ui_draw import AppHost
+from bar_layer import mini_btn as _bar_mini_btn
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 from ticks import _ticks_ms, _ticks_diff
@@ -675,5 +676,5 @@ class UpdateUI:
                 _ui.label(item)
         _ui.group()
         if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
-            ws.mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
+            _bar_mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 

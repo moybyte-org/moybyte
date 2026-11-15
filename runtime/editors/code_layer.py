@@ -41,6 +41,7 @@ from array import array as _array
 
 import ui as _ui
 import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
 from layers import Layer
 import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
@@ -1309,7 +1310,7 @@ class CodeLayer(Layer):
         if t is not None:
             ink = t["sym_ink"]
         if _glyph_known(spec):
-            self.ws.glyph(spec, rect, ink, cv)
+            _bar_glyph(spec, rect, ink, cv)
             return
         if not spec:
             return

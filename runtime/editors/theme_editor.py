@@ -48,6 +48,7 @@ import json as _json
 import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
 from layers import Layer
 import text_modes as _modes
 import layout_base as _lb
@@ -497,7 +498,7 @@ def draw_zone(app, cv, rect):
     y = rect[1] + (rect[3] - ic) // 2
     bx = back[0] + (back[2] - ic) // 2 if _floor(app) else back[0] + 2 * fs
     if not ws.draw_icon("back", (bx, y, ic, ic), ink, cv):
-        ws.glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
+        _bar_glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
     sets = ws.icon_spec() is not None
     for tab, label, icon, r, labelled in tabs:
         if tab == app.tab:
@@ -775,7 +776,7 @@ class ConfigLayer(CodeLayer):
             ink = th["value"] if not _contrast(th) else th["ink"]
             x0 = lay.x0 - 2 * fs
             if not ws.draw_icon("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv):
-                ws.glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
+                _bar_glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
             was = _ui_draw.print_font(_ui_draw.font("caption")[0])
             try:
                 cv.print(_ui_draw.print_cut(text, max(0, tx + tw - x0 - ic - 4 * fs), fs),
