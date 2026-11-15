@@ -127,7 +127,7 @@ class Run:
         self.project = None         # its Project, the open cart's workspace
         self.audio = None           # its AudioSession, built on a start (#16)
         # The cart's `textmode()`: it takes typed bytes, and the keyboard is
-        # in text mode while it holds the keys (`Player.typing`).
+        # in text mode while it holds the keys (`AppFace.typing`).
         self.textmode = False
         # The game canvas it draws on: the boot canvas, a canvas made for a
         # Proc (`canvas_tag` names it), or one a bind gave it.
@@ -167,23 +167,23 @@ def _is_app(cart):
 
 def _hold(pl):
     """A minimised game held: its clock stopped as the pause menu stops it
-    (`Player.pause`), what held it marked so `_unhold` gives back only its
+    (`Pace.pause`), what held it marked so `_unhold` gives back only its
     own hold. A pause the card made already counts as the hold."""
     if pl.paused_at:
         pl.min_held = True
         return
     if pl.detached:
         pl.paused_at = _ticks_ms() or 1    # a Proc's session is not the audible one
-        pl.audio_held = 0
+        pl.pace.audio_held = 0
     else:
-        pl.pause()
+        pl.pace.pause()
     pl.min_held = True
 
 
 def _unhold(pl):
     if getattr(pl, "min_held", False):
         pl.min_held = False
-        pl.resume()
+        pl.pace.resume()
 
 
 def _sample(pl, el):
@@ -280,7 +280,7 @@ class Procs:
             if win.docked is not None or getattr(win, "own", False) \
                     or getattr(wm, "play_intent", None) == "dev":
                 return False
-        if (pl.is_tool and not (hand and _is_app(ws.cart))) or pl.script \
+        if (pl.is_app() and not (hand and _is_app(ws.cart))) or pl.script \
                 or not _fit.shares_runtime(ws.cart) or pl.front \
                 or pl.netplay is not None:
             return False
@@ -535,7 +535,7 @@ class Procs:
         if e is not None:
             pl.tick_edges, pl.keep_edges = e
             pl.held_edges = None
-        pl.park()
+        pl.pace.park()
 
     def _install(self, p):
         """Serve `p`'s run (`ws.run`) for a step or a paint, until
@@ -588,7 +588,7 @@ class Procs:
             p.state = MINIMISED
             if not p.app:
                 _hold(pl)
-            pl.audio_held = 0          # the front's session is the next run's
+            pl.pace.audio_held = 0          # the front's session is the next run's
         self.list.append(p)
         self.by_key[key] = p
         self.gen += 1
@@ -905,7 +905,7 @@ class Procs:
                 and (ws.wm.stack.has(FRONT) or FRONT in getattr(ws.wm, "windows", {})):
             if self.front_minimised():
                 state = MINIMISED
-            elif pl.paused or not ws.wm.top_is(FRONT) and self.handheld():
+            elif pl.pace.paused or not ws.wm.top_is(FRONT) and self.handheld():
                 state = PAUSED
             else:
                 state = RUNNING

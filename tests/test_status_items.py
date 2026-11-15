@@ -228,13 +228,13 @@ def test_a_game_that_fits_only_without_the_music_asks_first(tmp_path, monkeypatc
     cart = {"title": "Doom", "runtime": "wasm"}
     ws.run.player._log_begin(cart)
     assert moy_log.current() != moy_log.SHELL
-    assert ws.run.player._music_keeps_the_vm(5, cart)
+    assert ws.run.player.pace.music_keeps_the_vm(5, cart)
     assert asked == [cart] and ended == [5] and ws.run.player.declined
     # the declined run's process is over: the dialog's answer, which stops
     # the shell's stream, runs as the shell
     assert moy_log.current() == moy_log.SHELL and ws.run.player.pid is None
     why[0] = "lease"
-    assert not ws.run.player._music_keeps_the_vm(5, cart), "another hold: the verdict stands"
+    assert not ws.run.player.pace.music_keeps_the_vm(5, cart), "another hold: the verdict stands"
 
 
 # -- a compiled program's item: the panel it describes ---------------------------

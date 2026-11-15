@@ -77,11 +77,11 @@ def test_a_hidden_game_is_held_and_hears_it(tmp_path):
         drv.frame(1 / 20)
     assert p.state == "minimised" and heard == ["min"]
     assert p.draws == draws and p.ups == ups      # paused: no update, no draw
-    assert pl.paused                            # its clock held
+    assert pl.pace.paused                            # its clock held
     ws.wm.minimize(wa, False)
     drv.frame(1 / 30)
     assert heard == ["min", "res"] and p.state == "throttled"
-    assert not pl.paused and p.ups > ups
+    assert not pl.pace.paused and p.ups > ups
 
 
 def _app_proc(ws, drv, p):
@@ -100,7 +100,7 @@ def test_a_hidden_app_updates_every_frame_and_never_draws(tmp_path):
     ups, draws = p.ups, p.draws
     for _ in range(20):
         drv.frame(1 / 30)
-    assert p.state == "minimised" and not p.player.paused
+    assert p.state == "minimised" and not p.player.pace.paused
     assert p.ups - ups == 20 and p.draws == draws
 
 
@@ -112,17 +112,17 @@ def test_the_front_minimised_holds_a_game_and_steps_an_app(tmp_path):
     ws.wm.minimize(wb, True)
     for _ in range(10):
         drv.frame(1 / 30)
-    assert ws.procs.front_minimised() and pl.paused and n[0] == 0
+    assert ws.procs.front_minimised() and pl.pace.paused and n[0] == 0
     ws.wm.minimize(wb, False)
     drv.frame(1 / 30)
-    assert not pl.paused and n[0] >= 1
+    assert not pl.pace.paused and n[0] >= 1
     ws.cart["type"] = "app"
     ws.wm.minimize(wb, True)
     drv.frame(1 / 30)
     n[0] = 0
     for _ in range(10):
         drv.frame(1 / 30)
-    assert not pl.paused and n[0] == 10
+    assert not pl.pace.paused and n[0] == 10
 
 
 def test_focusing_a_background_game_promotes_it(tmp_path):
@@ -259,13 +259,13 @@ def test_a_lua_game_minimised_beside_a_python_game_keeps_its_state(tmp_path):
     held = _n(p.player)
     for _ in range(20):
         drv.frame(1 / 30)
-    assert p.state == "minimised" and p.player.paused
+    assert p.state == "minimised" and p.player.pace.paused
     assert _n(p.player) == held, "a held Lua game ran"
     assert ws.run.player.lua is None and ws.cart["title"] == "Star Catcher"
     ws.wm.minimize(wl, False)
     for _ in range(4):
         drv.frame(1 / 30)
-    assert p.state == "throttled" and not p.player.paused
+    assert p.state == "throttled" and not p.player.pace.paused
     assert _n(p.player) > held
     # brought to the front, it is the one that plays and reads the keys
     ws.wm.move_focus("run:1")

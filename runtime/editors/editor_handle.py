@@ -516,7 +516,7 @@ class EditorHandle:
         """Whether the handle has a frame to draw: a verb changed it since its
         last draw (a key handed to it outside a drawn frame), its caret moved
         where the view has not shown it (`aim`) or its idle save is due --
-        what an app drawn on change (`Player.animates`) asks of every handle
+        what an app drawn on change (`AppFace.animates`) asks of every handle
         it opened."""
         ed = self.ed
         if self._gen != self._drawn or (self.live and (self._caret_at != ed.row
@@ -534,7 +534,7 @@ class EditorHandle:
         the mode is a program's or data's. `scale` is the canvas's font
         scale's, which the view takes itself.
 
-        In the run's pass (`Player.ui_host`) the view is a stop of the
+        In the run's pass (`AppFace.ui_host`) the view is a stop of the
         app's page, whose frames the engine plans: a fling, a glide or the
         caret's step moves the rows the frame before drew and draws the ones
         it brings, and a typed key draws the rows it changed

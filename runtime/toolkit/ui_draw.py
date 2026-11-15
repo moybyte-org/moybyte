@@ -2069,7 +2069,7 @@ def on_bar(on=None):
 # The board's tap floor (#203): its chrome stands over its font scale on the
 # handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
 # (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app
-# run's face word carries it, `Player.ui_face`): a list's rows meet the floor
+# run's face word carries it, `AppFace.ui_face`): a list's rows meet the floor
 # and a bubble takes its tap metrics and faces.
 _TAP_FLOOR = [False]
 

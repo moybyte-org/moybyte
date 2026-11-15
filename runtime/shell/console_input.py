@@ -78,7 +78,7 @@ class InputRouter:
         # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
         # a producer reads it next frame.
         kc = ws.wm.keys_to_cart()
-        ck = kc and not ws.run.player.is_tool
+        ck = kc and not ws.run.player.is_app()
         if ck != ws._cart_keys:
             ws._cart_keys = ck
             i.cart_keys = ck

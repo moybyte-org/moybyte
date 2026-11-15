@@ -124,7 +124,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
         ws.toggles.set_show_fps(True, persist=False)
     if not ships:
         ws.wm.CONTENT_RING = False
-        ws.run.player.holds = lambda cv: False
+        ws.run.player.face.holds = lambda cv: False
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
@@ -401,12 +401,12 @@ def test_the_text_console_draws_its_prompt_alone(tmp_path, bufs, desk):
     line's move of the log and a drag of it are shift frames (on a desk the
     drag's finger lies outside the log, so its frames draw rows), and every
     frame is a whole repaint's bytes. On a desk the run's canvas is its
-    window's own (`Player.holds`), which holds the log whatever the glass's
+    window's own (`AppFace.holds`), which holds the log whatever the glass's
     buffers do."""
     p = Pair(tmp_path, "console", bufs, desk, chip=True)
     assert p.a.show_fps
     if desk:
-        assert p.a.run.player.holds(p.a.run.canvas)
+        assert p.a.run.player.face.holds(p.a.run.canvas)
     _console_session(p)
     k = p.kinds
     assert k[:10] + k[12:16] == ["rows"] * 14, k

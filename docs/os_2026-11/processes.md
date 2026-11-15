@@ -71,7 +71,7 @@ window is in one of three states:
 - **minimised** (owner, 2026-11-03): a window hidden to its chip, under a
   full-screen window, or parked by console mode, and every run but the
   front one on a handheld. A **game** is paused: no `update`, no `draw`, its
-  clock held as the pause menu holds it (`Player.pause`; a Proc's clock
+  clock held as the pause menu holds it (`Pace.pause`; a Proc's clock
   alone, its session not being the audible one). An **app** (`"type":
   "app"`) keeps its `update` every loop frame with the true `dt` and never
   draws, so a player or a download keeps working. Either hears

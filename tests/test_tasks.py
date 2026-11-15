@@ -243,7 +243,7 @@ def test_the_pause_cards_minimise_keeps_the_game_held_and_goes_home(tmp_path):
     assert ws.screen == "launcher" and not ws.pause.open
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     p = ws.procs.list[0]
-    assert p.state == "minimised" and p.player.paused and heard == ["min"]
+    assert p.state == "minimised" and p.player.pace.paused and heard == ["min"]
     assert p.player.ns["_update"] is n and p.player is pl
     ups = p.ups
     for _ in range(10):
@@ -263,7 +263,7 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.screen == "tasks" and ws.run.player.paused   # it holds the front game
+    assert ws.screen == "tasks" and ws.run.player.pace.paused   # it holds the front game
     rows = _rows(ws)
     assert [(r[1], r[3]) for r in rows] == [("Brick Siege", "paused"),
                                             ("Star Catcher", "minimised")]
@@ -271,9 +271,9 @@ def test_a_launch_beside_a_minimised_game_and_switching_back(tmp_path):
     ws.tasks_layer._do("Switch to", rows[1])
     drv.frame(_DT)
     assert ws.screen == "desktop" and ws.cart["title"] == "Star Catcher"
-    assert not ws.run.player.paused and not ws.run.player.detached
+    assert not ws.run.player.pace.paused and not ws.run.player.detached
     assert [p.title() for p in ws.procs.list] == ["Brick Siege"]
-    assert ws.procs.list[0].state == "minimised" and ws.procs.list[0].player.paused
+    assert ws.procs.list[0].state == "minimised" and ws.procs.list[0].player.pace.paused
     n0 = ws.run.player.ns.get("score", 0)
     for _ in range(5):
         drv.frame(_DT)
@@ -294,10 +294,10 @@ def test_the_task_manager_goes_back_to_the_game_it_held_and_home_keeps_it(tmp_pa
     drv.frame(_DT)
     ws.open_tasks()
     drv.frame(_DT)
-    assert ws.run.player.paused
+    assert ws.run.player.pace.paused
     ws.input_policy.back()
     drv.frame(_DT)
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
     ws.open_tasks()
     drv.frame(_DT)
     rows = _rows(ws)
@@ -331,7 +331,7 @@ def test_a_minimised_app_keeps_updating_on_a_handheld(tmp_path):
     assert ws.procs.detach()
     ws.home.go_home()
     p = ws.procs.list[0]
-    assert p.app and p.state == "minimised" and not p.player.paused
+    assert p.app and p.state == "minimised" and not p.player.pace.paused
     n = p.player.ns["n"]
     for _ in range(10):
         drv.frame(_DT)

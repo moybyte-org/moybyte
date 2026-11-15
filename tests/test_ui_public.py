@@ -846,7 +846,7 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
         quiesce(ws)
         drv.frame(_DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    assert ws.run.player.animates() == every
+    assert ws.run.player.face.animates() == every
     n = ws.run.player.ns["frames"]
     for _ in range(20):
         quiesce(ws)

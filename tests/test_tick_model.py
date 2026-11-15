@@ -785,9 +785,9 @@ def test_the_rate_comes_from_the_manifest_and_junk_is_thirty(tmp_path):
     pl = ws.run.player
     for fps, rate in ((60, 60), (30, 30), (0, 30), (None, 30), ("junk", 30),
                       (45, 30)):
-        pl._arm_pacing({"fps": fps})
+        pl.pace.arm({"fps": fps})
         assert pl.sched.rate == rate, fps
-    pl._arm_pacing({})
+    pl.pace.arm({})
     assert pl.sched.rate == 30
 
 

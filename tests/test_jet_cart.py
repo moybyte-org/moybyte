@@ -103,7 +103,7 @@ def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
     open_cart(ws, title)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert type(ws.run.player.lua).__name__ == "WasmHostRun"
-    ws.run.player.uncap_mode(True)           # every frame draws: one tick, one frame
+    ws.run.player.pace.uncap_mode(True)           # every frame draws: one tick, one frame
     return ws
 
 

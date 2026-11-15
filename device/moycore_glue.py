@@ -508,7 +508,7 @@ class MoycoreRun:
 
     def play_begin(self, run, tick):
         """Hand this run's frame to the kernel's Player, which launched `run`
-        before this runtime loaded (the Player's _launch_play): `bind` gives
+        before this runtime loaded (`Pace.launch`): `bind` gives
         it the console's input table, the cart's audio session and the Tick a
         paced run notes its costs into (None: unpaced), `open` checks the
         runtime the constructor opened. Returns `play_frame`, which the Player
@@ -563,7 +563,7 @@ class MoycoreRun:
     def _sync_textmode(self):
         """The cart's `textmode()` (libmoy's host callback writes
         SNAP_TEXTMODE) on its run as it changes, as a Python cart's writes
-        it: the keyboard's mode follows (`Player.typing`)."""
+        it: the keyboard's mode follows (`AppFace.typing`)."""
         t = self.snap[self._I_TEXT]
         if t != self._textmode:
             self._textmode = t

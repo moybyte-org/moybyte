@@ -589,7 +589,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
     ws.pause.choose(ws.pause.rows.index(ws.pause.WINDOW))
     for _ in range(3):
         drv.frame(DT)
-    assert game.docked is None and not game.minimized and not ws.run.player.paused
+    assert game.docked is None and not game.minimized and not ws.run.player.pace.paused
     assert game.content_rect() != (game.x, game.y, game.w, game.h)   # framed
     assert not ws.editor_app.playing(), "the Editor's Play is Play again"
     ws.wm.close_window_kind("menu")
@@ -597,7 +597,7 @@ def test_closing_the_editor_keeps_a_game_moved_to_a_window(desk):
         drv.frame(DT)
     assert ws.wm.window_kinds() == ["desktop"] and ws.wm.windows["desktop"] is game
     assert game.docked is None and not game.minimized
-    assert ws.wm.focus_key == "desktop" and not ws.run.player.paused
+    assert ws.wm.focus_key == "desktop" and not ws.run.player.pace.paused
 
 
 def _contents(d):
@@ -1368,7 +1368,7 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     win = ws.wm.windows["desktop"]
     _press(drv, d, "pane 1 pause")
     drv.frame(DT)
-    assert d.paused and ws.run.player.paused and win.minimized
+    assert d.paused and ws.run.player.pace.paused and win.minimized
     assert d._still is not None                  # the still, dimmed under Play
     ws.pointer.visible = False
     settle_badges(ws)
@@ -1382,7 +1382,7 @@ def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
     gx, gy, gw, gh = d._still
     _click(drv, gx + gw // 2, gy + gh // 2)      # the still's Play goes on
     drv.frame(DT)
-    assert not d.paused and not ws.run.player.paused and not win.minimized
+    assert not d.paused and not ws.run.player.pace.paused and not win.minimized
     assert win.docked and ws.wm.z_order[-1] == "desktop"
 
 
@@ -1394,7 +1394,7 @@ def test_restart_and_stop_end_the_pause(desk):
     d.pause(True)
     drv.frame(DT)
     _play(drv)                                   # Ctrl+Enter: Restart
-    assert not d.paused and not ws.run.player.paused and ws.wm.windows["desktop"].docked
+    assert not d.paused and not ws.run.player.pace.paused and ws.wm.windows["desktop"].docked
     d.pause(True)
     drv.frame(DT)
     _tap(drv, ord("."), 1)                       # Stop

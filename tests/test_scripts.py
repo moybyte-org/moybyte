@@ -226,7 +226,7 @@ def test_a_python_script_runs_through_the_real_player(tmp_path):
     assert ws.cart["runtime"] == "python"
     assert ws.cart["permissions"] == ["files", "prefs", "console"]
     assert ws.cart["title"] == "hi"
-    assert ws.run.player.script and ws.run.player.is_tool
+    assert ws.run.player.script and ws.run.player.is_app()
     assert ws.run.player.tick_ms == 0, "a script is unpaced: one tick per loop frame"
 
 

@@ -225,7 +225,7 @@ class Notices:
 
     def ask_stop_music(self, cart):
         """A compiled game that fits with the VM stopped only without the
-        music (the Player's `_music_keeps_the_vm`): the running set's
+        music (`Pace.music_keeps_the_vm`): the running set's
         dialog asks first, Cancel focused; Stop & play stops the stream as
         the shell, then opens the game again once the media service has
         given its memory back (its run ends on the frame's job), now free

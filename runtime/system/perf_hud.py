@@ -100,7 +100,7 @@ class PerfHud:
         _ui_draw.overdrew(b[0], b[1], b[2], b[3])
         pl = ws.run.player
         if pl is not None:
-            pl.overdrew(cv, b[0], b[1], b[2], b[3])
+            pl.face.overdrew(cv, b[0], b[1], b[2], b[3])
 
     def _fps_tap_rect(self):
         """The bottom-right corner the FPS readout lives in, used as the tap target

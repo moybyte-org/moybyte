@@ -196,7 +196,7 @@ def consoles(tmp_path_factory):
             drv = make_drv(ws)
             for _ in range(3):
                 _frame(drv)
-            out[(name, tier)] = (ws.run.player.ui_face(), _shot(drv))
+            out[(name, tier)] = (ws.run.player.face.ui_face(), _shot(drv))
             assert ws.run.player.cart_error is None, (name, tier)
             ws.spine.exit()
     return out
@@ -247,9 +247,9 @@ def test_every_tier_draws_the_python_apps_page_on_each_console(consoles, console
 
 
 def test_a_responsive_app_draws_in_the_look_at_the_canvas_scale(consoles):
-    """The face each run's `ui` frame draws with (Player.ui_face): the
+    """The face each run's `ui` frame draws with (AppFace.ui_face): the
     shell's look, at the T-Deck's 1 and the console's 3."""
-    from runtime import player
+    from runtime import player_face as player
     for console, fs in (("tdeck", 1), ("console_fs3", 3)):
         face = consoles[(console, "python")][0]
         assert face & player._FACE_LOOK, console

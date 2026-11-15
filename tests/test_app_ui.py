@@ -247,7 +247,7 @@ def _state(ws):
     if ws.windowed_chrome:
         shows = "back" in dict(ws.wm._strip_buttons(ws.wm.windows["desktop"]))
     else:
-        shows = ws.run.player.has_page()
+        shows = ws.run.player.face.has_page()
     return (m[0], m[1], m[2], shows)
 
 

@@ -71,7 +71,7 @@ class _CardVerb:
 
 class PauseMenu:
     """The pause menu (docs/history/look_2026-10.md step 25a): over a fullscreen game
-    Super holds the run (`Player.pause`: no tick, no draw, its clock and its
+    Super holds the run (`Pace.pause`: no tick, no draw, its clock and its
     music held) and a card centred on the glass names the game and offers
     Resume, Restart, Options and Quit; Esc, B or Super again resumes, and
     the cart's next frame comes as if no time passed. On a board with a
@@ -152,7 +152,7 @@ class PauseMenu:
         if ws.cart_error is not None:
             self.stop()
             return
-        ws.run.player.pause()
+        ws.run.player.pace.pause()
         self.stopped = False
         offers = getattr(ws.wm, "offers_window", None)
         if offers is not None and offers():
@@ -207,7 +207,7 @@ class PauseMenu:
         self._hold.unsnap(self.ws, self.ws.sys_canvas)   # the frame as the game left it
         self._hold.drop()
         self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
-        self.ws.run.player.resume()
+        self.ws.run.player.pace.resume()
         self.ws.pause_touch()
 
     def back(self):
@@ -269,7 +269,7 @@ class PauseMenu:
         elif row == self.MINIMISE:
             self._shut()                  # the run stays held: it joins the running set
             if not ws.procs.minimise():
-                ws.run.player.resume()
+                ws.run.player.pace.resume()
         elif row == "Restart":
             self.close()
             ws.reset_canvas_state()

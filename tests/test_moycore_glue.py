@@ -489,20 +489,27 @@ class MinimalInput:
         return name in self._pressed
 
 
-class FakePlayer:
-    """The Player's `ui_room()`: None, a game's whole canvas, unless a test
-    sets an app's content_rect; and its `ui_face()`, a game's 0 unless a test
-    sets one."""
+class FakeFace:
+    """The Player's app face: its `ui_room()`, None, a game's whole canvas,
+    unless a test sets an app's content_rect; and its `ui_face()`, a game's
+    0 unless a test sets one."""
 
     def __init__(self):
         self.room = None
-        self.face = 0
+        self.word = 0
 
     def ui_room(self):
         return self.room
 
     def ui_face(self):
-        return self.face
+        return self.word
+
+
+class FakePlayer:
+    """The Player, as the glue reads it: its app face."""
+
+    def __init__(self):
+        self.face = FakeFace()
 
 
 class FakeRun:
@@ -1374,10 +1381,10 @@ def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
     room = [C_CONSTS["SNAP_ROOM_" + k] for k in "XYWH"]
-    ws.run.player.room = (0, 18, 320, 222)
+    ws.run.player.face.room = (0, 18, 320, 222)
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 18, 320, 222]
-    ws.run.player.room = None
+    ws.run.player.face.room = None
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 0, 0, 0]
 
@@ -1387,10 +1394,10 @@ def test_the_ui_face_crosses_whole(w):
     face reads its bits and its font scale (moy_ui_run.h)."""
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
-    ws.run.player.face = 1 | 2 | 4 | 3 << 8
+    ws.run.player.face.word = 1 | 2 | 4 | 3 << 8
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 1 | 2 | 4 | 3 << 8
-    ws.run.player.face = 0
+    ws.run.player.face.word = 0
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 0
 

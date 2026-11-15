@@ -796,7 +796,7 @@ on a board. `is_app()` is the public question.
 **Check.** `tests/test_frame_alloc.py`, the semantic traces, the cart
 raster's goldens unchanged. T-Deck: per-cart fps as before (#66).
 
-**Guard.** `+tests/test_player_parts.py`: the Player defines no method of
+**Guard.** `tests/test_player_parts.py`: the Player defines no method of
 the app face or the pacing half, and the frame path makes no call through
 either.
 

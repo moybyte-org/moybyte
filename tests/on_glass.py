@@ -3025,7 +3025,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = True
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is True
-        assert board.pyval("ws.run.player.paused", strict=True) is True
+        assert board.pyval("ws.run.player.pace.paused", strict=True) is True
         sram1, psram1 = _free_heaps(board)
         px, w, h = board_tool.grab(board, "screen")
         lit1 = _band_light(px, w, h, margin, rows)
@@ -3034,7 +3034,7 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60, rows=24):
         paused = False
         board.drain(1.0)
         assert board.pyval("ws.pause.open", strict=True) is False
-        assert board.pyval("ws.run.player.paused", strict=True) is False
+        assert board.pyval("ws.run.player.pace.paused", strict=True) is False
         st = board.state()
         assert st.get("cart") == title and not st.get("cart_error"), st
         f0 = st["frames"]

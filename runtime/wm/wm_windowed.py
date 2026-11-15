@@ -1350,7 +1350,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         if self.mode == "console":
             return (self.stack.depth() == 2 and self.stack.top() == "desktop"
                     and not ws.run.app_window_canvas and ws.cart_error is None
-                    and not ws.run.player.is_tool)
+                    and not ws.run.player.is_app())
         win = self.windows.get("desktop")
         return (win is not None and self._is_game(win)
                 and (win.saved is not None or win.docked is not None))
@@ -1522,12 +1522,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self.minimize(win, on)
         player = self.ws.run.player
         if on:
-            win.held = not player.paused
+            win.held = not player.pace.paused
             if win.held:
-                player.pause()
+                player.pace.pause()
         elif win.held:
             win.held = False
-            player.resume()
+            player.pace.resume()
 
     # -- the running set's windows (runtime/shell/procs.py) --------------------
 
@@ -1716,10 +1716,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             if lyr is not None and lyr.moved():
                 return True             # a window's surface moved on its own
         return (self.stack.has("desktop") and ws.cart_error is None
-                and not ws.run.player.paused
+                and not ws.run.player.pace.paused
                 and (ws.run.player.update is not None or ws.run.player.draw is not None)
-                and (pages or not ws.run.player.on_change)
-                and ws.run.player.animates())
+                and (pages or not ws.run.player.face.on_change)
+                and ws.run.player.face.animates())
 
     def content_for(self, kind):
         """The content Layer a window presents (the router's registry lookup,
@@ -1832,7 +1832,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """The playtest's game holds its frame: paused, or a stopped run
         under its card."""
         ws = self.ws
-        return ws.run.player.paused or (ws.pause.open and ws.pause.stopped)
+        return ws.run.player.pace.paused or (ws.pause.open and ws.pause.stopped)
 
     def _pop_live(self):
         """True while a popover is open or owed to a retained buffer."""

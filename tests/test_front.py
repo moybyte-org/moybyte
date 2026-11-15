@@ -151,7 +151,7 @@ def test_a_run_behind_without_front_asks_by_a_notification(tmp_path):
     _as(asker.pid, asker.ns["ask"], "Documents/todo.md")
     _frames(drv)
     assert asker.ns["said"] == [True], "the request waits"
-    assert ws.cart["title"] == "Star Catcher" and not ws.run.player.paused
+    assert ws.cart["title"] == "Star Catcher" and not ws.run.player.pace.paused
     n = N.NOTES.up()
     assert n is not None and (n.app, n.summary) == ("Asker", "Wants to open todo.md in Notes")
     assert n.pid == asker.pid

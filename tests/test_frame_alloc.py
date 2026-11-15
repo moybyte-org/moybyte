@@ -1547,7 +1547,7 @@ def test_notes_is_the_run_being_measured(result):
 
 
 def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
-    """An app on the verbs is drawn on change (Player.animates): idle, not a
+    """An app on the verbs is drawn on change (AppFace.animates): idle, not a
     frame; typed into, the frame each key lands in."""
     info, text = result
     assert info["notes_idle_drawn"] == 0, info["notes_idle_drawn"]

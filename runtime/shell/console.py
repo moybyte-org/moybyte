@@ -1423,7 +1423,7 @@ class Workstation:
         """A cart's editor handle takes (`handle`) or releases (None) the
         keyboard -- `editor_handle.EditorHandle.focus`.
 
-        The keyboard's text mode follows it (`Player.typing`): the input
+        The keyboard's text mode follows it (`AppFace.typing`): the input
         policy puts the T-Deck keyboard into clean ASCII and seeds the
         typed-key edge with the byte already down, so the key that opened the
         note is not typed into it (`b2ff7de`)."""
@@ -1735,9 +1735,9 @@ class Workstation:
             layer.held = False
             if self.procs.handheld():
                 self._tasks_return = self.wm.top_kind()
-                if self.wm.top_is_player() and not pl.paused \
+                if self.wm.top_is_player() and not pl.pace.paused \
                         and self.cart_error is None:
-                    pl.pause()
+                    pl.pace.pause()
                     layer.held = True
             self.wm.activate(layer.id)
 
@@ -1757,7 +1757,7 @@ class Workstation:
         if layer.held:
             layer.held = False
             if back == "desktop" and not home:
-                self.run.player.resume()
+                self.run.player.pace.resume()
         if home or back is None or back == layer.id or not self.wm.stack.has(back):
             if self.wm.stack.has("desktop") and self.procs._detachable():
                 self.procs.detach()     # the run that played joins the running set
@@ -1777,7 +1777,7 @@ class Workstation:
                 return
             if layer.held:
                 layer.held = False
-                self.run.player.resume()
+                self.run.player.pace.resume()
             self._tasks_return = None
             procs.switch(p)
             return
@@ -1926,7 +1926,7 @@ class Workstation:
         """A game runs fullscreen, live: what Super pauses -- in console
         mode, or full screen on the desk (`WindowedWM.game_full`)."""
         return (self.wm.top_is_player() and self.cart_error is None
-                and not self.run.player.is_tool
+                and not self.run.player.is_app()
                 and (not self.wm.desk_open() or self.wm.game_full()))
 
     def game_pauses(self):
@@ -1934,7 +1934,7 @@ class Workstation:
         Editor's Run slot, holding the keys (`WindowedWM.game_pauses`)."""
         gp = getattr(self.wm, "game_pauses", None)
         return (gp is not None and self.wm.top_is_player() and self.cart_error is None
-                and not self.run.player.is_tool and gp())
+                and not self.run.player.is_app() and gp())
 
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
@@ -2326,7 +2326,7 @@ class Workstation:
         """A running tool cart's compact bar, on the system canvas over the
         composited game's top rows: True where it drew."""
         p = self.run.player
-        if not p.is_tool or p.cart_error is not None or self.run.app_window_canvas \
+        if not p.is_app() or p.cart_error is not None or self.run.app_window_canvas \
                 or not self.wm.top_is_player() or self.bar_layer.tool_band() is None:
             return False
         self.bar_layer.draw_status_strip("tool")
@@ -2635,7 +2635,7 @@ class Workstation:
             player.crash_line = None
         player.draw = con.draw
         player.update = con.driver(player.update)
-        self.run.textmode = True       # a script TYPES (`Player.typing`)
+        self.run.textmode = True       # a script TYPES (`AppFace.typing`)
         self.input.spend_key()         # the key that ran it types nothing
         self.spine.play(caller)
         return (True, "")
@@ -2999,9 +2999,9 @@ class Workstation:
         # (The Player's own fields: ws.run.player.update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
         if kind == "desktop" and player.cart_error is None and not self.pause.open \
-                and not player.paused and (
+                and not player.pace.paused and (
                     player.update is not None or player.draw is not None) \
-                and (pages or not player.on_change) and player.animates():
+                and (pages or not player.face.on_change) and player.face.animates():
             return True
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
@@ -3263,7 +3263,7 @@ class Workstation:
                 player.tick(dt, render=False)
                 return
         elif player.tick_ms:
-            player.park()
+            player.pace.park()
         # The kernel's idle ladder is on its SAVER rung (idle_ladder.Saver): the
         # saver owns the glass until the ladder wakes, which moves the kernel
         # epoch so the gate below repaints what it covered.
@@ -3478,7 +3478,7 @@ class Workstation:
                     _game_open = False
                 self._composite_game()
                 _fold_live = True
-                if self.run.player.is_tool and self.bar_layer.tool_band() is not None:
+                if self.run.player.is_app() and self.bar_layer.tool_band() is not None:
                     _dsf = self._disarm_fn()        # #190: the band paints the root
                     if _dsf is not None:
                         _dsf()

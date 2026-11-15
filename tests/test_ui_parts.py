@@ -1847,7 +1847,7 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
         ws = host_app.build_workstation(root, **kw)
         ws.pointer.visible = False
         open_cart(ws, title)
-        host = ws.run.player._uh
+        host = ws.run.player.face._uh
         if host is not None:
             real = host.run
 

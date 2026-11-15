@@ -319,7 +319,7 @@ renders the owner chose from):
 9. **Stop & play.** When the VM must stop for a compiled game and the
    music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
    Cancel (focused) and Stop & play, which stops the stream and opens the
-   game (`Player._music_keeps_the_vm`, `Notices.ask_stop_music`).
+   game (`Pace.music_keeps_the_vm`, `Notices.ask_stop_music`).
 10. The system menu has no Stop music row: the music app's status item is
     where a stream stops.
 

@@ -102,7 +102,7 @@ def test_a_pause_holds_it_and_resume_goes_on(ws):
     pid = p.lua.pid
     from runtime import elf_binding
     ws.pause.show()
-    assert ws.pause.open and p.paused
+    assert ws.pause.open and p.pace.paused
     _frames(ws, 1)
     before = elf_binding.info(pid)["events"]
     _frames(ws, 4)

@@ -12,7 +12,7 @@
 // the primitives as a canvas row of its own -- its pixels, its size, the
 // whole canvas as the clip, no camera, the canvas's index-to-pixel words as
 // the palette. How it draws is the snapshot's face word (SNAP_FACE, the
-// console's Player.ui_face), so a run's page is the page a Python app's frame
+// console's AppFace.ui_face), so a run's page is the page a Python app's frame
 // draws with the same calls: the font scale of the canvas, the desk's rows,
 // and for a responsive app (one that defines `_layout`) the shell's look --
 // a ROW sink in MOY_UI_LOOK_APP, the theme's faces and icons, its block at

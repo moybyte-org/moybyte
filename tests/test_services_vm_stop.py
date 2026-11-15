@@ -9,7 +9,7 @@ kernel's tables with no second start. A Python service still pauses: it is
 TERMed before the stop and started again after it, a new process.
 
 The host stands the stop in as the board's teardown and return start do it:
-the resume record written and the pause run (the Player's `_stop_for`), the
+the resume record written and the pause run (`Pace.stop_for`), the
 VM's queues closed and its door gone, the VM down for the queue of calls
 (moy_kernel_vm_down), the kernel's frame serving the hops meanwhile; then
 the VM up, the app ABI's run grants ended but the kept services'

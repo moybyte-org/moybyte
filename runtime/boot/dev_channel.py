@@ -1888,7 +1888,7 @@ class DevChannel:
             ws.uncap = on                    # the next run starts uncapped
             pl = getattr(getattr(ws, "run", None), "player", None)
             if pl is not None and getattr(pl, "tick_ms", 0):
-                pl.uncap_mode(on)             # ...and the running one flips now
+                pl.pace.uncap_mode(on)             # ...and the running one flips now
             print("REMOTE uncap %s" % ("on" if on else "off"))
             return
         if cmd in ("skip", "gov"):

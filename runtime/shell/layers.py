@@ -204,28 +204,28 @@ class _PlayerLayer(Layer):
     ESC_LEAVES = False
 
     def ball_steps(self):
-        """An app's page takes the trackball as its W A S D (`Player.ball_steps`);
+        """An app's page takes the trackball as its W A S D (`AppFace.ball_steps`);
         a game's trackball is its pointer."""
-        return self.ws.run.player.ball_steps()
+        return self.ws.run.player.face.ball_steps()
 
     def typing(self):
-        return self.ws.run.player.typing()
+        return self.ws.run.player.face.typing()
 
     def cancel(self):
         """Mic in a script's prompt is its Stop; in an app's field, the
-        field's edit given back (`Player.cancel`)."""
+        field's edit given back (`AppFace.cancel`)."""
         ws = self.ws
         if (ws.cart is not None and ws.cart.get("type") == "script"
                 and ws.script_console.reading()):
             ws.spine.exit_to_caller()
             return True
-        return ws.run.player.cancel()
+        return ws.run.player.face.cancel()
 
     def back(self):
-        return self.ws.run.player.back()
+        return self.ws.run.player.face.back()
 
     def has_page(self):
-        return self.ws.run.player.has_page()
+        return self.ws.run.player.face.has_page()
 
     def draw(self, dt):
         self.ws.run.player.tick(dt)

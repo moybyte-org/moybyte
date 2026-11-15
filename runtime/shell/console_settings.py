@@ -63,7 +63,7 @@ class SettingsToggles:
         self._set_toggle("steady", bool(on), persist)
         pl = ws.run.player
         if pl is not None:
-            pl.steady_mode(on)
+            pl.pace.steady_mode(on)
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.

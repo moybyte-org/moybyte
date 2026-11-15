@@ -86,7 +86,7 @@ def _console(tmp_path, name, ships, desk):
     _pin_clock()
     if not ships:
         # the run's host plans nothing: every frame draws whole
-        h = ws.run.player._uh
+        h = ws.run.player.face._uh
         run = h.run
 
         def whole(*a, **k):
@@ -245,7 +245,7 @@ def test_a_consoles_lifetimes_end_with_it(tmp_path):
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 def test_the_desk_draws_rows_byte_for_byte(tmp_path, bufs):
-    """On the desk the run's canvas is its window's own (`Player.holds`):
+    """On the desk the run's canvas is its window's own (`AppFace.holds`):
     it holds the page as the run's last frame left it."""
     p = Pair(tmp_path, bufs, desk=True)
     _session(p)
@@ -402,7 +402,7 @@ def _moves(p):
     w, h, dy): the last of the moves its host made (the view's, inside the
     page R that holds it), kept as the session runs."""
     pl = p.a.run.player
-    h = pl._uh
+    h = pl.face._uh
     run = h.run
     got = []
 

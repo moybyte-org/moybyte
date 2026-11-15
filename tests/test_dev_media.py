@@ -804,10 +804,10 @@ def test_a_game_that_fits_only_without_the_music_is_asked_first(media, monkeypat
     monkeypatch.setattr(P._moy_play, "end", lambda run: None)
     cart = {"title": "Doom"}
     info[11] = "stops"
-    assert pl._music_keeps_the_vm(1, cart) is False
+    assert pl.pace.music_keeps_the_vm(1, cart) is False
     info[11] = "media"
     pl.pid = L.spawn("t.doom")
-    assert pl._music_keeps_the_vm(1, cart) is True and asked == [cart] and pl.declined
+    assert pl.pace.music_keeps_the_vm(1, cart) is True and asked == [cart] and pl.declined
     # Stop & play: the open waits for the run's end, a frame of the C's job.
     pid = L.spawn("t.music")
     _as(pid, lambda: moybyte.media.play(str(TONE)))

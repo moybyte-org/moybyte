@@ -234,6 +234,11 @@ def _defined(paths, recv=("self",)):
     return {n for n in out if n.startswith("_") and not n.startswith("__")}
 
 
+# The Player's modules: the class and its two parts (`player.face`,
+# `player.pace`), which read its state as their own.
+PLAYER = ("player", "player_face", "player_pace")
+
+
 def _owners():
     shell = sorted(str(p) for p in Path(ROOT / "runtime/shell").glob("console*.py"))
     svc = "|".join(SERVICES)
@@ -245,8 +250,8 @@ def _owners():
                lambda f: f.startswith("runtime/wm/"), r"(?:wm|_wm)"),
         "bar_layer": (_defined([ROOT / "runtime/shell/bar_layer.py"]),
                       lambda f: f == "runtime/shell/bar_layer.py", r"bar_layer"),
-        "player": (_defined([ROOT / "runtime/run/player.py"]),
-                   lambda f: f == "runtime/run/player.py", r"(?:player|pl)"),
+        "player": (_defined([ROOT / ("runtime/run/%s.py" % m) for m in PLAYER]),
+                   lambda f: f in ["runtime/run/%s.py" % m for m in PLAYER], r"(?:player|pl)"),
     }
 
 

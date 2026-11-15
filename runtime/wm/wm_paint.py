@@ -1590,7 +1590,7 @@ class WindowPaint:
         it composited."""
         ws = self.ws
         p = ws.run.player
-        ch = p.change
+        ch = p.face.change
         f = ws.frame_state.frames_drawn
         own = self._own
         ok = self._shown_ok(win)
@@ -1602,7 +1602,7 @@ class WindowPaint:
             own[4] = 0
             self._shown_note(win, f, ok, False)
             return False
-        if (not ch[8] or p.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
+        if (not ch[8] or p.face.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
                 or ch[6] < cw or ch[7] < chh):
             own[4] = 0
             self._shown_note(win, f, ok, False)

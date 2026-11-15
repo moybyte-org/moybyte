@@ -429,11 +429,11 @@ class TextConsole:
         # whatever the app-cart boundary is at
         was = _ui_draw.cart_text(False)
         # On a desk the run's canvas is its window's own, which the run
-        # alone draws (`Player.holds`): it holds the page as the last frame
+        # alone draws (`AppFace.holds`): it holds the page as the last frame
         # left it, but for the FPS chip, which names where it drew
         # (`overdrew`), so the log's view may move or keep its rows there.
         pl = self.ws.run.player
-        own = pl is not None and pl.holds(self.ws.run.canvas)
+        own = pl is not None and pl.face.holds(self.ws.run.canvas)
         if own:
             _ui_draw.window_frame(2)
         try:

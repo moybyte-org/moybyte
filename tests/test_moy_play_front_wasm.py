@@ -171,7 +171,7 @@ def test_super_leaves_the_last_frame_in_the_canvas_and_resume_takes_the_front(fr
     src.set_button("start", False)
     inp.begin_frame()
     ws.router.handle_input()
-    assert ws.pause.open and ws.run.player.paused
+    assert ws.pause.open and ws.run.player.pace.paused
     ws.frame(1 / 30)
     ws.pause.close()
     assert ws.run.player.front is True and mp.front_live(), "Resume gives the front back"

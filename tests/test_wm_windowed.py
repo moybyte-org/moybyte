@@ -947,13 +947,13 @@ def test_a_minimised_game_is_held_draws_nothing_and_hears_it(tmp_path):
     drv.touch(mn[0] + 2, mn[1] + 2)
     for _ in range(12):
         drv.frame(1 / 20)
-    assert win.minimized and ws.run.player.paused
+    assert win.minimized and ws.run.player.pace.paused
     assert heard == ["min"]
     assert draws[0] == 0 and ups == []
     ws.wm.minimize(win, False)
     for _ in range(3):
         drv.frame(1 / 30)
-    assert heard == ["min", "res"] and not ws.pause.open and not ws.run.player.paused
+    assert heard == ["min", "res"] and not ws.pause.open and not ws.run.player.pace.paused
     assert draws[0] >= 1 and ups
 
 
@@ -4738,7 +4738,7 @@ def test_projects_play_runs_a_make_card_in_a_window(tmp_path):
     lay._do_verb("window")
     for _ in range(4):
         drv.frame(1 / 30)
-    assert ws.cart.get("title") == "Star Catcher" and not ws.run.player.paused
+    assert ws.cart.get("title") == "Star Catcher" and not ws.run.player.pace.paused
     win = ws.wm.windows["desktop"]
     assert not win.full() and win.own
     assert [n for n, _r in ws.wm._strip_buttons(win)] == ["close", "max", "min"]

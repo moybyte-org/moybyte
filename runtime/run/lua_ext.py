@@ -211,7 +211,7 @@ def run_face(ws):
     the window bit alone where the run has no Player."""
     player = getattr(ws.run, "player", None)
     if player is not None:
-        return player.ui_face()
+        return player.face.ui_face()
     return 1 if getattr(ws, "windowed_chrome", False) else 0
 
 
@@ -219,7 +219,7 @@ def run_room(run):
     """`snap_shared`'s room for `run` (procs.Run): its Player's `ui_room()`,
     None where the run has no Player."""
     player = getattr(run, "player", None)
-    return player.ui_room() if player is not None else None
+    return player.face.ui_room() if player is not None else None
 
 
 def cfg_blob(cfg):

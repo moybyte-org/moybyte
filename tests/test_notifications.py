@@ -110,7 +110,7 @@ def test_a_service_posts_and_the_banner_goes_up_over_the_game(tmp_path):
     assert ws.note_layer in ws.wm._cache_overlay
     r = ws._note_rect
     assert r is not None and r[1] < ws.sys_canvas.h // 3, "drawn at the top"
-    assert not ws.run.player.paused and ws.screen == "desktop"
+    assert not ws.run.player.pace.paused and ws.screen == "desktop"
 
 
 def test_without_the_permission_nothing_is_posted(tmp_path):
@@ -165,7 +165,7 @@ def test_dismissing_keeps_the_game_playing(tmp_path):
     for _ in range(3):
         drv.frame(_DT)
     assert N.NOTES.up() is None and [n.id for n in N.NOTES.list] == [nid]
-    assert ws.run.player is pl and ws.screen == "desktop" and not pl.paused
+    assert ws.run.player is pl and ws.screen == "desktop" and not pl.pace.paused
     assert ws.procs.list == []
     assert ws.note_layer not in ws.wm._cache_overlay
 
@@ -183,7 +183,7 @@ def test_a_drag_up_on_the_banner_dismisses_it(tmp_path):
     ws.pointer.down = False
     assert ws.notices._note_pointer(x + w // 2, y - 20, True)
     assert N.NOTES.up() is None and len(N.NOTES.list) == 1
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
 
 
 # -- acting -----------------------------------------------------------------------
@@ -218,7 +218,7 @@ def test_acting_on_the_handheld_minimises_the_game_and_focuses_the_app(tmp_path)
     assert mesh.ns["acted"] == [(nid, "default")]
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     p = ws.procs.list[0]
-    assert p.player is game and p.state == "minimised" and game.paused
+    assert p.player is game and p.state == "minimised" and game.pace.paused
     assert N.NOTES.list == [] and N.NOTES.up() is None
 
 
@@ -245,7 +245,7 @@ def test_acting_on_the_desk_throttles_the_game(tmp_path):
     drv.frame(_DT)
     assert ws.run.player is mesh and mesh.ns["acted"] == [(nid, "default")]
     p = ws.procs.list[0]
-    assert p.player is game and p.state == "throttled" and not game.paused
+    assert p.player is game and p.state == "throttled" and not game.pace.paused
 
 
 def test_a_services_notification_is_acted_on_in_the_service(tmp_path):
@@ -256,7 +256,7 @@ def test_a_services_notification_is_acted_on_in_the_service(tmp_path):
     nid = _post_as(pid, "Ana", actions=("default", "Open", "reply", "Reply"))
     assert N.NOTES.act(nid, "reply")
     assert S.SCHED.procs[pid].ns["heard"] == [(nid, "reply")]
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
 
 
 # -- the task manager ---------------------------------------------------------------

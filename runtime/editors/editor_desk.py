@@ -1274,7 +1274,7 @@ class EditorDesk(Layer):
             win = ws.wm.windows.get("desktop")
             if win is not None:
                 win.held = False            # the restore lands on the run, not its menu
-            ws.run.player.resume()
+            ws.run.player.pace.resume()
             if "desktop" in ws.wm.windows:
                 ws.wm.move_focus("desktop")
         ws.mark_dirty()

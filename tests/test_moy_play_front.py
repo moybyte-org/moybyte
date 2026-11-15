@@ -128,7 +128,7 @@ def test_super_gives_the_console_the_frame_and_the_pause_holds_the_run(front):
     src.set_button("start", False)
     inp.begin_frame()
     ws.router.handle_input()                 # the console's key acts when it comes up
-    assert ws.pause.open and ws.run.player.paused
+    assert ws.pause.open and ws.run.player.pace.paused
     ws.frame(1 / 30)
     ws.pause.close()
     assert ws.run.player.front is True and mp.front_live(), "Resume gives the front back"

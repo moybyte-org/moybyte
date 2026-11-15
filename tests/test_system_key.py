@@ -161,9 +161,9 @@ def test_the_tdeck_mic_key_pauses_a_game_and_opens_the_system_menu_elsewhere(tmp
     assert not ws.sysmenu.open, "Mic again closes it"
     ws, _drv = _game(tmp_path / "g")
     _mic(ws, MIC)
-    assert ws.pause.open and ws.run.player.paused and not ws.sysmenu.open
+    assert ws.pause.open and ws.run.player.pace.paused and not ws.sysmenu.open
     _mic(ws, MIC)
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
 
 
 def test_the_tdeck_mic_key_works_in_text_mode_and_on_the_ascii_path(tmp_path):
@@ -193,9 +193,9 @@ def test_the_tdeck_mic_key_never_reaches_the_cart(tmp_path):
 def test_super_over_a_fullscreen_game_pauses_and_again_resumes(tmp_path):
     ws, drv = _game(tmp_path)
     drv.system_key()
-    assert ws.pause.open and ws.run.player.paused and not ws.sysmenu.open
+    assert ws.pause.open and ws.run.player.pace.paused and not ws.sysmenu.open
     drv.system_key()
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
     drv.system_key()
     drv.escape()
     assert not ws.pause.open, "Esc resumes"
@@ -279,7 +279,7 @@ def test_restart_runs_the_cart_from_the_top(tmp_path):
     _key(drv, "down")
     _key(drv, "down")
     _key(drv, "a")
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
     assert ws.screen == "desktop" and ws.run.player.ns["n"] <= 2
 
 
@@ -299,7 +299,7 @@ def test_esc_over_an_editor_playtest_pauses_and_quit_returns_to_the_editor(tmp_p
     _frames(drv, 3)
     assert ws.plays_fullscreen() and ws.cart.get("input") is None
     drv.escape()                        # the simulator hands Esc to the console in play
-    assert ws.pause.open and ws.run.player.paused
+    assert ws.pause.open and ws.run.player.pace.paused
     for _ in range(3):
         _key(drv, "down")
     _key(drv, "a")
@@ -600,7 +600,7 @@ def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tm
     _choose(ws, ws.pause.WINDOW)
     _frames(drv, 3)
     wm = ws.wm
-    assert wm.mode == "desktop" and not ws.pause.open and not ws.run.player.paused
+    assert wm.mode == "desktop" and not ws.pause.open and not ws.run.player.pace.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on"
     win = wm.windows["desktop"]
     assert not win.full() and win.content_rect()[1] > win.y and win.own
@@ -622,7 +622,7 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     assert n0 > 0
     _choose(ws, ws.pause.WINDOW)
     _frames(drv, 3)
-    assert wm.windows["desktop"] is win and not ws.pause.open and not ws.run.player.paused
+    assert wm.windows["desktop"] is win and not ws.pause.open and not ws.run.player.pace.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on, from where it stood"
     assert not win.full() and win.content_rect()[1] > win.y, "a title strip"
     names = [n for n, _r, _side in wm._frame_buttons(win)]

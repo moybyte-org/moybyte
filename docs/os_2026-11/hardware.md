@@ -591,7 +591,7 @@ the stop's fit counts what the run holds as not given back
 (`moy_play_stop_fit`'s `media`), so a compiled game that fits with the music
 playing stops the VM and keeps it, and one that fits only without it is
 `KEEP_MEDIA`: the console asks first, "Stop the music to play <game>?", for a
-file's stream and a station's alike (the Player's `_music_keeps_the_vm`). The
+file's stream and a station's alike (`Pace.music_keeps_the_vm`). The
 kernel's own chrome draws no control for the stream; a run in the kernel's
 front with the VM up hands Super to the shell's pause menu, from which
 Music's status item is reached (`docs/theme_and_shell_2026-11.md` §1.5). A Python app making

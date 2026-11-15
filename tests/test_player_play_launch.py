@@ -7,7 +7,7 @@ whose runtime offers no C frame ends at once and ticks through Python."""
 import os
 import shutil
 
-from runtime import player as player_mod
+from runtime import player as player_mod, player_pace as pace_mod
 from ws_helpers import build_ws, open_cart
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "placement_lua.moy")
@@ -32,7 +32,9 @@ def _ws(tmp_path, monkeypatch, log, make=None):
     root.mkdir(parents=True)
     shutil.copytree(FIXTURE, str(root / "placement_lua.moy"))
     ws = build_ws(tmp_path)
-    monkeypatch.setattr(player_mod, "_moy_play", FakePlay(log))
+    play = FakePlay(log)
+    monkeypatch.setattr(player_mod, "_moy_play", play)
+    monkeypatch.setattr(pace_mod, "_moy_play", play)
     real = ws.runtimes["lua"]
 
     def factory(ns, src):

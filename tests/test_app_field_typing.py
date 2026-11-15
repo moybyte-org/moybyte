@@ -8,7 +8,7 @@ holds when no field is focused. The trackball steps an app's page, as it
 does every surface that takes the keys (`Workstation.ball_steps`), and does
 not show the cursor. Mic (the T-Deck's cancel), Esc and B cancel a field's
 edit in progress: the field gets back the text the edit began from and
-focus steps off it (native/moy_ui's `api_cancel`, `Player.cancel`);
+focus steps off it (native/moy_ui's `api_cancel`, `AppFace.cancel`);
 with no edit, Mic stays the console's key."""
 
 import json
@@ -229,7 +229,7 @@ def test_mic_cancels_an_apps_field_edit(tmp_path, runtime):
 def test_mic_on_a_field_with_no_edit_opens_the_menu(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Edit App", LUA_EDIT if runtime == "lua" else PY_EDIT, runtime)
     assert _focus(ws) == "Name"
-    assert not ws.run.player.cancel()
+    assert not ws.run.player.face.cancel()
     _type(drv, "x")
     drv.type_char(8)                     # typed and deleted: nothing to give back
     for _ in range(2):
@@ -247,7 +247,7 @@ def test_enter_keeps_what_it_confirmed(tmp_path):
     for _ in range(2):
         drv.frame(DT)
     assert _name(ws) == "Srbija1"
-    assert not ws.run.player.cancel(), "Enter ends the edit: nothing to give back"
+    assert not ws.run.player.face.cancel(), "Enter ends the edit: nothing to give back"
     _type(drv, "2")
     _mic(ws, drv)
     assert _name(ws) == "Srbija1"
@@ -271,7 +271,7 @@ def _stop(ws):
 def test_esc_cancels_a_field_edit_before_it_goes_back(tmp_path, how):
     ws, drv = _open(tmp_path, "Edit App", PY_EDIT, "python")
     _type(drv, "xy")
-    assert ws.run.player.has_page(), "an edit in progress is the app's to step out of"
+    assert ws.run.player.face.has_page(), "an edit in progress is the app's to step out of"
     if how == "escape":
         drv.escape()
     else:

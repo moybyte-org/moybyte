@@ -346,7 +346,7 @@ def test_a_window_bound_app_cart_shown_again_goes_on_with_no_pause_menu(tmp_path
     _frames(ws)
     wm.minimize(win, True)
     _frames(ws)
-    assert win.minimized and not ws.run.player.paused
+    assert win.minimized and not ws.run.player.pace.paused
     wm.minimize(win, False)
     _frames(ws)
-    assert not ws.pause.open and not ws.run.player.paused and win.full()
+    assert not ws.pause.open and not ws.run.player.pace.paused and win.full()

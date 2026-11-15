@@ -63,7 +63,7 @@ def test_each_window_strip_shows_its_own_title_icon_and_back(tmp_path):
     assert wm._icon_slot(notes) == "notes"
     assert ws.cart.get("title") == "Notes"      # the running app's project is its own
     shows = lambda w: "back" in dict(wm._strip_buttons(w))
-    assert shows(notes) == ws.run.player.has_page()     # its own way back, or none
+    assert shows(notes) == ws.run.player.face.has_page()     # its own way back, or none
     assert not shows(term)
     assert wm._chip_title(notes) == "Notes" and wm._chip_title(term) == "Terminal"
 
