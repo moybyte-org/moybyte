@@ -248,9 +248,12 @@ to whoever called it.
 
 Record: `docs/history/console_architecture_2026-08.md` (rev 3, #209). Six
 collaborators — `ws.web`/`prefs`/`covers`/`carts`/`look`/`history` — came out
-from behind the façade in five gated landings. `tests/test_console_facade.py`
-pins every surviving forward with its caller, the 17 legacy property forwards,
-and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
+from behind the façade in five gated landings; the 2026-11 sprint (phase 9)
+carved the ten mixins into services and retired every forward
+(`runtime/README.md`'s console rows). `tests/test_console_facade.py` holds the
+rules, among them: a private read from outside its owner is made public on
+that owner, never read through; every
+`getattr(ws, "…")` name in runtime/device/tools resolves. Facts not to undo:
 
 - **`ws.system` is an ALIAS of the SystemStore rows (the spine's `Settings`) and
   is never rebound** — `SystemStore.load()` replaces its rows in place. Reads are

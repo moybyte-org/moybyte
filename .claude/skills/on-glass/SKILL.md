@@ -83,7 +83,7 @@ holds no frame of it: shoot the screen on a P4, and on an S3 nothing shows
 one. The frame is taken in one command between two frames, then sent
 deflated in bands.
 
-**Carts.** A folder cart pushes as it is. A compiled cart needs its per-chip
+**Carts.** A folder cart pushes as it is (over the cable; `tools/push_cart_wifi.py` hands the board a URL it pulls the folder from over Wi-Fi). A compiled cart needs its per-chip
 module, built and signed on the host — the chip is `[board] chip` (`esp32s3`
 for tdeck/guition_s3, `esp32p4` for p4/guition_p4):
 
