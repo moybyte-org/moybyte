@@ -25,7 +25,17 @@ python3 tools/shell_bench.py --board p4 --out DIR --report --against OLD   # its
 python3 tools/input_bench.py --board p4 --out DIR --only Code      # scrolling and text surfaces, presented-frame p90 per input
 python3 tools/input_gate.py gate --board tdeck,p4 --dev WT --cand WT --out DIR   # a surface's move gate: the boards at once, fresh-flash candidate runs against dev's newest stored runs (--fresh-dev benches dev beside it), p90 verdicts; a stale image is built first
 python3 tools/input_gate.py iter --board tdeck --cand WT --rows "Code:fling"      # one run of a few rows against the stored dev baseline
+tools/board.py perf-baseline tdeck                   # the board pass's perf stage alone, beside its last run
 ```
+
+Every `tools/board.py pass` ends each board with that perf stage
+(`tools/perf_pass.py`, `--no-perf` skips it): the desk idle, the heap, a window
+drag where there are windows, this roster's drawn fps and frame ms, Jet
+Teapot uncapped. Its records stay on the machine
+(`~/.cache/moybyte-perf/<board>.jsonl`) and its block marks a move past the
+noise band against the board's last run at another commit, so a drop shows in
+the pass that made it. It is a tripwire, not a ledger: what it flags is
+measured again with the tool for the question before it reaches #66.
 
 `perf` drops the first 4 s (caches, cold flash), takes only samples naming the
 cart it started, medians the drawn fps (a GC spike lands in one sample), ends

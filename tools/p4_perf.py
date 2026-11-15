@@ -86,8 +86,11 @@ WINDOW_S = 2.0
 
 # One read of the counter, between two frames: the board's clock at the top of
 # this frame, the frames drawn before it, the lockstep rate since the last read
-# (None with no session) and the cart the console is running.
-COUNTER = ("(pump.last, pump.drawn, ws.perf.perf_net(), "
+# (None with no session) and the cart the console is running. An image from
+# before the Workstation's services (phase 9 of docs/refactor_2026-11.md) has
+# `perf_net` on the console itself, and a baseline measures such images.
+COUNTER = ("(pump.last, pump.drawn, "
+           "(getattr(getattr(ws, 'perf', None), 'perf_net', None) or ws.perf_net)(), "
            "(ws.cart or {}).get('title'))")
 
 # MicroPython's ticks_ms wraps here.
@@ -146,6 +149,7 @@ def _from_counter(board, running, secs):
         "linked": statistics.median(ticks) if ticks else None,
         "fps": statistics.median(fps),
         "min": min(fps),
+        "windows": fps,
         "cart": slug(running),
         "phases": {k: None
                    for k in ("draw", "flush", "logic", "render", "chrome")},
@@ -191,6 +195,7 @@ def _from_perf(board, running, title, secs):
         "linked": statistics.median(ticks) if ticks else None,
         "fps": statistics.median(fps),
         "min": min(fps),
+        "windows": fps,
         "cart": samples[-1].get("cart") or title,
         "phases": {k: _median(s.get(k) for s in samples)
                    for k in ("draw", "flush", "logic", "render", "chrome")},

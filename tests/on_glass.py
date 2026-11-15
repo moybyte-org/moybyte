@@ -45,6 +45,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))          # p4_autotest.P4Board
 
+from radio_room import radio_room  # noqa: E402 -- tools/ is on sys.path above
+
 
 def gate(env_var, board):
     """`(port, skip-marker)` for a suite gated on a board being plugged in."""
@@ -1669,6 +1671,11 @@ def a_lua_app_s_every_runs_beside_a_python_app_s(board, title="Brick Siege Lua",
     titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
     if title not in titles:
         pytest.skip("%s is not in this board's store" % title)
+    with radio_room(title):
+        _lua_every_beside_python(board, title, seconds)
+
+
+def _lua_every_beside_python(board, title, seconds):
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:
@@ -2378,43 +2385,6 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
 # radio link (multiplayer), Bench Lua draws every verb family.
 VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
-
-
-def _multiplayer_titles():
-    """The seed carts whose manifest asks for `multiplayer`: a run of one
-    arms the radio link."""
-    import json
-    titles = set()
-    for m in (ROOT / "system_carts").glob("*.moy/manifest.json"):
-        man = json.loads(m.read_text(encoding="utf-8"))
-        if "multiplayer" in ((man.get("moybyte") or {}).get("permissions") or ()):
-            titles.add(man.get("title"))
-    return titles
-
-
-@contextlib.contextmanager
-def radio_room(title):
-    """Hold the bench's one radio room for a run of `title` when it is a
-    multiplayer cart. Two consoles on the same multiplayer cart within radio
-    range form a match by design (docs/netplay_v1.md: being in the same room
-    is the pairing ceremony): the guest's re-run is no HOME launch (stop
-    `place`), a lockstep run stalls on the peer's inputs, and neither is
-    the solo run a check reads. `tools/board.py pass` runs every board's
-    suite at once, and the suites reach their Brick Siege Lua runs within
-    seconds of each other, so a run of one takes a machine-wide flock under
-    ~/.cache/moybyte for its length; the link stops when the run ends, and
-    the next board's run finds the room quiet. A console driven by hand
-    outside a suite is not in the lock: one left on a multiplayer cart is a
-    peer every suite run of it meets."""
-    if title not in _multiplayer_titles():
-        yield
-        return
-    import fcntl
-    cache = Path.home() / ".cache" / "moybyte"
-    cache.mkdir(parents=True, exist_ok=True)
-    with open(cache / "radio-room.lock", "w") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        yield
 
 
 def _in_the_room(check):

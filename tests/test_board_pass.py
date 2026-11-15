@@ -6,6 +6,7 @@ records them, writes the junit XML a suite would, and holds a build long
 enough to see what overlaps. The board dirs and suites are the tree's own.
 """
 
+import json
 import os
 import sys
 import threading
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import board                                                    # noqa: E402
 import board_pass                                               # noqa: E402
+import perf_pass                                                # noqa: E402
 
 DIRS = board.boards()
 CONSOLES = sorted(n for n in DIRS if board.is_console(DIRS[n]))
@@ -104,6 +106,9 @@ class FakeSteps:
         self.build_rc = build_rc or {}
         self.build_barrier = build_barrier
         self.web_rc = 0
+        self.perf = {}                  # board -> the record its perf stage writes
+        self.perf_s = 0.0
+        self.perf_live = self.perf_peak = 0
         self.live = {}
         self.peak = {}
         self.lock = threading.Lock()
@@ -126,6 +131,18 @@ class FakeSteps:
         if cmd[1:2] == [board_pass.BOARD_PY] and cmd[3] == "flash":
             with open(log, "a") as f:
                 f.write("board flash: written in 0.0s\n")
+            return 0
+        if cmd[1:2] == [board_pass.PERF_PY]:
+            with self.lock:
+                self.perf_live += 1
+                self.perf_peak = max(self.perf_peak, self.perf_live)
+            time.sleep(self.perf_s)
+            with self.lock:
+                self.perf_live -= 1
+            rec = self.perf.get(cmd[2])
+            if rec is not None:
+                with open(cmd[cmd.index("--out") + 1], "w") as f:
+                    json.dump(rec, f)
             return 0
         if cmd[0] == "bash":
             name, chip = self.chip_of(cmd[1])
@@ -169,6 +186,7 @@ def bench(tmp_path, monkeypatch):
     lock in tmp."""
     monkeypatch.setenv("MOYBYTE_LOCK_DIR", str(tmp_path / "locks"))
     monkeypatch.setenv("MOYBYTE_TIMINGS", str(tmp_path / "timings.csv"))
+    monkeypatch.setenv("MOYBYTE_PERF_DIR", str(tmp_path / "perf"))
     image = tmp_path / "image.bin"
     image.write_bytes(b"\0")
     monkeypatch.setattr(board_pass, "image_path", lambda d: str(image))
@@ -319,10 +337,11 @@ def test_the_table_says_where_each_boards_time_went_and_the_log_keeps_it(
     run_pass(bench, steps, "tdeck", "p4")
     out = capsys.readouterr().out.splitlines()
     head = next(ln for ln in out if ln.startswith("board  ")).split()
-    assert head[6:12] == ["wait", "build", "flash", "boot", "suite", "total"]
+    assert head[6:13] == ["wait", "build", "flash", "boot", "suite", "perf",
+                          "total"]
     rows = {ln.split()[0]: ln.split() for ln in out
             if ln.split()[:1] in (["tdeck"], ["p4"])}
-    assert rows["tdeck"][8:13] != ["-"] * 5      # build..total all timed
+    assert rows["tdeck"][8:14] != ["-"] * 6      # build..total all timed
     assert out[-1].startswith("board pass: wall ")
     assert "browser console build" in out[-1]
     import timings
@@ -331,7 +350,8 @@ def test_the_table_says_where_each_boards_time_went_and_the_log_keeps_it(
     assert {("pass", "pass", "fail"), ("pass", "pass/web", "fail"),
             ("pass", "tdeck", "ok"), ("pass", "tdeck/build", "ok"),
             ("pass", "tdeck/flash", "ok"), ("pass", "tdeck/boot", "ok"),
-            ("pass", "tdeck/suite", "ok"), ("pass", "p4", "fail"),
+            ("pass", "tdeck/suite", "ok"), ("pass", "tdeck/perf", "ok"),
+            ("pass", "p4", "fail"),
             ("pass", "p4/wait", "fail")} <= got
 
 
@@ -426,3 +446,105 @@ def test_a_build_that_failed_for_itself_is_not_run_again(bench, monkeypatch):
     steps = RaceOnce("p4", why="error: 'x' undeclared")
     assert run_pass(bench, steps, "p4") == 1
     assert steps.builds == 1
+
+
+# -- the perf stage ------------------------------------------------------------
+
+
+def perf_cmds(steps):
+    return [c for c, _e in steps.cmds if c[1:2] == [board_pass.PERF_PY]]
+
+
+def test_the_perf_stage_runs_after_each_suite_on_the_resolved_port(bench):
+    steps = FakeSteps()
+    run_pass(bench, steps, "tdeck", "p4")
+    got = {c[2]: c for c in perf_cmds(steps)}
+    assert sorted(got) == ["p4", "tdeck"]
+    for name, c in got.items():
+        assert c[c.index("--port") + 1] == "/dev/fake-" + name
+        assert c[c.index("--out") + 1] == str(bench / "logs" / ("%s.perf.json" % name))
+        assert c[c.index("--image") + 1] == "c2d35a0c" and "--flashed" in c
+    for name in ("tdeck", "p4"):
+        mine = [i for i, (c, e) in enumerate(steps.cmds)
+                if ("pytest" in c and e and "/dev/fake-" + name in e.values())
+                or (c[1:2] == [board_pass.PERF_PY] and c[2] == name)]
+        assert "pytest" in steps.cmds[mine[0]][0] and len(mine) == 2
+
+
+def test_no_perf_skips_the_stage_and_its_column(bench, capsys):
+    steps = FakeSteps()
+    run_pass(bench, steps, "tdeck", "--no-perf")
+    assert perf_cmds(steps) == []
+    out = capsys.readouterr().out
+    row = next(ln for ln in out.splitlines() if ln.startswith("tdeck ")).split()
+    assert row[12] == "-"                    # the perf column
+    assert " perf  (" not in out
+
+
+def test_a_suite_that_never_ran_takes_no_perf_stage(bench):
+    steps = FakeSteps()
+    orig = steps.__call__
+
+    def no_xml(cmd, log, env=None):
+        if "pytest" in cmd:
+            return 1
+        return orig(cmd, log, env)
+    run_pass(bench, no_xml, "tdeck")
+    assert perf_cmds(steps) == []
+
+
+def _rec(board, commit, fps, frame):
+    return perf_pass.record(board, {
+        "Brick Siege fps": perf_pass.metric(fps, "fps", perf_pass.HIGHER,
+                                            [fps, fps, fps]),
+        "Brick Siege frame": perf_pass.metric(frame, "ms", perf_pass.LOWER,
+                                              [frame, frame]),
+    }, commit, tree="t", date="2026-11-15T10:00:00", secs=150.0)
+
+
+def test_the_perf_block_prints_under_the_table_and_the_exit_stays_the_suites(
+        bench, capsys):
+    perf_pass.append(_rec("tdeck", "aaaaaaaa", 60.0, 8.0))
+    steps = FakeSteps()
+    steps.perf["tdeck"] = _rec("tdeck", "c2d35a0c", 45.0, 12.0)
+    # The stage's own process appends its record; the fake does it here.
+    perf_pass.append(steps.perf["tdeck"])
+    assert run_pass(bench, steps, "tdeck") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out.index(next(ln for ln in out if ln.startswith("board  "))) < \
+        out.index(next(ln for ln in out if ln.startswith("tdeck perf  (")))
+    head = next(ln for ln in out if ln.startswith("tdeck perf  ("))
+    assert "vs aaaaaaaa" in head
+    fps = next(ln for ln in out if ln.lstrip().startswith("Brick Siege fps"))
+    assert "-25.0%" in fps and fps.endswith("<<< WORSE")
+    frame = next(ln for ln in out if ln.lstrip().startswith("Brick Siege frame"))
+    assert "+50.0%" in frame and frame.endswith("<<< WORSE")
+    assert out[-1].startswith("board pass: wall ")
+
+
+def test_a_stage_that_wrote_no_record_says_so(bench, capsys):
+    run_pass(bench, FakeSteps(), "tdeck")
+    out = capsys.readouterr().out
+    assert "tdeck: the perf stage wrote no record (tdeck.perf.log)" in out
+
+
+def test_a_failing_suites_log_is_still_the_one_named(bench, capsys):
+    steps = FakeSteps(fail={"tdeck": ["test_x"]})
+    run_pass(bench, steps, "tdeck")
+    out = capsys.readouterr().out.splitlines()
+    assert any(ln.startswith("tdeck: ") and ln.endswith("tdeck.suite.log")
+               for ln in out)
+
+
+def test_board_py_hands_perf_baseline_to_the_perf_stage(monkeypatch):
+    got = []
+    monkeypatch.setattr(perf_pass, "main", lambda argv: got.append(argv) or 3)
+    assert board.main(["perf-baseline", "tdeck"]) == 3
+    assert got == [["tdeck"]]
+
+
+def test_the_boards_take_the_perf_stage_one_at_a_time(bench):
+    steps = FakeSteps(build_s=0.0)
+    steps.perf_s = 0.1
+    run_pass(bench, steps, "tdeck", "p4", "guition_s3")
+    assert len(perf_cmds(steps)) == 3 and steps.perf_peak == 1

@@ -9,7 +9,7 @@
 #   -- the ports                      cmd_ports
 #   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
 #   -- the C6 radio's firmware        c6_image, c6_stream, cmd_c6
-#   -- the command line               parser, main (`pass` goes to tools/board_pass.py)
+#   -- the command line               parser, main (`pass`: tools/board_pass.py; `perf-baseline`: tools/perf_pass.py)
 """Drive an attached board by name: the on-glass loop, one command per step.
 
     tools/board.py ports                        which port is which board, who holds it
@@ -36,9 +36,14 @@
     tools/board.py tdeck wait                   until the desk answers
     tools/board.py guition_p4 c6 URL            flash the C6 radio's slave image
                                                 over ESP-Hosted, reboot onto it
-    tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, one table
+    tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, perf, one table
                                                 (tools/board_pass.py; --all,
-                                                --skip-build, --no-flash, --shot)
+                                                --skip-build, --no-flash, --shot,
+                                                --no-perf)
+    tools/board.py perf-baseline tdeck          the pass's perf stage alone, on the
+                                                image the board has: recorded and
+                                                set beside the last run
+                                                (tools/perf_pass.py)
 
 The board is its `[board] ota` id (p4, tdeck, guition_s3, guition_p4,
 xiao_zero), the same name `--board` takes everywhere else. Everything goes
@@ -1062,9 +1067,11 @@ def parser(dirs):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n")[0],
         epilog="`tools/board.py BOARD VERB -h` for a verb's options.")
-    ap.add_argument("board", choices=sorted(dirs) + ["ports", "pass"],
-                    help="the board's [board] ota id, `ports`, or `pass "
-                         "BOARD...` (`tools/board.py pass -h`)")
+    ap.add_argument("board", choices=sorted(dirs) + ["ports", "pass",
+                                                     "perf-baseline"],
+                    help="the board's [board] ota id, `ports`, `pass "
+                         "BOARD...` (`tools/board.py pass -h`) or "
+                         "`perf-baseline BOARD`")
     _common(ap, lambda v: v)
     ap.add_argument("--probe", action="store_true",
                     help="(ports) ask each unclaimed port who it is, once")
@@ -1178,6 +1185,9 @@ def main(argv=None):
     if argv[:1] == ["pass"]:
         import board_pass
         return board_pass.main(argv[1:])
+    if argv[:1] == ["perf-baseline"]:
+        import perf_pass
+        return perf_pass.main(argv[1:])
     dirs = boards()
     a = parser(dirs).parse_args(argv)
     try:
