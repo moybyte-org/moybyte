@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from runtime import moy_evq, moybyte, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime.run import lua_ext
 from ws_helpers import build_ws, make_drv, select_on_home
@@ -48,7 +49,7 @@ def _said(since, pid, what):
 
 @pytest.fixture
 def lua():
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
 
 

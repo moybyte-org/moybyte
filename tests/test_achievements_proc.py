@@ -28,6 +28,7 @@ import time
 import pytest
 
 from runtime import moy_evq, moybyte, notifications, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime import achievements as A
 
@@ -43,7 +44,7 @@ _SINCE = [0]
 
 def _lua_twin(ws):
     """The Lua process in the seed's folder, and the console's load of it."""
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     dst = os.path.join(ws.carts_root, "moybyte.achievements.moy")
     shutil.rmtree(dst)
@@ -516,7 +517,7 @@ def test_a_lua_game_awards_its_own_badges(tmp_path):
     `moybyte.send`) as a service does: the Python face's verbs, run as the
     run's process, so the OS stamps the game's app id and the game reaches
     its own manifest's badges and no other's."""
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     notifications.NOTES.reset()
     ws = build_ws(tmp_path)

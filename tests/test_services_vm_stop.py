@@ -26,6 +26,8 @@ import time
 import pytest
 
 from runtime import moy_evq, moy_loop, moybyte, moycore, native_build, os_log, scheduler as S
+from runtime import sched_python
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime.notifications import NOTES
 from test_scheduler import _clear
@@ -140,7 +142,7 @@ def _lua_step():
     moycore.svc_step()
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_lua_service_keeps_its_pid_and_timers_and_its_call_waits_for_the_vm(
         tmp_path, fresh, monkeypatch):
     _cart(tmp_path / "carts", "t.tick", "service.lua", LUA_SVC,
@@ -207,7 +209,7 @@ end)
 '''
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_lua_service_hears_and_answers_its_radio_through_a_vm_stop(
         tmp_path, fresh, monkeypatch):
     """A Lua service's radio is the kernel's handle and its wake the kernel's
@@ -251,7 +253,7 @@ moybyte.on("unset", function(_, tag) moybyte.cancel(ids[tag]); print("unset " ..
 '''
 
 
-@pytest.mark.skipif(S._svc() is None, reason="no Lua runtime on this host")
+@pytest.mark.skipif(sched_lua.runtime() is None, reason="no Lua runtime on this host")
 def test_a_kernel_alarm_keeps_its_wall_time_through_a_clock_step_and_a_cancel_frees_it(
         tmp_path, fresh):
     """The wall clock steps (the board's NTP answer, moy_wifi.c's
@@ -560,7 +562,7 @@ def test_a_compiled_program_stops_its_app_s_services_through_a_vm_stop(
     _cart(carts, "t.tick", "service.lua", LUA_SVC)
     from runtime.host_app import build_workstation
     ws = build_workstation(str(carts))
-    if not all(t in ws.runtimes for t in ("elf", "wasm")) or S._svc() is None:
+    if not all(t in ws.runtimes for t in ("elf", "wasm")) or sched_lua.runtime() is None:
         pytest.skip("no ELF, wasm or Lua tier on this host")
     s = fresh
     since = L.next()
@@ -875,7 +877,7 @@ def test_a_wake_waiting_on_the_store_s_lock_is_not_struck(tmp_path, elf_built, w
     assert moy_evq.open(peer, "t.peer", "", False) == moy_evq.OK
     assert _polled(s, lambda: all(any(t in ("listening", "started") for t in _texts(since, p))
                                   for p in (elf, wasi)))
-    hold = 3.5 * S.MOY_BG_ABORT_US / 1e6
+    hold = 3.5 * sched_python.MOY_BG_ABORT_US / 1e6
     lib.moy_store_lock()
     try:
         assert moy_evq.send(peer, "elf.svc", "files", "[1]")[0] == 1

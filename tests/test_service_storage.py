@@ -22,6 +22,7 @@ import json
 import pytest
 
 from runtime import app_perms, moybyte, notifications, os_log, scheduler as S, system_api
+from runtime import sched_lua
 from runtime import moy_log as L
 
 from ws_helpers import build_ws, make_drv, select_on_home
@@ -91,7 +92,7 @@ def _draw():
 
 @pytest.fixture(params=["python", "lua"])
 def tier(request):
-    if request.param == "lua" and S._svc() is None:
+    if request.param == "lua" and sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     return request.param
 

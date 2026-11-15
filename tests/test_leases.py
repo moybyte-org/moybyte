@@ -23,6 +23,7 @@ from runtime import moy_input as mi
 from runtime import moy_lease as N
 from runtime import moy_log as L
 from runtime import scheduler as S
+from runtime import sched_python as Y
 from runtime.host import lease_sim
 from unix_mp import ROOT, require_unix_mp, runtime_tree
 
@@ -40,7 +41,7 @@ class Guard:
         self.abort = False
 
     def call(self, fn, budget):
-        return S.ABORTED if self.abort else fn()
+        return Y.ABORTED if self.abort else fn()
 
     def cost(self):
         return 0

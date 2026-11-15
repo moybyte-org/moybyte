@@ -10,6 +10,7 @@ import os
 import pytest
 
 from runtime import host_app, moy_evq, scheduler as S
+from runtime import sched_lua
 from runtime import intents as I
 from ws_helpers import open_cart
 
@@ -60,7 +61,7 @@ def _wasm_cart(tmp_path, root):
 
 
 def _lua_cart(root, text):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     dst = os.path.join(root, "sharer.moy")
     os.makedirs(dst)

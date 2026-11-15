@@ -9,7 +9,7 @@ runs: start(path, argv, roots, pid, id, budget_ms) -> (0 or REFUSED, why),
 step(pid, max_ms) -> RUNNING or the exit status, cancel(pid) -> 130. The
 runtime answers the door's job contract, the WASI runtime's too: start ->
 (0, None) or (REFUSED, why), step and cancel -> (code, why). A service is
-the scheduler's (runtime/system/scheduler.py, COMPILED SERVICES):
+the scheduler's (runtime/system/sched_compiled.py, COMPILED SERVICES):
 service(cart, pid, run) -> None or why, stop(pid), reap() and figures(pid).
 
 A GAME is the cart played in the Player (any type but a command or a

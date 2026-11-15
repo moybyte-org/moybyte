@@ -1,4 +1,4 @@
-"""A native service run by the scheduler (runtime/system/scheduler.py,
+"""A native service run by the scheduler (runtime/system/sched_compiled.py,
 COMPILED SERVICES; docs/os_2026-11/processes.md section 1, the service
 model): started under its consent on a task of its own, listed with the
 other services, its app calls (`moy_notify`) answered on the VM's task as

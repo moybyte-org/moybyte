@@ -791,7 +791,7 @@ later one a strike, and `MOY_BG_STRIKES` (3) strikes suspend the process
 until it is resumed. Python aborts a callback still running after
 `MOY_BG_ABORT_US` (300 ms) and counts a strike; Lua yields a runaway
 callback with a count hook; a watchdog strikes and kills a compiled wake
-that stops polling. `runtime/system/scheduler.py`'s header is the ladder.
+that stops polling. `runtime/system/sched_python.py`'s header is the ladder.
 
 **Start, stop, restart.** A service runs from its start until it is stopped,
 exits, crashes, or strikes out. It starts by `autostart` (the permission: at
@@ -1370,7 +1370,7 @@ foreground command's at its job's next step; a background command's answers
 AGAIN after 5 s, its door serving nothing while it runs. The files, nav,
 prefs, clipboard, device and item rows, and `share`, are the role table's
 for a grant its start makes, over the roles its granted permissions name
-(`runtime/system/scheduler.py`, `compiled_run`), as a C program's are: a
+(`runtime/system/sched_compiled.py`, `compiled_run`), as a C program's are: a
 permission it lacks answers ACCES and a buffer too small RANGE. The files
 rows reach the store's documents in the folder its `files` permission
 names, the folder its WASI files (§5) are rooted at. A WASI program has no

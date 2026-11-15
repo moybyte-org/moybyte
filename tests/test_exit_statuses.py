@@ -19,7 +19,8 @@ C_FILES = (sorted((ROOT / "native" / "moy_sh").glob("moy_*.[ch]"))
            + sorted((ROOT / "native" / "moy_kernel").glob("*.[ch]"))
            + sorted((ROOT / "native" / "moycore").glob("moycore_svc.[ch]")))
 PY_FILES = (sorted(Path(sh_door.__file__).parent.glob("sh_*.py"))
-            + [Path(cron.__file__), Path(scheduler.__file__)])
+            + [Path(cron.__file__)]
+            + sorted(Path(scheduler.__file__).parent.glob("sched*.py")))
 
 
 def header():

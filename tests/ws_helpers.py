@@ -170,7 +170,7 @@ def settle_badges(ws=None):
     for p in list(s.procs.values()):
         ns = p.ns
         if p.state != scheduler.EXITED and ns and "SAVE_MS" in ns and "_later" in ns:
-            s._guarded(p.pid, ns["_later"])
+            s.python._guarded(p.pid, ns["_later"])
     return ws
 
 

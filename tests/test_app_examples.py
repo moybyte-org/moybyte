@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from runtime import app_perms, host_app, moy_evq, notifications, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 
 from ws_helpers import build_ws, select_on_home
@@ -64,7 +65,7 @@ def test_the_python_app_scrolls_its_list_and_keeps_its_choice(tmp_path):
 
 @pytest.fixture
 def echo(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     cart = _install(ws, "echo_lua.moy")
@@ -137,7 +138,7 @@ def _pinger(ws, off=()):
 
 
 def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     echo = S.start_cart(ws, _install(ws, "echo_lua.moy"))
@@ -157,7 +158,7 @@ def test_the_lua_app_hears_the_services_answer_through_on(tmp_path):
 
 
 def test_the_lua_app_posts_no_notification_without_the_permission(tmp_path):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     ws = build_ws(tmp_path)
     lua = _pinger(ws, off=("notifications",))

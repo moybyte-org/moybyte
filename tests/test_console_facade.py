@@ -7,7 +7,9 @@ collaborators of the 2026-08 carve. Four rules hold it there, none of them a
 count:
 
   1. NO PRIVATE NAME IS READ FROM OUTSIDE ITS OWNER. A `ws._x` (or
-     `ws.<service>._x`), `wm._x`, `bar_layer._x` or `player._x` read, or a
+     `ws.<service>._x`), `wm._x`, `bar_layer._x` or `player._x` read, a
+     scheduler tier's (`SCHED.python._x`, `.lua._x`, `.compiled._x`, or its
+     module's, `sched_lua._x`) outside the scheduler's modules, or a
      `getattr` of one by literal, in runtime/, device/, firmware/ or tools/
      outside the module that owns it is a private that became an API without
      anyone deciding so. A name the owner never defines (a tool's own stash
@@ -238,6 +240,12 @@ def _defined(paths, recv=("self",)):
 # `player.pace`), which read its state as their own.
 PLAYER = ("player", "player_face", "player_pace")
 
+# The scheduler's tiers: the objects `Scheduler` holds, by attribute, and
+# their modules; the scheduler's own modules are those and `scheduler` and
+# `sched_proc`, the row they share.
+SCHED_TIERS = {"python": "sched_python", "lua": "sched_lua", "compiled": "sched_compiled"}
+SCHED_MODULES = ("scheduler", "sched_proc") + tuple(SCHED_TIERS.values())
+
 
 def _owners():
     shell = sorted(str(p) for p in Path(ROOT / "runtime/shell").glob("console*.py"))
@@ -252,6 +260,12 @@ def _owners():
                       lambda f: f == "runtime/shell/bar_layer.py", r"bar_layer"),
         "player": (_defined([ROOT / ("runtime/run/%s.py" % m) for m in PLAYER]),
                    lambda f: f in ["runtime/run/%s.py" % m for m in PLAYER], r"(?:player|pl)"),
+        "scheduler tier": (
+            _defined([runtime_file(m + ".py") for m in SCHED_TIERS.values()]),
+            lambda f: f in [str(runtime_file(m + ".py").relative_to(ROOT))
+                            for m in SCHED_MODULES],
+            r"(?:[A-Za-z_]\w*\.(?:%s)|%s)" % ("|".join(SCHED_TIERS),
+                                            "|".join(SCHED_TIERS.values()))),
     }
 
 

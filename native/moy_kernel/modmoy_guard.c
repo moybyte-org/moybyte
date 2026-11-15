@@ -1,7 +1,7 @@
 // moy_guard: a Python callback run under the cooperative scheduler's slice
 // and stopped when it never returns, while the shell goes on
-// (docs/os_2026-11/processes.md §3; the scheduler is
-// runtime/system/scheduler.py).
+// (docs/os_2026-11/processes.md §3; the scheduler's Python processes are
+// runtime/system/sched_python.py).
 //
 //   call(fn, budget_us)  fn() under an abort point and a one-shot timer of
 //                      `budget_us` (0: no timer): fn's result, or ABORTED once

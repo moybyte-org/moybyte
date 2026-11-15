@@ -2688,8 +2688,8 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
 
 
 def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
-    """The scheduler's compiled-service contract (runtime/system/scheduler.py,
-    COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
+    """The scheduler's compiled-service contract
+    (runtime/system/sched_compiled.py, COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
     has: the module for this console where the cart carries one, main.wasm
     on the interpreter where it is refused."""
     world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])

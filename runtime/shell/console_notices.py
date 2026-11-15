@@ -348,7 +348,7 @@ class Notices:
                 ws.run.player.window_event("moy_action", n.id, key)
             return
         import scheduler as _sched
-        hooked = _sched.SCHED.hook(n.pid, "moy_action", n.id, key)
+        hooked = _sched.SCHED.python.hook(n.pid, "moy_action", n.id, key)
         c = n.cart
         if hooked and not (c and c.get("entry") and c.get("path")):
             return

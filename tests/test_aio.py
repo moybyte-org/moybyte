@@ -15,6 +15,7 @@ import time
 import pytest
 
 from runtime import aio, moybyte, os_log, scheduler as S
+from runtime import sched_python as Y
 from runtime import moy_log as L
 from test_scheduler import Guard, _clear
 from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
@@ -87,7 +88,7 @@ asyncio.run(main())
     p = sched.procs[pid]
     _ticks(sched, 6)
     assert set(p.ns["seen"]) == {pid}
-    assert p.strikes == S.MOY_BG_STRIKES and p.state == S.SUSPENDED
+    assert p.strikes == Y.MOY_BG_STRIKES and p.state == S.SUSPENDED
     n = len(p.ns["seen"])
     _ticks(sched, 4)
     assert len(p.ns["seen"]) == n           # a suspended process's steps wait
@@ -275,7 +276,7 @@ import sys
 sys.path[:0] = [@TREE@]
 import gc, time
 import moy_input as I
-import moybyte, aio
+import moybyte, aio, sched_python
 import scheduler as S
 moybyte.bind(I.HostInputTable())
 s = S.SCHED
@@ -326,7 +327,7 @@ p = s.procs[pid]
 ticks(4)
 print("CRASH", p.state, p.code, aio.count(pid))
 
-S.MOY_BG_ABORT_US = 30000
+sched_python.MOY_BG_ABORT_US = 30000
 SPIN = """
 import asyncio
 async def spin():

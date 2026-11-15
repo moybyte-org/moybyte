@@ -1,5 +1,5 @@
-"""A WASI service run by the scheduler (runtime/system/scheduler.py, COMPILED
-SERVICES; native/moy_wasm/moy_wasi.h, A SERVICE; docs/os_2026-11/processes.md
+"""A WASI service run by the scheduler (runtime/system/sched_compiled.py,
+COMPILED SERVICES; native/moy_wasm/moy_wasi.h, A SERVICE; docs/os_2026-11/processes.md
 section 1, the service model): started under its consent on a thread of its
 own with no shell session, listed with the other services, its moybyte.os
 `send` to the VM's processes served at the next frame's start, its end by

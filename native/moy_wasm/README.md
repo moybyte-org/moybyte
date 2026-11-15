@@ -306,7 +306,7 @@ of its own stepped the same way (`runtime/host/moyhost_wasm.c`'s
 
 A cart whose manifest says `"type": "service"` and `"runtime": "wasm"` and
 carries no source is a WASI service, the scheduler's as any service is
-(`runtime/system/scheduler.py`, COMPILED SERVICES; `moy_wasi.h`, A
+(`runtime/system/sched_compiled.py`, COMPILED SERVICES; `moy_wasi.h`, A
 SERVICE): a run with no shell session, its argv its cart's id, no env, no
 preopen, stdin empty, stdout and stderr the OS log's lines under its pid,
 its calls run in place on its own task with no hop. `service_start()` opens

@@ -23,6 +23,7 @@ import os
 import pytest
 
 from runtime import host_app, moy_evq, moy_loop, notifications, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 from tools import wasm_cart
 from ws_helpers import open_cart
@@ -172,7 +173,7 @@ def _talk(tmp_path, off=(), prep=None):
     lines after its frames and the scheduler's serves, and its pid."""
     import shutil
     _binding_or_skip()
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     try:
         built = str(tmp_path / "built" / "app_talk.moy")

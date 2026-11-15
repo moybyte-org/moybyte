@@ -256,7 +256,7 @@ the one wait until the next deadline they answer, a message or a stop, and
 runs what is due; the host and the desktop
 MicroPython, which have no task to give, step their services at the
 scheduler's poll
-(`runtime/system/scheduler.py`, LUA SERVICES). Its state runs the
+(`runtime/system/sched_lua.py`, LUA SERVICES). Its state runs the
 service's scripts in load order, each its own chunk: an app's entry after
 the app's shared scripts, those its `sources` lists before `main`
 (`docs/app_api_v1.md` §7). What a Lua service asks of
@@ -264,7 +264,7 @@ the console (a notification, a message, a function the console handed it)
 goes through the VM's queue (`tiers.md` §2). A compiled service, ELF or
 WASI, is the scheduler's as a Python or Lua one is, started, listed,
 stopped, restarted and autostarted the same way
-(`runtime/system/scheduler.py`, COMPILED SERVICES), and the scheduler's
+(`runtime/system/sched_compiled.py`, COMPILED SERVICES), and the scheduler's
 poll reaps its end. An ELF service is its `main` on a task of its own, on
 core 0 on the P4s and core 1 on the S3s, its app calls (`moy_notify` and
 the rest) hops on the VM's queue under a run grant of its own, served at

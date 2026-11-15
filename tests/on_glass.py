@@ -1538,10 +1538,10 @@ def the_scheduler_stops_a_runaway_service(board):
     drawing; its stop that never returns is killed. The limits are shortened
     for the test and put back."""
     import time
-    board.pyexec("import scheduler as S, moy_guard\n"
-                 "ws._sq = (S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS)\n"
-                 "S.MOY_BG_ABORT_US = 50000\n"
-                 "S.MOY_SERVICE_STOP_MS = 100\n"
+    board.pyexec("import scheduler as S, sched_proc as P, sched_python as Y, moy_guard\n"
+                 "ws._sq = (Y.MOY_BG_ABORT_US, P.MOY_SERVICE_STOP_MS)\n"
+                 "Y.MOY_BG_ABORT_US = 50000\n"
+                 "P.MOY_SERVICE_STOP_MS = 100\n"
                  "SRC = 'import moybyte\\n"
                  "def spin():\\n    while True:\\n        pass\\n"
                  "def moy_start():\\n    moybyte.every(200, spin)\\n"
@@ -1568,8 +1568,8 @@ def the_scheduler_stops_a_runaway_service(board):
         line = board.cmd("state", wait_for="STATE ")
         assert line is not None, "the desk did not answer after the aborts"
     finally:
-        board.pyexec("import scheduler as S\n"
-                     "S.MOY_BG_ABORT_US, S.MOY_SERVICE_STOP_MS = ws._sq\n"
+        board.pyexec("import scheduler as S, sched_proc as P, sched_python as Y\n"
+                     "Y.MOY_BG_ABORT_US, P.MOY_SERVICE_STOP_MS = ws._sq\n"
                      "S.SCHED.reset()",
                      strict=True)
 
