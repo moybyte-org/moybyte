@@ -318,8 +318,10 @@ def page(title, o=None):
     from the top: the content rect `(x, y, w, h)`. `title` draws in no
     page: it is the title the frame lends the host's bar where `bar` lends
     none. Its id is its title, or `o.id` where two pages share one."""
+    # GENERATED from native/os_calls.json's ui.page. Do not edit.
     t = _T
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
+    # END GENERATED
 
 
 _TONES = ("ink", "dim", "value", "danger")
@@ -356,22 +358,28 @@ def label(text, o=None):
 def button(label, kind="normal", o=None):
     """A button of `kind` (normal, primary, tonal, danger, toggle; an unknown
     one is normal): True the frame it is activated."""
+    # GENERATED from native/os_calls.json's ui.button. Do not edit.
     t = _T
-    k = _KINDS.index(kind) if kind in _KINDS else 0
-    return _C.api_button(t[0], t[1], t[2], label, k, _over(o))
+    return _C.api_button(t[0], t[1], t[2], label, _KINDS.index(kind) if kind in _KINDS else 0,
+                         _over(o))
+    # END GENERATED
 
 
 def toggle(label, on, o=None):
     """A two-state row, `on` its current mark: the new `on`."""
+    # GENERATED from native/os_calls.json's ui.toggle. Do not edit.
     t = _T
     return _C.api_toggle(t[0], t[1], t[2], label, on, _over(o))
+    # END GENERATED
 
 
 def slider(label, v, lo, hi, o=None):
     """A value from `lo` to `hi`, left and right its own while focused: the
     new `v`. `o.steps` draws a segment per step and no number."""
+    # GENERATED from native/os_calls.json's ui.slider. Do not edit.
     t = _T
     return _C.api_slider(t[0], t[1], t[2], label, v, lo, hi, _over(o))
+    # END GENERATED
 
 
 def list(label, items, cur, o=None):
@@ -482,17 +490,21 @@ def _opts(items):
 def cycle(label, items, cur, o=None):
     """`items[cur]` between chevrons; left and right step it (wrapping) while
     focused, activation takes the next: the new `cur`."""
+    # GENERATED from native/os_calls.json's ui.cycle. Do not edit.
     t = _T
     return _C.api_choice(t[0], t[1], t[2], 3, label, _opts(items), -1 if cur is None else cur,
                          _over(o))
+    # END GENERATED
 
 
 def seg(label, items, cur, o=None):
     """A segmented control, `items[cur]` wearing the current mark; left and
     right move it while focused, a tap picks: the new `cur`."""
+    # GENERATED from native/os_calls.json's ui.seg. Do not edit.
     t = _T
     return _C.api_choice(t[0], t[1], t[2], 4, label, _opts(items), -1 if cur is None else cur,
                          _over(o))
+    # END GENERATED
 
 
 def swatches(label, colours, cur, o=None):
@@ -548,7 +560,9 @@ def icon(name, o=None):
     slider or progress) draws icon `name` before its label: the theme's
     icon set's (`wifi`, `battery`, `settings`, `folder`...), else the glyph
     table's (`lock`, `key`...). True where either names it."""
+    # GENERATED from native/os_calls.json's ui.icon. Do not edit.
     return _C.api_icon(_T[0], name)
+    # END GENERATED
 
 
 _COUNT = {"steps": True}
@@ -703,7 +717,9 @@ def table_dist():
     from the view's centre along the table's axis, in 256ths of a row,
     negative before it (above it, or on its left); 0 where no part is
     open. A carousel scales each card by it."""
+    # GENERATED from native/os_calls.json's ui.table_dist. Do not edit.
     return _C.api_table_dist(_T[0])
+    # END GENERATED
 
 
 _TF = array("i", [0] * 4)               # table_floor's answer
@@ -782,7 +798,9 @@ def held(id, key):
     in turn, the frames between this page's, and that frame the app's
     alone (its kept table's key not negative). Names `id` under `key` for
     this frame, whose pass draws the part where it answers False."""
+    # GENERATED from native/os_calls.json's ui.held. Do not edit.
     return _C.api_held(_T[0], id, key)
+    # END GENERATED
 
 
 SLOT_MINT = 0x10000                     # `face`'s answer: draw the face into the slot first
@@ -796,7 +814,9 @@ def slots(cap, key):
     size, the layer: another key or `cap` forgets every face. The engine
     keeps one such record, held by the context that asked last. Answers
     the slots kept (at most 128)."""
+    # GENERATED from native/os_calls.json's ui.slots. Do not edit.
     return _C.api_slots(_T[0], cap, key)
+    # END GENERATED
 
 
 def slot(name, gen=0, mint=False):
@@ -806,7 +826,9 @@ def slot(name, gen=0, mint=False):
     slot to draw it into (the one stamped least recently) | `SLOT_MINT`,
     the app drawing the face there and then stamping it; else -1, the part
     drawn as it is."""
+    # GENERATED from native/os_calls.json's ui.slot. Do not edit.
     return _C.api_slot(_T[0], name, gen, mint)
+    # END GENERATED
 
 
 def slot_next():
@@ -816,7 +838,9 @@ def slot_next():
     start, no more of them than the slots kept (a round's minting never
     takes the slot of a part it named); -1 after the last, and the order starts again (as `faces`
     starts it)."""
+    # GENERATED from native/os_calls.json's ui.slot_next. Do not edit.
     return _C.api_slot_next(_T[0])
+    # END GENERATED
 
 
 def block_set(block, field, value):
@@ -858,7 +882,9 @@ def held_last(id, key):
     page as that frame named it under `key` (`held`): the frame before
     this one, this page's and the app's alone -- for a part the app copies
     out of that buffer. Names nothing."""
+    # GENERATED from native/os_calls.json's ui.held_last. Do not edit.
     return _C.api_held_last(_T[0], id, key)
+    # END GENERATED
 
 
 def held_all():
@@ -867,7 +893,9 @@ def held_all():
     buffer each, this page's, one a frame, each naming each part under the
     same key -- whether or not a kept table was drawn. False where the
     canvas keeps nothing."""
+    # GENERATED from native/os_calls.json's ui.held_all. Do not edit.
     return _C.api_held_all(_T[0])
+    # END GENERATED
 
 
 def table_rows():
@@ -891,8 +919,10 @@ def scroll(id=None, o=None):
     """`scroll(id)` begins a scroll region in `at`'s rect (else the page's
     room below its rows): the rows stacked after it scroll in it, by the keys
     that move focus and by a drag, until `scroll()` ends it."""
+    # GENERATED from native/os_calls.json's ui.scroll. Do not edit.
     t = _T
     _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
+    # END GENERATED
 
 
 # text_view's options packed (moy_ui_api.h's MOY_UI_TXO_*): the words of
@@ -1076,9 +1106,11 @@ def tabs(label, items, cur, o=None):
     """A row of tabs from the left, `items[cur]` wearing the current mark,
     `label` its id (it draws none); left and right move it while focused, a
     tap picks: the new `cur`."""
+    # GENERATED from native/os_calls.json's ui.tabs. Do not edit.
     t = _T
     return _C.api_choice(t[0], t[1], t[2], 9, label, _opts(items), -1 if cur is None else cur,
                          _over(o))
+    # END GENERATED
 
 
 def grid(id=None, w=0, h=0, o=None):
@@ -1160,8 +1192,10 @@ def empty(icon, title, lines=()):
     row): `icon` on a disc of `value`, `title`, then `lines` in the dim ink,
     what is missing; the page's one verb that fills it follows as a button.
     The y under it."""
+    # GENERATED from native/os_calls.json's ui.empty. Do not edit.
     t = _T
     return _C.api_empty(t[0], t[1], t[2], icon, title, _opts(lines))
+    # END GENERATED
 
 
 def note(icon, lines):
@@ -1170,8 +1204,10 @@ def note(icon, lines):
     wrapped in the caption face, the first in `ink` and the rest dim, on a
     card inset to the page's gutters. Stacked, else at `at`'s rect's top.
     The y under it."""
+    # GENERATED from native/os_calls.json's ui.note. Do not edit.
     t = _T
     return _C.api_note(t[0], t[1], t[2], icon, _opts(lines))
+    # END GENERATED
 
 
 MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
@@ -1250,8 +1286,10 @@ def tool(icon, label, o=None):
     handheld the word stands under the icon; on the desk a resting pointer
     shows the word and the key as a tooltip under it, over the page at
     `end()`. True the frame it is activated."""
+    # GENERATED from native/os_calls.json's ui.tool. Do not edit.
     t = _T
     return _C.api_tool(t[0], t[1], t[2], icon, label, _over(o))
+    # END GENERATED
 
 
 def bar(title, tools=(), off=(), back=False):
@@ -1275,16 +1313,20 @@ def rule(o=None):
     """A rule: a line in the structure colour across `at`'s rect (down it
     where the rect is taller than wide: a split's divider), else a row of
     the page with the line across it."""
+    # GENERATED from native/os_calls.json's ui.rule. Do not edit.
     t = _T
     _C.api_rule(t[0], t[1], t[2])
+    # END GENERATED
 
 
 def part(id, w=0, h=0, o=None):
     """A stop for content only the app can draw, `w` and `h` 0 being the
     row's: `(x, y, w, h, state)`, state's bits FOCUS 1, ACTIVATED 2,
     PRESSED 4, HOVER 8. The app draws into the rect after."""
+    # GENERATED from native/os_calls.json's ui.part. Do not edit.
     t = _T
     return _C.api_part(t[0], t[1], t[2], id, w, h, _over(o))
+    # END GENERATED
 
 
 # ui.split's words (moy_ui_api.h's MOY_UI_SPO_*, MOY_UI_SPLIT_*): kept, so a
@@ -1365,7 +1407,9 @@ def part_at():
     part; None otherwise (a key activated it, the pointer is off it). A
     press held on a part with no page under it, or with `nav` off, stays
     its own through a drag."""
+    # GENERATED from native/os_calls.json's ui.part_at. Do not edit.
     return _C.api_part_at(_T[0])
+    # END GENERATED
 
 
 FOCUS, ACTIVATED, PRESSED, HOVER = 1, 2, 4, 8
@@ -1411,7 +1455,9 @@ def focus(id=None):
 def keys_taken():
     """Whether the ui used this frame's keys (a cart's own input then skips
     them)."""
+    # GENERATED from native/os_calls.json's ui.keys_taken. Do not edit.
     return _C.api_keys_taken(_T[0])
+    # END GENERATED
 
 
 def input_kind():
@@ -1423,4 +1469,6 @@ def input_kind():
 def at(x, y, w, h):
     """Place the next call exactly, leaving the row cursor alone; before a
     `page`, it places the page."""
+    # GENERATED from native/os_calls.json's ui.at. Do not edit.
     _C.api_at(_T[0], x, y, w, h)
+    # END GENERATED

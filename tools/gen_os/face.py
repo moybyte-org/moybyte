@@ -19,6 +19,7 @@ A face.json maps a module's name to its face:
   structs   C structures the host's hand rows read: their ctypes mirrors
   errors    {name: {"codes": {rc: "Exxx"}, "other": "Exxx"}}: a C answer code
             raised as OSError(errno), 0 answering
+  api       the toolkit's engine verbs (native/moy_ui's alone): tools/gen_os/ui.py's
   rows      one per Python name, in the globals' order. `py` is its Python
             signature ("read(seq=0, n=32)"); `hand` a row both faces write by
             hand (its name and arity are still checked); otherwise `c` is the
@@ -50,7 +51,8 @@ FACES_PY = os.path.join(HOST, "faces.py")
 # Registered before any other: everything else's imports may reach it.
 FIRST = ("moy_spine",)
 
-MOD_FIELDS = {"about", "c", "host", "binding", "registered", "headers", "consts", "structs", "errors", "rows"}
+MOD_FIELDS = {"about", "c", "host", "binding", "registered", "headers", "consts", "structs", "errors", "rows",
+              "api"}
 ROW_FIELDS = {"py", "hand", "c", "span", "wbuf", "ret", "neg_out", "trunc", "null", "out", "err", "noalloc", "example",
               "absent", "doc"}
 FACES = ("host", "mp")

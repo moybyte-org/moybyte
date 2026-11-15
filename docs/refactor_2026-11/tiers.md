@@ -63,6 +63,8 @@ App-ABI rows (crypto, clipboard, theme, files) have the same shape: `modmoy_app.
    - `cap`: an `out`'s first capacity, and `grow: true` where FULL retries eightfold (`moy_app_lua.c:197` `row_call_cap`);
    - `example`: arguments a probe calls the row with, for §3's test.
 
+   The `ui.*` rows carry these as phase 8 landed them (2026-11-15): `py_sig`, `enum` (per tier's table, its count and default), `base`, `list`, `lua_ret` (the door rows' `nil`, `bool` and `value`, and the toolkit's own `index` and `words`, an out's words whose count the engine verb's prototype gives, so no `out_shape`) and `end_form`, with the faces' particulars under one `ui` field; the engine verbs they draw through are `native/moy_ui/face.json`'s `api` rows, each emitting the context form and the RUN form (T16). `tools/gen_os/ui.py`'s docstring is the fields' authority.
+
 2. **`native/<module>/face.json`**, a new per-module file, for the private faces. Each row names its C function. The generator **reads the prototype from the module's header** with the C-prototype parser `gen_os_table.py:494` `parse()` already has, so nothing restates the C types. The row adds only what the C types cannot say:
    - **types**:
      - `u32`/`i32`/`u8`/`bool`/`f32` follow from the prototype;

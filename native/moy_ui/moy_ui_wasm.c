@@ -31,83 +31,6 @@ static void put_words(uint8_t *out, uint32_t cap, const int32_t *v, uint32_t n) 
         return -MOY_UI_BAD;                             \
     }
 
-int32_t moy_ui_wasm_page(void *e, const uint8_t *title, uint32_t tn, const uint8_t *ob,
-                         uint32_t on, uint8_t *out, uint32_t cap) {
-    (void)e;
-    OVER(ob, on);
-    int32_t b[4];
-    int rc = moy_ui_run_page(wasm_target(), moy_ui_span_of(title, tn), &o, b);
-    if (rc == 0) {
-        put_words(out, cap, b, 4);
-    }
-    return rc;
-}
-
-int32_t moy_ui_wasm_label(void *e, const uint8_t *text, uint32_t n, const uint8_t *ob,
-                          uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_label(wasm_target(), moy_ui_span_of(text, n), &o);
-}
-
-int32_t moy_ui_wasm_button(void *e, const uint8_t *label, uint32_t n, int32_t kind,
-                           const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = 0;
-    int rc = moy_ui_run_button(wasm_target(), moy_ui_span_of(label, n), kind, &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_toggle(void *e, const uint8_t *label, uint32_t n, int32_t on_,
-                           const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = 0;
-    int rc = moy_ui_run_toggle(wasm_target(), moy_ui_span_of(label, n), on_, &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_slider(void *e, const uint8_t *label, uint32_t n, int32_t v, int32_t lo,
-                           int32_t hi, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t got = v;
-    int rc = moy_ui_run_slider(wasm_target(), moy_ui_span_of(label, n), v, lo, hi, &o, &got);
-    return rc != 0 ? v : got;
-}
-
-int32_t moy_ui_wasm_list(void *e, const uint8_t *label, uint32_t n, const uint8_t *items,
-                         uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t got = cur;
-    int rc = moy_ui_run_list(wasm_target(), moy_ui_span_of(label, n), items, len, cur, &o, &got);
-    return rc != 0 ? cur : got;
-}
-
-int32_t moy_ui_wasm_part(void *e, const uint8_t *id, uint32_t n, int32_t w, int32_t h,
-                         const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v[5];
-    int rc = moy_ui_run_part(wasm_target(), moy_ui_span_of(id, n), w, h, &o, v);
-    if (rc == 0) {
-        put_words(out, cap, v, 5);
-    }
-    return rc;
-}
-
-int32_t moy_ui_wasm_part_at(void *e, uint8_t *out, uint32_t cap) {
-    (void)e;
-    int32_t v[2];
-    if (!moy_ui_run_part_at(wasm_target(), v)) {
-        return 0;
-    }
-    put_words(out, cap, v, 2);
-    return 1;
-}
-
 int32_t moy_ui_wasm_split(void *e, const uint8_t *id, uint32_t n, uint8_t *sizes, uint32_t sn,
                           const uint8_t *mins, uint32_t mn, const uint8_t *opt, uint32_t on,
                           uint8_t *out, uint32_t cap) {
@@ -140,140 +63,6 @@ int32_t moy_ui_wasm_focus(void *e, const uint8_t *id, uint32_t n, uint8_t *buf, 
     moy_ui_span_t s = moy_ui_span_of(n ? id : NULL, n);
     int len = moy_ui_run_focus(wasm_target(), s, (char *)buf, cap);
     return len < 0 ? 0 : len;
-}
-
-int32_t moy_ui_wasm_table_floor(void *e, uint8_t *out, uint32_t cap) {
-    (void)e;
-    int32_t v[4];
-    int32_t r = moy_ui_run_table_floor(wasm_target(), v);
-    if (r > 0) {
-        put_words(out, cap, v, 4);
-    }
-    return r;
-}
-
-int32_t moy_ui_wasm_held(void *e, const uint8_t *id, uint32_t n, int32_t key) {
-    (void)e;
-    return moy_ui_run_held(wasm_target(), moy_ui_span_of(n ? id : NULL, n), key);
-}
-
-int32_t moy_ui_wasm_held_last(void *e, const uint8_t *id, uint32_t n, int32_t key) {
-    (void)e;
-    return moy_ui_run_held_last(wasm_target(), moy_ui_span_of(n ? id : NULL, n), key);
-}
-
-int32_t moy_ui_wasm_held_all(void *e) {
-    (void)e;
-    return moy_ui_run_held_all(wasm_target());
-}
-
-int32_t moy_ui_wasm_slots(void *e, int32_t cap, int32_t key) {
-    (void)e;
-    return moy_ui_run_slots(wasm_target(), cap, key);
-}
-
-int32_t moy_ui_wasm_slot(void *e, const uint8_t *name, uint32_t n, int32_t gen, int32_t mint) {
-    (void)e;
-    return moy_ui_run_slot(wasm_target(), moy_ui_span_of(n ? name : NULL, n), gen, mint != 0);
-}
-
-int32_t moy_ui_wasm_slot_next(void *e) {
-    (void)e;
-    return moy_ui_run_slot_next(wasm_target());
-}
-
-int32_t moy_ui_wasm_table_dist(void *e) {
-    (void)e;
-    return moy_ui_run_table_dist(wasm_target());
-}
-
-int32_t moy_ui_wasm_keys_taken(void *e) {
-    (void)e;
-    return moy_ui_run_keys_taken(wasm_target());
-}
-
-int32_t moy_ui_wasm_at(void *e, int32_t x, int32_t y, int32_t w, int32_t h) {
-    (void)e;
-    moy_ui_run_at(wasm_target(), x, y, w, h);
-    return 0;
-}
-
-int32_t moy_ui_wasm_group(void *e, const uint8_t *caption, uint32_t n, const uint8_t *ob,
-                          uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_group(wasm_target(), moy_ui_span_of(caption, n), &o);
-}
-
-static int32_t value_row(int kind, const uint8_t *label, uint32_t n, const uint8_t *value,
-                         uint32_t vn, const uint8_t *ob, uint32_t on) {
-    OVER(ob, on);
-    int32_t v = 0;
-    int rc = moy_ui_run_value(wasm_target(), kind, moy_ui_span_of(label, n), moy_ui_span_of(value, vn), &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_info(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
-                         uint32_t vn, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return value_row(MOY_UI_V_INFO, label, n, value, vn, ob, on);
-}
-
-int32_t moy_ui_wasm_link(void *e, const uint8_t *label, uint32_t n, const uint8_t *value,
-                         uint32_t vn, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return value_row(MOY_UI_V_LINK, label, n, value, vn, ob, on);
-}
-
-static int32_t choice_row(int kind, const uint8_t *label, uint32_t n, const uint8_t *opts,
-                          uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    OVER(ob, on);
-    int32_t got = cur;
-    int rc = moy_ui_run_choice(wasm_target(), kind, moy_ui_span_of(label, n), opts, len, cur, &o, &got);
-    return rc != 0 ? cur : got;
-}
-
-int32_t moy_ui_wasm_cycle(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
-                          uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return choice_row(MOY_UI_V_CYCLE, label, n, opts, len, cur, ob, on);
-}
-
-int32_t moy_ui_wasm_seg(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
-                        uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return choice_row(MOY_UI_V_SEG, label, n, opts, len, cur, ob, on);
-}
-
-int32_t moy_ui_wasm_swatches(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
-                             uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return choice_row(MOY_UI_V_SWATCH, label, n, opts, len, cur, ob, on);
-}
-
-int32_t moy_ui_wasm_tabs(void *e, const uint8_t *label, uint32_t n, const uint8_t *opts,
-                         uint32_t len, int32_t cur, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    return choice_row(MOY_UI_V_TABS, label, n, opts, len, cur, ob, on);
-}
-
-int32_t moy_ui_wasm_grid(void *e, const uint8_t *id, uint32_t n, int32_t w, int32_t h,
-                         const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_grid(wasm_target(), moy_ui_span_of(id, n), w, h, &o);
-}
-
-int32_t moy_ui_wasm_card(void *e, const uint8_t *title, uint32_t n, const uint8_t *sub,
-                         uint32_t sn, const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v[5] = {0, 0, 0, 0, 0};
-    int rc = moy_ui_run_card(wasm_target(), moy_ui_span_of(title, n), moy_ui_span_of(sub, sn), &o, v);
-    if (rc == 0) {
-        put_words(out, cap, v, 5);
-    }
-    return rc;
 }
 
 // ui_text_view's lines: NUL-separated text at `p`, found by walking on from
@@ -349,30 +138,6 @@ int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint
     return rc;
 }
 
-int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8_t *ob,
-                          uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_hints(wasm_target(), items, n, &o);
-}
-
-int32_t moy_ui_wasm_icon(void *e, const uint8_t *name, uint32_t n, const uint8_t *ob,
-                         uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    (void)o;
-    int32_t v = 0;
-    int rc = moy_ui_run_icon(wasm_target(), moy_ui_span_of(name, n), &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t v, int32_t hi,
-                             const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_progress(wasm_target(), moy_ui_span_of(label, n), v, hi, &o);
-}
-
 int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8_t *cols,
                           uint32_t cn, const uint8_t *cells, uint32_t en, int32_t cur,
                           const uint8_t *ob, uint32_t on, uint8_t *out, uint32_t cap) {
@@ -384,13 +149,6 @@ int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8
     return rc;
 }
 
-int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *ob,
-                           uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    return moy_ui_run_scroll(wasm_target(), moy_ui_span_of(id, n), &o);
-}
-
 int32_t moy_ui_wasm_field(void *e, const uint8_t *label, uint32_t n, uint8_t *buf, uint32_t cap,
                           int32_t len, const uint8_t *ob, uint32_t on) {
     (void)e;
@@ -399,56 +157,6 @@ int32_t moy_ui_wasm_field(void *e, const uint8_t *label, uint32_t n, uint8_t *bu
     int rc = moy_ui_run_field(wasm_target(), moy_ui_span_of(label, n), buf, cap,
                               len < 0 ? 0u : (size_t)len, &o, &v);
     return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_dialog(void *e, const uint8_t *title, uint32_t n, const uint8_t *buttons,
-                           uint32_t bn, int32_t kind, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = -1;
-    int rc = moy_ui_run_dialog(wasm_target(), moy_ui_span_of(title, n), buttons, bn, kind, &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_popover(void *e, const uint8_t *id, uint32_t n, int32_t w, const uint8_t *ob,
-                            uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = 0;
-    int rc = moy_ui_run_popover(wasm_target(), moy_ui_span_of(id, n), w, &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_menu(void *e, const uint8_t *label, uint32_t n, const uint8_t *items,
-                         uint32_t len, const uint8_t *icons, uint32_t ilen, const uint8_t *ob,
-                         uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = -1;
-    int rc = moy_ui_run_menu(wasm_target(), moy_ui_span_of(label, n), items, len, icons, ilen, &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_tool(void *e, const uint8_t *icon, uint32_t in, const uint8_t *label,
-                         uint32_t n, const uint8_t *ob, uint32_t on) {
-    (void)e;
-    OVER(ob, on);
-    int32_t v = 0;
-    int rc = moy_ui_run_tool(wasm_target(), moy_ui_span_of(icon, in), moy_ui_span_of(label, n), &o, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t *tools,
-                        uint32_t len, int32_t off) {
-    (void)e;
-    int32_t v = -1;
-    int rc = moy_ui_run_bar(wasm_target(), moy_ui_span_of(title, n), tools, len, (uint32_t)off, &v);
-    return rc != 0 ? rc : v;
-}
-
-int32_t moy_ui_wasm_rule(void *e) {
-    (void)e;
-    return moy_ui_run_rule(wasm_target());
 }
 
 int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8_t *head,
@@ -473,21 +181,8 @@ int32_t moy_ui_wasm_bubble(void *e, const uint8_t *text, uint32_t n, const uint8
     return rc;
 }
 
-int32_t moy_ui_wasm_empty(void *e, const uint8_t *icon, uint32_t in, const uint8_t *title,
-                          uint32_t n, const uint8_t *lines, uint32_t len) {
-    (void)e;
-    int32_t y = 0;
-    int rc = moy_ui_run_empty(wasm_target(), moy_ui_span_of(icon, in), moy_ui_span_of(title, n), lines, len, &y);
-    return rc == 0 ? y : rc;
-}
-
-int32_t moy_ui_wasm_note(void *e, const uint8_t *icon, uint32_t in, const uint8_t *lines,
-                         uint32_t len) {
-    (void)e;
-    int32_t y = 0;
-    int rc = moy_ui_run_note(wasm_target(), moy_ui_span_of(icon, in), lines, len, &y);
-    return rc == 0 ? y : rc;
-}
+// The rows (tools/gen_os/ui.py, from native/os_calls.json's ui rows).
+#include "moy_ui_wasm_face.h"
 
 #define FN(f) ((void *)(f))
 

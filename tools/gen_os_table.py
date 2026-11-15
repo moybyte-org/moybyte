@@ -47,6 +47,15 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     native/moy_ui/modmoy_ui_over.h  the board module's dict keys by qstr
     runtime/toolkit/ui.py           _OVER_KEYS, the host's block (a GENERATED region)
     docs/ui_api_2026-10.md          the keys' table and the block's (two regions)
+  the toolkit's verb faces, from native/moy_ui/face.json's `api` rows and the
+  ui rows (tools/gen_os/ui.py)
+    native/moy_ui/modmoy_ui_face.h  the board module's context form (api_<verb>)
+    runtime/host/moy_ui_face.py     the host's, over ctypes, with its argtypes
+    native/moy_ui/moy_ui_run_rows.h the RUN form's prototypes, and moy_ui_run_face.h its
+                                    bodies (included by moy_ui_run.c)
+    native/moy_ui/moy_ui_wasm_face.h  a compiled app's ui imports (included by moy_ui_wasm.c)
+    native/moycore/moycore_ui_rows.h  a Lua cart's ui verbs and their luaL_Reg rows
+    runtime/toolkit/ui.py           each public verb's body (a GENERATED region each)
   the moy-app plugin (sdk/moybyte_sdk, `moy app`)
     sdk/moybyte_sdk/os_table.py         what each tier's module or script reaches, with
                                     the permissions each answers under
@@ -87,7 +96,7 @@ from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
-from gen_os import face, over  # noqa: E402
+from gen_os import face, over, ui  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
@@ -132,6 +141,7 @@ def outputs(src=None):
             (UI_SDK_H, gen_sdk_ui_h(src)),
             (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
     outs += face.outputs() + over.outputs()
+    outs += ui.outputs(src, outs)
     whole(outs)
     return outs
 
