@@ -26,11 +26,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "device"))            # moy_webhost, moy_webserver
+sys.path.insert(0, str(ROOT / "device"))            # zero_host, moy_webhost, moy_webserver
 sys.path.insert(0, str(ROOT / "runtime"))           # moy_sync + its leaves
-# APPENDED: that directory holds the board's own modules AND the copies its
-# build stages there, and `device/` must win for every shared name.
-sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
 
 import zero_host                                               # noqa: E402
 

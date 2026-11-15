@@ -7,7 +7,7 @@ description: Drive an attached Moybyte board -- find its port, check who holds i
 
 One command per step: `tools/board.py BOARD VERB`. BOARD is the board.toml
 `[board] ota` id: `tdeck`, `guition_s3` (both ESP32-S3), `p4` (Waveshare, the
-only CH343), `guition_p4`, and the headless `xiao_zero` — read from the tree,
+only CH343), `guition_p4`, and the headless `xiao_zero` and `c3_zero` — read from the tree,
 so a new board is drivable the day its board.toml lands. Do not write a pyserial
 script: each board opens with its own, opposite line state, and `P4Board`
 (`tools/p4_autotest.py`), which every verb goes through, is what gets it right.

@@ -447,8 +447,7 @@ def test_the_two_backends_are_not_one_behind_a_flag():
     the other writes flash, and they share exactly the wire document."""
     src = (ROOT / "device" / "moy_webhost.py").read_text()
     assert "class ConsoleUpdate" in src
-    zero = (ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"
-            / "zero_host.py").read_text()
+    zero = (ROOT / "device" / "zero_host.py").read_text()
     assert "class ZeroUpdate" in zero
     # ...and the Zero no longer carries a route of its own.
     assert "def _update(" not in zero

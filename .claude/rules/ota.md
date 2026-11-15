@@ -15,8 +15,10 @@ paths:
   P4 (2026-08-02: real WiFi, on-device signature check, streamed install, boot
   into the new slot, rollback self-heal). **Timings, sizes and rates live in
   #53**, not here.
-  - **Every board is dual-OTA** (`otadata + ota_0 + ota_1 + vfs`), so the
-    one-time migration is HISTORY. The slot sizes differ per board and are NOT
+  - **Every board but the C3 Zero is dual-OTA** (`otadata + ota_0 + ota_1 +
+    vfs`), so the one-time migration is HISTORY. The C3 Zero is one factory
+    slot and the store (4 MB does not hold its image twice): its updater's
+    `available()` is False, and a new image goes on by cable. The slot sizes differ per board and are NOT
     repeated here: each board's partition CSV is the only thing that decides
     whether an image fits, and the build prints the headroom against it (#168).
     **The Zero's is the one authored under a real constraint** — 8MB of flash,

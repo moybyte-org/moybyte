@@ -40,7 +40,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "device"))
 sys.path.insert(0, str(ROOT / "runtime"))
 sys.path.insert(0, str(ROOT / "firmware" / "web_runner"))
-sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
 
 import moy_webhost                                                # noqa: E402
 import update_link                                               # noqa: E402

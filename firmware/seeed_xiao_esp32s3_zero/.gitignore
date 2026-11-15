@@ -8,6 +8,3 @@ native/.staged/
 modules/*
 !modules/boot.py
 !modules/main.py
-!modules/zero_host.py
-!modules/zero_setup.py
-!modules/zero_shell.py

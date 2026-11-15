@@ -390,9 +390,11 @@ def test_the_seed_stops_while_the_reserve_is_still_free(tmp_path, monkeypatch, c
 # -- the build wiring ------------------------------------------------------
 
 # Every build target that bakes a roster, and the runtime module that reads it.
-# The Zero is headless (zero_host), the other three boot the shared console.
+# The Zeros are headless (zero_host, device/'s, which both take), the others
+# boot the shared console.
 _BOARDS = {
     "seeed_xiao_esp32s3_zero": "zero_host.py",
+    "esp32c3_zero": "zero_host.py",
     "lilygo_t_deck_plus_mainline": "moy_runtime.py",
     "esp32_p4_wifi6_touch_lcd_7b": "moy_runtime.py",
     "guition_jc3248w535": "moy_runtime.py",
@@ -425,7 +427,10 @@ def test_every_board_bakes_the_packed_roster(board):
         "the stager would prune the generated roster before the freeze")
     # ...and the module that consumes it must read the PACKED name, or the board
     # freezes a compressed roster and imports a plain one that is not there.
-    with open(os.path.join(fw, "modules", _BOARDS[board])) as f:
+    src = os.path.join(fw, "modules", _BOARDS[board])
+    if not os.path.exists(src):
+        src = os.path.join(ROOT, "device", _BOARDS[board])
+    with open(src) as f:
         assert "CARTS_Z" in f.read()
 
 

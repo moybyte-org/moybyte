@@ -198,9 +198,9 @@ source   = "device"
 why = """
 The second staging source, an allowlist for the same reason it is one on every
 board -- `device/` is the boards' shared device tier and not every board drives
-every piece of it. This board drives four files of it, which is the smallest
-device set in the fleet and is the honest measure of what a headless board is:
-a socket, an HTTP/WS transport, a store host and an updater.
+every piece of it. This board drives the smallest device set in the fleet (it
+and the C3 Zero share it), which is the honest measure of what a headless board
+is: a store host, an HTTP transport and an updater.
 
 The absences are the whole console: no `device_canvas` (nothing
 to draw on), no `device_boot`/`device_api` (no FrameLoop, no cart namespace),
@@ -214,6 +214,13 @@ Empty, and it is the only board where it is. `moybyte/` is the boards' real
 InputState plus the T-Deck keyboard matrix and the #69 poller; the other three
 freeze it whole because they all construct an InputState. This board never
 does -- its inputs arrive as HTTP requests."""
+
+[[modules.device.group]]
+files = ["zero_host.py", "zero_setup.py", "zero_shell.py"]
+why = """
+The Zero's own three: the store host main.py serves, its first-boot setup
+access point and its terminal. They are in device/ because both Zero boards
+take them (this one and firmware/esp32c3_zero/), and nothing else does."""
 
 [[modules.device.group]]
 files = ["moy_webhost.py"]

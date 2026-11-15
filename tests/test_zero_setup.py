@@ -19,13 +19,7 @@ import pytest
 from net_ports import free_port
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "device"))            # moy_webserver
-# APPENDED, not inserted, since the Zero became a build target (2026-08-29):
-# that directory now holds the board's own modules AND the copies its build
-# stages there, and a staged `moy_webserver.py` is exactly the untracked stale
-# copy tests/test_staging_closure.py exists to stop anything reading. `device/`
-# stays first, so only the board-AUTHORED names resolve out of here.
-sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
+sys.path.insert(0, str(ROOT / "device"))            # zero_setup, zero_host, moy_webserver
 
 import zero_setup                                              # noqa: E402
 import zero_host                                               # noqa: E402
@@ -291,6 +285,17 @@ def test_a_failed_scan_is_an_empty_list_not_a_broken_page():
 
     srv = zero_setup.SetupServer("ap", lambda c: None, boom)
     assert json.loads(srv.scan_cached()) == {"nets": []}
+
+
+def test_the_kernels_scan_reaches_the_form(monkeypatch):
+    """moy_net.wifi_scan hands each ssid over as BYTES (modmoy_net.c), and the
+    form lists it: an ssid taken for a str and encoded again raised on every
+    row, and every scan came back an empty list."""
+    monkeypatch.setattr(zero_setup.moy_net, "wifi_scan",
+                        lambda: [(b"home", -41, 3), (b"cafe", -70, 0)], raising=False)
+    srv = zero_setup.SetupServer("ap", lambda c: None, zero_setup._scan)
+    assert json.loads(srv.scan_cached()) == {"nets": [
+        {"ssid": "home", "rssi": -41, "lock": 1}, {"ssid": "cafe", "rssi": -70, "lock": 0}]}
 
 
 def test_the_ap_name_carries_the_mac_tail():
@@ -635,7 +640,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
 
     monkeypatch.setattr(net, "wifi_ap_mac", lambda: ap.MAC, raising=False)
     monkeypatch.setattr(net, "wifi_ap", _ap_up, raising=False)
-    monkeypatch.setattr(net, "wifi_scan", lambda: [("home", -41, 3)], raising=False)
+    monkeypatch.setattr(net, "wifi_scan", lambda: [(b"home", -41, 3)], raising=False)
     monkeypatch.setattr(net, "wifi_off", lambda: ap.active(False), raising=False)
     monkeypatch.setattr(zero_setup, "SetupServer", _SpyServer)
     monkeypatch.setattr(zero_setup, "DnsRedirect", _SpyDns)

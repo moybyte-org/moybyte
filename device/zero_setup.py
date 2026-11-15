@@ -649,8 +649,9 @@ def _write_text(path, text):
 
 
 def _scan():
-    """What the station sees, in the port's WLAN.scan shape scan_json reads."""
-    return [(ssid.encode(), b"", 0, rssi, auth, False)
+    """What the station sees, in the port's WLAN.scan shape scan_json reads.
+    moy_net.wifi_scan's ssid is bytes already, as WLAN.scan's is."""
+    return [(ssid, b"", 0, rssi, auth, False)
             for ssid, rssi, auth in moy_net.wifi_scan()]
 
 

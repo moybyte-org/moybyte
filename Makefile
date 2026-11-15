@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-c3-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -77,7 +77,8 @@ VENV_TARGETS := test preflight preflight-web board-modules \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
                 firmware-flash-guition-p4 firmware-monitor-guition-p4 \
-                firmware-flash-zero firmware-monitor-zero
+                firmware-flash-zero firmware-monitor-zero \
+                firmware-flash-c3-zero firmware-monitor-c3-zero
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -677,6 +678,22 @@ firmware-monitor-zero:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/seeed_xiao_esp32s3_zero --port $(PORT)
+
+# The C3 Zero -- the Zero on an ESP32-C3 (firmware/esp32c3_zero/). One app
+# slot, so a new image goes on by cable only, through these targets.
+
+firmware-build-c3-zero:
+	firmware/esp32c3_zero/build.sh
+
+firmware-flash-c3-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/esp32c3_zero --port $(PORT)
+
+firmware-monitor-c3-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/esp32c3_zero --port $(PORT)
 
 # T-Deck recovery note: the flash target reaches the ROM loader on its own
 # (board.toml `before = "usb_reset"`), so this is only for a board so wedged

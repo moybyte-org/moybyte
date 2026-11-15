@@ -65,9 +65,11 @@ P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
+C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
 WEB = ROOT / "firmware" / "web_runner"
 BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-             "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4}
+             "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4,
+             "c3-zero": C3_ZERO}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -264,6 +266,15 @@ GENERATED = {
 PACKAGES = {"tdeck-mainline": {"moybyte"}, "p4": {"moybyte"},
             "guition-s3": {"moybyte"}, "zero": set(), "web": set(),
             "guition-p4": {"moybyte"}}
+
+# The C3 Zero is the Zero on another chip (firmware/esp32c3_zero/board.toml):
+# its declared sets are the Zero's, so its rows ARE the Zero's rows, and a
+# declaration that drifts from them fails here as the Zero's own would.
+for _table in (NATIVE, HOST_ONLY, GENERATED, PACKAGES):
+    _table["c3-zero"] = _table["zero"]
+# ...but one: the SSH server does not fit beside the web host in the C3's
+# internal heap (its board.toml's moy_ssh denial).
+NATIVE["c3-zero"] = NATIVE["zero"] - {"moy_ssh"}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -466,7 +477,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4")
+TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4", "c3-zero")
 
 # The floor each target's extraction must clear -- a smoke test on the
 # EXTRACTION, not on the board: a parser that silently found nothing would
@@ -474,7 +485,7 @@ TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4")
 # the consoles (they freeze the whole shared tree) and a much smaller one for
 # the Zero, whose thirteen-module allowlist is the point of it. A specific
 # number rather than `> 0`, so the Zero losing half its set still fails here.
-MIN_MODULES = {"zero": 12}
+MIN_MODULES = {"zero": 12, "c3-zero": 12}
 DEFAULT_MIN_MODULES = 40
 
 
@@ -539,7 +550,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero", "guition-p4")
+BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero", "guition-p4", "c3-zero")
 # The boards whose `[modules.shared]` is a DENYLIST. The Zero's is an
 # allowlist, on the argument its board.toml makes in full: a denylist is right
 # when the source tree's default answer is YES, and `runtime/` IS the console,
@@ -850,7 +861,8 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     is structurally different) and stays hand-listed."""
     for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
                               ("guition-s3", GUITION),
-                              ("guition-p4", GUITION_P4), ("zero", ZERO)):
+                              ("guition-p4", GUITION_P4), ("zero", ZERO),
+                              ("c3-zero", C3_ZERO)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")

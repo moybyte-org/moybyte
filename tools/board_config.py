@@ -347,6 +347,12 @@ CHIP_GPIO = {
         "flash_psram": tuple(range(26, 38)),    # octal flash/PSRAM: 33-37 too
         "usb": (19, 20),
     },
+    "esp32c3": {
+        "gpio": tuple(range(0, 22)),
+        "strapping": (2, 8, 9),
+        "flash_psram": tuple(range(11, 18)),    # 11 is VDD_SPI; no PSRAM to fit
+        "usb": (18, 19),
+    },
     "esp32p4": {
         "gpio": tuple(range(0, 55)),
         "strapping": (34, 35, 36, 37, 38),

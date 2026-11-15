@@ -141,9 +141,9 @@ def start(carts_root, name, webhost=None):
     ssh_service.boot(ws)
     tail()      # the face's hops are this task's from the server's first connection
     st = ssh_service.status()
-    print("ZERO ssh: %s" % ("serving as %s.local" % ssh_service.hostname(ws)
-                             if st is not None and st[0]
-                             else "off (no password: passwd)"))
+    print("ZERO ssh: %s" % ("off (no SSH server in this image)" if st is None
+                             else "serving as %s.local" % ssh_service.hostname(ws)
+                             if st[0] else "off (no password: passwd)"))
     return ws
 
 

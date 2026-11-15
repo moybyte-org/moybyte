@@ -15,7 +15,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 (`tools/board.py`). What follows is what bites whoever touches `firmware/`,
 `device/` or `native/`.
 
-## One build system, five boards
+## One build system, six boards
 
 - **The shared half of every `build.sh` is `tools/esp32_build_lib.sh`**: the
   toolchain and its self-heal, IDF components, native staging, the web blob
@@ -402,3 +402,13 @@ stages 1–6 all absent. Its README is the authority; what bites:
   channel, so `tools/board.py` knows it by the USB serial in its board.toml.
 - A pushed `.py` SHADOWS the frozen one (`/` is searched before `.frozen`), so
   its module push is opt-in and undoable, and the board announces it at boot.
+- **The C3 Zero (`firmware/esp32c3_zero/`, `c3_zero`) is the Zero on an
+  ESP32-C3**: the same store host (`device/zero_*.py`, which both Zeros take)
+  and module sets but the SSH server, on a chip with no PSRAM, one core, one
+  I2C controller and 4 MB of flash. A build without PSRAM (`MOY_HAS_PSRAM`
+  unset, `native/moy_kernel/moy_platform.h`) serves every PSRAM placement from
+  the internal heap and keeps no kernel pool, so a native block a PSRAM board
+  hides costs this one internal SRAM, and a new resident task or buffer on a
+  Zero is measured there before it ships (the README's `moy_ssh` story). One
+  factory slot and no OTA: a new image goes on by cable. Its README is the
+  authority.

@@ -405,7 +405,12 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # flash, which is a missing feature. This set is the second kind, and it is
     # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
-    no_site_card = {}
+    no_site_card = {
+        # One factory slot and no OTA manifest (firmware/esp32c3_zero/
+        # board.toml): CI builds its image, and a card to cable-flash it from
+        # the site is the missing feature.
+        "c3_zero": "no flasher card yet",
+    }
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
         % sorted(set(fetch.BOARDS) - set(rows)))
