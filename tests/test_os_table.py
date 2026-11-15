@@ -241,3 +241,59 @@ def test_one_error_table():
     nostore = next(e for e in errs if e["code"] == "NOSTORE")
     assert str(app_context.NO_STORE) == nostore["err"]
     assert type(face_errors.exception(99)) is type(face_errors.exception(face_errors.BAD))
+
+
+# What the call table's codes and rows guard (docs/refactor_2026-11.md, phase
+# 10): the sources the tree writes, the vendored copies and the generated
+# files apart.
+VENDORED = re.compile(r"/(lua|dash|dropbear|mbedtls|wamr|libmoy|monocypher|elf_loader)/")
+
+
+def _our_c():
+    """{path: text} of every C file of native/ the tree writes by hand."""
+    made = {os.path.relpath(p, ROOT) for p, _t in gen_os_table.outputs()}
+    files = subprocess.run(["git", "ls-files", "native"], cwd=ROOT, capture_output=True,
+                           text=True, check=True).stdout.split()
+    out = {}
+    for f in files:
+        if f.endswith((".c", ".h")) and not VENDORED.search("/" + f) and f not in made:
+            with open(os.path.join(ROOT, f), errors="replace") as fh:
+                out[f] = fh.read()
+    return out
+
+
+def test_no_hand_code_dispatches_a_row_or_maps_an_app_code():
+    """The door's rows are MOY_APP_DOOR_ROWS, a code's errno and texts the
+    errors' columns: no hand switch names a C row or an app code."""
+    bad = ["%s:%d" % (f, t[:m.start()].count("\n") + 1)
+           for f, t in _our_c().items() for m in re.finditer(r"case MOY_(ROW|APP)_[A-Z]", t)]
+    assert bad == []
+
+
+def test_every_module_s_ok_is_zero():
+    """moy_kernel.h's RESULT CODES: every MOY_<M>_OK is 0 (or another's OK)."""
+    bad = []
+    for f, t in _our_c().items():
+        for m in re.finditer(r"\b(MOY\w*_OK)\s*=\s*([^,}\s]+)", t):
+            if m.group(2) != "0" and not m.group(2).endswith("_OK"):
+                bad.append("%s: %s = %s" % (f, m.group(1), m.group(2)))
+    assert bad == []
+
+
+def test_lua_s_role_binding_has_no_per_row_function_but_the_hand_ones():
+    """A Lua name is l_row over its row (moy_app_lua.c), but the rows the table
+    marks hand; the rest of moy_app_lua.c's functions are io's and os's."""
+    hand = {cfn for _r, _t, _n, cfn, row, _rd in gen_os_table.lua_names(gen_os_table.load())
+            if any(r["name"] == row and r.get("lua_ret") == "hand"
+                   for r in gen_os_table.load()["rows"])}
+    with open(os.path.join(ROOT, "native", "moy_app", "moy_app_lua.c")) as f:
+        fns = set(re.findall(r"^static int (l_\w+)\(lua_State \*L\)", f.read(), re.M))
+    assert hand and hand <= fns
+    assert {f for f in fns - hand if not f.startswith(("l_io_", "l_os_"))} == {"l_row"}
+
+
+def test_the_evq_errors_are_moy_evq_h_s_codes():
+    """Every code moy_evq.h numbers has its row in evq_errors, and no other."""
+    with open(os.path.join(ROOT, "native", "moy_kernel", "moy_evq.h")) as f:
+        codes = set(re.findall(r"^\s+MOY_EVQ_([A-Z]+) = \d+,", f.read(), re.M)) - {"OK"}
+    assert {e["code"] for e in gen_os_table.load()["evq_errors"]} == codes
