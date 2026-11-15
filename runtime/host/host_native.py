@@ -7,7 +7,7 @@ boundary), a Lua run's UI rows and a compiled run's are one set of globals,
 because they are one firmware. The host matches that by construction: each
 binding (`gfx_binding`, `glass_binding`, `lua_binding` with the compiled-cart
 run, `moy_input`, `moy_loop`, `moy_play`, `net_binding`, the spine's, the
-store's and the index's components in tools/moy_index_spike.py, the
+store's and the index's components in runtime/host/native_parts.py, the
 user-files layer) declares its sources as a `native_build.Part`, `build()`
 compiles the union into `.build/host/moyhost-<hash>.so`, and every binding
 ctypes-loads that one path -- the dynamic loader hands each the same handle,
@@ -32,7 +32,7 @@ What stays a library of its own, each saying why in its module: the audio
 the Player reaches its sessions through hl_kernel's audio slots), and the
 builds that exist to be DIFFERENT from this one -- the tick model at double
 and fixed precision (runtime/host/moy_play.py), a sanitizer build
-(tools/moy_index_spike.py), a style edited under test
+(tools/native_check.py), a style edited under test
 (glass_binding.build(ui_dir=...)) and a test's own harness.
 """
 
@@ -78,8 +78,8 @@ def parts(verbose=False):
     out = [_module("runtime." + m).PART for m in (
         "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop", "moy_evq",
         "moy_play", "net_binding", "elf_binding")]
-    spike = _module("tools.moy_index_spike")
-    out += [spike.part(c) for c in (spike.SPINE, spike.FS, spike.INDEX)]
+    np = _module("runtime.native_parts")
+    out += [np.part(c) for c in (np.SPINE, np.FS, np.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
     cflags, link = [], ["-lm", "-lpthread", "-ldl"]
     uf = _module("runtime.moy_ufiles_binding")

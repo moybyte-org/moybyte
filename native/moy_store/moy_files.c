@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_files.h"
 #include "moy_vol.h"
 
@@ -69,19 +70,6 @@ size_t moy_files_key(const uint8_t *path, size_t n, char *out, size_t cap) {
     return k;
 }
 
-static int hexval(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
 int moy_files_path_of(const char *name, size_t n, uint8_t *out, size_t cap) {
     size_t o = 0;
     if (n == 0) {
@@ -91,8 +79,8 @@ int moy_files_path_of(const char *name, size_t n, uint8_t *out, size_t cap) {
         uint8_t c = (uint8_t)name[i];
         int v;
         if (c == '%') {
-            int hi = i + 2 < n ? hexval(name[i + 1]) : -1;
-            int lo = i + 2 < n ? hexval(name[i + 2]) : -1;
+            int hi = i + 2 < n ? moy_hex_value((unsigned char)name[i + 1]) : -1;
+            int lo = i + 2 < n ? moy_hex_value((unsigned char)name[i + 2]) : -1;
             if (hi < 0 || lo < 0) {
                 return -1;
             }

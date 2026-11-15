@@ -1,9 +1,11 @@
 # moy_kernel — the kernel below the app verb table
 
 The native kernel (#224, closed 2026-11-01; its leftovers are #245): the
-board's entry and the VM service (`moy_kernel.c`), the frame loop
+board's entry and the VM service (`moy_kernel.c`, over `moy_kernel_int.h`), the frame loop
 (`moy_loop.h`), the crash record and the boot decision (`moy_crash.h`), the
-recovery floor and first light (`moy_recovery.h`, `moy_boot.h`), the idle
+recovery floor (`moy_recovery.h`, its serial words and screen in
+`moy_recovery_floor.c`) and first light (`moy_boot.h`), the task watchdog the
+frame feeds (`moy_wd.c`), the idle
 ladder (`moy_idle.h`), the PERF line (`moy_perf.h`), the dev channel
 (`moy_devch.h`), the OS log (`moy_log.h`, the ring every writer shares and
 the dev channel's `log` word reads), the scheduler's callback guard
@@ -96,7 +98,7 @@ that hold VM state before it sweeps.
   every parser of untrusted bytes is fuzzed, the kernel stays small and
   crash-only (it records its reason and reboots to the floor or the launcher),
   and runtimes hold handles, never pointers (`moy_kernel.h`).
-  `tools/moy_index_spike.py` runs each component's suite and fuzz under both
+  `tools/native_check.py` runs each component's suite and fuzz under both
   sanitizers.
 - **Rust is revisited per subsystem, never assumed**: when upstream LLVM's
   Xtensa support lets the S3 build with a stock compiler, or for a

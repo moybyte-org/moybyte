@@ -298,8 +298,7 @@ def test_esc_over_an_editor_playtest_pauses_and_quit_returns_to_the_editor(tmp_p
     ws.editor_app.leave()               # the Editor's PLAY
     _frames(drv, 3)
     assert ws.plays_fullscreen() and ws.cart.get("input") is None
-    assert drv.takes_escape(), "the simulator hands Esc to the console in play"
-    drv.escape()
+    drv.escape()                        # the simulator hands Esc to the console in play
     assert ws.pause.open and ws.run.player.paused
     for _ in range(3):
         _key(drv, "down")

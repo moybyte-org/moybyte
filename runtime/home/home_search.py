@@ -21,6 +21,17 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 class HomeSearch:
     """The search line, its tap and its typing of `LauncherHomeLayer`."""
 
+    def typing(self):
+        """A query being typed takes the keyboard."""
+        return self.ws.search_typing
+
+    def cancel(self):
+        """Mic while a query is typed: the box closes, cleared."""
+        if not self.ws.search_typing:
+            return False
+        self.ws.close_search(clear=True)
+        return True
+
     def _search_label(self, query, typing):
         """The search box's words: "Search: " and the query (a bar caret
         follows it while typed, `_draw_search`), or, where the input in use
@@ -87,10 +98,10 @@ class HomeSearch:
         the full grid. Grid nav is intentionally NOT handled here (mirrors the
         wifi panel: while typing, the d-pad doesn't drive anything else)."""
         ws = self.ws
-        k = ws.input.last_key
+        k = ws.input.typed
         if i.pressed("b"):                          # a gamepad's B: the strip's Close
             ws.close_search(clear=True)
-        elif k and k != self._search_kprev:
+        elif k:
             if k in (10, 13):                       # ENTER -> stop typing, keep results
                 ws.close_search(clear=False)
             elif k == 27:                           # ESC -> cancel back to the full grid
@@ -99,5 +110,4 @@ class HomeSearch:
                 ws.set_search_query(ws.search_query[:-1])
             elif 32 <= k <= 126 and len(ws.search_query) < 24:
                 ws.set_search_query(ws.search_query + chr(k))
-        self._search_kprev = k
         return True

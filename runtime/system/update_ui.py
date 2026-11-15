@@ -27,7 +27,7 @@ The split follows the same discipline as the console's other sub-UIs:
 Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
-                             ws._set_text_mode, ws.go_home,
+                             ws.go_home,
                              ws._mini_btn, ws._ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
@@ -80,7 +80,6 @@ class UpdateUI:
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws._set_text_mode(False)             # button-driven, not typing
         self._upd_bin = None
         self._upd_msg = ""
         u = self.ws.updater
@@ -106,7 +105,6 @@ class UpdateUI:
         drawing and B cancels it."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
         self._online_manifest = None
@@ -127,7 +125,6 @@ class UpdateUI:
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
         self.ws._dirty = True
-        self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
         if getattr(self.ws, "c6_updater", None) is None:

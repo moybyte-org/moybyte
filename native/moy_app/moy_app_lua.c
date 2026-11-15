@@ -235,18 +235,11 @@ static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans
 // A grant problem is an error, as the Python face raises it.
 static int raise_rc(lua_State *L, int rc) {
     switch (rc) {
-        case MOY_APP_STALE:
-            return luaL_error(L, "a grant that ended");
-        case MOY_APP_DENIED:
-            return luaL_error(L, "a role the grant does not hold");
-        case MOY_APP_NOMEM:
-            return luaL_error(L, "not enough memory");
-        case MOY_APP_FULL:
-            return luaL_error(L, "the answer is too long");
-        case MOY_APP_NEEDS_VM:
-            return luaL_error(L, "no console to serve it");
+#define X(code, exc, eno, msg, lua) case MOY_APP_##code: return luaL_error(L, "%s", lua);
+        MOY_APP_ERRORS(X)
+#undef X
         default:
-            return luaL_error(L, "an argument the role refuses");
+            return raise_rc(L, MOY_APP_FALLBACK);
     }
 }
 
@@ -254,18 +247,18 @@ static int raise_rc(lua_State *L, int rc) {
 static void push_err(lua_State *L, int rc) {
     switch (rc) {
         case MOY_APP_NOSTORE:
-            lua_pushliteral(L, "NO STORAGE");
+            lua_pushliteral(L, MOY_APP_ERR_NOSTORE);
             return;
         case MOY_APP_IO: {
             int e = run_why(L);
-            lua_pushfstring(L, "[Errno %d] %s", e, strerror(e));
+            lua_pushfstring(L, MOY_APP_ERR_IO, e, strerror(e));
             return;
         }
         case MOY_APP_BAD:
-            lua_pushliteral(L, "a refused argument");
+            lua_pushliteral(L, MOY_APP_ERR_BAD);
             return;
         case MOY_APP_NOMEM:
-            lua_pushliteral(L, "memory allocation failed");
+            lua_pushliteral(L, MOY_APP_ERR_NOMEM);
             return;
         default:
             raise_rc(L, rc);
@@ -345,7 +338,7 @@ static int l_files_save(lua_State *L) {
 }
 
 static int l_files_delete(lua_State *L) {
-    return named(L, MOY_T_FILES_DELETE, 1, 0);
+    return named(L, MOY_T_FILES_DELETE, 1, 1);
 }
 
 static int l_files_duplicate(lua_State *L) {
@@ -808,7 +801,7 @@ static int crypto_answer(lua_State *L, int32_t r) {
         case MOY_CRYPTO_EABSENT:
             return luaL_error(L, "a build without it");
         case MOY_CRYPTO_ENOMEM:
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         default:
             if (r < 0) {
                 return luaL_error(L, "a length the call refuses");
@@ -1289,7 +1282,7 @@ static int l_io_open(lua_State *L) {
     f->dirty = mode[0] == 'w';
     if (has && r > 0) {
         if (!file_reserve(f, (size_t)r)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memcpy(f->p, ans, (size_t)r);
         f->n = (size_t)r;
@@ -1372,7 +1365,7 @@ static int file_write(lua_State *L) {
             f->pos = f->n;
         }
         if (!file_reserve(f, f->pos + n)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memcpy(f->p + f->pos, s, n);
         f->pos += n;
@@ -1482,7 +1475,7 @@ static int file_seek(lua_State *L) {
     f->pos = (size_t)(base + off);
     if (f->pos > f->n) {
         if (!file_reserve(f, f->pos)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memset(f->p + f->n, 0, f->pos - f->n);
         f->n = f->pos;

@@ -221,6 +221,7 @@ def test_code_editor_typing_inserts(tmp_path):
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     _enter(ws, "code")
+    drv.frame(1 / 30)                   # the tab's first frame takes the keyboard
     ws.editor.set_text("")
     for ch in "hi":
         drv.type_char(ord(ch))

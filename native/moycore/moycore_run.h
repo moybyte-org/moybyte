@@ -140,5 +140,7 @@ typedef struct {
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
 int moycore_wasm_ran(void);
 void moycore_close_c(void);
+// The VM is going: a run still open closes with it (modmoycore.c).
+void moycore_vm_stop(void);
 
 #endif // MOYCORE_RUN_H

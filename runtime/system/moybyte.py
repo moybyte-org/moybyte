@@ -677,9 +677,27 @@ def _wall():
     return wc.now()
 
 
-# fn(pid) told when a process ends, before its wakes go: the lease sweep
-# (runtime/system/leases.py) registers here.
-ENDS = []
+# The sweeps told when a process ends, before its wakes go, run in this
+# order: the handles it left open close (dev_handles), the device faces that
+# stop ahead of their leases (dev_midi), the shell's own (sound, status items,
+# achievements, intents, items), the leases, the other device faces, and its
+# asyncio tasks.
+END_ORDER = ("handles", "devices_first", "shell", "leases", "devices", "tasks")
+ENDS = []       # fn(pid), in END_ORDER
+_END_AT = []    # each one's place in END_ORDER
+
+
+def on_end(stage, fn):
+    """Run `fn(pid)` as a process ends, at `stage` of END_ORDER, after what
+    that stage holds already; once however often it registers."""
+    if fn in ENDS:
+        return
+    s = END_ORDER.index(stage)
+    i = len(_END_AT)
+    while i and _END_AT[i - 1] > s:
+        i -= 1
+    ENDS.insert(i, fn)
+    _END_AT.insert(i, s)
 
 WAKES = Wakes()
 
@@ -823,7 +841,7 @@ def _snd_end(pid):
         snd_close()
 
 
-ENDS.append(_snd_end)
+on_end("shell", _snd_end)
 
 
 def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
@@ -883,7 +901,7 @@ def _status_end(pid):
     _items().sweep(pid)
 
 
-ENDS.append(_status_end)
+on_end("shell", _status_end)
 
 
 def _intents():
@@ -970,7 +988,7 @@ def _ach_end(pid):
     _E.notes_end(pid)
 
 
-ENDS.append(_ach_end)
+on_end("shell", _ach_end)
 
 
 def share(data, mime):
@@ -985,7 +1003,7 @@ def _intents_end(pid):
     _intents().end(pid)
 
 
-ENDS.append(_intents_end)
+on_end("shell", _intents_end)
 
 
 # An item handed to a process: the message `moy_open` its queue takes, and
@@ -1046,7 +1064,7 @@ def _items_end(pid):
     _E.items_end(pid)
 
 
-ENDS.append(_items_end)
+on_end("shell", _items_end)
 
 
 def log(level, text):
@@ -1126,7 +1144,11 @@ def clock(local=False):
 
 
 def __getattr__(name):
-    if name in ("http", "mic", "lora", "ble", "usb", "midi", "camera", "media"):
-        import devices
-        return devices.api(name)
+    if not name.startswith("_"):
+        try:
+            import devices
+        except ImportError:  # an image without the device APIs
+            devices = None
+        if devices is not None and name in devices.NAMES:
+            return devices.api(name)
     raise AttributeError(name)

@@ -36,7 +36,7 @@ class T:
     """One typed byte (0 between bytes: the keyboard's edge)."""
 
     def __init__(self, k):
-        self.last_key = k
+        self.last_key = self.typed = k
 
     def steps(self, n):
         return int(bool(self.pressed(n)))
@@ -54,6 +54,7 @@ def _frame(ws, n=2):
         ws.input.begin_frame()
         ws._dirty = True
         ws.frame(1 / 30)
+        ws.input_policy.sync()          # the next key pass's mode (handle_input's)
 
 
 def _open(ws):

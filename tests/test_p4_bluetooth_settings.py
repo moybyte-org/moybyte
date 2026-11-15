@@ -88,7 +88,7 @@ def test_the_picker_is_a_page_the_keys_walk(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     sl = ws.settings_layer
     svc = ws.keyboard
-    sl.open_bluetooth()
+    sl.open_page("bt")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert sl.bt_msg == "Pick a keyboard."
@@ -102,14 +102,14 @@ def test_the_picker_is_a_page_the_keys_walk(tmp_path):
     assert svc.calls[-1] == ("connect", svc.rows[1][0])
     drv.press("b")
     drv.frame(1 / 30)
-    assert not sl.bt_view, "B backs out to the rows"
+    assert not sl.showing("bt"), "B backs out to the rows"
 
 
 def test_picker_actions_toggle_scan_select_save_and_forget(tmp_path):
     ws = _ws(tmp_path)
     sl = ws.settings_layer
     svc = ws.keyboard
-    sl.open_bluetooth()
+    sl.open_page("bt")
 
     sl._bt_action("toggle")
     assert svc.calls[-1] == ("enabled", False)
@@ -150,7 +150,7 @@ def test_a_first_keyboard_is_picked_by_touch_alone(tmp_path):
         drv.frame(1 / 30)
 
     tap(sl._host, "Bluetooth keyboard")
-    assert sl.bt_view and sl.bt_msg == "Scan, then pick a keyboard."
+    assert sl.showing("bt") and sl.bt_msg == "Scan, then pick a keyboard."
     tap(sl._sub, "Scan")
     assert svc.calls[-1] == ("scan",)
     svc.rows, svc.state = found, "choose"       # the picker's scan heard two

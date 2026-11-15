@@ -1,0 +1,7 @@
+{
+  "moy_spine": {
+    "about": "the kernel's spine, native/moy_spine",
+    "host": "moy_spine_binding",
+    "binding": true
+  }
+}

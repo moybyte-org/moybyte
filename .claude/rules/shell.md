@@ -61,9 +61,10 @@ to whoever called it.
     outlives the Editor and takes the Game tab out of its workspaces while it
     lasts. Play on the desk is full screen with no window buttons; Projects'
     Play runs a Make card in a window (`docs/theme_and_shell_2026-11.md` §8.1).
-    The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
-    window gets back the mode it had, so a field in one never leaves a game
-    beside it in text mode.
+    The keyboard's text mode follows focus: the input policy
+    (`runtime/shell/input_policy.py`) derives it each frame from the focused
+    window's surface, so a field in one never leaves a game beside it in text
+    mode.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
   (`docs/theme_and_shell_2026-11.md` §8.10) has four tabs, and a tap on Games, Mine or
   Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
@@ -104,7 +105,7 @@ to whoever called it.
   frame and draws its section AS its process; a handheld's cluster is one
   stop, and the bar reserves its focus ring's room. The LEFT zone opens with the **back
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
-  gets its X instead): one level back, as Esc and B (`ws.app_back` for a
+  gets its X instead): one level back, as Esc and B (`InputPolicy.back` for a
   registered app, whose `back()` steps its own pages); the launcher root draws
   one only above its mode's floor -- console mode over a P4's parked desk --
   and the Editor's one bar none (its B and Esc step back, and it shows no

@@ -56,7 +56,7 @@ authority; this is where each defence lives):
   not hold is `EBADF`; an object a row is using outlives another thread's
   close of it.
 - **The scrub.** A module's block, its stacks and its mappings are zeroed
-  when taken and when let go (`u_scrub_free` in `native/moy_elf/moy_os.c`),
+  when taken and when let go (`moy_os_u_scrub_free` in `native/moy_elf/moy_os.c`),
   so no process reads what the last holder left.
 - **The trap context.** A U call's saved kernel context carries a canary
   checked at its end (THE SEAL, `native/moy_elf/moy_umode.c`); a trap is
@@ -64,7 +64,7 @@ authority; this is where each defence lives):
 - **The kernel's own records** are taken under its lock, so no race between
   a row, a fault and a process's end reaches freed memory (90da6e6d9).
 - **Permissions bind rows**: a socket row asks the process's grant
-  (`net_need` in `moy_os.c`) before it opens one.
+  (`net_need` in `moy_os_net.c`) before it opens one.
 - **The net**: `tests/on_glass.py`'s `elf_umode_isolates` runs
   `tests/fixtures/elf/elf_wild.moy` against every row with a checked pointer
   or handle (the list generated from the table), hostile stacks, and ends

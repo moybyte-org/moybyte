@@ -323,3 +323,78 @@ def test_serial_verbs_are_words_the_dev_channel_knows(tool):
         "%s sends %s, which runtime/boot/dev_channel.py does not dispatch"
         % (tool.name, ", ".join("%r (line %d)" % (v, n)
                                 for v, n in sorted(unknown.items()))))
+
+
+# ---------------------------------------------------------------------------
+# the tree's direction: every tool is named, the runtime names no tool
+# ---------------------------------------------------------------------------
+
+# What may name a tool: anything tracked that a person or a build reads, but
+# not the history and the issue mirror, which keep the names of the dead.
+_NAMED_IN = (".py", ".sh", ".md", ".toml", ".yml", ".yaml", ".c", ".h", ".mk",
+             ".cmake", ".json", ".txt", ".js", ".html")
+_NOT_NAMED_IN = ("docs/history/", "docs/issues/")
+
+
+def _tracked():
+    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True)
+    if out.returncode:
+        pytest.skip("not a git checkout")
+    return out.stdout.split()
+
+
+def test_every_tool_is_named_by_something():
+    """A `tools/*.py` or `tools/*.sh` that no Makefile, test, skill, rule, doc,
+    build script or other tool names is a dead tool: nobody can find it, so
+    nobody runs it, and it rots against the tree it measures."""
+    tracked = _tracked()
+    words = {}
+    for f in tracked:
+        if f.startswith(_NOT_NAMED_IN) or not (f.endswith(_NAMED_IN) or f.endswith("Makefile")):
+            continue
+        try:
+            text = (ROOT / f).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for w in set(re.findall(r"[\w./-]+", text)):
+            words.setdefault(w.rstrip("."), set()).add(f)
+        for line in text.splitlines():
+            if "import" in line:
+                for w in re.findall(r"\w+", line):
+                    words.setdefault("import:" + w, set()).add(f)
+    tools = [f for f in tracked if f.startswith("tools/") and f.count("/") == 1
+             and f.endswith((".py", ".sh"))]
+    assert len(tools) > 50, "the tools derivation found almost nothing"
+    unnamed = []
+    for t in tools:
+        base = os.path.basename(t)
+        stem = base.rsplit(".", 1)[0]
+        hits = set()
+        for key in (t, base, "import:" + stem):
+            hits |= words.get(key, set())
+        if not hits - {t}:
+            unnamed.append(t)
+    assert not unnamed, ("named by nothing (delete it, or say where it is used): %s"
+                         % ", ".join(unnamed))
+
+
+def test_the_runtime_imports_nothing_from_tools():
+    """`runtime/` is what the console runs; `tools/` is what a developer runs
+    on it. The host faces once reached a tool by `sys.path` surgery, which
+    made a measurement script load-bearing for the console."""
+    bad = []
+    for path in sorted((ROOT / "runtime").rglob("*.py")):
+        tree = _tree(path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "tools":
+                bad.append("%s:%d" % (path.relative_to(ROOT), node.lineno))
+            elif isinstance(node, ast.Import) and any(a.name.split(".")[0] == "tools"
+                                                     for a in node.names):
+                bad.append("%s:%d" % (path.relative_to(ROOT), node.lineno))
+            elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                  and re.fullmatch(r"tools(\.\w+)+", node.value)):
+                bad.append("%s:%d %r" % (path.relative_to(ROOT), node.lineno, node.value))
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if "sys.path" in line and re.search(r"""["']tools["']""", line):
+                bad.append("%s:%d puts tools/ on sys.path" % (path.relative_to(ROOT), i))
+    assert not bad, "runtime/ reaches into tools/: " + "; ".join(bad)

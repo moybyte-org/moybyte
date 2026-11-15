@@ -42,7 +42,7 @@ class _LayoutCtx:
         # generically, so a new register_app'd app reflows per window with no WM
         # edits. (The legacy per-app attrs remain as views for the pinned tests.)
         ctx.app_layouts = {}
-        for _app, _t in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "_apps", ()):
             _lay = getattr(_app, "layout", None)
             if _lay is not None:
                 ctx.app_layouts[_app.id] = _lay
@@ -62,7 +62,7 @@ class _LayoutCtx:
         ws.scene_ui.layout = self.scene_layout
         ws.music_ui.layout = self.music_layout
         ws.cards_layer.layout = self.cards_layout
-        for _app, _t in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "_apps", ()):
             _lay = self.app_layouts.get(_app.id)
             if _lay is not None:
                 _app.layout = _lay
@@ -258,8 +258,9 @@ class _RepeatLayer(Layer):
         # A lead copy (a quiet frame paying a buffer's debt, the quiet
         # stack's layers after it): refused, the layers after it stand down.
         wm._lead_refused = self.lead
+        bar = wm.ws.bar_layer
         for layer in wm._cache_draw:
-            layer.draw(dt)
+            bar.draw_surface(layer, dt)
 
 
 class _PlayerWindowLayer(Layer):

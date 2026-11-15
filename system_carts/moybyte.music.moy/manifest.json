@@ -13,7 +13,6 @@
     "app": {
       "id": "jukebox",
       "entry": "music_app:MusicAppLayer",
-      "text_mode": false,
       "order": 85
     },
     "permissions": [

@@ -177,10 +177,11 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
     ws.carts.apply([c for c in ws.carts.all
                     if not system_api.is_text_app(c)])
     assert app.route("story", kind="docs") is None
-    assert app.status == "No text app"
-    ws._apps_by_id.pop("artwork")
+    assert app.status == "No app opens it"
+    ws.carts.apply([c for c in ws.carts.all
+                    if "image/x-moyimg" not in (c.get("handles") or ())])
     assert app.route("dragon", kind="drawings") is None
-    assert app.status == "No Paint app"
+    assert app.status == "No app opens it"
     assert app.route("gone.moy", kind=files_app.PROJECTS) is None
     assert app.status == "Can't open"
 

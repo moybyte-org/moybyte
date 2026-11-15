@@ -296,15 +296,15 @@ def test_props_row_tag_typing_and_flip(tmp_path):
     page = ui.page()
     x0, y0, scale, vw, vh = ui._sv_metrics()
     _tap(ws, x0 + 44, y0 + 60)                        # select the coin
-    # Tag opens its popover in text mode, pre-filled with the current tag; the
-    # typed "gem" is committed as one undo step (the typing itself is
-    # tests/test_editor_hh_tabs.py's).
+    # Tag opens its popover pre-filled with the current tag; the typed "gem"
+    # is committed as one undo step (the typing itself, and the keyboard's
+    # text mode while its field has focus, are tests/test_editor_hh_tabs.py's).
     page.act("Tag")
-    assert page.pop == "tag" and ws.input.text_mode
+    assert page.pop == "tag"
     assert page.text == "coin"
     page.text = "gem"
     page.commit()
-    assert page.pop is None and not ws.input.text_mode
+    assert page.pop is None
     assert se.selected()["tag"] == "gem"
     assert se.undo() and se.selected()["tag"] == "coin"
     # Flip, then Remove takes the actor away.

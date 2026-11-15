@@ -75,6 +75,7 @@ from home_hints import HomeHints, modal_keys
 from home_zone import HomeZone
 from home_details import HomeDetails
 from home_search import HomeSearch
+from layers import Layer
 from home_icons import IconHome
 from home_carousel import Carousel
 from home_grid import (HOME_SCALE_HH, HOME_TABS, PSEUDO_TILE_TYPES)
@@ -89,7 +90,7 @@ LONG_PRESS_MS = 500
 BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
 
 
-class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
+class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
     """The "launcher" content Layer (system domain): the home, console mode's root.
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
@@ -124,8 +125,6 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch):
         self._beside_drew = []
         # what the hint strip's key was made of, and the key (`_outside_key`)
         self._ok = [None, None, None, None, None, None, None, None]
-        self._search_kprev = 0        # keyboard edge detect while typing a search query
-        self._kprev = 0               # ...and for the carousel home's hint keys
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
         # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
         # shelf granularity): the last full home frame, captured at the END of

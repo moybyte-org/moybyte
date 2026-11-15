@@ -129,8 +129,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   the write-allocate read (cls, a big rect, an rrect's middle rows); sprite
   BATCHING on it is a dead end (~10× worse than `spr_batch`: per-op submit
   dwarfs a tiny blit); its scaler is fixed BILINEAR in silicon, so pixel art
-  goes through Settings → CRISP PIXELS (`moy_ppa.blit_crisp`, a banded SRAM
-  bounce byte-exact against the CPU kernel, #204). The triple framebuffer
+  goes through Settings → CRISP PIXELS (`moy_ppa_k_crisp`, a banded SRAM
+  bounce byte-exact against the CPU kernel, #204), one choice in one C body
+  for the canvas, the rotated paint route and the kernel's front
+  (`native/moy_glass/moy_present_game.c`). The triple framebuffer
   shipped; the double game canvas was built, measured and REVERTED (`26e1f9f` —
   the game fence was already ~free and the retention memcpy cost more); #159's
   L2 cache 128→256 KB closed the game chapter (512 KB does not boot — the
@@ -280,7 +282,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   ignores `0x03` (or raw turned off), where the `0x04` revert drains — the
   README has the mechanism. **Mic is the console's key** (`start`,
   2026-10-18), seen only in the matrix (ASCII sends the idle byte for a bare
-  Mic), and a text field's Cancel while one is typed into. Backspace is a
+  Mic), and a text field's Cancel while one has an edit in progress
+  (`InputPolicy.cancel`); which mode the keyboard is in is the input
+  policy's, derived from the focused surface (`runtime/shell/input_policy.py`). Backspace is a
   plain key.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens

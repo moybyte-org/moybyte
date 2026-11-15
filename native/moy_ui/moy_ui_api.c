@@ -1266,7 +1266,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
     // A field's edit lasts while focus stays on it; a cancel taken over the
     // frame drawn last gives the field its text back this pass and steps
-    // focus up off it, as Up would, where a stop lies above.
+    // focus off it: up, as Up would, where a stop lies above, else down (a
+    // dialog's field, its buttons under it), so the keys stop typing.
     if (c->fe_id != c->focus) {
         c->fe_id = 0;
     }
@@ -1276,6 +1277,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         if (f != NULL && c->fe_id != 0 && f->id == c->fe_id && (f->flags & STOP_FIELD)) {
             c->fe_cancel = 2;           // this pass's field c->fe_id takes its text back
             int t = nearest(v, n, f, MOY_UI_B_UP);
+            if (t < 0) {
+                t = nearest(v, n, f, MOY_UI_B_DOWN);
+            }
             if (t >= 0) {
                 fi = t;
                 f = &v[t];
@@ -4109,14 +4113,20 @@ int moy_ui_api_typing(const moy_ui_ctx_t *c) {
 }
 
 int moy_ui_api_cancel(moy_ui_ctx_t *c, int take) {
-    if (!c->fe_live || c->fe_id == 0 || c->fe_id != c->focus || c->inst->fe_ctx != c
-        || !moy_ui_api_typing(c)) {
-        return 0;
+    if (c->fe_live && c->fe_id != 0 && c->fe_id == c->focus && c->inst->fe_ctx == c
+        && moy_ui_api_typing(c)) {
+        if (take) {
+            c->fe_cancel = 1;
+        }
+        return 1;
     }
-    if (take) {
-        c->fe_cancel = 1;
+    if (c->pop_card.w > 0) {
+        if (take) {
+            c->pop_back = 1;
+        }
+        return 1;
     }
-    return 1;
+    return 0;
 }
 
 void moy_ui_api_keys_back(moy_ui_ctx_t *c) {

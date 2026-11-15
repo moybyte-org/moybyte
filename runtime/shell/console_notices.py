@@ -253,12 +253,13 @@ class Notices:
         choices are kept in, and the picker: its listing, its question and
         the running app it hands a pick to. The front's gate
         (runtime/system/front.py) reads the run on screen and brings a
-        process's run forward as acting on a notification does."""
+        process's run forward as acting on a notification does, and what a
+        process asked of it runs at the start of this console's frame."""
         _INTENTS.bind(self._intent_handlers, self.app_cart_id, self._intent_deliver,
                       self._intent_ask, self._intent_read, self._intent_write,
                       self.system, self._intent_list, self._intent_ask_pick,
                       self._intent_hand)
-        _FRONT.bind(self._front_pid, self._bring)
+        _FRONT.bind(self._front_pid, self._bring, True)
 
     def _front_pid(self):
         """The pid of the run the user is in: the front run while its
@@ -274,7 +275,7 @@ class Notices:
 
     def _intent_app(self, cart):
         """The registered app whose identity `cart` is, else None."""
-        for app, _text in self._apps:
+        for app in self._apps:
             if app.is_app(cart):
                 return app
         return None
@@ -699,7 +700,6 @@ class PauseMenu:
         self.sel = 0
         self.page = 0               # 0 the menu, 1 Options
         self._host = None
-        self._key = 0               # the key typed last frame (a press is its change)
         # The run's frame under the card, kept as the game left it and held
         # washed as the card draws over it (`ui_draw.Hold`), where the game's
         # frame is the system canvas (the handheld): each frame starts from
@@ -770,7 +770,7 @@ class PauseMenu:
         self.open = True
         self.sel = 0
         self.page = 0
-        self._key = getattr(ws.input, "last_key", 0)
+        ws.input.spend_key()        # the key that opened it is no press of the menu's
         self._hold.drop()
         self.ws.bar_layer.drop_strips("pause")   # its bar's strip with it
         self._capture = True
@@ -890,10 +890,7 @@ class PauseMenu:
         blit(win.buf, cx, cy, sx, sy, sw, sh)
 
     def handle_input(self, i):
-        k = getattr(i, "last_key", 0) or 0
-        esc = k == 27 and self._key != 27
-        self._key = k
-        if i.pressed("b") or i.pressed("stop") or esc:
+        if i.pressed("b") or i.pressed("stop") or getattr(i, "typed", 0) == 27:
             self.back()
             return
         if self.page:
@@ -1176,7 +1173,6 @@ class DeleteConfirm:
         self.title = ""
         self._then = None            # what follows a delete (the open cart's: go home)
         self._host = None
-        self._key = 0                # the key typed last frame (a press is its change)
         self.focused = None          # the focused button as the last frame left it
         self.line = self.UNDONE      # the line under the title
         self.buttons = self.BUTTONS
@@ -1193,12 +1189,11 @@ class DeleteConfirm:
         ws = self.ws
         self.open = True
         self.focused = None
-        self._key = getattr(ws.input, "last_key", 0) or 0
+        ws.input.spend_key()         # the key that asked is no press of the dialog's
         if self._host is None:
             self._host = _ui_draw.AppHost()
         else:
             self._host.reset()
-        self._host.key = self._key   # the key that asked is no press of the dialog's
         ws._dirty = True
 
     def choose(self, title, label, rows, icons, then):
@@ -1307,10 +1302,7 @@ class DeleteConfirm:
         blit(win.buf, cx, cy, sx, sy, sw, sh)
 
     def handle_input(self, i):
-        k = getattr(i, "last_key", 0) or 0
-        esc = k == 27 and self._key != 27
-        self._key = k
-        if i.pressed("b") or i.pressed("stop") or i.pressed("home") or esc:
+        if i.pressed("b") or i.pressed("stop") or i.pressed("home") or getattr(i, "typed", 0) == 27:
             self.cancel()
             return
         if self._host.keys(i):

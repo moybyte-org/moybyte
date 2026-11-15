@@ -214,7 +214,7 @@ class Player(PlayerDiag):
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
     injected NAMES like the other surfaces. The cart-run fields it owns
-    (ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev) are exposed
+    (ns/_update/_draw/cart_error/crash_line/_cart_start_ms) are exposed
     back on Workstation as forwarding properties, so every reader of ws.cart_error/
     ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
@@ -267,7 +267,6 @@ class Player(PlayerDiag):
         self._paused_at = 0           # _ticks_ms the pause menu held the run at (0: not held)
         self._audio_held = 0          # the session the pause took the mix from
         self._cart_palette_canvas = None  # the canvas _cart_palette came off
-        self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
         # #75: the tool/app-vs-game decision is a per-run CONSTANT (the manifest type
@@ -297,10 +296,6 @@ class Player(PlayerDiag):
                                       # responsive app's, whose `ui` verbs do
         self._responsive = False      # the app defines `_layout` (Player._wants_layout)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
-        # Whether the app's page had a field in focus last frame, and the text
-        # mode the run had before it did (`_sync_typing`).
-        self._typing = False
-        self._text_was = False
         self._on_change = False       # an app on the verbs: drawn on change (animates())
         self._masks = None            # ws.input.button_masks, bound for an app's run
         self._owe = 0                 # drawn frames it still owes after the last change
@@ -389,9 +384,9 @@ class Player(PlayerDiag):
 
     def set_editor_focus(self, handle):
         """The handle the keyboard belongs to, or None. Written by
-        `Workstation.cart_editor_focus`, which also flips the T-Deck. The one
-        it replaces is blurred here, so two handles can never both believe
-        they are being typed into; the keys let go inside a frame are the
+        `Workstation.cart_editor_focus`; the keyboard's mode follows through
+        `typing`. The one it replaces is blurred here, so two handles can
+        never both believe they are being typed into; the keys let go inside a frame are the
         page's again in that frame (`api_keys_back`)."""
         prev = self._focus_editor
         if prev is not None and prev is not handle:
@@ -433,18 +428,6 @@ class Player(PlayerDiag):
             m = getattr(self._lua, "mute", None)
             if m is not None and not self.detached:
                 m(on)
-
-    def seed_cart_key(self, code):
-        """Swallow the byte that took the keyboard, on the CART tier.
-
-        `b2ff7de`'s rule, one rung down: handing the keyboard to a text surface
-        is a screen change, and the key that caused it is still in `last_key`
-        when the surface's first frame reads it. The shell's own text surfaces
-        are seeded in `_set_text_mode`; this is the same call for a cart's
-        editor handle, and it is a SEED and not a mute -- releasing the key and
-        pressing it again still types."""
-        self._cart_key_prev = code or 0
-        self._keyp_latch = 0
 
     def _keep_grant(self, ctx):
         """Hold the context `make_system_api` built for this run: its grant
@@ -1037,7 +1020,6 @@ class Player(PlayerDiag):
         self._ui = None
         self._uh = None
         self._on_change = False
-        self._typing = False
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         self.run.view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -1296,33 +1278,28 @@ class Player(PlayerDiag):
 
     def ball_steps(self):
         """Whether the trackball steps this run's page, as it steps every
-        surface that takes the keys (`Workstation.ball_steps`): an app's,
+        surface that takes the keys (`InputPolicy.ball_steps`): an app's,
         unless a caret holds the keyboard (its editor handle takes the roll
         as arrows, `Workstation.nav`); a game's trackball is its pointer."""
         return self._is_tool and self._focus_editor is None
 
-    def _sync_typing(self, ws):
-        """An app's page with a field in focus holds the keyboard in text
-        mode, as the shell's own pages do (Settings' name, Files' rename):
-        on a T-Deck W A S D then type and press no direction
-        (native/moy_input/moy_kbd.c), and the mode the run had comes back
-        when focus leaves the field. One rule for every runtime: the Python
-        verbs' context, or the run face a Lua or compiled app draws through."""
+    def typing(self):
+        """Whether the run takes typed bytes, which the input policy puts the
+        keyboard in text mode for while it holds the keys: the cart asked
+        (`textmode()`, a script's console), an editor handle holds the
+        keyboard, or an app's page has a field in focus -- one rule for
+        every runtime: the Python verbs' context, or the run face a Lua or
+        compiled app draws through. On a T-Deck W A S D then type and press
+        no direction (native/moy_input/moy_kbd.c)."""
+        if self.run.textmode or self._focus_editor is not None:
+            return True
+        if not self._is_tool or self.cart_error is not None:
+            return False
         lua = self._lua
         if lua is not None:
-            on = not getattr(lua, "own_ui", False) and _ui_draw._C.api_run_typing()
-        elif self._ui is not None:
-            on = _ui_draw._C.api_typing(self._ui[0])
-        else:
-            on = False
-        if on == self._typing:
-            return
-        self._typing = on
-        if on:
-            self._text_was = bool(ws.input.text_mode)
-            ws._set_text_mode(True)
-        else:
-            ws._set_text_mode(self._text_was)
+            return not getattr(lua, "own_ui", False) and _ui_draw.run_typing()
+        ui = self._ui
+        return ui is not None and _ui_draw.app_typing(ui[0])
 
     def _ui_begin(self, ws, render=True):
         """Begin a Python app's frame of `ui` verbs (runtime/toolkit/ui.py) over the
@@ -1494,16 +1471,16 @@ class Player(PlayerDiag):
     def back(self):
         """The host's back -- the bar's chevron, a window's, Esc, B and the
         T-Deck's K -- into the running app: True where it cancels a field's
-        edit in progress (`cancel_field`) or steps out of a view of its own
+        edit in progress (`cancel`) or steps out of a view of its own
         (`has_page`), which the next frame shows; False where it has none,
-        and the host leaves it (`Workstation.app_back`)."""
+        and the host leaves it (`InputPolicy.back`)."""
         if not self._app_back(True):
             return False
         self._owe = max(self._owe, 1)
         self.ws.request_frame()
         return True
 
-    def cancel_field(self):
+    def cancel(self):
         """The host's cancel -- the T-Deck's Mic -- into the running app:
         True where the field its page focuses has an edit in progress, which
         the next frame gives back (its `ui.field` answers the text the edit
@@ -2453,27 +2430,26 @@ class Player(PlayerDiag):
     def _tick_keys(self, ws):
         """The keyboard edge for the cart's key()/keyp(), or for the focused
         editor handle that owns the keyboard instead."""
-        # The keyboard edge for the cart's key()/keyp(): last_key is the
-        # byte held this loop frame (0 when nothing is down); keyp fires on
-        # the 0->key transition, and the edge LATCHES until a logic tick
-        # takes it (#217). Done here (not in InputState) so it is
-        # independent of whether the backend sets last_key before or after
-        # begin_frame().
-        k = ws.input.last_key
+        # key() is last_key, the byte held this loop frame (0 when nothing
+        # is down); keyp() is the table's press (`typed`), which LATCHES
+        # until a logic tick takes it (#217).
+        i = ws.input
+        k = i.last_key
+        e = i.typed
         if self._netplay is not None or self.deaf:
-            k = 0                       # no key() in a match (only buttons cross the air), nor deaf
+            k = e = 0                   # no key() in a match (only buttons cross the air), nor deaf
         fed = self._focus_editor
         if fed is None:
-            ws.input.cart_key = k
-            if k and k != self._cart_key_prev:
-                self._keyp_latch = k
+            i.cart_key = k
+            if e:
+                self._keyp_latch = e
         else:
             # A FOCUSED editor handle owns the keyboard: the byte goes to
             # it and the cart's own key()/keyp() read nothing, so a skin
             # never has to filter the text its editor is eating.
-            ws.input.cart_key = 0
-            if k and k != self._cart_key_prev and not fed.key(k):
-                self._keyp_latch = k    # a key it did not take (Esc) is the cart's
+            i.cart_key = 0
+            if e and not fed.key(e):
+                self._keyp_latch = e    # a key it did not take (Esc) is the cart's
             # a held key types again at the input table's repeat: the
             # handle's, never the cart's key()/keyp()
             n = 0 if self.deaf else getattr(ws.input, "key_repeats", 0)
@@ -2482,8 +2458,6 @@ class Player(PlayerDiag):
                 if r in (8, 9, 10, 13, 127) or 32 <= r < 127:
                     for _ in range(n):
                         fed.key(r)
-        if k != self._cart_key_prev:
-            self._cart_key_prev = k
 
     def _lockstep_step(self, ws, dt):
         """The #65 lockstep gate for this frame: (dt, stalled, session). With
@@ -2622,8 +2596,8 @@ class Player(PlayerDiag):
                     pm.flush()
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
         # Honor it now that this frame's _update has run: pop to the run caller and stop
-        # (screen leaves "desktop", so this cart won't tick again -- skip the text-mode
-        # sync + chrome below). Any cart may call quit(); the console's own key (`start`)
+        # (screen leaves "desktop", so this cart won't tick again -- skip the
+        # chrome below). Any cart may call quit(); the console's own key (`start`)
         # opens the pause menu whatever the cart does. Reset the
         # cart-set camera/clip/pal first so whatever paints underneath is clean.
         if self.cart_error is None and getattr(ws.input, "cart_quit", False):
@@ -2637,14 +2611,6 @@ class Player(PlayerDiag):
         if self.detached:
             ws._reset_canvas_state()
             return
-        # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
-        # have just requested via textmode(), so the NEXT keyboard poll yields the
-        # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
-        # latency; no-op on the host. Done every running-cart frame so a mid-cart
-        # toggle (e.g. wifi entering/leaving its password screen) takes effect.
-        if self._is_tool:
-            self._sync_typing(ws)
-        ws._sync_cart_text_mode()
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured. A
         # compiled cart draws under libmoy's own state, never the canvas's.

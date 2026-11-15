@@ -6,7 +6,7 @@
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
 native/moy_app builds, as Python loads it by ctypes from the host's one
-library (runtime/host/host_native.py; tools/moy_index_spike.py's SPINE part
+library (runtime/host/host_native.py; runtime/host/native_parts.py's SPINE part
 carries native/moy_app). The
 runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
@@ -26,13 +26,12 @@ import collections
 import ctypes
 import json
 import os
-import sys
 import types
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
+import face_errors
+import native_parts
 
-import moy_index_spike  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 c = ctypes
 _P = c.c_void_p
@@ -42,7 +41,7 @@ _PU32 = c.POINTER(c.c_uint32)
 _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
-OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM, FORGED, BUSY = range(12)
+from face_errors import ABSENT, BAD, IO, NOSTORE, OK
 KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
@@ -52,11 +51,10 @@ TOKEN_ABSENT = -(1 << 31)
 CLIP_MAX = 4096
 SLOTS = 32
 ID_MAX = 63
-_ENOSPC = 28
 
 
 # The role table (native/os_calls.json's rows the ROLE door names, in order:
-# tools/gen_os_table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# tools/gen_os/table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
 # its roles and C rows size the C's.
 with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
     _SRC = json.load(_f)
@@ -224,15 +222,7 @@ _SIGS = (
 
 
 def _raise(rc):
-    if rc == NOMEM:
-        raise MemoryError("moy_app")
-    if rc == FULL:
-        raise OSError(_ENOSPC, "the grant table is full")
-    if rc == STALE:
-        raise ValueError("a grant that ended")
-    if rc == DENIED:
-        raise ValueError("a role the grant does not hold")
-    raise ValueError("an argument the role refuses")
+    raise face_errors.exception(rc)
 
 
 def _check(rc):
@@ -394,7 +384,7 @@ def binding(sanitize=False):
     """The moy_app module over the host's one library, or None with no C
     compiler. The library is the one runtime/host/moy_spine_binding.py loads, so a
     Settings it made is a pointer this one writes."""
-    path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
+    path = native_parts.host_library("c", sanitize, native_parts.SPINE)
     if path is None:
         return None
     lib = c.CDLL(path)
@@ -609,11 +599,9 @@ def binding(sanitize=False):
                 return self._no_store
             if rc == IO:
                 e = lib.moy_app_why(self._p)
-                return str(OSError(e, os.strerror(e)))
-            if rc == BAD:
-                return "a refused argument"
-            if rc == NOMEM:
-                return "memory allocation failed"
+                return face_errors.ERR[IO] % (e, os.strerror(e))
+            if rc in face_errors.ERR:
+                return face_errors.ERR[rc]
             _raise(rc)
 
         def _take(self, buf, text=True):
@@ -903,9 +891,13 @@ def binding(sanitize=False):
                 return (None, self._app._err(rc))
             return (self._app._take(buf, not binary.value), None)
 
-        def _named(self, fn, *args):
+        def _named(self, fn, *args, absent_none=False):
+            """`absent_none`: a row that found nothing answers (None, None),
+            as load does."""
             out = c.create_string_buffer(UF_NAME_MAX + 1)
             rc = fn(self._a(), self._g, *args, out)
+            if absent_none and rc == ABSENT:
+                return (None, None)
             if rc != OK:
                 return (None, self._app._err(rc))
             return (out.value.decode("utf-8", "surrogateescape"), None)
@@ -915,7 +907,8 @@ def binding(sanitize=False):
             return self._named(lib.moy_app_files_save, _str(kind), _str(name), b, len(b))
 
         def delete(self, kind, name):
-            return self._named(lib.moy_app_files_delete, _str(kind), _str(name))
+            return self._named(lib.moy_app_files_delete, _str(kind), _str(name),
+                               absent_none=True)
 
         def duplicate(self, kind, name):
             return self._named(lib.moy_app_files_duplicate, _str(kind), _str(name))
@@ -967,7 +960,7 @@ def binding(sanitize=False):
             if err.value == 0:
                 return (None, None)
             if err.value == BAD_UF:
-                return ("a refused argument", None)
+                return (face_errors.ERR[BAD], None)
             return (str(OSError(err.value, os.strerror(err.value))), None)
 
         # -- the codecs: their value, or None

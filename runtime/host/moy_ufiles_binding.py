@@ -17,6 +17,7 @@ values, and a list of names becomes a list.
 """
 
 import ctypes as c
+import errno
 import json
 import os
 import types
@@ -311,7 +312,11 @@ def binding():
         return _named(lib().moy_uf_duplicate, _root(root), _b(kind), _b(name))
 
     def delete_file(kind, name, root=CARTS_DIR):
-        return _named(lib().moy_uf_delete, _root(root), _b(kind), _b(name))
+        out = _NAME()
+        rc = lib().moy_uf_delete(_root(root), _b(kind), _b(name), out)
+        if rc:
+            _raise(errno.ENOENT if rc == NONE else rc)    # the layer's OSError
+        return out.value.decode()
 
     def restore_file(kind, name, root=CARTS_DIR):
         return _named(lib().moy_uf_restore, _root(root), _b(kind), _b(name))

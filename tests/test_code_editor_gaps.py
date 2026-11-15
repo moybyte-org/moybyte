@@ -434,7 +434,7 @@ def test_find_bar_type_and_navigate(tmp_path):
     drv.frame(DT)
     drv.set_mods(0)
     assert (ws.editor.row, ws.editor.col) == r0
-    assert ws.cancel_field()                       # Mic (the T-Deck's cancel) closes it
+    assert ws.input_policy.cancel()                       # Mic (the T-Deck's cancel) closes it
     assert not cl._find_open
 
 

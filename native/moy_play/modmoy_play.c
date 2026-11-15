@@ -75,8 +75,18 @@ bool moy_play_interrupt_pending(void) {
 // launched and not loaded, and it is not ended.
 #include "moy_kernel.h"
 #pragma weak moy_kernel_stop_pending
+// Its runtime closes first, where the image has moycore.
+#if __has_include("moycore_run.h")
+#include "moycore_run.h"
+#else
+void moycore_vm_stop(void);
+#endif
+#pragma weak moycore_vm_stop
 
 void moy_play_vm_stop(void) {
+    if (moycore_vm_stop != NULL) {
+        moycore_vm_stop();
+    }
     // Every run ends with the VM, but the one a stop is for (MOY_STOP_RUN):
     // the kernel's from here.
     uint32_t keep = moy_kernel_stop_pending != NULL && moy_kernel_stop_pending() == 2

@@ -83,12 +83,9 @@ def test_the_shell_registers_exactly_the_declared_apps(tmp_path):
     """The load-bearing one. A structural check cannot see a shell that builds
     an app somewhere else; this can."""
     ws = build_ws(tmp_path)
-    registered = [a.id for a, _text_mode in ws._apps]
+    registered = [a.id for a in ws._apps]
     assert registered == [d["id"] for d in app_decls.APPS]
-    text = {a.id: tm for a, tm in ws._apps}
     for d in app_decls.APPS:
-        assert text[d["id"]] is bool(d.get("text_mode")), (
-            "%s registered with the wrong text_mode" % d["id"])
         # the `<id>_app` attribute the shell and the apps address each other by
         assert getattr(ws, d["id"] + "_app", None) is ws._apps_by_id[d["id"]]
 

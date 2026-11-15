@@ -22,8 +22,8 @@ the **"open with" menu** asks: OS chrome, the console's one question
 last chosen first and focused, then Cancel, under keys, a pad or touch alone.
 There is no per-type "always": `open_with(item, choose=True)` opens the menu
 whatever was chosen, and the row picked becomes the choice. The verbs answer
-True where the item went to an app, the menu is up or the request waits in a
-notification (below), False where no app opens it.
+True where the item went to an app, the menu is up or the request waits for
+the frame's end or in a notification (below), False where no app opens it.
 
 **Taking the screen is one gate (owner, 2026-11-08).** Every way a process
 brings an app to the front passes `runtime/system/front.py`'s `take`:
@@ -35,6 +35,11 @@ calls, a Lua app's `open_app` and a compiled app's through the ROLE door.
 The request goes through where its process is the run on screen (the front
 run, its window holding the input) or holds the **`front`** permission
 (`processes.md` §2); the shell and the user's own input are never gated.
+A process's request that goes through runs at the start of the console's
+next frame, outside the call that made it: the open starts a run in the
+console's one Player, and a cart asking from its load, its init or its
+frame would otherwise have its own run replaced under it. The verb answers
+True for it, and the asking run ends there as any switch ends it.
 Any other process's request becomes a notification under its title ("Wants
 to open todo.md in Notes", `processes.md` §7) whose act does what it asked,
 the route read as it is opened; the verb answers as though it went. An alarm

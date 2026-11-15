@@ -2,7 +2,7 @@
 Workstation (runtime/shell/console.py).
 
 Two layers, the same split as the console's other sub-UIs:
-  * The perf *query* API -- perf_sample / perf_breakdown / perf_breakdown_raw /
+  * The perf *query* API -- perf_sample / perf_breakdown /
     perf_backdrop / perf_pointer / perf_batch -- is the PerfMeters mixin's
     (runtime/shell/console_perf.py). Those are the device backend's measurement
     contract (device_diag calls `ws.perf_sample()` / `ws.perf_breakdown()`

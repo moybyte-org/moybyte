@@ -1,18 +1,16 @@
 # Map (grep -n a name to jump there):
-#   TextVerbs                     typing, text mode, the Editor's tab landings, the Code tab's file
+#   TextVerbs                     typing, the Editor's tab landings, the Code tab's file
 #   TextVerbs.can_type            whether the console holds a keyboard that types
-#   TextVerbs._set_text_mode      the keyboard's text mode, counted
 #   TextVerbs.edit_theme          a theme opened in the Editor's theme mode
 #   TextVerbs.open_code_file      the Code tab on another of the cart's scripts
 #   -- the Code tab's FILE        a cart's scripts and the one the Code tab shows
 """The Workstation's TEXT verbs: whether the console can type (`can_type`, a
-board's declared keyboards, a connected Bluetooth one, a page's soft keyboard)
-and the keyboard's text mode (`_set_text_mode`, `sync_keyboard_mode`,
-`cancel_field`), the Editor's tab landings that stay the tested `ws.` entry
-points (`set_menu_view`, `_open_menu`/`_open_paint`/`_open_map`/..., `edit_theme`,
+board's declared keyboards, a connected Bluetooth one, a page's soft keyboard),
+the Editor's tab landings that stay the tested `ws.` entry points
+(`set_menu_view`, `_open_menu`/`_open_paint`/`_open_map`/..., `edit_theme`,
 `_leave_menu`) and the Code tab's file (`code_sources`/`code_file_name`/
-`open_code_file`). A mixin of `Workstation`; the per-frame keyboard plumbing
-(`_menu_keys`, `_sync_cart_text_mode`) is console_input's.
+`open_code_file`). A mixin of `Workstation`; the keyboard's text mode is the
+input policy's (runtime/shell/input_policy.py).
 """
 
 import ui_draw as _ui_draw
@@ -70,130 +68,6 @@ class TextVerbs:
                 except Exception:  # noqa: BLE001 -- a radio error is no keyboard
                     return False
         return False
-
-    def cancel_field(self):
-        """Cancel the text field being typed into, if one is: the home's
-        search box closes, cleared; Settings' Name gets its text back and
-        focus leaves it, its password prompt closes. The T-Deck's Mic does
-        this inside a field (owner call, 2026-10-18), where its K types a
-        letter; anywhere else Mic is the console's key. A running app's field
-        with an edit in progress gets back the text the edit began from
-        (`Player.cancel_field`), and so does a shell app's: its own
-        `cancel_field` where it has one, else its page's context
-        (`ui_draw.app_cancel` on its AppHost: Files' rename, Appearance's
-        name, Storybook's fields); with none, Mic stays the console's key. The same key closes
-        what sits over the Editor's typing (See why's popover, the Make it
-        mine and Blocks dialogs) and stops a script reading a line. True if it
-        did."""
-        if self.screen == "menu":
-            if self.crash_popup is not None and self.menu_view == "code":
-                self.crash_popup = None
-                self._dirty = True
-                return True
-            if self.menu_view == "code" and self.code_layer.close_overlay():
-                return True
-            if self.menu_view == "cards" and self.cards_layer.prompt is not None:
-                self.cards_layer._close_prompt()
-                return True
-            ui = self.built("block_ui")
-            if self.menu_view == "blocks" and ui is not None and ui.cancel_prompt():
-                self._dirty = True
-                return True
-        if self.search_typing and self.screen == "launcher":
-            self.close_search(clear=True)
-            return True
-        if self.wm.top_is_player() and self.cart is not None \
-                and self.cart.get("type") == "script" and self.script_console.reading():
-            self._exit_to_caller()        # the script's Stop, where its prompt types
-            return True
-        if (self.screen == "settings" or self.wm.input_holder() == "settings") \
-                and self.settings_layer.cancel_field():
-            self._dirty = True
-            return True
-        if self.wm.top_is_player() and self.run.player.cancel_field():
-            self._dirty = True          # a running app's field (Player.cancel_field)
-            return True
-        app = self._apps_by_id.get(self.wm.top_kind())
-        if app is None:
-            return False
-        cancel = getattr(app, "cancel_field", None)
-        if cancel is not None:
-            took = cancel()
-        else:
-            host = self._app_hosts.get(app.id)
-            took = host is not None and _ui_draw.app_cancel(host.ctx, True)
-            if took:
-                host.owed = True        # the next frame gives the text back
-        if took:
-            self._dirty = True
-        return bool(took)
-
-    def sync_keyboard_mode(self):
-        """Put the board's keyboard in the mode of the surface on top, as
-        `_set_text_mode` does on every change. Called as the keyboard is
-        attached: the console boots on the home, which is no text surface, so
-        the keyboard takes the game mode from the first frame -- on the T-Deck
-        the raw matrix, where Mic (the console's key) and a held direction
-        read; the C3 itself boots in ASCII, where a bare Mic sends nothing."""
-        kb = self.keyboard
-        if kb is not None:
-            kb.set_game_mode(not self.input.text_mode)
-
-    def _set_text_mode(self, on):
-        # A text surface (the code editor, a field) takes typed bytes, once a
-        # press (it reads last_key for typing); a running cart takes the held key
-        # and its buttons, so a *held* direction keeps firing. The T-Deck's driver
-        # reads its raw matrix for both, typing the press edges at a text surface
-        # (moy_kbd.c); on keyboard firmware older than 2025-06-12 it stays on the
-        # C3's ASCII path. The request is queued for the input task. No-op on the
-        # host (no keyboard).
-        # text_mode is the single source of truth for "typing, don't latch buttons":
-        # the device keyboard otherwise ALSO fires a typed key's game alias
-        # (w/a/s/d/z/x -> up/left/down/right/a/b), so a typed name/password would
-        # trigger d-pad/shortcut actions. Set it for the code editor too (on=True), and
-        # clear it on every other screen (on=False) so it can never leak past the cart
-        # /editor that asked for it -- the desktop frame re-derives keyboard mode from
-        # input.text_mode (#38/#42). No-op on the host (no keyboard); harmless flag set.
-        #
-        # THE SWITCH SWALLOWS THE BYTE THAT CAUSED IT. Taking the keyboard for a
-        # text surface is a screen change, and the key that made it happen is
-        # still in last_key when the surface's first frame runs -- so the code
-        # editor typed it. On glass that is a letter appearing in the buffer on
-        # entering the Code tab, at the caret, whichever key was used. Every
-        # other typed surface already seeded its edge with the live byte by hand
-        # (cards_layer's meta prompt, block_editor_ui's keypads); the code
-        # editor RESET its tracker to 0 instead, which is the same statement
-        # with the opposite meaning. Seeding here makes it the rule rather than
-        # a habit, and it is the one place every text surface passes through.
-        #
-        # EVERY on=True call, not only an off->on transition: re-entering the
-        # Code tab while already on it is the case the owner hit, and text mode
-        # is already set there. `on=True` MEANS "this surface is taking the
-        # keyboard now" -- a tab entry, a prompt opening, an app switch -- and
-        # nothing calls it per frame (a cart's own `textmode()` writes the flag
-        # directly, cart_api.py). Do not add a per-frame caller: it would seed
-        # away the keystroke it was called during.
-        #
-        # Text mode follows INPUT FOCUS: on the desk the windowed WM restores
-        # each window's own mode as focus moves (`note_text_mode` tells it a
-        # mode set for a window still being opened); `_text_by` is the process
-        # that set it last, which Settings asks before handing it back.
-        self._text_sets += 1
-        wm = getattr(self, "wm", None)
-        if wm is not None:
-            note = getattr(wm, "note_text_mode", None)
-            if note is not None:
-                note(self.input.text_mode)
-            self._text_by = wm.input_holder()
-        if on:
-            k = getattr(self.input, "last_key", 0) or 0
-            self._ekey_prev = k
-            self.code_layer.seed_key(k)
-            self.run.player.seed_cart_key(k)   # a cart's editor handle, same rule
-        self.input.text_mode = bool(on)
-        kb = self.keyboard
-        if kb is not None:
-            kb.set_game_mode(not on)
 
     # The per-tab landing entry points moved to EditorApp (Stage 3, editor_app.py);
     # these stay as the tested ws. entry points (bar_layer's tool switcher + the

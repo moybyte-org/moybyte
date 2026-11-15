@@ -219,7 +219,7 @@ PYEOF
         "${USERMODS_DIR}/moy_png"
 
   # moy_index usermod: the store's native index. Its fragment compiles it unless
-  # MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header), and board_config's
+  # MOY_INDEX_IMPL=py (tools/native_check.py's header), and board_config's
   # stage below then leaves runtime/carts/moy_index.py out.
   cp -r "${REPO_ROOT}/native/moy_index" \
         "${USERMODS_DIR}/moy_index"
@@ -452,7 +452,7 @@ EOF
   # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
   # longer has. A changed hook starts the generated headers afresh.
   INDEX_STAMP="${PORT_DIR}/${WASM_BUILD}/moy_index_impl"
-  INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
+  INDEX_HOOK="${MOY_INDEX_IMPL:-c}"
   if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
     rm -rf "${PORT_DIR}/${WASM_BUILD}/genhdr"
   fi

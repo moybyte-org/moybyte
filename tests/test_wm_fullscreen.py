@@ -112,9 +112,8 @@ def test_f11_toggles_and_esc_never_leaves(tmp_path):
     drv.press("b")                        # B: the app's
     drv.frame(DT)
     assert win.full()
-    if drv.takes_escape():                # Esc: the host's key, a game's
-        drv.escape()
-        drv.frame(DT)
+    drv.escape()                          # Esc: the host's back, the app's
+    drv.frame(DT)
     assert win.full()
     drv.full_key()
     drv.frame(DT)

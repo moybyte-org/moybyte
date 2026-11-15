@@ -130,7 +130,7 @@ dialog or popover I drew, else step my page":
 
 **What to do**
 
-Create `+runtime/shell/input_policy.py` (the owner) and make the surface
+Create `runtime/shell/input_policy.py` (the owner) and make the surface
 protocol explicit.
 
 *Step 0, the surface protocol.* In `layers.Layer`, add defaulted verbs:

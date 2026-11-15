@@ -47,6 +47,8 @@ import sys
 import threading
 
 from . import host_native, native_build
+from .moy_net_face import *  # noqa: F401,F403
+from .moy_net_face import PW_ITER
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -130,7 +132,6 @@ _SIGS = (
     ("moy_http_query", [ctypes.c_void_p, _Z, _P, _Z,
                         ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_http_head", [ctypes.c_void_p, _Z, _I, _P, _Z], _Z),
-    ("moy_utf8_valid", [ctypes.c_void_p, _Z], _I),
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),
@@ -565,15 +566,14 @@ def web_signout():
     return _lib().moy_web_signout()
 
 
-PW_ITER = 1 << 15                       # moy_seal.h's MOY_SEAL_PW_ITER
 
 
-def pw_hash(password, salt, iter=PW_ITER):
+def pw_hash(password, salt):
     """The console password's record, `$moy2$ITER$SALT$W0$L`
     (moy_seal_pw_record, moy_seal.h's THE PASSWORD)."""
     p, s = _bytes(password), _bytes(salt)
     out = ctypes.create_string_buffer(256)
-    n = _lib().moy_seal_pw_record(p, len(p), s, len(s), iter, out, len(out))
+    n = _lib().moy_seal_pw_record(p, len(p), s, len(s), PW_ITER, out, len(out))
     if n < 0:
         raise ValueError("salt")
     return _text(out.raw[:n])

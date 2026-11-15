@@ -3,7 +3,7 @@
 #   -- the settings-toggle registry  the rows a toggle derives
 #   SettingsLayer                    the Settings app: its pages, rows and panels
 #   SettingsLayer.settings_adjust    step a row
-#   SettingsLayer.open_bluetooth     the Bluetooth keyboard picker
+#   SettingsLayer.open_page          a page of its own over the rows (_PAGES)
 #   SettingsLayer.draw               the Settings app
 """The Settings app (#28/#39/#53): the console's AGGREGATOR, a page of rows
 in captioned groups (docs/history/look_2026-10.md step 19) drawn with the public UI
@@ -22,7 +22,8 @@ toggle's warning, the last crash record, App permissions
 (runtime/system/perms_ui.py), Achievements (runtime/system/achievements_ui.py),
 Licences (runtime/system/about_ui.py) and the System log
 (runtime/system/log_ui.py, `open_log`) are pages of
-their own in place of the rows, Settings' way back closing them; the Wi-Fi
+their own in place of the rows, one stack over the `_PAGES` table:
+`open_page` pushes one, Settings' way back pops it; the Wi-Fi
 panel is also what the bar's wifi popover holds (`wifi_page`,
 runtime/system/popover.py).
 
@@ -51,7 +52,7 @@ from achievements_ui import AchievementsPage
 from about_ui import LicencesPage, version_words, board_words
 from log_ui import LogPage
 from perms_ui import PermsPage
-from editors_base import TextEntry
+from layers import Layer
 from audio_session import console_volume
 import wallclock as _wc
 
@@ -198,8 +199,6 @@ BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guit
           "guition_p4": "Guition P4 10″", "xiao_zero": "XIAO ESP32-S3"}
 _PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
                 "permissions": "App permissions"}
-_PAGE_ROWS = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
-              "permissions": "App permissions"}
 
 # The groups, in page order: (caption, row keys). A row of kind `idle` is
 # Power's.
@@ -276,7 +275,7 @@ def _wrap(text, n):
     return out
 
 
-class SettingsLayer:
+class SettingsLayer(Layer):
     """The Settings content Layer (system domain): the rows page, or the
     page of a panel it opened, drawn with the public UI API's verbs. Reads
     ws config/system state and dispatches every mutation to ws setters.
@@ -285,6 +284,8 @@ class SettingsLayer:
     places no X (runtime/shell/bar_layer.py draws it from `back_title`): a tap on
     the chevron is `back`, as Esc and B are, one on the title knocks on the
     secret door (#21)."""
+
+    B_BACK = True
 
     id = "settings"
     domain = "system"
@@ -332,13 +333,11 @@ class SettingsLayer:
         self._footer = None           # the note under the group being drawn
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
         # connect/forget over the injected ws.wifi service.
-        self.wifi_view = False
         self.wifi_return = None       # the app the panel goes back to (`_wifi_back`)
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
         self.wifi_pick = None         # ssid being typed for (password mode)
-        self._wifi_seed = None        # the byte held as the prompt opened
-        self.wifi_pw = TextEntry(WIFI_PW_MAX)  # the password being typed (its .text)
+        self.wifi_pw = ""             # the password being typed
         self.wifi_msg = ""
         self.wifi_known = []
         # The radio's slow halves, polled, never waited on (a scan or a join
@@ -350,7 +349,6 @@ class SettingsLayer:
         self._wifi_wake = None
         # Bluetooth keyboard panel, capability-gated through _bt_service():
         # a board with no BLE service never shows the row.
-        self.bt_view = False
         self.bt_devices = []          # service rows; opaque address stays opaque
         self.bt_sel = 0
         self.bt_msg = ""
@@ -374,16 +372,11 @@ class SettingsLayer:
         # it was built from in a PREALLOCATED list compared element-wise.
         self._toggle_cache = None
         self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
-        # The kernel's last crash record (Settings -> LAST CRASH): a read-only
-        # page in place of the rows, on a board whose kernel keeps one.
-        self.crash_view = False
-        # The Time zone picker: a page of wallclock.ZONES over the rows.
-        self.tz_view = False
-        self._tz_words = None         # its rows' words, made at its first open
+        # The pages open over the rows, the shown one last (`_PAGES`).
+        self._stack = []
+        self._tz_words = None         # the Time zone picker's words, made at its first open
         # Paired browsers: the web console's keys (WebHost.browsers), read at
         # each visit and each change, never per frame.
-        self.paired_view = False
-        self.usb_view = False
         self._usb_seen = -1
         self._paired = ()
         self._paired_words = "None"
@@ -391,7 +384,6 @@ class SettingsLayer:
         self._tz_fresh = False        # opened this frame: focus goes to the list
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
-        self.page = None              # "achievements", "licences", "log" or None
         self._ach_n = -1              # the badges the Achievements row last said
         self._ach_t = -1              # ...of how many
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
@@ -402,7 +394,6 @@ class SettingsLayer:
         self.syslog = LogPage()
         self.permits = PermsPage(ws.app_context("permissions", PermsPage.NEEDS))
         self.back_title = "Settings"
-        self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
         # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
         # `_poll` when a value it shows moves: the override table the page is
@@ -423,45 +414,61 @@ class SettingsLayer:
         self._view = None
         self._want = None
         self._focused = None
-        if self.wifi_view:
-            self.close_wifi()
-        if self.bt_view:
-            self.close_bluetooth()
-        self.crash_view = False
-        self.tz_view = False
-        self.paired_view = False
+        self._drop("wifi")
+        self._drop("bt")
         # a computer that has the card keeps the page up (usb_drive.py)
-        self.usb_view = self._usb_on()
-        self.page = None
+        self._stack = ["usb"] if self._usb_on() else []
         self._name_bar("Settings")
-        self._typing = False
         self._about = self._read_about()
         self._read_paired()
 
     # -- About's pages: Achievements, Licences, the System log --------------------
 
+    # -- the page stack: a page of its own over the rows (`_PAGES`) ----------------
+
+    @property
+    def page(self):
+        """The page shown over the rows, None on the rows."""
+        st = self._stack
+        return st[-1] if st else None
+
+    def showing(self, page):
+        """Whether `page` is open, shown or under another."""
+        return page in self._stack
+
     def open_page(self, page, pid=None):
-        """Open About's `page` ("achievements", "licences", "log") over the
-        rows, Settings' way back closing it; the log on one process where
-        `pid` names it."""
+        """Open `page` (a `_PAGES` name) over what shows, Settings' way back
+        closing it; one of its kind already open goes (About's pages are
+        one kind); the log on one process where `pid` names it."""
         self.commit_name()
-        self.page = page
-        if page == "achievements":
-            self.achievements.open()
-        elif page == "log":
-            self.syslog.open(pid)
-        elif page == "permissions":
-            self.permits.open()
-        else:
-            self.licences.open()
+        kind = _PAGES[page][0]
+        st = self._stack
+        for p in st[:]:
+            if _PAGES[p][0] == kind:
+                st.remove(p)
+        st.append(page)
+        enter = _PAGES[page][1]
+        if enter is not None:
+            enter(self, pid)
         self._name_bar(self.page_title() or "Settings")
         self.ws._dirty = True
 
     def close_page(self):
-        was = self.page
-        self.page = None
-        self._name_bar("Settings")
-        self._want = _PAGE_ROWS.get(was, "Licences")
+        """Back from the page shown to what is under it."""
+        if self._stack:
+            self._drop(self._stack[-1])
+
+    def _drop(self, page):
+        """`page` closed, wherever it is: what it holds let go, the focus
+        back on its row."""
+        if page not in self._stack:
+            return
+        self._stack.remove(page)
+        leave = _PAGES[page][2]
+        if leave is not None:
+            leave(self)
+        self._want = _PAGES[page][4]
+        self._name_bar(self.page_title() or "Settings")
         self.ws._dirty = True
 
     def _name_bar(self, title):
@@ -484,14 +491,14 @@ class SettingsLayer:
         """The USB drive page is up and the drive's state moved since it
         drew (a computer took the card or let it go). A card the computer
         let go comes back here (`UsbDrive.poll`)."""
-        if not self.usb_view:
+        if not self.showing("usb"):
             return False
         return self.ws.usb_drive.poll(self.ws) != self._usb_seen
 
     def log_moved(self):
         """The System log page is up and a record came since it drew: the
         console's animation gate draws it again."""
-        return self.page == "log" and self._page_of() == "log" and self.syslog.moved()
+        return self.page == "log" and self.syslog.moved()
 
     # -- the cursor, as a row index ---------------------------------------------
 
@@ -530,8 +537,8 @@ class SettingsLayer:
                 return svc
         return None
 
-    def open_bluetooth(self):
-        """Open the Bluetooth keyboard picker, STARTING the service if it is idle.
+    def _bt_open(self, _pid=None):
+        """The Bluetooth keyboard picker's opening, STARTING the service if it is idle.
 
         The touch-only boards start their service at boot (a paired keyboard
         is their only way out of a cart); a board that already has a keyboard
@@ -545,16 +552,9 @@ class SettingsLayer:
                 svc.start()
             except Exception:  # noqa: BLE001 -- _bt_refresh reports the state
                 pass
-        self.bt_view = True
         self.bt_msg = ""
         self._bt_state = None
         self._bt_refresh()
-        self.ws._dirty = True
-
-    def close_bluetooth(self):
-        self.bt_view = False
-        self._want = say("BLUETOOTH KEYBOARD")
-        self.ws._dirty = True
 
     def _bt_refresh(self):
         svc = self._bt_service()
@@ -595,7 +595,7 @@ class SettingsLayer:
     def _bt_action(self, action, address=None):
         svc = self._bt_service()
         if action == "back":
-            self.close_bluetooth()
+            self._drop("bt")
             return
         if svc is None:
             self.bt_msg = "No Bluetooth keyboard service."
@@ -629,7 +629,7 @@ class SettingsLayer:
 
     def bluetooth_animating(self):
         """Keep a quiet Settings window repainting while async BLE state moves."""
-        if not self.bt_view:
+        if not self.showing("bt"):
             return False
         svc = self._bt_service()
         if svc is None:
@@ -678,26 +678,11 @@ class SettingsLayer:
 
     # -- the WIFI panel (#38; spec shell_ux_v1.md §10) ----------------------------
 
-    def open_wifi(self):
-        """Open the wifi panel in place of the rows (the WIFI row, and the
-        bar's wifi widget in console mode). Rescans on entry so the list is
-        fresh."""
-        self.wifi_view = True
-        self.wifi_enter()
-        self.ws._dirty = True
-
-    def close_wifi(self):
-        """Back from the wifi panel to the Settings rows (NOT out of Settings)."""
-        self.wifi_view = False
-        self.wifi_leave()
-        self._want = say("WIFI")
-        self.ws._dirty = True
-
-    def wifi_enter(self):
+    def wifi_enter(self, _pid=None):
         """The panel's entry, wherever it is held (these rows, or the wifi
         popover): a fresh password field, the radio lease, a rescan."""
         self.wifi_pick = None
-        self.wifi_pw.open("")
+        self.wifi_pw = ""
         self.ws.wifi_hold("settings")  # the radio lease: wifi_leave lets go
         self._wifi_rescan()
 
@@ -707,9 +692,8 @@ class SettingsLayer:
         is let go with it (a join the station finishes stays joined)."""
         ws = self.ws
         self.wifi_pick = None
-        ws._set_text_mode(False)
         pop = ws.sysmenu
-        if not self.wifi_view and not (pop.open and pop.widget == "wifi"):
+        if not self.showing("wifi") and not (pop.open and pop.widget == "wifi"):
             self.wifi_scanning = False
             self.wifi_joining = None
             self._wifi_unwatch()
@@ -722,10 +706,10 @@ class SettingsLayer:
         if popover:
             self.ws.sysmenu.close()
         elif self.wifi_return is not None:
-            self.close_wifi()
+            self._drop("wifi")
             self.ws._exit_settings()
         else:
-            self.close_wifi()
+            self._drop("wifi")
 
     def _wifi_rescan(self):
         ws = self.ws
@@ -828,11 +812,9 @@ class SettingsLayer:
     def _wifi_ask(self, ssid):
         ws = self.ws
         self.wifi_pick = ssid
-        self.wifi_pw.open("")
-        # the byte that opened the prompt is held: its field never types it
-        self._wifi_seed = getattr(ws.input, "last_key", 0) or 0
+        self.wifi_pw = ""
         self.wifi_msg = ""
-        ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
+        ws.input.spend_key()          # the key that picked the net types nothing
         ws._dirty = True
 
     def _wifi_connect(self, ssid, pw, locked=False):
@@ -840,7 +822,6 @@ class SettingsLayer:
         the join's to give (`_wifi_settle`), now or when the poll sees it."""
         ws = self.ws
         self.wifi_pick = None
-        ws._set_text_mode(False)
         w = ws.wifi
         try:
             join = getattr(w, "join", None) if w is not None else None
@@ -893,7 +874,6 @@ class SettingsLayer:
 
     def _wifi_cancel(self):
         self.wifi_pick = None
-        self.ws._set_text_mode(False)
         self.ws._dirty = True
 
     def wifi_input(self, i, host, popover=False):
@@ -903,9 +883,6 @@ class SettingsLayer:
         key, spec §9) and ESC, or B, cancels; in LIST mode the page takes
         the keys and B backs out. True when the panel took them."""
         if self.wifi_pick is not None:
-            if self._wifi_seed is not None:
-                host.key = self._wifi_seed      # the held byte types nothing
-                self._wifi_seed = None
             host.keys(i)
             if host.inp[5] == 27 or i.pressed("b") or i.pressed("stop"):
                 host.inp[5] = 0
@@ -1027,24 +1004,15 @@ class SettingsLayer:
             _ui.dialog()
             return
         pick = _ui.dialog(title, ("Cancel", "Connect"))
-        text, done = _ui.field("Password", self.wifi_pw.text, WIFI_PW_MAX, {"id": "password"})
+        text, done = _ui.field("Password", self.wifi_pw, WIFI_PW_MAX, {"id": "password"})
         _ui.dialog()
-        self.wifi_pw.text = text
+        self.wifi_pw = text
         if pick == 1 or done:
             self._wifi_connect(self.wifi_pick, text)
         elif pick == 0:
             self._wifi_cancel()
 
     # -- LAST CRASH page (the kernel's record, read-only) -----------------------
-
-    def open_crash(self):
-        self.crash_view = True
-        self.ws._dirty = True
-
-    def close_crash(self):
-        self.crash_view = False
-        self._want = say("LAST CRASH")
-        self.ws._dirty = True
 
     def _crash_page(self):
         """The record's lines, the core dump's size with a button that
@@ -1061,20 +1029,13 @@ class SettingsLayer:
             clear_core_dump()
             self.ws._dirty = True
         if _ui.button("Back"):
-            self.close_crash()
+            self._drop("crash")
         _ui.group()
 
     # -- the Time zone picker ---------------------------------------------------
 
-    def open_tz(self):
-        self.tz_view = True
+    def _tz_open(self, _pid=None):
         self._tz_fresh = True
-        self.ws._dirty = True
-
-    def close_tz(self):
-        self.tz_view = False
-        self._want = say("TIME ZONE")
-        self.ws._dirty = True
 
     def _tz_page(self):
         """The zones, west to east, each beside its standard offset: the one
@@ -1103,7 +1064,7 @@ class SettingsLayer:
         _ui.group()
         if got is not None:
             self.ws.set_time_zone(_wc.ZONES[got][1])
-            self.close_tz()
+            self._drop("tz")
 
     # -- Paired browsers ---------------------------------------------------------------
 
@@ -1122,16 +1083,8 @@ class SettingsLayer:
         self._paired_words = str(len(rows)) if rows else "None"
         self._paired_fp = _ssh.fingerprint(self.ws)
 
-    def open_paired(self):
+    def _paired_open(self, _pid=None):
         self._read_paired()
-        self.paired_view = True
-        self.ws._dirty = True
-
-    def close_paired(self):
-        self.paired_view = False
-        self._read_paired()
-        self._want = say("PAIRED BROWSERS")
-        self.ws._dirty = True
 
     def _forget(self, kid):
         web = getattr(self.ws, "webhost", None)
@@ -1175,15 +1128,8 @@ class SettingsLayer:
         d = getattr(self.ws, "usb_drive", None)
         return d is not None and d.on
 
-    def open_usb(self):
+    def _usb_open(self, _pid=None):
         self.ws.usb_drive.why = None
-        self.usb_view = True
-        self.ws._dirty = True
-
-    def close_usb(self):
-        self.usb_view = False
-        self._want = say("USB DRIVE")
-        self.ws._dirty = True
 
     def _usb_page(self):
         """Off: what the drive does and its one button, Turn on (and why it
@@ -1373,7 +1319,7 @@ class SettingsLayer:
         elif key == "update_c6":
             ws.update_ui.open_update_c6()
         elif key == "usb_drive":
-            self.open_usb()
+            self.open_page("usb")
 
     def _toggle_diag_row(self, key):
         """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles).
@@ -1416,10 +1362,10 @@ class SettingsLayer:
         ws = self.ws
         key, _label, kind = self._settings_rows()[self.set_msel if i is None else i]
         if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
-            self.open_wifi()
+            self.open_page("wifi")
             return
         if kind == "bluetooth":
-            self.open_bluetooth()
+            self.open_page("bt")
             return
         if kind == "action":                    # APPEARANCE / UPDATE FW: open the tool
             self._activate_settings_action(key)
@@ -1431,13 +1377,13 @@ class SettingsLayer:
             ws.toggle_webhost()
             return
         if kind == "crash":                     # LAST CRASH: any step/tap opens the record
-            self.open_crash()
+            self.open_page("crash")
             return
         if kind == "tz":                        # TIME ZONE: any step/tap opens the picker
-            self.open_tz()
+            self.open_page("tz")
             return
         if kind == "paired":                    # PAIRED BROWSERS: their page
-            self.open_paired()
+            self.open_page("paired")
             return
         if kind == "idle":                      # the idle ladder's rungs: OFF, 30S .. 30M
             ws.idle_ladder.step(key, d)
@@ -1466,18 +1412,11 @@ class SettingsLayer:
             self.ws.system.set("name", got)
             _ssh.rename(self.ws)
 
-    def leave(self):
-        """Settings stopped holding the keyboard (the console's frame saw input
-        focus move): the Name being typed is stored, and a text mode Settings
-        set is handed back. On the desk the window manager has already put
-        the focused window's own in place; elsewhere it goes to button mode
-        unless another surface set it since."""
+    def close(self):
+        """Leaving Settings, by any route: the Name being typed is stored and
+        the Wi-Fi panel's radio lease ends with the visit."""
         self.commit_name()
-        if self._typing:
-            self._typing = False
-            ws = self.ws
-            if not ws.wm.desk_open() and ws._text_by == "settings":
-                ws._set_text_mode(False)
+        self._drop("wifi")
 
     def level(self, key):
         """A level row's (value, lowest, highest): the stored value, else the
@@ -1676,11 +1615,11 @@ class SettingsLayer:
         if kind == "wifi-net":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                self.open_wifi()
+                self.open_page("wifi")
         elif kind == "bluetooth":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                self.open_bluetooth()
+                self.open_page("bt")
         elif kind == "action":
             self._kinds[s] = "link"
             if _ui.link(s, v):
@@ -1688,15 +1627,15 @@ class SettingsLayer:
         elif kind == "crash":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                self.open_crash()
+                self.open_page("crash")
         elif kind == "tz":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                self.open_tz()
+                self.open_page("tz")
         elif kind == "paired":
             self._kinds[s] = "link"
             if _ui.link(s, v):
-                self.open_paired()
+                self.open_page("paired")
         elif kind == "webhost":
             self._kinds[s] = "link"
             if _ui.link(s, v):
@@ -1770,25 +1709,28 @@ class SettingsLayer:
                 self.commit_name()
                 self._leave_field()
 
-    def editing_field(self):
-        """Whether a field on Settings is being typed into: the Name row
-        focused, or the Wi-Fi password prompt."""
-        if self._page_of() == "wifi":
-            return self.wifi_pick is not None
-        return self._page_of() is None and self._kinds.get(self._focused) == "field"
+    def ui_host(self):
+        """The page's AppHost, whose step the console's back takes first;
+        none under the Wi-Fi password prompt, a dialog `back` closes whole."""
+        return None if self.wifi_pick is not None else self._input_host()
 
-    def cancel_field(self):
-        """Cancel the field being typed into (Esc, B, the T-Deck's Mic): the
-        Name gets back the text it had when typing began and focus leaves
-        it; the password prompt closes. False where no field is."""
-        if not self.editing_field():
-            return False
-        if self._page_of() == "wifi":
+    def typing(self):
+        """A field on Settings has focus: the Name row, or the Wi-Fi password
+        prompt."""
+        if self.page == "wifi":
+            return self.wifi_pick is not None
+        return self.page is None and self._kinds.get(self._focused) == "field"
+
+    def cancel(self):
+        """Mic in a field: the password prompt closes; the Name gets back the
+        text it had when typing began and focus steps up off it (the
+        toolkit's cancel)."""
+        if self.page == "wifi":
+            if self.wifi_pick is None:
+                return False
             self._wifi_cancel()
             return True
-        self._name = None                 # nothing typed is kept
-        self._leave_field()
-        return True
+        return Layer.cancel(self)
 
     def _leave_field(self):
         """Focus leaves the field for the row above it: typing ends."""
@@ -1839,27 +1781,12 @@ class SettingsLayer:
 
     # -- the frame --------------------------------------------------------------------
 
-    def _page_of(self):
-        if self.wifi_view:
-            return "wifi"
-        if self.bt_view:
-            return "bt"
-        if self.crash_view:
-            return "crash"
-        if self.tz_view:
-            return "tz"
-        if self.paired_view:
-            return "paired"
-        if self.usb_view:
-            return "usb"
-        return self.page
-
     def _input_host(self):
-        return self._host if self._page_of() is None else self._sub
+        return self._host if self.page is None else self._sub
 
     def handle_input(self, i):
         ws = self.ws
-        view = self._page_of()
+        view = self.page
         if view == "wifi":
             return self.wifi_input(i, self._sub)
         if view == "usb" and self._usb_on() and (
@@ -1869,7 +1796,7 @@ class SettingsLayer:
             ws.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
-            self.back()
+            ws.input_policy.back(leave=True)
             return True
         if view == "licences" and self.licences.keys(i):
             return True
@@ -1880,42 +1807,20 @@ class SettingsLayer:
         """Whether a page is open over Settings' rows (Wi-Fi, Bluetooth, a
         crash report), which `back` steps out of: a desk
         window shows the back chevron in its title strip then."""
-        return self._page_of() is not None
+        return bool(self._stack)
 
     def back(self):
-        """Back one level -- B, Esc and the bar's chevron: a page open over
-        Settings closes, else Settings does (resuming the cart it was opened
-        from). True: Settings took it either way."""
-        view = self._page_of()
-        if view is None and self.cancel_field():
-            pass                          # the first back cancels the field
-        elif view == "bt":
-            self.close_bluetooth()
-        elif view == "crash":
-            self.close_crash()
-        elif view == "tz":
-            self.close_tz()
-        elif view == "paired":
-            self.close_paired()
-        elif view == "usb":
-            if not self._usb_on():
-                self.close_usb()
-        elif view == "achievements":
-            if not self.achievements.back():
-                self.close_page()
-        elif view == "licences":
-            if not self.licences.back():
-                self.close_page()
-            self._name_bar(self.page_title() or "Settings")
-        elif view in ("log", "permissions"):
+        """Back one page -- B, Esc and the bar's chevron, after the toolkit's
+        step (`InputPolicy.step`): a page open over Settings closes. False on
+        the rows: the host leaves Settings (resuming what it was opened
+        over)."""
+        view = self.page
+        if view is None:
+            return False
+        step = _PAGES[view][5]
+        if step is None or not step(self):
             self.close_page()
-        elif view == "wifi":
-            if self.wifi_pick is not None:
-                self._wifi_cancel()
-            else:
-                self._wifi_back()
-        else:
-            self.ws._exit_settings()
+        self._name_bar(self.page_title() or "Settings")
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1928,8 +1833,8 @@ class SettingsLayer:
         return True
 
     def draw(self, dt):
-        """The Settings app: its page, the ground around it (the bar's band,
-        wherever the bar sits), then the bar."""
+        """The Settings app: its page and the ground around it (the bar's
+        band, wherever the bar sits); the frame draws the bar over them."""
         ws = self.ws
         cv = ws.sys_canvas
         g = ws.theme_colors["panel"]
@@ -1943,7 +1848,6 @@ class SettingsLayer:
         if x + w < cv.w:
             cv.rect(x + w, y, cv.w - x - w, h, g)
         self._draw_page()
-        ws.bar_layer._draw_status_strip("settings")
 
     def _content(self):
         """The rect the page fills: the layout's content rect."""
@@ -1957,7 +1861,7 @@ class SettingsLayer:
         """The page the open panel is, else the rows, filling the content
         rect."""
         ws = self.ws
-        view = self._page_of()
+        view = self.page
         if view != self._view:
             if self._view is None:
                 self._host.clear()
@@ -1983,43 +1887,75 @@ class SettingsLayer:
                 ws.request_frame()    # ... and the next scrolls to it
             self._rows_page()
             self._focused = _ui.focus()
-            field = self._kinds.get(self._focused) == "field"
-            if not field:
+            if self._kinds.get(self._focused) != "field":
                 self.commit_name()        # focus left the field
-            # typed letters are the field's, never a button's alias -- while
-            # Settings holds the keyboard (on the desk, its window has focus)
-            typing = field and ws.wm.input_holder() == "settings"
-            if typing != self._typing:
-                self._typing = typing
-                ws._set_text_mode(typing)
         else:
             self.commit_name()
-            if view == "wifi":
-                self.wifi_page()
-            elif view == "bt":
-                self._bt_page()
-            elif view == "achievements":
-                self.achievements.draw(self._content())
-            elif view == "licences":
-                self.licences.draw(self._content())
-                self._name_bar(self.page_title() or "Settings")
-            elif view == "log":
-                self.syslog.draw(self._content())
-            elif view == "permissions":
-                self.permits.draw(self._content())
-            elif view == "tz":
-                self._tz_page()
-            elif view == "paired":
-                self._paired_page()
-            elif view == "usb":
-                self._usb_page()
-            else:
-                self._crash_page()
+            _PAGES[view][3](self)
             self._sub_focused = _ui.focus()
         _ui.end()                     # the fade where the rows run on below
-        if ws._dirty or self._page_of() != view or host.owed or host.tap == 2:
+        if ws._dirty or self.page != view or host.owed or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
         ws._dirty = was or ws._dirty
+
+    # -- the pages' own halves (`_PAGES`) ------------------------------------------
+
+    def _wifi_step(self):
+        if self.wifi_pick is not None:
+            self._wifi_cancel()
+        else:
+            self._wifi_back()
+        return True
+
+    def _paired_close(self):
+        self._read_paired()
+
+    def _ach_open(self, _pid=None):
+        self.achievements.open()
+
+    def _ach_draw(self):
+        self.achievements.draw(self._content())
+
+    def _lic_open(self, _pid=None):
+        self.licences.open()
+
+    def _lic_draw(self):
+        self.licences.draw(self._content())
+        self._name_bar(self.page_title() or "Settings")
+
+    def _log_open(self, pid=None):
+        self.syslog.open(pid)
+
+    def _log_draw(self):
+        self.syslog.draw(self._content())
+
+    def _perms_open(self, _pid=None):
+        self.permits.open()
+
+    def _perms_draw(self):
+        self.permits.draw(self._content())
+
+
+# The pages over Settings' rows: name -> (its kind, which one open of replaces;
+# its opening; its closing; its draw; the row the focus goes back to; its own
+# back step, True where it took the back, else the back closes it).
+_L = SettingsLayer
+_PAGES = {
+    "wifi": ("wifi", _L.wifi_enter, _L.wifi_leave, _L.wifi_page, say("WIFI"), _L._wifi_step),
+    "bt": ("bt", _L._bt_open, None, _L._bt_page, say("BLUETOOTH KEYBOARD"), None),
+    "crash": ("crash", None, None, _L._crash_page, say("LAST CRASH"), None),
+    "tz": ("tz", _L._tz_open, None, _L._tz_page, say("TIME ZONE"), None),
+    "paired": ("paired", _L._paired_open, _L._paired_close, _L._paired_page,
+               say("PAIRED BROWSERS"), None),
+    "usb": ("usb", _L._usb_open, None, _L._usb_page, say("USB DRIVE"), _L._usb_on),
+    "achievements": ("about", _L._ach_open, None, _L._ach_draw, "Achievements",
+                     lambda sl: sl.achievements.back()),
+    "licences": ("about", _L._lic_open, None, _L._lic_draw, "Licences",
+                 lambda sl: sl.licences.back()),
+    "log": ("about", _L._log_open, None, _L._log_draw, "System log", None),
+    "permissions": ("about", _L._perms_open, None, _L._perms_draw, "App permissions", None),
+}
+del _L
 
 
 def _day(t):

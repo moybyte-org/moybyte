@@ -81,7 +81,7 @@ class _TDeck:
         self.kbd = mi.KbdDriver(ws.input, self.fake)
         self.fake.frames = IDLE
         ws.keyboard = self.kbd
-        ws.sync_keyboard_mode()
+        ws.input_policy.attach_keyboard()
         ui_draw.input_kind("tdeck")
         self.tick()
 
@@ -198,7 +198,7 @@ def test_files_rows_step_and_its_rename_field_types(tmp_path):
     files = ws.files_app
     files.dialog = "rename"
     files.rename_text = ""
-    t.tick(2)
+    t.tick(3)                         # drawn, its field focused, the mode applied
     assert ws.input.text_mode
     t.key("w", settle=2)
     assert files.rename_text.endswith("w"), "the field types W"

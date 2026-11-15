@@ -31,7 +31,7 @@ def _name_field(tmp_path, stored="Ada"):
     sl.show_row("name")
     for _ in range(3):
         drv.frame(_DT)
-    assert sl.editing_field() and ws.input.text_mode
+    assert sl.typing() and ws.input.text_mode
     return ws, drv, sl
 
 
@@ -49,7 +49,7 @@ def test_enter_keeps_the_text_and_leaves_the_field(tmp_path):
     drv.frame(_DT)
     drv.frame(_DT)
     assert ws.system.get("name") == "Adax"
-    assert not sl.editing_field(), "Done leaves the field"
+    assert not sl.typing(), "Done leaves the field"
 
 
 def test_the_tdeck_mic_cancels_the_field_and_puts_its_text_back(tmp_path):
@@ -61,7 +61,7 @@ def test_the_tdeck_mic_cancels_the_field_and_puts_its_text_back(tmp_path):
     drv.frame(_DT)
     drv.frame(_DT)
     assert ws.system.get("name") == "Ada"
-    assert not sl.editing_field() and ws.screen == "settings"
+    assert not sl.typing() and ws.screen == "settings"
 
 
 def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, monkeypatch):
@@ -74,6 +74,7 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
     real = settings_layer._ui.hints
     monkeypatch.setattr(settings_layer._ui, "hints",
                         lambda items, *a: (drawn.append(tuple(items)), real(items, *a))[1])
+    _type(drv, "q")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
     ws._dirty = True
@@ -83,6 +84,7 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
 
 def test_mic_outside_a_field_is_still_the_console_key(tmp_path):
     ws, drv, sl = _name_field(tmp_path)
+    _type(drv, "q")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)            # cancels: focus leaves the field
     drv.frame(_DT)
@@ -95,11 +97,11 @@ def test_mic_outside_a_field_is_still_the_console_key(tmp_path):
 def test_esc_cancels_first_then_leaves(tmp_path):
     ws, drv, sl = _name_field(tmp_path)
     _type(drv, "q")
-    sl.back()                                   # Esc, B, the bar's chevron
+    ws.input_policy.back()                      # Esc, B, the bar's chevron
     drv.frame(_DT)
     drv.frame(_DT)
     assert ws.screen == "settings" and ws.system.get("name") == "Ada"
-    sl.back()
+    ws.input_policy.back()
     assert ws.screen != "settings"
 
 
@@ -118,12 +120,12 @@ def test_mic_cancels_the_wifi_password_prompt(tmp_path):
     ws.wifi = _Wifi()
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl._wifi_ask("Cafe")
     for _ in range(3):
         drv.frame(_DT)
     _type(drv, "abc")
-    assert sl.editing_field()
+    assert sl.typing()
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
     assert sl.wifi_pick is None and not ws.sysmenu.open

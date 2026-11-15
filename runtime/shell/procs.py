@@ -126,6 +126,9 @@ class Run:
         self.player = None          # its Player (player.Player, `Player.run` back)
         self.project = None         # its Project, the open cart's workspace
         self.audio = None           # its AudioSession, built on a start (#16)
+        # The cart's `textmode()`: it takes typed bytes, and the keyboard is
+        # in text mode while it holds the keys (`Player.typing`).
+        self.textmode = False
         # The game canvas it draws on: the boot canvas, a canvas made for a
         # Proc (`canvas_tag` names it), or one a bind gave it.
         self.canvas = canvas

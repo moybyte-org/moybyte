@@ -119,21 +119,16 @@
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (0)
 
-// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GT911 touch
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0 (its pins are
+// board.toml's `i2c0` row, MOY_HW_I2C0_SDA/_SCL), the GT911 touch
 // and the ES8311/ES7210 codecs.
 #define MOY_BUS_I2C_PORT                    (0)
-#define MOY_BUS_I2C_SDA                     (7)
-#define MOY_BUS_I2C_SCL                     (8)
 #define MOY_BUS_I2C_HZ                      (400000)
 
 // The speaker (native/moy_audio/moy_aud_out.c, #82): the ES8311 codec on the
-// bus above, clocked from MCLK, and its power amplifier's enable.
+// bus above, clocked from MCLK, and its power amplifier's enable, on the pins
+// of board.toml's `speaker` row (MOY_HW_SPEAKER_*).
 #define MOY_AUDIO_CODEC_ES8311              (1)
-#define MOY_AUDIO_I2S_MCLK                  (13)
-#define MOY_AUDIO_I2S_BCK                   (12)
-#define MOY_AUDIO_I2S_WS                    (10)
-#define MOY_AUDIO_I2S_DOUT                  (9)
-#define MOY_AUDIO_PA_GPIO                   (53)
 // 44.1 kHz stereo out (docs/os_2026-11/hardware.md section 3): the mix,
 // 22,050 Hz mono as on every board, upsampled 2x by the feeder, the streams
 // added after it. The ES8311 is a mono DAC that reads one slot, so the two

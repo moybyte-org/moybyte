@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_seal.h"
 
 #ifdef MOY_ON_BOARD
@@ -193,42 +194,6 @@ int moy_seal_eq(const void *a, const void *b, size_t n) {
         d |= (uint8_t)(x[i] ^ y[i]);
     }
     return d == 0;
-}
-
-static int nib(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-        return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-        return c - 'A' + 10;
-    }
-    return -1;
-}
-
-int moy_seal_unhex(const char *s, size_t n, uint8_t *out, size_t want) {
-    if (s == NULL || n != want * 2u) {
-        return 0;
-    }
-    for (size_t i = 0; i < want; i++) {
-        int hi = nib(s[2 * i]), lo = nib(s[2 * i + 1]);
-        if (hi < 0 || lo < 0) {
-            return 0;
-        }
-        out[i] = (uint8_t)(hi << 4 | lo);
-    }
-    return 1;
-}
-
-void moy_seal_hex(const uint8_t *p, size_t n, char *out) {
-    static const char D[] = "0123456789abcdef";
-    for (size_t i = 0; i < n; i++) {
-        out[2 * i] = D[p[i] >> 4];
-        out[2 * i + 1] = D[p[i] & 15];
-    }
-    out[2 * n] = '\0';
 }
 
 void moy_seal_sha256(const void *p, size_t n, uint8_t out[32]) {
@@ -550,10 +515,10 @@ int moy_seal_pw_record(const char *pw, size_t pn, const char *salt, size_t sn, u
         return -1;
     }
     int n = snprintf(out, cap, "%s%u$%.*s$", PRE, (unsigned)iter, (int)sn, salt);
-    moy_seal_hex(w0, sizeof w0, out + n);
+    moy_hex_encode(w0, sizeof w0, out + n);
     n += 2 * (int)sizeof w0;
     out[n++] = '$';
-    moy_seal_hex(l, sizeof l, out + n);
+    moy_hex_encode(l, sizeof l, out + n);
     moy_seal_wipe(w0, sizeof w0);
     return n + 2 * (int)sizeof l;
 }
@@ -584,8 +549,8 @@ int moy_seal_pw_parse(const char *text, size_t n, uint32_t *iter, char *salt, si
     }
     const char *h = sd + 1;
     if (end - h != 2 * 32 + 1 + 2 * MOY_SEAL_POINT || h[2 * 32] != '$'
-        || !moy_seal_unhex(h, 2 * 32, w0, 32)
-        || !moy_seal_unhex(h + 2 * 32 + 1, 2 * MOY_SEAL_POINT, l, MOY_SEAL_POINT)) {
+        || !moy_hex_decode(h, 2 * 32, w0, 32)
+        || !moy_hex_decode(h + 2 * 32 + 1, 2 * MOY_SEAL_POINT, l, MOY_SEAL_POINT)) {
         return 0;
     }
     *iter = it;

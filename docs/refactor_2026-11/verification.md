@@ -72,10 +72,10 @@ DSI vendor drivers) are outside every count.
 | T9 | corrected | 104 ctypes structures in `runtime/host`, not about 40. One has a size check. |
 | T10 | verified | Six hand registrations in `runtime/__init__.py:36-130`, one `setdefault` in `net_binding.py:246`, the rest found by file name. |
 | T11 | corrected | 2,006 lines and 96 top-level functions, not 120. |
-| T12 | verified | Three runtime modules import `tools/moy_index_spike.py` (1,178 lines); one test does too. |
+| T12 | verified | Three runtime modules imported `moy_index_spike.py` (1,178 lines, since removed); one test did too. |
 | T13 | verified | `runtime/host/moy_log.py:16-18` against `moy_log.h:37`. |
 | T14 | verified | 55 `l_*` row functions in the 1,775-line `moy_app_lua.c`; the WASI tier's generic rows start at `moy_wasi.c:1044`. |
-| T15 | corrected | `tools/bench_unix_mp.py` is named once outside itself, by a comment at `modmoy_gfx.c:67`, which goes with it. The other three items are as described. |
+| T15 | corrected | `bench_unix_mp.py` (since deleted) was named once outside itself, by a comment at `modmoy_gfx.c:67`, which goes with it. The other three items are as described. |
 | T16 | verified | Nothing to change; recorded so the two entry forms are not merged. |
 | tiers §2.4 | verified | 540 test files, 427 importing `runtime`, 172 using `monkeypatch`, 67 driving unix MicroPython. |
 

@@ -57,6 +57,75 @@ def test_a_level_write_drops_the_sources_queue():
     assert t.last_key == 0x77, "a level stays until the source writes again"
 
 
+def test_the_press_is_published_once_a_press_whoever_reads_it():
+    """THE PRESS (moy_input.h): a held level is one press, a byte after a
+    frame with none is a press again, a one-shot key is one press, and a
+    Ctrl chord is its control byte."""
+    t = mi.InputTable()
+    kbd = t.source("kbd")
+    seen = []
+    for k in (0x61, 0x61, 0, 0x61, 0x62, 0x62):
+        kbd.last_key = k
+        t.begin_frame()
+        seen.append(t.typed)
+        seen.append(t.typed)            # a second reader sees the same press
+    assert seen == [0x61, 0x61, 0, 0, 0, 0, 0x61, 0x61, 0x62, 0x62, 0, 0]
+    kbd.last_key = 0
+    t.begin_frame()
+    kbd.key(0x63)
+    t.begin_frame()
+    assert t.typed == 0x63
+    t.begin_frame()
+    assert t.typed == 0
+    kbd.last_key = mi.event(ord("z"), mi.CTRL)
+    t.begin_frame()
+    assert t.typed == 0x1A
+
+
+def test_spending_the_press_swallows_the_byte_held_until_it_is_pressed_again():
+    t = mi.InputTable()
+    kbd = t.source("kbd")
+    kbd.last_key = 0x0D
+    t.begin_frame()
+    assert t.typed == 0x0D
+    t.spend_key()                       # a surface took the keyboard on it
+    assert t.typed == 0
+    t.begin_frame()
+    assert t.typed == 0, "the byte held as it was spent is no press"
+    kbd.last_key = 0
+    t.begin_frame()
+    kbd.last_key = 0x0D
+    t.begin_frame()
+    assert t.typed == 0x0D, "let go and pressed again, it types"
+    kbd.last_key = 0x71                 # down between two merges, then spent
+    t.spend_key()
+    t.begin_frame()
+    assert t.typed == 0
+    t.begin_frame()
+    t.spend_edges()                     # the frame's edges take the press too
+    kbd.last_key = 0
+    t.begin_frame()
+    kbd.last_key = 0x72
+    t.begin_frame()
+    t.spend_edges()
+    assert t.typed == 0
+
+
+def test_a_direct_write_is_the_frames_press_against_the_last_merge():
+    t = mi.InputTable()
+    t.begin_frame()
+    t.last_key = 0x61                   # written after the merge: this frame's
+    assert t.typed == 0x61
+    t.last_key = 0
+    assert t.typed == 0
+    t.begin_frame()
+    t.last_key = 0x62                   # written before the merge: the merge's
+    t.begin_frame()
+    assert t.typed == 0x62
+    t.last_key = 0x62
+    assert t.typed == 0, "the byte the last merge saw is no press"
+
+
 def test_the_sources_are_bounded_and_say_so():
     t = mi.InputTable()
     for i in range(mi.SOURCES - 1):

@@ -110,7 +110,7 @@ def test_wifi_off_offers_the_wifi_page_and_looks_again_on_the_way_back(tmp_path)
     assert ws._wifi_icon_kind() == "wifi_off"
     _press(ws, app, "a")
     assert app._away and app._inst.wifi_open()
-    assert ws.settings_layer.wifi_view
+    assert ws.settings_layer.showing("wifi")
     net.up = True                                 # a network joined there
     ws.settings_layer.back()                      # B on the panel: back to Get Carts
     assert ws.wm.top_is("getcarts")

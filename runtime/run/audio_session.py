@@ -221,7 +221,7 @@ class PcmPump:
             self._na.set_rate(self.rate)
         self._carry = 0.0
         self.rendered = 0
-        self.last_pcm = b""
+        self.last_pcm = b""         # the last tick's mix
         self.stream = None
 
     def frames(self, dt):
@@ -246,9 +246,3 @@ class PcmPump:
         pcm = self.block(self.frames(dt))
         if pcm:
             self.last_pcm = pcm
-
-    def take_pcm(self):
-        """The last tick's PCM, handed off once."""
-        pcm = self.last_pcm
-        self.last_pcm = b""
-        return pcm

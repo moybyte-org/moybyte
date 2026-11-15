@@ -95,7 +95,7 @@ board).
 | T8, L2 | The theme reader is fuzzed by a seeded Python corpus. It is outside the native fuzz targets. The fix is unchanged. |
 | T9 | 104 mirrored structures, not about 40. |
 | T11 | 96 functions, not 120. |
-| T15 | `tools/bench_unix_mp.py` is named by one C comment, which goes with it. |
+| T15 | The deleted `bench_unix_mp.py` was named by one C comment, which went with it. |
 | X4 | The "after" picture exists (`tools/golden_png.py`). The "before", the diff and a failure that offers them are missing. |
 | X6 | About 61k lines of tracked Markdown; `docs/` outside the archive holds 18.6k. |
 | K1 | Worth doing, and for more than the issue says. The two compositors share four trivial methods, but the host's has since gained the three last-frame verbs the WM probes for and the web's has not, so the browser's desk takes a different path from the host's and the boards'. |
@@ -295,8 +295,8 @@ Closes N8, N11, G5, N7, N13.
 
 **Changes**
 
-- `+native/moy_spine/moy_sb.h` (one growable builder with a failed flag and
-  an allocator parameter) and `+native/moy_spine/moy_codec.h` (base64,
+- `native/moy_spine/moy_sb.h` (one growable builder with a failed flag and
+  an allocator parameter) and `native/moy_spine/moy_codec.h` (base64,
   base64url, hex, UTF-8: valid, next, put, whole prefix). The copies become
   uses. `moy_http_resp_parse` moves beside the request parser.
 - One UTF-8 decoder, the strict one. `moy_path.c` calls it and keeps, on
@@ -304,11 +304,11 @@ Closes N8, N11, G5, N7, N13.
   overlong lead is taken, a control draws as `?`). The two files' rules stay
   two; merging them is in §7.
 - `moy_kernel.c`: the recovery floor moves to
-  `+native/moy_kernel/moy_recovery_floor.c` and the watchdog to
-  `+native/moy_kernel/moy_wd.c`. The pinned `mp_task` copy does not move
+  `native/moy_kernel/moy_recovery_floor.c` and the watchdog to
+  `native/moy_kernel/moy_wd.c`. The pinned `mp_task` copy does not move
   (`native/moy_kernel/mp_task_calls.txt`).
 - `moy_os.c` splits by concern into files, sockets and processes over a
-  private header (`+native/moy_elf/moy_os_int.h`).
+  private header (`native/moy_elf/moy_os_int.h`).
 - N7: each board's `board.toml` gains the `os` rows its hand defines stand
   for, the drivers read `MOY_HW_*`, and the Zero's `/gpio` allowlist comes
   from the lease rows `tools/board_config.py` already emits. The hand pin
@@ -323,7 +323,7 @@ Closes N8, N11, G5, N7, N13.
 boot, with touch, keys and audio smoke (a wrong pin is a dead peripheral on
 one board). The recovery floor on glass and the P4's ELF suite.
 
-**Guards.** `+tests/test_native_codecs.py`: no private builder, base64, hex
+**Guards.** `tests/test_native_codecs.py`: no private builder, base64, hex
 or UTF-8 helper outside `native/moy_spine`. `tests/test_board_toml.py`: no
 `mpconfigboard.h` defines a pin-shaped `MOY_*` name. `tests/test_mp_task_calls.py`
 as it is.
@@ -344,23 +344,23 @@ Closes T11, T12, T15, T5, T3, and writes I1's matrix.
   `tools/gen_os/` (the table and its rules, the C prototype parser, one
   emitter per tier). Its outputs do not change by a byte.
 - T12: the host library's parts and the index's signatures move from
-  `tools/moy_index_spike.py` into `+runtime/host/native_parts.py`. The fuzz,
-  sanitize and host commands stay as `+tools/native_check.py`; the one-off
+  the removed `moy_index_spike.py` into `runtime/host/native_parts.py`. The fuzz,
+  sanitize and host commands stay as `tools/native_check.py`; the one-off
   bench, sizes and ci-time commands go (#224 holds their numbers).
-- T15: `tools/bench_unix_mp.py` and the comment that names it are deleted;
-  `tools/music_mockups.py` moves under `experiments/`; the two docstrings
+- T15: `bench_unix_mp.py` and the comment that named it are deleted;
+  the music mockup generator moves to `experiments/music_mockups/music_mockups.py`; the two docstrings
   that cite a test that does not exist point at T3's; `api_floor` moves to a
   test helper.
 - T5: one `errors` section in `native/os_calls.json`: code, Python
   exception, errno, message, Lua message. It generates the C and Lua header
   and the host's table. `MOY_APP_FULL` gets one meaning.
-- T3: `+tests/test_every_row.py`. Each row gains an `example`. Generated
+- T3: `tests/test_every_row.py`. Each row gains an `example`. Generated
   probes (a Python app, a Lua app, a wasm module and a WASI command assembled
   by `tools/wat.py`) call every row a tier projects and print one normalised
   line each; every tier's trace is compared with Python's, on CPython and on
   the board model.
 
-- I1: `+tests/test_input_matrix.py`, the input conformance matrix.
+- I1: `tests/test_input_matrix.py`, the input conformance matrix.
   - Rows: every widget kind (field, list, button, popover, dialog, text
     view).
   - Columns: every input as its driver delivers it, through the drivers'
@@ -410,7 +410,7 @@ I2, and turns I1's matrix green for everything but phase 8's cells.
   it: each registered app, Settings, Tasks, each tab layer of the Editor, and
   the layer the Player draws in.
   The `getattr` duck typing and `page_app`'s special cases go.
-- **`+runtime/shell/input_policy.py`, the owner.**
+- **`runtime/shell/input_policy.py`, the owner.**
   - *Typing* is derived once a frame from the surface that holds the keys and
     applied only when it changes, with the seed rule intact. The 45 setter
     calls, the 8 `nav.text_mode` calls (and that row of the call table), the
@@ -457,7 +457,7 @@ in each; W A S D moving; the trackball. P4: two desk windows, one typing and one
 keyboard's held key.
 
 **Guards.** Phase 4's matrix, with no failing cell left that names this
-phase. And `+tests/test_input_policy.py`:
+phase. And `tests/test_input_policy.py`:
 - a table over every surface in `APPS`, Settings, the Editor's tabs and a
   cart app: focusing a field types; Mic reverts and opens no menu; Esc, B and
   both chevrons end in one state; a menu over a field is game mode and typing
@@ -512,7 +512,7 @@ no-allocation rows are there for that.
 **Check.** Host suite; T3 green in every column. T-Deck and P4 pass; the
 Zero's image builds with headroom above its floor. Goldens unchanged.
 
-**Guard.** `+tests/test_face_parity.py`: for every `face.json`, the
+**Guard.** `tests/test_face_parity.py`: for every `face.json`, the
 MicroPython globals, the ctypes names and the table's rows are one set less
 the declared absences, and one generated script gives equal answers on both
 runtimes. The generator's drift test.
@@ -570,7 +570,7 @@ and the guard names it with the reason.
 `tests/test_content_rect.py`. P4: a frame-cost spot check, because the desk's
 repaint path moves (#58).
 
-**Guard.** `+tests/test_shell_surfaces.py`: the strip is drawn from the
+**Guard.** `tests/test_shell_surfaces.py`: the strip is drawn from the
 frame loop only; Settings keeps no per-page flag; OPEN and a single-candidate
 "Open with" land in one app; no surface under `runtime/system`,
 `runtime/apps` or `runtime/editors` keeps a scroll offset of its own, the
@@ -900,7 +900,7 @@ suites (`make preflight-web`). P4 and Guition P4 passes, with #58's composite
 numbers read before and after; crisp and smooth each looked at on glass, and
 a forced PPA error demoting to the CPU kernel.
 
-**Guard.** `+tests/test_one_compositor.py`: one class defines the
+**Guard.** `tests/test_one_compositor.py`: one class defines the
 one-buffer compositor's verbs, and the web's and the host's compositors are
 it; `device/p4_canvas.py` holds no branch on crisp or smooth around a blit.
 

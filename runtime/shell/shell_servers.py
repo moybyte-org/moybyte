@@ -362,11 +362,6 @@ class NavServer:
         return self._go(g, "Wants to run " + str(name),
                         lambda: ws.run_script(kind, name), (True, None))
 
-    def text_mode(self, g, on):
-        """Flip the keyboard between typing and game mode, for an app that
-        changes mode mid-session (Storybook's page editor)."""
-        self.__ws._set_text_mode(bool(on))
-
     def cover(self, g, cart):
         """`cart`'s cover decoded at its half (64x64), what a list row draws
         scaled to its picture (Files' projects): None for a cart with no
@@ -568,7 +563,7 @@ class InstallServer:
         m = getattr(ws, "sysmenu", None)
         if m is not None and m.open and m.widget == "wifi":
             return True
-        return bool(ws.wm.top_is("settings") and ws.settings_layer.wifi_view)
+        return bool(ws.wm.top_is("settings") and ws.settings_layer.showing("wifi"))
 
     def consent(self, g):
         """The console's consent records (`app_perms.Consent`): what the
@@ -808,7 +803,6 @@ DOOR_ARGS = {
     "nav.edit_file": "cso",
     "nav.play": "c",
     "nav.run_script": "ss",
-    "nav.text_mode": "i",
     "wallpaper.current": "",
     "wallpaper.carts": "",
     "wallpaper.id_for": "c",

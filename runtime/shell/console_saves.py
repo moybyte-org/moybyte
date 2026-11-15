@@ -94,7 +94,6 @@ class SaveVerbs:
                                         self.editor.text())
         if self._start():
             self.ach.award("first_run")         # Lift Off!: a cart was RUN
-            self._set_text_mode(False)
             # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
             # exit returns to the code tab (not the launcher home).
             self.play(self.editor_app)

@@ -5,7 +5,8 @@
 #include "moy_bus.h"
 
 #ifdef MOY_ON_BOARD
-#include "py/mpconfig.h"        // the board's MOY_BUS_I2C_* (mpconfigboard.h)
+#include "py/mpconfig.h"        // the board's MOY_BUS_I2C_* (mpconfigboard.h); its pins
+                                // are board.toml's i2c0 row (MOY_HW_I2C0_*)
 #endif
 
 #if defined(MOY_ON_BOARD) && defined(MOY_BUS_I2C_PORT)
@@ -36,8 +37,8 @@ static int bus_up(void) {
     }
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
-        .sda_io_num = MOY_BUS_I2C_SDA,
-        .scl_io_num = MOY_BUS_I2C_SCL,
+        .sda_io_num = MOY_HW_I2C0_SDA,
+        .scl_io_num = MOY_HW_I2C0_SCL,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = MOY_BUS_I2C_HZ,

@@ -262,7 +262,7 @@ def capture(cfg, carts_dir):
     out["row_wifi_off"] = page(focus="Wi-Fi")
     ws.wifi = _Wifi(True)
 
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_nets = [("MoyNet-5G-Long-Name", 88, True), ("Guest", 40, False),
                     ("cafe wifi", 12, True)]
     sl.wifi_known = ["MoyNet-5G-Long-Name"]
@@ -270,23 +270,23 @@ def capture(cfg, carts_dir):
     for sel in range(3):
         out["wifi_list_%d" % sel] = page(sl._sub, "net%d" % sel)
     sl.wifi_pick = "MoyNet-5G-Long-Name"
-    sl.wifi_pw.text = "hunter2hunter2"
+    sl.wifi_pw = "hunter2hunter2"
     out["wifi_password"] = page()
     sl.wifi_pick = None
     ws.wifi = _Wifi(False)
     out["wifi_offline"] = page()
     ws.wifi = _Wifi(True)
-    sl.close_wifi()
+    sl.close_page()
 
-    sl.open_bluetooth()
+    sl.open_page("bt")
     for sel in range(2):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
-    sl.close_bluetooth()
+    sl.close_page()
 
     ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
-    sl.open_tz()
+    sl.open_page("tz")
     out["tz_picker"] = page(sl._sub)
-    sl.close_tz()
+    sl.close_page()
     ws.set_time_zone(None, persist=False)
 
     sl._draw_page()
@@ -299,7 +299,7 @@ def capture(cfg, carts_dir):
     ws.usb_drive = drive
     sl._draw_page()
     out["row_usb_drive"] = page(focus=say("USB DRIVE"))
-    sl.open_usb()
+    sl.open_page("usb")
     out["usb_off"] = page(sl._sub, "Turn on")
     drive.why = _usb.NO_CARD
     out["usb_refused"] = page(sl._sub, "Turn on")
@@ -308,7 +308,7 @@ def capture(cfg, carts_dir):
         drive.lever.st = st
         out["usb_on_%d" % st] = page(sl._sub, "Turn off")
     drive.turn_off(ws)
-    sl.close_usb()
+    sl.close_page()
     ws.usb_drive = None
     sl._draw_page()
 

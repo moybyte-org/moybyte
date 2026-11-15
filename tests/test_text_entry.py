@@ -4,27 +4,19 @@ through it.
 `editors_base.text_key` is the key ladder every typed field on the console
 shares (Backspace trims, Delete finds nothing after the caret at the end,
 Enter commits, Esc cancels, printable ASCII appends under a cap);
-`TextEntry` is a buffer over it that reads `inp.last_key` through a
-`KeyEdge`, so one physical press types one character. It used to be six hand-rolled copies with six edge trackers (the
-block keypads, CART INFO, NEW SCRIPT, the wifi password, the scene TAG, the
-Files rename), none of which agreed on where the edge was seeded.
+`TextEntry` is a buffer over it; a typed byte is the input table's press
+(`typed`), so one physical press types one character.
 
-The second thing pinned here is `widgets.arm_prompt` + the GUARDED edge: the
-tap/key that OPENS a modal prompt (a held A / Enter byte, the tap on the
-button) must never be read as its first keystroke, commit or cancel (#29). It
-was one body in block_editor_ui and two inlined copies in cards_layer; the
-tests below drive all three callers through the same latched-byte frame.
+The second thing pinned here is `widgets.arm_prompt`: the tap/key that OPENS
+a modal prompt (a held A / Enter byte, the tap on the button) must never be
+read as its first keystroke, commit or cancel (#29); its `clear_edges` spends
+the press. The tests below drive all three callers through the same
+latched-byte frame.
 """
 
 from runtime import host_app, moy_carts
-from runtime.editors_base import (KeyEdge, TextEntry, text_key, TE_EDIT,
-                                  TE_COMMIT, TE_CANCEL)
+from runtime.editors_base import TextEntry, text_key, TE_EDIT, TE_COMMIT, TE_CANCEL
 from ws_helpers import shelf, select_on_home  # noqa: E402
-
-
-class _Inp:
-    def __init__(self, key=0):
-        self.last_key = key
 
 
 # -- the ladder ---------------------------------------------------------------
@@ -51,67 +43,15 @@ def test_text_key_caps_and_filters():
     assert text_key("1", ord("2"), 8, digits) == ("12", TE_EDIT)
 
 
-def test_text_entry_open_cuts_to_the_cap_and_types_one_char_per_press():
+def test_text_entry_open_cuts_to_the_cap_and_keys_through_the_ladder():
     e = TextEntry(4)
     e.open("abcdefgh")
     assert e.text == "abcd"                     # a seed longer than typing could make
     e.open("")
-    held = _Inp(ord("z"))
-    assert e.feed(held) == TE_EDIT
-    assert e.feed(held) is None                  # the same byte held: no repeat
-    assert e.feed(held) is None
-    assert e.feed(_Inp(0)) is None               # the gap
-    assert e.feed(held) == TE_EDIT               # ...re-arms the edge
+    assert e.key(ord("z")) == TE_EDIT
+    assert e.key(ord("z")) == TE_EDIT
+    assert e.key(13) == TE_COMMIT
     assert e.text == "zz"
-    assert e.feed(_Inp(13)) == TE_COMMIT
-    assert e.text == "zz"
-
-
-def test_text_entry_seed_swallows_the_byte_held_at_open():
-    """The wifi/TAG/rename discipline: a key still latched from the screen
-    change is not a keystroke. Seeded, the held byte types nothing; a fresh
-    press after a gap does."""
-    e = TextEntry(8)
-    e.open("", seed=13)
-    assert e.feed(_Inp(13)) is None              # the Enter that opened it
-    assert e.feed(_Inp(0)) is None
-    assert e.feed(_Inp(13)) == TE_COMMIT         # a real second press
-
-
-def test_guarded_open_arms_on_the_first_pass_only():
-    """The modal discipline: the first input pass after a guarded open only
-    re-seeds, whatever byte it carries -- even one that arrived AFTER the
-    open and would otherwise read as fresh."""
-    e = TextEntry(8)
-    e.open("", seed=0, guard=True)
-    inp = _Inp(ord("q"))                          # a byte the seed did not see
-    assert e.edge.arming(inp.last_key) is True    # the caller's early-out
-    assert e.edge.arming(inp.last_key) is False   # once
-    assert e.feed(inp) is None                    # ...and it was re-seeded to 'q'
-    assert e.feed(_Inp(0)) is None
-    assert e.feed(_Inp(ord("q"))) == TE_EDIT
-    assert e.text == "q"
-
-
-def test_key_edge_reset_drops_a_pending_guard():
-    k = KeyEdge()
-    k.seed(5, guard=True)
-    k.reset()
-    assert k.arming(7) is False
-    assert k.hit(7) is True
-
-
-def test_a_shared_edge_does_not_refire_across_fields():
-    """CART INFO's two fields share one KeyEdge: the Tab that moved focus is
-    recorded once, so the byte held across the switch types nothing into the
-    field it landed on."""
-    edge = KeyEdge()
-    a, b = TextEntry(8, edge=edge), TextEntry(8, edge=edge)
-    a.open("", 0)
-    b.open("", 0)
-    assert a.feed(_Inp(ord("x"))) == TE_EDIT
-    assert b.feed(_Inp(ord("x"))) is None        # still the same held byte
-    assert b.text == ""
 
 
 # -- arm_prompt: the three callers, one latched frame -------------------------
@@ -165,6 +105,7 @@ def test_cart_info_survives_the_keypress_that_opened_it(tmp_path):
     ws.input.begin_frame()
     ws.input.last_key = 0x0D
     cl._open_meta()                               # opened while Enter/A are down
+    ws.input_policy.sync()                        # the frame's look at the mode
     assert cl.prompt is not None and ws.input.text_mode
     assert not ws.input.held("a")                 # arm_prompt: everybody let go
     _latched_frame(ws)
@@ -197,6 +138,7 @@ def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     ws.input.begin_frame()
     ws.input.last_key = 0x0D
     bu._blk_open_kbd("text", "", block={"t": "x", "p": {}}, slot="s")
+    ws.input_policy.sync()
     assert bu.blk_kbd is not None and ws.input.text_mode
     _latched_frame(ws)
     ws.frame(1 / 30)
@@ -205,6 +147,7 @@ def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     _typed_frame(ws, ord("h"))
     assert bu.blk_kbd["entry"].text == "h"
     bu._blk_kbd_cancel()
+    ws.input_policy.sync()
     assert bu.blk_kbd is None and not ws.input.text_mode
 
 
@@ -228,7 +171,7 @@ def test_block_prompt_kinds_type_what_they_allow():
     bu._blk_kbd_cancel()
 
 
-# -- the seeded fields: wifi and the scene TAG ---------------------------------
+# -- the fields a held byte opens: wifi ----------------------------------------
 
 def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_path):
     """The prompt is the engine's field (tests/test_settings_wifi_prompt.py):
@@ -237,13 +180,14 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_nets = [("Locked", 80, True)]
     sl.wifi_known = []
     sl.wifi_sel = 0
     drv.frame(1 / 30)
     ws.input.last_key = 0x0D                      # the Enter that picked the row
     sl._wifi_activate()
+    ws.input_policy.sync()
     assert sl.wifi_pick == "Locked" and ws.input.text_mode
     sl.wifi_input(ws.input, sl._sub)                      # the byte is still held
     sl._draw_page()
@@ -259,12 +203,13 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
         sl._draw_page()
     for ch in "pw":
         key(ord(ch))
-    assert sl.wifi_pw.text == "pw"
+    assert sl.wifi_pw == "pw"
     key(127)                                      # Delete: the caret is the end
-    assert sl.wifi_pw.text == "pw"
+    assert sl.wifi_pw == "pw"
     key(8)
-    assert sl.wifi_pw.text == "p"
+    assert sl.wifi_pw == "p"
     key(27)
+    ws.input_policy.sync()
     assert sl.wifi_pick is None and not ws.input.text_mode
 
 
@@ -319,6 +264,7 @@ def test_new_script_is_closed_by_a_cart_switch(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)                               # draws the dialog
     cl.reset()
+    ws.input_policy.sync()
     assert cl.prompt is None and not ws.input.text_mode
 
 

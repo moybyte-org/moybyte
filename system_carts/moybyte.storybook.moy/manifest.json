@@ -13,7 +13,6 @@
     "app": {
       "id": "storybook",
       "entry": "storybook_app:StorybookAppLayer",
-      "text_mode": false,
       "order": 40
     },
     "permissions": [

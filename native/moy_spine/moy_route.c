@@ -72,8 +72,7 @@ uint32_t moy_apps_find(const moy_apps_t *a, const char *id, size_t id_len) {
 }
 
 int moy_apps_register(moy_apps_t *a, const char *id, size_t id_len,
-                      const char *title, size_t title_len, int text_mode,
-                      int has_min, int32_t min_w, int32_t min_h, uint32_t *h) {
+                      const char *title, size_t title_len, int has_min, int32_t min_w, int32_t min_h, uint32_t *h) {
     if (!kind_ok(id_len)) {
         return MOY_ROUTE_BAD;
     }
@@ -98,7 +97,6 @@ int moy_apps_register(moy_apps_t *a, const char *id, size_t id_len,
         return rc;
     }
     kind_set(&app->id, id, id_len);
-    app->text_mode = text_mode != 0;
     app->has_min = has_min != 0;
     app->min_w = app->has_min ? min_w : 0;
     app->min_h = app->has_min ? min_h : 0;

@@ -61,9 +61,9 @@ file is what the chip changes.
 
 ## Free pins
 
-The `/gpio` allowlist, `MOY_NET_GPIO_PINS` in `boards/MOYBYTE_C3_ZERO/mpconfigboard.h`,
-and the `gpio` lease row in `board.toml` (a test holds the two equal):
-GPIO0, GPIO1, GPIO3, GPIO4, GPIO5, GPIO6, GPIO7 and GPIO10. `machine.I2C(0)`
+The `/gpio` allowlist is the `gpio` lease row in `board.toml`, which the build
+emits as `MOY_LEASE_GPIO_PINS`: GPIO0, GPIO1, GPIO3, GPIO4, GPIO5, GPIO6, GPIO7
+and GPIO10. `machine.I2C(0)`
 defaults to SDA GPIO5 and SCL GPIO6. Held back: the strapping pins 2, 8 and 9,
 UART0's 20 and 21, the flash's 11–17 and USB's 18 and 19.
 

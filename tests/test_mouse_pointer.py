@@ -121,7 +121,7 @@ def test_the_middle_button_drags_the_page_as_far_as_a_finger(tmp_path):
     _drag(ws2, d2, x2, y2, -30, steps=6)
     _frames(d2)
     assert by_middle == _band(ws2)
-    assert not (ws.settings_layer.wifi_view or ws.settings_layer.bt_view), "and taps nothing"
+    assert not (ws.settings_layer.showing("wifi") or ws.settings_layer.showing("bt")), "and taps nothing"
 
 
 # -- the autoscroll, an exact trajectory ------------------------------------------

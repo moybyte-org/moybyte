@@ -3,7 +3,7 @@ C beside the Python, pinned once for every binding.
 
 `BINDINGS` names each implementation by a factory for an empty table: the
 Python twin, and the C twin over the host's C ABI through ctypes
-(tools/moy_index_spike.py). Every test below runs against each, unchanged --
+(runtime/host/native_parts.py). Every test below runs against each, unchanged --
 the parity the 1b gate asks for. tests/test_moy_index_twins.py runs this same file
 on the boards' VM over the native module, and tests/test_semantic_traces.py's
 store trace pins the handle VALUES, so a binding that hands out different
@@ -31,11 +31,11 @@ from runtime.moy_index import GEN_MAX, SLOT_BITS, SLOTS, StaleHandle
 BINDINGS = {"python": moy_index.Index}
 
 try:
-    from tools import moy_index_spike
-except ImportError:         # the VM's run of this file has no tools/
-    moy_index_spike = None
-if moy_index_spike is not None:
-    BINDINGS.update(moy_index_spike.host_bindings())
+    from runtime import native_parts
+except ImportError:         # the VM's run of this file has no ctypes face
+    native_parts = None
+if native_parts is not None:
+    BINDINGS.update(native_parts.host_bindings())
 
 
 @pytest.fixture(params=sorted(BINDINGS))

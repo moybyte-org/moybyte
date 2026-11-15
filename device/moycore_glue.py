@@ -562,14 +562,12 @@ class MoycoreRun:
 
     def _sync_textmode(self):
         """The cart's `textmode()` (libmoy's host callback writes
-        SNAP_TEXTMODE) on the console's input as it changes, as a Python
-        cart's writes it: the keyboard's mode follows (`Player.tick`)."""
+        SNAP_TEXTMODE) on its run as it changes, as a Python cart's writes
+        it: the keyboard's mode follows (`Player.typing`)."""
         t = self.snap[self._I_TEXT]
         if t != self._textmode:
             self._textmode = t
-            inp = getattr(self.ws, "input", None)
-            if inp is not None:
-                inp.text_mode = bool(t)
+            self.ws.run.textmode = bool(t)
 
     def mute(self, on):
         """A run held aside (runtime/shell/procs.py) reads no input while

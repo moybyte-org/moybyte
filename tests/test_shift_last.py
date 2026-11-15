@@ -192,17 +192,37 @@ def test_a_canvas_without_a_last_buffer_has_no_copy_last_into():
     from device_canvas import SystemCanvas
     lay = host_canvas.make_system_canvas(W, H).new_layer(8, 8)
     assert getattr(lay, "copy_last_into", None) is None
-    web = SystemCanvas(_OneBuffer(W, H))
-    assert getattr(web, "copy_last_into", None) is None
-    web._buf[:] = noise(W * H * 2, 3)
-    before = bytes(web._buf)
-    assert web.shift_last(2, 2, 30, 18, -3, 4)
-    assert bytes(web._buf) == ref_shift(before, before, W, H, 2, 2, 30, 18, -3, 4)
+    bare = SystemCanvas(_FourVerbs(W, H))
+    assert getattr(bare, "copy_last_into", None) is None
+    bare._buf[:] = noise(W * H * 2, 3)
+    before = bytes(bare._buf)
+    assert bare.shift_last(2, 2, 30, 18, -3, 4)
+    assert bytes(bare._buf) == ref_shift(before, before, W, H, 2, 2, 30, 18, -3, 4)
 
 
-class _OneBuffer:
-    """The browser's compositor shape (firmware/web_runner/web_canvas.py):
-    one buffer, no last frame of its own."""
+def test_the_one_buffer_compositor_is_its_own_last_frame():
+    """The browser's and the host's root (runtime/toolkit/one_buffer.py): the
+    one buffer is the last frame's, so copy_last copies nothing, shift_last
+    moves in place and copy_last_into reads the one buffer."""
+    host_canvas.install()
+    from device_canvas import SystemCanvas
+    from runtime.one_buffer import OneBufferCompositor
+    cv = SystemCanvas(OneBufferCompositor(W, H, gfx_binding))
+    cv._buf[:] = noise(W * H * 2, 7)
+    before = bytes(cv._buf)
+    assert cv.copy_last(3, 3, 20, 10) and bytes(cv._buf) == before
+    lay = cv.new_layer(30, 20)
+    lay._buf[:] = noise(30 * 20 * 2, 8)
+    lb = bytes(lay._buf)
+    assert cv.copy_last_into(lay, 5, 2, 30, 20, 1, 1)
+    assert bytes(lay._buf) == ref_copy(lb, 30, before, W, H, 5, 2, 30, 20, 1, 1)
+    assert cv.shift_last(2, 2, 30, 18, -3, 4)
+    assert bytes(cv._buf) == ref_shift(before, before, W, H, 2, 2, 30, 18, -3, 4)
+
+
+class _FourVerbs:
+    """A compositor of the four verbs DeviceCanvas asks for and nothing
+    more: no last frame of its own."""
 
     def __init__(self, w, h):
         self._w, self._h = w, h

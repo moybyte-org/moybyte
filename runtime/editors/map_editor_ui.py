@@ -23,7 +23,6 @@ import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 from editors_paint_map import MapEditor
-from editors_base import KeyEdge
 from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 
 # The handheld page (editor_map.py): the right column's width and the foot's
@@ -157,7 +156,6 @@ class MapEditorUI:
         self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood/select
         self._map_rect = None          # (x0,y0,x1,y1) cell corners while a RECT drags
         self._map_sel = None           # (x0,y0,x1,y1) live SELECT marquee drag box (#91)
-        self._mkey = KeyEdge()         # Ctrl+Z/Y edge tracker (#91)
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
         self._map_press = None         # gesture origin (px,py); set on press, None on release
         self._map_panning = False      # this gesture has crossed the pan threshold (#37)
@@ -270,7 +268,6 @@ class MapEditorUI:
         self.map_tool = "stamp"        # (#91) back to the plain per-cell brush
         self._map_rect = None
         self._map_sel = None
-        self._mkey.reset()
 
     # -- input -----------------------------------------------------------------
 
@@ -310,25 +307,7 @@ class MapEditorUI:
                 self._map_pan(1, 0)
             if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                 self._map_cycle_zoom()
-            # In-editor undo/redo (#91): the host keyboard shortcut Ctrl+Z (0x1A) /
-            # Ctrl+Y (0x19), edge-triggered (act on the 0->key press, no autorepeat),
-            # mirroring the code editor's journal shortcut. On the device the on-screen
-            # UNDO/REDO buttons are the touch-first affordance (no Ctrl key).
-            k = getattr(i, "last_key", 0)
-            self._mkey.undo_redo(k, self._map_undo, self._map_redo)
         ws._leave_or_home(ws.exit)
-
-    def _map_undo(self):
-        """Step the in-editor edit journal back one gesture (#91), then re-clamp the
-        camera (an undo can't move it, but a resize-undo path might)."""
-        me = self.mapedit
-        if me is not None and me.undo():
-            self._map_clamp_cam()
-
-    def _map_redo(self):
-        me = self.mapedit
-        if me is not None and me.redo():
-            self._map_clamp_cam()
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,

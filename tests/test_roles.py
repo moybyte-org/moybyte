@@ -48,8 +48,8 @@ def _rows():
 
 def _verbs():
     """Each role's verbs but those of the roles no AppContext object serves:
-    the toolkit's (app_context.TOOLKIT; tests/test_ui_wasm.py drives its
-    rows) and the console calls' (shell_servers.ConsoleCalls)."""
+    the toolkit's (app_context.TOOLKIT; tests/test_app_ui.py compares the
+    tiers' pictures) and the console calls' (shell_servers.ConsoleCalls)."""
     out = {}
     for r in _rows():
         if r["role"] not in _ac.ROLES:

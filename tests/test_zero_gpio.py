@@ -3,7 +3,7 @@
 Two ends, one wire shape, and no shared code between them on purpose -- the
 browser end is a queue and a cache (firmware/web_runner/gpio_link.py), the
 board end is the kernel webhost's /gpio route (native/moy_net/moy_gpio.c) over
-the board's allowlist table (MOY_NET_GPIO_PINS in the Zero's mpconfigboard.h),
+the board's allowlist table (its board.toml `gpio` lease row, MOY_LEASE_GPIO_PINS),
 run here over runtime/host/net_binding.py with the host's stand-in pins. What holds
 the ends together is the last test in this file, which drives a real batch out
 of one and into the other.
@@ -15,7 +15,6 @@ is the whole mechanism, so the cases below are refusals.
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -33,13 +32,14 @@ nb.install()
 import moy_webhost                                             # noqa: E402
 from gpio_link import GpioLink                                 # noqa: E402
 
-HEADER = (ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "boards" / "MOYBYTE_ZERO"
-          / "mpconfigboard.h")
+from tools import board_config                                # noqa: E402
+
+ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
 
 
 def _board_pins():
-    m = re.search(r"#define MOY_NET_GPIO_PINS\s+\{([^}]*)\}", HEADER.read_text())
-    return tuple(int(x) for x in m.group(1).split(","))
+    (_name, pins), = board_config.lease_defines(ZERO)
+    return tuple(int(x) for x in pins.split(","))
 
 
 PINS = _board_pins()

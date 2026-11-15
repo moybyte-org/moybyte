@@ -254,7 +254,7 @@ UNIX_MP_NATIVE := native
 # glass. Its blob table is generated (see the recipe below). moy_png is the
 # cover reader, here so tests/test_cover_png.py holds the boards' C to the
 # host's Python reader and to moy-spec's vectors. moy_index is the store's
-# native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
+# native index, built as the twin UNIX_MP_INDEX names (tools/native_check.py
 # has the hook): it registers extensible, so a run with runtime/ on its path
 # still imports runtime/carts/moy_index.py, and tests/test_moy_index_twins.py and the
 # store trace reach the native one with the path emptied. moy_spine is the

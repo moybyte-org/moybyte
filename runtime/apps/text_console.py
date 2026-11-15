@@ -60,7 +60,6 @@ none of this ring: its scrollback is the shell's cell grid in C
 from array import array as _array
 
 from editors_code import CodeEditor
-from editors_base import KeyEdge
 import os_log as _os_log
 from code_layer import symbols_for, draw_symbol_keys
 import ui as _ui
@@ -130,7 +129,6 @@ class TextConsole:
         self._shown_gen = -1
         self.top = 0              # the first row the log shows, as its view last drew
         self.ed = CodeEditor("", cols=self.cols, rows=1)
-        self._ekey = KeyEdge()
         self._armed = False       # a script is waiting on a line
         self._prompt = ""
         self._answer = None       # the entered line, until the script takes it
@@ -262,13 +260,6 @@ class TextConsole:
             self._answer = line
         return line
 
-    def seed_key(self, code):
-        """Swallow the byte that opened this surface. Taking the keyboard is a
-        screen change and the key that caused it is still in `last_key` when
-        the first frame runs -- the code editor's rule (`_set_text_mode`),
-        which the prompt needs for exactly the same reason."""
-        self._ekey.prev = code or 0
-
     def key(self, code):
         """One keyboard byte. Enter submits; everything else edits the line.
         After the script ended, Enter runs it again."""
@@ -298,7 +289,6 @@ class TextConsole:
         self.on_line = None
         self.title = str(title)
         self._lang = lang
-        self._ekey = KeyEdge()
         self._host.reset()                # the log's view starts afresh, at its foot
         self.ended = False
 
@@ -391,8 +381,8 @@ class TextConsole:
         Player runs, because that is what a script IS -- the console is not a
         content Layer of its own, it is the running cart's surface."""
         inp = self.ws.input
-        code = getattr(inp, "last_key", 0) or 0
-        if self._ekey.hit(code):
+        code = inp.typed
+        if code:
             self.key(code)
         n = getattr(inp, "key_repeats", 0)     # a held key types again, and
         if n:                                  # Enter, which enters, does not

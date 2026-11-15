@@ -196,7 +196,6 @@ class HomeVerbs:
         landing on the windowed tier; fullscreen tiers never call this."""
         self._dirty = True
         self.search_typing = False     # leaving the home ends any query typing
-        self._set_text_mode(False)
         # Re-derive the shelf under the desk-tier filter (system apps are
         # desk icons here): the first call runs before the WM swap finished
         # populating anything, so the boot-time entry settles the filter.
@@ -244,7 +243,6 @@ class HomeVerbs:
             return
         self._dirty = True             # screen change repaints (#44)
         self.search_typing = False     # the query is the fullscreen home's
-        self._set_text_mode(False)     # a grid, not the code editor
         g = self.projects_grid
         if g is None:
             g = self.projects_grid = self._home_grid(
@@ -295,7 +293,6 @@ class HomeVerbs:
         holds the workspace is not torn down -- go_home touches no parked
         window (docs/theme_and_shell_2026-11.md §8.1)."""
         self._dirty = True             # screen change repaints (#44)
-        self._set_text_mode(False)    # restore the game-button keyboard mode
         self.close_popover()
         # The launcher root ends every return path: an app-to-app return that
         # outlived its journey here would drag an unrelated later exit into
@@ -314,22 +311,17 @@ class HomeVerbs:
         # artwork._save) -- the bar-contract bug class one level down: an app that
         # persists on a debounce and is not on the list loses the kid's work,
         # silently. `close()` is the uniform LEAVING hook now
-        # (ui_refactor_2026-08 Phase 6, docs/app_api_v1.md); it is change-gated,
-        # so this costs nothing for an app with nothing pending, and a future app
-        # gets it by implementing one method instead of editing this file.
-        for _app, _text in getattr(self, "_apps", ()):
-            _close = getattr(_app, "close", None)
-            if _close is not None:
-                _close()
+        # (docs/app_api_v1.md), reached through `leave_surface`; it is
+        # change-gated, so this costs nothing for a surface with nothing
+        # pending, and a future app gets it by implementing one method
+        # instead of editing this file.
+        for _app in self._apps:
+            self.leave_surface(_app.id)
+        self.leave_surface("settings")    # a Name still typed, its radio lease
         _editor_app = getattr(self, "editor_app", None)
-        if _editor_app is not None and _editor_app.project is self.run.project:
-            _editor_app.save_current()
-        if self._editing_icons:
-            self.look.save_icons()     # the theme mode's tabs
-        self.look.commit()             # a change to the theme still settling
-        self.settings_layer.commit_name()  # and a Name still being typed
-        if self.settings_layer.wifi_view:
-            self.settings_layer.close_wifi()   # its radio lease ends with the visit
+        if _editor_app is not None and (self._editing_icons
+                                        or _editor_app.project is self.run.project):
+            self.leave_surface("menu")
         # The parked Editor's workspace (console mode): its window comes back
         # to it, so neither it nor the run state it holds is torn down.
         keep = self.wm.is_parked("menu") and (
@@ -410,7 +402,7 @@ class HomeVerbs:
         if tab == "apps":
             hidden = getattr(self.wm, "HIDDEN_APPS", ())
             out = []
-            for app, _t in getattr(self, "_apps", ()):
+            for app in getattr(self, "_apps", ()):
                 if app.id in hidden:
                     continue
                 for c in carts:
@@ -492,6 +484,9 @@ class HomeVerbs:
         g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
+        # The crash guard's mark on a Make card it turned off (#160).
+        g.broken_for = self.cart_broken
+        g.broken_ids = self.broken_cart_ids
         g.own_for = self.carts.is_own
         g.plays_for = self.carts.plays
         g.today_for = self._today_ymd
@@ -574,12 +569,11 @@ class HomeVerbs:
 
     def open_search(self):
         """Enter the launcher search box (≡ -> SEARCH, #105): capture ASCII
-        keystrokes into search_query, filtering the run-grid live. Mirrors the
-        wifi-password typing idiom (_set_text_mode swaps the keyboard to clean
-        ASCII while a query is being typed -- plain printable range only, so it
-        works on the T-Deck's keyboard with no `=[]{}<>%` keys)."""
+        keystrokes into search_query, filtering the run-grid live. The keyboard
+        is in clean ASCII while a query is typed (the home's `typing`) -- plain
+        printable range only, so it works on the T-Deck's keyboard with no
+        `=[]{}<>%` keys."""
         self.search_typing = True
-        self._set_text_mode(True)
         self._dirty = True
 
     def close_search(self, clear=True):
@@ -588,7 +582,6 @@ class HomeVerbs:
         grid; `clear=False` (ENTER) just stops capturing keystrokes, leaving the
         filtered results up for d-pad/trackball browsing."""
         self.search_typing = False
-        self._set_text_mode(False)
         if clear:
             self.search_query = ""
             self.launcher.set_items(self._launcher_view_items())
@@ -637,7 +630,7 @@ class HomeVerbs:
             keep = []
             for c in carts:
                 claimed = False
-                for _app, _t in apps:
+                for _app in apps:
                     try:
                         if _app.is_app(c):
                             claimed = True

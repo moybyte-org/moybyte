@@ -63,10 +63,12 @@ ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
 LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
 
 # The platform layer every native module includes (native/moy_kernel/
-# moy_platform.h) and the kernel's headers, whose optional symbols a module
-# names weakly: beside every build's sources, whichever parts it has.
+# moy_platform.h), the kernel's headers, whose optional symbols a module
+# names weakly, and the spine's shared builder and codecs (native/moy_spine/
+# moy_sb.h, moy_codec.h): beside every build's sources, whichever parts it has.
 PLATFORM = tuple(os.path.join(ROOT, "native", "moy_kernel", n) for n in (
-    "moy_platform.h", "moy_kmem.h", "moy_tasks.h", "moy_kernel.h", "moy_crash.h"))
+    "moy_platform.h", "moy_kmem.h", "moy_tasks.h", "moy_kernel.h", "moy_crash.h")) + tuple(
+    os.path.join(ROOT, "native", "moy_spine", n) for n in ("moy_sb.h", "moy_codec.h", "moy_htab.h"))
 PLATFORM_DIR = os.path.join(ROOT, "native", "moy_kernel")
 
 

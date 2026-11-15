@@ -149,12 +149,11 @@ def test_a_table_holds_any_object_and_gives_it_back(sp):
 
 def test_the_registry_keeps_ids_and_metadata_not_objects(sp):
     reg = sp.AppRegistry()
-    h = reg.register("files", "Files", True, [310, 230])
+    h = reg.register("files", "Files", [310, 230])
     assert reg.find("files") == h and reg.find("paint") == 0
-    assert (reg.app_id(h), reg.title(h), reg.text_mode(h), reg.min_size(h)) == (
-        "files", "Files", True, (310, 230))
+    assert (reg.app_id(h), reg.title(h), reg.min_size(h)) == ("files", "Files", (310, 230))
     g = reg.register("calc", "CALC")
-    assert reg.min_size(g) is None and reg.text_mode(g) is False
+    assert reg.min_size(g) is None
     assert reg.handles() == [h, g] and reg.count() == 2
     with pytest.raises(ValueError, match="duplicate app id: files"):
         reg.register("files", "again")
@@ -171,11 +170,11 @@ def test_the_registry_keeps_ids_and_metadata_not_objects(sp):
 
 def test_a_min_size_is_two_ints_that_fit_32_bits(sp):
     reg = sp.AppRegistry()
-    h = reg.register("a", "A", False, (-5, (1 << 31) - 1))
+    h = reg.register("a", "A", (-5, (1 << 31) - 1))
     assert reg.min_size(h) == (-5, (1 << 31) - 1)
     for bad in ((1 << 31, 1), (1, -(1 << 31) - 1), (1 << 40, 1)):
         with pytest.raises(ValueError):
-            reg.register("b", "B", False, bad)
+            reg.register("b", "B", bad)
     assert reg.find("b") == 0 and reg.count() == 1
     assert reg.title(reg.register("c", 42)) == "42"     # a title is str()'d
     assert reg.title(reg.register("d", "\u00e9t\u00e9")) == "\u00e9t\u00e9"

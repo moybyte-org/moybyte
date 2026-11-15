@@ -270,15 +270,16 @@ def test_a_tag_is_typed_in_its_popover(hh):
     ws._dirty = True
     drv.frame(DT)
     _tap(drv, page.host.box("Tag"))
-    assert page.pop == "tag"
+    drv.frame(DT)
+    assert page.pop == "tag" and ws.input.text_mode, "its field holds the keys"
     for ch in "gem":
         drv.type_char(ord(ch))
         drv.frame(DT)
     drv.type_char(0x0D)
-    for _ in range(2):
-        drv.frame(DT)
+    for _ in range(3):              # the page redraws without the popover
+        drv.frame(DT)               # and the input policy reads that
     assert se.selected()["tag"] == "coingem"
-    assert page.pop is None
+    assert page.pop is None and not ws.input.text_mode
 
 
 def test_snap_and_zoom_from_the_foot(hh):

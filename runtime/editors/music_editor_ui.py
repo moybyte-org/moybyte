@@ -15,7 +15,6 @@ not reset musicedit/music_preview (blocks/map's go_home does reset their
 active editor). Ctrl+Z/Ctrl+Y walk the editor's undo (`_music_input`)."""
 
 from editors_music import MusicEditor
-from editors_base import KeyEdge
 from audio import MusicTrack, SFX
 import ui_draw as _ui_draw
 from layout_base import LayoutBase
@@ -42,7 +41,6 @@ class MusicEditorUI:
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
-        self._mkey = KeyEdge()        # Ctrl+Z/Y edge tracker (#92)
         self._page = None             # the handheld's page on the verbs (editor_music.py)
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
@@ -176,12 +174,6 @@ class MusicEditorUI:
                     self._stop_music_preview()
                 else:
                     self._play_music_preview()
-            # Ctrl+Z/Ctrl+Y (#92), the code editor's control bytes. Edge-detected against the previous frame's byte (the code editor's
-            # _ekey_prev pattern): a LEVEL key source that holds last_key across
-            # frames (e.g. a BLE keyboard) must fire ONE undo per press, not one
-            # per frame -- a held Ctrl+Z would otherwise drain the whole stack.
-            if self._mkey.undo_redo(i.last_key, me.undo, me.redo):
-                changed = True
         if i.pressed("b") or i.pressed("home"):
             changed = True
         ws._leave_or_home(ws.exit)

@@ -43,8 +43,6 @@ C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION, "zero": ZERO,
           "guition-p4": GUITION_P4, "c3-zero": C3_ZERO}
-# The two Zero boards and their MicroPython board dirs.
-ZEROS = {ZERO: "MOYBYTE_ZERO", C3_ZERO: "MOYBYTE_C3_ZERO"}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -1124,14 +1122,37 @@ def test_a_class_row_names_a_device_api_the_image_stages(board):
                 assert module in staged, (board, row["name"], api)
 
 
-@pytest.mark.parametrize("zero", sorted(ZEROS), ids=lambda z: z.name)
-def test_the_zeros_lease_is_its_pin_allowlist(zero):
-    """A Zero's `/gpio` allowlist (MOY_NET_GPIO_PINS) is its lease row."""
-    text = (zero / "boards" / ZEROS[zero] / "mpconfigboard.h").read_text()
-    m = re.search(r"#define MOY_NET_GPIO_PINS\s+\{([^}]*)\}", text)
-    allow = sorted(int(p) for p in m.group(1).split(","))
-    lease = [r for r in board_config.hardware(zero)[2] if r["class"] == "lease"]
-    assert [sorted(r["pins"]) for r in lease] == [allow]
+def _pin_keys():
+    """What a define that names a GPIO ends in: each pin key a board.toml row
+    gives (`MOY_HW_<ROW>_<PIN>`'s last word), and GPIO and PINS."""
+    keys = {"GPIO", "PINS"}
+    for d in BOARDS.values():
+        for name, _v in board_config.hw_defines(d):
+            if name.startswith("MOY_HW_"):
+                keys.add(name.rsplit("_", 1)[1])
+    return keys
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_no_board_header_hand_writes_a_pin(board):
+    """A pin reaches C from board.toml alone (board_config.hw_defines and
+    lease_defines): a `MOY_*` define in mpconfigboard.h that names one is a
+    second copy of the row, and copies drift."""
+    keys = _pin_keys()
+    for header in (BOARDS[board] / "boards").glob("*/mpconfigboard.h"):
+        hand = [m.group(1) for m in re.finditer(r"^#define\s+(MOY_\w+)", header.read_text(), re.M)
+                if m.group(1).rsplit("_", 1)[1] in keys]
+        assert not hand, "%s: pins belong in board.toml [hardware]: %s" % (header, hand)
+
+
+def test_the_zeros_pin_allowlist_is_its_lease_row():
+    """A Zero's `/gpio` route serves its `gpio` lease row, emitted as
+    MOY_LEASE_GPIO_PINS; a console's lease rows are leases, not a route."""
+    assert board_config.lease_defines(ZERO) == [("MOY_LEASE_GPIO_PINS", "1,2,4,5,6,21")]
+    assert board_config.lease_defines(C3_ZERO) == [("MOY_LEASE_GPIO_PINS", "0,1,3,4,5,6,7,10")]
+    for board, d in BOARDS.items():
+        text = "".join(h.read_text() for h in (d / "boards").glob("*/mpconfigboard.h"))
+        assert ("#define MOY_NET_GPIO_ROUTE" in text) == (board in ("zero", "c3-zero")), board
 
 
 @pytest.mark.parametrize("board", ("p4", "guition-p4"))

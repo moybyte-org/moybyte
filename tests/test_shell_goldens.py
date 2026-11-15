@@ -238,6 +238,7 @@ import pytest
 import pixel_goldens
 from cart_store_fixtures import INDEX_URL, MemNet, snapshot
 from ws_helpers import open_cart, settle_badges
+from runtime import crash_guard
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
@@ -871,7 +872,35 @@ def _surface_plan(ws, cfg):
     plan += [(name, _mesh_page(ws, lua)) for name, lua in MESH_PAGES]
     if desktop:
         plan.append(("desk_two_windows", _two_windows(ws)))
+    plan.append(("launcher_make_broken", _broken_cart(ws, cfg)))
     return plan
+
+
+BROKEN_APP = {"title": "Boomy", "canvas": "320x240", "moybyte": {"type": "app"}}
+
+
+def _broken_cart(ws, cfg):
+    """A user app the crash guard turned off (#160), selected on the home's
+    Make tab, where its card wears the guard's mark. Last in the plan: it
+    adds a cart to the roster."""
+    def run():
+        ws.go_home()
+        if cfg["windowed"]:
+            ws.open_library()
+        d = os.path.join(str(ws.carts_root), "boomy.moy")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "manifest.json"), "w") as f:
+            json.dump(BROKEN_APP, f)
+        with open(os.path.join(d, "main.py"), "w") as f:
+            f.write("def _draw():\n    cls(0)\n")
+        ws.carts.rescan()
+        cart = next(c for c in ws.carts.all if c.get("title") == "Boomy")
+        guard = ws.app_guard
+        ws.system.set(crash_guard.KEY, {"strikes": {ws.app_cart_id(cart): guard.STRIKES}})
+        ws.set_home_tab("make")
+        items = ws.launcher.items
+        ws.launcher.sel = next(i for i, c in enumerate(items) if c.get("title") == "Boomy")
+    return run
 
 
 def _two_windows(ws):
@@ -2000,6 +2029,7 @@ def surface_names(config_name):
     names += [name for name, _lua in MESH_PAGES]
     if cfg["windowed"] and not cfg.get("console"):
         names.append("desk_two_windows")
+    names.append("launcher_make_broken")
     return names
 
 

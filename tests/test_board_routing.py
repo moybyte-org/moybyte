@@ -160,11 +160,12 @@ def test_micropython_touch_and_idle_cursor():
 
 
 def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
-    """The per-frame CALL that derives the keyboard mode from the cart's
-    textmode request lives in Player.tick; the mode flip itself is executed in
-    tests/test_cart_textmode.py and tests/test_tdeck_input.py."""
-    player = runtime_file("player.py").read_text(encoding="utf-8")
-    assert "ws._sync_cart_text_mode()" in player
+    """The keyboard's mode is derived around every key pass and tap
+    (`InputPolicy.sync`), the cart's textmode request among what it reads;
+    the mode flip itself is executed in tests/test_cart_textmode.py and
+    tests/test_tdeck_input.py."""
+    src = runtime_file("console_input.py").read_text(encoding="utf-8")
+    assert src.count("policy.sync()") >= 2 and src.count("input_policy.sync()") >= 1
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -1031,3 +1032,14 @@ def test_each_p4_board_says_what_its_layers_in_place_shift_costs():
         src = (_REPO / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert re.search(r"^LAYER_SHIFT_COST = \d+$", src, re.M), board
         assert "layer_shift_cost=LAYER_SHIFT_COST" in src, board
+
+
+def test_the_vm_going_closes_an_open_lua_run():
+    """A soft reset ends the Player's runs and closes moycore's open runtime
+    first: without the call, a Lua run a Ctrl-C left open outlives its VM,
+    keeps its internal SRAM and refuses the next VM's first run. Executed on
+    glass by `on_glass.a_ctrl_c_ends_a_front_run`."""
+    src = (NATIVE / "moy_play" / "modmoy_play.c").read_text()
+    body = src.split("void moy_play_vm_stop(void) {", 1)[1].split("\n}\n", 1)[0]
+    assert "moycore_vm_stop();" in body
+    assert "void moycore_vm_stop(void)" in (NATIVE / "moycore" / "modmoycore.c").read_text()

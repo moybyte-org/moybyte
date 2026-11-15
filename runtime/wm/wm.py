@@ -151,6 +151,12 @@ class FullscreenStackWM:
         WM answers the focused window on its desk (None: the desk itself)."""
         return self.stack.top()
 
+    def input_kind(self):
+        """The kind of the surface the keyboard reaches: the stack top. The
+        windowed WM answers its focused window's kind on the desk (None: the
+        desk itself)."""
+        return self.stack.top()
+
     def top_is_player(self):
         """True iff a cart Player is on top (screen "desktop") -- the running-cart test
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""

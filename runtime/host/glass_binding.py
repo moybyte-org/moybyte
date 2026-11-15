@@ -41,7 +41,7 @@ _GFX = os.path.join(native_build.ROOT, "native", "moy_gfx")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")   # an edited style's
 _SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_present.h",
-            "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
+            "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_present_game.c", "moy_htab.h", "moy_htab.c",
             "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
             "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api_int.h", "moy_ui_api.c", "moy_ui_api_text.c",
             "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c", "moy_ui_api_host.c",
@@ -758,6 +758,37 @@ class DsiCompositor:
 
 # -- present: the rotated DSI compositor (native/moy_glass/moy_present.h) --------
 
+def _game_lib():
+    lib = _lib()
+    if not getattr(lib, "_game_sigs", False):
+        lib.moy_game_composite.argtypes = ([_P, _Z, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, _P, _Z] + [ctypes.c_int] * 3
+                                           + [ctypes.c_bool] * 2)
+        lib.moy_game_composite.restype = ctypes.c_int
+        lib.moy_game_direct.argtypes = [ctypes.c_int] * 7
+        lib.moy_game_direct.restype = ctypes.c_bool
+        lib.moy_game_crisp.argtypes = [ctypes.c_bool]
+        lib.moy_game_crisp.restype = None
+        lib._game_sigs = True
+    return lib
+
+
+def game_composite(dst, dw, dh, dx, dy, src, sw, sh, scale, defer):
+    """moy_glass.game_composite: the game composite (moy_present_game.c) of
+    `src` into `dst`. 0 done, 1 a PPA op in flight, -1 the PPA demoted; the
+    host has no PPA, so the CPU kernel's nearest scale and 0."""
+    da = (ctypes.c_char * len(dst)).from_buffer(dst)
+    sa = (ctypes.c_char * len(src)).from_buffer(src)
+    return _game_lib().moy_game_composite(ctypes.addressof(da), len(dst) // 2, dw, dh,
+                                          dx, dy, ctypes.addressof(sa), len(src) // 2,
+                                          sw, sh, scale, bool(defer), False)
+
+
+def game_crisp(on):
+    """moy_glass.game_crisp: CRISP PIXELS for every game composite."""
+    _game_lib().moy_game_crisp(bool(on))
+
+
 class _Rect(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int16), ("y", ctypes.c_int16),
                 ("w", ctypes.c_int16), ("h", ctypes.c_int16)]
@@ -1019,7 +1050,12 @@ class RotatedCompositor:
     def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct, frame=None):
         g = self._r.game
         g.sw, g.sh, g.ox, g.oy, g.scale = int(sw), int(sh), int(ox), int(oy), int(scale)
-        g.direct = bool(direct)
+        if paint is None:
+            g.direct = _game_lib().moy_game_direct(self._w, self._h, g.ox, g.oy, g.sw, g.sh,
+                                                   g.scale)
+            paint = self._paint_game
+        else:
+            g.direct = bool(direct)
         g.frame = frame is not None
         pic = None
         if frame is not None:
@@ -1030,6 +1066,13 @@ class RotatedCompositor:
                 g.patches[k] = pr[k]
         self._game = (paint, quiet, src, pic)
         self._r.has_game = True
+
+    def _paint_game(self):
+        """modmoy_glass_rot.c's rot_paint: the game canvas's composite into
+        the paint buffer."""
+        g = self._r.game
+        game_composite(self._paints[self._r.pi], self._w, self._h, g.ox, g.oy,
+                       self._game[2], g.sw, g.sh, g.scale, False)
 
     @property
     def _stamp_pending(self):

@@ -1218,6 +1218,6 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
         "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
         "stage -- a paired keyboard cannot produce a keypress (#26)")
     assert ("ble_keyboard", "start") in _module_handles(
-        "runtime/system/settings_layer.py").verbs("open_bluetooth"), (
+        "runtime/system/settings_layer.py").verbs("_bt_open"), (
         "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
         "panel opens onto a radio that has never scanned (#26)")

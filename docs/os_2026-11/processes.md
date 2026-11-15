@@ -418,7 +418,9 @@ background", with no names: one gate, `runtime/system/front.py`'s `take`,
 reads it for every way a process brings an app to the front
 (`between_apps.md` §1 lists them). The run on screen needs no permission,
 the shell is never gated, and a process in the background without `front`
-gets its request as a notification it can be opened from (§7). A run is
+gets its request as a notification it can be opened from (§7). A process's
+request that goes through runs at the console's next frame start, never
+inside the process's own call (`front.py`'s `run_due`). A run is
 named by its pid (`moybyte` verbs, the current process) or by its role
 grant (`Procs.pid_of`, the nav role's verbs: a system app's grant is the
 shell's, one no run holds is gated), never by the app id it claims.

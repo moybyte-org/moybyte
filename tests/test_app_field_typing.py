@@ -8,7 +8,7 @@ holds when no field is focused. The trackball steps an app's page, as it
 does every surface that takes the keys (`Workstation.ball_steps`), and does
 not show the cursor. Mic (the T-Deck's cancel), Esc and B cancel a field's
 edit in progress: the field gets back the text the edit began from and
-focus steps up off it (native/moy_ui's `api_cancel`, `Player.cancel_field`);
+focus steps off it (native/moy_ui's `api_cancel`, `Player.cancel`);
 with no edit, Mic stays the console's key."""
 
 import json
@@ -155,7 +155,7 @@ def _type(drv, text):
 def _mic(ws, drv):
     """The T-Deck's Mic let go, as console_input answers it (the host's
     table has no `start`): a field's cancel, else the console's key."""
-    if not ws.cancel_field():
+    if not ws.input_policy.cancel():
         ws.system_key()
     for _ in range(3):
         drv.frame(DT)
@@ -200,7 +200,7 @@ def test_a_lua_carts_textmode_reaches_the_keyboard(tmp_path):
 @pytest.mark.parametrize("runtime", ["lua", "python"])
 def test_the_trackball_steps_an_apps_page_and_shows_no_cursor(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Field App", LUA_APP if runtime == "lua" else PY_APP, runtime)
-    assert ws.ball_steps(), "an app's page takes the trackball as its W A S D"
+    assert ws.input_policy.ball_steps(), "an app's page takes the trackball as its W A S D"
     ws._ball_axis_at -= ws.BALL_ROLLING_MS + 1
     drv.pan(0, 1)
     for _ in range(2):
@@ -229,7 +229,7 @@ def test_mic_cancels_an_apps_field_edit(tmp_path, runtime):
 def test_mic_on_a_field_with_no_edit_opens_the_menu(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Edit App", LUA_EDIT if runtime == "lua" else PY_EDIT, runtime)
     assert _focus(ws) == "Name"
-    assert not ws.run.player.cancel_field()
+    assert not ws.run.player.cancel()
     _type(drv, "x")
     drv.type_char(8)                     # typed and deleted: nothing to give back
     for _ in range(2):
@@ -247,7 +247,7 @@ def test_enter_keeps_what_it_confirmed(tmp_path):
     for _ in range(2):
         drv.frame(DT)
     assert _name(ws) == "Srbija1"
-    assert not ws.run.player.cancel_field(), "Enter ends the edit: nothing to give back"
+    assert not ws.run.player.cancel(), "Enter ends the edit: nothing to give back"
     _type(drv, "2")
     _mic(ws, drv)
     assert _name(ws) == "Srbija1"
@@ -304,8 +304,8 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
 # -- the shell's own apps ---------------------------------------------------------
 #
 # A shell app's field is drawn through its AppHost's context, so Mic reaches it
-# there (`Workstation.cancel_field` asks `ui_draw.app_cancel` where the app has
-# no `cancel_field` of its own). Each row opens the app's field on a draft and
+# there (`InputPolicy.cancel` asks `ui_draw.app_cancel` where the app has
+# no `cancel` of its own). Each row opens the app's field on a draft and
 # names where the app keeps it.
 
 def _files_rename(ws):

@@ -10,13 +10,13 @@ stream from, before either is built:
 - **The control center on a handheld**: one panel off the bar's status
   cluster, with the console's quick controls and then each app's card.
 
-**Every file is an engine render.** `tools/music_mockups.py` draws each page
+**Every file is an engine render.** `experiments/music_mockups/music_mockups.py` draws each page
 with the public UI API's verbs (`docs/ui_api_2026-10.md`) on the
 shell-goldens workstation (`tests/test_shell_goldens.py`), at the board's
 real size, in Moy Night (`moy-dark_*`) and, for some scenes, Moy Day
 (`moy-light_*`). The media service's answers are faked. The status item and
 the control center open through the shell's own popover (`toggle_popover`).
-To draw them again, run `.venv/bin/python tools/music_mockups.py OUT [FILTER ...]`.
+To draw them again, run `.venv/bin/python experiments/music_mockups/music_mockups.py OUT [FILTER ...]`.
 A 320×240 file also has an `@3x` copy, scaled nearest.
 
 ## One media card

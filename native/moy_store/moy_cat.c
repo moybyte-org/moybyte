@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_arena.h"
 #include "moy_cat.h"
 #include "moy_json.h"
@@ -191,46 +192,6 @@ static size_t project_title(const char *path, const char **name) {
     }
     *name = nm;
     return n;
-}
-
-static int valid_utf8(const char *p, size_t n) {
-    const unsigned char *s = (const unsigned char *)p, *e = s + n;
-    while (s < e) {
-        unsigned c = *s;
-        size_t k;
-        uint32_t cp;
-        if (c < 0x80u) {
-            s++;
-            continue;
-        } else if ((c & 0xe0u) == 0xc0u) {
-            k = 2;
-            cp = c & 0x1fu;
-        } else if ((c & 0xf0u) == 0xe0u) {
-            k = 3;
-            cp = c & 0x0fu;
-        } else if ((c & 0xf8u) == 0xf0u) {
-            k = 4;
-            cp = c & 0x07u;
-        } else {
-            return 0;
-        }
-        if ((size_t)(e - s) < k) {
-            return 0;
-        }
-        for (size_t i = 1; i < k; i++) {
-            if ((s[i] & 0xc0u) != 0x80u) {
-                return 0;
-            }
-            cp = (cp << 6) | (s[i] & 0x3fu);
-        }
-        if ((k == 2 && cp < 0x80u) || (k == 3 && cp < 0x800u)
-            || (k == 4 && (cp < 0x10000u || cp > 0x10ffffu))
-            || (cp >= 0xd800u && cp <= 0xdfffu)) {
-            return 0;
-        }
-        s += k;
-    }
-    return 1;
 }
 
 static moy_cat_json_t field(const char *man, const char *end, const char *key) {
@@ -822,7 +783,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
         if (keep == NULL) {
             return 0;
         }
-        if (!valid_utf8(keep, n)) {
+        if (!moy_utf8_valid(keep, n)) {
             broken = "manifest.json: invalid UTF-8";
         } else if (moy_json_valid(keep, n) != MOY_JSON_OK) {
             broken = "manifest.json: syntax error in JSON";
@@ -929,7 +890,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             if (c->src == NULL) {
                 return 0;
             }
-            if (!valid_utf8(c->src, c->src_n)) {
+            if (!moy_utf8_valid(c->src, c->src_n)) {
                 if (note != NULL) {
                     note(ctx, "unreadable", r->path, "main is not UTF-8");
                 }
@@ -1128,7 +1089,7 @@ static int text(rd_t *r, const char *name, const char **out, size_t *n) {
         *out = NULL;
         return 0;
     }
-    return valid_utf8(*out, *n) ? 1 : -1;
+    return moy_utf8_valid(*out, *n) ? 1 : -1;
 }
 
 // What `json.loads(_read(...))` under `except (OSError, ValueError)` makes of
@@ -1137,7 +1098,7 @@ static moy_load_json_t json_file(rd_t *r, const char *name) {
     moy_load_json_t j = { NULL, NULL };
     const char *t;
     size_t n;
-    if (slurp(r, name, &t, &n) == 0 && valid_utf8(t, n)) {
+    if (slurp(r, name, &t, &n) == 0 && moy_utf8_valid(t, n)) {
         const char *s = moy_json_ws(t, t + n);
         const char *e = moy_json_value(s, t + n, 1u);
         if (e != NULL && moy_json_ws(e, t + n) == t + n) {

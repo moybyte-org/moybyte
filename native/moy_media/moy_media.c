@@ -2,6 +2,7 @@
 
 #include "moy_kmem.h"
 
+#include "moy_codec.h"
 #include "moy_media.h"
 #include "moy_lease.h"
 
@@ -271,35 +272,6 @@ void moy_media_last(moy_media_end_t *out) {
 
 // -- text ------------------------------------------------------------------------
 
-static int utf8_ok(const unsigned char *p, size_t n) {
-    size_t i = 0;
-    while (i < n) {
-        unsigned c = p[i];
-        size_t k;
-        if (c < 0x80) {
-            k = 0;
-        } else if (c >= 0xc2 && c <= 0xdf) {
-            k = 1;
-        } else if (c >= 0xe0 && c <= 0xef) {
-            k = 2;
-        } else if (c >= 0xf0 && c <= 0xf4) {
-            k = 3;
-        } else {
-            return 0;
-        }
-        if (i + k >= n && k > 0) {
-            return 0;
-        }
-        for (size_t j = 1; j <= k; j++) {
-            if ((p[i + j] & 0xc0) != 0x80) {
-                return 0;
-            }
-        }
-        i += k + 1;
-    }
-    return 1;
-}
-
 // `s` (UTF-8, else read as Latin-1) into `out`, cut on a character: its length.
 static size_t to_utf8(const char *s, size_t n, char *out, size_t cap) {
     const unsigned char *p = (const unsigned char *)s;
@@ -307,7 +279,7 @@ static size_t to_utf8(const char *s, size_t n, char *out, size_t cap) {
     if (cap == 0) {
         return 0;
     }
-    if (utf8_ok(p, n)) {
+    if (moy_utf8_valid(p, n)) {
         size_t k = n < cap - 1 ? n : cap - 1;
         while (k > 0 && k < n && (p[k] & 0xc0) == 0x80) {
             k--;

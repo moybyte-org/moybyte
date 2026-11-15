@@ -16,13 +16,9 @@ codes to the exceptions the twin raises, which is modmoy_spine.c's job on a VM.
 import ctypes
 import json
 import os
-import sys
 import types
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
-
-import moy_index_spike  # noqa: E402
+import native_parts
 
 c = ctypes
 OK, STALE, FULL, NOMEM, DUP, BAD = range(6)
@@ -35,7 +31,7 @@ class _Kind(c.Structure):
 
 
 class _App(c.Structure):
-    _fields_ = [("id", _Kind), ("text_mode", c.c_uint8), ("has_min", c.c_uint8),
+    _fields_ = [("id", _Kind), ("has_min", c.c_uint8),
                 ("min_w", c.c_int32), ("min_h", c.c_int32),
                 ("title_len", c.c_uint32), ("title", c.c_void_p)]
 
@@ -60,7 +56,7 @@ _SIGS = (
     ("moy_htab_free", [_P], None),
     ("moy_apps_new", [_P], _P),
     ("moy_apps_free", [_P], None),
-    ("moy_apps_register", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE, c.c_int, c.c_int,
+    ("moy_apps_register", [_P, _PCHAR, _SIZE, _PCHAR, _SIZE, c.c_int,
                            c.c_int32, c.c_int32, _PU32], c.c_int),
     ("moy_apps_find", [_P, _PCHAR, _SIZE], _U32),
     ("moy_apps_get", [_P, _U32, c.POINTER(c.POINTER(_App))], c.c_int),
@@ -119,7 +115,7 @@ SAVE_FN = c.CFUNCTYPE(c.c_int, _P, _P, _SIZE)
 
 def binding(sanitize=False):
     """The spine module over the host library, or None with no C compiler."""
-    path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
+    path = native_parts.host_library("c", sanitize, native_parts.SPINE)
     if path is None:
         return None
     lib = c.CDLL(path)
@@ -243,7 +239,7 @@ def binding(sanitize=False):
 
         __del__ = free_with("moy_apps_free")
 
-        def register(self, app_id, title, text_mode=False, min_size=None):
+        def register(self, app_id, title, min_size=None):
             idb = kind(app_id)
             if lib.moy_apps_find(self._p, idb, len(idb)):
                 raise ValueError("duplicate app id: " + app_id)
@@ -256,8 +252,7 @@ def binding(sanitize=False):
             tb = str(title).encode()
             out = c.c_uint32()
             rc = lib.moy_apps_register(self._p, idb, len(idb), tb, len(tb),
-                                       int(bool(text_mode)), has_min, w, h,
-                                       c.byref(out))
+                                       has_min, w, h, c.byref(out))
             if rc != OK:
                 alloc_error(rc, "app table")
             return out.value
@@ -279,9 +274,6 @@ def binding(sanitize=False):
         def title(self, h):
             r = self._row(h)
             return c.string_at(r.title, r.title_len).decode()
-
-        def text_mode(self, h):
-            return bool(self._row(h).text_mode)
 
         def min_size(self, h):
             r = self._row(h)

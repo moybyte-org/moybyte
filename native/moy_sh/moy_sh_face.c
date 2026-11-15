@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #include "moy_sh_face.h"
@@ -84,14 +85,6 @@ static moy_ui_span_t span_n(const char *p, size_t n) {
 
 static moy_ui_span_t span(const char *p) {
     return span_n(p, strlen(p));
-}
-
-static int utf8_len(const char *p, size_t n) {
-    int k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += ((unsigned char)p[i] & 0xC0) != 0x80;
-    }
-    return k;
 }
 
 // -- the session -------------------------------------------------------------------
@@ -883,7 +876,7 @@ static int is_arrow(const char *name) {
 // A key's width in units: a word (an app's Save, Exit) three, Tab and the
 // arrows two, a symbol one.
 static int32_t units_of(const char *label) {
-    int n = utf8_len(label, strlen(label));
+    int n = (int)moy_utf8_count(label, strlen(label));
     return n > 3 && !is_arrow(label) ? 3 : n > 2 ? 2 : 1;
 }
 
@@ -1144,7 +1137,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
     char p[MOY_SH_FACE_LINE];
     size_t pn = prompt_of(f, p, sizeof p);
     snprintf(f->prompt_row, sizeof f->prompt_row, "%s%s%s%s%s", ECHO, p, TYPED, f->line, PLAIN);
-    int32_t caret = utf8_len(p, pn) + utf8_len(f->line, (size_t)f->col);
+    int32_t caret = (int32_t)(moy_utf8_count(p, pn) + moy_utf8_count(f->line, (size_t)f->col));
     int32_t left = cols > 2 && caret - cols + 2 > 0 ? caret - cols + 2 : 0;
     int32_t popt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;
     popt[MOY_UI_TXO_CARET_LINE] = 0;

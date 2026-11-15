@@ -29,19 +29,19 @@ path rather than a bar tap, #111; run_code stays PLAY's own explicit-run entry p
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
-code-UI state (the keyboard edge tracker _ekey, and the host whose page draws the
-rows through `ui.text_view`). ws.nav (the trackball-caret handler, called by both the host
+code-UI state (the host whose page draws the rows through `ui.text_view`); a
+typed byte is the input table's press (`typed`), one per physical press. ws.nav (the trackball-caret handler, called by both the host
 + device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
 + the MicroPython-safe syntax highlighter live here (single source; console.py imports
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
 injected.
 """
 from editors_code import CodeEditor
-from editors_base import KeyEdge
 from array import array as _array
 
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import Layer
 import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 # the text view's syntaxes by the highlighter's language (ui.text_options's)
@@ -248,7 +248,7 @@ for _lang, _kw in (("python", _HL_KEYWORDS), ("lua", _HL_LUA_KEYWORDS)):
 _POP_PAD = 32
 
 
-class CodeLayer:
+class CodeLayer(Layer):
     """The code editor content Layer (system domain, responsive #39): a full-screen
     text editor on the SYSTEM canvas. Owns the drawing + the code-UI state (keyboard
     edge / drag origin / highlight memo); reads ws.editor + ws.code_layout + the code-
@@ -256,7 +256,25 @@ class CodeLayer:
 
     id = "code"
     domain = "system"
-    ball_steps = False              # the trackball is the caret's arrows (`nav`)
+    def ball_steps(self):
+        """The trackball is the caret's arrows (`nav`)."""
+        return False
+
+    def typing(self):
+        """The code editor types, always."""
+        return True
+
+    def cancel(self):
+        """Mic, Esc or B over the editor: See why's popover closes, else an
+        open overlay (`close_overlay`)."""
+        ws = self.ws
+        if ws.crash_popup is not None:
+            ws.crash_popup = None
+            ws._dirty = True
+            return True
+        return self.close_overlay()
+
+    back = cancel
 
     # The tool palette (#89): a tappable row (opened by the always-visible TLS
     # toggle) that reaches every range op the T-Deck keyboard has no key/combo for.
@@ -281,7 +299,6 @@ class CodeLayer:
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         # The code's rows: `ui.text_view` on this host's page (its context
         # keeps the view's scroll and record, docs/history/scroll_and_text_2026-10.md
         # §5), the buffer it shows, and the first line the view showed last,
@@ -331,24 +348,14 @@ class CodeLayer:
         self._files_sel = 0           # the highlighted row (opens on the current file)
         self._ov_host = _ui_draw.AppHost()   # the overlays' UI context (look step 33)
 
-    def seed_key(self, k):
-        """The byte that was live when this surface took the keyboard is NOT a
-        keystroke of its own. Called by ws._set_text_mode on the switch into
-        text mode -- the key that entered the Code tab is still in last_key when
-        the editor's first frame reads it, and a zeroed edge tracker types it.
-        Seeding, not resetting: an already-down byte has to look like the
-        PREVIOUS one, so releasing and pressing it again still types."""
-        self._ekey.prev = k
-
     def reset(self):
-        """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
-        is (re)built) so the first key press after opening registers. Also drops the
+        """Called by ws.set_menu_view when the editor is (re)built: drops the
         transient #89 modes so a freshly-opened editor is in a clean state.
 
-        set_tab runs this BEFORE ws._set_text_mode, whose seed_key then supplies
-        the live byte -- so a fresh editor still starts clean and still does not
-        type the key that opened it."""
-        self._ekey.reset()
+        The key down as it opens is spent (`spend_key`), so a fresh editor
+        does not type the key that opened it, even where the keyboard was
+        already in text mode (re-entering the Code tab)."""
+        self.ws.input.spend_key()
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
@@ -593,15 +600,14 @@ class CodeLayer:
     # -- input ---------------------------------------------------------------
 
     def _editor_input(self):
-        # Feed the typed key to the editor, one insert per physical press: the
-        # keyboard reports the byte for the frame it is down then 0, so acting on
-        # the 0->key edge (key != previous) avoids autorepeat.
+        # Feed the typed key to the editor, one insert per physical press (the
+        # input table's `typed`), its held repeats after.
         ws = self.ws
         ed = ws.editor
         if ed is None:
             return
-        k = ws.input.last_key
-        if self._ekey.hit(k):
+        k = ws.input.typed
+        if k:
             self._typed(ed, k)
         # A held key types again at the input table's repeat (a count beside
         # the frame, never a second edge): text keys only, never into a popup.
@@ -647,10 +653,6 @@ class CodeLayer:
             self.close_overlay()
         elif self._find_open:
             self._find_key(k)              # find field owns the keyboard while open
-        elif k == 0x1A:
-            ws.history.undo()
-        elif k == 0x19:
-            ws.history.redo()
         elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
             ed.select_all()
         elif k == 0x03:
@@ -925,7 +927,7 @@ class CodeLayer:
 
     def close_overlay(self):
         """Close whichever overlay is open (the find strip, completion, Go to,
-        the scripts): Esc, the T-Deck's Mic (`Workstation.cancel_field`) or a
+        the scripts): Esc, the T-Deck's Mic (`CodeLayer.cancel`) or a
         press outside it. True where one was open."""
         was = self._find_open or self._cmp_open or self._jump_open or self._files_open
         self._find_open = self._cmp_open = self._jump_open = self._files_open = False

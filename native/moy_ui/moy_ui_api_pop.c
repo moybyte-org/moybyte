@@ -856,12 +856,6 @@ int moy_ui_api_back(moy_ui_ctx_t *c, int take) {
     if (moy_ui_api_cancel(c, take)) {
         return 1;
     }
-    if (c->pop_card.w > 0) {
-        if (take) {
-            c->pop_back = 1;
-        }
-        return 1;
-    }
     if (c->bar_seen && c->bar_back) {
         if (take) {
             c->bar_act = MOY_UI_BAR_UP;

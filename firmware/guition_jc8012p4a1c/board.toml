@@ -137,6 +137,14 @@ input. Flip this the day it does."""
 # NOTE the two files that are NOT denied here and ARE on the S3 boards:
 # `wm_windowed.py` and its halves. See [board].tier_why.
 
+[[modules.shared.deny]]
+file = "one_buffer.py"
+kind = "tier"
+why  = """
+The one-buffer compositor: the browser's and the host's presentation tier,
+one RGB565 buffer and no flush. A board's compositor is its panel's
+(native/moy_glass), so nothing on a board constructs this class."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]

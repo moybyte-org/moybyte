@@ -162,9 +162,10 @@ class TasksLayer(Layer):
                 self.note_cur = self.notes.index(note)
         self._focus = True           # the first frame puts the focus on the list
 
-    def back(self):
-        self.ws.close_tasks()
-        return True
+    B_BACK = True
+
+    def ui_host(self):
+        return self.host
 
     def draw_zone(self, cv, rect):
         return None
@@ -179,7 +180,7 @@ class TasksLayer(Layer):
             ws.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
-            self.back()
+            ws.input_policy.back(leave=True)
             return True
         if self.host.keys(i):
             ws._dirty = True
@@ -224,8 +225,6 @@ class TasksLayer(Layer):
         if x + w < cv.w:
             cv.rect(x + w, y, cv.w - x - w, h, g)
         self._page()
-        if not ws.windowed_chrome:
-            ws.bar_layer._draw_status_strip("tasks")
 
     def _page(self):
         ws = self.ws

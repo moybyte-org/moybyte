@@ -134,7 +134,7 @@ def _layouts(ws):
             continue
         lay = getattr(obj, "block_layout", None) or obj.layout
         out.append((type(lay).__name__, lay))
-    for app, _t in ws._apps:
+    for app in ws._apps:
         lay = getattr(app, "layout", None)
         if lay is not None:
             out.append((type(lay).__name__, lay))

@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_json.h"
 #include "moy_settings.h"
 
@@ -298,22 +299,9 @@ int moy_settings_at(const moy_settings_t *s, uint32_t i, const char **key,
 
 // -- the file ----------------------------------------------------------------
 
-typedef struct {
-    char *out;
-    size_t cap, n;
-} sink_t;
-
-static void put(sink_t *k, const char *p, size_t n) {
-    if (k->n < k->cap) {
-        size_t room = k->cap - k->n;
-        memcpy(k->out + k->n, p, n < room ? n : room);
-    }
-    k->n += n;
-}
-
-static void put_key(sink_t *k, const char *p, size_t n) {
+static void put_key(moy_sb_t *k, const char *p, size_t n) {
     static const char hex[] = "0123456789abcdef";
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)p[i];
         const char *esc = NULL;
@@ -328,29 +316,29 @@ static void put_key(sink_t *k, const char *p, size_t n) {
             default: break;
         }
         if (esc != NULL) {
-            put(k, esc, 2);
+            moy_sb_put(k, esc, 2);
         } else if (c < 0x20u) {
             char u[6] = { '\\', 'u', '0', '0', hex[c >> 4], hex[c & 15u] };
-            put(k, u, 6);
+            moy_sb_put(k, u, 6);
         } else {
-            put(k, p + i, 1);
+            moy_sb_put(k, p + i, 1);
         }
     }
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
 }
 
 size_t moy_settings_dump(const moy_settings_t *s, char *out, size_t cap) {
-    sink_t k = { out, cap, 0u };
-    put(&k, "{", 1);
+    moy_sb_t k = moy_sb_fixed(out, cap);
+    moy_sb_put(&k, "{", 1);
     for (uint32_t i = 0; i < s->count; i++) {
         if (i) {
-            put(&k, ", ", 2);
+            moy_sb_put(&k, ", ", 2);
         }
         put_key(&k, s->rows[i].buf, s->rows[i].key_len);
-        put(&k, ": ", 2);
-        put(&k, s->rows[i].buf + s->rows[i].key_len, s->rows[i].json_len);
+        moy_sb_put(&k, ": ", 2);
+        moy_sb_put(&k, s->rows[i].buf + s->rows[i].key_len, s->rows[i].json_len);
     }
-    put(&k, "}", 1);
+    moy_sb_put(&k, "}", 1);
     return k.n;
 }
 
@@ -439,7 +427,7 @@ static int key_before(const row_t *a, const row_t *b) {
 }
 
 size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
-    sink_t k = { out, cap, 0u };
+    moy_sb_t k = moy_sb_fixed(out, cap);
     // The rows in key order with no index to allocate: each pass writes the
     // least key after the last one written (a settings file holds dozens).
     const row_t *last = NULL;
@@ -456,13 +444,13 @@ size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
         }
         last = next;
         if (moy_settings_key_ok(next->buf, next->key_len)) {
-            put(&k, next->buf, next->key_len);
-            put(&k, " = ", 3);
+            moy_sb_put(&k, next->buf, next->key_len);
+            moy_sb_put(&k, " = ", 3);
             const char *v = next->buf + next->key_len;
             for (uint32_t i = 0; i < next->json_len; i++) {
-                put(&k, (v[i] == '\n' || v[i] == '\r') ? " " : v + i, 1);
+                moy_sb_put(&k, (v[i] == '\n' || v[i] == '\r') ? " " : v + i, 1);
             }
-            put(&k, "\n", 1);
+            moy_sb_put(&k, "\n", 1);
         }
     }
 }

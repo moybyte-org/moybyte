@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_ledger.h"
 
 // -- a scanner for text a settings row already validated ----------------------
@@ -265,44 +266,6 @@ int moy_ledger_proven_is(const char *slot, size_t n, const char *id, size_t idn,
 
 // -- edits ----------------------------------------------------------------------
 
-typedef struct {
-    char *p;
-    size_t n, cap;
-    const moy_htab_mem_t *mem;
-    int bad;
-} sbuf_t;
-
-static void put(sbuf_t *b, const char *s, size_t n) {
-    if (b->bad) {
-        return;
-    }
-    if (b->n + n > b->cap) {
-        size_t cap = b->cap ? b->cap : 256u;
-        while (cap < b->n + n) {
-            cap *= 2u;
-        }
-        char *q = b->mem->alloc(cap);
-        if (q == NULL) {
-            b->bad = 1;
-            return;
-        }
-        if (b->n) {
-            memcpy(q, b->p, b->n);
-        }
-        if (b->p) {
-            b->mem->release(b->p, b->cap);
-        }
-        b->p = q;
-        b->cap = cap;
-    }
-    memcpy(b->p + b->n, s, n);
-    b->n += n;
-}
-
-static void puts_(sbuf_t *b, const char *s) {
-    put(b, s, strlen(s));
-}
-
 // A member list being edited: spans, a removed one marked by a NULL key, an
 // added one pointing at text that outlives the edit.
 typedef struct {
@@ -375,22 +338,22 @@ static int sec_remove(sec_t *s, const char *k, size_t kn) {
     return 1;
 }
 
-static void sec_put(sbuf_t *b, const sec_t *s) {
+static void sec_put(moy_sb_t *b, const sec_t *s) {
     int first = 1;
-    puts_(b, "{");
+    moy_sb_str(b, "{");
     for (int i = 0; i < s->n; i++) {
         if (s->m[i].k == NULL) {
             continue;
         }
         if (!first) {
-            puts_(b, ", ");
+            moy_sb_str(b, ", ");
         }
         first = 0;
-        put(b, s->m[i].k, s->m[i].kn);
-        puts_(b, ": ");
-        put(b, s->m[i].v, s->m[i].vn);
+        moy_sb_put(b, s->m[i].k, s->m[i].kn);
+        moy_sb_str(b, ": ");
+        moy_sb_put(b, s->m[i].v, s->m[i].vn);
     }
-    puts_(b, "}");
+    moy_sb_str(b, "}");
 }
 
 int moy_ledger_edit(const moy_htab_mem_t *mem, const char *slot, size_t n,
@@ -399,7 +362,7 @@ int moy_ledger_edit(const moy_htab_mem_t *mem, const char *slot, size_t n,
     static const char strikes_k[] = "\"strikes\"", open_k[] = "\"open\"",
                       proven_k[] = "\"proven\"", empty[] = "{}", null_v[] = "null";
     sec_t top = {0}, st = {0}, pv = {0};
-    sbuf_t b = { NULL, 0, 0, mem, 0 };
+    moy_sb_t b = moy_sb_grown(mem);
     char num[16];
     int rc = MOY_LEDGER_NOMEM, edit_proven = (op == MOY_LEDGER_HEAL && proof != NULL);
 
@@ -484,25 +447,25 @@ int moy_ledger_edit(const moy_htab_mem_t *mem, const char *slot, size_t n,
         }
     }
 
-    puts_(&b, "{");
+    moy_sb_str(&b, "{");
     int first = 1;
     for (int i = 0; i < top.n; i++) {
         if (!first) {
-            puts_(&b, ", ");
+            moy_sb_str(&b, ", ");
         }
         first = 0;
-        put(&b, top.m[i].k, top.m[i].kn);
-        puts_(&b, ": ");
+        moy_sb_put(&b, top.m[i].k, top.m[i].kn);
+        moy_sb_str(&b, ": ");
         if (i == sec_find_name(&top, "strikes")) {
             sec_put(&b, &st);
         } else if (edit_proven && i == pi) {
             sec_put(&b, &pv);
         } else {
-            put(&b, top.m[i].v, top.m[i].vn);
+            moy_sb_put(&b, top.m[i].v, top.m[i].vn);
         }
     }
-    puts_(&b, "}");
-    if (b.bad) {
+    moy_sb_str(&b, "}");
+    if (b.failed) {
         rc = MOY_LEDGER_NOMEM;
         if (b.p) {
             mem->release(b.p, b.cap);

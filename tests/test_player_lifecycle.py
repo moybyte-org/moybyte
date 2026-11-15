@@ -76,8 +76,8 @@ def test_go_home_drops_the_workspace_pins(tmp_path):
 def test_text_mode_restored_on_play_exit_to_code_tab(tmp_path):
     """#80: PLAY from the CODE tab -> exit returns to the SAME tab, which is not
     a tab CHANGE, so set_menu_view's text-mode flip never fired -- the keyboard
-    stayed in the cart's raw/game mode and sym+digit typed nothing. The exit
-    path now restores the returned-to tab's mode explicitly."""
+    stayed in the cart's raw/game mode and sym+digit typed nothing. The mode
+    is the input policy's, derived from the tab the exit lands on."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.set_home_tab("make")
@@ -85,16 +85,20 @@ def test_text_mode_restored_on_play_exit_to_code_tab(tmp_path):
                            if it.get("path"))
     ws.launch_selected()
     ws.set_menu_view("code")
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True          # code tab = typing mode
     ws._leave_menu()                            # PLAY: cart wants game keys
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is False
     ws._exit_to_caller()                        # Quit back to the code tab
     assert ws.wm.top_is("menu")
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True          # the #80 fix: mode restored
     # And returning to a NON-text tab stays in game-key mode.
     ws.set_menu_view("config")
     ws._leave_menu()
     ws._exit_to_caller()
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is False
 
 

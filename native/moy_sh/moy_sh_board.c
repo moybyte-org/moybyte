@@ -25,6 +25,7 @@
 #include <time.h>
 #endif
 
+#include "moy_sb.h"
 #include "moy_devch.h"
 #include "moy_lease.h"
 #include "moy_log.h"
@@ -730,32 +731,20 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
 
 // -- the virtual files ---------------------------------------------------------------------
 
-typedef struct {
-    char *buf;
-    size_t n, cap;
-} text_t;
-
-static void put(text_t *t, const char *p, size_t n) {
-    if (t->n + n + 1 > t->cap) {
-        size_t cap = (t->n + n + 1) * 2;
-        char *q = b_alloc(NULL, cap);
-        if (q == NULL) {
-            return;
-        }
-        if (t->buf != NULL) {
-            memcpy(q, t->buf, t->n);
-            b_free(NULL, t->buf);
-        }
-        t->buf = q;
-        t->cap = cap;
-    }
-    memcpy(t->buf + t->n, p, n);
-    t->n += n;
-    t->buf[t->n] = 0;
+static void *text_alloc(size_t n) {
+    return b_alloc(NULL, n);
 }
 
+static void text_release(void *p, size_t n) {
+    (void)n;
+    b_free(NULL, p);
+}
+
+// What a virtual file's text grows in: the caller frees it with b_free.
+static const moy_htab_mem_t TEXT_MEM = { text_alloc, text_release };
+
 // The log's lines of process `name` (NULL: every one), or of `pid` (>= 0).
-static void log_text(text_t *t, const char *name, int pid) {
+static void log_text(moy_sb_t *t, const char *name, int pid) {
     moy_log_cursor_t c = { 0, 0 };
     moy_log_rec_t r;
     char text[512], head[96];
@@ -774,9 +763,9 @@ static void log_text(text_t *t, const char *name, int pid) {
             while (j < len && text[j] != '\n') {
                 j++;
             }
-            put(t, head, (size_t)k);
-            put(t, text + i, j - i);
-            put(t, "\n", 1);
+            moy_sb_put(t, head, (size_t)k);
+            moy_sb_put(t, text + i, j - i);
+            moy_sb_put(t, "\n", 1);
             i = j + 1;
         }
     }
@@ -785,7 +774,7 @@ static void log_text(text_t *t, const char *name, int pid) {
 // devfs.py's /proc/<pid>/log: the text of the process's last LOG_LINES lines.
 #define LOG_LINES 64
 
-static void log_lines(text_t *t, uint32_t pid) {
+static void log_lines(moy_sb_t *t, uint32_t pid) {
     moy_log_cursor_t c = { 0, 0 };
     moy_log_rec_t r;
     char text[512];
@@ -805,8 +794,8 @@ static void log_lines(text_t *t, uint32_t pid) {
                 if (pass == 0) {
                     total++;
                 } else if (at++ + LOG_LINES >= total) {
-                    put(t, text + i, j - i);
-                    put(t, "\n", 1);
+                    moy_sb_put(t, text + i, j - i);
+                    moy_sb_put(t, "\n", 1);
                 }
                 i = j + 1;
             }
@@ -815,7 +804,7 @@ static void log_lines(text_t *t, uint32_t pid) {
 }
 
 // The names of the leases `pid` holds, as devfs.py's status names them, or "-".
-static void leases_text(text_t *t, uint32_t pid) {
+static void leases_text(moy_sb_t *t, uint32_t pid) {
     int any = 0;
     moy_lease_row_t row;
     moy_lease_offer_t o;
@@ -826,15 +815,15 @@ static void leases_text(text_t *t, uint32_t pid) {
         }
         for (uint32_t i = 0; moy_lease_offer_at(i, &o) == MOY_LEASE_OK; i++) {
             if (o.cls == row.cls && o.unit == row.unit) {
-                put(t, any ? " " : "", any ? 1 : 0);
-                put(t, o.name, strlen(o.name));
+                moy_sb_put(t, any ? " " : "", any ? 1 : 0);
+                moy_sb_put(t, o.name, strlen(o.name));
                 any = 1;
                 break;
             }
         }
     }
     if (!any) {
-        put(t, "-", 1);
+        moy_sb_put(t, "-", 1);
     }
 }
 
@@ -882,25 +871,25 @@ static int b_vread(void *ctx, const char *path, char **p, size_t *n) {
     if (!proc_row(pid, &name, &kind, &state)) {
         return ENOENT;
     }
-    text_t t = { NULL, 0, 0 };
+    moy_sb_t t = moy_sb_grown(&TEXT_MEM);
     if (strcmp(leaf, "status") == 0) {
         char buf[160];
         int k = snprintf(buf, sizeof buf, "Name:\t%s\nPid:\t%d\nKind:\t%s\nState:\t%s\nLeases:\t",
                          name, pid, kind, state);
-        put(&t, buf, (size_t)k);
+        moy_sb_put(&t, buf, (size_t)k);
         leases_text(&t, (uint32_t)pid);
-        put(&t, "\n", 1);
+        moy_sb_put(&t, "\n", 1);
     } else if (strcmp(leaf, "log") == 0) {
         log_lines(&t, (uint32_t)pid);
     } else {
         return ENOENT;
     }
-    if (t.buf == NULL) {
-        put(&t, "", 0);
+    if (t.p == NULL) {
+        moy_sb_put(&t, "", 0);
     }
-    *p = t.buf;
+    *p = t.p;
     *n = t.n;
-    return t.buf != NULL ? 0 : ENOMEM;
+    return t.p != NULL ? 0 : ENOMEM;
 }
 
 static int b_vwrite(void *ctx, const char *path, const char *p, size_t n) {
@@ -1064,11 +1053,11 @@ static void b_sleep(void *ctx, int ms) {
 static int b_log(void *ctx, moy_sh_t *s, int fd, const char *name, int follow) {
     (void)ctx;
     (void)follow;
-    text_t t = { NULL, 0, 0 };
+    moy_sb_t t = moy_sb_grown(&TEXT_MEM);
     log_text(&t, name, -1);
-    if (t.buf != NULL) {
-        moy_sh_fd_write(s, fd, t.buf, t.n);
-        b_free(NULL, t.buf);
+    if (t.p != NULL) {
+        moy_sh_fd_write(s, fd, t.p, t.n);
+        b_free(NULL, t.p);
     }
     return 0;
 }

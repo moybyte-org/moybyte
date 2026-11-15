@@ -2463,7 +2463,8 @@ on the same board.
 | the Waveshare P4's root (the DSI compositor, `moy_dsi_last`) | the ring's front or pending buffer, fenced as `copy_last` fences | the 2D-DMA M2M block copy (`esp_async_fbcpy`), submitted async, fenced at the content's close; cross-buffer in either direction |
 | the Guition P4's root (the rotated compositor, `moy_rot_last`) | the other of its two landscape paint buffers (`retained_frames` 2) | the same 2D-DMA; **answers False while a rotate is in flight** (the rotate shares the DMA2D, and a shift queued behind it would wait for it); the shifted R is handed to `note_damage` or the compositor never rotates it |
 | the T-Deck's and Guition S3's root (the banded compositor, `moy_banded_last`) | the other of two buffers, the one the feeder is shipping | a CPU row copy, synchronous, reading alongside the feeder (read against read) |
-| one persistent buffer: the host's and web runner's root, every window buffer (`win.buf`), every layer, a cart's canvas (`RETAINED_FRAMES` 1) | this buffer | `moy_gfx.scroll_rect` in place |
+| the host's and the browser's root (the one-buffer compositor, `runtime/toolkit/one_buffer.py`; `RETAINED_FRAMES` 1) | this buffer | `moy_gfx.shift_rect` in place |
+| one persistent buffer: every window buffer (`win.buf`), every layer, a cart's canvas (`RETAINED_FRAMES` 1) | this buffer | `moy_gfx.scroll_rect` in place |
 
 What each shift costs per board is in #113 (2026-10-23 comment). The S3
 root lever is present (2026-10-27; it was `None` on 2026-10-23) because what
@@ -2527,7 +2528,7 @@ Per canvas, then per source:
 |---|---|---|
 | `shift_last` across buffers | the P4 roots (2D-DMA), the S3 roots (CPU row copy) | a one-buffer canvas (shifts in place instead); the Guition's root while a rotate is in flight (answers False, the frame draws) |
 | `shift_last` in place | one persistent buffer: the host's and web's root, every `win.buf`, every layer, a cart's canvas | the P4 and S3 roots (a second buffer exists; the CPU in-place shift loses) |
-| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the host's compositor, whose `last` is a test's ring as for `copy_last` | one persistent buffer with no ring: the web's canvas, every layer |
+| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the one-buffer compositor (the host's and the browser's root), which reads its one buffer, or on the host a test's ring as for `copy_last` | every layer |
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |

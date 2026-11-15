@@ -236,7 +236,7 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
     sl, win = ws.settings_layer, ws.wm._wins["settings"]
     assert not ws.app_has_page("settings")
     assert "back" not in _strip(ws, win)
-    sl.open_tz()
+    sl.open_page("tz")
     _frames(drv)
     assert ws.app_has_page("settings")
     btns = ws.wm._frame_buttons(win)
@@ -244,16 +244,16 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
     bx, by, bw, bh = btns[0][1]
     drv.click(bx + bw // 2, by + bh // 2)
     _frames(drv)
-    assert not sl.tz_view, "the chevron closes the page"
+    assert not sl.showing("tz"), "the chevron closes the page"
     assert "settings" in ws.wm._wins, "and never the window"
     assert "back" not in _strip(ws, win)
 
 
 def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
     ws, drv, app, win = _desk_app(tmp_path, "storybook")
-    assert not drv.takes_escape()
+    assert not ws.app_has_page("storybook")
     app.page = "deck"
-    assert drv.takes_escape()
+    assert ws.app_has_page("storybook")
     drv.escape()
     assert app.page == "stories" and "storybook" in ws.wm._wins
 

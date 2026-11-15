@@ -298,8 +298,20 @@ static int free_name(const char *root, const char *kind, const char *title, char
 
 NAME_VERB(free_file_name, free_name)
 NAME_VERB(duplicate_file, moy_uf_duplicate)
-NAME_VERB(delete_file, moy_uf_delete)
 NAME_VERB(restore_file, moy_uf_restore)
+
+// delete_file(kind, name, root=CARTS_DIR): OSError ENOENT where `name` names
+// nothing, as the Python layer raised it
+static mp_obj_t mod_delete_file(size_t n_args, const mp_obj_t *args) {
+    const char *root = root_of(n_args, args, 2), *kind = s(args[0]), *name = s(args[1]);
+    char out[MOY_UF_NAME_MAX + 1];
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_uf_delete(root, kind, name, out);
+    GUARD_END
+    return named(rc == MOY_UF_NONE ? MP_ENOENT : rc, out);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_delete_file_obj, 2, 3, mod_delete_file);
 
 // rename_file(kind, name, new_title, root=CARTS_DIR)
 static mp_obj_t mod_rename_file(size_t n_args, const mp_obj_t *args) {

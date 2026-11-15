@@ -312,7 +312,10 @@ touch alone (#242, #239). The `ui` engine gives you all three: arrows (the
 T-Deck's WASD and trackball, a pad's d-pad) move focus between stops,
 Enter, A or a tap activates, a drag scrolls. A `ui.field` in focus takes
 the keyboard as text: on the T-Deck its WASD type there, and the trackball
-steps focus off it. So: every action is a stop
+steps focus off it. Nothing sets the keyboard's mode by hand: the console's
+input policy (`runtime/shell/input_policy.py`) derives it from what the
+surface holding the keys has focused, and a menu over it is game mode. So:
+every action is a stop
 (a button, a list row, a menu item), and a key shortcut only ever doubles
 one.
 
@@ -330,6 +333,11 @@ views before it leaves the app, on every tier:
    the chevron meanwhile, in a desk window's title strip too;
 4. else the chevron leaves the app, and Esc and B reach your `keyp` and
    `btnp` (Notes calls `quit()` on Esc there).
+
+Esc is the same key everywhere, the host's included: a board's keyboard
+sends it as `stop` (the console's back) and, on a text surface, as the byte
+27, which over a view of the app's own (a field's edit, a dialog) is that
+same back and anywhere else the surface's own byte.
 
 A second page, a dialog, a picker: lend the way back while it shows. A
 page's title is the bar's: `ui.page("Radio")` draws no head in the page
@@ -357,8 +365,9 @@ end
 ```
 
 A shell app built into the console answers the same back through its
-`back()` and `has_page()` (`Workstation.app_back`); a running app cart's are
-the Player's, over its `ui` context. The console's own key (the T-Deck's
+AppHost, then its `back()` and `has_page()` (`InputPolicy.back`, one cascade
+for Esc, B and both chevrons); a running app cart's are the Player's, over
+its `ui` context. The console's own key (the T-Deck's
 Mic) opens the system menu and is never yours.
 
 **Tabs switch themselves.** `ui.tabs` takes Q and E (the `tabs` hint's
@@ -547,7 +556,8 @@ the ones the Files app shows: `files:documents` (the default),
 `files:pictures`, `files:music`, `files:recordings`; asking for two is a
 manifest error, and one the console has none of refuses the launch. The
 verbs are `files.list`, `load_text`/`save_text`, `load`/`save`, `rename`,
-`delete` (to the trash), `duplicate`, `new_name(title)` (what a typed name
+`delete` (to the trash; `(None, None)`, as `load`, where the name names
+nothing), `duplicate`, `new_name(title)` (what a typed name
 may be stored as) and `badge(name)` (the row's short label, `MD`, `TXT`,
 `JSON`, `PY`, `LUA`). Storage answers `(value, err)` and never raises (Lua:
 two results), `err` being `None` or why. In Lua the standard `io` and `os`
@@ -594,7 +604,10 @@ routing.
 and `open_app` ask first: the player gets a notification ("Wants to open
 todo.md in Notes") that does it when opened, and the call answers `True` as
 though it went. The `front` permission lets them straight through
-(`runtime/system/front.py`).
+(`runtime/system/front.py`). A request that goes through is carried out at
+the start of the console's next frame, after your call returns, so one made
+from your load or `_init` is safe; the call answers `True` for it, and your
+run ends there when the app opened takes its place.
 
 **The clipboard** is the `clipboard` permission: the console's own, at most
 4 KiB of text, the global `clipboard` (`put_text(text)`, False for a text
@@ -1441,14 +1454,14 @@ user cart with its own grant key (`tests/test_user_apps.py`):
 
 ```json
 "moybyte": { "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
-                      "text_mode": false, "order": 80 } }
+                      "order": 80 } }
 ```
 
 then `python tools/gen_device_carts.py --app-decls` regenerates the frozen
 copy. The Layer:
 
 ```python
-class MyAppLayer:
+class MyAppLayer(AppLayer):      # from layers import AppLayer
     id = "myapp"          # process kind: router, back-stack, window key
     domain = "system"     # draws on the responsive system canvas
     TITLE = "MY APP"      # the windowed WM's title strip
@@ -1467,7 +1480,8 @@ class MyAppLayer:
 That is the whole list: the console registers it from the declaration
 (`ws.register_app`), and the launcher's claim, the router, the back-stack,
 the window and its chip, the resize floor (`min_size`, or the layout's
-`MIN_W`/`MIN_H`), text mode and the exitable bar all follow; a new `runtime/`
+`MIN_W`/`MIN_H`), text mode (what its page has focused) and the exitable
+bar all follow; a new `runtime/`
 module reaches every board unless a `board.toml` denies it (#161).
 `tests/test_app_registry.py` fails a hand-written app name anywhere else, and
 `tests/test_app_api.py` holds the Calc set.
@@ -1483,7 +1497,7 @@ module reaches every board unless a `board.toml` denies it (#161).
 | `ctx.theme` | the live token table the look writes at every switch, under a generation: the token dict (rebuilt only when the generation moves), one token by its role id, the generation, the light flag, the theme's and variant's names (the reads every app is given, the floor); the verbs that change the look; and the Appearance page's (`docs/history/theming_2026-09.md` §9 phase 6 step 7): a change to the theme (landing in `custom`), what its rows show, CHROME SIZE, EDIT FILE, and NAME… (step 8: `custom` renamed into a theme of its own, and why a name will not do) | `appearance` | `colors()`, `token()`, `gen()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()`, `change()`, `choices()`, `set_chrome_scale()`, `edit_file()`, `name_custom()`, `name_check()` |
 | `ctx.files` | the USER-FILES store (#108), C rows over the layer in `native/moy_store/moy_ufiles.h`: named documents (`docs` is plain Markdown — `files/Documents/<name>.md`, the file's body IS the document), the trash, history sidecars, the image, cover and text codecs, provenance stamps; a grant made for a shared folder (a user app's) reaches the kinds in that folder alone | `files` | `readable()`, `ready()`, `begin()`, `end()`, `list()`, `count()`, `load()`, `save()`, `delete()`, `duplicate()`, `rename()`, `new_name()`, `trash_list()`, `restore()`, `empty_trash()`, `history()`, `history_ops()`, `history_commit()`, `encode_image()`, `decode_image()`, `decode_cover()`, `encode_cover()`, `sig()`, `stamp()`, `encode_text()`, `decode_text()`, `provenance()` |
 | `ctx.carts` | the CART store: the live cart list, a new cart, a project's undo journal and its images | the shell | `readable()`, `ready()`, `begin()`, `end()`, `all()`, `can_journal()`, `slug()`, `create()`, `journal()`, `rescan()`, `hydrate()`, `images()`, `save_image()`, `encode_image()` |
-| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `launch` | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `text_mode()`, `cover()`, `cover_gen()` |
+| `ctx.nav` | where the console goes next: another app, the Editor, a document, a run | `launch` | `open_app()`, `is_system_app()`, `projects()`, `edit()`, `open_image()`, `open_text()`, `edit_file()`, `play()`, `run_script()`, `cover()`, `cover_gen()` |
 | `ctx.prefs` | per-app settings on `system/settings`' rows, namespaced per app (the grant's namespace), a write saved as it is made | `prefs` | `get()`, `set()`, `clear()` |
 | `ctx.notify` | the console's own badges and every game's, as Settings lists them: one of the console's awarded by its id, the badges by game (each found one's day, each goal's last value), and today's date on the bar's clock as the badges record it | the shell | `award()`, `groups()`, `today()` |
 | `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | the shell | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
@@ -1530,18 +1544,22 @@ it paints the strip after `draw()` and routes a tap in its band before
 - `commit()`: just before the bar's back or the window's X, for an app that
   persists on an idle debounce (#111).
 - `back()`: one page back, answering True, or False on the first page, when
-  the host leaves the app.
+  the host leaves the app; the AppHost's step (a field's edit, a popover)
+  comes first.
 - `idle_step()` while `idle_owed`: work that must not land in a draw (a
   file read, a decode), run once on a frame with nothing to paint.
 - `page_title()`: the open page's name, after the back chevron or as the
   window's title.
 - `glass` (true while it holds the whole glass: no strip, its own back),
   `leave_asked` (its own way out, taken as the bar's back), `BACK_MINIMISES`
-  (a back on the first page minimises on the desk), `cancel_field()` (the
-  T-Deck's Mic inside an open field; an app without one has Mic asked of
-  its `ctx.ui` context, `ui_draw.app_cancel`, so a `ui.field` it draws
-  gives its draft back), `DESK_TILE` (False: off the desk's
-  column).
+  (a back on the first page minimises on the desk), `typing()` (True
+  where the app types outside a `ui.field`, as the Terminal does; by
+  default a field in focus on its `ctx.ui` page), `cancel()` (the T-Deck's
+  Mic inside an open field; by default its `ctx.ui` context's,
+  `ui_draw.app_cancel`, so a `ui.field` it draws gives its draft back and
+  a `ui.popover` it draws is dismissed),
+  `DESK_TILE` (False: off the desk's column). `layers.AppLayer` defaults
+  each; the console asks them through its input policy and nowhere else.
 
 **Between apps.** `ctx.nav.open_app(id)` opens another app by its registered
 id (a build without it degrades to a status line); the Files router's verbs

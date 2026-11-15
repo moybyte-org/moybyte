@@ -25,6 +25,7 @@ def test_the_remote_app_s_grid_and_messages(tmp_path):
     subprocess.run([shutil.which("cc"), "-std=gnu99", "-g", "-O1", "-Wall", "-Werror",
                     "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                     "-DMOY_SH_LINK=1", "-I", SH, "-I", os.path.join(ROOT, "native", "moy_kernel"),
+                    "-I", os.path.join(ROOT, "native", "moy_spine"),
                     "-o", exe] + srcs, check=True)
     out = subprocess.run([exe], check=True, capture_output=True, text=True,
                          env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1")).stdout

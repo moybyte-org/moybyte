@@ -130,6 +130,7 @@ def _search_frame(ws, drv, kind, typed=""):
     ws.launcher_layer._lib_unsupported = True   # every frame a full paint
     ws.use_inputs([("local", kind)])
     ws.open_search()
+    drv.frame(1 / 30)                           # the search takes the keyboard
     for ch in typed:
         drv.type_char(ord(ch))
         drv.frame(1 / 30)

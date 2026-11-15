@@ -138,7 +138,7 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
 
 
 def _owes(ws):
-    for app, _t in ws._apps:
+    for app in ws._apps:
         if getattr(app, "idle_owed", False):
             return True
     return False
@@ -341,7 +341,7 @@ def test_drags_flings_keys_and_held_keys_match_whole_repaints(tmp_path, app, buf
 
 def _inst(ws, cls):
     """The open app whose class is named `cls`."""
-    for app, _t in ws._apps:
+    for app in ws._apps:
         a = getattr(app, "_inst", app)
         if type(a).__name__ == cls:
             return a

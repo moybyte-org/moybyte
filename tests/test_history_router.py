@@ -476,11 +476,11 @@ def test_the_frame_loop_calls_the_router_directly(tmp_path):
 
 
 def test_the_keypress_site_stores_the_tick_it_does_not_call(tmp_path):
-    """`handle_input` re-arms the debounce on EVERY keystroke that reaches the
+    """`_route_keys` re-arms the debounce on EVERY keystroke that reaches the
     code tab. Doc 3e: one attribute store, never a method call."""
-    src = ast.dump(_fn("handle_input"))
+    src = ast.dump(_fn("_route_keys"))
     assert "edit_ms" in src
-    stores = [n for n in ast.walk(_fn("handle_input"))
+    stores = [n for n in ast.walk(_fn("_route_keys"))
               if isinstance(n, ast.Assign)
               and any(isinstance(t, ast.Attribute) and t.attr == "edit_ms"
                       for t in n.targets)]

@@ -40,6 +40,7 @@ static uint32_t m_held, m_last, m_pressed, m_kept;
 static int m_taken;
 static int32_t m_last_key;
 static int m_key_src;
+static int32_t m_key_prev, m_key_press;
 
 static void model_key(int s, int32_t key) {
     int32_t old = src[s].key;
@@ -79,7 +80,7 @@ static int32_t model_dequeue(msrc_t *s) {
 static void step(moy_input_t *t, uint8_t nb) {
     uint32_t r = next();
     int s = nsrc ? (int)(next() % (uint32_t)nsrc) : 0;
-    switch (r % 12u) {
+    switch (r % 13u) {
         case 0: {
             char name[8];
             snprintf(name, sizeof(name), "s%u", (unsigned)(next() % 16u));
@@ -160,6 +161,9 @@ static void step(moy_input_t *t, uint8_t nb) {
             m_last = held;
             m_held = held;
             m_taken = 0;
+            int32_t k = moy_input_typed(m_last_key);
+            m_key_press = k != m_key_prev ? k : 0;
+            m_key_prev = k;
             break;
         }
         case 8:
@@ -183,6 +187,11 @@ static void step(moy_input_t *t, uint8_t nb) {
                 m_kept = 0;
             }
             break;
+        case 12:
+            moy_input_spend_key(t);
+            m_key_press = 0;
+            m_key_prev = moy_input_typed(m_last_key);
+            break;
         case 11: {
             uint8_t p = (uint8_t)(next() % MOY_INPUT_PLAYERS);
             CHECK(moy_input_set_player(t, src[s].h, p) == MOY_INPUT_OK);
@@ -196,6 +205,7 @@ static void step(moy_input_t *t, uint8_t nb) {
     CHECK(p == m_pressed);
     CHECK(moy_input_kept(t) == m_kept);
     CHECK(moy_input_last_key(t) == m_last_key);
+    CHECK(moy_input_key_press(t) == m_key_press);
     CHECK(h == (h & ((1u << nb) - 1u)));
     uint8_t players[MOY_INPUT_SOURCES];
     uint8_t n = moy_input_players(t, players);
@@ -214,6 +224,7 @@ static void run(uint32_t seed, long steps) {
     m_taken = 0;
     m_last_key = 0;
     m_key_src = -1;
+    m_key_prev = m_key_press = 0;
     for (long i = 0; i < steps; i++) {
         step(t, nb);
     }

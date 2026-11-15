@@ -11,6 +11,6 @@ ifeq ($(MOY_GLASS_PRESENT),0)
 CFLAGS_USERMOD += -DMOY_GLASS_PRESENT=0
 else
 SRC_USERMOD_C += $(MOY_GLASS_DIR)/modmoy_glass_banded.c $(MOY_GLASS_DIR)/modmoy_glass_dsi.c $(MOY_GLASS_DIR)/modmoy_glass_rot.c
-SRC_USERMOD_LIB_C += $(MOY_GLASS_DIR)/moy_present_banded.c $(MOY_GLASS_DIR)/moy_present_dsi.c $(MOY_GLASS_DIR)/moy_present_rot.c
+SRC_USERMOD_LIB_C += $(MOY_GLASS_DIR)/moy_present_banded.c $(MOY_GLASS_DIR)/moy_present_dsi.c $(MOY_GLASS_DIR)/moy_present_rot.c $(MOY_GLASS_DIR)/moy_present_game.c
 endif
 CFLAGS_USERMOD += -I$(MOY_GLASS_DIR) -I$(MOY_GLASS_DIR)/../moy_spine -DMOY_GLASS=1

@@ -22,6 +22,7 @@
 #include "moycore_ui.h"
 #endif
 #include "moycore_scene.h"
+#include "moy_codec.h"
 #include "moy_img.h"
 #include "moy_buf.h"
 #include "moy_proc.h"
@@ -608,14 +609,6 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 #define g_p8rom (RUN.p8rom)
 static uint8_t *g_p8_next_mem, *g_p8_next_rom;   // the next open's, the row's from then
 
-static int mc_unhex(int ch)
-{
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    return -1;
-}
-
 // __moy_map_flags(hex): the baked __gff__ table, two hex chars per sprite,
 // crossed ONCE at shim boot. A bad nibble reads as 0, exactly like the shim's
 // own tonumber(..., 16). Non-string clears.
@@ -629,8 +622,8 @@ static int l_map_flags(lua_State *L)
     n = len / 2;
     if (n > sizeof(RUN.c.flags)) n = sizeof(RUN.c.flags);
     for (i = 0; i < n; i++) {
-        int hi = mc_unhex((unsigned char)s[2 * i]);
-        int lo = mc_unhex((unsigned char)s[2 * i + 1]);
+        int hi = moy_hex_value((unsigned char)s[2 * i]);
+        int lo = moy_hex_value((unsigned char)s[2 * i + 1]);
         if (hi >= 0 && lo >= 0) RUN.c.flags[i] = (uint8_t)((hi << 4) | lo);
     }
     lua_pushboolean(L, 1);

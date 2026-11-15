@@ -617,25 +617,25 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     ws = build_ws(tmp_path)
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
-    assert sl.wifi_view and "settings" in ws.leases.holders()
+    sl.open_page("wifi")
+    assert sl.showing("wifi") and "settings" in ws.leases.holders()
     assert ws.wifi.radio is True
-    sl.close_wifi()
+    sl.close_page()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     # Leaving Settings with the panel still open -- the HOME key, or the X --
     # ends the lease too: the panel is closed on the way out, not on the next
     # visit, or the radio would stay on until somebody opened Settings again.
-    sl.open_wifi()
+    sl.open_page("wifi")
     assert ws.wifi.radio is True
     ws.go_home()
-    assert not sl.wifi_view
+    assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     ws.open_settings()
-    sl.open_wifi()
+    sl.open_page("wifi")
     ws._exit_settings()
-    assert not sl.wifi_view
+    assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -922,7 +922,7 @@ def test_the_settings_panel_polls_its_scan_and_join(tmp_path):
     ws.wifi = w = _SlowWifi()
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     assert sl.wifi_scanning and sl.wifi_msg == settings_layer.WIFI_LOOKING
     wid = sl._wifi_wake
     assert wid in moybyte.WAKES.by_id
@@ -947,7 +947,7 @@ def test_the_settings_panel_polls_its_scan_and_join(tmp_path):
     w.polls = 0
     sl._wifi_rescan()
     assert sl._wifi_wake is not None
-    sl.close_wifi()
+    sl.close_page()
     assert sl._wifi_wake is None and not sl.wifi_busy()
 
 
@@ -959,7 +959,7 @@ def test_a_saved_locked_network_that_fails_asks_for_its_password_again(tmp_path)
     w.polls = 10
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_known = ["Cafe"]
     sl.wifi_sel = 0
     sl._wifi_activate()

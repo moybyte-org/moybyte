@@ -16,11 +16,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_fs.h"
 #include "moy_journal.h"
 #include "moy_json.h"
 #include "moy_net.h"
 #include "moy_vol.h"
+
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
 #define REL_CHARS 256
 #define REL_BYTES (REL_CHARS * 2)
@@ -271,35 +276,15 @@ static int publish_tmp(op_t *o) {
     return 0;
 }
 
-typedef struct {
-    char *names;            // each NUL-terminated, then its is_dir byte
-    size_t n, cap;
-    int fail;
-} names_t;
-
+// A listing's names into a builder: each NUL-terminated, then its is_dir byte.
 static int collect(void *ctx, const char *name, size_t len, int is_dir,
                    uint32_t size) {
     (void)size;
-    names_t *l = ctx;
-    if (l->n + len + 2u > l->cap) {
-        size_t cap = (l->cap ? l->cap * 2u : 256u) + len + 2u;
-        char *p = moy_store_alloc(cap);
-        if (p == NULL) {
-            l->fail = 1;
-            return 1;
-        }
-        if (l->names != NULL) {
-            memcpy(p, l->names, l->n);
-            moy_store_free(l->names, l->cap);
-        }
-        l->names = p;
-        l->cap = cap;
-    }
-    memcpy(l->names + l->n, name, len);
-    l->names[l->n + len] = '\0';
-    l->names[l->n + len + 1u] = (char)(is_dir != 0);
-    l->n += len + 2u;
-    return 0;
+    moy_sb_t *l = ctx;
+    moy_sb_put(l, name, len);
+    moy_sb_byte(l, '\0');
+    moy_sb_byte(l, (char)(is_dir != 0));
+    return l->failed;
 }
 
 // The tree at o->tree (`n` bytes) removed, bottom up.
@@ -309,13 +294,13 @@ static void rmtree(op_t *o, size_t n, int depth) {
     }
     moy_vol_t v;
     const char *rest;
-    names_t l = {0};
+    moy_sb_t l = moy_sb_grown(&STORE_MEM);
     if (at(o->tree, &v, &rest) == 0 && moy_vol_list(&v, rest, collect, &l) == 0
-        && !l.fail) {
+        && !l.failed) {
         for (size_t i = 0; i < l.n;) {
-            const char *name = l.names + i;
+            const char *name = l.p + i;
             size_t len = strlen(name);
-            int dir = l.names[i + len + 1u];
+            int dir = l.p[i + len + 1u];
             i += len + 2u;
             if (n + 1u + len >= sizeof(o->tree)) {
                 continue;
@@ -330,9 +315,7 @@ static void rmtree(op_t *o, size_t n, int depth) {
             o->tree[n] = '\0';
         }
     }
-    if (l.names != NULL) {
-        moy_store_free(l.names, l.cap);
-    }
+    moy_sb_free(&l);
     moy_fs_remove(o->tree);
 }
 
@@ -361,45 +344,6 @@ static void journal(op_t *o, const char *text, size_t n) {
     const char *file = o->rel + o->seg[1];
     moy_journal_append(cart, file, text, n, -1, NULL, 0, s->ts, &seq);
     moy_buf_free(&b);
-}
-
-// base64 as binascii.a2b_base64 reads it: bytes outside the alphabet are
-// passed over, the first '=' that completes a quantum ends the data, and a
-// quantum left short is an error. -1, or the decoded length.
-static long unb64(const char *s, size_t n, unsigned char *out) {
-    uint32_t acc = 0;
-    int bits = 0, q = 0;
-    long k = 0;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)s[i];
-        int d;
-        if (c >= 'A' && c <= 'Z') {
-            d = c - 'A';
-        } else if (c >= 'a' && c <= 'z') {
-            d = c - 'a' + 26;
-        } else if (c >= '0' && c <= '9') {
-            d = c - '0' + 52;
-        } else if (c == '+') {
-            d = 62;
-        } else if (c == '/') {
-            d = 63;
-        } else if (c == '=') {
-            if (q >= 2) {
-                return k;           // the padding that ends a short quantum
-            }
-            continue;
-        } else {
-            continue;
-        }
-        acc = (acc << 6) | (uint32_t)d;
-        bits += 6;
-        q = (q + 1) & 3;
-        if (bits >= 8) {
-            bits -= 8;
-            out[k++] = (unsigned char)(acc >> bits);
-        }
-    }
-    return q == 0 ? k : -1;
 }
 
 static void why(char *out, const char *text) {
@@ -558,7 +502,7 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
             return 1;
         }
         unsigned char *raw = moy_store_alloc(tn / 4u * 3u + 3u);
-        long rn = raw == NULL ? -2 : unb64(t, tn, raw);
+        long rn = raw == NULL ? -2 : moy_b64_decode(t, tn, raw);
         moy_store_free(t, tcap);
         if (rn < 0) {
             if (raw != NULL) {

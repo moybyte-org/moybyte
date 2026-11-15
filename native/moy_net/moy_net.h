@@ -59,6 +59,19 @@ int moy_http_parse(const char *buf, size_t n, moy_http_req_t *r);
 int moy_http_query(const char *target, size_t n, const char *name,
                    size_t name_n, const char **val, size_t *val_n);
 
+typedef struct {
+    int status;             // 0 when the status line does not parse
+    uint32_t clen;          // Content-Length, 0 when absent or unreadable
+    const char *loc;        // Location's value, trimmed; NULL when none
+    size_t loc_n;
+    size_t head_end;        // the byte past the blank line
+} moy_http_resp_t;
+
+// A response head off the first `n` bytes of `buf`: MOY_HTTP_OK with `r`
+// filled, or MOY_HTTP_PARTIAL until the "\r\n\r\n" arrives. Header names
+// match without regard to ASCII case.
+int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r);
+
 // -- the listener and the platform (moy_net_port.c) -----------------------------
 
 #define MOY_HTTP_REQ_MAX 65536      // a request past this is cut there
@@ -156,10 +169,6 @@ const char *moy_http_reason(int status);
 // writes at most `cap` bytes (no NUL) and returns the length the whole needs.
 size_t moy_http_head(char *out, size_t cap, int status, const char *ctype,
                      size_t body_n);
-
-// Whether the `n` bytes at `s` are well-formed UTF-8 (no overlong form, no
-// surrogate, nothing past U+10FFFF): what a strict decode accepts.
-int moy_utf8_valid(const char *s, size_t n);
 
 // -- the sync batch's envelope -----------------------------------------------
 
@@ -476,7 +485,8 @@ int moy_net_await(uint32_t *since);
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
-// MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
+// MOY_NET_GPIO_ROUTE: its board.toml `gpio` lease row, MOY_LEASE_GPIO_PINS):
+// the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).
 int moy_gpio_pins(const uint8_t **pins);
 int moy_gpio_drive(int pin, int level);

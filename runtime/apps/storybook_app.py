@@ -34,6 +34,7 @@ from array import array
 
 import ui
 from app_shell import ListShellApp
+from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 from ticks import _ticks_ms, _ticks_diff
 import story_doc as D
@@ -339,7 +340,6 @@ class StorybookAppLayer(ListShellApp):
         self.ed = None                # the desk's editor (runtime/apps/story_edit.py)
         self._focus = None
         self._focused = None
-        self._key = 0
         self._edited_at = None
         self._scanned = False
         self._rows = []               # the stories' cards (`_cards`)
@@ -408,6 +408,12 @@ class StorybookAppLayer(ListShellApp):
         if self.story is not None and self.page != "stories":
             return self.story.title() or "Untitled"
         return None
+
+    def typing(self):
+        """A field in focus types (a dialog's name), and so do a slide's
+        words while the desk's editor writes them."""
+        ed = self.ed
+        return (ed is not None and ed.writing) or AppLayer.typing(self)
 
     def has_page(self):
         return self.page != "stories" or self.asking is not None or self.menu is not None \
@@ -501,12 +507,7 @@ class StorybookAppLayer(ListShellApp):
 
     def _typed(self, inp):
         """The key typed this frame (each press once), or 0."""
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k if k != 0 and k != self._key else 0
-        self._key = k
-        return typed
+        return getattr(inp, "typed", 0)
 
     def handle_input(self, inp):
         k = self._typed(inp)

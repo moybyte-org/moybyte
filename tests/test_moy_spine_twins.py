@@ -1,5 +1,5 @@
 """The kernel spine's native twin beyond the interface suite: the part of
-sprint 2's harness (tools/moy_index_spike.py --component spine) CI runs.
+native checks (tools/native_check.py --component spine) CI runs.
 
   * tests/test_moy_spine.py itself, run on the boards' VM -- the desktop
     MicroPython, both object models -- over the native module and over the
@@ -32,7 +32,8 @@ import pytest
 
 import vm_suite
 import spine_twin as moy_spine    # the oracle (tests/spine_twin.py)
-from tools import moy_index_spike
+from runtime import native_parts
+from tools import native_check
 from runtime import moy_spine_binding
 from unix_mp import find_unix_mp, require_unix_mp
 
@@ -120,7 +121,7 @@ def round_():
     s.load(TEXT)
     reg = sp.AppRegistry()
     for i in range(8):
-        reg.register("app%d" % i, "App %d" % i, False, (i, i))
+        reg.register("app%d" % i, "App %d" % i, (i, i))
     rt = sp.Returns(reg)
     rt.run("app1")
     t = sp.Table(1, "x", 256)
@@ -294,8 +295,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 title = rnd.choice(["T%d" % i, "é", "", 42, None])
                 size = rnd.choice([None, (i, i + 1), [3, 4], (-2, 1 << 31),
                                    (1 << 31, 0)])
-                got = both(apps, "register", aid, title, rnd.random() < 0.5,
-                           size)
+                got = both(apps, "register", aid, title, size)
                 if got[0][0] == "ok":
                     assert got[0] == got[1], (step, got)
             elif op == "find":
@@ -305,7 +305,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
                 hs = apps[0].handles()
                 h = (rnd.choice(hs) if hs and rnd.random() < 0.7
                      else rnd.choice(seen))
-                for meth in ("app_id", "title", "text_mode", "min_size",
+                for meth in ("app_id", "title", "min_size",
                              "valid"):
                     agree(both(apps, meth, h), (step, meth))
                 continue
@@ -524,8 +524,8 @@ def _nest(n):
 def test_the_api_fuzz_runs_clean_under_the_sanitizers():
     """fuzz_spine's seeded programs, built with ASan and UBSan: every answer
     checked against its model, every byte returned."""
-    got = moy_index_spike.fuzz_seeded("c", seed=1, runs=150,
-                                      comp=moy_index_spike.SPINE)
+    got = native_check.fuzz_seeded("c", seed=1, runs=150,
+                                   comp=native_parts.SPINE)
     if got is None:
         if os.environ.get("CI"):
             pytest.fail("no C compiler with AddressSanitizer here")

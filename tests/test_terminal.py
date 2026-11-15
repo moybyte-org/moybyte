@@ -458,6 +458,7 @@ def test_the_trackball_walks_the_tdeck_row_and_back(tmp_path):
     drv.frame(1 / 30)
     app = ws.terminal_app
     kinds = ui_draw.input_kind(), ui_draw.hint_kind()
+    ws.use_inputs([("local", "tdeck")])     # the keys typed below are the T-Deck's
     ui_draw.input_kind("tdeck")
     ui_draw.hint_kind("tdeck")
 
@@ -625,11 +626,11 @@ def test_mic_enters_the_app_key_row_on_the_tdeck(term):
     ui_draw.input_kind("tdeck")
     ui_draw.hint_kind("tdeck")
     try:
-        assert not app.cancel_field()
+        assert not app.cancel()
         run(app, "top")
         _frame(ws)
-        assert app.cancel_field() and app.face.in_row()
-        assert app.cancel_field() and not app.face.in_row()
+        assert app.cancel() and app.face.in_row()
+        assert app.cancel() and not app.face.in_row()
         app.face.press("Quit")
         assert app.face.app() is None
     finally:

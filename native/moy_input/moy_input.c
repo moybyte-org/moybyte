@@ -111,6 +111,8 @@ struct moy_input {
     uint32_t krep_due[MOY_INPUT_SOURCES];
     int32_t krep_ev;                        // this frame's repeated key, and its count
     uint8_t krep;
+    int32_t key_prev;                       // the byte typed at the last merge
+    int32_t key_press;                      // this frame's byte where it is a fresh press
     // the event rings and their readers, written under the lock
     moy_input_ring_t *ring[MOY_INPUT_RINGS];   // the latch sources', then the ring sources'
     uint8_t ev_used;                        // a bit a reader
@@ -1185,7 +1187,10 @@ void moy_input_begin_frame(moy_input_t *t, uint32_t now) {
     for (uint8_t i = 0; i < t->nsrc; i++) {
         t->front->src[i].pflags &= (uint8_t)~P_EDGE;
     }
+    int32_t typed = moy_input_typed(t->front->last_key);
     UNLOCK(t);
+    t->key_press = typed != t->key_prev ? typed : 0;
+    t->key_prev = typed;
     t->mods = mods;
     t->pb_pressed = (uint8_t)(pb & ~t->pb_held);
     t->pb_held = pb;
@@ -1304,7 +1309,13 @@ void moy_input_release_all(moy_input_t *t) {
     memset(t->p_held, 0, sizeof(t->p_held));
 }
 
+void moy_input_spend_key(moy_input_t *t) {
+    t->key_press = 0;
+    t->key_prev = moy_input_typed(t->front->last_key);
+}
+
 void moy_input_spend_edges(moy_input_t *t) {
+    moy_input_spend_key(t);
     memset(t->rep, 0, sizeof(t->rep));
     t->krep = 0;
     t->krep_ev = 0;
@@ -1398,6 +1409,10 @@ int32_t moy_input_last_key(const moy_input_t *t) {
     return moy_input_typed(t->front->last_key);
 }
 
+int32_t moy_input_key_press(const moy_input_t *t) {
+    return t->key_press;
+}
+
 int32_t moy_input_key_event(const moy_input_t *t) {
     return t->front->last_key;
 }
@@ -1445,6 +1460,8 @@ void moy_input_set_last_key(moy_input_t *t, int32_t key) {
     LOCK(t);
     t->front->last_key = key;
     UNLOCK(t);
+    int32_t typed = moy_input_typed(key);
+    t->key_press = typed != t->key_prev ? typed : 0;
 }
 
 uint8_t moy_input_players(const moy_input_t *t, uint8_t *out) {

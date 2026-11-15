@@ -48,11 +48,13 @@ import json as _json
 import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
+from layers import Layer
 import text_modes as _modes
 import layout_base as _lb
 from code_layer import CodeLayer, _status_line
 from chrome import CodeLayout
 from editors_code import CodeEditor
+from op_history import History, OpCodec
 from editors_paint_map import PaintEditor
 from editor_map import checker as _checker
 from moy_input import CTRL as _CTRL
@@ -96,54 +98,25 @@ def _dot():
 # -- the package ------------------------------------------------------------------
 
 
-class _SlotOps:
-    """The Sprites tab's undo: each step one slot's tile before and after
-    and whether it drew from the sheet (a smooth slot painted is pixels
-    after, smooth before). History's face (`can_undo`, `undo`, ...) so the
-    bar's pair walks it as it walks a cart tab's."""
+class _SlotOps(OpCodec):
+    """The Sprites tab's undo codec: an op is one slot's tile before and
+    after and whether it drew from the sheet (a smooth slot painted is
+    pixels after, smooth before)."""
 
-    DEPTH = 32
+    def apply(self, doc, op):
+        doc._put(op[0], op[2], op[4])
 
-    def __init__(self, doc):
-        self.doc = doc
-        self._undo = []
-        self._redo = []
+    def invert(self, doc, op):
+        doc._put(op[0], op[1], op[3])
 
-    def record(self, op):
-        self._undo.append(op)
-        if len(self._undo) > self.DEPTH:
-            self._undo.pop(0)
-        self._redo = []
 
-    def can_undo(self):
-        return bool(self._undo)
-
-    def can_redo(self):
-        return bool(self._redo)
-
-    def undo(self):
-        if not self._undo:
-            return None
-        op = self._undo.pop()
-        self._redo.append(op)
-        self.doc._put(op[0], op[1], op[3])
-        return op
-
-    def redo(self):
-        if not self._redo:
-            return None
-        op = self._redo.pop()
-        self._undo.append(op)
-        self.doc._put(op[0], op[2], op[4])
-        return op
-
-    def brings_back(self, slot):
-        """Whether undo brings slot `slot`'s smooth icon back: a step on
-        the stack turned it to pixels."""
-        for op in self._undo:
-            if op[0] == slot and not op[3] and op[4]:
-                return True
-        return False
+def _brings_back(hist, slot):
+    """Whether undo brings slot `slot`'s smooth icon back: a step on the
+    stack turned it to pixels."""
+    for op in hist._undo:
+        if op[0] == slot and not op[3] and op[4]:
+            return True
+    return False
 
 
 class ThemeDoc:
@@ -183,7 +156,7 @@ class ThemeDoc:
         self.slot = FIRST_SLOT
         self.pe.n = self.slot
         self.cur = [0, 0]
-        self.hist = _SlotOps(self)
+        self.hist = History(self, _SlotOps(), max_undo=32, persisted=False)
         self.sprites_dirty = False
         self._pre = None               # the open edit's (slot, tile, flag)
         self._look_gen = look.look_gen
@@ -292,7 +265,7 @@ class ThemeDoc:
         s = self.slot
         if not self.flags[s]:
             return slot_name(s) + _dot() + "smooth"
-        if self.hist.brings_back(s):
+        if _brings_back(self.hist, s):
             return slot_name(s) + _dot() + "pixels" + _dot() + "Undo brings it back"
         return slot_name(s) + _dot() + "pixels"
 
@@ -709,6 +682,9 @@ class ConfigLayer(CodeLayer):
     language JSON, the theme's status line under it. The buffer is the open
     ThemeDoc's (`ws.editor` while the theme mode is open), its keys the Code
     tab's less what JSON has no use for (completion, Go to, the scripts)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
 
     id = TAB_CONFIG
 
@@ -816,24 +792,21 @@ class ConfigLayer(CodeLayer):
         doc = self._doc()
         if doc is None:
             return True
-        k = getattr(i, "last_key", 0) or 0
+        k = i.typed
         app = self.ws.editor_app
-        if k and self._ekey.prev != k:
+        if k:
             mods = getattr(i, "mods", 0)
             if k == 0x09 and mods & _CTRL:
-                self._ekey.hit(k)
                 app.theme_tab(TAB_SPRITES)
                 return True
             if k == 27 and not (self._find_open or self._cmp_open or self._jump_open):
-                self._ekey.hit(k)
                 self.ws.defer(app.close_theme)
                 return True
         if _ui_draw.input_kind() == "pad" and i.pressed("b"):
             self.ws.defer(app.close_theme)          # a gamepad types nothing here
             return True
-        typed = k and self._ekey.prev != k
         got = self._with(CodeLayer.handle_input, self, i)
-        if typed and doc.ed.dirty:
+        if k and doc.ed.dirty:
             doc.saved = False
             doc.note = None
         return got if got is not None else True
@@ -947,12 +920,17 @@ class SpritesLayout:
         return (x0 + (k % self.cols) * self.pitch, y0 + (k // self.cols) * self.pitch_y)
 
 
-class SpritesLayer:
+class SpritesLayer(Layer):
     """The Sprites tab's content layer (system domain, as the sprite tab's)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
 
     id = TAB_SPRITES
     domain = "system"
-    ball_steps = False              # the trackball points at the icon and its colours
+    def ball_steps(self):
+        """The trackball points at the icon and its colours."""
+        return False
 
     def __init__(self, ws, names):
         self.ws = ws
@@ -961,7 +939,6 @@ class SpritesLayer:
         self._args = None
         self._drag = None
         self._shape0 = None
-        self._kprev = 0
 
     def relayout(self, w, h, fs, cs=None):
         self._args = (w, h, fs, cs)
@@ -1003,7 +980,6 @@ class SpritesLayer:
             self._side(cv, th, lay, doc)
             self._palette(cv, th, lay, doc)
             self._foot(cv, th, lay, doc)
-        ws.bar_layer._draw_status_strip("menu")
 
     def _greys(self):
         return self.ws.look.live.fixed[:2]
@@ -1228,33 +1204,31 @@ class SpritesLayer:
         if doc is None:
             return True
         app = ws.editor_app
-        k = getattr(i, "last_key", 0) or 0
-        if k != self._kprev:
-            self._kprev = k
-            if k:
-                mods = getattr(i, "mods", 0)
-                if k == 0x09 and mods & _CTRL:
-                    app.theme_tab(TAB_CONFIG)
-                    return True
-                if k == 27:
-                    ws.defer(app.close_theme)
-                    return True
-                if k == 0x1A:
-                    ws.history.undo()
-                    return True
-                if k == 0x19:
-                    ws.history.redo()
-                    return True
-                if k in (0x71, 0x51):
-                    doc.select(doc.slot - 1)
-                    return True
-                if k in (0x77, 0x57, 0x65, 0x45):
-                    doc.select(doc.slot + 1)
-                    return True
-                op = _KEY_OPS.get(k)
-                if op is not None:
-                    self._op(doc, op)
-                    return True
+        k = i.typed
+        if k:
+            mods = getattr(i, "mods", 0)
+            if k == 0x09 and mods & _CTRL:
+                app.theme_tab(TAB_CONFIG)
+                return True
+            if k == 27:
+                ws.defer(app.close_theme)
+                return True
+            if k == 0x1A:
+                ws.history.undo()
+                return True
+            if k == 0x19:
+                ws.history.redo()
+                return True
+            if k in (0x71, 0x51):
+                doc.select(doc.slot - 1)
+                return True
+            if k in (0x77, 0x57, 0x65, 0x45):
+                doc.select(doc.slot + 1)
+                return True
+            op = _KEY_OPS.get(k)
+            if op is not None:
+                self._op(doc, op)
+                return True
         if i.pressed("b"):
             ws.defer(app.close_theme)
             return True

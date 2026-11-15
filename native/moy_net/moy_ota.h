@@ -39,19 +39,6 @@ int moy_url_parse(const char *url, int *tls, char *host, size_t host_cap,
                   uint16_t *port, const char **path);
 
 typedef struct {
-    int status;             // 0 when the status line does not parse
-    uint32_t clen;          // Content-Length, 0 when absent or unreadable
-    const char *loc;        // Location's value, trimmed; NULL when none
-    size_t loc_n;
-    size_t head_end;        // the byte past the blank line
-} moy_http_resp_t;
-
-// A response head off the first `n` bytes of `buf`: MOY_HTTP_OK with `r`
-// filled, or MOY_HTTP_PARTIAL until the "\r\n\r\n" arrives. Header names
-// match without regard to ASCII case.
-int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r);
-
-typedef struct {
     uint32_t h[8];
     uint64_t len;
     uint8_t buf[64];

@@ -26,8 +26,7 @@ console.py imports them back so tests + tools resolve console._PG_X0 / _PG_SPAN 
 `NAMES` (palette) is injected (the circular-import dodge); the rect hit-test is
 `ui.rect_in`, imported directly.
 
-Stage 4 (#46 zoned bar): PaintLayer.draw() calls ws.bar_layer._draw_status_strip("menu")
-LAST (chrome over content).
+The frame draws the "menu" strip over PaintLayer's page (`bar_layer.STRIP_OF`).
 
 Responsive (#39 step 3): the paint editor is SYSTEM-domain now -- it draws on the
 reflowed system canvas at the panel's native size via `PaintLayout`, whose
@@ -39,9 +38,9 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 
 import ui as _ui              # frozen on device
 import ui_draw as _ui_draw
+from layers import Layer
 from editor_map import checker as _checker, checker_quads as _checker_quads
 from editors_paint_map import PaintEditor, _pe_line
-from editors_base import KeyEdge
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from array import array
 
@@ -328,7 +327,7 @@ class PaintLayout(LayoutBase):
         self.more_btn = self.tool_btns[-1]
 
 
-class PaintLayer:
+class PaintLayer(Layer):
     """The paint editor content Layer (SYSTEM domain, responsive #39 step 3): a
     full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
     gone -- the panel always covered every pixel of it anyway). draw = the paint UI
@@ -347,7 +346,6 @@ class PaintLayer:
         self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
         self._shape_start = None      # RECT/LINE/OVAL/SELECT drag origin cell (#90)
         self._shape_end = None        # ...and its current (clamped) end cell, for preview
-        self._ekey = KeyEdge()        # Ctrl+Z/Y edge tracker (undo-shortcut, #90)
         # The grid's cursor (lx, ly): the cell the pointer last pressed or
         # dragged over, moved by the arrows; `a` acts there as a tap would.
         self._cur = [0, 0]
@@ -398,13 +396,10 @@ class PaintLayer:
         self.ws._reset_canvas_state()
         self._dt = dt
         self._draw_paint()
-        # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
-        # PLAY.
-        self.ws.bar_layer._draw_status_strip("menu")
 
     def ball_steps(self):
         """The trackball steps an open popover's rows (the more menu, a
-        picker) and points at the grid otherwise (Workstation.ball_steps)."""
+        picker) and points at the grid otherwise (InputPolicy.ball_steps)."""
         return bool(self._pop)
 
     def at_top(self):
@@ -461,25 +456,15 @@ class PaintLayer:
             self._cur[0], self._cur[1] = cell
 
     def handle_key(self, i):
-        """The typed keys, edge-tracked so a held key fires once: Ctrl+Z (0x1A)
-        / Ctrl+Y (0x19) undo and redo (#90), and PICO-8's sprite keys
-        (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
+        """The typed keys, a press each (the input table's `typed`, so a held
+        key fires once): PICO-8's sprite keys (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
         Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps, M opens the more menu, and
         Q and W (PICO-8's) or E step to the sprite before and after -- Q and
         E on the T-Deck, where W moves the cursor (moy_kbd.c, THE MOVE KEYS).
         Each has its place on the screen too, so touch reaches every one."""
         pe = self.ws.paint
-        k = getattr(i, "last_key", 0) or 0
-        if pe is None:
-            self._ekey.hit(k)          # keep the edge in sync even with no editor
-            return
-        if not self._ekey.hit(k):
-            return
-        if k == 0x1A:
-            pe.undo()
-            return
-        if k == 0x19:
-            pe.redo()
+        k = getattr(i, "typed", 0)
+        if pe is None or not k:
             return
         if k in (0x71, 0x51, 0x77, 0x57, 0x65, 0x45):   # Q, and W or E: the sprite before, after
             pe.select(-1 if k in (0x71, 0x51) else 1)

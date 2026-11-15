@@ -246,7 +246,7 @@ def test_the_install_prompt_says_a_service_works_in_the_background():
 
 def test_a_start_whose_grant_cannot_be_made_is_refused(ws, tier, monkeypatch):
     def full(*a, **k):
-        raise OSError(28, "the grant table is full")
+        raise OSError(28, "no room")
     monkeypatch.setattr(system_api, "service_api", full)
     assert _start(ws, _service(tier)) is None
     p = [q for q in S.SCHED.services() if q.name == APP][-1]

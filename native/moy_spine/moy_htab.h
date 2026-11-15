@@ -1,9 +1,9 @@
 // The kernel's handle table: rows in slots, named by checked integers.
 //
-// runtime/moy_spine.py's Table is the interface and the reference; this is its
-// native form, and the one implementation of the discipline every handle in the
-// kernel follows (the store index, native/moy_index, takes its slot bookkeeping
-// from here too). Everything above it calls only what is declared below.
+// tests/spine_twin.py is its reference model. The kernel's tables are built on
+// it, and the store index (native/moy_index) takes its slot bookkeeping from
+// here too; the device registry (native/moy_kernel/moy_dev.c) keeps its own
+// gen/slot table. Everything above it calls only what is declared below.
 //
 // A handle is gen << 12 | kind << 8 | slot: never 0, always below 2**30. KIND is
 // 1..15 and part of the handle, so a handle made by one table and given to
@@ -34,7 +34,8 @@
 #define MOY_HTAB_SLOTS 256u         // the most slots a kinded table has
 #define MOY_HTAB_SLOTS_PLAIN 4096u  // and an unkinded one
 
-// The kinds, one per client table. A later sprint adds its own here.
+// The kinds, one per client table. KIND is 4 bits and 14 of its 15 values are
+// taken: one more table fits, and the one after it needs the field widened.
 enum {
     MOY_KIND_NONE = 0,
     MOY_KIND_APP = 1,       // the registered system apps (moy_route)

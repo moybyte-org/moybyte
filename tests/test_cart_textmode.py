@@ -79,7 +79,9 @@ def test_textmode_cart_receives_typed_chars_and_edges(tmp_path):
     _open_cart(ws, "Typer")
     assert ws.screen == "desktop" and ws.cart_error is None
 
-    # First frame: the cart's _update runs textmode(True) -> in_text_mode() True next.
+    # First frame: the cart's _update runs textmode(True); the next frame's key
+    # pass applies it (runtime/shell/input_policy.py) -> in_text_mode() True.
+    drv.frame(1.0 / 30)
     drv.frame(1.0 / 30)
     assert drv.in_text_mode() is True
     assert ws.input.text_mode is True
@@ -144,6 +146,7 @@ def test_backspace_is_a_plain_key_zero_special_casing(tmp_path):
     # A running TEXT-mode TOOL: BACKSPACE is a typed key (DELETE), never an exit.
     _open_cart(ws, "TypeTool")
     drv.frame(1.0 / 30)                     # _update ran textmode(True)
+    drv.frame(1.0 / 30)                     # ... and the key pass applied it
     assert ws.input.text_mode is True
     drv.type_char(0x08)                     # BACKSPACE in text mode = the cart's DELETE...
     drv.frame(1.0 / 30)
@@ -152,6 +155,7 @@ def test_backspace_is_a_plain_key_zero_special_casing(tmp_path):
 
     # A typing game keeps its letters: q TYPES, never a console shortcut, no exit.
     _open_cart(ws, "TypeGame")
+    drv.frame(1.0 / 30)
     drv.frame(1.0 / 30)
     assert ws.input.text_mode is True
     drv.type_char(ord("q"))
@@ -168,11 +172,13 @@ def test_textmode_resets_on_cart_exit(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     _open_cart(ws, "Typer")
     drv.frame(1.0 / 30)
+    drv.frame(1.0 / 30)
     assert ws.input.text_mode is True            # text-mode cart asked for it
 
     # Leaving to the home desktop must drop text mode (don't leak it into the
     # launcher / next cart). go_home() is the device + host exit path.
     ws.go_home()
+    drv.frame(1.0 / 30)                          # the home's key pass: no text surface
     assert ws.input.text_mode is False
     assert drv.in_text_mode() is False           # not on the desktop anymore anyway
 
@@ -207,11 +213,12 @@ def _draw():
     drv = host_app.ConsoleDriver(ws)
     _open_cart(ws, "Toggler")
 
-    drv.frame(1.0 / 30)                          # phase 1 -> text on
+    # the frame's end applies what its tick asked for
+    drv.frame(1.0 / 30)                          # phase 1 asks for text: on
     assert ws.input.text_mode is True
-    drv.frame(1.0 / 30)                          # phase 2 -> text on
+    drv.frame(1.0 / 30)                          # phase 2 asks for text: on
     assert ws.input.text_mode is True
-    drv.frame(1.0 / 30)                          # phase 3 -> text off
+    drv.frame(1.0 / 30)                          # phase 3 asks for game: off
     assert ws.input.text_mode is False
     assert drv.in_text_mode() is False
 
@@ -246,9 +253,13 @@ def test_textmode_in_both_make_api_namespaces(monkeypatch):
     host_ns = host_app.make_api(_Stub(), StubInput(), {})
     dev_ns = device_api.make_api(_Stub(), StubInput(), {})
     assert "textmode" in host_ns and "textmode" in dev_ns
-    # Both default to on=True and set input.text_mode.
-    inp = StubInput()
-    host_app.make_api(_Stub(), inp, {})["textmode"]()
-    assert inp.text_mode is True
-    host_app.make_api(_Stub(), inp, {})["textmode"](False)
-    assert inp.text_mode is False
+    # Both default to on=True and set the run's flag (`Run.textmode`).
+    class _Run:
+        textmode = False
+        view = None
+        cart_start_ms = None
+    run = _Run()
+    host_app.make_api(_Stub(), StubInput(), {}, run=run)["textmode"]()
+    assert run.textmode is True
+    host_app.make_api(_Stub(), StubInput(), {}, run=run)["textmode"](False)
+    assert run.textmode is False

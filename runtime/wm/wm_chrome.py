@@ -249,7 +249,7 @@ class WindowChrome:
             return got
         ws = self.ws
         img = None
-        for app, _text in getattr(ws, "_apps", ()):
+        for app in getattr(ws, "_apps", ()):
             if app.id != win.kind:
                 continue
             for c in ws.carts.all:
@@ -421,8 +421,7 @@ class WindowChrome:
         """The page a shell app names in its window's title (a story's,
         Settings' Achievements), or None."""
         app = self.ws.settings_layer if win.kind == "settings" else self.ws._apps_by_id.get(win.kind)
-        pt = getattr(app, "page_title", None)
-        return pt() if pt is not None else None
+        return app.page_title() if app is not None else None
 
     def _win_title(self, win):
         ws = self.ws
@@ -502,32 +501,23 @@ class WindowChrome:
 
     def _win_back(self, win):
         """The window's back -- its chevron, and Esc and B while it holds the
-        focus: its app steps out of the page it has open, under the window's
-        layout context. False where the app has none open (no chevron shows;
-        the keys stay the app's own)."""
-        if not self.ws.app_has_page(win.kind):
+        focus: its surface steps out of the page it has open
+        (`InputPolicy.step`), under the window's layout context. False where
+        it has none open (no chevron shows; the keys stay its own)."""
+        ws = self.ws
+        policy = ws.input_policy
+        s = ws.surface_of(win.kind)
+        if s is None or not policy.has_page(s):
             return False
-        app = self.ws.page_app(win.kind)
         if win.ctx is not None:
             self._install(win.ctx, win, draws=False)
         try:
-            self.ws.app_back(app)
+            policy.step(s)
         finally:
             if win.ctx is not None:
                 self._install(self._root_ctx)
-        self.ws._dirty = True
+        ws._dirty = True
         return True
-
-    def focus_has_back(self):
-        """Whether the focused window shows the back chevron: what Esc does
-        on the host's desk (host_api.ConsoleDriver.escape)."""
-        win = self._focus_win()
-        return win is not None and not win.minimized and self.ws.app_has_page(win.kind)
-
-    def focus_back(self):
-        """The focused window's back (`_win_back`); False where it shows none."""
-        win = self._focus_win()
-        return win is not None and not win.minimized and self._win_back(win)
 
     def _strip_buttons(self, win):
         """The title-strip buttons as (name, rect), RIGHT to LEFT."""

@@ -430,8 +430,6 @@ class EditorDesk(Layer):
         app = self.ws.editor_app
         if tab is not None:
             app.focus_tab(tab)
-        else:
-            self.ws._set_text_mode(False)
         self._seen = app.tab
         self.ws._dirty = True
 
@@ -1773,6 +1771,11 @@ class EditorDesk(Layer):
             return False
         self.grow()
         return True
+
+    def back(self):
+        """The console's back over the desk Editor (`InputPolicy.step`):
+        a grown pane goes back."""
+        return self.escape()
 
     def _sheet_keys(self, i):
         ws = self.ws

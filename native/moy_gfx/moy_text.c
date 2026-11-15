@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_text.h"
 #include "moy_gfx_base.h"
 #include "moy_gfx_kernels.h"
@@ -361,26 +362,10 @@ static int cont(uint8_t b) {
 // The byte the codepoint at s[*i] draws at (moy_text.h), *i moved past it: a
 // malformed sequence is its first byte alone, at byte 0.
 static int next_byte(const uint8_t *s, size_t n, size_t *i) {
-    uint8_t b = s[(*i)++];
-    if (b < 0x80) {
-        return b;
+    int32_t cp = moy_utf8_next(s, n, i);
+    if (cp < 0x80) {
+        return cp < 0 ? 0 : cp;
     }
-    int len = b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3
-              : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
-    if (len == 0 || *i + (size_t)(len - 1) > n) {
-        return 0;
-    }
-    uint32_t cp = b & (0x7Fu >> len);
-    for (int k = 1; k < len; k++) {
-        if (!cont(s[*i + (size_t)k - 1])) {
-            return 0;
-        }
-        cp = cp << 6 | (s[*i + (size_t)k - 1] & 0x3Fu);
-    }
-    if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF))) {
-        return 0;       // an overlong form, or past Unicode
-    }
-    *i += (size_t)(len - 1);
     if (cp >= 0xA0 && cp <= 0xFF) {
         return (int)cp;
     }

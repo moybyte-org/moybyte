@@ -8,6 +8,7 @@
 
 #include "moy_platform.h"
 
+#include "moy_codec.h"
 #include "moy_path.h"
 #include "moy_gfx_base.h"
 
@@ -328,28 +329,31 @@ static const moy_path_face_t *face_of(int face, int size) {
 }
 
 // The next byte a glyph draws at: Latin-1 at its value, else `?`. *i moves
-// past the codepoint.
+// past the codepoint. The outline text keeps a rule of its own for what the
+// strict decoder refuses: a sequence whose continuation bytes are whole is
+// taken whole (an overlong form draws as what it spells), and anything else
+// is its lead byte alone, drawn as `?`.
 static int next_byte(const uint8_t *s, size_t n, size_t *i) {
-    uint8_t b = s[*i];
-    if (b < 0x80) {
-        (*i)++;
-        return b < 0x20 ? '?' : b;
+    size_t at = *i;
+    int32_t cp = moy_utf8_next(s, n, i);
+    if (cp >= 0 && cp < 0x80) {
+        return cp < 0x20 ? '?' : cp;
     }
-    int len = (b & 0xE0) == 0xC0 ? 2 : (b & 0xF0) == 0xE0 ? 3 : (b & 0xF8) == 0xF0 ? 4 : 1;
-    if (len == 1 || *i + (size_t)len > n) {
-        (*i)++;
-        return '?';
-    }
-    uint32_t cp = b & (0x7F >> len);
-    for (int k = 1; k < len; k++) {
-        uint8_t c = s[*i + (size_t)k];
-        if ((c & 0xC0) != 0x80) {
-            (*i)++;
+    if (cp < 0) {
+        uint8_t b = s[at];
+        size_t len = (b & 0xE0) == 0xC0 ? 2 : (b & 0xF0) == 0xE0 ? 3 : (b & 0xF8) == 0xF0 ? 4 : 1;
+        if (len == 1 || at + len > n) {
             return '?';
         }
-        cp = (cp << 6) | (c & 0x3F);
+        cp = b & (0x7F >> len);
+        for (size_t k = 1; k < len; k++) {
+            if ((s[at + k] & 0xC0) != 0x80) {
+                return '?';
+            }
+            cp = (cp << 6) | (s[at + k] & 0x3F);
+        }
+        *i = at + len;
     }
-    *i += (size_t)len;
     return cp >= 0xA0 && cp <= 0xFF ? (int)cp : '?';
 }
 

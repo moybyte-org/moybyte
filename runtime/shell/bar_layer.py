@@ -185,6 +185,27 @@ def _band_part():
     return _ui_draw.BAR_HH_BAND
 
 
+# The strip each content surface takes, keyed by its layer's id: the frame
+# draws it after the surface's page (`BarLayer.draw_surface`).
+STRIP_OF = {"settings": "settings", "tasks": "tasks", "webconsole": "webconsole",
+            "map": "menu", "scene": "menu", "music": "menu", "paint": "menu",
+            "theme_sprites": "menu"}
+# The surfaces that draw their strip themselves, and why the frame cannot.
+STRIP_SELF = {
+    "cards_layer.py": "an entry prompt draws over the bar",
+    "block_editor_ui.py": "an entry prompt draws over the bar",
+    "code_layer.py": ("the stop card's See-why popup draws over the bar (the theme's"
+                      " Config is a CodeLayer)"),
+    "editor_desk.py": "the dock draws over the bar",
+    "launcher_layer.py": ("the home's retained frame draws the strip only where its"
+                          " buffer lacks it, and the back tip over it"),
+    "home_band.py": "the band frame draws the strip between the band and the damage it hands",
+    "wm_desk.py": "the windows paint over the desk's bar",
+    "console.py": ("a running tool's strip is on the game canvas inside the Player's"
+                   " tick, or after the composite"),
+    "console_notices.py": "the pause card is an overlay: its bar over its scrim",
+}
+
 class BarLayer:
     """The shell's bars (#46), migrated out of Workstation as its own surface
     (docs/history/shell_layers_refactor_v1.md Phase 2): every bar of the
@@ -227,9 +248,11 @@ class BarLayer:
     The bar is CHROME the content composes, not a standalone stack layer: it's
     SYSTEM-domain on the launcher, Settings and every Editor tab (drawn on
     sys_canvas) and GAME-domain on a running tool's strip (drawn on the fixed game canvas, `_zone_is_game`), and it draws
-    at their rects (`bar_rects`), LAST inside each content's paint, which lays
-    out in what the bars leave (`content_rect`). So the content draws call
-    _draw_status_strip(where) and the pointer methods delegate their bar slice to
+    at their rects (`bar_rects`), LAST over each content's paint, which lays
+    out in what the bars leave (`content_rect`). The frame draws a surface's
+    strip after its page (`draw_surface`, `STRIP_OF`), but for the surfaces
+    `STRIP_SELF` names, which call _draw_status_strip(where) themselves; the
+    pointer methods delegate their bar slice to
     handle_bar_tap(where, ...), which takes
     canvas coordinates and hit-test in the coordinates of the bar they land on.
     An app's zone_tap takes the lent rect as a parameter: the zone's cell, in
@@ -348,11 +371,30 @@ class BarLayer:
 
     # -- draw ----------------------------------------------------------------
 
+    def draw_surface(self, layer, dt, app=False):
+        """Draw content `layer`, then the strip its surface takes, LAST (chrome
+        over its page): `STRIP_OF`'s, else with `app` (the full-screen frame's
+        word) a registered app's "app" strip, the host's guarantee; none for
+        a surface that draws its own (`STRIP_SELF`)."""
+        layer.draw(dt)
+        ws = self.ws
+        where = STRIP_OF.get(layer.id)
+        if where is None:
+            if not app:
+                return
+            got = ws._apps_by_id.get(layer.id)
+            if got is None or getattr(got, "glass", False) or ws.wm.desk_open():
+                return
+            where = "app"
+        elif where == "tasks" and ws.windowed_chrome:
+            return                        # in a desk window its title strip is the bar
+        self._draw_status_strip(where)
+
     def _draw_status_strip(self, where):
-        """Entry point every content Layer calls; `where` is "home" / "settings" /
-        "menu" / "tool" / ... Each routes through the ONE generalized cache
-        mechanism below (_draw_top_bar_cart) -- there is no more per-`where` draw
-        body here; the zoning happens inside _render_cart_bar."""
+        """The strip `where` names ("home" / "settings" / "menu" / "tool" /
+        ...), drawn through the ONE generalized cache mechanism below
+        (_draw_top_bar_cart) -- there is no per-`where` draw body here; the
+        zoning happens inside _render_cart_bar."""
         if self.held:
             return
         self._draw_top_bar_cart(where)
@@ -1202,20 +1244,12 @@ class BarLayer:
 
     def go_back(self, where):
         """The chevron's tap: back one level from `where` -- what Esc and B
-        do there."""
+        do there (`InputPolicy.back`); the home's goes to the desk."""
         ws = self.ws
         if where == "home":
             ws.open_desk()
-        elif where == "app":
-            ws.app_back()
-        elif where == "tool":
-            ws.app_back(ws.run.player)  # the app's own view first, then out of it
-        elif where == "settings":
-            ws.settings_layer.back()
-        elif where == "tasks":
-            ws.close_tasks()
         else:
-            ws.exit()
+            ws.input_policy.back()
         ws._dirty = True
 
     def _paint_back_title(self, cv, r, title, bar, game=False):
@@ -1648,8 +1682,7 @@ class BarLayer:
         if where == "app":
             kind = ws.wm.top_kind()
             app = ws._apps_by_id.get(kind)
-            pt = getattr(app, "page_title", None)
-            t = pt() if pt is not None else None
+            t = app.page_title() if app is not None else None
             if t:
                 return t                    # a page of the app names its own
             c = ws.app_carts.get(kind)

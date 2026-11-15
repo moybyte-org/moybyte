@@ -81,7 +81,7 @@ ALLOWED = {
     ("moy_net/moy_lora.c", "alloc"): "the radio's SPI transfer buffers, DMA-capable",
     ("moy_sd/moy_sd.c", "alloc"): "the card's bounce buffer, in the caps the host's DMA takes",
     ("moy_elf/modmoy_elf.c", "alloc"): "a program's memory: aligned to its sandbox's unit",
-    ("moy_elf/moy_os.c", "alloc"): "a program's memory and stacks: aligned to its sandbox's unit",
+    ("moy_elf/moy_os*.c", "alloc"): "a program's memory and stacks: aligned to its sandbox's unit",
     ("moycore/moycore_lua.c", "alloc"):
         "the Lua state's allocator over its own pool (lua_Alloc's realloc contract)",
     ("moy_elf/moy_os.c", "mutex"):
@@ -96,7 +96,7 @@ ALLOWED = {
     ("moy_kernel/moy_kernel.c", "task"):
         "mp_task: the esp32 port's own task, pinned as the port starts it",
     ("moy_app/moy_app_wasm.c", "weak"):
-        "the toolkit's wasm rows, which tools/gen_os_table.py declares weak (UI_WEAK) "
+        "the toolkit's wasm rows, which tools/gen_os/app.py declares weak (UI_WEAK) "
         "in moy_app_wasm_rows.h",
     ("moy_gfx/modmoy_gfx.c", "weak"): "esp_native_code_free_all is MicroPython's, no header of ours",
     ("moy_kernel/modmoy_guard.c", "weak"):

@@ -82,78 +82,29 @@ _sys.meta_path[:] = [f for f in _sys.meta_path
 _sys.meta_path.insert(0, FlatFinder())
 
 
-def _native_spine():
-    """The kernel's spine is C on every tier (docs/history/kernel_spine_2026-10.md):
-    on the CPython host it is native/moy_spine in the host's one library
-    (runtime/host/host_native.py) over ctypes
-    (`runtime/host/moy_spine_binding.py`), registered as `moy_spine` and
-    `runtime.moy_spine` before anything imports either name. Its Python twin
-    is the suites' oracle (tests/spine_twin.py), never the host's."""
-    if "moy_spine" in _sys.modules:
-        mod = _sys.modules["moy_spine"]
-    else:
-        from . import moy_spine_binding
-        mod = moy_spine_binding.binding()
-        if mod is None:
-            raise ImportError("the host's spine needs a C compiler "
-                              "(native/moy_spine over ctypes)")
-        _sys.modules["moy_spine"] = mod
-    _sys.modules["runtime.moy_spine"] = mod
-    return mod
-
-
-moy_spine = _native_spine()
-
-
-def _native_app():
-    """The app ABI's C rows (native/moy_app) over the host's one library,
-    registered as `moy_app` like the spine."""
-    if "moy_app" in _sys.modules:
-        return _sys.modules["moy_app"]
-    from . import moy_app_binding
-    mod = moy_app_binding.binding()
+def _register(name, face, binding):
+    """The native module `name` on the CPython host: its face in
+    runtime/host (`face`), or what that face's binding() builds, registered
+    as `name` and `runtime.<name>` before anything imports either."""
+    mod = _sys.modules.get(name)
     if mod is None:
-        raise ImportError("the host's app ABI needs a C compiler "
-                          "(native/moy_app over ctypes)")
-    _sys.modules["moy_app"] = mod
-    return mod
+        mod = _importlib.import_module(face)
+        if binding:
+            mod = mod.binding()
+            if mod is None:
+                raise ImportError("the host's %s needs a C compiler" % name)
+        _sys.modules[name] = mod
+    _sys.modules["runtime." + name] = mod
+    globals()[name] = mod
 
 
-moy_app = _native_app()
+# The host faces, from native/*/face.json (runtime/host/faces.py, generated):
+# the spine first, which every other's imports may reach.
+from .faces import FACES as _FACES  # noqa: E402
 
+for _face in _FACES:
+    _register(*_face)
 
-def _native_ufiles():
-    """The user-files layer (native/moy_store/moy_ufiles.h) over ctypes,
-    registered as `moy_ufiles` like the boards' module. Its library is built at
-    the first verb a caller uses (runtime/host/moy_ufiles_binding.py)."""
-    if "moy_ufiles" in _sys.modules:
-        return _sys.modules["moy_ufiles"]
-    from . import moy_ufiles_binding
-    mod = moy_ufiles_binding.binding()
-    _sys.modules["moy_ufiles"] = mod
-    return mod
-
-
-moy_ufiles = _native_ufiles()
-
-def _native_ui():
-    """The toolkit's C (native/moy_ui) over the host's one library,
-    registered as `moy_ui` like the boards' module (runtime/host/moy_ui_binding.py)."""
-    if "moy_ui" in _sys.modules:
-        return _sys.modules["moy_ui"]
-    from . import moy_ui_binding
-    mod = moy_ui_binding.binding()
-    if mod is None:
-        raise ImportError("the host's toolkit needs a C compiler "
-                          "(native/moy_ui over ctypes)")
-    _sys.modules["moy_ui"] = mod
-    return mod
-
-
-moy_ui = _native_ui()
-
-
-from . import moy_evq, moy_log  # noqa: E402,F401  (the OS log and the service queues)
 
 from .editors_code import CodeEditor  # noqa: E402
 from .editors_paint_map import PaintEditor  # noqa: E402

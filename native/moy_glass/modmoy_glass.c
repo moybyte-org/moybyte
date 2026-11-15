@@ -699,6 +699,42 @@ void glass_copy_into(mp_obj_t ppa, mp_obj_t src, mp_int_t W, mp_int_t H,
                   b[0], b[1], b[2], b[3], b[4], b[5]);
 }
 
+// The game composite (moy_present_game.c) of the RGB565 picture `src`, sw x
+// sh, `scale` times into `dst` (dw x dh) at (dx, dy): every caller's, which
+// says so once when a PPA error demotes it.
+int glass_game(mp_obj_t dst, int dw, int dh, int dx, int dy, mp_obj_t src, int sw, int sh,
+               int scale, bool defer, bool frame) {
+    mp_buffer_info_t db, sb;
+    mp_get_buffer_raise(dst, &db, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(src, &sb, MP_BUFFER_READ);
+    int r = moy_game_composite(db.buf, db.len / 2u, dw, dh, dx, dy, sb.buf, sb.len / 2u, sw,
+                               sh, scale, defer, frame);
+    if (r == MOY_GAME_DEMOTED) {
+        mp_printf(&mp_plat_print, "Moybyte P4 PPA composite failed -> CPU\n");
+    }
+    return r;
+}
+
+// game_composite(dst, dw, dh, dx, dy, src, sw, sh, scale, defer) -> 0 done,
+// 1 a PPA op still writes dst (the caller defers the show), -1 the PPA
+// failed and is demoted (composited on the CPU).
+static mp_obj_t glass_game_composite(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    return MP_OBJ_NEW_SMALL_INT(glass_game(
+        a[0], (int)mp_obj_get_int(a[1]), (int)mp_obj_get_int(a[2]), (int)mp_obj_get_int(a[3]),
+        (int)mp_obj_get_int(a[4]), a[5], (int)mp_obj_get_int(a[6]), (int)mp_obj_get_int(a[7]),
+        (int)mp_obj_get_int(a[8]), mp_obj_is_true(a[9]), false));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_game_composite_obj, 10, 10,
+                                           glass_game_composite);
+
+// game_crisp(on): CRISP PIXELS for every game composite.
+static mp_obj_t glass_game_crisp(mp_obj_t on) {
+    moy_game_crisp(mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(glass_game_crisp_obj, glass_game_crisp);
+
 #endif // MOY_GLASS_PRESENT
 
 // -- the VM's teardown (moy_kernel.c's soft-reset exit) -----------------------------
@@ -885,14 +921,15 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
 // drawn and how it reaches the glass. A banded compositor's game canvas IS the
 // panel, drawn straight into the back buffer and presented as the console
 // presents it (`game` None). A DSI compositor's run draws into the game canvas
-// `game` -- (buf, w, h, ox, oy, scale, smooth[, bezel]) -- which each present
-// scales into the back buffer: the PPA's bilinear scale where the board has
-// it and `smooth` holds, the CPU kernel's nearest one otherwise, then the
-// switch. Every scan buffer is cleared black once, unless `bezel` is false:
-// the glass around the game is the console's to keep (a full-screen window on
-// the desk, every scan buffer already holding it). A banded panel larger than
+// `game` -- (buf, w, h, ox, oy, scale[, bezel]) -- which each present
+// composites into the back buffer (the game composite, moy_present_game.c:
+// CRISP PIXELS or the PPA's bilinear scale, the CPU kernel where the PPA does
+// not take it), then the switch; the rotated compositor takes the same tuple.
+// Every scan buffer is cleared black once, unless `bezel` is false: the glass
+// around the game is the console's to keep (a full-screen window on the desk,
+// every scan buffer already holding it). A banded panel larger than
 // its game canvas (the Guition S3's) takes `game` and the fold's `scratch` --
-// (buf, w, h, ox, oy, scale, smooth, scratch) -- and each present snapshots
+// (buf, w, h, ox, oy, scale, scratch) -- and each present snapshots
 // the canvas into the scratch, which the flush resolves band by band with the
 // bezel around it (moy_fold.h), as the console's blit_game does.
 //
@@ -926,12 +963,10 @@ void moy_play_front_ops(const moy_front_ops_t *ops);
 #if __has_include("moy_ppa.h")
 #include "moy_ppa.h"
 #else
-int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src, int sw, int sh, int scale);
 int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src, int sw, int sh, int scale);
 long moy_ppa_k_snap(uint8_t *scr, size_t len, const uint8_t *frame, size_t n);
 void moy_ppa_k_sync(void);
 #endif
-#pragma weak moy_ppa_k_scale
 #pragma weak moy_ppa_k_scale_nb
 #pragma weak moy_ppa_k_snap
 #pragma weak moy_ppa_k_sync
@@ -945,7 +980,6 @@ static struct {
     bool dsi;
     uint16_t *game;
     int gw, gh, ox, oy, scale;
-    bool smooth;
     uint8_t *scr;                       // the fold's scratch (a banded game canvas)
     size_t scr_len;
     uint8_t *fr;                        // `frames`: a compiled frame's copy
@@ -1065,15 +1099,9 @@ static void front_dsi_present(void *ctx, bool drew) {
     if (!drew) {
         return;
     }
-    size_t n;
-    uint16_t *dst = view_px(mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(c->d.back),
-                                          MP_OBJ_SENTINEL), &n);
-    if (!(G.smooth && moy_ppa_k_scale != NULL
-          && moy_ppa_k_scale(dst, (int)c->w, (int)c->h, G.ox, G.oy, G.game, G.gw, G.gh,
-                             G.scale) == 0)) {
-        mg_blit565_scale(dst, n, (int)c->w, (int)c->h, G.ox, G.oy, G.game,
-                         (size_t)G.gw * (size_t)G.gh, G.gw, G.gh, G.scale);
-    }
+    glass_game(mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(c->d.back), MP_OBJ_SENTINEL),
+               (int)c->w, (int)c->h, G.ox, G.oy, MP_STATE_VM(moy_glass_front_game), G.gw,
+               G.gh, G.scale, false, false);
     moy_dsi_present(&c->d, false);
 }
 
@@ -1113,13 +1141,15 @@ static void front_dsi_frame_fence(void *ctx) {
     }
 }
 
-// The rotated compositor (the Guition P4): every front frame is a quiet
-// direct game frame of moy_rot_flush -- the game canvas, or a compiled
-// frame's snapshot in `frames`, scaled and rotated straight into a scan
-// buffer by queued PPA ops, the show at the loop's pre-frame hook
-// (moy_rot_present_pending), as the console's quiet play frames go. A buffer
+// The rotated compositor (the Guition P4): every front frame is a quiet game
+// frame of moy_rot_flush, as the console's quiet play frames go. A compiled
+// frame's snapshot in `frames`, and the game canvas where the PPA's bilinear
+// scale takes it (moy_game_direct), are scaled and rotated straight into a
+// scan buffer by queued PPA ops; a crisp game canvas is composited into the
+// paint buffer (the game composite, rot_paint) and rotated from there. The
+// show is at the loop's pre-frame hook (moy_rot_present_pending). A buffer
 // the stale lists bring current with a full rotate reads the paint buffer,
-// which the game is scaled into first (`paint`). The snapshot is read by the
+// which the game is composited into first. The snapshot is read by the
 // queued op, never the cart's memory, so the fence before the cart's next
 // hook is the snapshot's alone.
 #if __has_include("moy_ppa.h")
@@ -1135,22 +1165,6 @@ static mp_obj_t front_rot_quiet(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(front_rot_quiet_obj, front_rot_quiet);
 
-static mp_obj_t front_rot_paint(void) {
-    glass_rot_obj_t *c = G.ops.ctx;
-    size_t n;
-    uint16_t *dst = view_px(c->bufs[MOY_ROT_PAINT0 + c->r.pi], &n);
-    mp_buffer_info_t sb;
-    mp_get_buffer_raise(c->bufs[MOY_ROT_GAME], &sb, MP_BUFFER_READ);
-    if (!(moy_ppa_k_scale != NULL
-          && moy_ppa_k_scale(dst, (int)c->r.w, (int)c->r.h, G.ox, G.oy, sb.buf, G.gw, G.gh,
-                             G.scale) == 0)) {
-        mg_blit565_scale(dst, n, (int)c->r.w, (int)c->r.h, G.ox, G.oy, sb.buf,
-                         sb.len / 2u, G.gw, G.gh, G.scale);
-    }
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(front_rot_paint_obj, front_rot_paint);
-
 static void front_rot_flush(glass_rot_obj_t *c, mp_obj_t src, bool frame) {
     moy_rot_game_t *g = &c->r.game;
     g->sw = G.gw;
@@ -1158,7 +1172,8 @@ static void front_rot_flush(glass_rot_obj_t *c, mp_obj_t src, bool frame) {
     g->ox = G.ox;
     g->oy = G.oy;
     g->scale = G.scale;
-    g->direct = true;
+    g->direct = frame || moy_game_direct((int)c->r.w, (int)c->r.h, G.ox, G.oy, G.gw, G.gh,
+                                         G.scale);
     g->frame = frame;
     g->bx = 0;
     g->by = 0;
@@ -1168,7 +1183,7 @@ static void front_rot_flush(glass_rot_obj_t *c, mp_obj_t src, bool frame) {
     g->npatch = 0;
     c->bufs[MOY_ROT_GAME] = src;
     c->bufs[MOY_ROT_PIC] = mp_const_none;
-    c->paint = MP_OBJ_FROM_PTR(&front_rot_paint_obj);
+    c->paint = mp_const_none;           // the game composite (rot_paint)
     c->quiet = MP_OBJ_FROM_PTR(&front_rot_quiet_obj);
     c->r.has_game = true;
     glass_shift_fence(c->ppa, &c->shift_fly);
@@ -1261,7 +1276,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
     } else if (mp_obj_is_type(a[0], &glass_banded_type) && n_args > 1
                && a[1] != mp_const_none) {
         mp_obj_t *g;
-        mp_obj_get_array_fixed_n(a[1], 8, &g);
+        mp_obj_get_array_fixed_n(a[1], 7, &g);
         size_t n;
         G.game = view_px(g[0], &n);
         G.gw = (int)mp_obj_get_int(g[1]);
@@ -1270,7 +1285,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         G.oy = (int)mp_obj_get_int(g[4]);
         G.scale = (int)mp_obj_get_int(g[5]);
         mp_buffer_info_t sb;
-        mp_get_buffer_raise(g[7], &sb, MP_BUFFER_WRITE);
+        mp_get_buffer_raise(g[6], &sb, MP_BUFFER_WRITE);
         G.scr = sb.buf;
         G.scr_len = sb.len;
         glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
@@ -1286,7 +1301,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
             G.ops.frame_fence = front_banded_frame_fence;
         }
         MP_STATE_VM(moy_glass_front_game) = g[0];
-        MP_STATE_VM(moy_glass_front_scr) = g[7];
+        MP_STATE_VM(moy_glass_front_scr) = g[6];
 #endif
 #ifdef MOY_GLASS_BANDED_TYPE
     } else if (mp_obj_is_type(a[0], &glass_banded_type)) {
@@ -1310,7 +1325,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         mp_obj_t *g;
         size_t ng;
         mp_obj_get_array(a[1], &ng, &g);
-        if (ng < 7 || ng > 8) {
+        if (ng < 6 || ng > 7) {
             mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
         }
         size_t n;
@@ -1320,7 +1335,6 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         G.ox = (int)mp_obj_get_int(g[3]);
         G.oy = (int)mp_obj_get_int(g[4]);
         G.scale = (int)mp_obj_get_int(g[5]);
-        G.smooth = mp_obj_is_true(g[6]);
         if (G.scale < 1 || n < (size_t)G.gw * (size_t)G.gh) {
             mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
         }
@@ -1338,7 +1352,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         // screen before the run left around the game -- unless the console
         // keeps it.
         moy_dsi_fence(&c->d);
-        if (ng < 8 || mp_obj_is_true(g[7])) {
+        if (ng < 7 || mp_obj_is_true(g[6])) {
             size_t nf;
             mp_obj_t *fv;
             mp_obj_get_array(c->fbs, &nf, &fv);
@@ -1356,7 +1370,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         mp_obj_t *g;
         size_t ng;
         mp_obj_get_array(a[1], &ng, &g);
-        if (ng < 7 || ng > 8) {
+        if (ng < 6 || ng > 7) {
             mp_raise_ValueError(MP_ERROR_TEXT("front: game"));
         }
         size_t n;
@@ -1382,7 +1396,7 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
         if (moy_ppa_k_sync != NULL) {
             moy_ppa_k_sync();
         }
-        if (ng < 8 || mp_obj_is_true(g[7])) {
+        if (ng < 7 || mp_obj_is_true(g[6])) {
             for (int i = 0; i < MOY_ROT_PAINT0 + 2; i++) {
                 size_t k;
                 uint16_t *p = view_px(c->bufs[i], &k);
@@ -1428,6 +1442,8 @@ static const mp_rom_map_elem_t glass_globals_table[] = {
     #if MOY_GLASS_PRESENT
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&glass_front_obj) },
     { MP_ROM_QSTR(MP_QSTR_front_stats), MP_ROM_PTR(&glass_front_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_composite), MP_ROM_PTR(&glass_game_composite_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_crisp), MP_ROM_PTR(&glass_game_crisp_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_glass) },
     { MP_ROM_QSTR(MP_QSTR_buf), MP_ROM_PTR(&glass_buf_obj) },

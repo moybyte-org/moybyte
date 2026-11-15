@@ -125,7 +125,7 @@ def test_a_drag_is_one_undo_step():
     st.end()
     st.place(0, 2, 300, 416)
     st.end()
-    assert len(st.undos) == 2
+    assert len(st.hist._undo) == 2
     st.undo()
     st.undo()
     assert st.objects(0)[2]["x"] == 64

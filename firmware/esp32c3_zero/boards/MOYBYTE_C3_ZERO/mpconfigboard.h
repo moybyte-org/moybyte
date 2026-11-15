@@ -65,10 +65,11 @@
 #define MOY_NET_MDNS                        (1)
 
 // THE /gpio ALLOWLIST (native/moy_net/moy_gpio.c): the pins a browser's cart
-// may drive or read, by GPIO number, and board.toml's `gpio` lease row. A C3
-// Super Mini breaks out 0-10, 20 and 21. EXCLUDED:
+// may drive or read, by GPIO number: board.toml's `gpio` lease row, which the
+// build emits as MOY_LEASE_GPIO_PINS; this board serves the route over it. A
+// C3 Super Mini breaks out 0-10, 20 and 21. EXCLUDED:
 //   2, 8, 9   strapping: 9 is BOOT, 8 the board's LED (active LOW) and the
 //             ROM log's gate, 2 must idle high at reset;
 //   20, 21    UART0, the REPL that recovers a wedged USB image;
 //   11-17     the in-package flash and its VDD_SPI; 18, 19 the USB.
-#define MOY_NET_GPIO_PINS                   {0, 1, 3, 4, 5, 6, 7, 10}
+#define MOY_NET_GPIO_ROUTE                  (1)

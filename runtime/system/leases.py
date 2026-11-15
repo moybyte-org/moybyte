@@ -476,7 +476,7 @@ class Leases:
 
 
 LEASES = Leases(_machine)
-_moybyte.ENDS.append(LEASES.sweep)
+_moybyte.on_end("leases", LEASES.sweep)
 
 
 def lease(name, **cfg):

@@ -43,4 +43,4 @@ against CPython over every cart and generated ones) and
 desktop MicroPython, every write the C store's) and `tests/test_store_tasks.py`
 (a task of no VM and the VM's Python working one volume at once, on the
 kernel's flash and the card's FAT). The harness is
-`tools/moy_index_spike.py --component fs sanitize`.
+`tools/native_check.py --component fs sanitize`.

@@ -94,6 +94,8 @@
 #include <strings.h>
 #include <time.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_fs.h"
 #include "moy_json.h"
 #include "moy_net.h"
@@ -127,6 +129,9 @@ bool moy_flush_drain(void);
 #else
 int moy_web_term(int fd, int cols, int rows, const struct moy_wa_seal *seal);
 #endif
+
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 #pragma weak moy_web_term
 
 #define CHUNK_MIN 8192
@@ -629,34 +634,20 @@ static void jstr(out_t *o, const char *s, size_t n) {
 // -- the pull -----------------------------------------------------------------------
 
 typedef struct {
-    char *names;            // each NUL-terminated, then its is_dir byte
-    size_t n, cap;
+    moy_sb_t b;             // each name NUL-terminated, then its is_dir byte
     size_t count;
-    int fail;
 } names_t;
 
 static int collect(void *ctx, const char *name, size_t len, int is_dir,
                    uint32_t size) {
     (void)size;
     names_t *l = ctx;
-    if (l->n + len + 2u > l->cap) {
-        size_t cap = (l->cap ? l->cap * 2u : 512u) + len + 2u;
-        char *p = moy_store_alloc(cap);
-        if (p == NULL) {
-            l->fail = 1;
-            return 1;
-        }
-        if (l->names != NULL) {
-            memcpy(p, l->names, l->n);
-            moy_store_free(l->names, l->cap);
-        }
-        l->names = p;
-        l->cap = cap;
+    moy_sb_put(&l->b, name, len);
+    moy_sb_byte(&l->b, '\0');
+    moy_sb_byte(&l->b, (char)(is_dir != 0));
+    if (l->b.failed) {
+        return 1;
     }
-    memcpy(l->names + l->n, name, len);
-    l->names[l->n + len] = '\0';
-    l->names[l->n + len + 1u] = (char)(is_dir != 0);
-    l->n += len + 2u;
     l->count++;
     return 0;
 }
@@ -666,24 +657,23 @@ static int by_name(const void *a, const void *b) {
 }
 
 // The folder's entries, sorted by name: `*index` (moy_store_alloc'd, `count`
-// pointers into l->names), or 0 when it cannot be listed after IO_TRIES.
+// pointers into l->b), or 0 when it cannot be listed after IO_TRIES.
 static int list_sorted(const char *path, names_t *l, const char ***index) {
     *index = NULL;
     for (int t = 0; t < IO_TRIES; t++) {
-        memset(l, 0, sizeof(*l));
+        l->b = moy_sb_grown(&STORE_MEM);
+        l->count = 0;
         moy_vol_t v;
         const char *rest;
         int rc = moy_vol_at(path, &v, &rest);
         if (rc == 0) {
             rc = moy_vol_list(&v, rest, collect, l);
         }
-        if (rc == 0 && !l->fail) {
+        if (rc == 0 && !l->b.failed) {
             break;
         }
-        if (l->names != NULL) {
-            moy_store_free(l->names, l->cap);
-        }
-        memset(l, 0, sizeof(*l));
+        moy_sb_free(&l->b);
+        l->count = 0;
         if (rc == 2 || t + 1 == IO_TRIES) {    // ENOENT: nothing to retry
             return 0;
         }
@@ -694,14 +684,14 @@ static int list_sorted(const char *path, names_t *l, const char ***index) {
     }
     const char **ix = moy_store_alloc(l->count * sizeof(char *));
     if (ix == NULL) {
-        moy_store_free(l->names, l->cap);
-        memset(l, 0, sizeof(*l));
+        moy_sb_free(&l->b);
+        l->count = 0;
         return 0;
     }
     size_t k = 0;
-    for (size_t i = 0; i < l->n; k++) {
-        ix[k] = l->names + i;
-        i += strlen(l->names + i) + 2u;
+    for (size_t i = 0; i < l->b.n; k++) {
+        ix[k] = l->b.p + i;
+        i += strlen(l->b.p + i) + 2u;
     }
     qsort(ix, l->count, sizeof(char *), by_name);
     *index = ix;
@@ -712,9 +702,7 @@ static void list_free(names_t *l, const char **ix) {
     if (ix != NULL) {
         moy_store_free((void *)ix, l->count * sizeof(char *));
     }
-    if (l->names != NULL) {
-        moy_store_free(l->names, l->cap);
-    }
+    moy_sb_free(&l->b);
 }
 
 static int is_dir_of(const char *name) {
@@ -726,25 +714,6 @@ static int open_read(const char *path, moy_vol_file_t **f) {
     const char *rest;
     int rc = moy_vol_at(path, &v, &rest);
     return rc ? rc : moy_vol_open(&v, rest, MOY_VOL_READ, f);
-}
-
-// The bytes of `s` up to its last whole UTF-8 sequence: `*whole` that length.
-// 0 when the bytes cannot be UTF-8 however they continue.
-static int utf8_whole(const char *s, size_t n, size_t *whole) {
-    size_t cut = n;
-    for (size_t back = 1; back <= 3 && back <= n; back++) {
-        unsigned char c = (unsigned char)s[n - back];
-        if ((c & 0xC0) == 0x80) {
-            continue;
-        }
-        size_t need = c >= 0xF0 ? 4u : c >= 0xE0 ? 3u : c >= 0xC0 ? 2u : 1u;
-        if (need > back) {
-            cut = n - back;
-        }
-        break;
-    }
-    *whole = cut;
-    return moy_utf8_valid(s, cut);
 }
 
 // Up to `cap` bytes of the file into buf, the carry first.
@@ -839,7 +808,8 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
     if (open_first(path, READ_CHUNK, &f, &got) != 0) {
         return;                     // the card gave up: skip, never fail the pull
     }
-    if (!utf8_whole(W->io, got, &whole)) {
+    whole = moy_utf8_whole(W->io, got);
+    if (!moy_utf8_valid(W->io, whole)) {
         moy_vol_close(f);
         return;                     // not text: absent, never present and empty
     }
@@ -863,7 +833,8 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
             break;                  // the card gave up, or the end
         }
         got = carry + k;
-        if (!utf8_whole(W->io, got, &whole)) {
+        whole = moy_utf8_whole(W->io, got);
+        if (!moy_utf8_valid(W->io, whole)) {
             break;                  // not text past here: end the value
         }
     }
@@ -871,27 +842,6 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
         moy_vol_close(f);
     }
     body(o, "\"", 1);
-}
-
-static const char B64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static size_t b64(const unsigned char *p, size_t n, char *out) {
-    size_t k = 0;
-    for (size_t i = 0; i < n; i += 3) {
-        uint32_t v = (uint32_t)p[i] << 16;
-        if (i + 1 < n) {
-            v |= (uint32_t)p[i + 1] << 8;
-        }
-        if (i + 2 < n) {
-            v |= p[i + 2];
-        }
-        out[k++] = B64[(v >> 18) & 63];
-        out[k++] = B64[(v >> 12) & 63];
-        out[k++] = i + 1 < n ? B64[(v >> 6) & 63] : '=';
-        out[k++] = i + 2 < n ? B64[v & 63] : '=';
-    }
-    return k;
 }
 
 static void binary_value(out_t *o, const char *path, const char *rel,
@@ -909,7 +859,7 @@ static void binary_value(out_t *o, const char *path, const char *rel,
     jstr(o, rel, strlen(rel));
     body(o, ":{\"b\":\"", 7);
     while (got > 0 && !o->err) {
-        body(o, W->b64, b64((const unsigned char *)W->io, got, W->b64));
+        body(o, W->b64, moy_b64_encode((const uint8_t *)W->io, got, W->b64, 0));
         pos += (uint32_t)got;
         if (got < BIN_CHUNK
             || read_next(path, &f, pos, 0, BIN_CHUNK, &got) != 0) {
@@ -1553,7 +1503,7 @@ static int term(out_t *o, const moy_http_req_t *r) {
     uint8_t dg[20];
     sha1(cat, kn + 36, dg);
     char acc[32];
-    size_t an = b64(dg, 20, acc);
+    size_t an = moy_b64_encode(dg, 20, acc, 0);
     const char *proto = header(W->req, r->head_end, "Sec-WebSocket-Protocol", &pn);
     int sh = proto != NULL && pn >= 6 && strstr(proto, "moy.sh") != NULL
              && (size_t)(strstr(proto, "moy.sh") - proto) + 6 <= pn;

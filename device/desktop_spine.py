@@ -113,8 +113,7 @@ class Desktop:
                 if n or ws.ball_owed:
                     dx = (n >> 12 & 4095) - 2048 if n else 0
                     dy = (n & 4095) - 2048 if n else 0
-                    if not ws.ball(dx, dy, n >> 24) & 1 and (dx or dy):
-                        pointer.move(cursor(dx), cursor(dy))
+                    ws.ball_frame(dx, dy, n >> 24, pointer, cursor)
             ws.handle_input()
 
         drawn = [0]
@@ -198,15 +197,14 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
                 return False
             r = getattr(ws, "render_scale", 1)
             ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
-            smooth = bool(getattr(type(sys_canvas), "_smooth", True))
             if fold:
                 scr = sys_canvas.front_scratch(game.w, game.h)
-                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
-                                          scr), frames())
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, scr),
+                                   frames())
             else:
                 bezel = getattr(ws.wm, "mode", None) != "desktop"
-                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
-                                          bezel), frames())
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, bezel),
+                                   frames())
         if took:
             ws.perf_push(loop, front=True)
         return took

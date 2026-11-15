@@ -1,5 +1,5 @@
 // The store's imports on the host, over malloc and the POSIX volume: what the
-// ctypes binding links (tools/moy_index_spike.py --component fs). Every path
+// ctypes binding links (tools/native_check.py --component fs). Every path
 // is its own POSIX path; moy_store_host_live is the bytes held now, so a test
 // can see a call leave nothing behind.
 

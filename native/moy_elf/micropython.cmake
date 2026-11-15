@@ -1,8 +1,10 @@
 # moy_elf: the native tier (README.md) -- Espressif's elf_loader, vendored
 # under elf_loader/ (tools/vendor_elf_loader.py), as its own static library,
-# and the usermod sources over it: the process model (moy_os.c), the OS
-# table the generator writes (moy_os_table.c), the verdict a module passes
-# before it is relocated (moy_elf_check.c) and the binding (modmoy_elf.c).
+# and the usermod sources over it: the process model (moy_os.c, its file
+# rows moy_os_files.c, its sockets moy_os_net.c, its processes moy_os_proc.c,
+# over moy_os_int.h), the OS table the generator writes (moy_os_table.c),
+# the verdict a module passes before it is relocated (moy_elf_check.c) and
+# the binding (modmoy_elf.c).
 # ESP32-S3 (Xtensa) and ESP32-P4 (RISC-V) only; on any other target this
 # file adds nothing.
 #
@@ -76,6 +78,9 @@ add_library(usermod_moy_elf INTERFACE)
 target_sources(usermod_moy_elf INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_elf.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_os.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_os_files.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_os_net.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_os_proc.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_os_table.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_elf_check.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_elf_maps.c

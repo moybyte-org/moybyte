@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_net.h"
 #include "moy_seal.h"
 
@@ -158,25 +159,6 @@ void moy_wc_park(int on) {
     }
 }
 
-// base64url, no padding, NUL-terminated.
-static void b64url(const uint8_t *p, size_t n, char *out) {
-    static const char A[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    size_t k = 0;
-    for (size_t i = 0; i < n; i += 3) {
-        uint32_t v = (uint32_t)p[i] << 16 | (i + 1 < n ? (uint32_t)p[i + 1] << 8 : 0)
-                     | (i + 2 < n ? p[i + 2] : 0);
-        out[k++] = A[v >> 18 & 63];
-        out[k++] = A[v >> 12 & 63];
-        if (i + 1 < n) {
-            out[k++] = A[v >> 6 & 63];
-        }
-        if (i + 2 < n) {
-            out[k++] = A[v & 63];
-        }
-    }
-    out[k] = '\0';
-}
-
 size_t moy_wc_url(char *out, size_t cap, int paired) {
     if (!ready() || s_wc->st.ip == 0) {
         if (cap > 0) {
@@ -196,11 +178,11 @@ size_t moy_wc_url(char *out, size_t cap, int paired) {
     if (paired) {
         uint8_t raw[MOY_SEAL_RAND];
         moy_web_token(hex);
-        if (moy_seal_unhex(hex, strlen(hex), raw, MOY_SEAL_RAND)) {
-            b64url(raw, MOY_SEAL_RAND, tok);
+        if (moy_hex_decode(hex, strlen(hex), raw, MOY_SEAL_RAND)) {
+            tok[moy_b64_encode(raw, MOY_SEAL_RAND, tok, 1)] = '\0';
             moy_web_board_id(hex);
-            moy_seal_unhex(hex, strlen(hex), raw, MOY_SEAL_RAND);
-            b64url(raw, 8, id);
+            moy_hex_decode(hex, strlen(hex), raw, MOY_SEAL_RAND);
+            id[moy_b64_encode(raw, 8, id, 1)] = '\0';
         }
         moy_seal_wipe(raw, sizeof raw);
         moy_seal_wipe(hex, sizeof hex);

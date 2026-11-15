@@ -1,5 +1,5 @@
 // The index's two imports on the host, over malloc: what the ctypes binding
-// and the sanitizer builds link (tools/moy_index_spike.py).
+// and the sanitizer builds link (tools/native_check.py).
 
 #include <stdlib.h>
 

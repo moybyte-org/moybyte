@@ -978,8 +978,9 @@ this frame's picture, and copying it out is cheaper than drawing it again.
 **The backend verb is `copy_last(x, y, w, h)` on the root canvas**, bound
 from its compositor where that compositor names the buffer the last
 presented frame drew into (the P4s' DSI and rotated compositors, the S3s'
-banded one), absent elsewhere (the web's canvas, one persistent buffer,
-has none). It copies the rect, in buffer coordinates, from that buffer
+banded one) and by the one-buffer compositor (the host's and the
+browser's root, `runtime/toolkit/one_buffer.py`), whose one buffer is the
+last frame's. It copies the rect, in buffer coordinates, from that buffer
 into the one this frame draws into: on a P4 after fencing any queued op
 still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
 (`moy_ppa.copy`) and any other rect a row copy on the CPU; on an S3 a row

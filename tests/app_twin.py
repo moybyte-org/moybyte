@@ -325,7 +325,7 @@ class App:
                 self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
-        raise OSError(_ENOSPC, "the grant table is full")
+        raise OSError(_ENOSPC, "no room")
 
     def regrant(self, app_id, roles, svc, kind=None):
         mask, smask = set(), set()
@@ -698,6 +698,15 @@ def _layer():
     return moy_ufiles
 
 
+def _delete_or_none(kind, name, root):
+    try:
+        return _layer().delete_file(kind, name, root)
+    except OSError as e:
+        if e.args and e.args[0] == 2:       # ENOENT: nothing by that name
+            return None
+        raise
+
+
 class Files(_Role):
     def _row(self, row, kind=None, need="read"):
         """(True, None) when the row may run, else (False, its `err`)."""
@@ -758,7 +767,8 @@ class Files(_Role):
         return self._op("save", kind, "write", _layer().save_file, kind, name, blob)
 
     def delete(self, kind, name):
-        return self._op("delete", kind, "write", _layer().delete_file, kind, name)
+        """(None, None) where `name` names nothing, as load answers."""
+        return self._op("delete", kind, "write", _delete_or_none, kind, name)
 
     def duplicate(self, kind, name):
         return self._op("duplicate", kind, "write", _layer().duplicate_file, kind, name)

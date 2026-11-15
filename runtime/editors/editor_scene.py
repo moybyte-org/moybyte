@@ -225,10 +225,10 @@ class ScenePage:
 
     def open_tag(self, which, text):
         """Type the picked actor's tag (`which` "tag") or the stamp's
-        ("stamp") in a popover, the keyboard in text mode while it is."""
+        ("stamp") in a popover, the keyboard in text mode while its field has
+        focus."""
         self.pop = which
         self.text = str(text)
-        self.su.ws._set_text_mode(True)
         self.host.focus("Tag text")
 
     def commit(self):
@@ -245,7 +245,6 @@ class ScenePage:
 
     def close(self):
         self.pop = None
-        self.su.ws._set_text_mode(False)
 
     # -- input ------------------------------------------------------------------------
 

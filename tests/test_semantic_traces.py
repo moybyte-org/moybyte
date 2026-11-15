@@ -1013,12 +1013,12 @@ for junk in (None, "1"):
     say("junk", tried(t.get, junk), t.valid(junk))
 
 reg = sp.AppRegistry()
-for d in (("artwork", "Paint", False, None), ("files", "Files", True, (310, 230)),
-          ("calc", "Calc", False, None)):
+for d in (("artwork", "Paint", None), ("files", "Files", (310, 230)),
+          ("calc", "Calc", None)):
     say("register", d[0], h_(reg.register(*d)))
 fh = reg.find("files")
 say("find", h_(fh), reg.find("menu"), tried(reg.find, None))
-say("row", reg.app_id(fh), reg.title(fh), reg.text_mode(fh), reg.min_size(fh))
+say("row", reg.app_id(fh), reg.title(fh), reg.min_size(fh))
 say("refused", tried(reg.register, "files", "x"), tried(reg.register, "", "x"),
     tried(reg.register, "x" * 16, "x"), tried(reg.register, 5, "x"))
 say("stale app", tried(reg.title, fh + (1 << sp.GEN_SHIFT)), reg.valid(fh))
@@ -1134,7 +1134,7 @@ register artwork 1.0.1
 register files 1.1.1
 register calc 1.2.1
 find 1.1.1 0 TYPE
-row files Files True (310, 230)
+row files Files (310, 230)
 refused VALUE VALUE VALUE TYPE
 stale app STALE True
 apps 1.0.1 1.1.1 1.2.1 3
@@ -2248,10 +2248,6 @@ def roles_trace(ws):
     ws.go_home()
     say("run_script", _n(nv.run_script("docs", "nope.py")))
     ws.go_home()
-    nv.text_mode(True)
-    t1 = ws.input.text_mode
-    nv.text_mode(False)
-    say("text_mode", t1, ws.input.text_mode)
     say("cover", nv.cover({"title": "Nowhere"}))
     say("cover_gen", isinstance(nv.cover_gen(), int))
     nv.play(cart)
@@ -2359,7 +2355,8 @@ def roles_trace(ws):
 def roles_rows():
     """The role table's (role, verb) rows, in table order, of the roles an
     AppContext serves: not the toolkit's, a compiled app's alone
-    (tests/test_ui_wasm.py drives each), nor the console calls'."""
+    (tests/test_app_ui.py compares the tiers' pictures), nor the console
+    calls' (tests/test_every_row.py calls those on every tier)."""
     from tools import gen_os_table
     from runtime import app_context
     return [(r["role"], r["verb"]) for r in gen_os_table.role_table()
@@ -2507,7 +2504,6 @@ edit_file True desktop
 open_image True artwork
 open_text True desktop
 run_script [False,"CAN'T READ IT"]
-text_mode True False
 cover None
 cover_gen True
 play desktop

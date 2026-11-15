@@ -49,7 +49,6 @@ static inline int moy_kind_is(const moy_kind_t *a, const char *s, size_t n) {
 
 typedef struct {
     moy_kind_t id;
-    uint8_t text_mode;
     uint8_t has_min;
     int32_t min_w, min_h;
     uint32_t title_len;
@@ -68,8 +67,7 @@ void moy_apps_clear(moy_apps_t *a);
 // OK with the app's handle in `h`; BAD, DUP, FULL or NOMEM. The apps are
 // numbered in registration order and never unregister.
 int moy_apps_register(moy_apps_t *a, const char *id, size_t id_len,
-                      const char *title, size_t title_len, int text_mode,
-                      int has_min, int32_t min_w, int32_t min_h, uint32_t *h);
+                      const char *title, size_t title_len, int has_min, int32_t min_w, int32_t min_h, uint32_t *h);
 // The app's handle, or 0 when no app has that id.
 uint32_t moy_apps_find(const moy_apps_t *a, const char *id, size_t id_len);
 // OK, or STALE. The row stays valid while the registry lives.

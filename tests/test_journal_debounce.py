@@ -34,6 +34,8 @@ def test_keystroke_in_code_editor_arms_the_debounce(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     drv = host_app.ConsoleDriver(ws)
     _open_code(ws)
+    drv.frame(1 / 30)                               # the tab's first frame
+    ws.history.edit_ms = None
     assert ws.history.edit_ms is None               # no pending edit yet
 
     drv.type_char(ord("x"))

@@ -2,7 +2,7 @@
 // module runtime/carts/moy_index.py is, name for name -- Index, StaleHandle,
 // SLOT_BITS, SLOTS, GEN_MAX, ROOTS -- and mem(), the bytes the index holds now
 // and at its high water, which the census reads. Every image builds it unless
-// its MOY_INDEX_IMPL is `py` (tools/moy_index_spike.py).
+// its MOY_INDEX_IMPL is `py` (tools/native_check.py).
 //
 // It registers EXTENSIBLE, so a moy_index.py on the import path wins over it.
 // An image that takes it stages no such file (tools/board_config.py), and the
@@ -109,15 +109,6 @@ static uint32_t handle_arg(mp_obj_t h) {
         mp_raise_TypeError(MP_ERROR_TEXT("store handle must be an int"));
     }
     return v;
-}
-
-// The table under an Index, for C that drives the ABI itself
-// (bench_moy_index.c).
-moy_index_t *moy_index_of(mp_obj_t index) {
-    if (!mp_obj_is_type(index, &index_type)) {
-        mp_raise_TypeError(MP_ERROR_TEXT("not a moy_index.Index"));
-    }
-    return ix_of(index);
 }
 
 static mp_obj_t index_make_new(const mp_obj_type_t *type, size_t n_args,

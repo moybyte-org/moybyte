@@ -375,7 +375,6 @@ class GetCartsAppLayer(ListShellApp):
         self._grab = None             # a drag over the licence: (y, first line) at its press
         self._focus = None            # the id focus moves to on the next frame
         self._focused = None          # the focused id as the last frame left it
-        self._key = 0
 
     # -- the app protocol (docs/app_api_v1.md) --------------------------------
 
@@ -1223,11 +1222,8 @@ class GetCartsAppLayer(ListShellApp):
     def handle_input(self, inp):
         if self._tail is not None:
             return True
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(inp, "typed", 0)
+        typed = k != 0
         if self.toast is not None and (typed or _any_key(inp)):
             self.toast = None
             self._damage.all()

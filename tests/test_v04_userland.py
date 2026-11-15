@@ -739,6 +739,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     if ws.menu_view == "cards":
         ws.set_menu_view("code")
     assert ws.menu_view == "code" and ws.editor is not None
+    drv.frame(1 / 30)                                   # the tab's first frame
     ws.editor.row, ws.editor.col = 0, 0
     for ch in "Z=9":
         drv.type_char(ord(ch))
@@ -812,12 +813,13 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.set_menu_view("code")
     from runtime import ui_draw
-    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
     drv.frame(1 / 30)
     ed = ws.editor
     ed.set_text("")
     ed.row = ed.col = 0
     drv.type_char(ord("x"))                 # keyboard char ...
+    drv.frame(1 / 30)
+    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
     drv.frame(1 / 30)
     for sym in "=[]":                       # ... + palette symbols the keyboard lacks
         i = C._CODE_SYMBOLS.index(sym)

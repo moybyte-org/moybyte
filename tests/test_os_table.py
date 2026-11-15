@@ -45,6 +45,14 @@ def test_the_generated_files_are_the_source_s():
             assert f.read() == text, "%s is stale: run tools/gen_os_table.py" % path
 
 
+def test_every_whole_generated_file_is_marked_generated_for_github():
+    paths = [os.path.relpath(p, ROOT) for p in gen_os_table.whole(gen_os_table.outputs())]
+    got = subprocess.run(["git", "check-attr", "linguist-generated", "--"] + paths, cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout.splitlines()
+    unmarked = [line.split(":")[0] for line in got if not line.endswith(": true")]
+    assert unmarked == [], "give each a .gitattributes pattern: %s" % unmarked
+
+
 def test_the_http_prompt_says_it_reaches_the_local_network():
     """`http` reaches any host, the LAN's included, with no address filter
     (owner, 2026-11-09): its install prompt line, generated from the
@@ -137,7 +145,7 @@ def test_the_sdk_s_log_levels_and_event_record_are_the_kernel_s():
     order = ["MOY_LOG_EMERG"] + [n.strip() for n in names.split(",") if n.strip()]
     for name, value in re.findall(r"#define (MOY_LOG_\w+) (\d+)", sdk):
         assert order.index(name) == int(value), name
-    assert gen_os_table._evq_block() in sdk
+    assert gen_os_table.evq_block() in sdk
 
 
 @pytest.fixture(scope="module")
@@ -204,3 +212,32 @@ def test_a_service_s_device_permissions_are_the_handle_rows():
     from runtime.shell import system_api
     row = next(r for r in gen_os_table.load()["rows"] if r["name"] == "moybyte.dev_open")
     assert set(system_api.DEVICE_PERMS) == {p.split(":")[0] for p in row["perm"]}
+
+
+def test_one_error_table():
+    """native/os_calls.json's errors are the app ABI's codes and every face's
+    answer to one: the C enum and the texts are generated (moy_app_err.h,
+    runtime/host/face_errors.py), so no face restates a message by hand, and
+    the console's NO_STORE says the table's text."""
+    from runtime import face_errors
+    from runtime.shell import app_context
+    errs = gen_os_table.load()["errors"]
+    texts = {e[k] for e in errs for k in ("msg", "lua", "err") if e.get(k)}
+    faces = [os.path.join(ROOT, *p.split("/")) for p in (
+        "native/moy_app/modmoy_app.c", "native/moy_app/moy_app_lua.c",
+        "runtime/host/moy_app_binding.py")]
+    for path in faces:
+        src = open(path).read()
+        for t in texts:
+            assert '"%s"' % t not in src, "%s restates %r: take it from the errors" % (path, t)
+    for e in errs:
+        assert getattr(face_errors, e["code"]) == e["n"]
+        if e["code"] == "OK":
+            continue
+        exc = face_errors.exception(e["n"])
+        assert type(exc).__name__ == e["py"], e["code"]
+        if e["py"] == "OSError":
+            assert exc.errno == getattr(__import__("errno"), e["errno"])
+    nostore = next(e for e in errs if e["code"] == "NOSTORE")
+    assert str(app_context.NO_STORE) == nostore["err"]
+    assert type(face_errors.exception(99)) is type(face_errors.exception(face_errors.BAD))

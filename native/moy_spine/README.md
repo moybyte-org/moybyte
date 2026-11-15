@@ -7,7 +7,7 @@ The data half of the kernel's spine, in C (#224 sprint 2; the design record is
 `native/moy_index/` is (see its README), with no hook: every image, the
 desktop MicroPython and the CPython host (`runtime/host/moy_spine_binding.py`, which
 the `runtime` package registers as `moy_spine`) run it;
-`tools/moy_index_spike.py --component spine` runs its host suite and
+`tools/native_check.py --component spine` runs its host suite and
 sanitizers.
 
 | file | what it is |
@@ -20,8 +20,10 @@ sanitizers.
 | `modmoy_spine.c` | the MicroPython binding: the module `moy_spine`, registered extensible so a Python module of that name on the path wins (how a suite runs the oracle on a VM). `Settings.set` encodes a value, marks the store dirty and flushes it through the rows' saver, the save hook behind a thunk; `kernel_settings(save, fresh)` is a view of the kernel's rows. It also exports the allocator and a Settings' C rows to `native/moy_app`'s binding |
 | `moy_str.h`, `moy_str.c` | the strings C draws, as data: `moy_str(id)` reads a language pack's entry or English, and a pack entry whose conversions differ from English's is refused (`native/moy_ui/README.md`). Here because every image links the spine and the kernel's floor draws these words with no toolkit; a pack's text lives in this file's own allocation (PSRAM on a board) |
 | `strings/en.json`, `moy_str_table.h`, `moy_str_table.c` | English for every string C draws, by dotted id; the pair GENERATED from it by `tools/gen_ui_tables.py` and committed (`tests/test_ui_tables.py` fails a stale pair) |
+| `moy_sb.h` | the one byte builder, header-only: GROWN from a `moy_htab_mem_t` (doubled as it fills, NUL-terminated, a refused block sets `failed`) or FIXED in a caller's buffer (copies what fits, counts all, snprintf's rule). `tests/test_native_codecs.py` refuses a private builder anywhere else |
+| `moy_codec.h` | base64 (binascii.a2b_base64's reading; padded or base64url out), hex and UTF-8 (`next`, `valid`, `whole`, `put`, `count`), header-only, each with one rule: UTF-8's is the strict one, and the outline font (`native/moy_gfx/moy_path.c`) keeps its own reading of what it refuses. `tests/test_native_codecs.py` refuses a private codec anywhere else; `fuzz_spine.c` holds the codecs and the builder to their properties |
 | `moy_spine_host.c` | the allocator over calloc, and the table calls the header has only inline, for the ctypes binding (`runtime/host/moy_spine_binding.py`) |
-| `fuzz_spine.c` | every component against a model with allocation failure injected, and the scanner on raw and corrupted text: libFuzzer or a seeded driver |
+| `fuzz_spine.c` | every component against a model with allocation failure injected, the scanner on raw and corrupted text, and the codecs and the builder on the raw input: libFuzzer or a seeded driver |
 
 Every byte a component holds comes from the `moy_htab_mem_t` it is made with:
 PSRAM under `modmoy_spine.c` on a board (`native/moy_kernel/moy_kernel.h`),

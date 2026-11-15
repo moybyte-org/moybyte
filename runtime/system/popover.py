@@ -206,7 +206,7 @@ class WifiPanel:
 
     def _state(self):
         sl = self.ws.settings_layer
-        return (len(sl.wifi_nets), sl.wifi_msg, sl.wifi_sel, sl.wifi_pick, sl.wifi_pw.text)
+        return (len(sl.wifi_nets), sl.wifi_msg, sl.wifi_sel, sl.wifi_pick, sl.wifi_pw)
 
     def handle_input(self, i):
         before = self._state()
