@@ -623,8 +623,8 @@ def test_perf_line_is_the_one_format(board):
         assert got[name] is None, (name, got[name])
 
 # -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
-# LAST in the file: both bring WiFi up (released again), and the WiFi driver
-# keeps its internal RAM for the rest of the boot; the second starts BLE, which
+# LAST in the file: both bring WiFi up (released again, which ends the
+# driver and gives its internal RAM back); the second starts BLE, which
 # is off here until Settings asks for it, and stops it again.
 
 

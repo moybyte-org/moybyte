@@ -557,7 +557,7 @@ static inline int moy_wifi_remember(int ok, const char *password,
 #endif
 
 typedef struct {
-    uint8_t driver;         // initialised this boot (one-way: its RAM stays)
+    uint8_t driver;         // initialised: on an S3 until the station's stop
     uint8_t on;             // started: the radio is up
     uint8_t connected;      // associated and holding an address
     uint8_t reason;         // the last disconnect's reason, 0 after an address

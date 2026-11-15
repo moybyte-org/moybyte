@@ -169,13 +169,25 @@ class DeviceWifi:
         # the radio up only on first real use (scan/connect), never at boot. Whether WiFi
         # and the display can coexist at all on this RAM budget is an open #38 question.
         self.wlan = None
-        # Whether the driver has been brought up this boot. One-way: radio_off()
-        # stops the radio but the driver keeps its internal-RAM allocation, so a
-        # measurement of the idle desk's internal SRAM has to know.
-        self.driver_up = False
+        self._driver_ran = False  # the port's network.WLAN has started this boot
         self._join = None        # (ssid, password, stored, started) while a join runs
         self._joined = None      # the last join's verdict
         _rest_after_vm_start()
+
+    @property
+    def driver_up(self):
+        """Whether the radio's driver holds its internal RAM now, which a
+        measurement of the idle desk's internal SRAM has to know. The kernel's
+        driver says: on an S3 it ends with the station's stop, through a P4's
+        companion radio it stays up. The port's network.WLAN keeps it from its
+        first start to the next boot."""
+        try:
+            import moy_net
+            if hasattr(moy_net, "wifi_on"):
+                return bool(moy_net.wifi_status()[0])
+        except ImportError:
+            pass
+        return self._driver_ran
 
     def _ensure_wlan(self):
         """Bring the radio up on demand (never at boot -- see __init__)."""
@@ -183,7 +195,7 @@ class DeviceWifi:
             return self.wlan
         try:
             self.wlan = kernel_wlan()
-            self.driver_up = True
+            self._driver_ran = True
             self.wlan.active(True)
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
             _diag_note("wifi", "WLAN unavailable, offline: %s" % (exc,))

@@ -26,6 +26,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "soc/soc_caps.h"
 #if __has_include("moy_input.h")
 #include "moy_input.h"
 #define WIFI_EVENTS 1
@@ -76,6 +77,7 @@ enum { SCAN_IDLE, SCAN_ASKING, SCAN_RUNNING, SCAN_DONE };
 #define STALL_MS 15000u
 
 static void connect_now(void);
+static esp_netif_t *s_ap;           // the provisioning access point (moy_wifi_ap)
 
 static void schedule_retry(void) {
     if (s_retry == NULL) {
@@ -271,23 +273,29 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
     }
 }
 
+// The station's interface, its handlers and its retry timer are made once a
+// boot; the driver under them is initialised at each first start after a
+// stop that ended it (driver_end).
 static int driver(void) {
     if (s_st.driver) {
         return ESP_OK;
     }
-    esp_err_t e = esp_netif_init();
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
-        return e;
+    esp_err_t e;
+    if (s_netif == NULL) {
+        e = esp_netif_init();
+        if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+            return e;
+        }
+        e = esp_event_loop_create_default();
+        if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+            return e;
+        }
+        esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL, NULL);
+        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL, NULL);
+        s_netif = esp_netif_create_default_wifi_sta();
+        const esp_timer_create_args_t ta = {.callback = retry, .name = "moy_wifi"};
+        esp_timer_create(&ta, &s_retry);
     }
-    e = esp_event_loop_create_default();
-    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
-        return e;
-    }
-    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL, NULL);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL, NULL);
-    s_netif = esp_netif_create_default_wifi_sta();
-    const esp_timer_create_args_t ta = {.callback = retry, .name = "moy_wifi"};
-    esp_timer_create(&ta, &s_retry);
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     e = esp_wifi_init(&cfg);
     if (e != ESP_OK) {
@@ -299,6 +307,30 @@ static int driver(void) {
         s_st.driver = 1;
     }
     return e;
+}
+
+// The stopped station's driver ended, on a chip whose radio is its own (the
+// S3s, SOC_WIFI_SUPPORTED): its receive buffers, its task and its queues are
+// about 40 KB of internal SRAM, which the desk has back from here. A link
+// riding the radio, or the access point beside it, keeps it. Through a
+// companion radio (the P4s' C6) that memory is the companion's, and the
+// driver stays initialised.
+static void driver_end(void) {
+    #if SOC_WIFI_SUPPORTED
+    if (!s_st.driver || s_ap != NULL) {
+        return;
+    }
+    #if defined(MOY_NET_LINK) && MOY_NET_LINK
+    moy_link_stats_t l;
+    moy_link_stats(&l);
+    if (l.up) {
+        return;
+    }
+    #endif
+    if (esp_wifi_deinit() == ESP_OK) {
+        s_st.driver = 0;
+    }
+    #endif
 }
 
 int moy_wifi_on(void) {
@@ -332,6 +364,7 @@ void moy_wifi_off(void) {
     s_st.ssid[0] = '\0';
     portEXIT_CRITICAL(&s_latch);
     radio(false, 0);
+    driver_end();
 }
 
 // Each driver call is a round trip to the C6 on a P4, so a connect asks only
@@ -424,8 +457,6 @@ static void keep_now(void) {
 // The provisioning access point (the Zero's first run): open, beside the
 // station, which stays up for the setup form's scans. Its address in `*ip`
 // (network order); 0, or an ESP error.
-static esp_netif_t *s_ap;
-
 int moy_wifi_ap(const char *ssid, uint32_t *ip) {
     int e = driver();
     if (e != ESP_OK) {

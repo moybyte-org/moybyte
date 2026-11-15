@@ -38,15 +38,15 @@ def c6_updater_class():
 
 
 # Internal DMA-capable RAM (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA) a download
-# needs. The radio's driver takes RADIO_SRAM of it the first time it comes up
-# (its receive buffers, kept after the lease powers it down), and a TLS
+# needs. The radio's driver takes RADIO_SRAM of it while it is up (its
+# receive buffers; on an S3 the station's stop gives them back), and a TLS
 # download then takes TLS_SRAM_MIN more a record at a time: with mbedtls's
 # state in PSRAM (each console's sdkconfig.board), what is left internal is the
 # hardware AES/SHA's DMA bounce, 4.7 KB at its peak on the Guition S3
 # (a 786 KB GitHub download). The driver measured 41 KB on the
 # T-Deck. Short of the first, the radio does not come up
 # ("Expected to init 16 rx buffer, actual is 0"); short of the second, a
-# download stops partway. Only a restart gives the memory back.
+# download stops partway.
 TLS_SRAM_MIN = 8192
 RADIO_SRAM = 41 * 1024
 _INTERNAL_DMA = 0x808
@@ -131,7 +131,7 @@ class CartNet:
     def out_of_memory(self):
         """True when internal DMA-capable RAM is short of what a download
         needs: TLS_SRAM_MIN, and RADIO_SRAM besides while the radio's driver
-        has not come up yet this boot."""
+        is not up."""
         try:
             import esp32
             free = sum(h[1] for h in esp32.idf_heap_info(_INTERNAL_DMA))
