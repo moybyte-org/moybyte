@@ -317,6 +317,8 @@ def capture(cfg, carts_dir):
         ws.home.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
+    for _ in range(2):              # its first frames lay its body out and cut it
+        ws.menu_ui._draw_sysmenu()
     for sel in range(len(m.items)):
         m.sel = sel
         out["sysmenu_%d" % sel] = _shot(ws, lambda: ws.menu_ui._draw_sysmenu())
