@@ -288,6 +288,37 @@ def test_what_is_not_a_backup_restores_nothing(trial, tmp_path):
     assert os.listdir(fresh) == []
 
 
+def test_a_restore_that_does_not_fit_is_refused_before_it_writes(trial, tmp_path, monkeypatch):
+    root = trial + "/carts"
+    path, _n = moy_backup.archive(root)
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        unpacked = sum(i.file_size for i in z.infolist())
+    assert moy_backup.needs(path, 4096) >= unpacked
+    fresh = str(tmp_path / "fresh" / "moybyte")
+    croot = fresh + "/carts"
+    os.makedirs(croot)
+    want = moy_backup.needs(path, 4096)
+    monkeypatch.setattr(moy_backup, "room", lambda root: (want - 4096, 4096))
+    with pytest.raises(OSError) as e:
+        moy_backup.restore(path, croot)
+    assert e.value.errno == moy_backup.ENOSPC
+    assert _tree(fresh) == {}, "nothing written: no member, no stage"
+    monkeypatch.setattr(moy_backup, "room", lambda root: (want * 2, 4096))
+    assert moy_backup.restore(path, croot) == _n
+
+
+def test_what_is_not_an_archive_restores_nothing(trial, tmp_path):
+    junk = str(tmp_path / "junk.zip")
+    with open(junk, "wb") as f:
+        f.write(b"not a zip" * 100)
+    fresh = str(tmp_path / "fresh" / "moybyte") + "/carts"
+    os.makedirs(fresh)
+    with pytest.raises(ValueError):
+        moy_backup.restore(junk, fresh)
+    assert os.listdir(fresh) == []
+
+
 VM = r'''
 import sys
 sys.path.insert(0, @RUNTIME@)

@@ -71,13 +71,16 @@ class PushBoard:
     """A console for push: the upload helpers `push_file_raw` calls exist only
     once the tool has installed them, as on a board."""
 
-    def __init__(self):
+    def __init__(self, room=None):
         self.helpers = False
         self.words = []
+        self.room = room
 
     def pyval(self, expr, timeout=30.0, strict=False):
         if "backups_dir" in expr:
             return "/sd/moybyte/files/Backups"
+        if ".room(" in expr:
+            return self.room
         return 1
 
     def pyexec(self, code, timeout=30.0, strict=False):
@@ -112,3 +115,30 @@ def test_push_installs_the_upload_helpers_and_restores_an_archive_already_there(
     console_backup.main(["push", str(archive), "--board", "p4"])
     assert sent == ["/sd/moybyte/files/Backups/moybyte-backup.zip"]
     assert b.words == ["restore /sd/moybyte/files/Backups/moybyte-backup.zip"]
+
+
+def test_push_sends_nothing_where_the_store_has_no_room(tmp_path, monkeypatch):
+    """The archive lands beside the store and its restore unpacks a stage
+    there too: a console without room for both is told before a byte goes."""
+    import zipfile
+    pc = console_backup.push_cart
+    archive = tmp_path / "moybyte-backup.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("moybyte/backup.json", "{}")
+        z.writestr("moybyte/files/big.bin", bytes(64 * 1024))
+    b = PushBoard(room=(64 * 1024, 4096))
+    sent = []
+    monkeypatch.setattr(pc, "connect", lambda *a: b)
+    monkeypatch.setattr(pc, "raw_link", lambda *a: None)
+    monkeypatch.setattr(pc, "serial_cfg", lambda *a: None)
+    monkeypatch.setattr(pc, "push_file_raw", lambda *a, **k: sent.append(a))
+    try:
+        console_backup.main(["push", str(archive), "--board", "p4"])
+    except SystemExit as exc:
+        assert "free" in str(exc)
+    else:
+        raise AssertionError("a push with no room went on")
+    assert sent == [] and b.words == []
+    b.room = (1 << 20, 4096)
+    console_backup.main(["push", str(archive), "--board", "p4"])
+    assert len(sent) == 1 and len(b.words) == 1
