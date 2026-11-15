@@ -80,6 +80,14 @@ def text(p):
     return None if p is None else p.decode("utf-8", "replace")
 
 
+def take(free, buf):
+    """The bytes of a buffer the C allocated (its `p` and `n`), freed by `free`."""
+    try:
+        return ctypes.string_at(buf.p, buf.n) if buf.p else b""
+    finally:
+        free(ctypes.byref(buf))
+
+
 def raise_errno(eno):
     raise OSError(eno, os.strerror(eno))
 

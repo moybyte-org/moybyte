@@ -20,7 +20,6 @@
 #include "py/stream.h"
 
 #include "moy_ufiles.h"
-#include "modmoy_ufiles_face.h"
 
 void moy_store_unwind(void);
 
@@ -31,15 +30,8 @@ void moy_store_unwind(void);
 
 static const char CARTS_DIR[] = MOY_UF_CARTS_DIR;
 
-static MP_NORETURN void raise_rc(int rc) {
-    if (rc == MOY_UF_BAD) {
-        mp_raise_ValueError(MP_ERROR_TEXT("an argument the store refuses"));
-    }
-    if (rc == MOY_ENOMEM) {
-        mp_raise_type(&mp_type_MemoryError);
-    }
-    mp_raise_OSError(rc);
-}
+// The rows face.json generates; they run under GUARD.
+#include "modmoy_ufiles_face.h"
 
 static const char *s(mp_obj_t o) {
     return mp_obj_str_get_str(o);
@@ -47,20 +39,6 @@ static const char *s(mp_obj_t o) {
 
 static const char *root_of(size_t n_args, const mp_obj_t *args, size_t at) {
     return n_args > at ? s(args[at]) : CARTS_DIR;
-}
-
-static mp_obj_t take(moy_buf_t *b, int text) {
-    mp_obj_t o;
-    nlr_buf_t nlr;
-    if (nlr_push(&nlr) == 0) {
-        o = text ? mp_obj_new_str(b->p, b->n) : mp_obj_new_bytes((const byte *)b->p, b->n);
-        nlr_pop();
-    } else {
-        moy_buf_free(b);
-        nlr_jump(nlr.ret_val);
-    }
-    moy_buf_free(b);
-    return o;
 }
 
 // The builtin json, straight from the module table: an import of an
@@ -72,7 +50,7 @@ static mp_obj_t json_call(qstr name, mp_obj_t arg) {
 }
 
 static mp_obj_t names(moy_buf_t *b, uint32_t count, int pairs) {
-    mp_obj_t raw = take(b, 0);
+    mp_obj_t raw = face_moy_ufiles_take(b, 0);
     mp_buffer_info_t bi;
     mp_get_buffer_raise(raw, &bi, MP_BUFFER_READ);
     mp_obj_t list = mp_obj_new_list(0, NULL);
@@ -148,50 +126,6 @@ static mp_obj_t mod_project_folder(mp_obj_t kind) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_project_folder_obj, mod_project_folder);
 
-// -- paths ------------------------------------------------------------------------------
-
-static mp_obj_t path_of(int which, const char *root, const char *kind, const char *name) {
-    moy_buf_t b = { NULL, 0 };
-    int rc = 0;
-    GUARD_BEGIN
-    rc = moy_uf_path(which, root, kind, name, &b);
-    GUARD_END
-    if (rc) {
-        raise_rc(rc);
-    }
-    return take(&b, 1);
-}
-
-// f(root=CARTS_DIR)
-static mp_obj_t mod_files_root(size_t n_args, const mp_obj_t *args) {
-    return path_of(MOY_UF_PATH_FILES, root_of(n_args, args, 0), "", "");
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_files_root_obj, 0, 1, mod_files_root);
-
-// f(kind, root=CARTS_DIR)
-static mp_obj_t mod_file_kind_dir(size_t n_args, const mp_obj_t *args) {
-    return path_of(MOY_UF_PATH_KIND, root_of(n_args, args, 1), s(args[0]), "");
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_file_kind_dir_obj, 1, 2, mod_file_kind_dir);
-
-static mp_obj_t mod_project_dir(size_t n_args, const mp_obj_t *args) {
-    return path_of(MOY_UF_PATH_PROJECT, root_of(n_args, args, 1), s(args[0]), "");
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_project_dir_obj, 1, 2, mod_project_dir);
-
-// f(kind, name, root=CARTS_DIR)
-#define PATH_VERB(fn, which) \
-    static mp_obj_t mod_##fn(size_t n_args, const mp_obj_t *args) { \
-        return path_of(which, root_of(n_args, args, 2), s(args[0]), s(args[1])); \
-    } \
-    static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_##fn##_obj, 2, 3, mod_##fn);
-
-PATH_VERB(file_path, MOY_UF_PATH_FILE)
-PATH_VERB(history_path, MOY_UF_PATH_HISTORY)
-PATH_VERB(trash_path, MOY_UF_PATH_TRASH)
-PATH_VERB(history_trash_path, MOY_UF_PATH_HISTORY_TRASH)
-PATH_VERB(project_file_path, MOY_UF_PATH_PROJECT_FILE)
-
 // -- the items -----------------------------------------------------------------------------
 
 static mp_obj_t mod_list_files(size_t n_args, const mp_obj_t *args) {
@@ -203,7 +137,7 @@ static mp_obj_t mod_list_files(size_t n_args, const mp_obj_t *args) {
     rc = moy_uf_list(root, kind, &b, &n);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return names(&b, n, 0);
 }
@@ -217,7 +151,7 @@ static mp_obj_t mod_count_files(size_t n_args, const mp_obj_t *args) {
     rc = moy_uf_count(root, kind, &n);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_obj_new_int_from_uint(n);
 }
@@ -234,15 +168,15 @@ static mp_obj_t mod_load_file(size_t n_args, const mp_obj_t *args) {
         return mp_const_none;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, !binary);
+    return face_moy_ufiles_take(&b, !binary);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_load_file_obj, 2, 3, mod_load_file);
 
 static mp_obj_t named(int rc, const char *out) {
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_obj_new_str(out, strlen(out));
 }
@@ -338,7 +272,7 @@ static mp_obj_t mod_trash_list(size_t n_args, const mp_obj_t *args) {
     rc = moy_uf_trash_list(root, &b, &n);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return names(&b, n, 1);
 }
@@ -350,7 +284,7 @@ static mp_obj_t prune_trash(const char *root, uint32_t keep) {
     rc = moy_uf_prune_trash(root, keep);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_const_none;
 }
@@ -385,9 +319,9 @@ static mp_obj_t json_verb(json_fn fn, size_t n_args, const mp_obj_t *args) {
     rc = fn(root, kind, name, &b);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return json_call(MP_QSTR_loads, take(&b, 1));
+    return json_call(MP_QSTR_loads, face_moy_ufiles_take(&b, 1));
 }
 
 static mp_obj_t mod_load_history(size_t n_args, const mp_obj_t *args) {
@@ -437,7 +371,7 @@ static mp_obj_t mod_history_commit(size_t n_args, const mp_obj_t *args, mp_map_t
     (void)ops_text;
     (void)kf_text;
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     if (err == 0) {
         return mp_const_none;
@@ -469,7 +403,7 @@ static mp_obj_t mod_prune_history(size_t n_args, const mp_obj_t *args, mp_map_t 
                               v[3].u_int < 0 ? 0u : (uint32_t)v[3].u_int, &dropped);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_obj_new_int_from_uint(dropped);
 }
@@ -482,16 +416,11 @@ static mp_obj_t mod_clear_history(size_t n_args, const mp_obj_t *args) {
     rc = moy_uf_clear_history(root, kind, name);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_clear_history_obj, 2, 3, mod_clear_history);
-
-static mp_obj_t mod_history_prune_fails(void) {
-    return mp_obj_new_int_from_uint(moy_uf_prune_fails());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(mod_history_prune_fails_obj, mod_history_prune_fails);
 
 // -- provenance and the codecs ----------------------------------------------------------------
 
@@ -522,9 +451,9 @@ static mp_obj_t mod_stamp_provenance(size_t n_args, const mp_obj_t *args) {
         return blob;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, 1);
+    return face_moy_ufiles_take(&b, 1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_stamp_provenance_obj, 4, 4, mod_stamp_provenance);
 
@@ -545,9 +474,9 @@ static mp_obj_t mod_read_provenance(mp_obj_t blob) {
         return mp_obj_new_tuple(2, none2);
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    mp_obj_t t[2] = { take(&b, 1), mp_obj_new_int_from_ll(sig) };
+    mp_obj_t t[2] = { face_moy_ufiles_take(&b, 1), mp_obj_new_int_from_ll(sig) };
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_read_provenance_obj, mod_read_provenance);
@@ -563,9 +492,9 @@ static mp_obj_t mod_load_copy(size_t n_args, const mp_obj_t *args) {
         return mp_const_none;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, 1);
+    return face_moy_ufiles_take(&b, 1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_load_copy_obj, 0, 1, mod_load_copy);
 
@@ -578,7 +507,7 @@ static mp_obj_t mod_save_copy(size_t n_args, const mp_obj_t *args) {
     rc = moy_uf_copy_save(root, bi.buf, bi.len);
     GUARD_END
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     return mp_const_none;
 }
@@ -599,9 +528,9 @@ static mp_obj_t mod_deflate(mp_obj_t data) {
     moy_buf_t b = { NULL, 0 };
     int rc = moy_uf_deflate(bi.buf, bi.len, &b);
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, 0);
+    return face_moy_ufiles_take(&b, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_deflate_obj, mod_deflate);
 
@@ -616,9 +545,9 @@ static mp_obj_t mod_encode_image(mp_obj_t w, mp_obj_t h, mp_obj_t pix) {
         mp_raise_ValueError(MP_ERROR_TEXT("bad artwork size"));
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, 1);
+    return face_moy_ufiles_take(&b, 1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_encode_image_obj, mod_encode_image);
 
@@ -632,9 +561,10 @@ static mp_obj_t mod_decode_image(mp_obj_t blob) {
         return mp_const_none;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    mp_obj_t t[3] = { mp_obj_new_int_from_uint(w), mp_obj_new_int_from_uint(h), take(&b, 0) };
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(w), mp_obj_new_int_from_uint(h),
+                      face_moy_ufiles_take(&b, 0) };
     return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_decode_image_obj, mod_decode_image);
@@ -645,9 +575,9 @@ static mp_obj_t mod_encode_cover(mp_obj_t pix) {
     moy_buf_t b = { NULL, 0 };
     int rc = moy_uf_encode_cover(bi.buf, bi.len, &b);
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
-    return take(&b, 0);
+    return face_moy_ufiles_take(&b, 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_encode_cover_obj, mod_encode_cover);
 
@@ -674,7 +604,7 @@ static mp_obj_t mod_cover_image(size_t n_args, const mp_obj_t *args) {
     mp_int_t dw = mp_obj_get_int(args[2]), dh = mp_obj_get_int(args[3]);
     mp_int_t mw = mp_obj_get_int(args[4]), mh = mp_obj_get_int(args[5]);
     if (dw <= 0 || dh <= 0 || mw <= 0 || mh <= 0 || (uint64_t)dw * (uint64_t)dh > bi.len) {
-        raise_rc(MOY_UF_BAD);
+        face_raise_uf(MOY_UF_BAD);
     }
     uint32_t w = 0, h = 0;
     int rc = 0;
@@ -686,7 +616,7 @@ static mp_obj_t mod_cover_image(size_t n_args, const mp_obj_t *args) {
         return mp_const_none;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     mp_obj_t t[2] = { mp_obj_new_int_from_uint(w), mp_obj_new_int_from_uint(h) };
     return mp_obj_new_tuple(2, t);
@@ -702,10 +632,10 @@ static mp_obj_t mod_decode_cover(mp_obj_t data) {
         return mp_const_none;
     }
     if (rc) {
-        raise_rc(rc);
+        face_raise_uf(rc);
     }
     mp_obj_t t[3] = { MP_OBJ_NEW_SMALL_INT(MOY_UF_COVER_SIDE),
-                      MP_OBJ_NEW_SMALL_INT(MOY_UF_COVER_SIDE), take(&b, 0) };
+                      MP_OBJ_NEW_SMALL_INT(MOY_UF_COVER_SIDE), face_moy_ufiles_take(&b, 0) };
     return mp_obj_new_tuple(3, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_decode_cover_obj, mod_decode_cover);
@@ -715,12 +645,6 @@ static mp_obj_t mod_palette(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_palette_obj, mod_palette);
 
-static mp_obj_t mod_clock_fix(mp_obj_t ts) {
-    moy_uf_clock_fix((int64_t)mp_obj_get_int(ts));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_clock_fix_obj, mod_clock_fix);
-
 static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ufiles) },
     MOY_FACE_MOY_UFILES_ROWS
@@ -729,14 +653,6 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_vault_ext), MP_ROM_PTR(&mod_vault_ext_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_kind), MP_ROM_PTR(&mod_project_kind_obj) },
     { MP_ROM_QSTR(MP_QSTR_project_folder), MP_ROM_PTR(&mod_project_folder_obj) },
-    { MP_ROM_QSTR(MP_QSTR_project_dir), MP_ROM_PTR(&mod_project_dir_obj) },
-    { MP_ROM_QSTR(MP_QSTR_project_file_path), MP_ROM_PTR(&mod_project_file_path_obj) },
-    { MP_ROM_QSTR(MP_QSTR_files_root), MP_ROM_PTR(&mod_files_root_obj) },
-    { MP_ROM_QSTR(MP_QSTR_file_kind_dir), MP_ROM_PTR(&mod_file_kind_dir_obj) },
-    { MP_ROM_QSTR(MP_QSTR_file_path), MP_ROM_PTR(&mod_file_path_obj) },
-    { MP_ROM_QSTR(MP_QSTR_history_path), MP_ROM_PTR(&mod_history_path_obj) },
-    { MP_ROM_QSTR(MP_QSTR_trash_path), MP_ROM_PTR(&mod_trash_path_obj) },
-    { MP_ROM_QSTR(MP_QSTR_history_trash_path), MP_ROM_PTR(&mod_history_trash_path_obj) },
     { MP_ROM_QSTR(MP_QSTR_list_files), MP_ROM_PTR(&mod_list_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_count_files), MP_ROM_PTR(&mod_count_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_load_file), MP_ROM_PTR(&mod_load_file_obj) },
@@ -755,7 +671,6 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_history_commit), MP_ROM_PTR(&mod_history_commit_obj) },
     { MP_ROM_QSTR(MP_QSTR_prune_history), MP_ROM_PTR(&mod_prune_history_obj) },
     { MP_ROM_QSTR(MP_QSTR_clear_history), MP_ROM_PTR(&mod_clear_history_obj) },
-    { MP_ROM_QSTR(MP_QSTR_history_prune_fails), MP_ROM_PTR(&mod_history_prune_fails_obj) },
     { MP_ROM_QSTR(MP_QSTR_content_sig), MP_ROM_PTR(&mod_content_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_stamp_provenance), MP_ROM_PTR(&mod_stamp_provenance_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_provenance), MP_ROM_PTR(&mod_read_provenance_obj) },
@@ -768,7 +683,6 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_palette), MP_ROM_PTR(&mod_palette_obj) },
     { MP_ROM_QSTR(MP_QSTR_load_copy), MP_ROM_PTR(&mod_load_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_copy), MP_ROM_PTR(&mod_save_copy_obj) },
-    { MP_ROM_QSTR(MP_QSTR_clock_fix), MP_ROM_PTR(&mod_clock_fix_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ufiles_globals, moy_ufiles_globals_table);
 

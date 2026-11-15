@@ -21,6 +21,7 @@ import errno
 import json
 import os
 import types
+import face_ctypes
 import moy_ufiles_face as _face
 from moy_store_face import moy_buf_t as _Buf
 
@@ -34,7 +35,6 @@ UZLIB = os.path.join(ROOT, ".build", "unix_micropython", "micropython", "lib", "
 NONE, BAD = -1, -2
 NAME_MAX = 255
 CARTS_DIR = _face.CARTS_DIR
-_ENOMEM = 12
 
 _NAMES = ("moy_ufiles.h", "moy_ufiles.c", "moy_fs.h", "moy_fs.c", "moy_vol.h",
           "moy_vol.c", "moy_journal.h", "moy_journal.c", "moy_cat.h", "moy_cat.c",
@@ -63,7 +63,6 @@ _SIGS = (
     ("moy_uf_kind_base", [c.c_int], _P),
     ("moy_uf_vault_ext", [_P], _S),
     ("moy_uf_script_ext", [_P], _S),
-    ("moy_uf_path", [c.c_int, _P, _P, _P, _PB], c.c_int),
     ("moy_uf_list", [_P, _P, _PB, _PU32], c.c_int),
     ("moy_uf_count", [_P, _P, _PU32], c.c_int),
     ("moy_uf_load", [_P, _P, _P, _PB, _PINT], c.c_int),
@@ -81,7 +80,6 @@ _SIGS = (
     ("moy_uf_history_commit", [_P, _P, _P, _P, _S, _P, _S, _PINT], c.c_int),
     ("moy_uf_prune_history", [_P, _P, _P, _U32, _PU32], c.c_int),
     ("moy_uf_clear_history", [_P, _P, _P], c.c_int),
-    ("moy_uf_prune_fails", [], _U32),
     ("moy_uf_sig", [_P, _S], _U32),
     ("moy_uf_stamp", [_P, _S, _P, _P, _U32, _PB], c.c_int),
     ("moy_uf_provenance", [_P, _S, _PB, c.POINTER(c.c_int64)], c.c_int),
@@ -94,7 +92,6 @@ _SIGS = (
     ("moy_uf_palette", [], c.c_void_p),
     ("moy_uf_copy_load", [_P, _PB], c.c_int),
     ("moy_uf_copy_save", [_P, _P, _S], c.c_int),
-    ("moy_uf_clock_fix", [c.c_int64], None),
     ("moy_buf_free", [_PB], None),
     ("moy_fs_root", [_P], c.c_int),
 )
@@ -145,19 +142,11 @@ def _b(s):
     return s if isinstance(s, bytes) else str(s).encode()
 
 
-def _raise(rc):
-    if rc == BAD:
-        raise ValueError("moy_ufiles: an argument the store refuses")
-    if rc == _ENOMEM:
-        raise MemoryError("moy_ufiles")
-    raise OSError(rc, os.strerror(rc))
+_raise = _face._raise_uf
 
 
 def _take(lib, buf, text=True):
-    try:
-        raw = c.string_at(buf.p, buf.n) if buf.p else b""
-    finally:
-        lib.moy_buf_free(c.byref(buf))
+    raw = face_ctypes.take(lib.moy_buf_free, buf)
     return raw.decode() if text else raw
 
 
@@ -223,37 +212,6 @@ def binding():
     def project_folder(kind):
         k = str(kind)
         return k[len(m.PROJECT_KIND):] if k.startswith(m.PROJECT_KIND) else ""
-
-    def _path(which, root, kind="", name=""):
-        buf = _Buf()
-        rc = lib().moy_uf_path(which, _b(root), _b(kind), _b(name), c.byref(buf))
-        if rc:
-            _raise(rc)
-        return _take(lib(), buf)
-
-    def files_root(root=CARTS_DIR):
-        return _path(0, root)
-
-    def file_kind_dir(kind, root=CARTS_DIR):
-        return _path(1, root, kind)
-
-    def file_path(kind, name, root=CARTS_DIR):
-        return _path(2, root, kind, name)
-
-    def history_path(kind, name, root=CARTS_DIR):
-        return _path(3, root, kind, name)
-
-    def trash_path(kind, name, root=CARTS_DIR):
-        return _path(4, root, kind, name)
-
-    def history_trash_path(kind, name, root=CARTS_DIR):
-        return _path(5, root, kind, name)
-
-    def project_dir(kind, root=CARTS_DIR):
-        return _path(6, root, kind)
-
-    def project_file_path(kind, name, root=CARTS_DIR):
-        return _path(7, root, kind, name)
 
     def list_files(kind, root=CARTS_DIR):
         buf, n = _Buf(), c.c_uint32()
@@ -366,9 +324,6 @@ def binding():
         rc = lib().moy_uf_clear_history(_root(root), _b(kind), _b(name))
         if rc:
             _raise(rc)
-
-    def history_prune_fails():
-        return lib().moy_uf_prune_fails()
 
     def content_sig(text):
         if not text:
@@ -486,9 +441,6 @@ def binding():
         rc = lib().moy_uf_copy_save(_root(root), data, len(data))
         if rc:
             _raise(rc)
-
-    def clock_fix(ts):
-        lib().moy_uf_clock_fix(int(ts))
 
     for name, v in list(locals().items()):
         if callable(v) and not name.startswith("_") and name not in ("lib", "m"):

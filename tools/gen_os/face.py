@@ -34,7 +34,11 @@ A face.json maps a module's name to its face:
   structs   C structures the host's hand rows read: their ctypes mirrors,
             read from the native headers (tools/gen_os/structs.py)
   errors    {name: {"codes": {rc: "Exxx"}, "other": "Exxx"}}: a C answer code
-            raised as OSError(errno), 0 answering
+            raised as OSError(errno), 0 answering; a code may raise
+            "ValueError: <text>" or "MemoryError", and "other": "rc" raises
+            OSError(rc), the code an errno value
+  buf       {"c": structure, "free": function}: the buffer a `take` row's C
+            allocates (a pointer and a length, `p` and `n`) and its free
   api       the toolkit's engine verbs (native/moy_ui's alone): tools/gen_os/ui.py's
   roles     {role: C prefix}: the role objects whose C rows (native/os_calls.json)
             both faces generate as methods, tools/gen_os/roles.py's
@@ -49,12 +53,22 @@ A face.json maps a module's name to its face:
               trunc    [param]: an integer taken modulo its width (handles)
               null     [param]: a const char * None passes as NULL
               out      {param: [field, ...] | null}: a structure answered as
-                       the tuple of its fields, or a scalar answered as itself
+                       the tuple of its fields ("field?" a truth value, a char
+                       array its text), or a scalar answered as itself
               neg_out  a negative int answer is answered as itself, else the
                        one out parameter; "tuple": else (answer, out, ...)
               err      an `errors` name: the C's int answer raises
               ret      the answer's type where the prototype's is not it
                        ("bool"), or "ok": an int answer, True where it is 0
+              fix      {param: C}: a C parameter the row passes as a constant (a
+                       header's integer, or a string literal); the Python
+                       parameters then meet the C ones by name, and a str
+                       default is the C's literal
+              take     {param: "text" | "bytes"}: an out buffer (the face's
+                       `buf`) answered as a str or bytes and freed
+              flag     [param]: an int taken as a truth value
+              guard    NAME: the board's call runs between the hand file's
+                       NAME_BEGIN and NAME_END (its answer kept)
               when     a `when` name: the row exists on the boards where its
                        condition holds
               noalloc  the MicroPython face allocates nothing (checked)
@@ -65,6 +79,7 @@ A face.json maps a module's name to its face:
 Rows without a face.json `rows` list are registered only: their faces are
 still written by hand (docs/refactor_2026-11.md, phase 6)."""
 
+import ast
 import json
 import os
 import re
@@ -82,9 +97,9 @@ FACES_PY = os.path.join(HOST, "faces.py")
 FIRST = ("moy_spine",)
 
 MOD_FIELDS = {"about", "c", "host", "binding", "lazy", "registered", "headers", "consts", "structs", "errors",
-              "rows", "api", "when", "roles"}
+              "rows", "api", "when", "roles", "buf"}
 ROW_FIELDS = {"py", "hand", "c", "span", "wbuf", "ret", "neg_out", "trunc", "null", "out", "err", "noalloc", "example",
-              "absent", "doc", "when"}
+              "absent", "doc", "when", "fix", "take", "guard", "flag"}
 FACES = ("host", "mp")
 
 _UNSIGNED = {"uint8_t": 8, "uint16_t": 16, "uint32_t": 32, "unsigned": 32, "unsigned int": 32,
@@ -289,31 +304,45 @@ class Row:
         self.ret, self.fn, cps, _ = hdr.proto(row["c"])
         span = set(row.get("span", ())) | set(row.get("wbuf", ()))
         out = row.get("out", {})
+        fix, take = row.get("fix", {}), row.get("take", {})
+        by_name = {nm: j for j, (nm, _) in enumerate(self.params)} if fix else None
         self.c = []        # (kind, cname, ctype, py index or None)
         self.fixed = {}    # cname: the length of an array parameter (`addr[6]`)
         i, k = 0, 0
+
+        def at(cn):
+            if by_name is None:
+                return k
+            if cn not in by_name:
+                raise TableError("%s.%s: no Python parameter %s" % (m, self.name, cn))
+            return by_name[cn]
         while i < len(cps):
             p = cps[i]
             cn = param_name(p)
             ct = p[:p.rfind(cn)].strip()
+            if cn in fix or cn in take:
+                self.c.append(("fix" if cn in fix else "take", cn, ct, None))
+                i += 1
+                continue
             if cn in span:
                 ln = cps[i + 1]
-                self.c.append(("wbuf" if cn in row.get("wbuf", ()) else "span", cn, ct, k))
-                self.c.append(("len", param_name(ln), ln[:ln.rfind(param_name(ln))].strip(), k))
+                j = at(cn)
+                self.c.append(("wbuf" if cn in row.get("wbuf", ()) else "span", cn, ct, j))
+                self.c.append(("len", param_name(ln), ln[:ln.rfind(param_name(ln))].strip(), j))
                 k += 1
                 i += 2
                 continue
             fixed = re.search(r"\[(\d+)\]\s*$", p)
             if fixed:
                 self.fixed[cn] = int(fixed.group(1))
-                self.c.append(("fixed", cn, ct + " *", k))
+                self.c.append(("fixed", cn, ct + " *", at(cn)))
                 k += 1
                 i += 1
                 continue
             if cn in out:
                 self.c.append(("out", cn, ct, None))
             else:
-                self.c.append(("in", cn, ct, k))
+                self.c.append(("in", cn, ct, at(cn)))
                 k += 1
             i += 1
         if k != len(self.params) or self.star:
@@ -322,7 +351,14 @@ class Row:
         self.outs = [(cn, ct) for kind, cn, ct, _ in self.c if kind == "out"]
         if self.outs and _base(self.ret) != "void" and not (row.get("err") or row.get("neg_out")):
             raise TableError("%s.%s: an out parameter and an answer" % (m, self.name))
-        for cn in list(row.get("trunc", ())) + list(row.get("null", ())) + list(span):
+        if take and (len(take) != 1 or self.outs or _base(self.ret) != "int"
+                     or not row.get("err")):
+            raise TableError("%s.%s: a take row answers one buffer, its int raising"
+                             % (m, self.name))
+        if row.get("guard") and _base(self.ret) == "void":
+            raise TableError("%s.%s: a guarded row answers" % (m, self.name))
+        for cn in (list(row.get("trunc", ())) + list(row.get("null", ())) + list(span) + list(fix)
+                   + list(take) + list(row.get("flag", ()))):
             if cn not in [x[1] for x in self.c]:
                 raise TableError("%s.%s: no parameter %s" % (m, self.name, cn))
 
@@ -432,6 +468,8 @@ def check(faces=None):
 
 def _mp_in(ct, cn, row, o):
     b = _base(ct)
+    if cn in row.get("flag", ()):
+        return "mp_obj_is_true(%s)" % o
     if b in ("char *",) or b == "char*":
         if cn in row.get("null", ()):
             return "%s == mp_const_none ? NULL : mp_obj_str_get_str(%s)" % (o, o)
@@ -466,6 +504,8 @@ def _mp_val(ct, v):
 
 
 def _c_default(d, ct):
+    if d[:1] in ("'", '"'):
+        return json.dumps(ast.literal_eval(d))
     if d == "None":
         return "NULL" if "*" in ct else "0"
     if d in ("True", "False"):
@@ -512,6 +552,11 @@ def _mp_row(m, face, hdr, r):
             st = b.rstrip("*").strip()
             o.append("    %s %s%s;" % (st, cn, " = 0" if st in _UNSIGNED or st in _SIGNED else ""))
             call.append("&" + cn)
+        elif kind == "fix":
+            call.append(r.row["fix"][cn])
+        elif kind == "take":
+            o.append("    %s %s = { NULL, 0 };" % (face["buf"]["c"], cn))
+            call.append("&" + cn)
         else:
             dflt = r.params[k][1]
             expr = _mp_in(ct, cn, r.row, arg[k])
@@ -525,7 +570,16 @@ def _mp_row(m, face, hdr, r):
     callx = "%s(%s)" % (r.fn, ", ".join(call))
     ret = r.row.get("ret") or _base(r.ret)
     err = r.row.get("err")
-    if err:
+    guard = r.row.get("guard")
+    if guard:
+        o += ["    %s r_ = 0;" % _base(r.ret), "    %s_BEGIN" % guard, "    r_ = %s;" % callx,
+              "    %s_END" % guard]
+        callx = "r_"
+    if r.row.get("take"):
+        (cn, how), = r.row["take"].items()
+        o.append("    face_raise_%s(%s);" % (err, callx))
+        o.append("    return face_%s_take(&%s, %d);" % (m, cn, how == "text"))
+    elif err:
         o.append("    face_raise_%s(%s);" % (err, callx))
     elif ret == "ok":
         o.append("    return mp_obj_new_bool(%s == 0);" % callx)
@@ -557,13 +611,20 @@ def _mp_row(m, face, hdr, r):
         if fields is None:
             o.append("    return %s;" % _mp_val(st, cn))
         else:
-            types = {f: t for f, t, _ in hdr.struct(st)}
+            types = {f: (t, n) for f, t, n in hdr.struct(st)}
             o.append("    mp_obj_t t_[%d] = {" % len(fields))
             for f in fields:
-                o.append("        %s," % _mp_val(types[f], "%s.%s" % (cn, f)))
+                v = "%s.%s" % (cn, f.rstrip("?"))
+                t, n = types[f.rstrip("?")]
+                if f.endswith("?"):
+                    o.append("        mp_obj_new_bool(%s)," % v)
+                elif n and t == "char":
+                    o.append("        mp_obj_new_str(%s, strlen(%s))," % (v, v))
+                else:
+                    o.append("        %s," % _mp_val(t, v))
             o.append("    };")
             o.append("    return mp_obj_new_tuple(%d, t_);" % len(fields))
-    elif err or ret == "void":
+    elif (err or ret == "void") and not r.row.get("take"):
         o.append("    return mp_const_none;")
     o.append("}")
     if var:
@@ -598,11 +659,27 @@ def gen_mp(m, face):
         o.append("    switch (rc) {")
         o.append("    case 0: return;")
         for rc, eno in e["codes"].items():
-            o.append("    case %s: mp_raise_OSError(MP_%s);" % (rc, eno))
-        o.append("    default: mp_raise_OSError(MP_%s);" % e["other"])
+            if eno.startswith("ValueError: "):
+                o.append('    case %s: mp_raise_ValueError(MP_ERROR_TEXT("%s"));' % (rc, eno[12:]))
+            elif eno == "MemoryError":
+                o.append("    case %s: mp_raise_type(&mp_type_MemoryError);" % rc)
+            else:
+                o.append("    case %s: mp_raise_OSError(MP_%s);" % (rc, eno))
+        o.append("    default: mp_raise_OSError(%s);" % ("rc" if e["other"] == "rc"
+                                                        else "MP_" + e["other"]))
         o.append("    }")
         o.append("}")
         o.append("")
+    if face.get("buf"):
+        b = face["buf"]
+        o += ["// A buffer the C allocated as a str (`text`) or bytes, freed either way.",
+              "static mp_obj_t face_%s_take(%s *b, int text) {" % (m, b["c"]),
+              "    mp_obj_t o;", "    nlr_buf_t nlr;", "    if (nlr_push(&nlr) == 0) {",
+              "        o = text ? mp_obj_new_str(b->p, b->n) "
+              ": mp_obj_new_bytes((const byte *)b->p, b->n);",
+              "        nlr_pop();", "    } else {", "        %s(b);" % b["free"],
+              "        nlr_jump(nlr.ret_val);", "    }", "    %s(b);" % b["free"], "    return o;",
+              "}", ""]
     mp = [r for r in rs if not r.row.get("hand") and "mp" not in r.row.get("absent", ())]
     strs = hdr.strings()
     for cn, pn in consts(face):
@@ -680,6 +757,8 @@ def host_path(m, face):
 
 def _py_in(ct, cn, row, v):
     b = _base(ct)
+    if cn in row.get("flag", ()):
+        return "1 if %s else 0" % v
     if b in ("char *", "char*"):
         if cn in row.get("null", ()):
             return "None if %s is None else _f.cstr(%s)" % (v, v)
@@ -730,10 +809,23 @@ def _py_row(m, face, hdr, r, structs):
             st = _base(ct).rstrip("*").strip()
             o.append("    %s = %s()" % (cn, st if st in structs else _CTYPES[st]))
             call.append("_c.byref(%s)" % cn)
+        elif kind == "fix":
+            fx = r.row["fix"][cn]
+            call.append(repr(ast.literal_eval(fx).encode()) if fx[:1] == '"'
+                        else str(hdr.values()[fx]))
+        elif kind == "take":
+            o.append("    %s = %s()" % (cn, face["buf"]["c"]))
+            call.append("_c.byref(%s)" % cn)
         else:
             call.append(_py_in(ct, cn, r.row, v))
     callx = "_lib().%s(%s)" % (r.fn, ", ".join(call))
     ret = r.row.get("ret") or _base(r.ret)
+    if r.row.get("take"):
+        (cn, how), = r.row["take"].items()
+        o.append("    _raise_%s(%s)" % (r.row["err"], callx))
+        o.append("    return _f.take(_lib().%s, %s)%s" % (face["buf"]["free"], cn,
+                                                       ".decode()" if how == "text" else ""))
+        return o
     if r.row.get("err"):
         o.append("    _raise_%s(%s)" % (r.row["err"], callx))
     elif ret == "ok":
@@ -756,25 +848,54 @@ def _py_row(m, face, hdr, r, structs):
         if fields is None:
             o.append("    return %s.value" % cn)
         else:
-            o.append("    return (%s%s)" % (", ".join("%s.%s" % (cn, f) for f in fields),
-                                            "," if len(fields) == 1 else ""))
+            types = {f: (t, n) for f, t, n in hdr.struct(_base(ct).rstrip("*").strip())}
+
+            def val(f):
+                v = "%s.%s" % (cn, f.rstrip("?"))
+                t, n = types[f.rstrip("?")]
+                if f.endswith("?"):
+                    return "bool(%s)" % v
+                return '%s.decode("utf-8")' % v if n and t == "char" else v
+            items = [val(f) for f in fields]
+            line = "    return (%s%s)" % (", ".join(items), "," if len(fields) == 1 else "")
+            o += _fold_py(line) if len(line) > 99 else [line]
     return o
 
 
-def _structs_needed(rs):
+def _fold_py(line):
+    """A `return (a, b, ...)` line past 99 wrapped under its first item."""
+    k = line.index("(") + 1
+    out, cur = [], line[:k]
+    for x in line[k:].split(", "):
+        if len(cur) + len(x) + 2 > 99 and cur.strip() != line[:k].strip():
+            out.append(cur.rstrip())
+            cur = " " * k
+        cur += x + ", "
+    out.append(cur[:-2])
+    return out
+
+
+def _errnos(e):
+    """Whether an `errors` entry names an errno (a table the host face keeps)."""
+    return e["other"] != "rc" or any(x.startswith("E") for x in e["codes"].values())
+
+
+def _structs_needed(rs, face=None):
     want = []
     for r in rs:
         for cn, ct in getattr(r, "outs", []):
             st = _base(ct).rstrip("*").strip()
             if r.row["out"][cn] is not None and st not in want:
                 want.append(st)
+        if r.row.get("take") and not r.row.get("hand") and face["buf"]["c"] not in want:
+            want.append(face["buf"]["c"])
     return want
 
 
 def gen_host(m, face):
     hdr = Headers(face)
     rs = rows(m, face, hdr)
-    mir = mirrors(face, _structs_needed(rs))
+    mir = mirrors(face, _structs_needed(rs, face))
     structs = mir.done
     vals = hdr.values()
     gen = [r for r in rs if not r.row.get("hand") and "host" not in r.row.get("absent", ())]
@@ -784,7 +905,8 @@ def gen_host(m, face):
          '"""%s\'s generated %s over ctypes: %s.' % (m, what, face["about"]),
          'The module `%s` is runtime/host/%s.py."""' % (m, face["host"]),
          ""] + (["import ctypes as _c"] if gen or structs or face.get("roles") else []) + (
-         ["import errno as _errno"] if face.get("errors") else []) + (
+         ["import errno as _errno"] if any(map(_errnos, face.get("errors", {}).values()))
+         else []) + (
          ["", "import face_ctypes as _f"] if gen or face.get("errors") else []) + (
          ["", "import face_errors as _E"] if face.get("roles") else []) + [
          "", "__all__ = ("] + wrap(['"%s"' % n for n in public]) + [")", ""]
@@ -798,12 +920,26 @@ def gen_host(m, face):
     o.append("")
     o += mir.emit()
     for name, e in sorted(face.get("errors", {}).items()):
-        o.append("_%s = {" % name.upper())
-        o += wrap(["%d: _errno.%s" % (vals[rc] if rc in vals else int(rc), eno)
-                   for rc, eno in e["codes"].items()])
-        o.append("}")
-        o += ["", "", "def _raise_%s(rc):" % name, "    if rc:",
-              "        _f.raise_errno(_%s.get(rc, _errno.%s))" % (name.upper(), e["other"]),
+        if _errnos(e):
+            o.append("_%s = {" % name.upper())
+            o += wrap(["%d: _errno.%s" % (vals[rc] if rc in vals else int(rc), eno)
+                       for rc, eno in e["codes"].items() if eno.startswith("E")])
+            o.append("}")
+        o += ["", "", "def _raise_%s(rc):" % name]
+        if e["other"] != "rc":
+            o += ["    if rc:",
+                  "        _f.raise_errno(_%s.get(rc, _errno.%s))" % (name.upper(), e["other"]),
+                  "", ""]
+            continue
+        o += ["    if not rc:", "        return"]
+        for rc, eno in e["codes"].items():
+            v = vals[rc] if rc in vals else int(rc)
+            if eno.startswith("ValueError: "):
+                o += ["    if rc == %d:" % v, '        raise ValueError("%s")' % eno[12:]]
+            elif eno == "MemoryError":
+                o += ["    if rc == %d:" % v, "        raise MemoryError()"]
+        eno = "_%s.get(rc, rc)" % name.upper() if _errnos(e) else "rc"
+        o += ["    _f.raise_errno(%s)" % eno,
               "", ""]
     if face.get("roles"):
         o += _roles.host_rows(face, hdr) + [""]
@@ -822,6 +958,8 @@ def gen_host(m, face):
             args.append(_ctype(ct, structs, kind in ("span", "wbuf", "fixed")))
         ret = "_c.c_int" if r.row.get("err") else _ctype(r.ret, structs)
         o.append('    ("%s", [%s], %s),' % (r.fn, ", ".join(args), ret))
+    if face.get("buf") and any(r.row.get("take") for r in gen):
+        o.append('    ("%s", [_c.c_void_p], None),' % face["buf"]["free"])
     o += [")", "", "", "def _lib():", "    return _f.lib(_SIGS)", "", ""]
     for r in gen:
         o += _py_row(m, face, hdr, r, structs)
