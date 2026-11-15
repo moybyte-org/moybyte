@@ -25,10 +25,10 @@ def kib(v):
     return pp.metric(v, "KiB", pp.HIGHER, [v])
 
 
-def rec(board, commit, date, errors=None, **metrics):
+def rec(board, commit, date, errors=None, start=pp.AFTER_SUITE, **metrics):
     return pp.record(board, metrics, commit, tree="t", date=date, secs=1.0,
                      image={"stamp": commit, "sha256": "sha" + commit[:4]},
-                     errors=errors)
+                     errors=errors, protocol=pp.protocol(start))
 
 
 @pytest.fixture
@@ -158,3 +158,62 @@ def test_the_committed_ledger_is_what_its_records_generate():
     """Skipped where this machine has no records (CI); red when the committed
     file was edited by hand."""
     assert pl.main(["--check"]) == 0
+
+
+# -- one protocol a ledger -------------------------------------------------------
+
+
+def add(records, r):
+    pp.append(r, str(records / ("%s.jsonl" % r["board"])))
+
+
+def test_the_ledger_is_one_protocol_and_names_it(records, tmp_path):
+    # A fresh run after the pass's: the after-suite ledger keeps the pass's.
+    add(records, rec("tdeck", "cccc3333", "2026-11-15T12:00:00", start=pp.FRESH,
+                     **{"Brick Siege fps": fps(70.0)}))
+    _, text = write(records, tmp_path)
+    assert "--protocol after-suite" in text.splitlines()[1]
+    assert "Every number here was taken **after-suite**" in text
+    assert table(text, "Carts", "tdeck")[2][1] == "60.0"
+    out, text = write(records, tmp_path, "--protocol", "fresh")
+    assert "Every number here was taken **fresh**" in text
+    assert table(text, "Carts", "tdeck")[2][1] == "70.0"
+    assert "### p4" not in text                      # p4 has no fresh record
+    assert pl.regen_command(str(out)) == "python3 tools/perf_ledger.py --protocol fresh"
+    assert pl.regen_command(str(out), protocol=pp.AFTER_SUITE) == \
+        "python3 tools/perf_ledger.py"
+    assert pl.main(["--check", "--dir", str(records), "--out", str(out)]) == 0
+
+
+def test_a_baseline_of_another_protocol_is_refused_not_compared(records, tmp_path):
+    add(records, rec("tdeck", "dddd4444", "2026-11-15T10:30:00", start=pp.FRESH,
+                     **{"Brick Siege fps": fps(90.0)}))
+    _, text = write(records, tmp_path, "--baseline", "dddd4444")
+    rows = table(text, "Carts", "tdeck")
+    assert len(rows[0]) == 3                        # no baseline column
+    assert ("no after-suite record at commit `dddd4444` on this board; its "
+            "records there are fresh, not compared") in text
+    latest = pl.records("tdeck", str(records), protocol=pp.AFTER_SUITE)[-1]
+    fresh = pl.records("tdeck", str(records), protocol=pp.FRESH)[-1]
+    with pytest.raises(ValueError):
+        pl.render([("tdeck", latest, fresh)], "2026-11-16", "dddd4444")
+    with pytest.raises(ValueError):
+        pp.compare(latest, fresh)
+
+
+def test_legacy_records_enter_the_ledger_of_their_inferred_protocol(tmp_path):
+    d = tmp_path / "perf"
+    for commit, date, flashed in [
+            ("aaaa1111", "2026-11-15T10:00:00", True),     # the pass's stage
+            ("bbbb2222", "2026-11-15T11:00:00", False),    # perf-baseline's
+            ("cccc3333", "2026-11-15T11:04:00", True)]:    # begun 40 s after
+        r = rec("p4", commit, date, **{"heap sram free": kib(100.0)})
+        del r["protocol"]
+        r["secs"], r["image"]["flashed"] = 200.0, flashed
+        add(d, r)
+    got = [pp.protocol_name(r["protocol"]) for r in pp.history("p4", str(d / "p4.jsonl"))]
+    assert got == ["after-suite, inferred", "fresh, inferred", "unknown, inferred"]
+    _, text = write(d, tmp_path)
+    assert "`aaaa1111`" in text and "`cccc3333`" not in text
+    _, text = write(d, tmp_path, "--protocol", "fresh")
+    assert "`bbbb2222`" in text and "`cccc3333`" not in text

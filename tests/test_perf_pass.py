@@ -19,9 +19,10 @@ def history_dir(tmp_path, monkeypatch):
     return tmp_path / "perf"
 
 
-def rec(commit, **metrics):
+def rec(commit, start=pp.AFTER_SUITE, **metrics):
     return pp.record("tdeck", metrics, commit, tree="t",
-                     date="2026-11-15T10:00:00", secs=1.0)
+                     date="2026-11-15T10:00:00", secs=1.0,
+                     protocol=pp.protocol(start))
 
 
 def fps(v, samples=None):
@@ -73,6 +74,69 @@ def test_the_previous_run_is_the_newest_at_another_commit():
     assert pp.previous([a, b, c], c) is a
     assert pp.previous([a], rec("aaaaaaaa")) is None
     assert pp.previous([], rec("x")) is None
+
+
+# -- the protocol ----------------------------------------------------------------
+
+
+def test_the_previous_run_is_of_the_same_protocol_only():
+    suite, fresh = rec("aaaaaaaa"), rec("bbbbbbbb", start=pp.FRESH)
+    new = rec("cccccccc")
+    assert pp.previous([suite, fresh], new) is suite
+    assert pp.previous([fresh], new) is None
+    assert pp.previous([suite, fresh], rec("cccccccc", start=pp.FRESH)) is fresh
+    # --carts is part of it: a cart measures after the carts before it
+    some = pp.record("tdeck", {}, "dddddddd", protocol=pp.protocol(
+        pp.AFTER_SUITE, ["Hop Quest"]))
+    assert pp.previous([suite, fresh], some) is None
+    assert pp.protocol_name(some["protocol"]) == "after-suite (carts: Hop Quest)"
+
+
+def test_with_no_run_of_its_protocol_the_block_says_so_and_flags_nothing():
+    new = rec("bbbbbbbb", **{"heap sram free": pp.metric(100, "KiB", pp.HIGHER)})
+    old = rec("aaaaaaaa", start=pp.FRESH,
+              **{"heap sram free": pp.metric(250, "KiB", pp.HIGHER)})
+    out = pp.block(new, pp.previous([old], new)).splitlines()
+    assert "after-suite" in out[0]
+    assert "no earlier after-suite run at another commit" in out[0]
+    assert "nothing flagged" in out[0] and "WORSE" not in "\n".join(out)
+    with pytest.raises(ValueError):
+        pp.block(new, old)
+
+
+def _legacy(commit, date, secs, flashed=None):
+    r = rec(commit)
+    del r["protocol"]
+    r["date"], r["secs"] = date, secs
+    if flashed is not None:
+        r["image"] = {"stamp": commit, "flashed": flashed}
+    return r
+
+
+def test_a_legacy_record_has_its_protocol_inferred_on_reading():
+    for r in [_legacy("a1", "2026-11-15T10:00:00", 200.0, True),    # the pass's stage
+              _legacy("b2", "2026-11-15T10:30:00", 200.0, False),   # perf-baseline's
+              _legacy("c3", "2026-11-15T10:34:00", 200.0, True),    # begun 40 s after b2
+              _legacy("d4", "2026-11-15T11:30:00", 200.0)]:         # says nothing
+        pp.append(r)
+    pp.append(rec("e5"))
+    got = pp.history("tdeck")
+    assert [pp.protocol_name(r["protocol"]) for r in got] == [
+        "after-suite, inferred", "fresh, inferred", "unknown, inferred",
+        "unknown, inferred", "after-suite"]
+    assert all(r["protocol"]["inferred"] for r in got[:4])
+    # an inferred protocol compares like a recorded one; an unknown never does
+    assert pp.previous(got, got[4])["commit"] == "a1"
+    assert pp.previous(got, got[2]) is None
+    out = pp.block(got[2], None).splitlines()[0]
+    assert "its protocol is unknown: compared with nothing" in out
+
+
+def test_perf_baseline_records_fresh_unless_told():
+    a = pp.parser().parse_args(["tdeck", "--image", "x"])
+    assert a.protocol == pp.FRESH
+    a = pp.parser().parse_args(["tdeck", "--image", "x", "--protocol", "after-suite"])
+    assert a.protocol == pp.AFTER_SUITE
 
 
 # -- the band and the comparison -----------------------------------------------

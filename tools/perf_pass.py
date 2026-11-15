@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # Map (grep -n a name to jump there):
 #   -- the record           metric, record, history_path, append, history, previous
+#   -- the protocol         protocol, protocol_key, same_protocol, protocol_name, infer_protocol
 #   -- the comparison       band, compare, block
 #   -- the measurement      measure (desk idle, heap, window drag, the roster, the compiled cart)
 #   Stage                   one board's stage: its phases, metrics and errors
 #   -- the command line     main (`tools/board.py perf-baseline` and the pass's perf stage)
 """A board pass's perf stage: one board's fixed measurement, recorded every
-run and set beside the run before it.
+run and set beside the run before it under the same protocol.
 
-    tools/board.py perf-baseline tdeck         measure the board as it is,
-                                               record it, print the block
-    python3 tools/perf_pass.py tdeck --port P --out FILE --image STAMP
-                                               what `tools/board.py pass`
+    tools/board.py perf-baseline tdeck --image COMMIT
+                                               measure the board as it is
+                                               (`fresh`: just booted), record
+                                               it, print the block
+    python3 tools/perf_pass.py tdeck --port P --out FILE --image STAMP \
+        --flashed --protocol after-suite       what `tools/board.py pass`
                                                runs after a board's suite
 
 WHAT IT MEASURES, with the meters the `perf` skill names and nothing new:
@@ -50,14 +53,30 @@ they were, the window it opened closed, the cart it pushed gone.
 THE RECORD. One JSON object a run (`record`): the board, the date, the commit
 the image was built from, the image (its stamp, sha256 and whether this pass
 flashed it), the tree that measured, how long the stage took, the conditions
-(WiFi holders) and each metric's value, unit, sample count and samples. It is
+(WiFi holders), the protocol and each metric's value, unit, sample count and
+samples. It is
 appended to `~/.cache/moybyte-perf/<board>.jsonl` (MOYBYTE_PERF_DIR moves the
 directory), outside the repo because the numbers are this machine's boards',
 and written to `--out`, the pass's log dir.
 
+THE PROTOCOL. How the board got to its measurement, because a board measures
+differently after a suite than after a boot (internal SRAM, and the carts
+behind a cart run earlier in the same boot, #249): `fresh` is `perf-baseline`'s,
+the board booted and nothing run since (`tools/board.py BOARD reboot` first;
+the tool takes the board as it finds it), `after-suite` the board pass's stage,
+after its 15-20-minute on-glass suite. `--carts` is part of it too: a cart
+measures after the carts before it. A record written before records carried a
+protocol has it inferred on reading (`infer_protocol`) and marked so: the pass
+records only an image it flashed, so a record of an image the run did not
+flash is perf-baseline's (`fresh`), one it flashed is the pass's
+(`after-suite`) unless it began within PASS_GAP of the board's record before
+it, too soon for a flash, a boot and a suite, and is then `unknown`. An
+unknown protocol is compared with nothing.
+
 THE COMPARISON. Each metric beside the newest earlier record at a DIFFERENT
-commit (a rerun of the same image compares with what came before it), with its
-change in %. A change is flagged past the metric's noise band: the larger of
+commit under the SAME protocol (a rerun of the same image compares with what
+came before it; with no such record the block says so and flags nothing), with
+its change in %. A change is flagged past the metric's noise band: the larger of
 the unit's default (DEFAULT_BAND) and three times the samples' relative median
 absolute deviation in either run, and only when it also moves by more than the
 unit's absolute floor (MIN_MOVE), so a 3 ms frame cannot flag on a 10%
@@ -118,6 +137,14 @@ MAD_K = 3.0
 HIGHER = "higher"
 LOWER = "lower"
 
+FRESH = "fresh"
+AFTER_SUITE = "after-suite"
+UNKNOWN = "unknown"
+STARTS = (FRESH, AFTER_SUITE)
+# Seconds a board pass needs at the least between one perf stage and its next
+# on the same board: a flash, a boot and a suite.
+PASS_GAP = 120.0
+
 
 # -- the record ----------------------------------------------------------------
 
@@ -157,7 +184,7 @@ def image_facts(path):
 
 
 def record(board, metrics, commit, image=None, secs=None, conditions=None,
-           errors=None, date=None, tree=None):
+           errors=None, date=None, tree=None, protocol=None):
     return {
         "format": FORMAT,
         "board": board,
@@ -167,6 +194,7 @@ def record(board, metrics, commit, image=None, secs=None, conditions=None,
         "tree": tree or git_head(),
         "secs": None if secs is None else round(secs, 1),
         "conditions": conditions or {},
+        "protocol": protocol,
         "metrics": metrics,
         "errors": errors or {},
     }
@@ -190,8 +218,9 @@ def append(rec, path=None):
 
 
 def history(board, path=None):
-    """Every record of `board`, oldest first; a line that does not parse is
-    skipped."""
+    """Every record of `board`, oldest first, each with its protocol (a record
+    written before records carried one has it inferred); a line that does not
+    parse is skipped."""
     path = path or history_path(board)
     out = []
     try:
@@ -202,6 +231,9 @@ def history(board, path=None):
                 except ValueError:
                     continue
                 if isinstance(rec, dict) and rec.get("format") == FORMAT:
+                    if not isinstance(rec.get("protocol"), dict):
+                        rec["protocol"] = infer_protocol(
+                            rec, out[-1] if out else None)
                     out.append(rec)
     except OSError:
         pass
@@ -209,13 +241,82 @@ def history(board, path=None):
 
 
 def previous(records, rec):
-    """The newest record before `rec` taken at a different commit, or None."""
+    """The newest record before `rec` taken at a different commit under the
+    same protocol, or None (always None when `rec`'s protocol is unknown)."""
     for r in reversed(records):
         if r is rec or r == rec:
             continue
-        if r.get("commit") != rec.get("commit"):
+        if r.get("commit") != rec.get("commit") and same_protocol(r, rec):
             return r
     return None
+
+
+# -- the protocol --------------------------------------------------------------
+
+
+def protocol(start, carts=None):
+    """How the board got to its measurement: `start` FRESH or AFTER_SUITE,
+    `carts` the titles run in place of the #66 roster, in their order (None:
+    the roster)."""
+    return {"start": start, "carts": None if carts is None else list(carts)}
+
+
+def protocol_key(p):
+    """What two records must share to be compared, or None (unknown)."""
+    p = p if isinstance(p, dict) else {}
+    if p.get("start") not in STARTS:
+        return None
+    carts = p.get("carts")
+    return p["start"], None if carts is None else tuple(carts)
+
+
+def same_protocol(a, b):
+    k = protocol_key((a or {}).get("protocol"))
+    return k is not None and k == protocol_key((b or {}).get("protocol"))
+
+
+def protocol_name(p):
+    p = p if isinstance(p, dict) else {}
+    name = p.get("start") if p.get("start") in STARTS else UNKNOWN
+    if p.get("carts") is not None:
+        name += " (carts: %s)" % ", ".join(p["carts"])
+    if p.get("inferred"):
+        name += ", inferred"
+    return name
+
+
+def _start(rec):
+    """The record's start as a datetime (its date is when it was written,
+    `secs` after the stage began), or None."""
+    try:
+        end = datetime.datetime.fromisoformat(rec["date"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return end - datetime.timedelta(seconds=rec.get("secs") or 0)
+
+
+def infer_protocol(rec, before=None):
+    """The protocol of a record written before records named one, from the
+    record and the board's record `before` it."""
+    flashed = (rec.get("image") or {}).get("flashed")
+    start = UNKNOWN
+    if flashed is False:
+        start, why = FRESH, "an image the run did not flash: perf-baseline's"
+    elif flashed is True:
+        began = _start(rec)
+        try:
+            prev_end = datetime.datetime.fromisoformat((before or {})["date"])
+        except (KeyError, TypeError, ValueError):
+            prev_end = None
+        if began is not None and prev_end is not None and \
+                (began - prev_end).total_seconds() < PASS_GAP:
+            why = ("an image it flashed, begun too soon after the board's "
+                   "record before it for a suite between them")
+        else:
+            start, why = AFTER_SUITE, "an image it flashed: the board pass's stage"
+    else:
+        why = "the record does not say whether the run flashed its image"
+    return dict(protocol(start), inferred=why)
 
 
 # -- the comparison ------------------------------------------------------------
@@ -247,6 +348,10 @@ def compare(rec, prev):
     """[(name, metric, previous value, change %, band %, flag)] in the
     record's order. `flag` is "WORSE", "better" or "" -- a move past the band
     and the unit's absolute floor, read by the metric's direction."""
+    if prev is not None and not same_protocol(rec, prev):
+        raise ValueError("not compared: %s's record is %s, %s's %s" % (
+            rec.get("commit", "?"), protocol_name(rec.get("protocol")),
+            prev.get("commit", "?"), protocol_name(prev.get("protocol"))))
     rows = []
     old = (prev or {}).get("metrics", {})
     for name, m in rec["metrics"].items():
@@ -276,11 +381,16 @@ def _num(v, unit):
 
 def block(rec, prev):
     """The perf block a pass prints under its table for one board."""
-    head = "%s perf  (%s, image %s, %s)" % (
+    name = protocol_name(rec.get("protocol"))
+    head = "%s perf  (%s, image %s, %s, %s)" % (
         rec["board"], rec.get("date", "?"), rec.get("commit", "?"),
-        "stage %ss" % ("%.0f" % rec["secs"] if rec.get("secs") is not None else "?"))
-    if prev is None:
-        head += "  -- no earlier run at another commit: this is the baseline"
+        "stage %ss" % ("%.0f" % rec["secs"] if rec.get("secs") is not None else "?"),
+        name)
+    if prev is None and protocol_key(rec.get("protocol")) is None:
+        head += "  -- its protocol is unknown: compared with nothing"
+    elif prev is None:
+        head += ("  -- no earlier %s run at another commit: this is the "
+                 "baseline, nothing flagged" % name)
     else:
         head += "  vs %s (%s)" % (prev.get("commit", "?"), prev.get("date", "?"))
     rows = [("metric", "unit", "value", "n", "prev", "change", "band", "")]
@@ -681,6 +791,10 @@ def parser():
                     help="this pass flashed the image in dist/")
     ap.add_argument("--carts", help="comma-separated titles in place of the "
                                     "#66 roster")
+    ap.add_argument("--protocol", choices=STARTS, default=FRESH,
+                    help="how the board got here: fresh (booted, nothing run "
+                         "since: the default) or after-suite (the board "
+                         "pass's stage)")
     ap.add_argument("--no-compiled", action="store_true",
                     help="skip the compiled cart")
     ap.add_argument("--no-history", action="store_true",
@@ -734,7 +848,8 @@ def main(argv=None):
                         "flashed": bool(a.flashed)},
                  secs=time.monotonic() - t0,
                  conditions=dict(stage.conditions, phases=stage.phases),
-                 errors=stage.errors)
+                 errors=stage.errors,
+                 protocol=protocol(a.protocol, roster if a.carts else None))
     if a.out:
         os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
         with open(a.out, "w") as f:

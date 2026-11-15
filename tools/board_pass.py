@@ -29,8 +29,10 @@ THE PERF STAGE runs after each board's suite unless `--no-perf` says not to
 (tools/perf_pass.py: the desk idle, the heap, a window drag on a windowed
 tier, the #66 roster's fps and frame ms, a compiled cart). Its record goes to
 `<board>.perf.json` in the log directory and to the machine's history
-(`~/.cache/moybyte-perf/<board>.jsonl`), and its block sets each metric beside
-the board's last run at another commit, a move past its noise band marked.
+(`~/.cache/moybyte-perf/<board>.jsonl`) under the `after-suite` protocol, and
+its block sets each metric beside the board's last after-suite run at another
+commit, a move past its noise band marked (never beside a `perf-baseline`
+run, which measures a freshly booted board).
 It is a report: the pass's exit code stays its suites'. The pass then prints
 the command that writes the committed ledger (`docs/perf/ledger.md`,
 tools/perf_ledger.py) from these records; it never writes it itself. The boards take the
@@ -427,7 +429,7 @@ def perf_stage(row, a, ctx, path):
     if os.path.exists(out):
         os.remove(out)
     cmd = [sys.executable, PERF_PY, name, "--port", ctx["ports"][name],
-           "--out", out]
+           "--out", out, "--protocol", perf_pass.AFTER_SUITE]
     if not a.no_flash and row.image not in ("-", "?"):
         # dist/ names the board's image only when this pass flashed it; under
         # --no-flash the stage refuses to guess, and the row has no record
@@ -447,7 +449,8 @@ def perf_stage(row, a, ctx, path):
 
 
 def perf_blocks(rows):
-    """Each board's perf block, beside its last run at another commit."""
+    """Each board's perf block, beside its last run at another commit under
+    the same protocol."""
     out = []
     for r in rows:
         if r.perf is not None:
@@ -598,7 +601,8 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
         print(blocks)
     if any(r.perf is not None for r in ordered):
         print("perf ledger: `%s` writes docs/perf/ledger.md from these "
-              "records; commit it when you choose" % perf_ledger.regen_command())
+              "records; commit it when you choose"
+              % perf_ledger.regen_command(protocol=perf_pass.AFTER_SUITE))
     print("board pass: wall %s%s" % (
         timings.dur(wall),
         "" if web is None else ", browser console build %s" % timings.dur(web)))

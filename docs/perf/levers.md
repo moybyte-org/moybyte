@@ -5,7 +5,8 @@ reasoned in, the levers that shipped, the ones that were measured and reverted,
 and the ones still open. Decisions only. The numbers are elsewhere:
 
 - `docs/perf/ledger.md` — each board's per-cart fps and frame ms and its desk,
-  generated from the board pass's perf records (`tools/perf_ledger.py`).
+  generated from the perf records of one protocol, which it names
+  (`tools/perf_ledger.py`).
 - Issue comments — the story behind a number: a bisect, an A/B, a deep dive.
   #66 for the carts (its moved body sections are indexed in its body), #58 for
   the P4 desk, #158 for the compiled tier, #67 for the Lua tier.
