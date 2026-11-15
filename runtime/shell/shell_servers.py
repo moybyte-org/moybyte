@@ -7,6 +7,9 @@
 #   WallpaperServer  the desktop backdrop
 #   InstallServer    carts from outside: the radio lease, the store, the engine
 #   ShellInstall     that server as the shell drives it: pkg, the home's Delete
+#   WifiServer       the Wi-Fi station and the radio lease (Settings' panel)
+#   BtServer         the Bluetooth keyboard service (Settings' picker)
+#   UsbServer        the USB drive that lends the card to a computer
 #   ConsoleCalls     the moybyte role: console calls run as the calling process
 #   RoleDoor         the ROLE upcall's Python half: a compiled app's call
 #   serve_all        register every server on the console's app ABI
@@ -650,6 +653,77 @@ class ShellInstall:
         return lambda *a: fn(None, *a)
 
 
+# -- Settings' radios and the card lent over USB ---------------------------------
+
+class WifiServer:
+    """The Wi-Fi station and the radio lease: Settings' Wi-Fi panel scans,
+    joins and forgets through the station (`ws.wifi`, the service each head
+    injects, or None), and holds the radio while it shows, under the grant's
+    app id (`ConsoleSpine.wifi_hold`)."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def hold(self, g):
+        ws = self.__ws
+        return ws.spine.wifi_hold(ws.app_abi.grant_id(g))
+
+    def release(self, g):
+        ws = self.__ws
+        ws.spine.wifi_release(ws.app_abi.grant_id(g))
+
+    def station(self, g):
+        return self.__ws.wifi
+
+
+class BtServer:
+    """The Bluetooth keyboard service a picker drives, or None. Two shapes,
+    because the boards differ: on the touch-only boards (P4, Guition) a paired
+    keyboard is the only one, so it is `ws.keyboard` and the capability rides
+    the keyboard itself; the T-Deck has its own keyboard over I2C and the
+    Bluetooth one hangs off `ws.ble_keyboard`, both writing into the same
+    InputState. `settings_capable` is what picks."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def keyboard(self, g):
+        ws = self.__ws
+        for svc in (getattr(ws, "ble_keyboard", None), getattr(ws, "keyboard", None)):
+            if getattr(svc, "settings_capable", False):
+                return svc
+        return None
+
+
+class UsbServer:
+    """The USB drive (runtime/system/usb_drive.py), or None on a board with
+    none: the card lent to a computer, the store closed while it is. Each
+    verb answers None on a console with no drive."""
+
+    def __init__(self, ws):
+        self.__ws = ws
+
+    def drive(self, g):
+        return self.__ws.usb_drive
+
+    def turn_on(self, g):
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.turn_on(ws)
+
+    def turn_off(self, g):
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.turn_off(ws)
+
+    def poll(self, g):
+        """The drive's state, a computer's take or release of the card
+        applied (`UsbDrive.poll`)."""
+        ws = self.__ws
+        d = ws.usb_drive
+        return None if d is None else d.poll(ws)
+
+
 # -- the console calls --------------------------------------------------------
 
 class ConsoleCalls:
@@ -945,6 +1019,7 @@ def serve_all(ws):
         "carts": CartsServer(ws), "nav": NavServer(ws),
         "notify": NotifyRole(ws), "wallpaper": WallpaperServer(ws),
         "install": InstallServer(ws),
+        "wifi": WifiServer(ws), "bt": BtServer(ws), "usb": UsbServer(ws),
     }
     for role, server in servers.items():
         app.serve(role, server)

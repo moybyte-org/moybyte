@@ -97,7 +97,7 @@ def _tap_bar(ws, rect):
 # The roles no permission maps to: a cart never has them, whatever its
 # manifest says.
 NEVER_GRANTED = ("carts", "install", "wallpaper", "artwork", "damage",
-                 "surface", "notify")
+                 "surface", "notify", "wifi", "bt", "usb")
 
 
 def test_every_role_is_either_grantable_or_named_ungrantable():

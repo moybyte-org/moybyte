@@ -286,6 +286,9 @@ class SettingsLayer(Layer):
     secret door (#21)."""
 
     B_BACK = True
+    # Its radios and the card lent over USB, through its context's roles: the
+    # Wi-Fi station and lease, the Bluetooth keyboard, the USB drive.
+    NEEDS = ("wifi", "bt", "usb")
 
     id = "settings"
     domain = "system"
@@ -298,7 +301,7 @@ class SettingsLayer(Layer):
     _SETTINGS_ROWS = (
         # WIFI (#38, spec shell_ux_v1.md §10: wifi setup lives in Settings): a
         # row that opens the wifi PANEL -- scan/pick/password/connect over the
-        # injected ws.wifi service. Settings is a system APP (not a cart), so
+        # Wi-Fi station its wifi role hands it. Settings is a system APP (not a cart), so
         # this works while a game keeps running in the one cart slot.
         ("wifi", "WIFI", "wifi-net"),
         # APPEARANCE: wallpaper + panel theme are the Appearance app's (the
@@ -320,6 +323,11 @@ class SettingsLayer(Layer):
 
     def __init__(self, ws, host):
         self.ws = ws
+        ctx = ws.app_context("settings", self.NEEDS)
+        self.ctx = ctx
+        self._wifi = ctx.wifi
+        self._bt = ctx.bt
+        self._usb = ctx.usb
         self._host = host()           # the rows page's UI context (an AppHost)
         self._sub = host()            # a panel's, fresh each time one opens
         self._view = None             # the page drawn last
@@ -332,7 +340,7 @@ class SettingsLayer(Layer):
         self._about = ()              # About's facts, read at each visit
         self._footer = None           # the note under the group being drawn
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
-        # connect/forget over the injected ws.wifi service.
+        # connect/forget over the station its wifi role hands it.
         self.wifi_return = None       # the app the panel goes back to (`_wifi_back`)
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
@@ -493,7 +501,7 @@ class SettingsLayer(Layer):
         let go comes back here (`UsbDrive.poll`)."""
         if not self.showing("usb"):
             return False
-        return self.ws.usb_drive.poll(self.ws) != self._usb_seen
+        return self._usb.poll() != self._usb_seen
 
     def log_moved(self):
         """The System log page is up and a record came since it drew: the
@@ -522,20 +530,9 @@ class SettingsLayer(Layer):
     # -- BLUETOOTH KEYBOARD panel (capability-gated) ------------------------------
 
     def _bt_service(self):
-        """The BLE keyboard service, or None on a board without one.
-
-        TWO SHAPES, because the boards genuinely differ. On the touch-only
-        tiers (P4, Guition) a paired BLE keyboard IS the only keyboard, so it
-        is `ws.keyboard` and the capability rides the keyboard itself. The
-        T-Deck has a physical C3 keyboard over I2C AND can pair a BLE one, so
-        `ws.keyboard` stays the local keyboard and the BLE service hangs off
-        `ws.ble_keyboard`; both drivers write into the SAME InputState.
-        `settings_capable` is what gates."""
-        for svc in (getattr(self.ws, "ble_keyboard", None),
-                    getattr(self.ws, "keyboard", None)):
-            if getattr(svc, "settings_capable", False):
-                return svc
-        return None
+        """The Bluetooth keyboard service, or None on a board without one
+        (the bt role's server picks between the boards' two shapes)."""
+        return self._bt.keyboard()
 
     def _bt_open(self, _pid=None):
         """The Bluetooth keyboard picker's opening, STARTING the service if it is idle.
@@ -683,7 +680,7 @@ class SettingsLayer(Layer):
         popover): a fresh password field, the radio lease, a rescan."""
         self.wifi_pick = None
         self.wifi_pw = ""
-        self.ws.spine.wifi_hold("settings")  # the radio lease: wifi_leave lets go
+        self._wifi.hold()                 # the radio lease: wifi_leave lets go
         self._wifi_rescan()
 
     def wifi_leave(self):
@@ -697,7 +694,7 @@ class SettingsLayer(Layer):
             self.wifi_scanning = False
             self.wifi_joining = None
             self._wifi_unwatch()
-            ws.spine.wifi_release("settings")
+            self._wifi.release()
 
     def _wifi_back(self, popover=False):
         """BACK out of the panel: to the Settings rows, or out of the popover
@@ -712,8 +709,7 @@ class SettingsLayer(Layer):
             self._drop("wifi")
 
     def _wifi_rescan(self):
-        ws = self.ws
-        if ws.wifi is None:
+        if self._wifi.station() is None:
             self.wifi_nets = []
             self.wifi_known = []
             self.wifi_msg = "No Wi-Fi service."
@@ -728,7 +724,7 @@ class SettingsLayer(Layer):
         """The scan asked once more: its networks once it ended, nothing
         while it runs. A service with no polled scan answers at once."""
         ws = self.ws
-        w = ws.wifi
+        w = self._wifi.station()
         try:
             poll = getattr(w, "scan_poll", None)
             nets = poll() if poll is not None else w.scan()
@@ -777,7 +773,7 @@ class SettingsLayer(Layer):
         if self.wifi_scanning:
             self._wifi_scan_poll()
         if self.wifi_joining is not None:
-            w = self.ws.wifi
+            w = self._wifi.station()
             ok = None
             try:
                 ok = w.joined() if w is not None else False
@@ -822,7 +818,7 @@ class SettingsLayer(Layer):
         the join's to give (`_wifi_settle`), now or when the poll sees it."""
         ws = self.ws
         self.wifi_pick = None
-        w = ws.wifi
+        w = self._wifi.station()
         try:
             join = getattr(w, "join", None) if w is not None else None
             ok = (join(ssid, pw) if join is not None else w.connect(ssid, pw)) \
@@ -849,9 +845,10 @@ class SettingsLayer(Layer):
         self.wifi_msg = ("Connected to " + str(ssid))[:34] if ok \
             else ("That password didn't work." if pw
                   else "Couldn't connect.")
-        if ws.wifi is not None:
+        w = self._wifi.station()
+        if w is not None:
             try:
-                self.wifi_known = list(ws.wifi.known())
+                self.wifi_known = list(w.known())
             except Exception:  # noqa: BLE001
                 pass
         if not ok and locked and not pw:
@@ -861,12 +858,13 @@ class SettingsLayer(Layer):
 
     def _wifi_forget(self):
         ws = self.ws
-        if not self.wifi_nets or ws.wifi is None:
+        w = self._wifi.station()
+        if not self.wifi_nets or w is None:
             return
         ssid = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0]
         try:
-            ws.wifi.forget(ssid)
-            self.wifi_known = list(ws.wifi.known())
+            w.forget(ssid)
+            self.wifi_known = list(w.known())
             self.wifi_msg = ("Forgot " + str(ssid))[:34]
         except Exception as exc:  # noqa: BLE001
             self.wifi_msg = ("Forget failed: " + str(exc))[:34]
@@ -902,9 +900,10 @@ class SettingsLayer(Layer):
         popover's card is shorter than its rows, and the networks scroll."""
         ws = self.ws
         connected, ssid, ip = (False, None, None)
-        if ws.wifi is not None:
+        w = self._wifi.station()
+        if w is not None:
             try:
-                connected, ssid, ip = ws.wifi.status()
+                connected, ssid, ip = w.status()
             except Exception:  # noqa: BLE001
                 pass
         if popover:
@@ -1125,18 +1124,18 @@ class SettingsLayer(Layer):
     # -- the USB drive page (runtime/system/usb_drive.py) ----------------------
 
     def _usb_on(self):
-        d = getattr(self.ws, "usb_drive", None)
+        d = self._usb.drive()
         return d is not None and d.on
 
     def _usb_open(self, _pid=None):
-        self.ws.usb_drive.why = None
+        self._usb.drive().why = None
 
     def _usb_page(self):
         """Off: what the drive does and its one button, Turn on (and why it
         did not, where it did not). On: where the card is, how to give it
         back, and Turn off, the page's only way out."""
         ws = self.ws
-        d = ws.usb_drive
+        d = self._usb.drive()
         st = d.state()
         self._usb_seen = st
         _x, _y, w, _h = _ui.page("")
@@ -1155,7 +1154,7 @@ class SettingsLayer(Layer):
                 for line in _wrap(_USB_SERIAL_BACK, n):
                     _ui.label(line)
             if _ui.button("Turn off", "danger"):
-                d.turn_off(ws)
+                self._usb.turn_off()
         else:
             if d.dev_channel:
                 for line in _wrap(_USB_SERIAL_OFF, n):
@@ -1163,7 +1162,7 @@ class SettingsLayer(Layer):
             if d.why is not None:
                 _ui.label(d.why)
             if _ui.button("Turn on"):
-                d.turn_on(ws)
+                self._usb.turn_on()
         _ui.group()
 
     # -- the lent left zone (#46 zoned bar) -------------------------------------
@@ -1236,7 +1235,7 @@ class SettingsLayer(Layer):
         onl = ws.online_update_available()
         web = getattr(ws, "webhost", None) is not None
         c6u = getattr(ws, "c6_updater", None) is not None
-        usb = getattr(ws, "usb_drive", None) is not None
+        usb = self._usb.drive() is not None
         idle = getattr(ws, "idle_ladder", None)
         tog = self._toggle_rows()
         lgen = ws.look.layout_gen
@@ -1519,9 +1518,10 @@ class SettingsLayer(Layer):
         ws = self.ws
         if kind == "wifi-net":
             ssid = None
-            if ws.wifi is not None:
+            w = self._wifi.station()
+            if w is not None:
                 try:
-                    connected, ssid, _ip = ws.wifi.status()
+                    connected, ssid, _ip = w.status()
                     ssid = ssid if connected else None
                 except Exception:  # noqa: BLE001
                     ssid = None

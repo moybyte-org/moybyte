@@ -2312,6 +2312,12 @@ def roles_trace(ws):
     say("clip put", cl.put_text("hello"), cl.put_text("x" * 4097))
     say("clip", cl.text(), cl.kind(), cl.seq() - s0)
 
+    # -- Settings' radios and the USB drive
+    u = ctx.usb
+    say("radios", ctx.wifi.station() is getattr(ws, "wifi", None),
+        ctx.bt.keyboard() is None, u.drive() is None,
+        u.turn_on(), u.turn_off(), u.poll())
+
     # -- install
     i = ctx.install
     say("install", i.root() == ws.carts_root, i.writable(), i.can_pick(),
@@ -2462,7 +2468,7 @@ def _roles_trace_board(exe, tmp_path, driver=None):
 
 
 ROLES_TRACE = """\
-roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
+roles artwork bt carts clipboard damage files install nav notify prefs surface theme usb wallpaper wifi
 damage 1 2 0
 surface True True 1 1 False True True
 pointer True True
@@ -2522,6 +2528,7 @@ copies attach 'Trace Cart' True ['wall','game']
 clip empty ''
 clip put True False
 clip hello text 1
+radios True True True None None None
 install True True False None True True True
 lease True None
 op 7

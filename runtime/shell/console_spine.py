@@ -522,8 +522,9 @@ class Spine:
         interface it activates.
         Idempotent per tag and holder. The console's own holders: "web" (wasm
         mode, released when its socket actually closes), "update" (the online
-        update screen), "settings" (the WIFI panel), "link" (a match), "carts"
-        (the Get Carts app while it fetches), "ssh" (the SSH server while it
+        update screen), "settings" (the WIFI panel, through its wifi role),
+        "link" (a match), "carts" (the Get Carts app while it fetches), "ssh"
+        (the SSH server while it
         serves, ssh_service.py). A process's, held with its `pid`
         (`PROC_TAGS`): "cart" (a run with the "network" permission), "http"
         (its `moybyte.http` requests while one runs, dev_http.py, or a

@@ -13,7 +13,8 @@ roles are the C rows every image runs.
 
 `binding()` returns a module-like object with modmoy_app.c's names -- App,
 kernel, Damage, Surface, Theme, Prefs, Artwork, Clipboard, the roles served
-in Python (Files, Carts, Nav, Notify, Wallpaper, Install), policy, manifest_error,
+in Python (Files, Carts, Nav, Notify, Wallpaper, Install, Wifi, Bt, Usb), policy,
+manifest_error,
 id_for, roles, rows, perms, kinds, tokens and the constants -- or None where
 there is no C compiler. Each
 call into C is moy_app.h's ABI and nothing more; what a binding adds is the
@@ -1069,8 +1070,8 @@ def binding(sanitize=False):
         verbs = [r["verb"] for r in _TABLE if r["role"] == role and r["server"] != "c"]
         return type(role.capitalize(), (_Role,), {v: row(v) for v in verbs})
 
-    Carts, Nav, Notify, Install = (
-        _served_role(r) for r in ("carts", "nav", "notify", "install"))
+    Carts, Nav, Notify, Install, Wifi, Bt, Usb = (
+        _served_role(r) for r in ("carts", "nav", "notify", "install", "wifi", "bt", "usb"))
 
     class Wallpaper(_served_role("wallpaper")):
         """The wallpaper's rows served in Python, and its copy's, in C."""
@@ -1158,6 +1159,7 @@ def binding(sanitize=False):
         App=App, kernel=kernel, Damage=Damage, Surface=Surface, Theme=Theme,
         Prefs=Prefs, Clipboard=Clipboard, Artwork=Artwork, Files=Files,
         Carts=Carts, Nav=Nav, Notify=Notify, Wallpaper=Wallpaper, Install=Install,
+        Wifi=Wifi, Bt=Bt, Usb=Usb,
         policy=policy, manifest_error=manifest_error, id_for=id_for,
         roles=lambda: role_names, rows=lambda: row_names, perms=perms,
         table=lambda: table_names, door_bind=door_bind, wasm_rows=wasm_rows,

@@ -201,7 +201,7 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
         "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
@@ -243,7 +243,7 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
         "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
@@ -283,7 +283,7 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
         "with_sd": "no SD in play (stage 4 open) -- the store is internal "
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",
@@ -902,8 +902,8 @@ class _Handles:
 
     Follows the shapes the wiring actually uses -- `x = ws.svc`,
     `getattr(ws, "svc", None)`, `for x in (<handles>)` and `x = helper()` where
-    helper returns one -- to a fixed point, so the service settings_layer
-    reaches through `self._bt_service()` resolves like a direct attribute.
+    helper returns one -- to a fixed point, so a service reached through a
+    helper (`self._bt_service()`) resolves like a direct attribute.
     Scopes are deliberately ignored: a name is a name, which can only ever make
     this MORE willing to find a call, and a found call is the thing being
     demanded.
@@ -1217,7 +1217,14 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     assert 'getattr(ws, "ble_keyboard", None)' in spine, (
         "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
         "stage -- a paired keyboard cannot produce a keypress (#26)")
-    assert ("ble_keyboard", "start") in _module_handles(
-        "runtime/system/settings_layer.py").verbs("_bt_open"), (
+    # Settings reaches the service through its bt role, whose server
+    # (runtime/shell/shell_servers.py's BtServer) hands out the keyboard.
+    served = _module_handles("runtime/shell/shell_servers.py").rets.get("keyboard", set())
+    assert "ble_keyboard" in served, "the bt role no longer hands out ws.ble_keyboard"
+    settings = _module_handles("runtime/system/settings_layer.py")
+    settings.rets["keyboard"] = set(served)
+    while settings._pass():
+        pass
+    assert ("ble_keyboard", "start") in settings.verbs("_bt_open"), (
         "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
         "panel opens onto a radio that has never scanned (#26)")

@@ -24,7 +24,8 @@ SLOTS = 32
 ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-          "notify", "wallpaper", "artwork", "clipboard", "install", "ui", "moybyte")
+          "notify", "wallpaper", "artwork", "clipboard", "install", "wifi", "bt", "usb",
+          "ui", "moybyte")
 # The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR).
 _FLOOR = ("moybyte",)
 _ROWS = ("damage.all", "damage.again",
@@ -864,6 +865,9 @@ _SERVED = {
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
                 "writable op rescan free find net keep wifi wifi_open consent"),
+    "wifi": "hold release station",
+    "bt": "keyboard",
+    "usb": "drive turn_on turn_off poll",
 }
 
 
@@ -880,6 +884,9 @@ Carts = _served_role("carts")
 Nav = _served_role("nav")
 Notify = _served_role("notify")
 Install = _served_role("install")
+Wifi = _served_role("wifi")
+Bt = _served_role("bt")
+Usb = _served_role("usb")
 
 
 class Wallpaper(_served_role("wallpaper")):

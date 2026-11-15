@@ -80,7 +80,8 @@ _CLASSES = {"damage": moy_app.Damage, "surface": moy_app.Surface,
             "carts": moy_app.Carts, "nav": moy_app.Nav, "prefs": moy_app.Prefs,
             "notify": moy_app.Notify, "wallpaper": moy_app.Wallpaper,
             "artwork": moy_app.Artwork, "clipboard": moy_app.Clipboard,
-            "install": moy_app.Install}
+            "install": moy_app.Install, "wifi": moy_app.Wifi, "bt": moy_app.Bt,
+            "usb": moy_app.Usb}
 
 
 def test_every_role_has_its_type():
@@ -196,7 +197,8 @@ def test_the_shell_rows_are_the_servers_methods():
     servers = {"theme": ss.ThemeServer,
                "carts": ss.CartsServer,
                "nav": ss.NavServer,
-               "wallpaper": ss.WallpaperServer, "install": ss.InstallServer}
+               "wallpaper": ss.WallpaperServer, "install": ss.InstallServer,
+               "wifi": ss.WifiServer, "bt": ss.BtServer, "usb": ss.UsbServer}
     shell = {}
     for r in _rows():
         if r["server"] == "shell":

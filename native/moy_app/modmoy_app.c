@@ -36,9 +36,9 @@
 //                        (moy_loop_role), or none
 //   Damage(app, g), Surface(app, g), Theme(app, g), Files(app, g),
 //   Prefs(app, g), Artwork(app, g), Clipboard(app, g)    the roles with C rows
-//   Carts, Nav, Notify, Wallpaper, Install (app, g)   the roles served in
-//                        Python, every row the console's but the wallpaper's
-//                        copy
+//   Carts, Nav, Notify, Wallpaper, Install, Wifi, Bt, Usb (app, g)   the
+//                        roles served in Python, every row the console's but
+//                        the wallpaper's copy
 //   tokens()             the token vocabulary, in role-id order
 //   policy(perms), manifest_error(perms), id_for(id, title)   the grant policy
 //
@@ -1910,6 +1910,36 @@ static const mp_rom_map_elem_t install_locals_table[] = {
 };
 SERVED_ROLE(install, Install)
 
+// wifi, bt, usb: Settings' radios and the card lent over USB
+
+SERVED(wifi, WIFI, hold)
+SERVED(wifi, WIFI, release)
+SERVED(wifi, WIFI, station)
+static const mp_rom_map_elem_t wifi_locals_table[] = {
+    ROW(wifi, hold)
+    ROW(wifi, release)
+    ROW(wifi, station)
+};
+SERVED_ROLE(wifi, Wifi)
+
+SERVED(bt, BT, keyboard)
+static const mp_rom_map_elem_t bt_locals_table[] = {
+    ROW(bt, keyboard)
+};
+SERVED_ROLE(bt, Bt)
+
+SERVED(usb, USB, drive)
+SERVED(usb, USB, turn_on)
+SERVED(usb, USB, turn_off)
+SERVED(usb, USB, poll)
+static const mp_rom_map_elem_t usb_locals_table[] = {
+    ROW(usb, drive)
+    ROW(usb, turn_on)
+    ROW(usb, turn_off)
+    ROW(usb, poll)
+};
+SERVED_ROLE(usb, Usb)
+
 // artwork
 
 // current() -> (kind, name) of Paint's open picture, or None while none is named.
@@ -2306,6 +2336,9 @@ static const mp_rom_map_elem_t moy_app_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_Notify), MP_ROM_PTR(&notify_type) },
     { MP_ROM_QSTR(MP_QSTR_Wallpaper), MP_ROM_PTR(&wallpaper_type) },
     { MP_ROM_QSTR(MP_QSTR_Install), MP_ROM_PTR(&install_type) },
+    { MP_ROM_QSTR(MP_QSTR_Wifi), MP_ROM_PTR(&wifi_type) },
+    { MP_ROM_QSTR(MP_QSTR_Bt), MP_ROM_PTR(&bt_type) },
+    { MP_ROM_QSTR(MP_QSTR_Usb), MP_ROM_PTR(&usb_type) },
     { MP_ROM_QSTR(MP_QSTR_policy), MP_ROM_PTR(&mod_policy_obj) },
     { MP_ROM_QSTR(MP_QSTR_manifest_error), MP_ROM_PTR(&mod_manifest_error_obj) },
     { MP_ROM_QSTR(MP_QSTR_id_for), MP_ROM_PTR(&mod_id_for_obj) },
