@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import host_native
 import native_build
+from moy_sh_face import moy_sh_face_frame_t as _Frame
 
 SH = os.path.join(native_build.ROOT, "native", "moy_sh")
 _DASH = os.path.join(SH, "dash")
@@ -397,12 +398,6 @@ class Job:
 
     def interrupt(self):
         _lib().moy_sh_job_interrupt(self._job())
-
-
-class _Frame(ctypes.Structure):
-    _fields_ = [("cx", ctypes.c_int32), ("cy", ctypes.c_int32), ("cw", ctypes.c_int32),
-                ("ch", ctypes.c_int32), ("fs", ctypes.c_int32), ("desk", ctypes.c_int32),
-                ("bar", ctypes.c_char_p), ("bar_n", ctypes.c_uint32)]
 
 
 def face_row(desk):

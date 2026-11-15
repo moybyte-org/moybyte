@@ -1301,9 +1301,9 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     p = Pointer(320, 240, idle_ms=100)
     p.move(1, 0)
     assert p.visible
-    p.tick(p._last_move + 99)
+    p.tick(p.last_move + 99)
     assert p.visible
-    p.tick(p._last_move + 100)
+    p.tick(p.last_move + 100)
     assert not p.visible
     p.move(1, 0)
     assert p.visible

@@ -32,7 +32,7 @@ PIN_MAX = 64
 SHELL = 1
 
 
-class _moy_lease_offer_t(_c.Structure):
+class moy_lease_offer_t(_c.Structure):
     _fields_ = [
         ("name", _c.c_char * 8),
         ("cls", _c.c_uint8),
@@ -43,7 +43,7 @@ class _moy_lease_offer_t(_c.Structure):
     ]
 
 
-class _moy_lease_row_t(_c.Structure):
+class moy_lease_row_t(_c.Structure):
     _fields_ = [
         ("pins", _c.c_uint64),
         ("owner", _c.c_uint32),

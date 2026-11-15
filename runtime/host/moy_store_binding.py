@@ -22,10 +22,7 @@ import ctypes as c
 import errno
 import os
 import types
-
-
-class _Buf(c.Structure):
-    _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
+from moy_store_face import moy_buf_t as _Buf
 
 
 _NONE = -1

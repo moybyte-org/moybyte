@@ -4,8 +4,6 @@ The module `moy_net` is runtime/host/net_binding.py."""
 
 import ctypes as _c
 
-import face_ctypes as _f
-
 __all__ = (
     "PW_ITER",
 )
@@ -13,9 +11,109 @@ __all__ = (
 PW_ITER = 32768
 
 
-_SIGS = (
-)
+class moy_http_req_t(_c.Structure):
+    _fields_ = [
+        ("method", _c.c_void_p),
+        ("method_n", _c.c_size_t),
+        ("target", _c.c_void_p),
+        ("target_n", _c.c_size_t),
+        ("clen", _c.c_uint32),
+        ("head_end", _c.c_size_t),
+    ]
 
 
-def _lib():
-    return _f.lib(_SIGS)
+class moy_sync_batch_t(_c.Structure):
+    _fields_ = [
+        ("root", _c.c_int),
+        ("ops", _c.c_void_p),
+        ("ops_end", _c.c_void_p),
+    ]
+
+
+class moy_sync_store_t(_c.Structure):
+    _fields_ = [
+        ("carts", _c.c_char_p),
+        ("files", _c.c_char_p),
+        ("kinds", _c.c_char_p),
+        ("journal", _c.c_int),
+        ("ts", _c.c_int64),
+        ("shelf", _c.c_void_p),
+        ("shelf_cap", _c.c_size_t),
+        ("apps", _c.c_char_p),
+    ]
+
+
+class moy_sync_result_t_err_MOY_SYNC_ERRS_(_c.Structure):
+    _fields_ = [
+        ("index", _c.c_uint32),
+        ("why", _c.c_char * 40),
+    ]
+
+
+class moy_sync_result_t(_c.Structure):
+    _fields_ = [
+        ("applied", _c.c_uint32),
+        ("refused", _c.c_uint32),
+        ("shelf", _c.c_int),
+        ("nerr", _c.c_uint32),
+        ("err", moy_sync_result_t_err_MOY_SYNC_ERRS_ * 8),
+    ]
+
+
+class moy_web_cfg_t(_c.Structure):
+    _fields_ = [
+        ("port", _c.c_uint16),
+        ("carts", _c.c_char_p),
+        ("files", _c.c_char_p),
+        ("kinds", _c.c_char_p),
+        ("system", _c.c_char_p),
+        ("defer", _c.c_char_p),
+        ("apps", _c.c_char_p),
+    ]
+
+
+class moy_web_state_t(_c.Structure):
+    _fields_ = [
+        ("serving", _c.c_uint8),
+        ("closing", _c.c_uint8),
+        ("parked", _c.c_uint8),
+        ("listening", _c.c_uint8),
+        ("port", _c.c_uint16),
+        ("requests", _c.c_uint32),
+        ("events", _c.c_uint32),
+        ("err", _c.c_int),
+    ]
+
+
+class moy_ota_state_t(_c.Structure):
+    _fields_ = [
+        ("phase", _c.c_uint8),
+        ("sink", _c.c_uint8),
+        ("dl_done", _c.c_uint32),
+        ("dl_total", _c.c_uint32),
+        ("done", _c.c_uint32),
+        ("total", _c.c_uint32),
+        ("err", _c.c_char * 48),
+    ]
+
+
+class moy_wc_state_t(_c.Structure):
+    _fields_ = [
+        ("state", _c.c_uint8),
+        ("parked", _c.c_uint8),
+        ("dialled", _c.c_uint8),
+        ("port", _c.c_uint16),
+        ("ip", _c.c_uint32),
+        ("err", _c.c_int),
+    ]
+
+
+class moy_sync_env_t(_c.Structure):
+    _fields_ = [
+        ("v", _c.c_void_p),
+        ("v_end", _c.c_void_p),
+        ("root", _c.c_void_p),
+        ("root_end", _c.c_void_p),
+        ("ops", _c.c_void_p),
+        ("ops_end", _c.c_void_p),
+    ]

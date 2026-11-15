@@ -46,6 +46,7 @@ import ctypes
 import os
 
 from . import host_native, native_build
+from moy_gfx_face import moy_shape_hole_t as _Hole, moy_shape_paint_t as _Paint
 
 # The native module's own directory, searched alongside the vendored libmoy one:
 # the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
@@ -279,16 +280,6 @@ def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,
                     int(color) & 0xFFFF, int(pat) & 0xFFFF, int(hole),
                     int(cam_x), int(cam_y),
                     int(cx0), int(cy0), int(cx1), int(cy1))
-
-
-class _Paint(ctypes.Structure):
-    _fields_ = [("n", ctypes.c_uint8), ("mode", ctypes.c_uint8), ("steps", ctypes.c_uint8),
-                ("pad", ctypes.c_uint8), ("t", ctypes.c_int16 * 6), ("c", ctypes.c_uint16 * 6),
-                ("y0", ctypes.c_int), ("h", ctypes.c_int)]
-
-
-class _Hole(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_int) for n in ("x", "y", "w", "h", "r")]
 
 
 def _paint(fill):

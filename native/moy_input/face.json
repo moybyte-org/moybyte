@@ -34,6 +34,11 @@
     "about": "the input sources and drivers, native/moy_input/moy_input.h",
     "host": "moy_input",
     "headers": ["moy_input.h", "moy_hid.h"],
+    "structs": [
+      "moy_input_ptr_t", "moy_event_t", "moy_input_ring_info_t", "moy_input_isr_t", "moy_i2c_t",
+      "moy_touch_map_t", "moy_touch_held_t", "moy_touch_pt_t", "moy_kbd_t", "moy_touchdev_t",
+      "moy_hid_addr_t", "moy_hid_ops_t"
+    ],
     "rows": [
       {"py": "NAMES", "hand": true},
       {"py": "HOST_NAMES", "hand": true},
@@ -156,5 +161,11 @@
       {"py": "raw_keys()", "hand": true, "absent": ["mp"]},
       {"py": "usage_to_keycode(usage, modifiers=0, caps=False)", "hand": true, "absent": ["mp"]}
     ]
+  },
+  "moy_gatt": {
+    "about": "the BLE GATT central, native/moy_input/moy_gatt.h",
+    "host": "moy_gatt",
+    "registered": false,
+    "structs": ["moy_gatt_uuid_t", "moy_gatt_seen_t"]
   }
 }

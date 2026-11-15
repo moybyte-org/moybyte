@@ -81,6 +81,7 @@ import textwrap
 
 from . import TableError, header
 from .cproto import c_decl
+from . import face as _face
 from .face import Headers, NATIVE
 from .table import ROOT, runtime_file, verb_of
 from .py import splice
@@ -414,13 +415,13 @@ def _ctype(a):
     if a.kind in ("ctx", "inst", "over", "rw", "out", "buf", "wspan"):
         return "c.c_void_p"
     if a.kind == "sink":
-        return "c.POINTER(_Sink)"
+        return "c.POINTER(moy_ui_sink_t)"
     if a.kind == "span":
-        return "_Span"
+        return "moy_ui_span_t"
     if a.kind == "box":
-        return "_Box"
+        return "moy_ui_box_t"
     if a.kind == "boxout":
-        return "c.POINTER(_Box)"
+        return "c.POINTER(moy_ui_box_t)"
     if a.kind in ("opts", "bytes"):
         return "c.c_char_p"
     return _CT[b]
@@ -429,7 +430,7 @@ def _ctype(a):
 def _restype(v):
     rb = _base(v.ret)
     if rb == "moy_ui_box_t":
-        return "_Box"
+        return "moy_ui_box_t"
     if rb == "char *":
         return "c.c_char_p"
     return _CT[rb]
@@ -466,7 +467,7 @@ def _py_row(v):
         elif a.kind == "box":
             call.append("box_of(%s)" % x[0])
         elif a.kind == "boxout":
-            o.append("        %s = _Box()" % a.cn)
+            o.append("        %s = moy_ui_box_t()" % a.cn)
             call.append("c.byref(%s)" % a.cn)
             post = "        return (%s.x, %s.y, %s.w, %s.h)" % ((a.cn,) * 4)
         elif a.kind in ("opts", "bytes"):
@@ -524,14 +525,17 @@ def gen_host(vs):
          '"""The host\'s context form of the toolkit\'s verbs over ctypes: the argtypes',
          "of each engine verb they call (SIGS, which runtime/host/moy_ui_binding.py",
          "sets), and the verbs, set on the module by runtime/host/moy_ui_api_binding.py's",
-         'install with its converters."""', "", "import ctypes as c", "",
-         "from runtime.moy_ui_binding import _Box, _Sink, _Span, _nested", "", "SIGS = ("]
+         'install with its converters; and the ctypes mirrors of the structures the',
+         'toolkit\'s host binding reads (tools/gen_os/structs.py)."""', "",
+         "import ctypes as c", "import ctypes as _c", "", ""] + _face.mirrors(_face.load()["moy_ui"]).emit() + [
+         "SIGS = ("]
     o += [_sig(v) for v in vs if v.args is not None and v.hand != {"mp", "host"}]
     o += [")", "", "",
           "def install(m, lib, ctx_, sink, span0, over, box_of):",
           '    """The verbs on module `m` over `lib`: `ctx_` a context\'s pointer and what',
           "    keeps it, `sink` a canvas's sink, `span0` a text's span (None as \"\"), `over`",
-          '    the override block\'s struct and what keeps it, `box_of` a rect."""']
+          '    the override block\'s struct and what keeps it, `box_of` a rect."""',
+          "    from runtime.moy_ui_binding import _nested"]
     for v in vs:
         if "host" not in v.hand:
             o += _py_row(v)

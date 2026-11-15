@@ -16,7 +16,8 @@ A face.json maps a module's name to its face:
             read from, beside the face.json or under native/
   consts    "C_NAME" or "C_NAME as PY_NAME": a constant of the headers, on
             both faces under its Python name
-  structs   C structures the host's hand rows read: their ctypes mirrors
+  structs   C structures the host's hand rows read: their ctypes mirrors,
+            read from the native headers (tools/gen_os/structs.py)
   errors    {name: {"codes": {rc: "Exxx"}, "other": "Exxx"}}: a C answer code
             raised as OSError(errno), 0 answering
   api       the toolkit's engine verbs (native/moy_ui's alone): tools/gen_os/ui.py's
@@ -42,6 +43,7 @@ import os
 import re
 
 from . import TableError, header
+from . import structs as _structs
 from .cproto import param_name, parse, wrap
 from .table import ROOT
 
@@ -70,12 +72,17 @@ for _t in ("int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "ui
 
 
 def sources():
-    """[(dir, path)] of every face.json, by dir."""
+    """[(dir, path)] of every face.json, by dir: native/<dir>, and the P4
+    boards' native/p4/<dir>."""
     out = []
     for d in sorted(os.listdir(NATIVE)):
         p = os.path.join(NATIVE, d, "face.json")
         if os.path.isfile(p):
             out.append((d, p))
+    for d in sorted(os.listdir(os.path.join(NATIVE, "p4"))):
+        p = os.path.join(NATIVE, "p4", d, "face.json")
+        if os.path.isfile(p):
+            out.append(("p4/" + d, p))
     return out
 
 
@@ -299,6 +306,28 @@ def generated(face):
     return bool(face.get("consts")) or any(not r.get("hand") for r in face.get("rows", []))
 
 
+def struct_names(face):
+    return [s["c"] if isinstance(s, dict) else s for s in face.get("structs", [])]
+
+
+_INDEX = {}
+
+
+def index():
+    """Every declaration of the native headers (tools/gen_os/structs.py), read once."""
+    if "ix" not in _INDEX:
+        _INDEX["ix"] = _structs.Index(defines=_structs.host_defines())
+    return _INDEX["ix"]
+
+
+def mirrors(face, extra=()):
+    """The face's structures' ctypes mirrors, dependencies first; `extra` the
+    structures its generated rows answer."""
+    names = struct_names(face)
+    return _structs.Mirrors(face.get("structs", []) + [s for s in extra if s not in names],
+                            index())
+
+
 def r_name(r):
     return py_sig(r)[0]
 
@@ -332,8 +361,6 @@ def check(faces=None):
                                  % (m, cn, vals[cn]))
             if pn in seen:
                 raise TableError("%s: %s is a row and a constant" % (m, pn))
-        for s in face.get("structs", []):
-            hdr.struct(s)
     return faces
 
 
@@ -531,7 +558,7 @@ def _ctype(ct, structs=(), buf=False):
         if inner == "char":
             return "_c.c_char_p"
         if inner in structs:
-            return "_c.POINTER(_%s)" % inner
+            return "_c.POINTER(%s)" % inner
         if inner in ("void", "uint8_t"):
             return "_c.c_void_p" if inner == "void" else "_c.c_char_p"
         return "_c.POINTER(%s)" % _CTYPES[inner]
@@ -589,7 +616,7 @@ def _py_row(m, face, hdr, r, structs):
             call.append(size if n == 1 else "%s // %d" % (size, n))
         elif kind == "out":
             st = _base(ct).rstrip("*").strip()
-            o.append("    %s = %s()" % (cn, "_" + st if st in structs else _CTYPES[st]))
+            o.append("    %s = %s()" % (cn, st if st in structs else _CTYPES[st]))
             call.append("_c.byref(%s)" % cn)
         else:
             call.append(_py_in(ct, cn, r.row, v))
@@ -616,8 +643,8 @@ def _py_row(m, face, hdr, r, structs):
     return o
 
 
-def _structs_needed(face, hdr, rs):
-    want = list(face.get("structs", []))
+def _structs_needed(rs):
+    want = []
     for r in rs:
         for cn, ct in getattr(r, "outs", []):
             st = _base(ct).rstrip("*").strip()
@@ -626,37 +653,27 @@ def _structs_needed(face, hdr, rs):
     return want
 
 
-def _struct_py(hdr, name, structs):
-    o = ["class _%s(_c.Structure):" % name, "    _fields_ = ["]
-    for f, t, n in hdr.struct(name):
-        ty = _ctype(t, structs)
-        if n:
-            ty = "%s * %d" % (ty, hdr.expr(n))
-        o.append('        ("%s", %s),' % (f, ty))
-    o += ["    ]", "", ""]
-    return o
-
-
 def gen_host(m, face):
     hdr = Headers(face)
     rs = rows(m, face, hdr)
-    structs = _structs_needed(face, hdr, rs)
+    mir = mirrors(face, _structs_needed(rs))
+    structs = mir.done
     vals = hdr.values()
     gen = [r for r in rs if not r.row.get("hand") and "host" not in r.row.get("absent", ())]
     public = [r.name for r in gen] + [p for _, p in consts(face)]
+    what = "rows" if gen or consts(face) else "structures"
     o = [header("native/%s/face.json" % face["dir"], "#"),
-         '"""%s\'s generated rows over ctypes: %s.' % (m, face["about"]),
+         '"""%s\'s generated %s over ctypes: %s.' % (m, what, face["about"]),
          'The module `%s` is runtime/host/%s.py."""' % (m, face["host"]),
-         "", "import ctypes as _c"] + (["import errno as _errno"] if face.get("errors") else []) + [
-         "", "import face_ctypes as _f", "",
-         "__all__ = ("] + wrap(['"%s"' % n for n in public]) + [")", ""]
+         "", "import ctypes as _c"] + (["import errno as _errno"] if face.get("errors") else []) + (
+         ["", "import face_ctypes as _f"] if gen or face.get("errors") else []) + [
+         "", "__all__ = ("] + wrap(['"%s"' % n for n in public]) + [")", ""]
     for cn, pn in consts(face):
         o.append("%s = %d" % (pn, vals[cn]))
     if consts(face):
         o.append("")
     o.append("")
-    for s in structs:
-        o += _struct_py(hdr, s, structs)
+    o += mir.emit()
     for name, e in sorted(face.get("errors", {}).items()):
         o.append("_%s = {" % name.upper())
         o += wrap(["%d: _errno.%s" % (vals[rc] if rc in vals else int(rc), eno)
@@ -665,6 +682,10 @@ def gen_host(m, face):
         o += ["", "", "def _raise_%s(rc):" % name, "    if rc:",
               "        _f.raise_errno(_%s.get(rc, _errno.%s))" % (name.upper(), e["other"]),
               "", ""]
+    if not gen:
+        while o[-1] == "":
+            o.pop()
+        return "\n".join(o) + "\n"
     o.append("_SIGS = (")
     seen = set()
     for r in gen:
@@ -709,7 +730,8 @@ def outputs(faces=None):
         if not generated(face):
             continue
         out.append((mp_path(m, face), gen_mp(m, face)))
-        if face.get("host"):
+    for m, face in faces.items():
+        if face.get("host") and (generated(face) or face.get("structs")) and "api" not in face:
             out.append((host_path(m, face), gen_host(m, face)))
     return out
 

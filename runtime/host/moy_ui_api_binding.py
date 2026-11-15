@@ -11,9 +11,13 @@ interaction verbs returned. Host only.
 import ctypes as c
 
 from runtime import moy_ui_face
-from runtime.moy_ui_binding import (OK, _Depth, _I, _LINE_FN, _Lines, _Over, _Span, _Surface,
-                                    _TXO_DEFAULTS, _TXO_LEN, _check, _layout_type, _names,
-                                    _nested, _shape_type)
+from runtime.moy_ui_binding import (OK, _Depth, _I, _Lines, _Over, _Span, _Surface,
+                                    _TXO_DEFAULTS, _TXO_LEN, _check, _names, _nested,
+                                    moy_theme_layout_t, moy_ui_shape_t)
+from runtime.moy_ui_face import (moy_theme_cell_t, moy_theme_leaf_t, moy_theme_look_t,
+                                 moy_ui_mark_t)
+
+_LINE_FN = dict(_Lines._fields_)["get"]
 
 
 def install(m, lib, h, counts, glyphs, kinds, states, tokens):
@@ -428,7 +432,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.themes = lambda: seeds
     n_roles = c.c_int.in_dll(lib, "moy_theme_n_roles").value
     roles = _names(lib, "moy_theme_role_names", n_roles)
-    metric_n = c.c_int.in_dll(lib, "moy_theme_n_metrics").value
     effect_names = _names(lib, "moy_theme_effect_names",
                           c.c_int.in_dll(lib, "moy_theme_n_effects").value)
     m.theme_roles = lambda: roles
@@ -436,7 +439,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     parts = _names(lib, "moy_theme_part_names", c.c_int.in_dll(lib, "moy_theme_n_parts").value)
     th_states = _names(lib, "moy_theme_state_names",
                        c.c_int.in_dll(lib, "moy_theme_n_states").value)
-    Shape = _shape_type(metric_n, len(parts), len(th_states), 64)
+    Shape = moy_ui_shape_t
     assert c.sizeof(Shape) == c.c_int.in_dll(lib, "moy_ui_shape_size").value
     m.parts = lambda: parts
     m.theme_states = lambda: th_states
@@ -509,10 +512,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = _b(name)
         return int(lib.moy_theme_modes(b, len(b)))
 
-    class _Mark(c.Structure):
-        _fields_ = [("mark", c.c_int8), ("w", c.c_int8), ("gap", c.c_int8),
-                    ("key_w", c.c_int8), ("c", c.c_int16), ("ink", c.c_int16),
-                    ("alpha", c.c_uint8), ("declared", c.c_uint8), ("key_c", c.c_int32)]
+    _Mark = moy_ui_mark_t
 
     def theme_marks(name, light):
         b = _b(name)
@@ -546,9 +546,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     sdims = tuple((c.c_int * 6).in_dll(lib, "moy_theme_sheet_dims"))
 
-    class _CellRec(c.Structure):
-        _fields_ = [(n, c.c_uint8) for n in ("part", "state", "sub", "x", "y", "w", "h",
-                                             "nine")]
+    _CellRec = moy_theme_cell_t
 
     cell_recs = (_CellRec * sdims[4]).in_dll(lib, "moy_theme_cells")
     cells = tuple((parts[r.part], th_states[r.state], r.sub, r.x, r.y, r.w, r.h, bool(r.nine))
@@ -584,7 +582,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.sheet_caps = lambda: (w_, sr, ir, sr * (w_ + 2), ir * (w_ + 2))
 
     dims = (c.c_int * 7).in_dll(lib, "moy_theme_layout_dims")
-    Layout = _layout_type(*dims[:5])
+    Layout = moy_theme_layout_t
     assert c.sizeof(Layout) == dims[6]
     bar_edges = _names(lib, "moy_theme_bar_edges", dims[0])
     widgets = _names(lib, "moy_theme_widget_names", dims[5])
@@ -616,26 +614,12 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     ld = tuple((c.c_int * 10).in_dll(lib, "moy_theme_look_dims"))
     n_leaves, stops, paints_cap, tiles_cap, ab_cap, btn_n, map_max, text_max, n_texts, btn0 = ld
 
-    class _Paint(c.Structure):
-        _fields_ = [("n", c.c_uint8), ("mode", c.c_uint8), ("steps", c.c_uint8),
-                    ("pad", c.c_uint8), ("t", c.c_int16 * stops), ("c", c.c_int32 * stops)]
-
-    class _Map(c.Structure):
-        _fields_ = [("name", c.c_char * (map_max + 1)), ("section", c.c_uint8),
-                    ("kind", c.c_uint8), ("v", c.c_int32 * btn_n)]
-
-    class _Look(c.Structure):
-        _fields_ = [("v", c.c_int32 * n_leaves), ("n_paints", c.c_uint8),
-                    ("n_tiles", c.c_uint8), ("n_appbtn", c.c_uint8), ("n_text", c.c_uint8),
-                    ("paint", _Paint * paints_cap), ("tile", _Map * tiles_cap),
-                    ("appbtn", _Map * ab_cap), ("text", (c.c_char * (text_max + 1)) * n_texts)]
+    _Look = moy_theme_look_t
 
     if c.sizeof(_Look) != c.c_size_t.in_dll(lib, "moy_theme_look_bytes").value:
         raise RuntimeError("moy_ui_binding: moy_theme_look_t does not match")
 
-    class _Leaf(c.Structure):
-        _fields_ = [("kind", c.c_uint8), ("lo", c.c_int32), ("hi", c.c_int32),
-                    ("def_", c.c_int32)]
+    _Leaf = moy_theme_leaf_t
 
     leaf_rows = (_Leaf * n_leaves).in_dll(lib, "moy_theme_leaves")
     leaf_names = _names(lib, "moy_theme_leaf_names", n_leaves)

@@ -2,77 +2,412 @@
 """The host's context form of the toolkit's verbs over ctypes: the argtypes
 of each engine verb they call (SIGS, which runtime/host/moy_ui_binding.py
 sets), and the verbs, set on the module by runtime/host/moy_ui_api_binding.py's
-install with its converters."""
+install with its converters; and the ctypes mirrors of the structures the
+toolkit's host binding reads (tools/gen_os/structs.py)."""
 
 import ctypes as c
+import ctypes as _c
 
-from runtime.moy_ui_binding import _Box, _Sink, _Span, _nested
+
+class moy_ui_box_t(_c.Structure):
+    _fields_ = [
+        ("x", _c.c_int16),
+        ("y", _c.c_int16),
+        ("w", _c.c_int16),
+        ("h", _c.c_int16),
+    ]
+
+
+class moy_ui_surface_t(_c.Structure):
+    _fields_ = [
+        ("edge", _c.c_uint8),
+        ("fill", _c.c_uint8),
+        ("flags", _c.c_uint8),
+        ("a", _c.c_int8),
+        ("b", _c.c_int8),
+        ("line", _c.c_int8),
+    ]
+
+
+class moy_ui_shape_t(_c.Structure):
+    _fields_ = [
+        ("metric", _c.c_int8 * 3),
+        ("n_surf", _c.c_uint8),
+        ("n_fx", _c.c_uint8),
+        ("effect", ((_c.c_uint8 * 2) * 8) * 34),
+        ("stid", (_c.c_uint8 * 8) * 34),
+        ("surf", moy_ui_surface_t * 64),
+        ("frame", _c.c_uint8 * 6),
+        ("name", _c.c_char * 25),
+    ]
+
+
+class moy_theme_bar_t(_c.Structure):
+    _fields_ = [
+        ("edge", _c.c_uint8),
+        ("size", _c.c_uint8),
+        ("n", _c.c_uint8 * 3),
+        ("w", (_c.c_uint8 * 6) * 3),
+        ("text0", _c.c_uint8),
+        ("n_text", _c.c_uint8),
+    ]
+
+
+class moy_theme_layout_t(_c.Structure):
+    _fields_ = [
+        ("set", _c.c_uint8),
+        ("n_bars", _c.c_uint8),
+        ("bar", moy_theme_bar_t * 4),
+        ("n_text", _c.c_uint8),
+        ("text", (_c.c_char * 25) * 12),
+        ("home", _c.c_uint8),
+    ]
+
+
+class moy_ui_span_t(_c.Structure):
+    _fields_ = [
+        ("p", _c.c_void_p),
+        ("n", _c.c_uint16),
+    ]
+
+
+class moy_ui_lines_t(_c.Structure):
+    _fields_ = [
+        ("src", _c.c_void_p),
+        ("n", _c.c_int32),
+        ("get", _c.CFUNCTYPE(_c.c_void_p, _c.c_void_p, _c.c_int32, _c.POINTER(_c.c_size_t))),
+    ]
+
+
+class moy_ui_depth_t(_c.Structure):
+    _fields_ = [
+        ("win_r", _c.c_uint8),
+        ("card_r", _c.c_uint8),
+        ("key_r", _c.c_uint8),
+        ("corners", _c.c_uint8),
+        ("stepped", _c.c_uint8),
+        ("shadow", _c.c_uint8),
+        ("edges", _c.c_uint8),
+        ("frames", _c.c_uint8),
+        ("shadow_565", _c.c_uint16),
+        ("alpha", _c.c_int16),
+        ("blur", _c.c_int16),
+        ("dx", _c.c_int16),
+        ("dy", _c.c_int16),
+        ("back", _c.c_int16),
+        ("line", _c.c_int16),
+        ("line_back", _c.c_int16),
+        ("line_c", _c.c_int32),
+        ("line_back_c", _c.c_int32),
+        ("body", _c.c_int32),
+        ("header", _c.c_uint8),
+        ("align", _c.c_uint8),
+        ("controls", _c.c_uint8),
+        ("icon", _c.c_uint8),
+        ("rule", _c.c_uint8),
+        ("fill", _c.c_int32),
+        ("fill_back", _c.c_int32),
+        ("grad", _c.c_int32),
+        ("grad_back", _c.c_int32),
+        ("bar_style", _c.c_uint8),
+        ("hh_style", _c.c_uint8),
+        ("bar_h", _c.c_uint8),
+        ("hh_h", _c.c_uint8),
+        ("bar_line_w", _c.c_int16),
+        ("hh_line_w", _c.c_int16),
+        ("bar_fill", _c.c_int32),
+        ("bar_line_c", _c.c_int32),
+        ("hh_fill", _c.c_int32),
+        ("hh_line_c", _c.c_int32),
+        ("bar_ink", _c.c_int32),
+        ("bar_dim", _c.c_int32),
+        ("hh_ink", _c.c_int32),
+        ("hh_dim", _c.c_int32),
+        ("sys_fill", _c.c_int32),
+        ("hh_sys_fill", _c.c_int32),
+        ("chip_cur", _c.c_int32),
+        ("tile_r", _c.c_uint8),
+        ("tile_line_w", _c.c_int16),
+        ("tile_fill", _c.c_int32),
+        ("tile_line_c", _c.c_int32),
+        ("card_line", _c.c_int16),
+        ("card_line_c", _c.c_int32),
+        ("sys_line_w", _c.c_int16),
+        ("sys_line_c", _c.c_int32),
+    ]
+
+
+class moy_ui_frame_button_t(_c.Structure):
+    _fields_ = [
+        ("box", moy_ui_box_t),
+        ("id", _c.c_uint8),
+        ("right", _c.c_uint8),
+    ]
+
+
+class moy_ui_sink_t(_c.Structure):
+    _fields_ = [
+        ("kind", _c.c_uint8),
+        ("fs", _c.c_uint8),
+        ("look", _c.c_uint8),
+        ("dst", _c.c_void_p),
+        ("cart", _c.c_uint8),
+        ("shown", _c.c_uint8),
+    ]
+
+
+class moy_ui_row_t(_c.Structure):
+    _fields_ = [
+        ("label", moy_ui_span_t),
+        ("value", moy_ui_span_t),
+        ("glyph", _c.c_int16),
+        ("glyph_size", _c.c_int16),
+        ("glyph_ink", _c.c_int16),
+        ("value_ink", _c.c_int16),
+        ("pad", _c.c_int16),
+        ("pad_right", _c.c_int16),
+        ("text_dy", _c.c_int16),
+        ("scale", _c.c_int16),
+        ("fs", _c.c_int16),
+        ("colors", _c.c_int16 * 3),
+    ]
+
+
+class moy_ui_cell_t(_c.Structure):
+    _fields_ = [
+        ("label", moy_ui_span_t),
+        ("glyph", _c.c_int16),
+        ("pad", _c.c_int16),
+        ("caption_h", _c.c_int16),
+        ("band_fill", _c.c_int16),
+        ("band_ink", _c.c_int16),
+        ("text_dx", _c.c_int16),
+        ("text_dy", _c.c_int16),
+        ("fs", _c.c_int16),
+        ("colors", _c.c_int16 * 3),
+    ]
+
+
+class moy_ui_button_t(_c.Structure):
+    _fields_ = [
+        ("label", moy_ui_span_t),
+        ("glyph", _c.c_int16),
+        ("fs", _c.c_int16),
+        ("colors", _c.c_int16 * 3),
+        ("app", _c.c_int16),
+        ("icon", _c.c_int16),
+    ]
+
+
+class moy_ui_btn_style_t(_c.Structure):
+    _fields_ = [
+        ("c", _c.c_int16 * 3),
+        ("edge_w", _c.c_int8),
+        ("shape", _c.c_int8),
+        ("r", _c.c_int8),
+        ("font", _c.c_int8),
+        ("bevel", _c.c_int8),
+        ("check", _c.c_int8),
+    ]
+
+
+class moy_ui_over_t(_c.Structure):
+    _fields_ = [
+        ("fill", _c.c_int32),
+        ("ink", _c.c_int32),
+        ("border", _c.c_int32),
+        ("id", moy_ui_span_t),
+        ("current", _c.c_int8),
+        ("disabled", _c.c_int8),
+        ("nav", _c.c_int8),
+        ("mark", _c.c_int8),
+        ("steps", _c.c_int8),
+        ("hint", moy_ui_span_t),
+        ("wash", _c.c_int8),
+        ("lead", _c.c_int8),
+        ("has_gen", _c.c_int8),
+        ("gen", _c.c_int32),
+        ("has_part", _c.c_int8),
+        ("part_w", _c.c_int16),
+        ("part_h", _c.c_int16),
+        ("bar", _c.c_int8),
+        ("axis_x", _c.c_int8),
+        ("snap", _c.c_int8),
+        ("has_offset", _c.c_int8),
+        ("offset", _c.c_int32),
+        ("spill", _c.c_int16),
+        ("has_keep", _c.c_int8),
+        ("whole", _c.c_int8),
+        ("keep", _c.c_int32),
+        ("over_x", _c.c_int16),
+        ("over_y", _c.c_int16),
+        ("over_w", _c.c_int16),
+        ("over_h", _c.c_int16),
+        ("shift", _c.c_int8),
+        ("fade", _c.c_int16),
+        ("has_across", _c.c_int8),
+        ("across_first", _c.c_int16),
+        ("across_pitch", _c.c_int16),
+        ("at", _c.c_int16),
+        ("signal", _c.c_int8),
+        ("values", moy_ui_span_t),
+        ("check", _c.c_int8),
+        ("subs", moy_ui_span_t),
+        ("icons", moy_ui_span_t),
+        ("counts", moy_ui_span_t),
+        ("tags", moy_ui_span_t),
+        ("marks", moy_ui_span_t),
+        ("card", _c.c_int8),
+        ("tag", moy_ui_span_t),
+        ("focus", moy_ui_span_t),
+        ("flags2", _c.c_int32),
+    ]
+
+
+class moy_ui_mark_t(_c.Structure):
+    _fields_ = [
+        ("mark", _c.c_int8),
+        ("w", _c.c_int8),
+        ("gap", _c.c_int8),
+        ("key_w", _c.c_int8),
+        ("c", _c.c_int16),
+        ("ink", _c.c_int16),
+        ("alpha", _c.c_uint8),
+        ("declared", _c.c_uint8),
+        ("key_c", _c.c_int32),
+    ]
+
+
+class moy_theme_cell_t(_c.Structure):
+    _fields_ = [
+        ("part", _c.c_uint8),
+        ("state", _c.c_uint8),
+        ("sub", _c.c_uint8),
+        ("x", _c.c_uint8),
+        ("y", _c.c_uint8),
+        ("w", _c.c_uint8),
+        ("h", _c.c_uint8),
+        ("nine", _c.c_uint8),
+    ]
+
+
+class moy_theme_paint_t(_c.Structure):
+    _fields_ = [
+        ("n", _c.c_uint8),
+        ("mode", _c.c_uint8),
+        ("steps", _c.c_uint8),
+        ("pad", _c.c_uint8),
+        ("t", _c.c_int16 * 6),
+        ("c", _c.c_int32 * 6),
+    ]
+
+
+class moy_theme_mapent_t(_c.Structure):
+    _fields_ = [
+        ("name", _c.c_char * 13),
+        ("section", _c.c_uint8),
+        ("kind", _c.c_uint8),
+        ("v", _c.c_int32 * 9),
+    ]
+
+
+class moy_theme_look_t(_c.Structure):
+    _fields_ = [
+        ("v", _c.c_int32 * 265),
+        ("n_paints", _c.c_uint8),
+        ("n_tiles", _c.c_uint8),
+        ("n_appbtn", _c.c_uint8),
+        ("n_text", _c.c_uint8),
+        ("paint", moy_theme_paint_t * 12),
+        ("tile", moy_theme_mapent_t * 12),
+        ("appbtn", moy_theme_mapent_t * 12),
+        ("text", (_c.c_char * 25) * 4),
+    ]
+
+
+class moy_theme_leaf_t(_c.Structure):
+    _fields_ = [
+        ("kind", _c.c_uint8),
+        ("lo", _c.c_int32),
+        ("hi", _c.c_int32),
+        ("def_", _c.c_int32),
+    ]
+
 
 SIGS = (
     ("moy_ui_api_size", [], c.c_size_t),
-    ("moy_ui_api_page", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.POINTER(_Box)], None),
-    ("moy_ui_api_label", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
-    ("moy_ui_api_button", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int, c.c_void_p], c.c_int),
-    ("moy_ui_api_toggle", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int, c.c_void_p], c.c_int),
-    ("moy_ui_api_group", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
-    ("moy_ui_api_value", [c.c_void_p, c.POINTER(_Sink), c.c_int, _Span, _Span, c.c_void_p],
+    ("moy_ui_api_page", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_void_p,
+     c.POINTER(moy_ui_box_t)], None),
+    ("moy_ui_api_label", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_void_p], None),
+    ("moy_ui_api_button", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int,
+     c.c_void_p], c.c_int),
+    ("moy_ui_api_toggle", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int,
+     c.c_void_p], c.c_int),
+    ("moy_ui_api_group", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_void_p], None),
+    ("moy_ui_api_value", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_int, moy_ui_span_t,
+     moy_ui_span_t, c.c_void_p], c.c_int),
+    ("moy_ui_api_choice", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_int, moy_ui_span_t,
+     c.c_char_p, c.c_size_t, c.c_int32, c.c_void_p], c.c_int32),
+    ("moy_ui_api_hints", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_char_p, c.c_size_t,
+     c.c_void_p], None),
+    ("moy_ui_api_hints_w", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_char_p, c.c_size_t],
      c.c_int),
-    ("moy_ui_api_choice", [c.c_void_p, c.POINTER(_Sink), c.c_int, _Span, c.c_char_p, c.c_size_t,
-     c.c_int32, c.c_void_p], c.c_int32),
-    ("moy_ui_api_hints", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, c.c_size_t, c.c_void_p], None),
-    ("moy_ui_api_hints_w", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, c.c_size_t], c.c_int),
-    ("moy_ui_api_slider", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int32, c.c_int32, c.c_int32,
-     c.c_void_p], c.c_int32),
-    ("moy_ui_api_icon", [c.c_void_p, _Span], c.c_int),
-    ("moy_ui_api_box", [c.c_void_p, _Span, c.c_void_p], c.c_int),
-    ("moy_ui_api_progress", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int32, c.c_int32,
-     c.c_void_p], None),
-    ("moy_ui_api_list", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, c.c_size_t, c.c_int32,
-     c.c_void_p], c.c_int32),
-    ("moy_ui_api_part", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int, c.c_int, c.c_void_p,
-     c.c_void_p], None),
+    ("moy_ui_api_slider", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int32,
+     c.c_int32, c.c_int32, c.c_void_p], c.c_int32),
+    ("moy_ui_api_icon", [c.c_void_p, moy_ui_span_t], c.c_int),
+    ("moy_ui_api_box", [c.c_void_p, moy_ui_span_t, c.c_void_p], c.c_int),
+    ("moy_ui_api_progress", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int32,
+     c.c_int32, c.c_void_p], None),
+    ("moy_ui_api_list", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_char_p,
+     c.c_size_t, c.c_int32, c.c_void_p], c.c_int32),
+    ("moy_ui_api_part", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int, c.c_int,
+     c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_part_at", [c.c_void_p, c.c_void_p], c.c_int),
     ("moy_ui_api_split_at", [c.c_void_p, c.c_int, c.c_int], c.c_int),
     ("moy_ui_api_split_toward", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_void_p],
      c.c_int),
-    ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int, c.c_int, c.c_void_p], None),
-    ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
-     None),
-    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], c.c_int32),
-    ("moy_ui_api_field", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_size_t, c.c_size_t,
-     c.c_void_p], c.c_int32),
-    ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, c.c_size_t, c.c_int,
-     c.c_void_p], c.c_int32),
-    ("moy_ui_api_wash", [c.c_void_p, c.POINTER(_Sink)], None),
-    ("moy_ui_api_wash_box", [c.c_void_p], _Box),
+    ("moy_ui_api_grid", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int, c.c_int,
+     c.c_void_p], None),
+    ("moy_ui_api_card", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     c.c_void_p, c.c_void_p], None),
+    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_void_p],
+     c.c_int32),
+    ("moy_ui_api_field", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_void_p,
+     c.c_size_t, c.c_size_t, c.c_void_p], c.c_int32),
+    ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_char_p,
+     c.c_size_t, c.c_int, c.c_void_p], c.c_int32),
+    ("moy_ui_api_wash", [c.c_void_p, c.POINTER(moy_ui_sink_t)], None),
+    ("moy_ui_api_wash_box", [c.c_void_p], moy_ui_box_t),
     ("moy_ui_api_owes", [c.c_void_p], c.c_int),
     ("moy_ui_api_moved", [c.c_void_p], c.c_int),
     ("moy_ui_api_moving", [c.c_void_p], c.c_int),
     ("moy_ui_api_offset", [c.c_void_p, c.c_int, c.c_int], c.c_int32),
     ("moy_ui_api_fades", [c.c_void_p, c.c_int], c.c_uint32),
     ("moy_ui_api_owed", [c.c_void_p, c.c_int], c.c_uint32),
-    ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_end", [c.c_void_p, c.POINTER(moy_ui_sink_t)], None),
     ("moy_ui_api_table_dist", [c.c_void_p], c.c_int32),
-    ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
-    ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(_Sink), c.c_void_p], c.c_int32),
+    ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(moy_ui_sink_t)], None),
+    ("moy_ui_api_table_part", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_void_p], c.c_int32),
     ("moy_ui_api_table_floor", [c.c_void_p, c.c_void_p], c.c_int32),
     ("moy_ui_api_table_copy", [c.c_void_p, c.c_void_p, c.c_int], c.c_int32),
     ("moy_ui_api_table_shift", [c.c_void_p, c.c_void_p, c.c_int], c.c_int32),
-    ("moy_ui_api_held", [c.c_void_p, _Span, c.c_int32], c.c_int),
-    ("moy_ui_api_held_last", [c.c_void_p, _Span, c.c_int32], c.c_int),
+    ("moy_ui_api_held", [c.c_void_p, moy_ui_span_t, c.c_int32], c.c_int),
+    ("moy_ui_api_held_last", [c.c_void_p, moy_ui_span_t, c.c_int32], c.c_int),
     ("moy_ui_api_held_all", [c.c_void_p], c.c_int),
     ("moy_ui_api_slots", [c.c_void_p, c.c_int32, c.c_int32], c.c_int32),
-    ("moy_ui_api_slot", [c.c_void_p, _Span, c.c_int32, c.c_int], c.c_int32),
+    ("moy_ui_api_slot", [c.c_void_p, moy_ui_span_t, c.c_int32, c.c_int], c.c_int32),
     ("moy_ui_api_slot_next", [c.c_void_p], c.c_int32),
-    ("moy_ui_api_block_set", [c.c_void_p, _Span, c.c_int, c.c_uint32], c.c_int),
-    ("moy_ui_api_block_gen", [c.c_void_p, _Span], c.c_int32),
-    ("moy_ui_api_block_since", [c.c_void_p, _Span, c.c_int32], c.c_uint32),
-    ("moy_ui_api_block_key", [c.c_void_p, _Span], c.c_int32),
-    ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int, c.c_void_p], c.c_int),
-    ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, c.c_size_t, c.c_char_p,
-     c.c_size_t, c.c_void_p], c.c_int32),
+    ("moy_ui_api_block_set", [c.c_void_p, moy_ui_span_t, c.c_int, c.c_uint32], c.c_int),
+    ("moy_ui_api_block_gen", [c.c_void_p, moy_ui_span_t], c.c_int32),
+    ("moy_ui_api_block_since", [c.c_void_p, moy_ui_span_t, c.c_int32], c.c_uint32),
+    ("moy_ui_api_block_key", [c.c_void_p, moy_ui_span_t], c.c_int32),
+    ("moy_ui_api_popover", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int,
+     c.c_void_p], c.c_int),
+    ("moy_ui_api_menu", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_char_p,
+     c.c_size_t, c.c_char_p, c.c_size_t, c.c_void_p], c.c_int32),
     ("moy_ui_api_menu_danger", [c.c_void_p, c.c_uint32], None),
-    ("moy_ui_api_tool", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p], c.c_int),
+    ("moy_ui_api_tool", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     c.c_void_p], c.c_int),
     ("moy_ui_api_bar_tap", [c.c_void_p, c.c_int], None),
     ("moy_ui_api_back", [c.c_void_p, c.c_int], c.c_int),
     ("moy_ui_api_cancel", [c.c_void_p, c.c_int], c.c_int),
@@ -83,20 +418,22 @@ SIGS = (
     ("moy_ui_run_paste", [c.c_char_p, c.c_size_t], None),
     ("moy_ui_run_steps", [c.c_int32, c.c_int32], None),
     ("moy_ui_run_typing", [], c.c_int),
-    ("moy_ui_api_rule", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_rule", [c.c_void_p, c.POINTER(moy_ui_sink_t)], None),
     ("moy_ui_api_text", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int], None),
-    ("moy_ui_api_card_mark", [c.c_void_p, _Span, c.c_int, _Span], None),
+    ("moy_ui_api_card_mark", [c.c_void_p, moy_ui_span_t, c.c_int, moy_ui_span_t], None),
     ("moy_ui_api_grid_spread", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_int], None),
-    ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
-    ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, c.c_size_t],
-     c.c_int),
-    ("moy_ui_api_note", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, c.c_size_t], c.c_int),
-    ("moy_ui_api_bubble", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _Span, c.c_void_p, c.c_int,
-     c.c_void_p, c.c_void_p], None),
-    ("moy_ui_api_month", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_int, c.c_int, c.c_int],
-     c.c_int),
-    ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_int, c.c_void_p], None),
-    ("moy_ui_api_focus_ahead", [c.c_void_p, _Span], None),
+    ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(moy_ui_sink_t)], None),
+    ("moy_ui_api_empty", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     c.c_char_p, c.c_size_t], c.c_int),
+    ("moy_ui_api_note", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_char_p,
+     c.c_size_t], c.c_int),
+    ("moy_ui_api_bubble", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     moy_ui_span_t, c.c_void_p, c.c_int, c.c_void_p, c.c_void_p], None),
+    ("moy_ui_api_month", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     c.c_int, c.c_int, c.c_int], c.c_int),
+    ("moy_ui_api_toast", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, moy_ui_span_t,
+     c.c_int, c.c_void_p], None),
+    ("moy_ui_api_focus_ahead", [c.c_void_p, moy_ui_span_t], None),
     ("moy_ui_api_shift_plan", [c.c_void_p, c.c_void_p], c.c_int),
     ("moy_ui_api_shift_break", [c.c_void_p], None),
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], c.c_int),
@@ -105,10 +442,10 @@ SIGS = (
     ("moy_ui_api_host_whole", [c.c_void_p], None),
     ("moy_ui_api_keys_back", [c.c_void_p], None),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], c.c_int),
-    ("moy_ui_api_text_at", [c.c_void_p, _Span, c.c_int, c.c_int, c.c_void_p], c.c_int),
-    ("moy_ui_api_text_cover", [c.c_void_p, _Span, c.c_int, c.c_int], None),
-    ("moy_ui_api_text_aim", [c.c_void_p, _Span, c.c_int32, c.c_int32], c.c_int),
-    ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int], c.c_int),
+    ("moy_ui_api_text_at", [c.c_void_p, moy_ui_span_t, c.c_int, c.c_int, c.c_void_p], c.c_int),
+    ("moy_ui_api_text_cover", [c.c_void_p, moy_ui_span_t, c.c_int, c.c_int], None),
+    ("moy_ui_api_text_aim", [c.c_void_p, moy_ui_span_t, c.c_int32, c.c_int32], c.c_int),
+    ("moy_ui_api_keep", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int], c.c_int),
     ("moy_ui_api_audit", [c.c_void_p, c.c_int], c.c_uint32),
     ("moy_ui_api_keys_taken", [c.c_void_p], c.c_int),
     ("moy_ui_api_typing", [c.c_void_p], c.c_int),
@@ -124,6 +461,7 @@ def install(m, lib, ctx_, sink, span0, over, box_of):
     """The verbs on module `m` over `lib`: `ctx_` a context's pointer and what
     keeps it, `sink` a canvas's sink, `span0` a text's span (None as ""), `over`
     the override block's struct and what keeps it, `box_of` a rect."""
+    from runtime.moy_ui_binding import _nested
     def api_size():
         return int(lib.moy_ui_api_size())
     m.api_size = api_size
@@ -131,7 +469,7 @@ def install(m, lib, ctx_, sink, span0, over, box_of):
         p_, k_ = ctx_(ctx)
         title_t, title_k = span0(title)
         o_v, o_k = over(o)
-        content = _Box()
+        content = moy_ui_box_t()
         lib.moy_ui_api_page(p_, c.byref(sink(cv, look)), title_t, o_v, c.byref(content))
         return (content.x, content.y, content.w, content.h)
     m.api_page = api_page

@@ -11,6 +11,212 @@ __all__ = (
 )
 
 
+class moy_input_ptr_t(_c.Structure):
+    _fields_ = [
+        ("w", _c.c_int32),
+        ("h", _c.c_int32),
+        ("x", _c.c_int32),
+        ("y", _c.c_int32),
+        ("idle_ms", _c.c_int32),
+        ("sampled", _c.c_uint32),
+        ("last_move", _c.c_uint32),
+        ("click", _c.c_bool),
+        ("down", _c.c_bool),
+        ("hovers", _c.c_bool),
+        ("fresh", _c.c_bool),
+        ("visible", _c.c_bool),
+        ("touched", _c.c_bool),
+        ("div", _c.c_int32),
+    ]
+
+
+class moy_event_t(_c.Structure):
+    _fields_ = [
+        ("t_us", _c.c_uint32),
+        ("src", _c.c_uint16),
+        ("kind", _c.c_uint8),
+        ("prov", _c.c_uint8),
+        ("a", _c.c_uint16),
+        ("id", _c.c_uint16),
+        ("b", _c.c_uint32),
+    ]
+
+
+class moy_input_ring_info_t(_c.Structure):
+    _fields_ = [
+        ("depth", _c.c_uint32),
+        ("head", _c.c_uint32),
+        ("count", _c.c_uint32),
+        ("drops", _c.c_uint32),
+        ("prov", _c.c_uint8),
+        ("internal", _c.c_bool),
+        ("src", _c.c_uint16),
+    ]
+
+
+class moy_input_isr_t(_c.Structure):
+    _fields_ = [
+        ("mux", _c.c_void_p),
+        ("ring", _c.c_void_p),
+    ]
+
+
+class moy_i2c_t(_c.Structure):
+    _fields_ = [
+        ("write", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint8, _c.POINTER(_c.c_uint8), _c.c_size_t)),
+        ("read", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint8, _c.POINTER(_c.c_uint8), _c.c_size_t)),
+        ("write_read", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint8, _c.POINTER(_c.c_uint8), _c.c_size_t, _c.POINTER(_c.c_uint8), _c.c_size_t)),
+        ("ms", _c.CFUNCTYPE(_c.c_uint32, _c.c_void_p)),
+        ("us", _c.CFUNCTYPE(_c.c_uint32, _c.c_void_p)),
+        ("sleep_ms", _c.CFUNCTYPE(None, _c.c_void_p, _c.c_uint32)),
+        ("ctx", _c.c_void_p),
+    ]
+
+
+class moy_touch_map_t(_c.Structure):
+    _fields_ = [
+        ("w", _c.c_int32),
+        ("h", _c.c_int32),
+        ("raw_w", _c.c_int32),
+        ("raw_h", _c.c_int32),
+        ("raw_x0", _c.c_int32),
+        ("raw_y0", _c.c_int32),
+        ("swap", _c.c_bool),
+        ("flip_x", _c.c_bool),
+        ("flip_y", _c.c_bool),
+    ]
+
+
+class moy_touch_held_t(_c.Structure):
+    _fields_ = [
+        ("down", _c.c_bool),
+        ("fresh", _c.c_bool),
+        ("has_last", _c.c_bool),
+        ("extrapolate", _c.c_bool),
+        ("gliding", _c.c_bool),
+        ("lx", _c.c_int32),
+        ("ly", _c.c_int32),
+        ("gx", _c.c_int32),
+        ("gy", _c.c_int32),
+        ("w", _c.c_int32),
+        ("h", _c.c_int32),
+        ("hold_ms", _c.c_int32),
+        ("ms", _c.c_uint32),
+        ("vx", _c.c_float),
+        ("vy", _c.c_float),
+        ("damp", _c.c_float),
+    ]
+
+
+class moy_touch_pt_t(_c.Structure):
+    _fields_ = [
+        ("down", _c.c_bool),
+        ("edge", _c.c_bool),
+        ("x", _c.c_int32),
+        ("y", _c.c_int32),
+    ]
+
+
+class moy_kbd_t(_c.Structure):
+    _fields_ = [
+        ("table", _c.c_void_p),
+        ("src", _c.c_uint32),
+        ("available", _c.c_bool),
+        ("raw_mode", _c.c_bool),
+        ("raw_unsupported", _c.c_bool),
+        ("raw_game", _c.c_bool),
+        ("want", _c.c_int8),
+        ("err_run", _c.c_uint8),
+        ("held", _c.c_uint32),
+        ("held_until", _c.c_uint32),
+        ("raw_held", _c.c_uint32),
+        ("raw_key", _c.c_int32),
+        ("raw_bytes", _c.c_uint8 * 5),
+        ("raw_valid", _c.c_bool),
+        ("stat_n", _c.c_uint32),
+        ("stat_max_us", _c.c_uint32),
+        ("stat_over5", _c.c_uint32),
+        ("stat_over20", _c.c_uint32),
+        ("stat_timeouts", _c.c_uint32),
+        ("stat_max_raw", _c.c_bool),
+        ("raw_text", _c.c_bool),
+        ("typing", _c.c_int16),
+    ]
+
+
+class moy_touchdev_t(_c.Structure):
+    _fields_ = [
+        ("kind", _c.c_uint8),
+        ("addr", _c.c_uint8),
+        ("available", _c.c_bool),
+        ("yx", _c.c_bool),
+        ("clear_first", _c.c_bool),
+        ("gate", _c.c_bool),
+        ("int_count", _c.c_uint32),
+        ("int_last", _c.c_uint32),
+        ("int_seen", _c.c_bool),
+        ("touching", _c.c_bool),
+        ("last_read_ms", _c.c_uint32),
+        ("fw", _c.c_void_p),
+        ("fw_len", _c.c_size_t),
+        ("loaded", _c.c_uint32),
+        ("init_state", _c.c_int8),
+        ("gsl_werr", _c.c_uint32),
+        ("gsl_sig", _c.c_uint32),
+        ("gsl_sig_read", _c.c_bool),
+        ("gsl_ms", _c.c_uint32),
+        ("gsl_tries", _c.c_uint8),
+        ("reprobe", _c.c_uint16),
+        ("lock", _c.c_int),
+        ("st_point", _c.c_bool),
+        ("st_up", _c.c_bool),
+        ("st_x", _c.c_int32),
+        ("st_y", _c.c_int32),
+        ("st_fingers", _c.c_uint8),
+        ("map", moy_touch_map_t),
+        ("held", moy_touch_held_t),
+        ("raw_x", _c.c_int32),
+        ("raw_y", _c.c_int32),
+        ("has_raw", _c.c_bool),
+        ("fingers", _c.c_uint8),
+        ("stat_n", _c.c_uint32),
+        ("stat_max_us", _c.c_uint32),
+        ("stat_over5", _c.c_uint32),
+        ("stat_over20", _c.c_uint32),
+        ("stat_skipped", _c.c_uint32),
+        ("fb_set", _c.c_bool),
+        ("fb_phase", _c.c_uint8),
+        ("fb_status", _c.c_int16),
+        ("fb_ms", _c.c_uint32),
+        ("fb_n", _c.c_uint32),
+    ]
+
+
+class moy_hid_addr_t(_c.Structure):
+    _fields_ = [
+        ("type", _c.c_uint8),
+        ("a", _c.c_uint8 * 6),
+    ]
+
+
+class moy_hid_ops_t(_c.Structure):
+    _fields_ = [
+        ("scan", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_bool)),
+        ("scan_stop", _c.CFUNCTYPE(_c.c_int, _c.c_void_p)),
+        ("connect", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.POINTER(moy_hid_addr_t))),
+        ("disconnect", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16)),
+        ("pair", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16)),
+        ("disc_svcs", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16)),
+        ("disc_chrs", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16, _c.c_uint16, _c.c_uint16)),
+        ("disc_dscs", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16, _c.c_uint16, _c.c_uint16)),
+        ("write", _c.CFUNCTYPE(_c.c_int, _c.c_void_p, _c.c_uint16, _c.c_uint16, _c.POINTER(_c.c_uint8), _c.c_size_t, _c.c_bool)),
+        ("forget_bonds", _c.CFUNCTYPE(None, _c.c_void_p)),
+        ("save", _c.CFUNCTYPE(None, _c.c_void_p, _c.c_void_p)),
+        ("ms", _c.CFUNCTYPE(_c.c_uint32, _c.c_void_p)),
+        ("ctx", _c.c_void_p),
+    ]
+
+
 _SIGS = (
     ("moy_input_typed", [_c.c_int32], _c.c_int32),
     ("moy_input_pin_clock", [_c.c_uint32], None),

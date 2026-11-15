@@ -40,7 +40,7 @@ WANT_MAIL = 1
 WANT_POLL = 2
 
 
-class _moy_status_item_t(_c.Structure):
+class moy_status_item_t(_c.Structure):
     _fields_ = [
         ("pid", _c.c_uint32),
         ("icon", _c.c_char * 25),
@@ -52,13 +52,22 @@ class _moy_status_item_t(_c.Structure):
     ]
 
 
-class _moy_notes_note_t(_c.Structure):
+class moy_notes_note_t(_c.Structure):
     _fields_ = [
         ("id", _c.c_uint32),
         ("pid", _c.c_uint32),
         ("app", _c.c_char * 48),
         ("summary", _c.c_char * 48),
         ("body", _c.c_char * 201),
+    ]
+
+
+class moy_evq_ev_t(_c.Structure):
+    _fields_ = [
+        ("from_", _c.c_uint32),
+        ("n", _c.c_uint32),
+        ("app", _c.c_char * 48),
+        ("name", _c.c_char * 24),
     ]
 
 

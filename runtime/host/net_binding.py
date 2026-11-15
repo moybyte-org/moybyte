@@ -49,6 +49,10 @@ import threading
 from . import host_native, native_build
 from .moy_net_face import *  # noqa: F401,F403
 from .moy_net_face import PW_ITER
+from .moy_net_face import (
+    moy_http_req_t as _Req, moy_ota_state_t as _OtaState, moy_sync_batch_t as _Batch,
+    moy_sync_env_t as _Env, moy_sync_result_t as _Result, moy_sync_store_t as _Store,
+    moy_wc_state_t as _WcState, moy_web_cfg_t as _WebCfg, moy_web_state_t as _WebState)
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -68,63 +72,6 @@ _Z = ctypes.c_size_t
 _I = ctypes.c_int
 _PP = ctypes.POINTER(ctypes.c_char_p)
 _PZ = ctypes.POINTER(ctypes.c_size_t)
-
-
-class _Req(ctypes.Structure):
-    _fields_ = [("method", ctypes.c_void_p), ("method_n", _Z),
-                ("target", ctypes.c_void_p), ("target_n", _Z),
-                ("clen", ctypes.c_uint32), ("head_end", _Z)]
-
-
-class _Batch(ctypes.Structure):
-    _fields_ = [("root", _I), ("ops", ctypes.c_void_p),
-                ("ops_end", ctypes.c_void_p)]
-
-
-class _Store(ctypes.Structure):
-    _fields_ = [("carts", _P), ("files", _P), ("kinds", _P), ("journal", _I),
-                ("ts", ctypes.c_int64), ("shelf", ctypes.c_void_p),
-                ("shelf_cap", _Z), ("apps", _P)]
-
-
-class _Err(ctypes.Structure):
-    _fields_ = [("index", ctypes.c_uint32), ("why", ctypes.c_char * 40)]
-
-
-class _Result(ctypes.Structure):
-    _fields_ = [("applied", ctypes.c_uint32), ("refused", ctypes.c_uint32),
-                ("shelf", _I), ("nerr", ctypes.c_uint32), ("err", _Err * 8)]
-
-
-class _WebCfg(ctypes.Structure):
-    _fields_ = [("port", ctypes.c_uint16), ("carts", _P), ("files", _P),
-                ("kinds", _P), ("system", _P), ("defer", _P), ("apps", _P)]
-
-
-class _WebState(ctypes.Structure):
-    _fields_ = [("serving", ctypes.c_uint8), ("closing", ctypes.c_uint8),
-                ("parked", ctypes.c_uint8), ("listening", ctypes.c_uint8),
-                ("port", ctypes.c_uint16),
-                ("requests", ctypes.c_uint32), ("events", ctypes.c_uint32),
-                ("err", _I)]
-
-
-class _OtaState(ctypes.Structure):
-    _fields_ = [("phase", ctypes.c_uint8), ("sink", ctypes.c_uint8),
-                ("dl_done", ctypes.c_uint32), ("dl_total", ctypes.c_uint32),
-                ("done", ctypes.c_uint32), ("total", ctypes.c_uint32),
-                ("err", ctypes.c_char * 48)]
-
-
-class _WcState(ctypes.Structure):
-    _fields_ = [("state", ctypes.c_uint8), ("parked", ctypes.c_uint8),
-                ("dialled", ctypes.c_uint8), ("port", ctypes.c_uint16),
-                ("ip", ctypes.c_uint32), ("err", _I)]
-
-
-class _Env(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_void_p) for n in (
-        "v", "v_end", "root", "root_end", "ops", "ops_end")]
 
 
 _SIGS = (

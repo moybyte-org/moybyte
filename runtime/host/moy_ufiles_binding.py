@@ -21,6 +21,7 @@ import errno
 import json
 import os
 import types
+from moy_store_face import moy_buf_t as _Buf
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -43,10 +44,6 @@ _NAMES = ("moy_ufiles.h", "moy_ufiles.c", "moy_fs.h", "moy_fs.c", "moy_vol.h",
 _COMPILE = ("moy_store_host.c", "moy_ufiles.c", "moy_fs.c", "moy_vol.c",
             "moy_journal.c", "moy_cat.c", "moy_img.c", "moy_pack.c", "moy_json.c", "moy_png.c",
             "tinflate.c", "header.c", "adler32.c", "crc32.c")
-
-
-class _Buf(c.Structure):
-    _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
 
 
 _P = c.c_char_p

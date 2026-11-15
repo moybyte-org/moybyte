@@ -8,7 +8,8 @@ runtime/host/moy_log_face.py's, generated."""
 import ctypes as _c
 
 from moy_log_face import *  # noqa: F401,F403
-from moy_log_face import TEXT_MAX, _moy_log_cursor_t, _moy_log_rec_t, stats
+from moy_log_face import TEXT_MAX, stats
+from moy_log_face import moy_log_cursor_t as _moy_log_cursor_t, moy_log_rec_t as _moy_log_rec_t
 
 _CURRENT = 0xFFFFFFFF
 _HAND = (

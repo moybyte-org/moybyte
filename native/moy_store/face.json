@@ -66,6 +66,7 @@
     "about": "the store's files, cards, journal and shelf, native/moy_store",
     "host": "moy_store_binding",
     "binding": true,
+    "structs": [{"c": "moy_buf_t", "addr": ["p"]}],
     "rows": [
       {"py": "kvol()", "hand": true, "absent": ["host"]},
       {"py": "KVfs", "hand": true, "absent": ["host"]},

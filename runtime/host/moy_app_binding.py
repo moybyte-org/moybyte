@@ -43,6 +43,10 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 from face_errors import ABSENT, BAD, IO, NOSTORE, OK
+from moy_app_face import (
+    moy_app_policy_t as _Policy, moy_app_run_t as _Run, moy_app_surface_t as _Surf,
+    moy_grant_t as _Grant)
+from moy_store_face import moy_buf_t as _Buf
 KINDS_N, TOKENS_N = 4, 38
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
@@ -67,38 +71,8 @@ ROLE_N = len(_SRC["roles"])
 ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 
 
-class _Buf(c.Structure):
-    """moy_fs.h's moy_buf_t: an answer the user-files layer allocated."""
-    _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
-
-
-class _Run(c.Structure):
-    """moy_app_run.h's moy_app_run_t: an app's run on a tier binding."""
-    _fields_ = [("a", c.c_void_p), ("sn", c.c_uint32), ("g", c.c_uint32),
-                ("roles", c.c_uint32)]
-
-
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
 Pointer = collections.namedtuple("Pointer", ("x", "y", "down", "click", "visible"))
-
-
-class _Surf(c.Structure):
-    _fields_ = [("canvas", c.c_uint32), ("w", c.c_int32), ("h", c.c_int32),
-                ("ox", c.c_int32), ("oy", c.c_int32), ("cx", c.c_int32),
-                ("cy", c.c_int32), ("cw", c.c_int32), ("ch", c.c_int32),
-                ("font_scale", c.c_uint8), ("chrome_scale", c.c_uint8),
-                ("windowed", c.c_uint8)]
-
-
-class _Grant(c.Structure):
-    _fields_ = [("id_len", c.c_uint8), ("ns_len", c.c_uint8), ("cls", c.c_uint8),
-                ("kind", c.c_int8), ("roles", c.c_uint32), ("owner", c.c_uint32),
-                ("id", c.c_char * (ID_MAX + 1))]
-
-
-class _Policy(c.Structure):
-    _fields_ = [("roles", c.c_uint32), ("nkinds", c.c_uint8),
-                ("kinds", c.c_int8 * KINDS_N)]
 
 
 _SIGS = (
@@ -1128,9 +1102,7 @@ def binding(sanitize=False):
 
     table_names = tuple(lib.moy_app_table_name(i).decode() for i in range(len(_TABLE)))
 
-    class _Native(c.Structure):
-        _fields_ = [("symbol", c.c_char_p), ("fn", c.c_void_p),
-                    ("signature", c.c_char_p), ("attachment", c.c_void_p)]
+    from moy_wasm_face import NativeSymbol as _Native
 
     def wasm_rows():
         n = c.c_uint32()

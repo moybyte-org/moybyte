@@ -32,6 +32,13 @@
     "consts": [
       "MOY_SEAL_PW_ITER as PW_ITER"
     ],
+    "structs": [
+      {"c": "moy_http_req_t", "addr": ["method", "target"]},
+      {"c": "moy_sync_batch_t", "addr": ["ops", "ops_end"]},
+      {"c": "moy_sync_store_t", "addr": ["shelf"]}, "moy_sync_result_t", "moy_web_cfg_t",
+      "moy_web_state_t", "moy_ota_state_t", "moy_wc_state_t",
+      {"c": "moy_sync_env_t", "addr": ["v", "v_end", "root", "root_end", "ops", "ops_end"]}
+    ],
     "rows": [
       {"py": "encode_batch(v, root_id, ops)", "hand": true},
       {"py": "decode_batch(body)", "hand": true},
@@ -117,5 +124,11 @@
       {"py": "web_handle_answer(resp)", "hand": true, "absent": ["mp"]},
       {"py": "web_token()", "hand": true, "absent": ["mp"]}
     ]
+  },
+  "moy_lora": {
+    "about": "the LoRa radio, native/moy_net/moy_lora.h",
+    "host": "moy_lora",
+    "registered": false,
+    "structs": ["moy_lora_cfg_t"]
   }
 }

@@ -21,6 +21,7 @@ import traceback
 
 import host_native
 import native_build
+from moy_loop_face import moy_idle_t as _Idle, moy_loop_meter_t as _Meter, moy_loop_pump_t as _Pump
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _SHIM = os.path.join(_KERNEL, "moy_loop.c")
@@ -41,21 +42,6 @@ _I = ctypes.c_int
 _P = ctypes.c_void_p
 _UP_FN = ctypes.CFUNCTYPE(_I, _I, _U32, ctypes.c_char_p)
 _ROLE_FN = ctypes.CFUNCTYPE(_I32, _U32, _U32, _P, ctypes.c_size_t, _P, ctypes.c_size_t)
-
-
-class _Meter(ctypes.Structure):
-    _fields_ = [("budget_us", _I32), ("avg_us", _U32), ("last_us", _U32),
-                ("max_us", _U32), ("misses", _U32), ("n", _U32)]
-
-
-class _Pump(ctypes.Structure):
-    _fields_ = [("frame_ms", _U32), ("slot", _U32), ("debt", _U32),
-                ("slack", _U32), ("tick_ms", _U32)]
-
-
-class _Idle(ctypes.Structure):
-    _fields_ = [("after_s", _U32 * 5), ("idle_at", _U32), ("state", ctypes.c_uint8),
-                ("can_dim", _B), ("force", _B), ("wake", _B)]
 
 
 _SIGS = (

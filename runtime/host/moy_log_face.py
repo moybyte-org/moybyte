@@ -29,7 +29,7 @@ TRAPPED = 134
 KILLED = 137
 
 
-class _moy_log_rec_t(_c.Structure):
+class moy_log_rec_t(_c.Structure):
     _fields_ = [
         ("t_us", _c.c_uint64),
         ("seq", _c.c_uint32),
@@ -40,14 +40,14 @@ class _moy_log_rec_t(_c.Structure):
     ]
 
 
-class _moy_log_cursor_t(_c.Structure):
+class moy_log_cursor_t(_c.Structure):
     _fields_ = [
         ("seq", _c.c_uint32),
         ("off", _c.c_uint32),
     ]
 
 
-class _moy_log_stats_t(_c.Structure):
+class moy_log_stats_t(_c.Structure):
     _fields_ = [
         ("first", _c.c_uint32),
         ("next", _c.c_uint32),
@@ -59,7 +59,7 @@ class _moy_log_stats_t(_c.Structure):
 _SIGS = (
     ("moy_log_spawn", [_c.c_char_p], _c.c_uint32),
     ("moy_log_name", [_c.c_uint32], _c.c_char_p),
-    ("moy_log_stats", [_c.POINTER(_moy_log_stats_t)], None),
+    ("moy_log_stats", [_c.POINTER(moy_log_stats_t)], None),
     ("moy_log_level_name", [_c.c_int], _c.c_char_p),
     ("moy_log_level_of", [_c.c_char_p, _c.c_size_t], _c.c_int),
     ("moy_log_init", [_c.c_size_t], _c.c_bool),
@@ -80,7 +80,7 @@ def name(pid):
 
 
 def stats():
-    s = _moy_log_stats_t()
+    s = moy_log_stats_t()
     _lib().moy_log_stats(_c.byref(s))
     return (s.first, s.next, s.used, s.cap)
 
