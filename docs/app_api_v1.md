@@ -1572,7 +1572,8 @@ it paints the strip after `draw()` and routes a tap in its band before
   Mic inside an open field; by default its `ctx.ui` context's,
   `ui_draw.app_cancel`, so a `ui.field` it draws gives its draft back and
   a `ui.popover` it draws is dismissed),
-  `DESK_TILE` (False: off the desk's column). `layers.AppLayer` defaults
+  `DESK_TILE` (False: off the desk's column; an app no cart in the store
+  carries is off it too, as on the home). `layers.AppLayer` defaults
   each; the console asks them through its input policy and nowhere else.
 
 **Between apps.** `ctx.nav.open_app(id)` opens another app by its registered

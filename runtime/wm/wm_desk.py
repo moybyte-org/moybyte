@@ -306,6 +306,10 @@ class _BackdropLayer(Layer):
                 if app.is_app(c):
                     cart = c
                     break
+            if cart is None:
+                # No cart in the store carries it (a C3 Zero's store holds a
+                # handful): open_app could not open it, so it has no tile.
+                continue
             out.append((app.id, str(ws.spine.app_title(app.id) or app.id.upper()), cart))
         for c in ws.home.unclaimed_apps(carts):
             cid = str(c.get("id") or c.get("title") or "")

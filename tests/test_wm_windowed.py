@@ -3678,6 +3678,22 @@ def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
     assert opened == [notes[0][2]]
 
 
+def test_an_app_no_cart_carries_has_no_desk_tile(tmp_path, monkeypatch):
+    """A registered app whose identity cart the store does not hold has no
+    tile: open_app could not open it. A C3 Zero's store holds a handful of
+    the system carts, and the page it served drew a tile for every app,
+    so most of its desk took clicks and did nothing."""
+    ws = _moy_desk(tmp_path)
+    desk = ws.wm._backdrop_layer
+    before = [k for k, _l, _c in desk._icon_catalog()]
+    gone = next(a for a in ws.app_layers if a.id in before)
+    here = ws.home.runs_here
+    monkeypatch.setattr(ws.home, "runs_here",
+                        lambda carts: [c for c in here(carts) if not gone.is_app(c)])
+    after = [k for k, _l, _c in desk._icon_catalog()]
+    assert after == [k for k in before if k != gone.id]
+
+
 def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
     """Every tile's icon is its app's slot of the theme's set (Paint's by
     its alias), at the 24-pixel size in the ink."""
