@@ -340,8 +340,9 @@ def test_notify_sees_a_compiled_programs_post_before_the_frame_takes_it(console,
     from runtime import notifications as N
     monkeypatch.setattr(N, "NOTES", N.Notifications())
     waiting = []
-    monkeypatch.setattr(N._E, "notes_waiting", lambda: len(waiting))
-    monkeypatch.setattr(N._E, "notes_take", lambda: waiting.pop(0) if waiting else None)
+    kernel_waiting, kernel_take = N._E.notes_waiting, N._E.notes_take
+    monkeypatch.setattr(N._E, "notes_waiting", lambda: len(waiting) + kernel_waiting())
+    monkeypatch.setattr(N._E, "notes_take", lambda: waiting.pop(0) if waiting else kernel_take())
     _ws, door = console
     first = N._E.notes_id()
     waiting.append((first, 0, "local.svc", "Queued", ""))
