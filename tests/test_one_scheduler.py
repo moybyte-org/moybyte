@@ -64,6 +64,25 @@ def _cart(tmp_path, runtime, main, src, perms=()):
     return root
 
 
+def _lua_names():
+    """(every `moybyte.` Lua name of the call table, the ones only a run's
+    role binding adds: its moybyte rows that are not the crypto rows every
+    Lua program's C table holds)."""
+    rows = json.loads((ROOT / "native" / "os_calls.json").read_text())["rows"]
+    table, hand = set(), set()
+    for r in rows:
+        lua = r.get("lua") or ()
+        for n in ([lua] if isinstance(lua, str) else lua):
+            if n.startswith("moybyte."):
+                table.add(n[len("moybyte."):])
+                if r.get("lua_ret") == "hand":
+                    hand.add(n[len("moybyte."):])
+    binding = (ROOT / "native" / "moy_app" / "moy_app_lua_rows.h").read_text()
+    run = set(re.findall(r'X\(MOY_ROLE_MOYBYTE, "moybyte", "(\w+)"', binding))
+    assert run and hand <= run, "the scan stopped finding the binding's rows"
+    return table, run - hand
+
+
 def test_a_python_process_s_timers_are_rows_of_the_kernel_s_table():
     pid = L.current()
     before = moy_evq.timers(pid) if moy_evq.has(pid) else 0
@@ -142,9 +161,27 @@ def test_a_lua_app_and_a_lua_service_hold_one_table_one_sandbox_and_kernel_timer
         # os.clock, a run's file rows (native/moy_app/moy_app_lua.h)
         svc_banned = _said(since, svc, "globals")
         assert [g for g in svc_banned if g != "os"] == [g for g in app_banned if g != "os"] == []
-        own = set(lua_ext.LUA_OWN) | set(lua_ext.LUA_RUN_CALLS) | {"ERR", "WARNING", "INFO"}
-        assert own <= set(app_names) and own <= set(svc_names)
-        assert set(svc_names) - own <= {"exit"} | set(app_names)
+        # Every `moybyte.` name of the call table, in both; the run's role
+        # binding adds its device and status item rows to an app's
+        # (native/moy_app/moy_app_lua.h), and a service holds `exit`.
+        table, run = _lua_names()
+        consts = {"ERR", "WARNING", "INFO"}
+        assert set(app_names) == table | consts
+        assert set(svc_names) == (table - run) | {"exit"} | consts
     finally:
         S.SCHED.stop(svc)
         ws.spine.exit()
+
+
+def test_a_compiled_app_s_timers_are_rows_of_the_kernel_s_table(tmp_path):
+    """A wasm app's moybyte_every is the kernel's row, not the Python
+    registry's, and it goes with the run (tests/test_wasm_app.py's Talk)."""
+    from test_wasm_app import _talk
+    ws, pid, lines = _talk(tmp_path)
+    try:
+        assert [ln for ln in lines if ln.startswith("every ")], lines
+        assert moy_evq.timers(pid) >= 1
+        assert not [w for w in moybyte.WAKES.list if w[1] == pid]
+    finally:
+        ws.spine.exit()
+    assert moy_evq.timers(pid) == 0
