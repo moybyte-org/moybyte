@@ -12,3 +12,7 @@ SRC_USERMOD_LIB_C += $(MOY_UI_DIR)/moy_ui.c $(MOY_UI_DIR)/moy_ui_glyph.c $(MOY_U
 CFLAGS_USERMOD += -I$(MOY_UI_DIR) -I$(MOY_UI_DIR)/../moy_gfx -I$(MOY_UI_DIR)/../moy_gfx/libmoy \
     -I$(MOY_UI_DIR)/../moy_glass \
     -I$(MOY_UI_DIR)/../moy_spine
+# A generated face (gen_os, *_face.h) holds names only its includer uses, and
+# the qstr pass re-scans a source only when that source changed: a face that
+# changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_UI_DIR)/*_face.h)

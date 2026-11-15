@@ -26,3 +26,7 @@ SRC_USERMOD_LIB_C += $(MOY_NET_DIR)/moy_net_port.c $(MOY_NET_DIR)/moy_wifi.c $(M
 SRC_USERMOD_C += $(MOY_NET_DIR)/modmoy_http.c $(MOY_NET_DIR)/modmoy_lora.c
 endif
 CFLAGS_USERMOD += -I$(MOY_NET_DIR) -I$(MOY_NET_DIR)/../moy_spine -I$(MOY_NET_DIR)/../moy_store -I$(MOY_NET_DIR)/../moy_web -I$(MOY_NET_DIR)/../moy_input
+# A generated face (gen_os, *_face.h) holds names only its includer uses, and
+# the qstr pass re-scans a source only when that source changed: a face that
+# changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_NET_DIR)/*_face.h)

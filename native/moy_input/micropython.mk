@@ -13,3 +13,7 @@ SRC_USERMOD_C += $(MOY_INPUT_DIR)/modmoy_midi.c
 SRC_USERMOD_LIB_C += $(MOY_INPUT_DIR)/moy_midi.c $(MOY_INPUT_DIR)/moy_midi_dev.c $(MOY_INPUT_DIR)/moy_touch.c $(MOY_INPUT_DIR)/moy_kbd.c $(MOY_INPUT_DIR)/moy_touchdev.c $(MOY_INPUT_DIR)/moy_ble_task.c
 endif
 CFLAGS_USERMOD += -I$(MOY_INPUT_DIR) -I$(MOY_INPUT_DIR)/../moy_spine
+# A generated face (gen_os, *_face.h) holds names only its includer uses, and
+# the qstr pass re-scans a source only when that source changed: a face that
+# changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_INPUT_DIR)/*_face.h)
