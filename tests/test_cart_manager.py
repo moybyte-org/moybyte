@@ -528,6 +528,24 @@ def test_slim_strips_the_heavy_keys_and_rehydrate_refills_the_same_dict(tmp_path
     assert cart["lazy"] is False and cart.get("src")
 
 
+def test_a_run_only_field_leaves_the_shelf_and_comes_back_with_the_run(tmp_path):
+    """A cart's palette is read by a run alone (Player.start), so the shelf's
+    entry holds none: a PICO-8 import's is 64 strings, ~2.3KB of live heap a
+    shelved cart. Rehydrate brings it back; reslim drops it again."""
+    ws = build_ws(tmp_path)
+    pal = ["%06X" % (i * 0x40404) for i in range(64)]
+    path = _mk(str(ws.carts_root), "Paletted", palette=pal)["path"]
+    ws.carts.apply(shelf(str(ws.carts_root)))
+    cart = next(c for c in ws.carts.all if c.get("path") == path)
+    assert cart["lazy"] is True
+    assert not [k for k in cart_manager.RUN_ONLY if k in cart]
+
+    ws.carts.rehydrate(cart)
+    assert cart["palette"] == pal
+    ws.carts.reslim(cart)
+    assert "palette" not in cart and cart["lazy"] is True
+
+
 def test_slim_bakes_the_grid_icon_while_the_art_is_still_in_ram(tmp_path):
     """The one ordering inside `slim` itself: the icon is baked BEFORE the
     sprite art is deleted, because after that there is nothing to bake from.

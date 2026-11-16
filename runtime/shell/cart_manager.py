@@ -52,11 +52,15 @@ named, which the verbs below already read as "nothing to load".
 # ~300-500KB of permanently-live strings the GC MARK phase pays for on every
 # collect (#66 live-set diet). Opening a cart rehydrates them from the store,
 # and switching carts re-slims the previous one. "icon_rows" is what the scan
-# read for the cart's icon, dropped once slim() has baked it.
+# read for the cart's icon, dropped once slim() has baked it. RUN_ONLY are the
+# entry's fields only a run reads, off the rehydrated cart: a "palette" is 64
+# "RRGGBB" strings, ~2.3KB of live heap a shelved PICO-8 import would hold.
 import moy_catalogue
 from moy_carts import PAYLOADS
 import ui_draw as _ui_draw
-_SLIM_DROPS = PAYLOADS + ("icon_rows",)
+RUN_ONLY = ("palette",)
+_RESLIM_DROPS = PAYLOADS + RUN_ONLY
+_SLIM_DROPS = _RESLIM_DROPS + ("icon_rows",)
 
 
 def _folder_order(cart):
@@ -314,7 +318,7 @@ class CartManager:
         # most ~one fat cart live). Only SD-backed carts that slim() managed.
         if cart is None or not cart.get("path") or cart.get("lazy") is not False:
             return
-        for k in PAYLOADS:
+        for k in _RESLIM_DROPS:
             if k in cart:
                 del cart[k]
         cart["lazy"] = True
