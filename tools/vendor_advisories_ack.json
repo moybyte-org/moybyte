@@ -5,6 +5,12 @@
       "id": "CVE-2025-66442",
       "date": "2026-11-16",
       "reason": "A timing side channel in RSA and in CBC/ECB decryption under LLVM's select-optimize, fixed in no release. The vendored subset has no RSA and decrypts only with GCM, CTR and CCM; the boards build with GCC."
+    },
+    {
+      "pin": "native/moy_lua/lua_vendor.json",
+      "id": "CVE-2021-32921",
+      "date": "2026-11-17",
+      "reason": "A non-constant-time secret comparison in Prosody before 0.11.9; NVD names Lua 5.2 and later only as the runtime Prosody runs under. Nothing in Lua itself is affected, and the console runs no Prosody."
     }
   ]
 }

@@ -24,7 +24,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
-  MicroPython v1.28 and ESP-IDF v5.5.6 into the board's `.build/`, and an
+  MicroPython and ESP-IDF at the releases `tools/upstream_pins.env` names
+  into the board's `.build/`, and an
   oversized image, or one under its board's headroom floor (`[image]
   headroom_floor_kib` in board.toml), is a build FAILURE on every board. Every
   floor is 0 since 2026-11-07 (owner): with no users the slots are still ours
@@ -85,6 +86,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   commit than the tag's is reset to stock at the tag (patches gone, the
   patchers re-apply them) and a tag it cannot get fails the build. Same tag: a
   silent no-op, patches and objects kept.
+- **The tag and the ESP-IDF release are named once, in
+  `tools/upstream_pins.env`.** The build lib, the web runner's `build.sh`, the
+  Makefile and CI read it, and `tests/test_upstream_pins.py` fails a build
+  script or workflow that spells a release. CI's board builds then run
+  `tools/patch_check.py`, which tries every `patches/*.patch` with `git apply
+  --check --cached` against the pinned trees' indexes; a bump runs it first.
 - **A build runs in a worktree, never the main checkout.** The main
   checkout's `dist/` and board `.build/` trees are the images every other
   session flashes, and a build there overwrites them (it happened twice before

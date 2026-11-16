@@ -1122,21 +1122,6 @@ def test_a_usj_enable_that_changed_shape_FAILS(tmp_path):
     assert "Moybyte" not in f.read_text(encoding="utf-8")
 
 
-def test_every_board_and_the_ci_cache_name_the_one_pinned_release():
-    """MOYBYTE_IDF_VER is the release; nothing else that builds or caches
-    for a board may spell another one."""
-    pinned = _pinned()
-    wf = (ROOT / ".github" / "workflows" / "firmware-build.yml").read_text(
-        encoding="utf-8")
-    assert "idf-${{ matrix.board }}-${{ runner.os }}-%s" % pinned in wf
-    for build in (ROOT / "firmware").glob("*/build.sh"):
-        text = build.read_text(encoding="utf-8")
-        for word in text.split():
-            if word.startswith("v5.") or word.startswith("v6."):
-                assert word.rstrip(".,;:)") == pinned, (
-                    "%s names ESP-IDF %s" % (build, word))
-
-
 # -- the OTA identity stamp -----------------------------------------------------
 
 

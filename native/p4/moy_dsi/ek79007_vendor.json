@@ -1,0 +1,26 @@
+{
+  "dir": "native/p4/moy_dsi/vendor",
+  "upstream": {
+    "name": "espressif/esp_lcd_ek79007",
+    "version": "2.0.2~1",
+    "url": "https://components-file.espressif.com/components/espressif/esp_lcd_ek79007/2.0.2~1/espressif__esp_lcd_ek79007-v2.0.2_1.zip",
+    "sha256": "b6bcbb6eaf46334bd1e68cc8892e694d75c642715f76045111a9ac723fe24d39",
+    "repository": "https://github.com/espressif/esp-iot-solution",
+    "path": "components/display/lcd/esp_lcd_ek79007",
+    "commit": "12f6ca1182ec48889b17ec570fadaaf267cb336e"
+  },
+  "files": {
+    "native/p4/moy_dsi/vendor/CHANGELOG.md": "7ea44d633657b5efcbdd074b6c1ea438e7d8815bc88a7029086c568769554d15",
+    "native/p4/moy_dsi/vendor/CMakeLists.txt": "dfe000b44d1b6c371293b1016c424b649412ff72d5abaef6fca4d69fa9e64cea",
+    "native/p4/moy_dsi/vendor/README.md": "40fde74bdd8cbad50a4805d5e365a36b0e91a5335f5156eabc023bcc78a2bdb8",
+    "native/p4/moy_dsi/vendor/esp_lcd_ek79007.c": "0bd6882cbf9fc1a7dc932b288e99784519816d9d9989f15578abbfa094c76c1b",
+    "native/p4/moy_dsi/vendor/idf_component.yml": "d04801508832646316e685e15480c8a3a68ef0c6f92d066d34d727c39282612b",
+    "native/p4/moy_dsi/vendor/license.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "native/p4/moy_dsi/vendor/include/esp_lcd_ek79007.h": "d015530ae1ab69b1b9d11ce27a5570840a59bb203a424ab49da6788f25bba371",
+    "native/p4/moy_dsi/vendor/test_apps/CMakeLists.txt": "e56877379728a334f788c98593f68657a2eb010a2459cbcf957acc886ec81923",
+    "native/p4/moy_dsi/vendor/test_apps/sdkconfig.defaults": "1e6eb9fd686be544d3b2088a76cfe0d03127a945c8852bb9fd364e40d92ca7e3",
+    "native/p4/moy_dsi/vendor/test_apps/main/CMakeLists.txt": "2855a38701db0c90350e0cc9cb6e2db4366f6de1e382252135fc2215ae83c4fb",
+    "native/p4/moy_dsi/vendor/test_apps/main/idf_component.yml": "221ac9ea2867db047c36c4f50fa4d9420da2944765a91f569f9e928b162f8078",
+    "native/p4/moy_dsi/vendor/test_apps/main/test_esp_lcd_ek79007.c": "513dc3ce18c482fb40d8ce99ef4ea739a1792283839926addc1ea72c3c523d34"
+  }
+}

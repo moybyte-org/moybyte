@@ -140,7 +140,7 @@ esp32p4 --port /dev/ttyACM0 --baud 3000000 write_flash 0x2000
 dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
 - `build.sh` clones MicroPython v1.28.0 into `.build/` and ESP-IDF v5.5.6
-  (`MOYBYTE_IDF_VER` in `tools/esp32_build_lib.sh`) into `.build/esp-idf`,
+  (`MOYBYTE_IDF_VER` in `tools/upstream_pins.env`) into `.build/esp-idf`,
   the checkout every other board reuses, patches `esp_lcd` into the port's
   `IDF_COMPONENTS` (see below), and builds with `BOARD_DIR=boards/MOYBYTE_P4`.
 - Serial is the CH343 USB-UART bridge (`/dev/ttyACM0`); `mpremote` works, and

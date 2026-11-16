@@ -182,17 +182,23 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: python3 -m pip install --quiet 'zopfli==0.4.3'
 
-      # Cache the installed Xtensa/RISC-V toolchains (the expensive part); the
-      # .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
-      # The key names the ESP-IDF release (tools/esp32_build_lib.sh's
-      # MOYBYTE_IDF_VER): a release that wants other tools installs them over
-      # the restored ones once and saves them under its own key.
+      # The upstream releases (tools/upstream_pins.env) as this job's step
+      # outputs: steps.pins.outputs.MOYBYTE_IDF_VER and MOYBYTE_MPY_TAG.
+      - name: Read the upstream pins
+        id: pins
+        if: steps.gate.outputs.run == 'true'
+        run: grep -E '^[A-Z][A-Z0-9_]*=' tools/upstream_pins.env >> "$GITHUB_OUTPUT"
+
+      # Cache the installed Xtensa/RISC-V toolchains (the expensive part).
+      # The key names the ESP-IDF release (MOYBYTE_IDF_VER): a release that
+      # wants other tools installs them over the restored ones once and saves
+      # them under its own key.
       - name: Cache ESP-IDF toolchains
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.espressif
-          key: idf-${{ matrix.board }}-${{ runner.os }}-v5.5.6
+          key: idf-${{ matrix.board }}-${{ runner.os }}-${{ steps.pins.outputs.MOYBYTE_IDF_VER }}
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
       # ccache 4 writes ~/.cache/ccache unless told; name the directory the
@@ -245,7 +251,7 @@ jobs:
             pip-${{ runner.os }}-
 
       # The BIG win: cache the per-board `.build` UPSTREAM CLONES (esp-idf +
-      # micropython). They are PINNED in build.sh, so an
+      # micropython). They are PINNED (tools/upstream_pins.env), so an
       # otherwise-fresh runner re-clones ~1.5 GB of esp-idf on every run -- and for
       # the T-Deck that late esp-idf fetch is exactly why the build had to run
       # twice (the #43 patch can't land until esp-idf exists). Keyed on build.sh so
@@ -273,7 +279,7 @@ jobs:
           path: |
             ${{ matrix.dir }}/.build
             !${{ matrix.dir }}/.build/micropython/ports/esp32/build-*
-          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py') }}
+          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py', 'tools/upstream_pins.env') }}
 
       # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
       # emsdk + a micropython checkout, both pinned by web_runner/build.sh).
@@ -282,7 +288,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh', 'tools/upstream_pins.env') }}
           restore-keys: web-runner-${{ runner.os }}-
 
       - name: Host venv (make setup)
@@ -319,6 +325,17 @@ jobs:
             echo "== warm .build cache: single pass is patched"
           fi
           ccache -s | head -12 || true
+
+      # Every patch in patches/ against the stock releases the build just put
+      # at their pins, read from the trees' indexes (tools/patch_check.py), so
+      # a restored, already-patched tree still answers. It runs when the build
+      # failed too: a release bump then names every patch it breaks at once.
+      - name: Check patches/ against the pinned releases
+        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' }}
+        run: >-
+          python3 tools/patch_check.py
+          --mpy ${{ matrix.dir }}/.build/micropython
+          --idf ${{ matrix.dir }}/.build/esp-idf
 
       # The P4's radio is a SECOND processor with its own firmware: the C6
       # slave (the espnow shim -- docs/espnow_p4_2026-08.md). Built from the

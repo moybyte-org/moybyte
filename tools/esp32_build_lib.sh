@@ -11,8 +11,15 @@
 # the board's own sdkconfig.board.
 #
 # Callers set (before sourcing or before the call that needs them):
-#   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR MPY_TAG DIST_DIR MODULES_DIR
+#   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR DIST_DIR MODULES_DIR
 # Every function says what else it reads.
+
+# The pinned upstream releases, MOYBYTE_MPY_TAG and MOYBYTE_IDF_VER, from the
+# one file that names them. MPY_TAG in the environment overrides the tag for
+# one build; nothing overrides the ESP-IDF release.
+# shellcheck source=upstream_pins.env
+source "$(dirname "${BASH_SOURCE[0]}")/upstream_pins.env"
+MPY_TAG="${MPY_TAG:-${MOYBYTE_MPY_TAG}}"
 
 # Parallelism for every make below (MOYBYTE_BUILD_JOBS overrides -- CI runners
 # report more CPUs than they schedule).
@@ -179,9 +186,6 @@ moybyte_resolve_build_python() {
 moybyte_clone_micropython() {
   bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}"
 }
-
-# The ESP-IDF release every board builds against: the one place it is named.
-MOYBYTE_IDF_VER="v5.5.6"
 
 # The release an ESP-IDF checkout at $1 is, as `vX.Y.Z`, read from its
 # tools/cmake/version.cmake (a `--depth 1` clone holds no tag to describe).

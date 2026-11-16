@@ -141,14 +141,15 @@ jobs:
       - name: Install zopfli
         run: python3 -m pip install --quiet 'zopfli==0.4.3'
 
-      # emsdk + the micropython clone, keyed on the build script that pins them.
+      # emsdk + the micropython clone, keyed on the build script and the pin file
+      # (tools/upstream_pins.env) that pin them.
       # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board
       # builds, which need the whole ESP-IDF and cache only their toolchains).
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-master-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          key: web-runner-master-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh', 'tools/upstream_pins.env') }}
           restore-keys: web-runner-master-${{ runner.os }}-
 
       # dev's micropython clone and objects, apart from master's. Its emsdk is
@@ -158,7 +159,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _dev/firmware/web_runner/.build
-          key: web-runner-dev-${{ runner.os }}-${{ hashFiles('_dev/firmware/web_runner/build.sh') }}
+          key: web-runner-dev-${{ runner.os }}-${{ hashFiles('_dev/firmware/web_runner/build.sh', '_dev/tools/upstream_pins.env') }}
           restore-keys: web-runner-dev-${{ runner.os }}-
 
       - name: Build the browser console (master)

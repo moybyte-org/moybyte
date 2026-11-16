@@ -200,7 +200,8 @@ preflight-web:  ## ...plus the browser suites in real Chrome
 # would answer "MicroPython cannot write this format" -- about itself, not about
 # the boards -- which is the sort of false negative this whole target exists to
 # stop.
-UNIX_MP_TAG ?= v1.28.0
+include tools/upstream_pins.env
+UNIX_MP_TAG ?= $(MOYBYTE_MPY_TAG)
 UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods

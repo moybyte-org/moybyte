@@ -92,3 +92,7 @@ diff -u lua-5.4.7/src/lvm.c ./lvm.c        # the pragma block, plus item 4
 diff -u lua-5.4.7/src/luaconf.h ./luaconf.h # LUA_32BITS, plus item 4
 diff -u lua-5.4.7/src/lobject.c ./lobject.c # the pragma, plus items 0 and 3
 ```
+
+## The pin
+
+Every file's hash: `native/moy_lua/lua_vendor.json` (re-stamped by `tools/vendor_stamp.py`).

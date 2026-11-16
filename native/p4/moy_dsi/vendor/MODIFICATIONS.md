@@ -45,3 +45,7 @@ for f in esp_lcd_ek79007.c include/esp_lcd_ek79007.h license.txt \
   curl -sS "$B/$f" | diff -q - "$f"
 done
 ```
+
+## The pin
+
+Every file's hash: `native/p4/moy_dsi/ek79007_vendor.json` (re-stamped by `tools/vendor_stamp.py`).

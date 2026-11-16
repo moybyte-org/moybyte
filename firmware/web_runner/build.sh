@@ -35,7 +35,7 @@
 #     emscripten_scan_registers dependency -> NO -s ASYNCIFY (it instruments every
 #     wasm function; dropping it halves the .wasm and speeds the whole VM).
 #   - no periodic mp_js_hook (node REPL Ctrl-C plumbing; costs a call / 10 VM ops).
-# Port patches applied idempotently below (upstream v1.28.0 vs emscripten 6.x):
+# Port patches applied idempotently below (upstream MicroPython vs emscripten 6.x):
 #   - Makefile: two -Wno-* (new clang warnings tripping -Werror) + -Os on the
 #     LINK step (emcc defaults the JS glue to -O0 + ASSERTIONS, and the
 #     assertions abort on the port's own patterns).
@@ -54,7 +54,9 @@ MPY_DIR="${BUILD_DIR}/micropython"
 EMSDK_DIR="${BUILD_DIR}/emsdk"
 PORT_DIR="${MPY_DIR}/ports/webassembly"
 STAGE_DIR="${BUILD_DIR}/stage"
-MPY_TAG="${MPY_TAG:-v1.28.0}"
+# shellcheck source=../../tools/upstream_pins.env
+source "${REPO_ROOT}/tools/upstream_pins.env"
+MPY_TAG="${MPY_TAG:-${MOYBYTE_MPY_TAG}}"
 # The emscripten the bundle is compiled with: emcc's output is not byte-reproducible
 # across versions, and this bundle rides every board image. It is the version
 # moy-spec's preflight builds its player in (EMSDK_IMAGE there); move them together.
