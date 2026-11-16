@@ -920,7 +920,9 @@ class Workstation:
         # terminal scrollback after it. One instance for the console's life
         # (its ring is preallocated, so a run costs no allocation); `run_script`
         # below is what starts a script on it.
-        self.script_console = TextConsole(self, NAMES)
+        self.script_console = TextConsole(
+            self.app_context("script_console", TextConsole.NEEDS), NAMES,
+            lambda: self.input, lambda: self.run, self._restart_script)
         # The EDITOR app (Stage 3, editor_app.py): owns the tab ladder + the active-tab
         # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
         # which is now a forwarding projection of editor_app.tab -- see below). The tab
@@ -2654,6 +2656,12 @@ class Workstation:
         self.input.spend_key()         # the key that ran it types nothing
         self.spine.play(caller)
         return (True, "")
+
+    def _restart_script(self):
+        """Enter on the script console after its script ended: the run
+        again, on a canvas with its draw state reset."""
+        self.reset_canvas_state()
+        self.start()
 
     def ask_run(self, handle):
         """RUN the script an editor handle holds (`EditorHandle.run`), as a

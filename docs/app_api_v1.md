@@ -571,8 +571,11 @@ model.
 **Python is trusted, not sandboxed.** A Python app runs in the shell's one VM
 with the real builtins, so `open()`, `os` and `socket` reach the whole tree
 with or without a grant; the manifest is what the install prompt tells the
-user (`docs/os_2026-11/processes.md` §2). Lua and wasm have no names past
-their grants.
+user (`docs/os_2026-11/processes.md` §2). What it imports is the app API,
+`moybyte` and `ui`, and the language's own library
+(`runtime/carts/app_imports.py`): the installer refuses a cart that imports
+any other of the console's modules, and names it. Lua and wasm have no names
+past their grants.
 
 **Opening with another app.** Your manifest says what your app opens
 (`"handles": ["text/markdown", "image/*"]`), and a file is named by its path

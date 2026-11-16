@@ -114,9 +114,18 @@ class TextConsole:
 
     LINES = 200          # scrollback capacity, in WRAPPED rows
     MIN_COLS = 8
+    NEEDS = ("damage", "theme", "surface")
 
-    def __init__(self, ws, names):
-        self.ws = ws
+    def __init__(self, ctx, names, inp, served, restart):
+        """`ctx` its AppContext; `inp()` the console's input state; `served()`
+        the run the shell serves (procs.Run: the canvas the script draws on
+        and its Player); `restart()` runs the script that ended again."""
+        self._damage = ctx.damage
+        self._theme = ctx.theme
+        self._surface = ctx.surface
+        self._inp = inp
+        self._served = served
+        self._restart = restart
         self.NAMES = names
         self.cols = 38
         self._cap = self.LINES
@@ -264,8 +273,7 @@ class TextConsole:
         """One keyboard byte. Enter submits; everything else edits the line.
         After the script ended, Enter runs it again."""
         if code in (0x0D, 0x0A) and self.ended and not self.reading():
-            self.ws.reset_canvas_state()
-            self.ws.start()
+            self._restart()
             return True
         if not code or not self.reading():
             return False
@@ -380,7 +388,7 @@ class TextConsole:
         """Take this frame's keyboard byte and pointer. Called from the tick the
         Player runs, because that is what a script IS -- the console is not a
         content Layer of its own, it is the running cart's surface."""
-        inp = self.ws.input
+        inp = self._inp()
         code = inp.typed
         if code:
             self.key(code)
@@ -412,10 +420,10 @@ class TextConsole:
     # -- the surface ----------------------------------------------------------
 
     def _dirty(self):
-        self.ws.mark_dirty()
+        self._damage.all()
 
     def _fs(self):
-        return max(1, int(getattr(self.ws.run.canvas, "font_scale", 1) or 1))
+        return max(1, int(getattr(self._served().canvas, "font_scale", 1) or 1))
 
     def draw(self):
         """The run's draw hook: the whole console, on whatever surface the
@@ -432,8 +440,9 @@ class TextConsole:
         # alone draws (`AppFace.holds`): it holds the page as the last frame
         # left it, but for the FPS chip, which names where it drew
         # (`overdrew`), so the log's view may move or keep its rows there.
-        pl = self.ws.run.player
-        own = pl is not None and pl.face.holds(self.ws.run.canvas)
+        run = self._served()
+        pl = run.player
+        own = pl is not None and pl.face.holds(run.canvas)
         if own:
             _ui_draw.window_frame(2)
         try:
@@ -444,14 +453,14 @@ class TextConsole:
             _ui_draw.cart_text(was)
 
     def _draw(self):
-        cv = self.ws.run.canvas
-        th = self.ws.theme_colors
+        cv = self._served().canvas
+        th = self._theme.colors()
         fs = self._fs()
         fid, cell, line, _asc = _ui_draw.font("mono")
         fw = cell * fs
         lh = line * fs + 4 * fs
         dim, value, accent = th["ink_dim"], th["value"], th["accent"]
-        cx, top, cw, ch = self.ws.app_content_rect()   # under the host's strip
+        cx, top, cw, ch = self._surface.content_rect()   # under the host's strip
         host = self._host
         moved = False
         if self._shown_gen != self._gen:
@@ -514,7 +523,7 @@ class TextConsole:
         cell = max(8 * fs + 2, cv.w // len(syms))
         syms = syms[:max(1, cv.w // cell)]
         rects = []
-        draw_symbol_keys(cv, self.ws.theme_colors, syms, 0, y, cell, h, fs, rects)
+        draw_symbol_keys(cv, self._theme.colors(), syms, 0, y, cell, h, fs, rects)
         self._sym_rects = tuple(rects)
 
 

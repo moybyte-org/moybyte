@@ -13,6 +13,14 @@ from pathlib import Path
 
 from ws_helpers import build_ws as _ws
 
+
+def _console(tmp_path):
+    """A fresh script console, built as the console builds its own."""
+    from runtime.text_console import TextConsole
+    ws = _ws(tmp_path)
+    return TextConsole(ws.app_context("script_console", TextConsole.NEEDS), {},
+                       lambda: ws.input, lambda: ws.run, ws._restart_script)
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -49,8 +57,7 @@ def test_a_script_name_slugs_its_stem_and_keeps_its_extension(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_the_scrollback_is_a_bounded_ring(tmp_path):
-    from runtime.text_console import TextConsole
-    con = TextConsole(_ws(tmp_path), {})
+    con = _console(tmp_path)
     for i in range(con.LINES + 50):
         con.write("line %d\n" % i)
     assert con.count() == con.LINES              # bounded: nothing grows
@@ -60,8 +67,7 @@ def test_the_scrollback_is_a_bounded_ring(tmp_path):
 
 
 def test_print_wraps_at_the_view_width_and_end_keeps_the_row_open(tmp_path):
-    from runtime.text_console import TextConsole
-    con = TextConsole(_ws(tmp_path), {})
+    con = _console(tmp_path)
     con.cols = 8
     con.write("abcdefghij\n")
     assert [con.row(0), con.row(1)] == ["abcdefgh", "ij"]

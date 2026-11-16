@@ -38,8 +38,8 @@ count:
      of them names the registered object (`ws.settings_layer.id`).
 
   6. NO APP REACHES THE CONSOLE (owner, 2026-11-15). An app -- each module
-     app_decls.APPS declares and the runtime/apps/ modules it is built from,
-     and a cart app's namespace -- holds no `ws`: it reaches the shell through
+     app_decls.APPS declares and every module of runtime/apps/, and a cart
+     app's namespace -- holds no `ws`: it reaches the shell through
      its AppContext's roles alone. The console's own modules (runtime/system/,
      runtime/editors/, Settings and the task manager among them) call
      `ws.<service>` directly and are not routed through roles: the gain is
@@ -430,30 +430,12 @@ def test_the_kind_owners_still_compare():
 
 def _app_modules():
     """The modules an app is built from: each declared app's module
-    (app_decls.APPS, which the console constructs every app from) and the
-    modules of runtime/apps/ they import, transitively."""
+    (app_decls.APPS, which the console constructs every app from) and every
+    module of runtime/apps/."""
     from runtime.app_decls import APPS
     apps_dir = runtime_file("app_shell.py").parent
-    todo = [str(d["entry"]).partition(":")[0] for d in APPS]
-    seen = set()
-    while todo:
-        mod = todo.pop()
-        if mod in seen:
-            continue
-        seen.add(mod)
-        tree = ast.parse((apps_dir / (mod + ".py")).read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                names = [node.module]
-            else:
-                continue
-            for name in names:
-                base = name.split(".")[-1]
-                if (apps_dir / (base + ".py")).is_file():
-                    todo.append(base)
-    return sorted(seen)
+    return sorted({str(d["entry"]).partition(":")[0] for d in APPS}
+                  | {p.stem for p in apps_dir.glob("*.py")})
 
 
 def test_no_app_module_names_the_console():
@@ -462,7 +444,7 @@ def test_no_app_module_names_the_console():
     its services: what an app reaches of the shell is its AppContext's
     roles."""
     mods = _app_modules()
-    assert {"paint_app", "music_app", "artwork", "app_shell"} <= set(mods), mods
+    assert {"paint_app", "music_app", "artwork", "app_shell", "text_console"} <= set(mods), mods
     found = []
     for mod in mods:
         tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))

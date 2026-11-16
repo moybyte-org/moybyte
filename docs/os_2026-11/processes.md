@@ -326,9 +326,15 @@ pid, so it is a row of its own that neither run's end takes from the other
 capability has no name in the process. For **Python** the manifest is
 legible, not binding: a Python cart runs inside process 1's VM with the real
 builtins and can reach `machine` and the `never` roles (`system_api.py`: "NOT
-a sandbox"); the import scanner rejecting illegal imports at install and at
-PLAY is a lint (`__import__`, `exec`, `getattr` walk past it), and there is
-no boundary (§3). What a Python app's grants gate is the names its
+a sandbox"). What a Python app may import is a declared list
+(`runtime/carts/app_imports.py`): the app API's two modules, `moybyte` and
+`ui`, and the language's own library, `machine` and `asyncio` among it. The
+installer (`cart_index.Install`) scans a Python cart's main before it lands
+and refuses one that imports any other module, naming it. The scan is a
+lint, not a boundary: it reads the source at install only, `__import__`,
+`exec` and `getattr` walk past it, and a cart made on the console is never
+installed. What it buys is the statement of what the console will not
+rename under an app; there is no boundary (§3). What a Python app's grants gate is the names its
 namespace is handed: `files` the role row, `wifi` and `moybyte.http` their
 device APIs; `open`, `os`, `socket`, `requests` and `machine` are the real
 modules, reached with or without a grant. For **ELF** permissions

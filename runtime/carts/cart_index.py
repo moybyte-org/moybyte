@@ -150,10 +150,11 @@ except ImportError:  # pragma: no cover
 from ticks import _ticks_ms, _ticks_diff
 from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
                             builtin_ns, cart_path)
-from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
+from moy_fs import _exists, _mkdir, _read, _read_recover, _write_atomic, _write_atomic_steps
 import moy_carts as _store
 import cart_files as _cart_files
 import cart_listing as _cl
+import app_imports as _app_imports
 
 # The record and the removal are native/moy_store/moy_shelf.h's on every tier
 # (the module `moy_store`).
@@ -219,6 +220,7 @@ NO_LICENCE = "Its licence wasn't accepted."
 NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
 BAD_SIGNATURE = "The cart shelf's signature is wrong."
+NOT_FOR_APPS = "It uses a part of the console apps can't: %s."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -1368,7 +1370,9 @@ class Install:
     anything else is the install prompt's question (runtime/shell/
     app_perms.py), held in `asking` until `agree()` goes on or `cancel()`
     removes the build; an InstallError it raises refuses the install. A
-    denied install leaves the shelf exactly as it was.
+    denied install leaves the shelf exactly as it was. Before the ask, a
+    Python cart whose main imports a module an app may not is refused
+    (`app_imports`), the module named.
 
     With a `keep` (the module docstring's keeper) the checked build goes to the
     store of record before it moves into place, and moves only once that store
@@ -1472,6 +1476,8 @@ class Install:
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
+                        if self.cart.get("runtime") == "python":
+                            self.in_store(self._imports_check)
                         ask, self.ask = self.ask, None
                         if ask is not None:
                             self.asking = self.in_store(lambda: ask(self.stage))
@@ -1493,6 +1499,25 @@ class Install:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
         return not self.finished
+
+    def _imports_check(self):
+        """A Python cart whose main imports a module an app may not is
+        refused, the module named (runtime/carts/app_imports.py)."""
+        try:
+            man = json.loads(_read(self.stage + "/manifest.json"))
+            main = man.get("main") or "main.py"
+            src = _read(self.stage + "/" + main)
+        except (OSError, ValueError, AttributeError, TypeError):
+            return
+        bad = _app_imports.refused(src)
+        if bad:
+            names = []
+            for _line, mod in bad:
+                if mod not in names:
+                    names.append(mod)
+            raise InstallError(NOT_FOR_APPS % ", ".join(names),
+                               "%s: %s line %d imports %s, which an app may not"
+                               % (self.folder, main, bad[0][0], bad[0][1]))
 
     def _report_once(self):
         if self.finished and self.done and not self._reported:
