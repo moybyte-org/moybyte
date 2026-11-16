@@ -59,7 +59,7 @@ a setup with no instructions and a setup that needs some.
 
 The second is that the decline never priced the hijack; it assumed one. The
 mechanism was checked before this was reversed, on the sources this board's own
-image is built from: ESP-IDF 5.5.1's DHCP server initialises `dhcps_dns = 0x00`
+image is built from: ESP-IDF 5.5.6's DHCP server initialises `dhcps_dns = 0x00`
 (no DNS option offered) BUT compiles `CONFIG_LWIP_DHCPS_ADD_DNS`, which
 defaults to `y` and is `y` in this board's generated sdkconfig -- and its else
 branch offers the AP's own address as the DNS server. So a phone joining this

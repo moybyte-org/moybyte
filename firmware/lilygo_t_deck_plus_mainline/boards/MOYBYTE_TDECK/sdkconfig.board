@@ -102,7 +102,7 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 # flag set the fork build applied (its MOYBYTE_EXTMEM_SPEED=fast) --
 # keep the two together rather than deriving this one from Kconfig again.
 #
-# Flash and PSRAM move TOGETHER: at 240MHz core, ESP-IDF 5.5.1 ships no MSPI
+# Flash and PSRAM move TOGETHER: at 240MHz core, ESP-IDF 5.5.6 ships no MSPI
 # timing table for PSRAM-120 with flash-80, and says so as a compile error
 # naming the 240M/120M table. Do not set a FLASHMODE here -- the fork set none,
 # the octal variant decides it.
@@ -280,6 +280,12 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 # Python: sdkconfig.ble's 6144 was sized for MicroPython's BLE IRQ handlers,
 # and the 2 KB it carries above IDF's default is internal SRAM.
 CONFIG_BT_NIMBLE_TASK_STACK_SIZE=4096
+
+# NimBLE's host pools are static (.bss), not allocated by nimble_port_init:
+# the kernel's BLE task starts and stops the host (native/moy_input/
+# moy_ble_task.c), and the internal-SRAM budget was measured with the pools
+# static. ESP-IDF defaults this to y; MicroPython's later sdkconfig.ble sets n.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 
 # --- The panel flush done-ISR runs from IRAM, not flash ---------------------
 # IDF's own default is y; MicroPython's boards/sdkconfig.base turns it off in a

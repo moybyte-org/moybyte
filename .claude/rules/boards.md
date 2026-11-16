@@ -24,7 +24,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
-  MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
+  MicroPython v1.28 and ESP-IDF v5.5.6 into the board's `.build/`, and an
   oversized image, or one under its board's headroom floor (`[image]
   headroom_floor_kib` in board.toml), is a build FAILURE on every board. Every
   floor is 0 since 2026-11-07 (owner): with no users the slots are still ours

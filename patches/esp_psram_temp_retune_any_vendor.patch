@@ -4,14 +4,14 @@
          if (valid_point[point] && valid_point[point + 1]) {
              // check temperature intersection
              if (s_point_temp_range_max[point] <= s_point_temp_range_min[point + 1]) {
--                ESP_EARLY_LOGE(TAG, "no temperature intersection of neighboring phase points");
+-                ESP_DRAM_LOGE(TAG, "no temperature intersection of neighboring phase points");
 -                abort();
 +                //Moybyte #169: upstream abort()s here, which turns "this chip's scanned
 +                //timing points don't overlap in temperature" into a dead board at boot.
 +                //Stop adjusting instead: the boot-tuned timing point stays in force,
 +                //which is exactly the (un-mitigated) behaviour of a build without this
 +                //option -- degraded, never bricked.
-+                ESP_EARLY_LOGE(TAG, "no temperature intersection of neighboring phase points -- PSRAM temperature retuning disabled");
++                ESP_DRAM_LOGE(TAG, "no temperature intersection of neighboring phase points -- PSRAM temperature retuning disabled");
 +                vTaskDelete(NULL);
              }
          }
@@ -23,7 +23,7 @@
 -    if (vender_id == 0xC8 || vender_id == 0x20) {
 -        xTaskCreatePinnedToCore(adjust_psram_timing_point_task, "adjust_psram_timing_point_task", 1024 * 5, NULL, configMAX_PRIORITIES - 2, NULL, 0);
 -    } else {
--        ESP_EARLY_LOGE(TAG, "The flash model has not been verified support this feature, please contact espressif business support");
+-        ESP_DRAM_LOGE(TAG, "The flash model has not been verified support this feature, please contact espressif business support");
 -        return ESP_ERR_NOT_SUPPORTED;
 +    if (vender_id != 0xC8 && vender_id != 0x20) {
 +        //Moybyte #169: upstream returns ESP_ERR_NOT_SUPPORTED here, and because this
@@ -34,7 +34,7 @@
 +        //temperature sensor. Without it, 120MHz octal PSRAM runs with NO drift
 +        //mitigation at all -- random PSRAM/flash faults ~20C either side of the boot
 +        //temperature, which is an ordinary day for a handheld. Warn and run it.
-+        ESP_EARLY_LOGW(TAG, "flash vendor 0x%02x is not on Espressif's verified list for PSRAM temperature retuning -- enabling anyway (Moybyte #169)", vender_id);
++        ESP_DRAM_LOGW(TAG, "flash vendor 0x%02x is not on Espressif's verified list for PSRAM temperature retuning -- enabling anyway (Moybyte #169)", vender_id);
      }
 +    xTaskCreatePinnedToCore(adjust_psram_timing_point_task, "adjust_psram_timing_point_task", 1024 * 5, NULL, configMAX_PRIORITIES - 2, NULL, 0);
      return ESP_OK;

@@ -1,0 +1,17 @@
+diff --git a/components/esp_system/ld/ld.dram.sections b/components/esp_system/ld/ld.dram.sections
+index 5519139a..db97ef20 100644
+--- a/components/esp_system/ld/ld.dram.sections
++++ b/components/esp_system/ld/ld.dram.sections
+@@ -93,8 +93,10 @@
+   {
+     _data_start_high = ABSOLUTE(.);
+ 
+-    mapping[dram0_data]
+-    mutable[dram0_data]
++    /* Moybyte P4: dram0_data is mapped once, in .dram0.data. Every input
++     * section a second mapping names is already placed there, so it matched
++     * nothing here, but it defined the SURROUND symbols again: the core dump's
++     * _coredump_dram_start/_end landed empty at this section's origin. */
+ 
+     _data_end_high = ABSOLUTE(.);
+   } > dram_high_seg

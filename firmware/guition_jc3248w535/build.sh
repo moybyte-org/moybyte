@@ -33,7 +33,7 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
 # ---------------------------------------------------------------------------
 # 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
-#    boards' sed-patched esp32_common.cmake), and ESP-IDF v5.5.1 reused from
+#    boards' sed-patched esp32_common.cmake), and ESP-IDF reused from
 #    the P4, which owns the shared checkout (see its build.sh) -- falling back
 #    to a clone of our own, which is what happens on every CI runner.
 #
@@ -110,6 +110,9 @@ moybyte_patch_mdns_psram
 
 # DECLINED moybyte_patch_p4_ppa_srm_mb_order -- an ESP32-P4 silicon patch: the
 # PPA SRM engine's macro-block-order bypass. This board has no PPA.
+
+# DECLINED moybyte_patch_p4_coredump_dram -- an ESP32-P4 linker patch: the
+# rev < v3 P4's high-SRAM data section. The S3's linker script has none.
 
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE

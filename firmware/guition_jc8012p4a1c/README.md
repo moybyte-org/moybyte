@@ -200,7 +200,7 @@ MOYBYTE_GUITION_P4_PORT=/dev/ttyACM4 .venv/bin/python -m pytest tests/test_guiti
 ```
 
 `build.sh` clones its own MicroPython v1.28.0 into `.build/`, reuses the
-Waveshare's ESP-IDF v5.5.1 checkout when present (its own clone otherwise —
+Waveshare's ESP-IDF v5.5.6 checkout when present (its own clone otherwise —
 CI), applies the same patch ladder (the `p4_*` patch through the shared
 lib, the ESP-Hosted 2.12.12 bump, REPR_C, native-code-free, the GC split
 reserve), stages the shared modules + the `native/p4` tier per `board.toml`,

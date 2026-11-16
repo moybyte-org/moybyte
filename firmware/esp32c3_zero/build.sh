@@ -34,7 +34,7 @@ moybyte_resolve_build_python
 mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
 # ---------------------------------------------------------------------------
-# 1) MicroPython + ESP-IDF: v5.5.1 reused from the P4, which owns the shared
+# 1) MicroPython + ESP-IDF: reused from the P4, which owns the shared
 #    checkout; `install.sh esp32c3` brings the RISC-V toolchain on a first run.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
@@ -79,6 +79,8 @@ moybyte_patch_gc_split_reserve
 #    PSRAM with the heap; headless and without PSRAM.
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch.
 # DECLINED moybyte_patch_p4_ppa_srm_mb_order -- an ESP32-P4 silicon patch.
+# DECLINED moybyte_patch_p4_coredump_dram -- an ESP32-P4 linker patch: the
+#    rev < v3 P4's high-SRAM data section. The C3's linker script has none.
 # DECLINED moybyte_patch_esp_hosted_bump -- the P4's radio; this one is on-die.
 # DECLINED moybyte_patch_lfs_sizes -- measured on the P4s' flash only (the
 #    XIAO's reason).
