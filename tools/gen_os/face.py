@@ -77,7 +77,9 @@ A face.json maps a module's name to its face:
               absent   ["host"] or ["mp"]: the faces the row is not on
 
 Rows without a face.json `rows` list are registered only: their faces are
-still written by hand (docs/refactor_2026-11.md, phase 6)."""
+still written by hand (docs/refactor_2026-11.md, phase 6). Every module bound
+by hand is a key of tests/test_hand_bindings.py's HAND_WRITTEN, with its
+reason: a new module has a generated face or an entry there."""
 
 import ast
 import json
