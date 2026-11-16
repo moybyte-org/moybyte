@@ -1,3 +1,10 @@
 {
-  "acknowledged": []
+  "acknowledged": [
+    {
+      "pin": "native/moy_net/mbedtls_vendor.json",
+      "id": "CVE-2025-66442",
+      "date": "2026-11-16",
+      "reason": "A timing side channel in RSA and in CBC/ECB decryption under LLVM's select-optimize, fixed in no release. The vendored subset has no RSA and decrypts only with GCM, CTR and CCM; the boards build with GCC."
+    }
+  ]
 }
