@@ -7,8 +7,8 @@ description: Measure a Moybyte cart's frame rate or frame cost on a board, pick 
 
 The numbers are generated ledgers in `docs/perf/` (owner, 2026-11-15):
 `docs/perf/ledger.md` is each board's per-cart fps and frame ms and its desk,
-written by `tools/perf_ledger.py` from the board pass's perf records and never
-edited by hand. The decisions are `docs/perf/levers.md`: the frame budget
+written by `tools/perf_ledger.py` from the perf records of one protocol, which
+it names, and never edited by hand. The decisions are `docs/perf/levers.md`: the frame budget
 model, the shipped levers, the tried-and-reverted list and the open ones —
 read it before proposing a lever. The story behind a number (a bisect, an A/B,
 a deep dive) is a comment on its issue: **#66** for the carts, **#58** for the
@@ -29,7 +29,7 @@ python3 tools/shell_bench.py --board p4 --out DIR --report --against OLD   # its
 python3 tools/input_bench.py --board p4 --out DIR --only Code      # scrolling and text surfaces, presented-frame p90 per input
 python3 tools/input_gate.py gate --board tdeck,p4 --dev WT --cand WT --out DIR   # a surface's move gate: the boards at once, fresh-flash candidate runs against dev's newest stored runs (--fresh-dev benches dev beside it), p90 verdicts; a stale image is built first
 python3 tools/input_gate.py iter --board tdeck --cand WT --rows "Code:fling"      # one run of a few rows against the stored dev baseline
-tools/board.py perf-baseline tdeck --image COMMIT    # the board pass's perf stage alone, beside its last run
+tools/board.py perf-baseline tdeck --image COMMIT    # the board pass's perf stage alone on a just-booted board (`fresh`), beside its last fresh run
 ```
 
 Every `tools/board.py pass` ends each board with that perf stage
@@ -37,11 +37,19 @@ Every `tools/board.py pass` ends each board with that perf stage
 drag where there are windows, this roster's drawn fps and frame ms, Jet
 Teapot uncapped. Its records stay on the machine
 (`~/.cache/moybyte-perf/<board>.jsonl`) and its block marks a move past the
-noise band against the board's last run at another commit, so a drop shows in
-the pass that made it. The pass then prints the `tools/perf_ledger.py` command
-that rewrites `docs/perf/ledger.md` from those records; commit the ledger when
-a pass is worth publishing (`--baseline COMMIT` sets each board beside a
-chosen run). What the block flags is measured again with the tool for the
+noise band against the board's last run at another commit under the same
+protocol, so a drop shows in the pass that made it. Every record names its
+protocol: the pass's are `after-suite` (15-20 minutes of suite into the boot),
+`perf-baseline`'s `fresh` (booted, nothing run: reboot first), and `--carts`
+is part of it. The two never compare: after a suite a board has less internal
+SRAM and a cart measures behind the carts before it (#249); with no earlier run
+of its protocol the block says so and flags nothing. Records from before the
+field have it inferred (an image the run flashed is the pass's) or read as
+`unknown`, which compares with nothing. The pass then prints the
+`tools/perf_ledger.py` command that rewrites `docs/perf/ledger.md` from those
+records; commit the ledger when a pass is worth publishing (`--baseline COMMIT`
+sets each board beside a chosen run, `--protocol` picks the one protocol the
+ledger holds and names). What the block flags is measured again with the tool for the
 question, and that story goes to the issue as a comment.
 
 `perf` drops the first 4 s (caches, cold flash), takes only samples naming the

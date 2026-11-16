@@ -1,0 +1,8 @@
+{
+  "moy_elf": {
+    "about": "compiled ELF apps, native/moy_elf/moy_os.h",
+    "host": "elf_binding",
+    "registered": false,
+    "structs": ["moy_os_info_t", "moy_os_fault_t", "moy_os_stats_t"]
+  }
+}

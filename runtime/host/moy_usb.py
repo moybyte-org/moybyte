@@ -10,6 +10,7 @@ import os
 
 import host_native
 import native_build
+from moy_usb_face import moy_usb_dev_t as _Dev
 
 _USB = os.path.join(native_build.ROOT, "native", "p4", "moy_usb")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
@@ -24,11 +25,6 @@ EV_ATTACH, EV_DETACH, EV_REPORT, EV_DATA, EV_SENT = range(1, 6)
 _U8, _U16, _U32, _I = ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32, ctypes.c_int
 _P = ctypes.c_void_p
 _B = ctypes.c_char_p
-
-
-class _Dev(ctypes.Structure):
-    _fields_ = [("addr", _U8), ("cls", _U8), ("kind", _U8), ("iface_class", _U8),
-                ("vid", _U16), ("pid", _U16), ("name", ctypes.c_char * 25)]
 
 
 _SIGS = (

@@ -28,7 +28,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws.frame_state.dirty,
                              ws.home.go_home,
-                             ws.mini_btn, ws.toggles.ota_channel
+                             ws.toggles.ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
                              begin_download/download_step/reset). This is the one
@@ -46,6 +46,7 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 
 import ui as _ui
 from ui_draw import AppHost
+from bar_layer import mini_btn as _bar_mini_btn
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 from ticks import _ticks_ms, _ticks_diff
@@ -448,25 +449,21 @@ class UpdateUI:
         elif ph == "done":
             # Brief pause so the kid sees "UPDATED!", then reboot into the new image.
             if _ticks_diff(_ticks_ms(), self._upd_at) >= 1200:
-                self._commit_open_editor()
+                self._leave_every_surface()
                 try:
                     u.reset()
                 except Exception:
                     self._upd_phase = "error"
                     self._upd_msg = "reset failed"
 
-    def _commit_open_editor(self):
-        """A reboot is an exit path too (#154). On the windowed tier an Editor
-        window can still be open beside this screen holding an edit inside its
-        idle-debounce window, and nothing else on the way to reset() would persist
-        it -- so hard-commit it the way go_home does. Guarded: a store hiccup must
-        not strand a board whose bootloader already points at the new slot."""
-        ws = self.ws
-        app = getattr(ws, "editor_app", None)
-        if app is None or app.project is not ws.run.project:
-            return
+    def _leave_every_surface(self):
+        """A reboot is an exit path too (#154): every surface's edit is written
+        before it (`Workstation.leave_every_surface`), an Editor window or an
+        app open beside this screen with an edit inside its idle-debounce
+        window among them. Guarded: a store hiccup must not strand a board
+        whose bootloader already points at the new slot."""
         try:
-            app.save_current()
+            self.ws.leave_every_surface()
         except Exception as exc:  # noqa: BLE001
             print("Moybyte pre-reboot commit failed:", exc)
 
@@ -675,5 +672,5 @@ class UpdateUI:
                 _ui.label(item)
         _ui.group()
         if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
-            ws.mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
+            _bar_mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 

@@ -1,5 +1,5 @@
-// The catalogue (moy_cat.h has the contract; runtime/carts/moy_carts.py's `_load`
-// and `_each` are the reference every branch below follows).
+// The catalogue (moy_cat.h has the contract; runtime/carts/moy_carts.py's
+// `entry` and `load` document what a cart reads as).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,6 +105,52 @@ int moy_cat_plain(const char *name, size_t n) {
         }
     }
     return 1;
+}
+
+// One byte of a name the caller sizes: written while it fits beside the NUL.
+static size_t put(char *out, size_t cap, size_t k, char c) {
+    if (k + 1u < cap) {
+        out[k] = c;
+    }
+    return k + 1u;
+}
+
+static size_t put_str(char *out, size_t cap, size_t k, const char *s) {
+    for (; *s; s++) {
+        k = put(out, cap, k, *s);
+    }
+    return k;
+}
+
+// A name's slug (moy_store_base.slug) put at `k`: letters lower-cased, digits
+// kept, a space, '-' or '_' as '_', anything else dropped, and "cart" for a
+// name left empty.
+static size_t put_slug(const char *s, size_t n, char *out, size_t cap, size_t k) {
+    size_t start = k;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char u = (unsigned char)s[i];
+        if (u >= 'A' && u <= 'Z') {
+            k = put(out, cap, k, (char)(u + 32));
+        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
+            k = put(out, cap, k, (char)u);
+        } else if (u == ' ' || u == '-' || u == '_') {
+            k = put(out, cap, k, '_');
+        }
+    }
+    return k == start ? put_str(out, cap, k, "cart") : k;
+}
+
+size_t moy_cat_folder(const char *title, size_t n, const char *ns, char *out,
+                      size_t cap) {
+    size_t k = 0;
+    if (ns != NULL && ns[0]) {
+        k = put(out, cap, put_slug(ns, strlen(ns), out, cap, k), '.');
+    }
+    k = put_str(out, cap, put_slug(title, n, out, cap, k), MOY_CAT_EXT);
+    if (cap) {
+        out[k < cap ? k : cap - 1u] = 0;
+    }
+    return k;
 }
 
 // `_absent`: the listing proves `name` is not in its folder.
@@ -377,7 +423,9 @@ static void norm_tags(moy_cat_json_t f, moy_cat_entry_t *e) {
     }
 }
 
-// _normalize_icon: (tile, w, h), or 0.
+// A manifest "icon" (SPEC.md 3.4: a bare tile id, or [tile, w, h] of at most
+// 4x4 tiles) normalised: 1 and (tile, w, h), or 0 when absent, malformed or
+// out of range -- an icon is cosmetic, so a bad one costs the picture only.
 static int norm_icon(moy_cat_json_t f, int64_t out[3]) {
     if (f.v == NULL) {
         return 0;
@@ -525,8 +573,9 @@ static void sort_names(const char **nm, size_t *nn, size_t len) {
     }
 }
 
-// `_scene_files` then `scene_names`: 0, MOY_ENOMEM, or 1 when the manifest's
-// order holds a value `in` cannot hash (the twin raises, and drops the cart).
+// The scene names, the manifest's order then the scenes/ listing's: 0,
+// MOY_ENOMEM, or 1 when the manifest's order holds a value a dict key cannot
+// be (the cart is dropped).
 static int scene_names(rd_t *r, const char *man, const char *mend,
                        moy_cat_entry_t *e, const names_t *given) {
     names_t blobs = { &r->a, NULL, NULL, 0, 0 };
@@ -745,11 +794,11 @@ static int sheet_icon(rd_t *r, moy_cat_entry_t *e) {
 static const char *const known[] = { "sprites.moygfx", "map.moymap",
                                      "flags.moyflags", "config.json" };
 
-// `_load(path, False, folder)`: 1 and the entry, or 0 for no cart.
+// The payloads of a whole load: 1 and the cart, or 0 for no cart.
 static int load_payloads(rd_t *r, moy_cart_t *c, const char *man,
                          const char *mend, moy_cat_note_fn note, void *ctx);
 
-// `_load(path, whole, folder)`: 1 and the entry -- the cart whole into `c`
+// One folder read: 1 and the entry -- the cart whole into `c`
 // when it is not NULL -- or 0 for no cart.
 static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
                       moy_cat_note_fn note, void *ctx) {
@@ -962,6 +1011,8 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     e->graduated = g.v != NULL && moy_json_truthy(g.v, g.e);
     moy_cat_json_t gl = vfield(man, mend, "glass");
     e->glass = gl.v != NULL && gl.e - gl.v == 4 && memcmp(gl.v, "true", 4) == 0;
+    moy_cat_json_t an = vfield(man, mend, "animates");
+    e->animates = an.v != NULL && an.e - an.v == 4 && memcmp(an.v, "true", 4) == 0;
     moy_cat_json_t wa = vfield(man, mend, "wasi");
     e->wasi = wa.v != NULL && wa.e - wa.v == 4 && memcmp(wa.v, "true", 4) == 0;
     e->icon_ok = norm_icon(field(man, mend, "icon"), e->icon);

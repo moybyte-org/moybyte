@@ -10,7 +10,8 @@ runtime/carts/moy_backup.py's `archive`: it lands in the user files'
 Backups/) and reads it back a piece at a time over `py`. `push` sends an
 archive with the raw receive tools/push_cart.py uses, into the console's
 Backups/, and restores it there (`restore`, `moy_backup.restore`), which
-reads the shelf again. The board's line state and identity check are
+reads the shelf again; it sends nothing where the store has no room for the
+archive and the restore's stage beside it. The board's line state and identity check are
 push_cart's (`connect`); --board is required for the same reason.
 """
 
@@ -39,7 +40,7 @@ def remote_line(b, word, timeout=600.0):
 
 def read_back(b, path, out, log=print):
     """The console's file `path` written to `out`, a PIECE at a time."""
-    if b.pyval("ws.__dict__.__setitem__('_bk', open(%r, 'rb')) or 1" % path) != 1:
+    if b.pyval("setattr(ws, '_bk', open(%r, 'rb')) or 1" % path) != 1:
         sys.exit("the console cannot open %s" % path)
     got = 0
     try:
@@ -71,6 +72,22 @@ def pull(a):
         b.close()
 
 
+def fits(b, archive):
+    """Exits before a byte is sent where the console's store has no room for
+    the archive and the stage its restore unpacks it into beside it
+    (`moy_backup.needs`, `moy_backup.room`)."""
+    from runtime import moy_backup
+    room = b.pyval("__import__('moy_backup').room(ws.carts_root)", strict=True)
+    if room is None:
+        return
+    free, block = room
+    size = os.path.getsize(archive)
+    want = moy_backup.needs(archive, block) + (size + block - 1) // block * block
+    if want > free:
+        sys.exit("the console's store has %d KB free; the archive (%d KB) and its restore "
+                 "need %d KB" % (free // 1024, size // 1024, want // 1024))
+
+
 def push(a):
     if not os.path.isfile(a.archive):
         sys.exit("no archive: " + a.archive)
@@ -81,9 +98,11 @@ def push(a):
         b.pyval("[__import__('moy_fs')._mkdir(p) for p in (%r, %r)] and 1"
                 % (where.rsplit("/", 1)[0], where), strict=True)
         dest = where + "/" + os.path.basename(a.archive)
+        fits(b, a.archive)
         link = push_cart.raw_link(b, push_cart.serial_cfg(a.board))
-        if not push_cart.push_file_raw(b, a.archive, dest, link, a.verbose):
-            sys.exit("the push did not land")
+        if not b.pyexec(push_cart.HELPERS):
+            sys.exit("could not install the upload helpers")
+        push_cart.push_file_raw(b, a.archive, dest, link, a.verbose)
         print("restored %s files" % remote_line(b, "restore " + dest))
     finally:
         b.close()

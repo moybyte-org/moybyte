@@ -10,6 +10,7 @@ live, blit the cache, or skip the restore outright.
 from layers import Layer
 from widgets import _in, _ticks_ms
 import ui_draw as _ui_draw        # the desk's tiles and labels
+from bar_layer import glyph as _bar_glyph
 import layout_base as _layout_base
 import iconsets as _iconsets
 from status_items import ITEMS as _ITEMS
@@ -410,7 +411,7 @@ class _BackdropLayer(Layer):
                     cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
                            box[1] + (box[3] - 16 * sc) // 2, sc)
                 else:
-                    ws.glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
+                    _bar_glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
             _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, shadow=shadow)
 
     def _draw_desk_icons(self):

@@ -241,31 +241,23 @@ static const char *moycore_ui_items(lua_State *L, int i, size_t *len)
     return lua_tolstring(L, -1, len);
 }
 
-/* ui.swatches(label, colours, cur, o): the colours 0xRRGGBB, a word each. */
-static int moycore_ui_swatches(lua_State *L)
+/* The colours 0xRRGGBB of the table at stack index `i`, a little-endian word
+ * each, pushed as one string: its bytes (ui.swatches' options). */
+static const char *moycore_ui_words(lua_State *L, int i, size_t *len)
 {
-    int32_t cur = lua_isnoneornil(L, 3) ? -1 : moycore_ui_int(L, 3) - 1;
-    moy_ui_over_t o;
-    moycore_ui_over(L, 4, &o);
-    luaL_checktype(L, 2, LUA_TTABLE);
+    luaL_checktype(L, i, LUA_TTABLE);
     luaL_Buffer b;
     luaL_buffinit(L, &b);
-    lua_Integer n = luaL_len(L, 2);
+    lua_Integer n = luaL_len(L, i);
     for (lua_Integer k = 1; k <= n; k++) {
-        lua_geti(L, 2, k);
+        lua_geti(L, i, k);
         uint32_t c = (uint32_t)(lua_tointeger(L, -1) & 0xffffff);
         lua_pop(L, 1);
         char w[4] = { (char)(c & 0xff), (char)((c >> 8) & 0xff), (char)((c >> 16) & 0xff), 0 };
         luaL_addlstring(&b, w, 4);
     }
     luaL_pushresult(&b);
-    size_t len = 0;
-    const char *opts = lua_tolstring(L, -1, &len);
-    int32_t got = cur;
-    moy_ui_run_choice(moycore_ui_canvas(), MOY_UI_V_SWATCH, moycore_ui_span(L, 1),
-                      (const uint8_t *)opts, len, cur, &o, &got);
-    lua_pushinteger(L, (lua_Integer)got + 1);
-    return 1;
+    return lua_tolstring(L, -1, len);
 }
 
 /* The strings of the table at stack index `i`, each ending in a NUL, appended to b. */

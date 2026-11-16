@@ -99,9 +99,11 @@ HOST_STORE = """# CPython's `moy_store` over the staged tree: the host's ctypes 
 # (runtime/host/moy_store_binding.py) over the library this test process
 # built. A VM's built-in moy_store wins over this file.
 import importlib.util, os, sys
-_spec = importlib.util.spec_from_file_location("moy_store_binding", %r)
-_face = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_face)
+for _name, _path in (("moy_store_face", %r), ("moy_store_binding", %r)):
+    _spec = importlib.util.spec_from_file_location(_name, _path)
+    _face = importlib.util.module_from_spec(_spec)
+    sys.modules[_name] = _face
+    _spec.loader.exec_module(_face)
 sys.modules[__name__] = _face.binding()
 """
 
@@ -114,7 +116,8 @@ def _host_store(tree):
     if lib is not None:
         os.environ["MOYHOST_LIB"] = lib
     with open(os.path.join(tree, "moy_store.py"), "w") as f:
-        f.write(HOST_STORE % str(ROOT / "runtime" / "host" / "moy_store_binding.py"))
+        f.write(HOST_STORE % (str(ROOT / "runtime" / "host" / "moy_store_face.py"),
+                              str(ROOT / "runtime" / "host" / "moy_store_binding.py")))
 
 
 def build_flags():

@@ -6,6 +6,7 @@ invisible").
 """
 
 from pathlib import Path
+from tests import journal_files as jf
 
 from ws_helpers import build_ws_with_cart
 
@@ -18,7 +19,7 @@ def _make_ws_with_cart(tmp_path, src, title="Debounced"):
 
 def _entries(cart_path):
     from runtime import moy_carts
-    return moy_carts._journal_load_entries(cart_path + "/journal/journal.jsonl")
+    return jf.entries(cart_path + "/journal/journal.jsonl")
 
 
 def _open_code(ws, text=None):
@@ -72,7 +73,7 @@ def test_idle_debounce_autosaves_and_journals_invisibly(tmp_path):
     ents = [e for e in _entries(path) if e["file"] == "main.py"]
     assert ents, "the idle debounce must journal a durable step"
     from runtime import moy_journal
-    assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == new
+    assert jf.read_snap(path + "/journal", ents[-1]) == new
 
 
 def test_autosave_skips_unparseable_source_without_nagging(tmp_path):

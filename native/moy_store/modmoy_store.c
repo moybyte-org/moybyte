@@ -859,6 +859,9 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
         mp_obj_list_append(tg, new_str(e->tags[i], strlen(e->tags[i])));
     }
     put(d, MP_QSTR_tags, tg);
+    if (e->animates) {
+        put(d, MP_QSTR_animates, mp_const_true);
+    }
     if (e->broken != NULL) {
         put(d, MP_QSTR_broken, mp_obj_new_str(e->broken, strlen(e->broken)));
     }
@@ -1467,10 +1470,10 @@ static mp_obj_t mod_seed(size_t n_args, const mp_obj_t *args) {
                 progress = mp_const_none;
             }
         }
-        size_t fn = moy_seed_folder(title, tn, ns, NULL, 0);
+        size_t fn = moy_cat_folder(title, tn, ns, NULL, 0);
         vstr_t folder;
         vstr_init_len(&folder, fn);
-        moy_seed_folder(title, tn, ns, folder.buf, fn + 1u);
+        moy_cat_folder(title, tn, ns, folder.buf, fn + 1u);
         mp_obj_t fobj = mp_obj_new_str_from_vstr(&folder);
         mp_map_elem_t *had = mp_map_lookup(mp_obj_dict_get_map(present), fobj, MP_MAP_LOOKUP);
         if (had != NULL && mp_binary_op(MP_BINARY_OP_LESS_EQUAL,
@@ -1501,15 +1504,15 @@ static mp_obj_t mod_seed(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_seed_obj, 3, 5, mod_seed);
 
-// folder(title, ns): the folder a seeded cart takes (moy_seed_folder).
+// folder(title, ns): the folder a cart named `title` is stored in (moy_cat_folder).
 static mp_obj_t mod_folder(mp_obj_t title, mp_obj_t ns) {
     size_t tn;
     const char *t = mp_obj_str_get_data(title, &tn);
     const char *n = ns != mp_const_none ? mp_obj_str_get_str(ns) : NULL;
-    size_t fn = moy_seed_folder(t, tn, n, NULL, 0);
+    size_t fn = moy_cat_folder(t, tn, n, NULL, 0);
     vstr_t vs;
     vstr_init_len(&vs, fn);
-    moy_seed_folder(t, tn, n, vs.buf, fn + 1u);
+    moy_cat_folder(t, tn, n, vs.buf, fn + 1u);
     return mp_obj_new_str_from_vstr(&vs);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_folder_obj, mod_folder);

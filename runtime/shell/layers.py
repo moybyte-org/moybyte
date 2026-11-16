@@ -227,6 +227,12 @@ class _PlayerLayer(Layer):
     def has_page(self):
         return self.ws.run.player.face.has_page()
 
+    def close(self):
+        """Leaving the run: what a cart app's editor handles hold is written."""
+        pl = self.ws.run.player
+        if pl is not None:
+            pl.flush_editors()
+
     def draw(self, dt):
         self.ws.run.player.tick(dt)
 

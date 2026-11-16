@@ -27,6 +27,13 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from runtime import glass_binding  # noqa: E402
+# The mirrors the api and draw bindings take from here too.
+from moy_ui_face import (  # noqa: E402,F401
+    moy_theme_layout_t, moy_ui_box_t as _Box, moy_ui_btn_style_t as _BtnStyle,
+    moy_ui_button_t as _Button, moy_ui_cell_t as _Cell, moy_ui_depth_t as _Depth,
+    moy_ui_frame_button_t as _FrameButton, moy_ui_lines_t as _Lines, moy_ui_shape_t, moy_ui_over_t as _Over,
+    moy_ui_row_t as _Row, moy_ui_sink_t as _Sink, moy_ui_span_t as _Span, moy_ui_surface_t as _Surface)
+from moy_gfx_face import moy_text_line_t as _Line  # noqa: E402,F401
 
 c = ctypes
 _I = c.c_int
@@ -110,102 +117,12 @@ _SIGS = (
 )
 
 
-class _Box(c.Structure):
-    _fields_ = [("x", c.c_int16), ("y", c.c_int16), ("w", c.c_int16), ("h", c.c_int16)]
-
-
-class _Surface(c.Structure):
-    _fields_ = [("edge", c.c_uint8), ("fill", c.c_uint8), ("flags", c.c_uint8),
-                ("a", c.c_int8), ("b", c.c_int8), ("line", c.c_int8)]
-
-
-def _shape_type(metrics, parts, states, stids):
-    class _Shape(c.Structure):
-        _fields_ = [("metric", c.c_int8 * metrics), ("n_surf", c.c_uint8),
-                    ("n_fx", c.c_uint8),
-                    ("effect", ((c.c_uint8 * 2) * states) * parts),
-                    ("stid", (c.c_uint8 * states) * parts),
-                    ("surf", _Surface * stids),
-                    ("frame", c.c_uint8 * 6),
-                    ("name", c.c_char * 25)]
-    return _Shape
-
-
-def _layout_type(bars, slots, slot_cap, widget_cap, text_max):
-    class _Bar(c.Structure):
-        _fields_ = [("edge", c.c_uint8), ("size", c.c_uint8), ("n", c.c_uint8 * slots),
-                    ("w", (c.c_uint8 * slot_cap) * slots),
-                    ("text0", c.c_uint8), ("n_text", c.c_uint8)]
-
-    class _Layout(c.Structure):
-        _fields_ = [("set", c.c_uint8), ("n_bars", c.c_uint8), ("bar", _Bar * bars),
-                    ("n_text", c.c_uint8), ("text", (c.c_char * (text_max + 1)) * widget_cap),
-                    ("home", c.c_uint8)]
-    return _Layout
-
-
-class _Span(c.Structure):
-    _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
-
-
 # moy_ui_api.h's MOY_UI_TXO_LEN and MOY_UI_TXO_DEFAULTS (tests/test_text_view.py pins both).
 _TXO_LEN = 19
 _TXO_DEFAULTS = (0, 0, 4, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1)
 
 
-_LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
-
-
-class _Lines(c.Structure):
-    _fields_ = [("src", c.c_void_p), ("n", c.c_int32), ("get", _LINE_FN)]
-
-
-class _Depth(c.Structure):
-    _fields_ = ([(n, c.c_uint8) for n in ("win_r", "card_r", "key_r", "corners",
-                                          "stepped", "shadow", "edges", "frames")]
-                + [("shadow_565", c.c_uint16)]
-                + [(n, c.c_int16) for n in ("alpha", "blur", "dx", "dy", "back", "line",
-                                            "line_back")]
-                + [(n, c.c_int32) for n in ("line_c", "line_back_c", "body")]
-                + [(n, c.c_uint8) for n in ("header", "align", "controls", "icon", "rule")]
-                + [(n, c.c_int32) for n in ("fill", "fill_back", "grad", "grad_back")]
-                + [(n, c.c_uint8) for n in ("bar_style", "hh_style", "bar_h", "hh_h")])
-
-
-class _FrameButton(c.Structure):
-    _fields_ = [("box", _Box), ("id", c.c_uint8), ("right", c.c_uint8)]
-
-
-class _Sink(c.Structure):
-    _fields_ = [("kind", c.c_uint8), ("fs", c.c_uint8), ("look", c.c_uint8),
-                ("dst", c.c_void_p), ("cart", c.c_uint8),
-                ("shown", c.c_uint8)]
-
-
 _I16 = c.c_int16
-
-
-class _Row(c.Structure):
-    _fields_ = [("label", _Span), ("value", _Span)] + [
-        (n, _I16) for n in ("glyph", "glyph_size", "glyph_ink", "value_ink", "pad",
-                            "pad_right", "text_dy", "scale", "fs")] + [
-        ("colors", _I16 * 3)]
-
-
-class _Cell(c.Structure):
-    _fields_ = [("label", _Span)] + [
-        (n, _I16) for n in ("glyph", "pad", "caption_h", "band_fill", "band_ink",
-                            "text_dx", "text_dy", "fs")] + [("colors", _I16 * 3)]
-
-
-class _Button(c.Structure):
-    _fields_ = [("label", _Span), ("glyph", _I16), ("fs", _I16), ("colors", _I16 * 3),
-                ("app", _I16), ("icon", _I16)]
-
-
-class _BtnStyle(c.Structure):
-    _fields_ = [("c", _I16 * 3), ("edge_w", c.c_int8), ("shape", c.c_int8),
-                ("r", c.c_int8), ("font", c.c_int8), ("bevel", c.c_int8)]
 
 
 _R4 = c.c_int32 * 4
@@ -352,31 +269,6 @@ _DRAW_SIGS = (
     ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
     ("moy_ui_over_size", [], c.c_size_t),
 )
-
-
-class _Over(c.Structure):
-    """moy_ui_over_t (native/moy_ui/moy_ui_api.h)."""
-    _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
-                ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
-                ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8),
-                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8),
-                ("has_gen", c.c_int8), ("gen", c.c_int32), ("has_part", c.c_int8),
-                ("part_w", c.c_int16), ("part_h", c.c_int16), ("bar", c.c_int8),
-                ("axis_x", c.c_int8), ("snap", c.c_int8), ("has_offset", c.c_int8),
-                ("offset", c.c_int32), ("spill", c.c_int16), ("has_keep", c.c_int8), ("whole", c.c_int8),
-                ("keep", c.c_int32), ("over_x", c.c_int16), ("over_y", c.c_int16),
-                ("over_w", c.c_int16), ("over_h", c.c_int16), ("shift", c.c_int8),
-                ("fade", c.c_int16), ("has_across", c.c_int8),
-                ("across_first", c.c_int16), ("across_pitch", c.c_int16), ("at", c.c_int16),
-                ("signal", c.c_int8), ("values", _Span), ("check", c.c_int8),
-                ("subs", _Span), ("icons", _Span), ("counts", _Span), ("tags", _Span),
-                ("marks", _Span), ("card", c.c_int8), ("tag", _Span),
-                ("focus", _Span), ("flags2", c.c_int32)]
-
-
-class _Line(c.Structure):
-    """moy_text.h's moy_text_line_t."""
-    _fields_ = [("off", c.c_uint16), ("len", c.c_uint16), ("collapse", c.c_uint8)]
 
 
 _SPACE = re.compile(rb"[ \t\n\r\x0b\x0c\x1c-\x1f]+")

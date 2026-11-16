@@ -12,7 +12,7 @@
       {"py": "sweep(owner)", "c": "moy_mic_sweep", "example": [4]},
       {"py": "owner()", "c": "moy_mic_owner", "example": []},
       {"py": "read(owner, buf)", "c": "moy_mic_read", "wbuf": ["out"], "example": [3, {"bytearray": 8}]},
-      {"py": "push(buf)", "hand": true},
+      {"py": "push(buf)", "c": "moy_mic_push", "span": ["s"], "example": [{"bytes": [1, 0, 2, 0]}]},
       {"py": "rate()", "c": "moy_mic_rate", "example": []},
       {"py": "drops()", "c": "moy_mic_drops", "example": []},
       {"py": "pending()", "c": "moy_mic_pending", "example": []},
@@ -20,5 +20,11 @@
       {"py": "sim(rate)", "c": "moy_mic_sim", "example": [22050]},
       {"py": "reset()", "c": "moy_mic_reset", "example": []}
     ]
+  },
+  "moy_audio": {
+    "about": "audio: the console's mixer, voices and streams, native/moy_audio",
+    "host": "audio_binding",
+    "binding": true,
+    "lazy": true
   }
 }

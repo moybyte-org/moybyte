@@ -41,6 +41,11 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
     runtime/host/<m>_face.py        the same rows over ctypes, with the
                                     structures and constants they name
     runtime/host/faces.py           each host face, in registration order
+  the role objects' rows, from a face.json's `roles` and native/os_calls.json
+  (tools/gen_os/roles.py)
+    native/moy_app/modmoy_app_face.h  the theme's and the clipboard's C rows as
+                                    methods of the board module's role types
+    runtime/host/moy_app_face.py    the same over ctypes (ThemeRows, ClipboardRows)
   the override table's readers, from native/moy_ui/over.json (tools/gen_os/over.py)
     native/moy_ui/moy_ui_over_keys.h  the keys, the block's bits, the table every
                                     tier's reader walks
@@ -65,8 +70,8 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
 The generator is the package tools/gen_os/: table.py (the source, its views
 and its rules), cproto.py (a row's C prototype, parsed), and one emitter per
 tier (elf.py, wasi.py, app.py, lua.py, py.py, docs.py, sdk.py), and face.py,
-the binding faces from their own sources. This file is
-its entry point and outputs() its one list.
+the binding faces from their own sources (roles.py their role objects'
+rows). This file is its entry point and outputs() its one list.
 
 The output is committed: no build runs this, and tests/test_os_table.py
 regenerates it and fails on any difference. A file it writes whole opens
@@ -96,7 +101,7 @@ from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
-from gen_os import face, over, ui  # noqa: E402
+from gen_os import face, over, style, ui  # noqa: E402
 from gen_os.sdk import (gen_app_wasm_h, gen_lua_stub, gen_plugin_table, gen_py_stubs,  # noqa: E402
                         gen_sdk_ui_h)
 
@@ -140,7 +145,7 @@ def outputs(src=None):
             (PLUGIN_TABLE, gen_plugin_table(src)), (APP_WASM_SDK_H, gen_app_wasm_h(src)),
             (UI_SDK_H, gen_sdk_ui_h(src)),
             (LUA_STUB, gen_lua_stub(src))] + list(zip(PY_STUBS, gen_py_stubs(src)))
-    outs += face.outputs() + over.outputs()
+    outs += face.outputs() + over.outputs() + style.outputs()
     outs += ui.outputs(src, outs)
     whole(outs)
     return outs

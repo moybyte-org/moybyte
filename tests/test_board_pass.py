@@ -464,6 +464,7 @@ def test_the_perf_stage_runs_after_each_suite_on_the_resolved_port(bench):
         assert c[c.index("--port") + 1] == "/dev/fake-" + name
         assert c[c.index("--out") + 1] == str(bench / "logs" / ("%s.perf.json" % name))
         assert c[c.index("--image") + 1] == "c2d35a0c" and "--flashed" in c
+        assert c[c.index("--protocol") + 1] == perf_pass.AFTER_SUITE
     for name in ("tdeck", "p4"):
         mine = [i for i, (c, e) in enumerate(steps.cmds)
                 if ("pytest" in c and e and "/dev/fake-" + name in e.values())
@@ -493,13 +494,14 @@ def test_a_suite_that_never_ran_takes_no_perf_stage(bench):
     assert perf_cmds(steps) == []
 
 
-def _rec(board, commit, fps, frame):
+def _rec(board, commit, fps, frame, start=perf_pass.AFTER_SUITE):
     return perf_pass.record(board, {
         "Brick Siege fps": perf_pass.metric(fps, "fps", perf_pass.HIGHER,
                                             [fps, fps, fps]),
         "Brick Siege frame": perf_pass.metric(frame, "ms", perf_pass.LOWER,
                                               [frame, frame]),
-    }, commit, tree="t", date="2026-11-15T10:00:00", secs=150.0)
+    }, commit, tree="t", date="2026-11-15T10:00:00", secs=150.0,
+        protocol=perf_pass.protocol(start))
 
 
 def test_the_perf_block_prints_under_the_table_and_the_exit_stays_the_suites(
@@ -520,6 +522,19 @@ def test_the_perf_block_prints_under_the_table_and_the_exit_stays_the_suites(
     frame = next(ln for ln in out if ln.lstrip().startswith("Brick Siege frame"))
     assert "+50.0%" in frame and frame.endswith("<<< WORSE")
     assert out[-1].startswith("board pass: wall ")
+
+
+def test_the_perf_block_never_compares_with_a_fresh_boot_run(bench, capsys):
+    perf_pass.append(_rec("tdeck", "aaaaaaaa", 60.0, 8.0))
+    perf_pass.append(_rec("tdeck", "bbbbbbbb", 90.0, 4.0, start=perf_pass.FRESH))
+    steps = FakeSteps()
+    steps.perf["tdeck"] = _rec("tdeck", "c2d35a0c", 60.0, 8.0)
+    perf_pass.append(steps.perf["tdeck"])
+    run_pass(bench, steps, "tdeck")
+    out = capsys.readouterr().out
+    head = next(ln for ln in out.splitlines() if ln.startswith("tdeck perf  ("))
+    assert "after-suite" in head and "vs aaaaaaaa" in head
+    assert "WORSE" not in out
 
 
 def test_a_stage_that_wrote_no_record_says_so(bench, capsys):

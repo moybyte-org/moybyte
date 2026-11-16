@@ -29,6 +29,8 @@ import os
 from . import native_build
 from .lua_ext import cfg_blob
 from .moyimg import decode_moyimg
+from .moycore_face import moycore_svc_chunk_t as SvcChunk, moycore_svc_info_t as SvcInfo
+from .moy_play_face import moy_play_info_t as PlayInfo
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
@@ -131,18 +133,6 @@ def build(verbose=False):
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 _U32 = ctypes.c_uint32
-
-class SvcChunk(ctypes.Structure):
-    """moycore_svc_chunk_t (native/moycore/moycore_svc.h)."""
-    _fields_ = [("src", ctypes.c_char_p), ("n", ctypes.c_size_t), ("name", ctypes.c_char_p)]
-
-
-class SvcInfo(ctypes.Structure):
-    """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
-    _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
-                ("heap", ctypes.c_uint32), ("cpu_us", ctypes.c_uint32), ("pid", ctypes.c_uint32),
-                ("why", ctypes.c_char * 96), ("wakes", ctypes.c_uint8), ("mail", ctypes.c_uint8)]
-
 
 _SIGS = (
     ("moycore_svc_start", [_U32, _C, ctypes.POINTER(SvcChunk), ctypes.c_size_t, _C,
@@ -282,19 +272,6 @@ SNAP_ROOM_X, SNAP_ROOM_Y, SNAP_ROOM_W, SNAP_ROOM_H = 15, 16, 17, 18
 AQ_SLOTS = 4
 AQ_MAX = 32
 AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
-
-
-class PlayInfo(ctypes.Structure):
-    """moy_play_info_t (native/moy_play/moy_play.h)."""
-    _fields_ = [("runtime", ctypes.c_char * 12), ("error", ctypes.c_char * 192),
-                ("frames", _U32), ("ticks", _U32), ("upcalls", _U32 * 6),
-                ("stack_open", _U32), ("stack_frame", _U32),
-                ("why", ctypes.c_uint8), ("end_why", ctypes.c_uint8),
-                ("stop_why", ctypes.c_uint8), ("vm_down", ctypes.c_bool),
-                ("vm_free", ctypes.c_bool), ("raised", ctypes.c_bool),
-                ("ended", ctypes.c_bool), ("game", ctypes.c_bool),
-                ("title", ctypes.c_char * 48), ("id", ctypes.c_char * 24),
-                ("fit", _U32 * 5), ("stuck", ctypes.c_bool)]
 
 
 class HostLuaRun:

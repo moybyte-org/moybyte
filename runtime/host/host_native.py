@@ -25,7 +25,10 @@ Two parts are taken only where their prerequisites are: the compiled-cart run
 (native/moy_store's moy_ufiles, moy_img) where the desktop MicroPython's tree
 has the inflater (`make unix-micropython`). Without the latter a Lua run's
 paint image decodes through the Python codec (runtime/host/moyhost_lua.c), as it
-always could.
+always could. MOYHOST_NO_INFLATER=1 builds without it where the tree is, as a
+machine with none does (CI's browser-console and board builds):
+tests/test_host_no_inflater.py holds every row a binding loads unconditionally
+to that build.
 
 What stays a library of its own, each saying why in its module: the audio
 (runtime/host/audio_binding.py, compiled double-widened for the parity harness;
@@ -73,7 +76,15 @@ def _module(name):
     return importlib.import_module(name)
 
 
-def parts(verbose=False):
+def inflater(want=None):
+    """Whether the library takes the inflater's part: where the desktop
+    MicroPython's tree is and `want` (default: MOYHOST_NO_INFLATER unset)."""
+    if want is None:
+        want = not os.environ.get("MOYHOST_NO_INFLATER")
+    return bool(want) and os.path.isdir(_module("runtime.moy_ufiles_binding").UZLIB)
+
+
+def parts(verbose=False, with_inflater=None):
     """([Part], extra cflags, link flags): what the library is made of here."""
     out = [_module("runtime." + m).PART for m in (
         "gfx_binding", "glass_binding", "lua_binding", "moy_input", "moy_lease", "moy_http", "moy_mic", "moy_lora", "moy_gatt", "moy_usb", "moy_midi", "moy_media", "moy_loop", "moy_evq",
@@ -82,9 +93,8 @@ def parts(verbose=False):
     out += [np.part(c) for c in (np.SPINE, np.FS, np.INDEX)]
     out.append(_module("runtime.moy_play").FILES_PART)
     cflags, link = [], ["-lm", "-lpthread", "-ldl"]
-    uf = _module("runtime.moy_ufiles_binding")
-    if os.path.isdir(uf.UZLIB):
-        out += [uf.part(), _module("runtime.moy_play").IMG_PART]
+    if inflater(with_inflater):
+        out += [_module("runtime.moy_ufiles_binding").part(), _module("runtime.moy_play").IMG_PART]
         cflags.append("-DMOYHOST_IMG_C=1")
     wasm = _module("runtime.wasm_binding")
     got = wasm.wamr(verbose) if wasm.vendored() else None
@@ -104,15 +114,23 @@ def parts(verbose=False):
     return out, cflags, link
 
 
-def build(verbose=False):
+def build(verbose=False, with_inflater=None):
     """The one library's path (built once per content), or None with no C
-    compiler. A process asks once; every binding loads what this answers."""
+    compiler. A process asks once; every binding loads what this answers.
+    `with_inflater` False is the build of a machine with no desktop
+    MicroPython tree, for a test to read, never this process's library."""
+    if with_inflater is not None:
+        return _build(verbose, with_inflater)
     if _PATH[0] is None:
-        ps, cflags, link = parts(verbose)
-        if os.environ.get("MOYHOST_ASAN"):
-            cflags = cflags + ASAN
-            link = link + ASAN
-        _PATH[0] = native_build.build_parts("moyhost", ps, CACHE, cflags=CFLAGS + cflags,
-                                            link_flags=link, verbose=verbose) or False
+        _PATH[0] = _build(verbose, None) or False
     return _PATH[0] or None
+
+
+def _build(verbose, with_inflater):
+    ps, cflags, link = parts(verbose, with_inflater)
+    if os.environ.get("MOYHOST_ASAN"):
+        cflags = cflags + ASAN
+        link = link + ASAN
+    return native_build.build_parts("moyhost", ps, CACHE, cflags=CFLAGS + cflags,
+                                    link_flags=link, verbose=verbose)
 

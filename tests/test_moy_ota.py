@@ -31,7 +31,11 @@ from test_ota_signing import TEST_KEYS, sign_with_test_key  # noqa: E402
 import moy_ota_health  # noqa: E402  (the health half: its thresholds and marker)
 from runtime import net_binding as nb  # noqa: E402
 
-nb.install()
+
+@pytest.fixture(autouse=True)
+def _moy_net(monkeypatch):
+    """`import moy_net` reaches the host's face, as a board's reaches the usermod."""
+    monkeypatch.setitem(sys.modules, "moy_net", nb)
 
 
 def _fresh():

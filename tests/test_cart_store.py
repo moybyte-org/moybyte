@@ -986,7 +986,7 @@ def _board_net(wifi=None, dial=None):
     """The board's transport (device/wire_links.CartNet) over the kernel's
     client, the C run by runtime/host/net_binding.py."""
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     sys.path.insert(0, str(ROOT / "device"))
     import wire_links
     return wire_links, wire_links.CartNet(wifi, dial)

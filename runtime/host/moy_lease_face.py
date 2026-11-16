@@ -9,9 +9,9 @@ import face_ctypes as _f
 
 __all__ = (
     "offer", "drop", "sweep", "vm_stop", "live", "held", "of_pin", "edge", "edge_close",
-    "pin_state", "device_name", "sim_pin", "sim_level", "sim_get", "reset", "WIFI", "GPIO",
-    "UART", "SPI", "VM", "PINS", "PIN_IN", "PIN_OUT", "PIN_PU", "PIN_PD", "PIN_PERIPH",
-    "PIN_SAFE", "ROWS_MAX", "EDGES", "PIN_MAX", "SHELL",
+    "pin_state", "device_name", "sim_pin", "sim_level", "sim_get", "reset", "wifi_reset",
+    "WIFI", "GPIO", "UART", "SPI", "VM", "PINS", "PIN_IN", "PIN_OUT", "PIN_PU", "PIN_PD",
+    "PIN_PERIPH", "PIN_SAFE", "ROWS_MAX", "EDGES", "PIN_MAX", "SHELL",
 )
 
 WIFI = 8
@@ -32,7 +32,7 @@ PIN_MAX = 64
 SHELL = 1
 
 
-class _moy_lease_offer_t(_c.Structure):
+class moy_lease_offer_t(_c.Structure):
     _fields_ = [
         ("name", _c.c_char * 8),
         ("cls", _c.c_uint8),
@@ -43,7 +43,7 @@ class _moy_lease_offer_t(_c.Structure):
     ]
 
 
-class _moy_lease_row_t(_c.Structure):
+class moy_lease_row_t(_c.Structure):
     _fields_ = [
         ("pins", _c.c_uint64),
         ("owner", _c.c_uint32),
@@ -82,6 +82,7 @@ _SIGS = (
     ("moy_lease_sim_level", [_c.c_int, _c.c_int], None),
     ("moy_lease_sim_get", [_c.c_int], _c.c_int),
     ("moy_lease_reset", [], None),
+    ("moy_lease_wifi_reset", [], None),
 )
 
 
@@ -149,3 +150,7 @@ def sim_get(pin):
 
 def reset():
     _lib().moy_lease_reset()
+
+
+def wifi_reset():
+    _lib().moy_lease_wifi_reset()

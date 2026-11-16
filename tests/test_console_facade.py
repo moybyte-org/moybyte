@@ -3,7 +3,7 @@
 `Workstation` is a compositor with services: each `console_*` module holds
 one object over the console that its `__init__` builds (`ws.router`,
 `ws.home`, `ws.spine`, ...; tests/ws_services.py reads them), beside the six
-collaborators of the 2026-08 carve. Four rules hold it there, none of them a
+collaborators of the 2026-08 carve. Six rules hold it there, none of them a
 count:
 
   1. NO PRIVATE NAME IS READ FROM OUTSIDE ITS OWNER. A `ws._x` (or
@@ -36,6 +36,14 @@ count:
      policy need of a surface is its Layer's protocol (`moved`,
      `ON_WALLPAPER`, `BAR`, `leave`, `blur`), and a verb that is about one
      of them names the registered object (`ws.settings_layer.id`).
+
+  6. NO APP REACHES THE CONSOLE (owner, 2026-11-15). An app -- each module
+     app_decls.APPS declares and the runtime/apps/ modules it is built from,
+     and a cart app's namespace -- holds no `ws`: it reaches the shell through
+     its AppContext's roles alone. The console's own modules (runtime/system/,
+     runtime/editors/, Settings and the task manager among them) call
+     `ws.<service>` directly and are not routed through roles: the gain is
+     minor, and the console may move to C.
 """
 
 import ast
@@ -415,3 +423,123 @@ def test_the_kind_owners_still_compare():
         assert any(isinstance(n, ast.Compare)
                    and any(_names_a_shell_kind(x) for x in [n.left] + n.comparators)
                    for n in ast.walk(tree)), rel
+
+
+# -- no app reaches the console -------------------------------------------------
+
+def _app_modules():
+    """The modules an app is built from: each declared app's module
+    (app_decls.APPS, which the console constructs every app from) and the
+    modules of runtime/apps/ they import, transitively."""
+    from runtime.app_decls import APPS
+    apps_dir = runtime_file("app_shell.py").parent
+    todo = [str(d["entry"]).partition(":")[0] for d in APPS]
+    seen = set()
+    while todo:
+        mod = todo.pop()
+        if mod in seen:
+            continue
+        seen.add(mod)
+        tree = ast.parse((apps_dir / (mod + ".py")).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                base = name.split(".")[-1]
+                if (apps_dir / (base + ".py")).is_file():
+                    todo.append(base)
+    return sorted(seen)
+
+
+def test_no_app_module_names_the_console():
+    """Rule 6, the source half. An app's module neither names `ws` (a
+    parameter, a variable or an attribute) nor imports the console or one of
+    its services: what an app reaches of the shell is its AppContext's
+    roles."""
+    mods = _app_modules()
+    assert {"paint_app", "music_app", "artwork", "app_shell"} <= set(mods), mods
+    found = []
+    for mod in mods:
+        tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            hit = ((isinstance(node, ast.Name) and node.id == "ws")
+                   or (isinstance(node, ast.arg) and node.arg == "ws")
+                   or (isinstance(node, ast.Attribute) and node.attr == "ws"))
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                         else [node.module or ""])
+                hit = any(n.split(".")[-1] == "console"
+                          or n.split(".")[-1].startswith("console_") for n in names)
+            if hit:
+                found.append("%s:%d" % (mod, node.lineno))
+    assert not found, (
+        "an app module reaches the console: hand it a role instead:\n  %s"
+        % "\n  ".join(found))
+
+
+_LEAVES = (type, type(len), type(_app_modules), type(ROOT.is_file),
+           str, bytes, bytearray, int, float, bool, memoryview, type(None))
+
+
+def _path_to(root, target):
+    """The path of public names (attributes, items, elements) from `root` to
+    `target`, or None. A name with a leading underscore is the owner's
+    (an app's own state, a role object's link to the ABI), so the walk
+    follows only what an app is handed to name; it does not enter a bound
+    method or a function, since neither hands out its receiver on a board."""
+    seen = {id(root)}
+    queue = [(root, "")]
+    while queue:
+        obj, path = queue.pop(0)
+        if obj is target:
+            return path or "itself"
+        if isinstance(obj, _LEAVES):
+            continue
+        if isinstance(obj, dict):
+            kids = [("[%r]" % (k,), v) for k, v in obj.items()]
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            kids = [("[%d]" % i, v) for i, v in enumerate(obj)]
+        else:
+            kids = [("." + k, v) for k, v in (getattr(obj, "__dict__", None) or {}).items()
+                    if not k.startswith("_")]
+        for name, val in kids:
+            if id(val) not in seen:
+                seen.add(id(val))
+                queue.append((val, path + name))
+    return None
+
+
+def test_no_app_is_handed_the_console(tmp_path):
+    """Rule 6, the object half. From every declared app, as the console
+    built it, and from a cart app's namespace, as the Player hands it (the
+    shipped Notes, and make_system_api with every permission), no path of
+    public names leads to the Workstation."""
+    import moy_app
+    from runtime.app_decls import APPS
+    from runtime import system_api
+    ws = build_ws(tmp_path)
+    for d in APPS:
+        app = ws.app(d["id"])
+        assert app is not None, d["id"]
+        path = _path_to(app, ws)
+        assert path is None, "%s reaches the console at app%s" % (d["id"], path)
+    ns = system_api.make_system_api(
+        ws.app_context, {"id": "every.perm", "title": "Every",
+                         "permissions": [p for p, _r in moy_app.perms()]},
+        ws.run.canvas)
+    assert "files" in ns and "prefs" in ns, sorted(ns)
+    path = _path_to(ns, ws)
+    assert path is None, "a cart app's names reach the console at %s" % path
+    from ws_helpers import select_on_home
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(1 / 30.0)
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    path = _path_to(ws.run.player.ns, ws)
+    assert path is None, "Notes' globals reach the console at %s" % path

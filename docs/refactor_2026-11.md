@@ -142,6 +142,15 @@ board).
 X6 is not a phase: every phase's last commit corrects the documents it
 falsified (`.claude/rules/docs.md`: grep the vocabulary it moved).
 
+**Size.** Planned: about 16,500 to 18,500 lines removed net, most of them
+faces (phases 6 and 8) and import boilerplate (phase 2), with the folded
+issues adding about 900 back (the input matrix, the archive and its tool).
+Actual, from before phase 0 to the last phase (5789c851..fbc81427d): +7,199
+net, each phase's figure in §4 and +292 for the fixes the waves made on the
+way. It grew because the generators' output is committed (the 52 files they
+write whole are +5,826) and the tests and guards grew by +3,813, while the
+rest of the tree shrank by 2,440.
+
 ## 4. The phases
 
 Every phase runs in its own worktree, lands as one outcome, and is checked
@@ -208,7 +217,7 @@ and a Storybook field. Guition S3: the two tests' twenty runs.
 in `tests/test_app_field_typing.py` (Mic reverts the draft and opens no
 menu).
 
-**Size.** About +350 (tool, target, tests), −240.
+**Size.** About +350 (tool, target, tests), −240. Actual: net +795, +443 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Nothing. Everything else depends on X4.
 
@@ -257,7 +266,7 @@ allowlist whose every entry has a reason (ISR rings, DMA drivers,
 `native/p4`, the Lua allocator's pool, the pinned `mp_task` copy, vendored
 trees).
 
-**Size.** About −1,200, across on the order of a hundred C files.
+**Size.** About −1,200, across on the order of a hundred C files. Actual: net +537 (its commits' `git diff --stat`).
 
 **Depends on.** Phase 0.
 
@@ -285,7 +294,7 @@ module set is byte-for-byte the list it was. Goldens unchanged.
 module, each flat name and its `runtime.` name are one object; no runtime
 file holds the two-arm form.
 
-**Size.** About −2,000.
+**Size.** About −2,000. Actual: net −2,322 (its commits' `git diff --stat`).
 
 **Depends on.** Phase 0.
 
@@ -329,7 +338,7 @@ or UTF-8 helper outside `native/moy_spine`. `tests/test_board_toml.py`: no
 as it is.
 
 **Size.** About −350 and 100 defines; 6,200 lines regrouped at no net
-change.
+change. Actual: net −5 (its commits' `git diff --stat`).
 
 **Depends on.** Phase 1 (the split must not carry `moy_os.c`'s private
 platform section with it).
@@ -393,7 +402,7 @@ it: nothing under `runtime/` imports from `tools/`; `tests/test_tools_smoke.py`
 fails a tool that nothing names.
 
 **Size.** About +1,000 of test and generator (T3 600, the matrix 400), −550
-of code, 1,850 lines out of `tools/`.
+of code, 1,850 lines out of `tools/`. Actual: net +948, +1,546 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phase 2 (both rewrite imports in `runtime/host`).
 
@@ -451,7 +460,10 @@ typing path, Mic, back from four entry points, and the simulator's Esc.
 **Check.** Host suite, `tests/test_frame_alloc.py` (the per-frame derive
 allocates nothing), `tests/test_app_field_typing.py` extended to the shell
 apps. **Re-bake "input owner":** static frames should not move; any that
-does is reviewed from phase 0's pictures under this name. T-Deck: typing in a
+does is reviewed from phase 0's pictures under this name. Its semantic-trace
+re-bakes: the app registry's `row` line loses its text-mode column and the
+`text_mode` line reads `False False` (471c6cf83), and the roles trace's
+`text_mode` line goes with `nav.text_mode` (da0a2c794). T-Deck: typing in a
 field of Files, of Settings, of Music, of Appearance and of a cart app; Mic
 in each; W A S D moving; the trackball. P4: two desk windows, one typing and one a game; a BLE
 keyboard's held key.
@@ -466,7 +478,7 @@ phase. And `tests/test_input_policy.py`:
 - a scan: the mode setter, a write of `input.text_mode`, `set_game_mode(`
   and `KeyEdge(` appear only in the owner and the input layer.
 
-**Size.** About −860.
+**Size.** About −860. Actual: net +225, +339 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phases 0 and 2. Phase 1 has landed before S3 edits
 `native/moy_input`. It lands on top of phase 4 (§5), whose matrix it turns
@@ -505,6 +517,12 @@ Closes T1, T9, T10, T13, N9, T16; measures X8. Decided: §6, decision 2.
 - X8: the build's printed headroom for the Zero and the T-Deck is read
   before and after, and the difference goes to the phase's issue.
 
+**Decided: conditional rows (owner, 2026-11-15).** A row the boards build
+only under a C condition (`moy_net`'s serving and Wi-Fi halves) is generated
+like any other: the face's `when` names the condition, the row names its
+group, and the MicroPython face carries the group inside `#if`, so the web
+build's absent names stay absent rather than becoming hand rows.
+
 **Mechanical or not.** Mechanical. What can go subtly wrong is integer
 truncation, None, and allocation on a frame path; the four columns and the
 no-allocation rows are there for that.
@@ -517,7 +535,7 @@ MicroPython globals, the ctypes names and the table's rows are one set less
 the declared absences, and one generated script gives equal answers on both
 runtimes. The generator's drift test.
 
-**Size.** About −6,000 to −8,000 net.
+**Size.** About −6,000 to −8,000 net. Actual: see #258.
 
 **Depends on.** Phases 1 (it edits the same MicroPython files lightly) and
 4 (the split generator, the error table, T3).
@@ -579,7 +597,7 @@ code editor, the home band and About's licence page excepted by name;
 order; a cart the guard turned off is marked on the Make tab and one it
 forgave is not.
 
-**Size.** About −340, +15 for the badge.
+**Size.** About −340, +15 for the badge. Actual: net +268, +268 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phase 5 (the surface protocol; Settings' seed swallow is the
 policy's by then).
@@ -640,7 +658,7 @@ parity test hold the names. Phase 4's matrix has no failing cell left, and
 gains two assertions: a stacked field's cancel, and a popover's box equal on
 its first shown frame and the one after.
 
-**Size.** About −3,100.
+**Size.** About −3,100. Actual: net +2,555, +371 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phases 4 and 6 (the generator and its emitters), 0 (the
 theme reader is already off the context's files), 5 (the matrix's other
@@ -654,6 +672,12 @@ the sprint; #242 stays open for its convention rows.
 
 Closes G1, S7, S9, S10, S2b, and G6's console part. Decided: §6,
 decision 3.
+
+**G1's boundary (owner, 2026-11-15).** Apps reach no `ws` at all: an app
+holds its `AppContext`'s roles and nothing of the console. The console's own
+system and editor modules call `ws.<service>` directly and keep doing so;
+routing them through `app_context` roles too was declined, because the gain
+is minor and the console may move to C.
 
 **Changes**
 
@@ -697,9 +721,15 @@ no `ws._name`, `wm._name`, `bar_layer._name` or `player._name` read from
 outside its owner; the pinned forward set is the six big names and nothing
 else, and no service's module reads one of them; no kind compared to
 `"settings"` or `"tasks"` outside the registry; each service's module holds
-only its own verbs.
+only its own verbs; no app reaches `ws`, neither by the modules a declared
+app is built from naming it nor by a path of public names from an app, or
+from a cart app's namespace, to the Workstation.
 
-**Size.** Near zero net; about 60 files and their tests touched.
+**Re-bake.** `tests/test_semantic_traces.py`'s roles trace: its `roles`
+line gains `bt`, `usb` and `wifi`, and a `radios` line is new (S2b,
+dae8383e2).
+
+**Size.** Near zero net; about 60 files and their tests touched. Actual: net +476 (its commits' `git diff --stat`).
 
 **Depends on.** Phases 5 and 7.
 
@@ -733,7 +763,7 @@ app.
 `case MOY_APP_` outside a generated file; every `MOY_*_OK` is 0; no per-row
 Lua function outside the hand list.
 
-**Size.** About −1,100.
+**Size.** About −1,100. Actual: net +23 (its commits' `git diff --stat`).
 
 **Depends on.** Phases 3 (`moy_os.c` is split), 4 (T5's table, T3) and 6.
 
@@ -777,7 +807,7 @@ row of the kernel's table; a Lua app's and a Lua service's `moybyte` names
 are one set; a service and a cart see one set of banned globals; no timer
 table in `moycore_svc.c` and no due-list in `Wakes`.
 
-**Size.** About −600; 1,220 lines of `Scheduler` regrouped.
+**Size.** About −600; 1,220 lines of `Scheduler` regrouped. Actual: net +938, +308 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phases 1, 4, 6 (`moy_evq`'s face), 10 and 12 (the Player's
 frame start).
@@ -800,7 +830,7 @@ raster's goldens unchanged. T-Deck: per-cart fps as before (#66).
 the app face or the pacing half, and the frame path makes no call through
 either.
 
-**Size.** Near zero net; 2,813 lines in three objects.
+**Size.** Near zero net; 2,813 lines in three objects. Actual: net +233 (its commits' `git diff --stat`).
 
 **Depends on.** Phases 5 (which removes the Player's typing state) and 9.
 
@@ -815,6 +845,9 @@ Closes N15, X1, E1. Decided: §6, decision 4.
   held each pair to one answer become plain tests of the one body. The test
   oracles (`tests/spine_twin.py`, the Python index, `tests/app_twin.py`)
   stay.
+  The owner's decision (2026-11-15): the C store runs on every tier, the
+  CPython host included, so the catalogue, the whole-cart load, the seed and
+  the journal are host parts too and their Python bodies go.
 - X1: the store carries a format stamp, written when a
   store is made and read by its strict readers. A fixture store in the
   trial's format is committed. `sweep_store`'s generation-gated pass is the
@@ -837,8 +870,8 @@ Closes N15, X1, E1. Decided: §6, decision 4.
     already reach it; no new transport.
   - `tools/console_backup.py` pulls and pushes an archive from a host, and
     the dev channel has the two calls as commands.
-  - The on-device action, a row in Settings with its confirm and its restore
-    picker, is not in the sprint (§6's rule, §7).
+  - There is no on-device action: a backup is a copy of the whole moybyte
+    folder made off the device (owner, 2026-11-15, #127).
 
 
 **Mechanical or not.** N15 is mechanical. X1 adds a stamp to a new store;
@@ -858,13 +891,13 @@ root reads back equal, file for file, thumbnails aside, and a re-seed after
 it leaves an edited built-in as restored.
 
 **Size.** About −1,300, +550 (the stamp and fixture 200, the archive and
-the host tool 350).
+the host tool 350). Actual: net −167 (its commits' `git diff --stat`).
 
 **Depends on.** Phase 6 (`moy_store`'s face is generated by then).
 
 **Closes on the issues.** X1. #127's archive and restore exist and are
-reachable from a host; the issue stays open for the on-device action and
-for LAN auto-backup (§7).
+reachable from a host; the issue stays open for the folder copy that
+restores on its own and for LAN auto-backup (§7).
 
 ### Phase 14. The canvas leftovers
 
@@ -904,7 +937,7 @@ a forced PPA error demoting to the CPU kernel.
 one-buffer compositor's verbs, and the web's and the host's compositors are
 it; `device/p4_canvas.py` holds no branch on crisp or smooth around a blit.
 
-**Size.** About −20 (K1) and −60 of Python for +40 of C (K2).
+**Size.** About −20 (K1) and −60 of Python for +40 of C (K2). Actual: net +377, +206 of it tests (its commits' `git diff --stat`).
 
 **Depends on.** Phases 1 and 3 (they edit `native/moy_glass` and `native/p4`
 first) and 2.
@@ -938,10 +971,6 @@ Fifteen worker-phases in the same seven waves. Then the gate: one
 (which is why F1 and F2 are in phase 0), and the CI run read, not only
 preflight.
 
-The sprint removes about 16,500 to 18,500 lines net, most of them faces
-(phases 6 and 8) and import boilerplate (phase 2). The folded issues add
-about 900 of that back: the input matrix, the archive and its tool.
-
 ## 6. Owner decisions
 
 ### Decided (owner, 2026-11-11)
@@ -971,6 +1000,10 @@ the shape before the rest follow.
 - *What it costs:* the largest pass in the sprint, across about 60 files
   and their tests, and S2b's risk on the Wi-Fi and USB paths.
 - *Declined:* keeping the mixins and only renaming the most-read privates.
+- *The boundary (owner, 2026-11-15):* apps reach no `ws` at all; the
+  console's own system and editor modules call `ws.<service>` directly. The
+  gain of routing them through `app_context` roles is minor, and the console
+  may move to C. `tests/test_console_facade.py`'s rule 6 holds it.
 
 **4. The trial's store.** A format stamp; a committed fixture of a
 trial-format store; `sweep_store`'s generation-gated pass as the one door;
@@ -1000,10 +1033,10 @@ would change behaviour or reach further than the audits' mechanical core:
 
 ### For the owner
 
-- **#127's on-device action waits for the trial's software (owner,
-  2026-11-12).** Under the rule, the sprint ends with the archive, restore
-  and host tool (phase 13), and a family's one-tap backup in Settings comes
-  with the trial's first items. #127 stays open for that row.
+- **#127's backup is a copy of the moybyte folder (owner, 2026-11-15).**
+  It replaced 2026-11-12's Settings row: an archive written on the device
+  froze the T-Deck for 73 s on a 13 MB store and guarded nothing against a
+  lost card. The archive stays as the format door's pre-step copy.
 
 ## 7. After the sprint
 
@@ -1018,7 +1051,7 @@ would change behaviour or reach further than the audits' mechanical core:
 
 | id | what | why not in the sprint |
 |---|---|---|
-| E1 (action) | The backup's on-device action: a Settings row, its confirm, the restore picker | §6's rule. #127 closes with it. It belongs with the trial's first-boot software. |
+| E1 (folder) | The backup as a copy of the whole moybyte folder, `system/` included: a boot that finds another board's stamp drops the rows bound to a device, `installed.json` is rebuilt from the cart folders, and `tools/console_backup.py` mirrors the folder (owner, 2026-11-15) | A feature. #127 closes with it. |
 | #83 | USB keyboard and mouse into the console | A feature. It is built on the input owner and proved by the matrix's USB column, so it starts where phase 5 ends. |
 | #26 | BLE input | The same as #83, on the matrix's BLE column. |
 
@@ -1041,7 +1074,7 @@ would change behaviour or reach further than the audits' mechanical core:
 | X2 | An upgrade rehearsal of MicroPython and ESP-IDF on a branch | Sizing work for a bump the P4's later silicon may force. Independent of the refactor. |
 | #249 (perf) | Its perf items: Notes' app pass on the P4s, the home's vertical scroll and carousel, the Guition S3 pickers' first frame, the T-Deck's carousel fling | The refactor changes what they measure: phases 5, 7, 8 and 9 rewrite the home's and the apps' Python frame. Measured again after the gate, numbers to #66. |
 | #242 (rows) | Its input-convention rows | Features. They are checked against the matrix once it exists. |
-| #127 (LAN) | LAN auto-backup | A feature on top of E1's archive. |
+| #127 (LAN) | LAN auto-backup | The folder mirror on an interval, on top of E1's. |
 | K2 (rest) | `present_frame`, its patch pictures and `blit_strip_async` in C | Console-only Python with no second copy, whose patch arithmetic has no host test. A perf port; decide it from #58's numbers. |
 | #160 (Editor) | The broken-cart mark in the Editor | §6's rule. #160 closes on the launcher's badge. |
 
@@ -1050,7 +1083,8 @@ would change behaviour or reach further than the audits' mechanical core:
 **Vendored.** Lua, both libmoy copies, WAMR, dash, mbedTLS, monocypher,
 Dropbear, the DSI vendor drivers, `tools/p8_lua_port.py`, the SDK's libc.
 Fixed upstream or in the fork and re-vendored. Every scan in this plan
-excludes them.
+excludes them. `tools/vendor_advisories.py` checks each `*_vendor.json` pin
+against the public advisory sources weekly.
 
 **Two by design**
 

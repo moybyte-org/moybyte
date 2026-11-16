@@ -147,7 +147,7 @@ def pixel_sheet():
     return _PIXEL[0]
 
 
-# A `slots` look field's leaves hold this many slots each (tools/gen_ui_tables.py).
+# A `slots` look field's leaves hold this many slots each (tools/gen_os/style.py).
 SLOT_BITS = 30
 _SLOT_LEAVES = tuple("icons.pixel_slots.%d" % i for i in range(-(-len(SLOTS) // SLOT_BITS)))
 

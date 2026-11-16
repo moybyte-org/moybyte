@@ -1,0 +1,8 @@
+{
+  "moy_wasm": {
+    "about": "compiled (wasm) apps over the vendored WAMR, native/moy_wasm",
+    "host": "wasm_binding",
+    "registered": false,
+    "structs": [{"c": "NativeSymbol", "header": "moy_wasm/wamr/core/iwasm/include/lib_export.h"}]
+  }
+}

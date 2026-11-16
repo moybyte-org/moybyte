@@ -172,6 +172,35 @@ def test_a_game_too_big_for_the_console_gets_the_fit_notice(ws, monkeypatch):
     assert p.notice is not None and p.lua is None, p.cart_error
 
 
+def test_a_game_built_for_another_chip_gets_the_chip_notice(tmp_path, built):
+    """A native cart with no module for this console (a backup of an S3's
+    store restored onto a P4) is refused before it loads, with the notice
+    that says so: no run, and no error text of the loader's."""
+    from runtime.host_app import build_workstation
+    from runtime.moy_input import InputTable
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    dst = carts / "elf_game.moy"
+    shutil.copytree(built, str(dst))
+    man = json.loads((dst / "manifest.json").read_text())
+    man["moybyte"]["native"] = ["esp32s3"]
+    (dst / "manifest.json").write_text(json.dumps(man))
+    (dst / "main.host.elf").rename(dst / "main.esp32s3.elf")
+    ws = build_workstation(str(carts))
+    if "elf" not in ws.runtimes:
+        pytest.skip("no host native tier")
+    ws.input = InputTable()
+    open_cart(ws, "Game Native")
+    p = ws.run.player
+    en = json.load(open(os.path.join(ROOT, "native", "moy_spine", "strings", "en.json")))
+    assert p.lua is None
+    assert p.notice == en["strings"]["say.chip_text"]
+    assert p.notice_title == en["strings"]["say.chip"]
+    _frames(ws, 2)
+    card = ws.pause
+    assert card.rows == (card.HOME,), "a notice, not a stop: nothing to restart"
+
+
 def test_a_command_has_no_screen_to_present_to(tmp_path):
     """moy_screen and moy_present answer ENODEV outside a game."""
     from runtime import elf_binding

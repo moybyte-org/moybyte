@@ -551,9 +551,13 @@ def test_music_follows_what_another_client_or_a_vm_stop_left_playing(tmp_path, f
     after a VM stop (a fresh Stream, its label read back), another client's
     by its source, and a run that ended with nothing played as failed."""
     ws = build_ws(tmp_path)
+
+    def nav_of():
+        return ws.app_context(M.MusicAppLayer.id, ("nav",)).nav
+
     s = M.STREAM
     face.play(GROOVE[2], label=M.label_of("radio", GROOVE[0]))
-    assert M.follow(ws) is True
+    assert M.follow(nav_of) is True
     assert s.what == ("radio", GROOVE[0], GROOVE[2]) and s.card["station"] == GROOVE[0]
     it = ITEMS.at(0)
     assert it is not None and it.app == "Music" and it.state == ON
@@ -567,4 +571,4 @@ def test_music_follows_what_another_client_or_a_vm_stop_left_playing(tmp_path, f
     assert s.card["state"] == M.FAILED and ITEMS.at(0).state == ERROR
     face.end = None
     s._end()
-    assert M.follow(ws) is False and ITEMS.at(0) is None
+    assert M.follow(nav_of) is False and ITEMS.at(0) is None

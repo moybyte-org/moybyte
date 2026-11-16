@@ -1,0 +1,8 @@
+{
+  "moy_media": {
+    "about": "media playback: a stream decoded to the audio ring",
+    "host": "moy_media",
+    "lazy": true,
+    "structs": ["moy_media_status_t", "moy_media_end_t", "moy_media_probe_t"]
+  }
+}

@@ -72,7 +72,10 @@ A `ui.*` row (native/os_calls.json) adds:
             `init` (*out's value before the call), `wret` ("in:<param>": a
             failed call answers that argument), `wput` ("always" or "pos":
             when the out words are written; on success by default),
-            `wnull` ([param]: an empty text crosses as NULL)."""
+            `wnull` ([param]: an empty text crosses as NULL), `pack`
+            ({param: packer}: a sequence on Python and Lua packed by another
+            converter than a list's, "words": 0xRRGGBB colours, a
+            little-endian word each; wasm takes the packed bytes)."""
 
 import json
 import os
@@ -81,6 +84,7 @@ import textwrap
 
 from . import TableError, header
 from .cproto import c_decl
+from . import face as _face
 from .face import Headers, NATIVE
 from .table import ROOT, runtime_file, verb_of
 from .py import splice
@@ -102,7 +106,10 @@ HAND_LUA = os.path.join(NATIVE, "moycore", "moycore_ui.h")
 
 API_FIELDS = {"api", "c", "hand", "ret", "out", "buf", "opts", "wspan", "flag", "trunc", "dflt",
               "run", "run_ret", "run_fix", "doc"}
-ROW_UI = {"api", "fix", "hand", "lua_in", "lua_opt", "init", "wret", "wput", "wnull"}
+ROW_UI = {"api", "fix", "hand", "lua_in", "lua_opt", "init", "wret", "wput", "wnull", "pack"}
+# A packer: what a sequence on Python and Lua crosses to the engine as, by name
+# (Python's _<name>, Lua's moycore_ui_<name>); a `list` packs with `items`.
+UI_PACKS = ("words",)
 UI_LUA_RETS = ("nil", "bool", "value", "index", "words")
 # Python names a C parameter cannot keep on the host: the face calls these.
 _PY_TAKEN = {"len", "int", "bytes", "bool", "tuple", "in", "c", "lib", "m"}
@@ -414,13 +421,13 @@ def _ctype(a):
     if a.kind in ("ctx", "inst", "over", "rw", "out", "buf", "wspan"):
         return "c.c_void_p"
     if a.kind == "sink":
-        return "c.POINTER(_Sink)"
+        return "c.POINTER(moy_ui_sink_t)"
     if a.kind == "span":
-        return "_Span"
+        return "moy_ui_span_t"
     if a.kind == "box":
-        return "_Box"
+        return "moy_ui_box_t"
     if a.kind == "boxout":
-        return "c.POINTER(_Box)"
+        return "c.POINTER(moy_ui_box_t)"
     if a.kind in ("opts", "bytes"):
         return "c.c_char_p"
     return _CT[b]
@@ -429,7 +436,7 @@ def _ctype(a):
 def _restype(v):
     rb = _base(v.ret)
     if rb == "moy_ui_box_t":
-        return "_Box"
+        return "moy_ui_box_t"
     if rb == "char *":
         return "c.c_char_p"
     return _CT[rb]
@@ -466,7 +473,7 @@ def _py_row(v):
         elif a.kind == "box":
             call.append("box_of(%s)" % x[0])
         elif a.kind == "boxout":
-            o.append("        %s = _Box()" % a.cn)
+            o.append("        %s = moy_ui_box_t()" % a.cn)
             call.append("c.byref(%s)" % a.cn)
             post = "        return (%s.x, %s.y, %s.w, %s.h)" % ((a.cn,) * 4)
         elif a.kind in ("opts", "bytes"):
@@ -524,14 +531,17 @@ def gen_host(vs):
          '"""The host\'s context form of the toolkit\'s verbs over ctypes: the argtypes',
          "of each engine verb they call (SIGS, which runtime/host/moy_ui_binding.py",
          "sets), and the verbs, set on the module by runtime/host/moy_ui_api_binding.py's",
-         'install with its converters."""', "", "import ctypes as c", "",
-         "from runtime.moy_ui_binding import _Box, _Sink, _Span, _nested", "", "SIGS = ("]
+         'install with its converters; and the ctypes mirrors of the structures the',
+         'toolkit\'s host binding reads (tools/gen_os/structs.py)."""', "",
+         "import ctypes as c", "import ctypes as _c", "", ""] + _face.mirrors(_face.load()["moy_ui"]).emit() + [
+         "SIGS = ("]
     o += [_sig(v) for v in vs if v.args is not None and v.hand != {"mp", "host"}]
     o += [")", "", "",
           "def install(m, lib, ctx_, sink, span0, over, box_of):",
           '    """The verbs on module `m` over `lib`: `ctx_` a context\'s pointer and what',
           "    keeps it, `sink` a canvas's sink, `span0` a text's span (None as \"\"), `over`",
-          '    the override block\'s struct and what keeps it, `box_of` a rect."""']
+          '    the override block\'s struct and what keeps it, `box_of` a rect."""',
+          "    from runtime.moy_ui_binding import _nested"]
     for v in vs:
         if "host" not in v.hand:
             o += _py_row(v)
@@ -875,10 +885,12 @@ def _enum_py(p, cn, n):
     return "%s.index(%s) if %s in %s else %d" % (e["py"], n, n, e["py"], e["default"])
 
 
-def _lua_row(p, fix=None):
+def _lua_row(p, fix=None, packs=None):
     """(the body's lines up to its run call, the lines that answer) of p's Lua verb, its
-    fixed arguments from `fix` (p's own by default)."""
+    fixed arguments from `fix` (p's own by default), a sequence's packer from `packs`
+    ({param: C}; its own by default)."""
     fix = p.fix if fix is None else fix
+    packs = packs or {}
     v = p.api
     o = []
     lua_in = p.u.get("lua_in", {})
@@ -886,6 +898,7 @@ def _lua_row(p, fix=None):
     base = p.r.get("base", {})
     enum = p.r.get("enum", {})
     lists = set(p.r.get("list", ()))
+    pack = p.u.get("pack", {})
     call, outs = ["moycore_ui_canvas()"], []
     for a in p.run_params():
         if a.cn in fix:
@@ -915,13 +928,14 @@ def _lua_row(p, fix=None):
         elif a.kind == "span":
             o.append("    moy_ui_span_t %s = moycore_ui_span(L, %d);" % (a.cn, i))
             call.append(a.cn)
-        elif a.kind in ("opts", "bytes") and a.cn in lists:
+        elif a.kind in ("opts", "bytes") and (a.cn in lists or a.cn in pack):
+            fn = packs.get(a.cn, _packer(p, a.cn))
             o.append("    size_t %s_n = 0;" % a.cn)
             if a.cn in lua_opt:
                 o.append("    const char *%s = lua_isnoneornil(L, %d) ? \"\" : "
-                         "moycore_ui_items(L, %d, &%s_n);" % (a.cn, i, i, a.cn))
+                         "%s(L, %d, &%s_n);" % (a.cn, i, fn, i, a.cn))
             else:
-                o.append("    const char *%s = moycore_ui_items(L, %d, &%s_n);" % (a.cn, i, a.cn))
+                o.append("    const char *%s = %s(L, %d, &%s_n);" % (a.cn, fn, i, a.cn))
             call += ["(const uint8_t *)%s" % a.cn, "%s_n" % a.cn]
         elif a.cn in enum:
             e = enum[a.cn]
@@ -980,6 +994,17 @@ def _lua_row(p, fix=None):
     raise TableError("%s: lua_ret %s" % (p.r["name"], lret))
 
 
+def _packer(p, cn):
+    """The C packer of p's sequence parameter `cn`."""
+    return "moycore_ui_" + p.u.get("pack", {}).get(cn, "items")
+
+
+def _packed(p):
+    """p's sequence parameters a Lua verb packs."""
+    return [a.cn for a in p.run_params() if a.kind in ("opts", "bytes")
+            and (a.cn in p.r.get("list", ()) or a.cn in p.u.get("pack", {}))]
+
+
 def shared(ps, body):
     """The rows of `ps` whose bodies are one body once their fixed arguments are
     parameters, as {first row's verb: (the group's rows, its fixed C names)}: such
@@ -1001,13 +1026,17 @@ def _lua_shared(g, names):
     rets = {tuple(_lua_row(p)[1]) for p in g} - {("    return 0;",)}
     if len(rets) > 1:
         return None
-    pre = _lua_row(g[0], {n: n for n in names})[0]
+    # A sequence packed by more than one packer across the group: a parameter too.
+    packs = [cn for cn in _packed(g[0]) if len({_packer(p, cn) for p in g}) > 1]
+    pre = _lua_row(g[0], {n: n for n in names}, {cn: cn + "_pack" for cn in packs})[0]
     ret = list(rets.pop()) if rets else ["    return 0;"]
     head = "static int moycore_ui_%s_of(lua_State *L, %s)" % (
-        v, ", ".join("int32_t " + n for n in names))
+        v, ", ".join(["int32_t " + n for n in names]
+                     + ["const char *(*%s_pack)(lua_State *, int, size_t *)" % cn
+                        for cn in packs]))
     o = [head, "{"] + pre + ret + ["}", ""]
     for p in g:
-        args = ", ".join(["L"] + [p.fix[n] for n in names])
+        args = ", ".join(["L"] + [p.fix[n] for n in names] + [_packer(p, cn) for cn in packs])
         o += ["static int moycore_ui_%s(lua_State *L)" % p.verb, "{"]
         if ret != ["    return 0;"] and _lua_row(p)[1] == ["    return 0;"]:
             o += ["    moycore_ui_%s_of(%s);" % (v, args), "    return 0;"]
@@ -1023,7 +1052,8 @@ def gen_lua(ps):
          "// converters; MOYCORE_UI_VERBS is the `ui` table's luaL_Reg rows, every verb's.",
          "#ifndef MOYCORE_UI_ROWS_H", "#define MOYCORE_UI_ROWS_H", ""]
     mine = [p for p in ps if "lua" not in p.hand]
-    groups = shared(mine, lambda p, fix: _lua_row(p, fix)[0])
+    groups = shared(mine, lambda p, fix: _lua_row(p, fix, {cn: cn + "_pack"
+                                                           for cn in _packed(p)})[0])
     done = set()
     for p in mine:
         if p.verb in done:
@@ -1067,7 +1097,7 @@ def _py_body(p):
         if a.kind == "over":
             args.append("_over(%s)" % n)
         elif a.kind in ("opts", "bytes"):
-            args.append("_opts(%s)" % n)
+            args.append("_%s(%s)" % (p.u.get("pack", {}).get(a.cn, "opts"), n))
         elif a.cn in p.r.get("enum", {}):
             args.append(_enum_py(p, a.cn, n))
         elif base.get(a.cn) is not None:
@@ -1168,6 +1198,10 @@ def check(vs, ps):
     for p in ps:
         if p.r.get("lua_ret", "nil") not in UI_LUA_RETS:
             raise TableError("%s: lua_ret is one of %s" % (p.r["name"], UI_LUA_RETS))
+        for cn, k in p.u.get("pack", {}).items():
+            if k not in UI_PACKS or cn in p.r.get("list", ()):
+                raise TableError("%s: pack %s is one of %s, on no list"
+                                 % (p.r["name"], cn, UI_PACKS))
     with open(HAND_MP) as f:
         mp = f.read()
     with open(HAND_HOST) as f:

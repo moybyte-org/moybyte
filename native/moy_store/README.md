@@ -3,14 +3,14 @@
 The store in C (`docs/history/kernel_store_2026-10.md`; #224), linked by every image:
 the boards, the browser and the desktop MicroPython; CPython (the simulator, the
 tools, the tests) reaches it over ctypes as the same module
-(`runtime/host/moy_store_binding.py`, face.json's host rows). Its file verbs and
-crash-safe write, the archive and adopt, the tree removal and the shelf are
-the one body on every tier (`runtime/carts/moy_fs.py`, `moy_pack.py`,
-`moy_store_base.py` and `cart_index.py` call them; `tests/test_store_one_body.py`
-fails a Python body of one). The catalogue, the seed and the journal keep
-CPython bodies of their own, the reference the C is held to
-(`docs/refactor_2026-11.md` §7), which `moy_carts`, `moy_seed` and
-`moy_journal` take where the module has no such row.
+(`runtime/host/moy_store_binding.py`, face.json's host rows). It is the one
+body on every tier: the file verbs and crash-safe write, the catalogue and the
+whole-cart load, the seed, the journal, the archive and adopt, the tree
+removal and the shelf (`runtime/carts/moy_fs.py`, `moy_carts.py`, `moy_seed.py`,
+`moy_journal.py`, `moy_pack.py`, `moy_store_base.py` and `cart_index.py` call
+them; `tests/test_store_one_body.py` fails a Python body of one). The rows the
+host leaves out are a VM's own: the card, the internal volume, the store task,
+the lock meter and the heap meter.
 
 | file | what it is |
 |---|---|
@@ -26,7 +26,7 @@ CPython bodies of their own, the reference the C is held to
 | `moy_arena.h` | a store call's scratch, freed at once |
 | `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
 | `moy_shelf.h`, `moy_shelf.c` | the shelf's record (`installed.json`: its one reader, the record without a cart as `json.dumps` writes it, an installed cart found by folder or id) and a cart's removal (the rename out of the carts folder, the record, the delete, its written files: `moy_shelf_remove` in one call, `moy_shelf_take` and `moy_shelf_written` for the VM's steps); `runtime/carts/cart_index.py` calls it on every tier (CPython through `runtime/host/moy_store_binding.py`) and the C shell's `pkg list` and `pkg remove` with no VM |
-| `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
+| `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, the folder a cart is stored in (`moy_cat_folder`, `moy_store_base.cart_folder`'s row, on every build: the seed needs the inflater, the name does not), and the whole-folder verbs (remove, copy) |
 | `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table resolve on the VM's task (the kernel's own `lfs2_t` under a `KVfs`, VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), which fills the volume table at each change of the mount table, and the table's resolve on any other task (`moy_store_on_vm` says which); every call under `nlr_push` and the store's lock; scratch per task and the marker cache in PSRAM on a board; on the unix port the tests' task (`task`, `task_join`), two threads of no VM working the store, or walking a folder inside one gate |
 | `moy_kvfs.c` | the internal flash volume, the kernel's: its `lfs2_t` over the "vfs" partition (a RAM medium on the unix port, for the host's tests), listed in the volume table at `/` at its mount, and `KVfs`, the VFS type each VM's start mounts at `/`, each littlefs call under the store's lock |
 | `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes faces (`runtime/host/moy_store_binding.py`, `moy_ufiles_binding.py`) |
@@ -43,8 +43,9 @@ folder's other entries).
 The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the user-files layer's writes among the cut ones, the C over POSIX
 through ctypes and on the desktop MicroPython), `tests/test_moy_fs_publish.py` (each state a cut leaves, read),
 `tests/test_store_one_body.py` (the one body, the trial's store and its door, the backup),
-`tests/test_store_native.py` (the shelf and moy_json on the desktop MicroPython
-against CPython over every cart and generated ones) and
+`tests/test_store_native.py` (the shelf, the seed and the journal read alike by
+the VM's face and CPython's over every cart and generated ones, and moy_json
+against CPython's json) and
 `tests/test_store_on_vfs.py` (the store on FAT and littlefs volumes under the
 desktop MicroPython, every write the C store's) and `tests/test_store_tasks.py`
 (a task of no VM and the VM's Python working one volume at once, on the

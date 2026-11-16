@@ -43,11 +43,7 @@ def native():
         try:
             import moy_audio as na
         except ImportError:
-            try:
-                from runtime import audio_binding
-                na = audio_binding.install() or False
-            except ImportError:
-                na = False
+            na = False
         if na is not False and not hasattr(na, "open"):
             na = False
         _NA[0] = na

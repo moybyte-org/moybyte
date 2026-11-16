@@ -508,6 +508,6 @@ T8 (theme JSON reader) can ride any host-only batch.
 - **The DENY-list Lua preludes for object-valued verbs** (`lua_ext.py` handles, layers, editor, grants): `.claude/rules/shell.md` makes that one module the place for them. T4 removes only the `moybyte` call and wake half.
 - **The single-pass, previous-frame-stops UI model:** a measure pass costs the S3 a second verb walk, and §14's shift and floor machinery rests on it. `surface_model_v1.md` §8 is closed.
 - **`modmoy_ui.c`'s zero-allocation hand paths** (`label_text`, the single dict-map walk): generate their schema, keep their shape. `test_frame_alloc` and `test_ui_opts_seq` pin them.
-- **The committed-output-plus-drift-test pattern** (`gen_ui_tables`, `gen_os_table`): the generator in T1 and T2 follows it, so no build step generates and a reviewer sees every generated line.
+- **The committed-output-plus-drift-test pattern** (`gen_os_table`): the generator in T1 and T2 follows it, so no build step generates and a reviewer sees every generated line.
 - **Vendored trees** (WAMR, libmoy, Lua, dash, `p8_lua_port.py`, `sdk/libc`): fix upstream and re-vendor.
 - **`tools/look_shots.py`, `focus_shots.py`, `shell_bench.py`, `input_gate.py`:** large but live, with tests and skills naming them.

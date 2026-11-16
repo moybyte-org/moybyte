@@ -18,9 +18,7 @@ row with an `example` is called with it on each tier its projections name,
 and each tier's answer is reduced to one outcome: an error code (or the
 codes a face's text names), nothing, or a value in one form (text and bytes
 alike, a JSON text read as its value, a NUL-joined list as its items). A row
-whose tiers disagree is a finding: it is fixed, or it is listed in KNOWN
-with what differs, and the list is emptied by the phases that own the rows.
-A row in KNOWN that agrees fails too, so the list never outlives its cause.
+whose tiers disagree is a finding, fixed where it differs.
 
 The UI toolkit's rows are not here: their answer is a picture, and
 tests/test_app_ui.py compares the tiers' pictures of the features it draws.
@@ -57,26 +55,6 @@ VARIES = {"moybyte.random", "moybyte.aes_gcm_seal", "moybyte.clock", "clipboard.
           "moybyte.notify", "moybyte.on", "moybyte.every", "moybyte.after", "moybyte.at",
           "moybyte.key_make", "moybyte.key_public", "moybyte.status_show"}
 ROWS = [r for r in G.door_rows(SRC) if "example" in r and G.role_of(r) != "ui"]
-
-# The rows whose tiers disagree today, each with what differs. Emptied by
-# the phase that owns the row (phase 6 the faces, phase 10 the app rows).
-KNOWN = {
-    "lua theme.token": "an index into the caller's palette: the Python probe's context "
-                       "draws on the shell's canvas, an app on its own",
-    "wasm theme.token": "as lua",
-    "lua moybyte.key_make": "Python answers None for the tracer's key; Lua makes it and "
-                            "answers its public key",
-    "lua moybyte.key_public": "as key_make: no key on Python, the made one's in Lua",
-    "wasm clipboard.kind": "the kind crosses as a name on Python and Lua, as an index on "
-                           "wasm and WASI (the table's `enum`, phase 6)",
-    "wasi clipboard.kind": "as wasm",
-    "wasm clipboard.put_text": "Python answers True where C answers 0 for a text taken "
-                               "(Lua's convention `lua_ret`, phase 6)",
-    "wasi clipboard.put_text": "as wasm",
-    "lua/wasm moybyte.dev_open": "Lua answers nil where C refuses the name BAD",
-    "lua/wasi moybyte.dev_open": "as lua/wasm",
-}
-
 
 def py_rows():
     """A role row an AppContext serves as ctx.<role>.<verb>, and the
@@ -150,9 +128,28 @@ def _enc(v):
 
 
 def roles_trace(ws):
+    """The trace as a Python app: the probe cart's run (`write_py_app`), its
+    run grant and its process, as the Lua app's are."""
+    import app_perms
+    import moy_log
+    cart = [c for c in ws.carts.all if c.get("title") == "Every Row Py"][0]
+    app_perms.made_here(ws, cart)
+    ws.home.select_cart(cart)
+    ws.open()
+    ws.input.begin_frame()
+    ws.frame(1.0 / 30)
+    pl = ws.run.player
+    was = moy_log.current()
+    moy_log.current(pl.pid)
+    try:
+        _trace(pl.app_ctx)
+    finally:
+        moy_log.current(was)
+
+
+def _trace(ctx):
     import json
     import moybyte
-    ctx = ws.app_context("tracer", ROLES, prefs_ns="tracer")
     for name, py, types, args in CALLS:
         head, _, verb = py.rpartition(".")
         holder = moybyte if head == "moybyte" else getattr(ctx, head, None)
@@ -184,6 +181,17 @@ def py_driver():
     return PY_DRIVER.replace("@CALLS@", repr(calls))
 
 
+def write_py_app(carts):
+    """The Python probe's cart, under the permissions the Lua app holds."""
+    d = carts / "EveryRowPy.moy"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({
+        "format": "moy-1", "title": "Every Row Py", "id": "test.everyrow.py",
+        "runtime": "python", "main": "main.py", "canvas": "320x240",
+        "moybyte": {"type": "app", "permissions": _perms()}}))
+    (d / "main.py").write_text("def update():\n    pass\n\n\ndef draw():\n    pass\n")
+
+
 def py_trace_cpython(tmp_path):
     from runtime import host_app
     from runtime.app_context import NO_STORE, ROLES
@@ -191,6 +199,7 @@ def py_trace_cpython(tmp_path):
     import io
     ns = {"ROLES": ROLES, "NO_STORE": NO_STORE}
     exec(py_driver(), ns)
+    write_py_app(tmp_path / "carts")
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -512,11 +521,14 @@ def _dec(v):
     return v
 
 
-def _err_codes(err):
+def _err_codes(err, row=None):
     if isinstance(err, dict) and err.get("code"):
         return {err["code"]}
     if isinstance(err, bytes):
-        return _codes_of_text(err.decode("utf-8", "replace"))
+        text = err.decode("utf-8", "replace")
+        if row is not None and row.get("lua_ret") == "value_name" and text in ERRORS:
+            return {text}           # the code's own name (moy_app_lua.c, LR_VALUE_NAME)
+        return _codes_of_text(text)
     return None
 
 
@@ -532,6 +544,11 @@ def outcome(row, tier, ans):
             return _none_of(WASI_ERRNO.get(-rc, {"errno%d" % -rc})), None
         if ans["out"] is not None:
             return None, binascii.unhexlify(ans["out"])
+        if row.get("lua_enum") and rc < len(row["lua_enum"]):
+            name = row["lua_enum"][rc]          # the index of the table's enum
+            return (NONE, None) if name is None else (None, name.encode())
+        if row.get("lua_ret") == "taken":
+            return None, 1                      # 0 (OK): taken, as Python's and Lua's true
         return None, rc
     if "noname" in ans:
         return {"noname"}, None
@@ -551,7 +568,7 @@ def outcome(row, tier, ans):
             vals.pop()
         value = vals[0] if vals else None
         if len(ans["ret"]) == 2 and ans["ret"][1] is not None:
-            codes = _err_codes(_dec(ans["ret"][1]))
+            codes = _err_codes(_dec(ans["ret"][1]), row)
             if codes:
                 return codes, None
     else:
@@ -657,11 +674,7 @@ def test_every_tier_answers_every_row_as_python_does(traces):
             b = outcome(r, tier, got[name])
             if not agree(r, a, b):
                 differ["%s %s" % (tier, name)] = "python %r, %s %r" % (a, tier, b)
-    new = {k: v for k, v in differ.items() if k not in KNOWN}
-    gone = sorted(k for k in KNOWN if k not in differ and "/" not in k.split()[0]
-                  and not k.startswith("board "))
-    assert not new, "tiers disagree:\n" + "\n".join("%s: %s" % kv for kv in sorted(new.items()))
-    assert not gone, "listed in KNOWN and now agreeing (take them out): %s" % gone
+    assert not differ, "tiers disagree:\n" + "\n".join("%s: %s" % kv for kv in sorted(differ.items()))
 
 
 def test_the_tiers_without_python_agree_with_each_other(traces):
@@ -678,17 +691,15 @@ def test_the_tiers_without_python_agree_with_each_other(traces):
             b = outcome(r, t, traces[t][r["name"]])
             if not agree(r, a, b):
                 differ["%s/%s %s" % (tiers[0], t, r["name"])] = "%r, %r" % (a, b)
-    new = {k: v for k, v in differ.items() if k not in KNOWN}
-    gone = sorted(k for k in KNOWN if k not in differ and "/" in k.split()[0])
-    assert not new, "tiers disagree:\n" + "\n".join("%s: %s" % kv for kv in sorted(new.items()))
-    assert not gone, "listed in KNOWN and now agreeing (take them out): %s" % gone
+    assert not differ, "tiers disagree:\n" + "\n".join("%s: %s" % kv for kv in sorted(differ.items()))
 
 
 def test_the_python_probe_answers_alike_on_the_boards_object_model(tmp_path):
     from unix_mp import require_unix_mp
     import test_semantic_traces as st
     exe = require_unix_mp("moy_spine")
-    board = _lines("T " + line for line in st._roles_trace_board(exe, tmp_path, py_driver()))
+    board = _lines("T " + line for line in st._roles_trace_board(exe, tmp_path, py_driver(),
+                                                                write_py_app))
     host = py_trace_cpython(tmp_path / "host")
     differ = {}
     for r in py_rows():
@@ -696,9 +707,8 @@ def test_the_python_probe_answers_alike_on_the_boards_object_model(tmp_path):
         b = outcome(r, "python", board[r["name"]])
         if not agree(r, a, b):
             differ["board " + r["name"]] = "cpython %r, board %r" % (a, b)
-    new = {k: v for k, v in differ.items() if k not in KNOWN}
-    assert not new, "the board's Python differs:\n" + "\n".join(
-        "%s: %s" % kv for kv in sorted(new.items()))
+    assert not differ, "the board's Python differs:\n" + "\n".join(
+        "%s: %s" % kv for kv in sorted(differ.items()))
 
 
 if __name__ == "__main__":

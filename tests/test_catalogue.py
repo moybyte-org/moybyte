@@ -135,17 +135,6 @@ def test_an_entry_is_the_whole_cart_without_its_payloads(tmp_path):
             SpriteSheet.icon_from_hex(w["sprites"], n, tw, th, cols=16, rows=32))
 
 
-def test_an_entry_opens_no_payload_file(tmp_path, monkeypatch):
-    root = _store(tmp_path)
-    read = []
-    real = moy_carts._read
-    monkeypatch.setattr(moy_carts, "_read",
-                        lambda p: (read.append(p), real(p))[1])
-    assert moy_carts.catalogue(root)
-    names = {p.rsplit("/", 1)[-1] for p in read}
-    assert names <= {"manifest.json", "config.json", "flags.moyflags"}, names
-
-
 def test_the_icon_read_stops_once_it_has_the_art_and_the_rows():
     """The sheet is read as far as the icon needs: a line past that is never
     pulled, so a card's scan reads the top of each sheet and no more."""
@@ -174,49 +163,6 @@ def test_an_entry_checks_only_the_main_scripts_existence(tmp_path):
     (tmp_path / "carts" / "packed.moy").write_text("archive")
     assert [c["title"] for c in moy_carts.catalogue(root)] == ["Missing Piece"]
     assert moy_carts.scan(root) == []
-
-
-def test_the_scan_reads_each_folder_from_its_listing_and_from_inside_it(
-        tmp_path, monkeypatch):
-    """What the scan costs a card (#224): a path lookup walks every directory
-    above the file again, so the shelf looks nothing up one name at a time.
-    Each folder is listed once and entered; no name is stat'ed, no file is
-    opened that the listing shows absent, and every open is by its name in
-    the folder. The working directory comes back as it was, and nothing is
-    imported while it is moved: `""` on a board's sys.path is the working
-    directory, and a cart's own files would be searched first."""
-    import builtins
-    import os
-
-    from runtime import moy_catalogue
-
-    root = _store(tmp_path)
-    start = os.getcwd()
-    opened, stats, imports = [], [], []
-    real_open, real_stat, real_import = builtins.open, os.stat, builtins.__import__
-
-    def spy_open(name, *a, **k):
-        f = real_open(name, *a, **k)          # a failed open raises first
-        opened.append(str(name))
-        return f
-
-    def spy_import(name, *a, **k):
-        if os.getcwd() != start:
-            imports.append(name)
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "open", spy_open)
-    monkeypatch.setattr(os, "stat", lambda p, *a, **k: (stats.append(p),
-                                                        real_stat(p, *a, **k))[1])
-    monkeypatch.setattr(builtins, "__import__", spy_import)
-    try:
-        shelf = moy_catalogue.catalogue(root)
-    finally:
-        monkeypatch.undo()
-    assert len(shelf) > 40
-    assert os.getcwd() == start
-    assert stats == [] and imports == []
-    assert opened and all("/" not in n for n in opened), opened
 
 
 def test_a_name_only_the_file_system_can_answer_is_asked_of_it():

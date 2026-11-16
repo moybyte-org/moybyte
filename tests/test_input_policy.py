@@ -206,44 +206,195 @@ def test_a_desk_windows_chevron_and_esc_step_its_page(tmp_path):
 
 
 # -- a pending edit survives every exit -----------------------------------
+#
+# A surface's edit not yet written -- a Name still typed, a stroke on the
+# drawing, a story's change, a look still settling, an Editor tab's edit, a
+# cart app's note -- is written, or still held, after every exit: home, a
+# jump to another app, the window's X, and the hand-off to an update. Back is
+# no exit for an edit in progress: its first step gives a field its draft
+# back, as Mic does. Each recipe opens its surface on `ws`, makes the edit and
+# answers the check that reads it back after the exit.
 
-def _exit_home(ws, drv):
+def _settings_name(ws, drv):
+    ws.open_settings()
+    _frames(drv)
+    _focus_name(ws, drv)
+    _type(drv, "kq")
+    assert ws.settings_layer._name is not None
+    return lambda: str(ws.system.get("name", "")).endswith("kq")
+
+
+def _paint_stroke(ws, drv):
+    from runtime import moy_carts
+    app = ws.app("artwork")
+    ws.spine.open_app(app)
+    _frames(drv)
+    doc = app.doc
+    doc.snapshot()
+    doc.put(5, 5, 14)
+    doc.finish()
+    app._mark_changed()
+    at = 5 * doc.W + 5
+
+    def check():
+        name = ws.artwork.doc_name()
+        blob = name and moy_carts.load_file("drawings", name, ws.carts_root)
+        return bool(blob) and moy_carts.decode_moyimg(blob)[2][at] == 14
+    return check
+
+
+def _story_edit(ws, drv):
+    import json
+    from runtime import moy_carts
+    from runtime import story_doc as D
+    moy_carts.save_file("stories", "brave/story.json", D.write(D.new_doc("Brave")),
+                        ws.carts_root)
+    app = ws.app("storybook")
+    ws.spine.open_app(app)
+    _frames(drv)
+    app._open_story(next(s for s in app.stories if s["name"] == "brave"), "deck")
+    st = app.story
+    st.slides[0]["objects"].append(D.text_obj("kq words", 64, 64, 400, 72, 1))
+    st.dirty = True
+    return lambda: "kq words" in json.dumps(D.read(moy_carts.load_file(
+        "stories", "brave/story.json", ws.carts_root)))
+
+
+def _look_change(ws, drv):
+    import json
+    from runtime import ui_draw
+    ws.spine.open_app(ws.app("appearance"))
+    _frames(drv)
+    accent = ui_draw.theme_accents()[7][1]
+    ws.look.change("accent", accent)
+    ws.look.tick(0.0)
+    man = Path(ws.carts_root) / "custom.moy" / "manifest.json"
+    return lambda: man.is_file() and json.loads(
+        man.read_bytes())["moybyte"]["look"].get("accent") == accent
+
+
+def _tab_edit(tab):
+    """An edit on Editor tab `tab` of a cart with blocks (Coin Quest), made by
+    the tab's own mutation verb; the check: the cart's stored `key` moved."""
+    def edit(ws, drv):
+        from runtime import moy_carts
+        cart = next(c for c in ws.carts.all if c.get("title") == "Coin Quest")
+        ws.open_in_editor(cart)
+        _frames(drv)
+        ws.text.set_menu_view(tab)
+        _frames(drv)
+        key, make = TAB_EDITS[tab]
+        before = moy_carts.load(cart["path"]).get(key)
+        make(ws)
+        return lambda: moy_carts.load(cart["path"]).get(key) != before
+    return edit
+
+
+def _code_edit(ws):
+    ws.editor.goto_row(0, 0)
+    ws.editor.insert("#")
+
+
+def _cfg_edit(ws):
+    ws.run.project.config["fps"] = 12
+
+
+TAB_EDITS = {
+    "cards": ("cfg", _cfg_edit),
+    "blocks": ("blocks", lambda ws: ws.block_ui.blocks_ed.new_var()),
+    "code": ("src", _code_edit),
+    "paint": ("sprites", lambda ws: ws.sheet.pset(0, 0, 7)),
+    "map": ("map", lambda ws: ws.run.project.tilemap.mset(0, 0, 1)),
+    "scene": ("scenes", lambda ws: ws.scene_ui.sceneedit.place(16, 16)),
+    "music": ("sounds", lambda ws: ws.music_ui.musicedit.toggle_rest()),
+}
+
+
+def _cart_note(ws, drv):
+    from runtime import moy_carts
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    _frames(drv)
+    ed = ws.run.player.ns["open_editor"]("kept")
+    ed.focus()
+    _frames(drv)
+    _type(drv, "kq")
+    assert ed.text() == "kq"
+    return lambda: moy_carts.load_file("docs", "kept", ws.carts_root) == "kq"
+
+
+# surface: (its kind, the recipe)
+PENDING = {"settings": ("settings", _settings_name),
+           "artwork": ("artwork", _paint_stroke),
+           "storybook": ("storybook", _story_edit),
+           "appearance": ("appearance", _look_change),
+           "cart_app": ("desktop", _cart_note)}
+PENDING.update(("tab:" + t, ("menu", _tab_edit(t))) for t in COMMIT_TABS)
+
+# The declared apps that hold no edit an exit could lose, and why.
+NO_PENDING = {
+    "myart": "a rename's draft is a dialog's: every exit gives it back, as Back does",
+    "files": "a rename's draft is a dialog's: every exit gives it back, as Back does",
+    "calc": "its entry and tape reset on a fresh open by design",
+    "getcarts": "an install is no edit: its close lands one in flight",
+    "jukebox": "a station is written as it is added; Add's draft is a dialog's",
+    "terminal": "a shell session, not an edit: a command runs as it is entered",
+}
+
+
+def test_the_pending_table_covers_every_declared_app():
+    held = {k for k in PENDING if not k.startswith(("tab:", "cart_app", "settings"))}
+    assert held | set(NO_PENDING) == {d["id"] for d in app_decls.APPS}
+    assert not held & set(NO_PENDING)
+
+
+def _exit_home(ws, drv, kind):
     ws.home.go_home()
 
 
-def _exit_jump(ws, drv):
-    ws.spine.open_app(ws.app("appearance"))
+def _exit_jump(ws, drv, kind):
+    ws.spine.open_app(ws.app("calc"))
 
 
-# Back is no exit for an edit in progress: its first step gives the field its
-# draft back, as Mic does (`test_settings_name_types_and_mic_gives_it_back`).
-EXITS = {"home": _exit_home, "jump": _exit_jump}
+def _exit_window_x(ws, drv, kind):
+    ws.wm.close_window_kind(kind)
+
+
+def _exit_update(ws, drv, kind):
+    from runtime.ticks import _ticks_ms
+
+    class _Updater:
+        reset_called = False
+
+        def reset(self):
+            self.reset_called = True
+
+    ws.updater = _Updater()
+    ui = ws.update_ui
+    ui._upd_phase = "done"
+    ui._upd_at = _ticks_ms() - 5000          # past the "UPDATED!" pause
+    ui._pump_update(DT)
+    assert ws.updater.reset_called
+
+
+EXITS = {"home": _exit_home, "jump": _exit_jump, "window_x": _exit_window_x,
+         "update": _exit_update}
 
 
 @pytest.mark.parametrize("how", sorted(EXITS))
-def test_a_name_still_typed_survives_every_exit(tmp_path, how):
-    ws = build_ws(tmp_path)
+@pytest.mark.parametrize("what", sorted(PENDING))
+def test_a_pending_edit_survives_every_exit(tmp_path, what, how):
+    kind, recipe = PENDING[what]
+    if how == "window_x":
+        ws = build_desktop_ws(tmp_path)
+        ws.home.open_desk()
+    else:
+        ws = build_ws(tmp_path)
     drv = make_drv(ws)
-    sl = ws.settings_layer
-    ws.open_settings()
-    _frames(drv)
-    _focus_name(ws, drv)
-    _type(drv, "kq")
-    assert sl._name is not None
-    EXITS[how](ws, drv)
-    assert str(ws.system.get("name", "")).endswith("kq"), how
-
-
-def test_a_name_still_typed_survives_the_window_x(tmp_path):
-    ws = build_desktop_ws(tmp_path)
-    drv = make_drv(ws)
-    ws.home.open_desk()
-    ws.open_settings()
-    _frames(drv)
-    _focus_name(ws, drv)
-    _type(drv, "kq")
-    ws.wm.close_window_kind("settings")
-    assert str(ws.system.get("name", "")).endswith("kq")
+    check = recipe(ws, drv)
+    assert not check(), "the edit is pending before the exit"
+    EXITS[how](ws, drv, kind)
+    assert check(), (what, how)
 
 
 # -- Ctrl+Z on every Editor tab is the bar's UNDO -------------------------------

@@ -1,5 +1,5 @@
 // The seed (moy_seed.h has the contract; runtime/carts/moy_seed.py's seed_builtins
-// is the reference every branch below follows).
+// documents its rules).
 
 #include <stdio.h>
 #include <string.h>
@@ -17,64 +17,19 @@
 #define MOY_SEED_INFLATE 1
 #endif
 #if MOY_SEED_INFLATE
+#if defined(__has_include)
+#if __has_include("lib/uzlib/uzlib.h")
 #include "lib/uzlib/uzlib.h"
+#else
+#include "uzlib.h"
+#endif
+#else
+#include "lib/uzlib/uzlib.h"
+#endif
 #endif
 
 // What a builder here grows in: the store's call scratch.
 static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
-
-size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
-                       size_t cap) {
-    size_t k = 0;
-    char c;
-#define PUT(ch) do { c = (ch); if (k + 1u < cap) { out[k] = c; } k++; } while (0)
-    size_t start = 0;
-    if (ns != NULL && ns[0]) {
-        for (const char *p = ns; *p; p++) {
-            unsigned char u = (unsigned char)*p;
-            if (u >= 'A' && u <= 'Z') {
-                PUT((char)(u + 32));
-            } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-                PUT((char)u);
-            } else if (u == ' ' || u == '-' || u == '_') {
-                PUT('_');
-            }
-        }
-        if (k == 0) {
-            PUT('c');
-            PUT('a');
-            PUT('r');
-            PUT('t');
-        }
-        PUT('.');
-    }
-    start = k;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char u = (unsigned char)title[i];
-        if (u >= 'A' && u <= 'Z') {
-            PUT((char)(u + 32));
-        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-            PUT((char)u);
-        } else if (u == ' ' || u == '-' || u == '_') {
-            PUT('_');
-        }
-    }
-    if (k == start) {
-        PUT('c');
-        PUT('a');
-        PUT('r');
-        PUT('t');
-    }
-    PUT('.');
-    PUT('m');
-    PUT('o');
-    PUT('y');
-#undef PUT
-    if (cap) {
-        out[k < cap ? k : cap - 1u] = 0;
-    }
-    return k;
-}
 
 int moy_seed_inflate(const uint8_t *blob, size_t n, moy_buf_t *out) {
     out->p = NULL;
@@ -318,7 +273,7 @@ static const char *i64(int64_t v, char *buf) {
     return p;
 }
 
-// The manifest seed_builtins writes, in its key order: the spec's fields, then
+// The manifest a seed writes, in its key order: the spec's fields, then
 // Moybyte's own under "moybyte". `folder` is the cart's folder, whose name
 // without the extension is its id.
 static void manifest(moy_sb_t *b, const char *c, const char *ce, int64_t ver,
@@ -486,6 +441,10 @@ static void manifest(moy_sb_t *b, const char *c, const char *ce, int64_t ver,
     f = get(c, ce, "glass");                // a per-glass wallpaper
     if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
         moy_sb_str(b, ", \"glass\": true");
+    }
+    f = get(c, ce, "animates");             // an app drawn every frame
+    if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
+        moy_sb_str(b, ", \"animates\": true");
     }
     f = get(c, ce, "pictures");             // a picture wallpaper
     if (f.v != NULL && *f.v != 'n') {

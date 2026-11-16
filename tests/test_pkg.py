@@ -38,7 +38,7 @@ def _sign(data, d=TEST_D):
 @pytest.fixture
 def keys(monkeypatch):
     from runtime import net_binding
-    net_binding.install()
+    monkeypatch.setitem(sys.modules, "moy_net", net_binding)
     monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
 
 

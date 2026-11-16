@@ -3,6 +3,13 @@
     "about": "the toolkit's C, native/moy_ui",
     "host": "moy_ui_binding",
     "binding": true,
+    "structs": [
+      "moy_ui_box_t", "moy_ui_surface_t", "moy_ui_shape_t", "moy_theme_bar_t",
+      "moy_theme_layout_t", "moy_ui_span_t", "moy_ui_lines_t", "moy_ui_depth_t",
+      "moy_ui_frame_button_t", "moy_ui_sink_t", "moy_ui_row_t", "moy_ui_cell_t", "moy_ui_button_t",
+      "moy_ui_btn_style_t", "moy_ui_over_t", "moy_ui_mark_t", "moy_theme_cell_t",
+      "moy_theme_paint_t", "moy_theme_mapent_t", "moy_theme_look_t", "moy_theme_leaf_t"
+    ],
     "api": [
       {"api": "size"},
       {"api": "begin", "hand": true},

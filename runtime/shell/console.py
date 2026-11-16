@@ -235,7 +235,7 @@ from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
 # tests reference as console._X are imported back here rather than
 # duplicated. NAMES is injected into the one BarLayer a Workstation builds
 # (circular-import dodge).
-from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
+from bar_layer import BarLayer, _BAR_ICON, _STATUS_H, glyph as _bar_glyph
 
 # The Editor's Config tab ("Make it mine", #3/#15 -- see cards_layer.py). CART
 # STATE stays on Workstation: ws.run.project.config / ws.saves.apply; the tab's page mutates
@@ -2521,6 +2521,21 @@ class Workstation:
                 s.close()
         self.look.commit()
 
+    def leave_every_surface(self):
+        """Every surface that can hold an edit is left (`leave_surface`): each
+        registered app, Settings (a Name still typed, its radio lease), the
+        run (a cart app's editor handles) and the Editor where it holds the
+        run's project or the theme's icons. Going home and the hand-off to an
+        update take it; each `close()` is change-gated, so a surface with
+        nothing pending costs nothing."""
+        for app in self.app_layers:
+            self.leave_surface(app.id)
+        self.leave_surface(self.settings_layer.id)
+        self.leave_surface("desktop")
+        ed = getattr(self, "editor_app", None)
+        if ed is not None and (self.text.editing_icons or ed.project is self.run.project):
+            self.leave_surface("menu")
+
     def open(self, cart=None):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
         # cart (`cart`, else the home's selected one) on the desktop, recording the
@@ -3145,7 +3160,8 @@ class Workstation:
         """A run of the media service found, whoever played it: Music's card
         and its status item follow it (music_app.follow)."""
         import music_app
-        music_app.follow(self)
+        music_app.follow(lambda: self.app_context(
+            music_app.MusicAppLayer.id, ("nav",)).nav)
 
     def frame(self, dt):
         # DEEP meters (the per-op canvas timers, the batch counters, the DRAWBRK
@@ -3592,19 +3608,6 @@ class Workstation:
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
-    def mini_btn(self, label, rect, fill, cv=None, label_rect=None):
-        # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
-        # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
-        _ui_draw.mini_btn(cv if cv is not None else self.run.canvas, rect, label, fill,
-                        label_rect)
-
-    def _btn(self, label, rect, fill, cv=None):
-        # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the
-        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
-        # implementation (incl. the frozen scale-2 baseline quirk) moved to
-        # ui.game_btn; this stays the tested ws entry point.
-        _ui_draw.game_btn(cv if cv is not None else self.run.canvas, rect, label, fill)
-
     def _draw_cursor(self):
         # The pointer lives in SYSTEM-canvas space (it ranges over the panel size),
         # so the cursor draws on the system canvas, on TOP of the composited viewport
@@ -3621,15 +3624,6 @@ class Workstation:
             else:                         # a resize's arrows, centred on it
                 img = RESIZE_CURSORS[shape]
                 self.sys_canvas.spr(img, p.x - img.w * s // 2, p.y - img.h * s // 2, s)
-
-    def glyph(self, kind, rect, c, cv=None, scale=None):
-        # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
-        # editors/cart-overlay callers); the desktop/system callers pass cv=
-        # self.sys_canvas so the glyph follows the system font scale (#39). `scale`
-        # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
-        # slot (#203). The raster is native/moy_ui's, through `ui.glyph`, which
-        # Launcher (canvas-only) is handed too.
-        _ui_draw.glyph(cv if cv is not None else self.run.canvas, kind, rect, c, scale)
 
     def wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
@@ -3767,8 +3761,8 @@ class Workstation:
         if img is not None:
             cv.spr(img, x, y, fs)                        # 16px art upscaled by that scale
         else:
-            self.glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
-                        self.theme_colors.get("chrome_ink_dim", 6), cv, fs)
+            _bar_glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
+                       self.theme_colors.get("chrome_ink_dim", 6), cv, fs)
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,

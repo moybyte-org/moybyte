@@ -138,11 +138,12 @@ static int moycore_ui_link(lua_State *L)
     return moycore_ui_value_of(L, MOY_UI_V_LINK);
 }
 
-static int moycore_ui_choice_of(lua_State *L, int32_t kind)
+static int moycore_ui_choice_of(lua_State *L, int32_t kind,
+                                const char *(*opts_pack)(lua_State *, int, size_t *))
 {
     moy_ui_span_t label = moycore_ui_span(L, 1);
     size_t opts_n = 0;
-    const char *opts = moycore_ui_items(L, 2, &opts_n);
+    const char *opts = opts_pack(L, 2, &opts_n);
     int32_t cur = lua_isnoneornil(L, 3) ? -1 : moycore_ui_int(L, 3) - 1;
     moy_ui_over_t o;
     moycore_ui_over(L, 4, &o);
@@ -155,17 +156,22 @@ static int moycore_ui_choice_of(lua_State *L, int32_t kind)
 
 static int moycore_ui_cycle(lua_State *L)
 {
-    return moycore_ui_choice_of(L, MOY_UI_V_CYCLE);
+    return moycore_ui_choice_of(L, MOY_UI_V_CYCLE, moycore_ui_items);
 }
 
 static int moycore_ui_seg(lua_State *L)
 {
-    return moycore_ui_choice_of(L, MOY_UI_V_SEG);
+    return moycore_ui_choice_of(L, MOY_UI_V_SEG, moycore_ui_items);
+}
+
+static int moycore_ui_swatches(lua_State *L)
+{
+    return moycore_ui_choice_of(L, MOY_UI_V_SWATCH, moycore_ui_words);
 }
 
 static int moycore_ui_tabs(lua_State *L)
 {
-    return moycore_ui_choice_of(L, MOY_UI_V_TABS);
+    return moycore_ui_choice_of(L, MOY_UI_V_TABS, moycore_ui_items);
 }
 
 static int moycore_ui_hints(lua_State *L)

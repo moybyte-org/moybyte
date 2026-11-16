@@ -57,6 +57,13 @@ enum {
     MOY_EV_KINDS,
 };
 
+// A record's fields in an events() buffer of 32-bit ints, MOY_EV_FIELDS a
+// record.
+enum {
+    MOY_EV_F_T, MOY_EV_F_SRC, MOY_EV_F_KIND, MOY_EV_F_PROV, MOY_EV_F_A, MOY_EV_F_ID,
+    MOY_EV_F_B, MOY_EV_FIELDS,
+};
+
 // A reader's kinds, a bit each.
 #define MOY_EV_BIT(kind) (1u << (kind))
 #define MOY_EV_KEYS (MOY_EV_BIT(MOY_EV_KEY_DOWN) | MOY_EV_BIT(MOY_EV_KEY_UP) | MOY_EV_BIT(MOY_EV_TEXT))

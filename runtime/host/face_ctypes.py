@@ -65,17 +65,27 @@ def cstr(v):
 
 
 def span(v):
-    """A str or a bytes-like as the bytes a (pointer, size) pair reads."""
+    """A str or any buffer (bytes, a bytearray, an array) as the bytes a
+    (pointer, size) pair reads."""
     if isinstance(v, str):
         return v.encode("utf-8")
-    if isinstance(v, (bytes, bytearray, memoryview)):
-        return bytes(v)
-    raise TypeError("object with buffer protocol required")
+    try:
+        return bytes(memoryview(v).cast("B"))
+    except TypeError:
+        raise TypeError("object with buffer protocol required") from None
 
 
 def text(p):
     """A borrowed const char * answer as a str (NULL: None)."""
     return None if p is None else p.decode("utf-8", "replace")
+
+
+def take(free, buf):
+    """The bytes of a buffer the C allocated (its `p` and `n`), freed by `free`."""
+    try:
+        return ctypes.string_at(buf.p, buf.n) if buf.p else b""
+    finally:
+        free(ctypes.byref(buf))
 
 
 def raise_errno(eno):

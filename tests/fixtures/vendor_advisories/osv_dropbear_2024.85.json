@@ -1,0 +1,18 @@
+{
+ "vulns": [
+  {
+   "id": "CVE-2025-14282",
+   "aliases": [],
+   "summary": "Dropbear: privilege escalation via unix domain socket forwardings",
+   "details": "A flaw was found in Dropbear. When running in multi-user mode and authenticating users, the dropbear ssh server does the socket forwardings requested by the remote client as root,",
+   "modified": "2026-10-28T02:30:31.699242339Z"
+  },
+  {
+   "id": "CVE-2025-47203",
+   "aliases": [],
+   "summary": "",
+   "details": "dbclient in Dropbear SSH before 2025.88 allows command injection via an untrusted hostname argument, because a shell is used.",
+   "modified": "2026-10-28T02:31:02.964498600Z"
+  }
+ ]
+}

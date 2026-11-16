@@ -223,6 +223,13 @@ def dirty(wt):
     return git("status", "--porcelain", "--untracked-files=no", cwd=wt).splitlines()
 
 
+def untracked(wt):
+    """Files in `wt` that git neither tracks nor ignores: a worker's scripts
+    and notes, which no commit would bring back."""
+    out = git("status", "--porcelain", "--untracked-files=normal", cwd=wt)
+    return [l for l in out.splitlines() if l.startswith("??")]
+
+
 def upstream(main, into):
     """The ref `into` names for landing: its remote branch when the checkout
     has one (fetched, quietly; offline keeps the last fetch), else itself."""
@@ -289,6 +296,9 @@ def blockers(wt, into):
     changed = dirty(wt)
     if changed:
         why.append("%d tracked file(s) changed" % len(changed))
+    loose = untracked(wt)
+    if loose:
+        why.append("%d untracked file(s)" % len(loose))
     ahead = unmerged(wt, into)
     if ahead:
         why.append("%d commit(s) not on %s" % (len(ahead), into))

@@ -61,7 +61,7 @@
       {"py": "sim_get(pin)", "c": "moy_lease_sim_get", "example": [2]},
       {"py": "reset()", "c": "moy_lease_reset", "example": []},
       {"py": "Wifi", "hand": true},
-      {"py": "wifi_reset()", "hand": true},
+      {"py": "wifi_reset()", "c": "moy_lease_wifi_reset", "example": []},
       {"py": "WIFI_TAGS", "hand": true}
     ]
   },
@@ -79,7 +79,7 @@
       "MOY_EVQ_DEPTH as DEPTH", "MOY_EVQ_SENDER as SENDER", "MOY_EVQ_BATCH as BATCH",
       "MOY_EVQ_WANT_MAIL as WANT_MAIL", "MOY_EVQ_WANT_POLL as WANT_POLL"
     ],
-    "structs": ["moy_status_item_t", "moy_notes_note_t"],
+    "structs": ["moy_status_item_t", "moy_notes_note_t", "moy_evq_ev_t"],
     "rows": [
       {"py": "open(pid, app, receives='', vm=False, alarms=False, notify=False)", "hand": true},
       {"py": "close(pid)", "c": "moy_evq_close", "example": [901]},
@@ -150,5 +150,25 @@
       {"py": "reset()", "hand": true},
       {"py": "SYSTEM", "hand": true}
     ]
+  },
+  "moy_loop": {
+    "about": "the frame loop: its meter, its pump and the idle ladder",
+    "host": "moy_loop",
+    "lazy": true,
+    "structs": ["moy_loop_meter_t", "moy_loop_pump_t", "moy_idle_t"]
+  },
+  "moy_crash": {
+    "about": "the crash record the kernel keeps across a reset",
+    "host": null,
+    "c": "modmoy_kernel.c"
+  },
+  "moy_guard": {
+    "about": "a Python callback run under the scheduler's slice and stopped when it never returns",
+    "host": null
+  },
+  "moy_kernel": {
+    "about": "the kernel's small bindings: the boot's verdict, the watchdog, the VM's stop",
+    "host": null,
+    "c": "modmoy_kernel.c"
   }
 }

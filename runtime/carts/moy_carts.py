@@ -4,7 +4,6 @@
 #   decode_cover               cover.png bytes -> 128x128 indices
 #   encode_cover               128x128 indices -> cover.png bytes
 #   load_images                a cart's paint-image assets
-#   load_scenes                a cart's scene assets
 #   -- sibling stores          load_artwork
 #   -- the document codec      encode_text, decode_text
 #   -- the catalogue           PAYLOADS, entry, load, catalogue, scan
@@ -47,7 +46,6 @@
 #                    below, never imported here, so a board without it (the
 #                    Zero) loads this module
 
-import gc
 import json
 
 try:
@@ -60,9 +58,7 @@ try:
 except ImportError:  # pragma: no cover
     _time = None
 
-from moy_fs import _native as _store
-if _store is not None and not hasattr(_store, "catalogue"):
-    _store = None
+from moy_fs import _native
 
 from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, files_root, CARTS_DIR,
                             CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
@@ -70,76 +66,10 @@ from moy_store_base import (FILE_KIND_NAMES, FILE_KIND_DIRS, SHARED_FOLDERS, fil
                             SCENE_EXT, _normalize_canvas, _canvas_str,
                             _sibling_path, slug, ensure_dirs,
                             _rmtree, COVER_FILE, COVER_MAX_BYTES,
-                            SPRITES_NAME, icon_rows, _listing, _absent,
-                            _has, _cwd, _enter, _leave, CART_EXT,
+                            SPRITES_NAME, CART_EXT,
                             cart_path, cart_folder,
                             USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
-                            is_cart_id, builtin_ns, id_in_folder, THEME_NAME_MAX, theme_name_ok)
-
-
-# Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
-# input groups it actually reads -- "buttons" (btn/btnp), "touch" (touch()), "keyboard"
-# (key/keyp/textmode) -- so a surface (today: the web view) can show only the controls
-# a cart needs (e.g. skip the virtual d-pad for a touch()-only game). OPTIONAL and
-# purely advisory: absent/invalid -> None, and every consumer treats None as "show
-# everything" (today's behaviour), so an undeclared cart is a zero-regression no-op.
-INPUT_KINDS = ("buttons", "touch", "keyboard")
-
-
-def _str_list(v):
-    """`v` when it is a list of strings, else None."""
-    if isinstance(v, list) and all(isinstance(x, str) for x in v):
-        return v
-    return None
-
-
-def _int_or(value, default):
-    """`value` as an int, or `default` when it is absent or malformed. Manifest
-    fields are hand-editable, so a bad one must DEGRADE -- an exception here
-    escapes to load()'s blanket handler and drops the whole cart out of the
-    gallery, which is a far worse failure than losing one field."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-# SPEC.md 3.4: an icon is at most 4x4 tiles (32x32px). The bound is what makes the
-# field safe to honour -- a launcher decodes MANY icons at once, and an unbounded
-# block would let one cart name the whole 512-tile sheet.
-ICON_MAX_TILES = 4
-
-
-def _normalize_icon(value):
-    """A manifest "icon" (SPEC.md 3.4) -> (tile, w, h), or None when absent, malformed
-    or out of range. Accepts a bare tile id (1x1) or [tile, w, h]. Never raises and
-    never refuses: an icon is COSMETIC, so a bad one costs the cart its picture (the
-    host picks instead), not its place in the gallery -- unlike `extensions`/`runtime`,
-    where running the cart at all would be wrong."""
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, int):
-        return (value, 1, 1) if value >= 0 else None
-    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 3:
-        return None
-    try:
-        n = int(value[0])
-        w = int(value[1]) if len(value) > 1 else 1
-        h = int(value[2]) if len(value) > 2 else 1
-    except (TypeError, ValueError):
-        return None
-    if n < 0 or not 1 <= w <= ICON_MAX_TILES or not 1 <= h <= ICON_MAX_TILES:
-        return None
-    return (n, w, h)
-
-
-def _normalize_input_kinds(value):
-    """A manifest "input" value -> a tuple of known kinds, or None when absent/not a
-    list/empty after filtering -- never raises on a malformed manifest."""
-    if not isinstance(value, list):
-        return None
-    kinds = tuple(k for k in value if k in INPUT_KINDS)
-    return kinds or None
+                            is_cart_id, builtin_ns, THEME_NAME_MAX, theme_name_ok)
 
 
 ARTWORK_NAME = "artwork.moyimg"
@@ -180,7 +110,6 @@ def flags_to_hex(flags):
 # modules (moyimg / moy_fs); imported back + re-exported under these names so
 # every `store.X` lookup reaches them. Same bare-or-package fallback as every
 # shared module.
-import cart_listing as _cart_listing
 from moy_store_base import THUMBS_DIR
 from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
 from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
@@ -278,49 +207,6 @@ def load_scene(path, name):
         return _read(path + "/" + SCENES_DIR + "/" + name + SCENE_EXT)
     except OSError:
         return None
-
-
-def load_scenes(path):
-    """A cart's scene assets (#85): {name: text} of every scenes/<name>.moyscene blob
-    (name = filename without the extension), or {} when the cart has no scenes/ dir.
-    Kept as raw JSON text (like the map/image blobs); Project builds the widgets.Scenes
-    the cart reads. Guarded so a missing dir / bad entry just yields fewer scenes, never
-    a crash (mirrors load_images)."""
-    out = {}
-    d = path + "/" + SCENES_DIR
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return out                     # no scenes/ subfolder -> the common case
-    for name in names:
-        if name.endswith(SCENE_EXT):
-            try:
-                out[name[:-len(SCENE_EXT)]] = _read(d + "/" + name)
-            except OSError:
-                pass                   # skip an unreadable entry, keep the rest
-    return out
-
-
-def scene_names(man, blobs):
-    """The ordered scene names for a cart (#85): the manifest's moybyte.assets.scenes order
-    (filtered to scenes that actually exist on disk), then any on-disk scene the
-    manifest forgot, appended sorted -- so the loader is authoritative but robust to a
-    hand-added file. `man` is the parsed manifest, `blobs` the load_scenes() dict.
-    Element 0 is the default active scene."""
-    order = []
-    seen = {}
-    assets = vendor(man).get("assets")
-    listed = assets.get("scenes") if isinstance(assets, dict) else None
-    if isinstance(listed, list):
-        for n in listed:
-            if n in blobs and n not in seen:
-                order.append(n)
-                seen[n] = True
-    for n in sorted(blobs.keys()):     # any on-disk scene the manifest didn't list
-        if n not in seen:
-            order.append(n)
-            seen[n] = True
-    return order
 
 
 def _manifest_add_scene(cart_dir, name):
@@ -431,77 +317,6 @@ def decode_text(blob):
     return blob.split("\n") if blob else []
 
 
-def _read_main(path, name):
-    """A cart's source, read once more after a collect if the heap said no.
-
-    The source is the largest single allocation a load makes -- tens of KB as
-    one contiguous string -- so on a fragmented heap it is the read that fails
-    while the memory to serve it exists: the caller that re-opens a cart drops
-    the previous one's payloads a few statements earlier (CartManager.reslim)
-    and nothing has collected since. A `big=75k` heap against a 77KB source is
-    what this was written from (#66).
-    """
-    full = path + "/" + name
-    try:
-        return _read_recover(full)
-    except MemoryError:
-        gc.collect()
-        return _read_recover(full)
-
-
-def _compiled_sources(path):
-    """A compiled cart's source, as (name, text) under `src/` in name order --
-    the text files among them. Never required and never verified against the
-    module (moy-spec SPEC.md §16): it is what the Code tab shows, and a
-    cart that ships none has no Code tab."""
-    out = []
-    try:
-        names = sorted(os.listdir(path + "/src"))
-    except OSError:
-        return out
-    for n in names:
-        try:
-            out.append(("src/" + n, _read(path + "/src/" + n)))
-        except (OSError, ValueError, UnicodeError):
-            continue                # a subfolder, or bytes that are not text
-    return out
-
-
-# The listing of the store `_each` walks (name -> is a folder), while it
-# walks it: what `_cart_id` asks whether a folder owns an id, so the scan
-# looks no name up.
-_SCAN = [None]
-
-
-def _cart_id(man, path, broken):
-    """A cart's id (#162, SPEC.md 3.1): its manifest's as `id_in_folder`
-    rules, a broken manifest's none -- the rule, not a migration."""
-    return id_in_folder(None if broken else man.get("id"), path, _SCAN[0])
-
-
-def _config_of(v):
-    """The manifest's config as a dict: an object, "" or a list of [key,
-    value] pairs (what dict() takes and moy_cat.c's dict_takes accepts, and
-    nothing else dict() would). ValueError otherwise."""
-    if isinstance(v, dict) or v == "":
-        return dict(v)
-    if isinstance(v, list):
-        for p in v:
-            if not (isinstance(p, list) and len(p) == 2
-                    and not isinstance(p[0], (list, dict))):
-                raise ValueError("config is not a mapping")
-        return dict(v)
-    raise ValueError("config is not a mapping")
-
-
-def _project_title(path):
-    """A cart folder's own name as a title -- what a cart is called when its
-    manifest can no longer say."""
-    cut = max(path.rfind("/"), path.rfind("\\"))
-    name = path[cut + 1:] if cut >= 0 else path
-    return name[:-4] if name.endswith(".moy") else (name or "cart")
-
-
 # --- the catalogue and the whole cart ---
 #
 # The shelf holds each cart as its catalogue ENTRY -- the manifest's metadata,
@@ -518,41 +333,18 @@ PAYLOADS = ("src", "src_before", "src_after", "sprites", "sounds", "map",
 
 
 def entry(path):
-    """The catalogue entry of the .moy folder at `path`, or None when it is no
-    cart: what `load` returns without its PAYLOADS, read without opening their
-    files, and refused on the same terms -- except that of the scripts only
-    the main one's EXISTENCE is checked (the rest are read at open).
-
-    An entry costs the shelf a few hundred bytes where the whole cart can cost
-    tens of KB, and the scan reads one per cart folder, so its peak is what the
-    gc heap grows to and keeps for the session (#224). A payload is also the
-    allocation a fragmented heap refuses mid-session while the memory to serve
-    it exists: a rescan that read sources dropped ten of forty-four carts off
-    the Guition S3's shelf as "unreadable".
+    """One .moy folder's catalogue ENTRY, or None when it is no cart: the
+    manifest's metadata, the config, the tile flags and the scene names, read
+    from inside the folder (native/moy_store/moy_cat.c). None of the PAYLOADS:
+    those are `load`'s. A folder whose manifest will not read is still an
+    entry, `broken` saying why.
 
     One field is the shelf's, and lives until the shelf takes the entry:
     `icon_rows`, the rows of the sprite sheet the cart's launcher icon is cut
-    from (`moy_store_base.icon_rows`; None for no sheet or no art), read a
-    piece at a time and only as far as the icon needs. `CartManager.slim`
-    bakes the icon from it and drops it.
-
-    Read from inside the folder, against one listing of it (`_entry_at`).
-    Where the native store is linked, it reads the entry (moy_cat)."""
-    if _store is not None:
-        return _store.entry(path)
-    here = _cwd() if path[:1] == "/" else None
-    if here is None:
-        return _load(path, False)
-    try:
-        return _load(path, False, _enter(path))
-    finally:
-        _leave(here)
-
-
-def _entry_at(path, folder):
-    """`entry` with the working directory already in the folder and `folder`
-    its listing (`_enter`), or by full path when `folder` is None."""
-    return _load(path, False, folder)
+    from (`moy_store_base.icon_rows`; None for no sheet or no art), read only
+    as far as the icon needs. `CartManager.slim` bakes the icon from it and
+    drops it."""
+    return _native.entry(path)
 
 
 def load(path):
@@ -562,426 +354,25 @@ def load(path):
 
     A corrupt cart (bad manifest.json, missing main.py, or anything else
     unexpected) returns None instead of throwing, so one broken folder can never
-    take down the gallery or the boot path. The whole body is also guarded so a
-    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash.
+    take down the gallery or the boot path.
 
     Every optional asset is carried in its SERIALISED form -- `sprites`, `map`
     and `flags` are the file text, `None` when the file is absent -- and the
     live objects (SpriteSheet / TileMap / the 512-byte flag table) are built
     from them by `Project`. An absent `flags.moyflags` is `None` here and
     all-zero there, which is SPEC.md 3.5's own reading of a missing file.
-
-    Where the native store is linked it reads the cart (moy_cat_load: one
-    PSRAM arena, freed once the dict is built)."""
-    if _store is not None:
-        return _store.load(path)
-    return _load(path, True)
-
-
-def _load(path, whole, folder=None):
-    # `folder` is the folder's listing with the working directory inside it
-    # (`_enter`): a file it proves absent is never opened, and an optional
-    # one is opened by its name alone. None: every read is by full path.
-    try:
-        here = "" if folder is not None else path + "/"
-        broken = ""
-        try:
-            # _read_recover falls back to manifest.json.bak so a crash mid-save
-            # (or an interrupted atomic write) doesn't make the cart unreadable.
-            man = json.loads(_read_recover(path + "/manifest.json",
-                                           here + "manifest.json"))
-        except (OSError, ValueError) as exc:
-            broken = "manifest.json: " + str(exc)[:48]
-        else:
-            if not isinstance(man, dict):
-                broken = "manifest.json: not an object"
-        if broken and not _has(folder, path, "manifest.json"):
-            # Nothing to repair: the folder was pulled, or never held a cart.
-            # Only a manifest that IS there and will not parse is recoverable.
-            print("Moybyte cart manifest bad:", path, broken)
-            return None
-        if broken:
-            # A manifest a kid BROKE does not take the project off the shelf
-            # (step 5 of docs/theme_and_shell_2026-11.md §10). JSON mode writes an
-            # invalid document on a hard exit by design, so this is the reload
-            # that design implies: the cart comes back on format defaults,
-            # carrying `broken`, and the Editor opens it on the Config tab with
-            # the repair path. It is not RUNNABLE -- Workstation.open sends a
-            # launcher tap to the Editor instead, and the loader re-validates
-            # every time the folder is read again.
-            print("Moybyte cart manifest bad:", path, broken)
-            man = {"title": _project_title(path)}
-        # A moy-spec cart (SPEC.md 3.1, "format": "moy-1") is Lua-by-definition
-        # with spec defaults: main.lua, 30fps, a game. Its manifest never carries
-        # the moybyte fields, so the defaults below flip on this flag -- moybyte's
-        # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
-        spec = man.get("format") == "moy-1"
-        runtime = man.get("runtime", "lua" if spec else "python")
-        # A COMPILED cart (moy-spec SPEC.md §16): its main is a module,
-        # not text, so it is never read here -- the runtime loads it from the
-        # folder. What text it has is its optional `src/` (the Code tab).
-        # A NATIVE cart (docs/os_2026-11/tiers.md section 1) is compiled too:
-        # its main is its first chip's module (tools/elf_cart.py).
-        chips = vendor(man).get("native")
-        native = isinstance(chips, list) and bool(chips) and isinstance(chips[0], str)
-        compiled = runtime == "wasm" or native
-        mainf = man.get("main", "main.%s.elf" % chips[0] if native else
-                        "main.wasm" if compiled else ("main.lua" if spec else "main.py"))
-        if broken and not _has(folder, path, mainf):
-            # No manifest to name the program, so take whichever is there.
-            for alt in ("main.py", "main.lua"):
-                if _has(folder, path, alt):
-                    mainf = alt
-                    break
-        src = None
-        if whole and compiled:
-            if not _has(folder, path, mainf) and not broken:
-                print("Moybyte cart main missing:", path)
-                return None
-            src = ""            # a module has no text; `src/` below is the code
-        elif whole:
-            try:
-                src = _read_main(path, mainf)
-            except OSError as exc:
-                if not broken:
-                    print("Moybyte cart main missing:", path, exc)
-                    return None
-                src = ""        # a broken cart still opens; it just cannot run
-        elif not broken and not _has(folder, path, mainf):
-            print("Moybyte cart main missing:", path)
-            return None
-        # THE CART'S OTHER SCRIPTS (SPEC.md 4). `sources` is the whole load
-        # order with `main` among them; absent it is [main], which is every
-        # cart that is not a PICO-8 port. Split at main because that is how the
-        # tiers use it: `src` is main's text and travels on its own (the Editor
-        # edits it, the crash panel maps its lines), so what is left is the
-        # pieces either side.
-        #
-        # A port's p8.lua is the standing case -- the generated half, data
-        # tables and compat shim, 61% of what the importer used to write into
-        # main.lua. Its own chunk works because the shim publishes 96 GLOBALS
-        # and globals cross a chunk boundary; the four per-cart upvalue
-        # captures (__p8_gff, __music_map, __p8_map_raw, __p8_sheet) sit beside
-        # the data tables IN THAT FILE, which is why the cut is there.
-        #
-        # Read on the same terms as `src`: a catalogue entry carries neither.
-        before = []
-        after = []
-        if whole and compiled:
-            after = _compiled_sources(path)
-        elif whole:
-            names = man.get("sources") or ()
-            if names and mainf not in names:
-                # SPEC.md 4 requires it. Running main last (which is where an
-                # unfound marker would put it) is worse than not opening: the
-                # cart would fail inside code the author did write.
-                print("Moybyte cart sources without main:", path)
-                return None
-            seen_main = False
-            for n in names:
-                if n == mainf:
-                    seen_main = True
-                    continue
-                try:
-                    text = _read(path + "/" + n)
-                except OSError as exc:
-                    if not broken:
-                        print("Moybyte cart source missing:", path, n, exc)
-                        return None
-                    continue        # a broken cart still opens; it cannot run
-                if seen_main:
-                    after.append((n, text))
-                else:
-                    before.append((n, text))
-        icon = _normalize_icon(man.get("icon"))
-        ven = vendor(man)
-        cart = {
-            "path": path,
-            "id": _cart_id(man, path, broken),
-            "title": man.get("title", "cart"),
-            # Manifest metadata (#94 -- the Config-tab "CART INFO" editor):
-            # optional, kid-editable. Absent on every seed cart + every
-            # pre-#94 hand-authored one, so this defaults to "" (a blank author
-            # reads as "not set", never crashes a display that prints it).
-            "author": man.get("author", ""),
-            "type": ven.get("type", "game" if spec else "app"),
-            # The #67 dual-runtime seam: which VM runs this cart ("python" today,
-            # "lua" via the injected runtime), and which file `src` came from --
-            # save_code/duplicate/seed must write THAT file back, never main.py.
-            "runtime": runtime,
-            "main": mainf,
-            # A compiled cart's linear memory in 64 KiB pages, which its module
-            # must declare exactly (moy-spec SPEC.md §16.7); None
-            # for every other runtime, and for a compiled cart that forgot it --
-            # which its runtime refuses before anything loads.
-            "memory": _int_or(man.get("memory"), None) if compiled else None,
-            # A compiled cart's "writable" paths (moy-spec SPEC.md §16.12): the
-            # list as the manifest has it, which libmoy's binding holds every
-            # path to; None for every other runtime and for a cart with none.
-            "writable": _str_list(man.get("writable")) if compiled else None,
-            # The render-ahead audio ring's depth in frames ("moybyte":
-            # {"audio_ring": n}, docs/os_2026-11/hardware.md section 2): a
-            # compiled cart's `snd` queue, None for the default.
-            "audio_ring": _int_or(ven.get("audio_ring"), None),
-            # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
-            # the author, so a hand-typed "1.2" must read as unversioned rather
-            # than take the cart down with it.
-            "version": _int_or(man.get("version"), 0),
-            # The manifest's declared format, carried so a rewrite puts back what
-            # it found: a moy-spec cart duplicated here must stay a "moy-1" cart.
-            # Restamping it "moybyte-cart-v1" would make it unrecognisable to
-            # every other conforming host -- and silently reset its fps default.
-            "format": man.get("format", CART_FORMAT),
-            # Graduation (#29 / spec Section 8): a STORED, one-way project fact. Set
-            # when a block-authored cart's code commit diverges past the block
-            # vocabulary; makes the block editor read-only. Default False (absent =
-            # not graduated). Un-set only through the undo journal (the grad rider).
-            "graduated": bool(ven.get("graduated", False)),
-            # A wallpaper that draws per glass (docs/theme_and_shell_2026-11.md §3.9):
-            # at the glass's W and H around the shell's quiet rectangles,
-            # rather than a 320x240 frame cover-cropped onto it.
-            "glass": ven.get("glass") is True,
-            # A picture wallpaper: {"WxH": image name}, one picture per glass
-            # size (Wallpaper.picture_sizes reads it), else None.
-            "pictures": ven.get("pictures"),
-            # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
-            # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
-            # Spec carts default to that tick explicitly.
-            "fps": man.get("fps", 30 if spec else 0),
-            # Cart-supplied palette (SPEC.md 2.2): 64 "RRGGBB" strings replacing
-            # the default table for this cart's run, or None. Player applies it.
-            "palette": man.get("palette"),
-            # Required optional features (SPEC.md 10): Player refuses the cart
-            # cleanly when one isn't implemented, instead of crashing mid-frame.
-            "extensions": man.get("extensions", []),
-            # The sheet tiles a launcher shows this cart by (SPEC.md 3.4):
-            # (tile, w, h) or None to let the host choose. A POINTER into art the
-            # cart already has -- no image, no codec, no reserved tiles.
-            "icon": icon,
-            "edit": ven.get("edit", []),
-            # Manifest capability permissions (#38): a cart only gets a gated API
-            # (e.g. the injected `wifi`) when its permission is listed here. A
-            # normal kid cart has just ["graphics","input"] (or none) and stays
-            # network-less -- the sandbox is preserved.
-            "permissions": ven.get("permissions", []),
-            # The permissions the cart cannot run without (runtime/shell/
-            # app_perms.py): one of them absent refuses its launch by name.
-            "required": ven.get("required", []),
-            # A native cart's chips (docs/os_2026-11/tiers.md section 1): a
-            # module `main.<chip>.elf` for each, beside the manifest
-            # (tools/elf_cart.py); None for every other cart.
-            "native": ven.get("native") if isinstance(ven.get("native"), list) else None,
-            # A compiled app that is a WASI command the Player runs, drawing
-            # with the toolkit it links (runtime/run/wasi_run.py).
-            "wasi": ven.get("wasi") is True,
-            # The MIME types the cart's app opens (docs/os_2026-11/
-            # between_apps.md section 1): what `open_with` and `share` route by.
-            "handles": ven.get("handles", []),
-            # The message names another app's process may send it
-            # (docs/os_2026-11/processes.md section 1, the rule), as the
-            # manifest has them; None without the field. Its queue's open
-            # takes the strings (scheduler._open).
-            "receives": ven.get("receives"),
-            # The cart's entry points beside `main` (docs/app_api_v1.md
-            # section 7): {"service": its service's program}, as the manifest
-            # has them; None without the field. scheduler.entry_of reads it
-            # strictly where it is used.
-            "entries": ven.get("entries"),
-            # The badges the cart declares (docs/moy_cart_api.md,
-            # "Achievements"), as the manifest has them; None without the
-            # field. runtime/system/achievements.py's `declared` reads it
-            # strictly where it is used.
-            "achievements": ven.get("achievements"),
-            # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
-            # actually reads, or None when undeclared (show every control -- see
-            # _normalize_input_kinds above).
-            "input": _normalize_input_kinds(man.get("input")),
-            # Cart canvas (SPEC.md 1/3.1): (w, h) from the closed set, None for
-            # the 320x240 default, or the raw out-of-set value Player.start
-            # refuses by name -- see _normalize_canvas above.
-            "canvas": _normalize_canvas(man.get("canvas")),
-            # What a list says about the cart (SPEC.md 3.7), each read as
-            # every host reads it: None / None / [] when the manifest has none
-            # or has one that does not read. Cosmetic, never a reason to refuse.
-            "description": _cart_listing.description(man.get("description")),
-            "genre": _cart_listing.genre(man.get("genre")),
-            "tags": _cart_listing.tags(man.get("tags")),
-        }
-        if ven.get("animates") is True:
-            # An app on the `ui` verbs drawn every frame rather than on change
-            # (docs/ui_api_2026-10.md, "Drawn on change"); set only where the
-            # manifest says so, like `broken` below.
-            cart["animates"] = True
-        if broken:
-            # Set ONLY on a cart whose manifest would not parse, so every reader
-            # is a `.get` and a repaired cart simply stops carrying the key.
-            cart["broken"] = broken
-        if not whole:
-            # The scene ORDER from the folder's listing; no scene is read.
-            cart["scene_names"] = scene_names(man, _scene_files(here, folder))
-            cart["icon_rows"] = _sheet_icon(here, icon, folder)
-            return cart
-        # The manifest's config under the kid's config.json (the Make-it-mine
-        # values).
-        cfg = _config_of(ven.get("config", {}))
-        try:
-            cfg.update(json.loads(_read(path + "/config.json")))
-        except (OSError, ValueError):
-            pass
-        cart["cfg"] = cfg
-        # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
-        # cart has no such file -- carried in the SERIALISED form like
-        # sprites/map, and turned into the live 512-byte table by
-        # Project._build_flags (absent -> all zero, which is what the spec
-        # says an absent file means).
-        try:
-            cart["flags"] = _read(path + "/" + FLAGS_NAME)
-        except OSError:
-            cart["flags"] = None
-        cart["src"] = src
-        # SPEC.md 4's other scripts, as (filename, text) in load order. Empty
-        # lists, never None, for a cart that has none -- the tiers iterate them
-        # unconditionally.
-        cart["src_before"] = before
-        cart["src_after"] = after
-        try:
-            # PICO-8 __gfx__-style hex, optional
-            cart["sprites"] = _read(path + "/" + SPRITES_NAME)
-        except OSError:
-            cart["sprites"] = None
-        try:
-            # AudioBank, optional (#16)
-            cart["sounds"] = json.loads(_read(path + "/sounds.json"))
-        except (OSError, ValueError):
-            cart["sounds"] = None
-        try:
-            cart["map"] = _read(path + "/map.moymap")   # TileMap blob (#32), optional
-        except OSError:
-            cart["map"] = None
-        try:
-            # Block source (#29): the program tree a cart was authored from in
-            # the block editor, or None for a code-authored cart. main.py stays
-            # the runnable source either way; blocks.json is the editable origin.
-            cart["blocks"] = json.loads(_read(path + "/blocks.json"))
-        except (OSError, ValueError):
-            cart["blocks"] = None
-        # Paint-image assets (#63 Fold 3): {name: .moyimg text} from images/, or
-        # {}. A cart references one via the api's image(name) accessor and places
-        # it with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
-        cart["images"] = load_images(path)
-        # Scene assets (#85 Variant A): {name: .moyscene text} from scenes/, or
-        # {}. The manifest's assets.scenes is the ordered set (element 0 =
-        # default active); Project builds a widgets.Scenes the cart reads via
-        # scene()/load_scene() in _init. scene_names is that order (files not in
-        # the manifest are appended sorted, so a hand-added scene still loads).
-        scenes = load_scenes(path)
-        cart["scenes"] = scenes
-        cart["scene_names"] = scene_names(man, scenes)
-        return cart
-    except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
-        print("Moybyte cart unreadable:", path, exc)
-        return None
-
-
-def _scene_files(here, folder=None):
-    """A cart's scene names as `scene_names` reads them, from its scenes/
-    listing alone: no scene file is opened. `here` prefixes a name in the
-    cart's folder; `folder` is that folder's listing, when there is one."""
-    if folder is not None and (folder.get(SCENES_DIR) is False
-                               or _absent(folder, SCENES_DIR)):
-        return {}
-    try:
-        names = os.listdir(here + SCENES_DIR)
-    except OSError:
-        return {}
-    return {n[:-len(SCENE_EXT)]: None for n in names if n.endswith(SCENE_EXT)}
-
-
-def _pieces(f, size=1024):
-    """The lines of an open text file, read `size` characters at a time, so a
-    reader that stops early never holds the rest of the file."""
-    tail = ""
-    while True:
-        piece = f.read(size)
-        if not piece:
-            break
-        lines = (tail + piece).split("\n")
-        tail = lines.pop()
-        for line in lines:
-            yield line
-    if tail:
-        yield tail
-
-
-def _sheet_icon(here, icon, folder=None):
-    """The rows of a cart's sprite sheet its launcher icon is cut from
-    (`icon_rows`), read off the top of the file -- or None when it has no
-    sheet, no art on it, or a sheet that will not read as text. `here` and
-    `folder` as `_scene_files` takes them."""
-    if _absent(folder, SPRITES_NAME):
-        return None
-    try:
-        f = open(here + SPRITES_NAME)
-    except OSError:
-        return None
-    try:
-        n, tw, th = icon or (0, 1, 1)
-        return icon_rows(_pieces(f), n, tw, th)
-    except (OSError, ValueError):
-        return None
-    finally:
-        f.close()
-
-
-def _each(root, read, enter=False):
-    """`read(folder, listing)` for every cart folder under root, sorted by
-    name, the folders it refuses (None) left out and any per-folder surprise
-    swallowed, so a single bad folder can't break the launcher. None when root
-    itself will not list, which a caller keeping state per folder must not
-    read as "every cart is gone" (moy_catalogue.catalogue).
-
-    With `enter`, each read runs with the working directory in its folder and
-    `listing` that folder's (`_enter`; None where it could not), and the
-    working directory is put back once, after the last; without, `listing` is
-    None and every read is by full path.
-
-    A cart is a FOLDER. A `.moy` FILE beside them is an archive -- how a cart
-    travels, not how it is stored -- and is skipped silently: unpacking belongs
-    to whatever brought it here, because a cart in an archive can't be edited,
-    can't take an autosave commit, and can't hold its own undo journal or
-    saves."""
-    names = _listing(root)
-    if names is None:
-        return None
-    here = _cwd() if enter and root[:1] == "/" else None
-    carts = []
-    _SCAN[0] = names
-    try:
-        for name in sorted(names):
-            if not (name.endswith(CART_EXT) and names[name]):
-                continue
-            path = cart_path(root, name)
-            try:
-                c = read(path, _enter(path) if here is not None else None)
-            except Exception as exc:  # noqa: BLE001  -- belt-and-braces over _load()
-                print("Moybyte cart scan skipped:", name, exc)
-                c = None
-            if c:
-                carts.append(c)
-    finally:
-        _SCAN[0] = None
-        if here is not None:
-            _leave(here)
-    return carts
+    native/moy_store/moy_cat.c's moy_cat_load: one arena, freed once the dict
+    is built."""
+    return _native.load(path)
 
 
 def entries(root=CARTS_DIR):
     """Every cart folder's `entry` under root, sorted by folder name, or None
-    when root will not list: the native scan (moy_cat) where it is linked,
-    else `_each` over `_entry_at`."""
-    if _store is not None:
-        return _store.catalogue(root)
-    return _each(root, _entry_at, True)
+    when root will not list, which a caller keeping state per folder must not
+    read as "every cart is gone" (moy_catalogue.catalogue). A `.moy` FILE
+    beside the folders is an archive -- how a cart travels, not how it is
+    stored -- and is no entry."""
+    return _native.catalogue(root)
 
 
 def catalogue(root=CARTS_DIR):
@@ -995,11 +386,12 @@ def scan(root=CARTS_DIR):
     """Every cart under root, loaded WHOLE, sorted by folder name -- for a
     caller that wants every cart's payloads (a host tool, a test); the shelf
     reads the `catalogue`."""
-    return _each(root, _load_whole) or []
-
-
-def _load_whole(path, _names):
-    return load(path)
+    out = []
+    for e in entries(root) or []:
+        c = load(e["path"])
+        if c:
+            out.append(c)
+    return out
 
 
 def save_config(cart):
@@ -1020,28 +412,8 @@ def _manifest_set_graduated(cart_dir, value):
     """Set manifest.json's `moybyte.graduated` flag to `value` (a bool), preserving all
     other fields. Returns True iff the manifest was rewritten (changed), False on a
     no-op or an unreadable/bad manifest. Atomic (its rename is the torn-write
-    proofing)."""
-    if _store is not None:
-        return _store.graduate(cart_dir, bool(value))
-    path = cart_dir + "/manifest.json"
-    try:
-        man = json.loads(_read_recover(path))
-    except (OSError, ValueError):
-        return False
-    if not isinstance(man, dict):
-        return False
-    want = bool(value)
-    if bool(vendor(man).get("graduated", False)) == want:
-        return False                         # already at the target -> write nothing
-    ven = man.get(VENDOR_KEY)
-    ven = dict(ven) if isinstance(ven, dict) else {}
-    if want:
-        ven["graduated"] = True
-    else:
-        ven.pop("graduated", None)           # absent == not graduated (keep manifests clean)
-    man[VENDOR_KEY] = ven
-    _write_atomic(path, json.dumps(man))
-    return True
+    proofing). The store's (moy_journal_graduate)."""
+    return _native.graduate(cart_dir, bool(value))
 
 
 def set_graduated(cart_or_path, value=True):
@@ -1321,9 +693,7 @@ def save_map(cart, hex_text):
 from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                          JOURNAL_SNAP_DIR, journal_append, journal_undo,
                          journal_redo, journal_can_undo, journal_can_redo,
-                         journal_list, journal_snap, journal_restore,
-                         _journal_paths, _journal_load_entries,
-                         _journal_current_snap, _journal_total_len)
+                         journal_list, journal_snap, journal_restore)
 
 
 def _import_blocks():
@@ -1592,58 +962,15 @@ def new_from_template(root=CARTS_DIR, title="New Cart", ns=USER_NS):
                   edit=NEW_TEMPLATE["edit"], type=NEW_TEMPLATE["type"], ns=ns)
 
 
-# Files create() has already written for the copy, or that must NOT follow one.
-# Everything else in a cart folder is project content and gets copied verbatim.
-#   manifest/config/main -- create() wrote the COPY's own (new title, version, format)
-#   journal*             -- the ORIGINAL's undo history; inheriting it would let a
-#                           copy "undo" into the source project's edits
-#   pmem.json            -- the original's save state, not the new project's
-#   thumbs/              -- a regenerable preview cache, stamped against the source
-#   *.bak / *.tmp        -- moy_fs's crash-safety artifacts. A copied .bak stamps
-#                           content the copy's own file does not hold, and the next
-#                           read would "recover" the SOURCE's bytes over it (#154).
-def _dup_skip(name, main):
-    return (name in ("manifest.json", "config.json",
-                     "pmem.json", main, THUMBS_DIR, JOURNAL_DIR, JOURNAL_LOG,
-                     JOURNAL_CURSOR, JOURNAL_SNAP_DIR)
-            or name.startswith("journal")
-            or name.endswith(".bak") or name.endswith(".tmp"))
-
-
 def _copy_cart_files(src, dst, main):
     """Copy a cart folder's asset files (one level of subfolders -- images/,
-    scenes/, docs/) into a fresh copy. Degrade-don't-throw like load():
-    an unreadable entry is skipped, never fatal, so a copy can lose one asset but
-    never fail outright -- except when the store is full, which raises: a copy
-    that ran out of room is not a copy. The native store's moy_cat_copy where
-    it is linked."""
-    if _store is not None:
-        _store.copy_files(src, dst, main)
-        return
-    try:
-        names = os.listdir(src)
-    except OSError:
-        return
-    for name in names:
-        if _dup_skip(name, main):
-            continue
-        s, d = src + "/" + name, dst + "/" + name
-        try:
-            kids = os.listdir(s)         # a subfolder (images/, scenes/, ...)
-        except OSError:
-            try:
-                _copy_bytes(s, d)        # a plain file -- cover.png is not text
-            except (OSError, ValueError) as exc:
-                if store_full(exc):
-                    raise
-            continue
-        _mkdir(d)
-        for kid in kids:
-            try:
-                _copy_bytes(s + "/" + kid, d + "/" + kid)
-            except (OSError, ValueError) as exc:
-                if store_full(exc):
-                    raise
+    scenes/, docs/) into a fresh copy, leaving out what the copy writes itself
+    or must not inherit: its manifest, config and `main`, the original's saves
+    and undo journal, thumbs/, and the crash-safety leftovers (a copied .bak
+    would "recover" the source's bytes over the copy's own file, #154). An
+    unreadable entry is skipped; a store that is full raises: a copy that ran
+    out of room is not a copy. native/moy_store/moy_cat.c's moy_cat_copy."""
+    _native.copy_files(src, dst, main)
 
 
 # What a copy's program does, which the copy's regenerated manifest keeps:

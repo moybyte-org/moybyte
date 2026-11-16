@@ -102,7 +102,7 @@ tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the
 tools/board.py pass --all --build-only    # every image, the Zero's too, no board: preflight's firmware lane
 tools/board.py pass --all --shot      # ...and a screenshot of each at the end
 tools/board.py pass tdeck --no-perf   # no perf stage after the suite
-tools/board.py perf-baseline tdeck --image COMMIT   # the perf stage alone, on the image the board has (built from COMMIT)
+tools/board.py perf-baseline tdeck --image COMMIT   # the perf stage alone on a just-booted board (`fresh`), on the image it has (built from COMMIT)
 ```
 
 It is one job, however many boards: run it in the background and take its
@@ -122,11 +122,11 @@ drawn frame, under PERF DIAG), and Jet
 Teapot uncapped. Each run is one JSON record, in the log directory as
 `<board>.perf.json` and appended to `~/.cache/moybyte-perf/<board>.jsonl`; the
 block under the table sets each metric beside the board's last run at another
-commit and marks `<<< WORSE` a move past its noise band (the module header has
-the rule). It is a report, never a gate: the exit code stays the suites'.
-`perf-baseline` records a board without a suite, the first run on a board has
-nothing to compare with, and a number is published by regenerating
-`docs/perf/ledger.md` with the command the pass prints. A
+commit under the same protocol (`after-suite` for the pass, `fresh` for
+`perf-baseline`: the `perf` skill says why they never meet) and marks
+`<<< WORSE` a move past its noise band (the module header has the rule). It is
+a report, never a gate: the exit code stays the suites'. A number is published
+by regenerating `docs/perf/ledger.md` with the command the pass prints. A
 pass that builds builds the browser console first, because every image bakes
 the tree's own (a board built without one fails its suite's baked-console
 check). Run it

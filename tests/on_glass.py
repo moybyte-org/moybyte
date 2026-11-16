@@ -3456,8 +3456,9 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
     WASM_IDLE_LARGEST_COST_MAX.
 
     A fresh boot is the only fair comparison, because two radios keep what
-    they took: the WiFi driver holds its allocation after the lease powers it
-    down, and BLE once started stays up. A desk that has had either this boot
+    they took: the WiFi driver holds its allocation while it is up (through a
+    P4's companion radio, after the lease powers it down too), and BLE once
+    started stays up. A desk that has had either this boot
     (beyond what the board starts by itself) is refused with the reason,
     never compared. So is a desk a cart has run on this boot (the kernel
     Player's last run, `moy_play.info()`, or the sound's output started or
@@ -3473,8 +3474,8 @@ def wasm_idle_cost_is_bounded(board, baseline, ble_at_boot):
         pytest.skip("a cart has run this boot and what it started keeps its "
                     "internal RAM; reboot the board and run the suite first")
     if board.pyval("bool(getattr(ws.wifi, 'driver_up', False))", strict=True):
-        pytest.skip("the WiFi driver has run this boot and keeps its internal "
-                    "RAM; reboot the board and run the suite first")
+        pytest.skip("the WiFi driver is up and holds its internal RAM; reboot "
+                    "the board and run the suite first")
     if not ble_at_boot and board.pyval(
             "bool(getattr(%s, 'available', False))" % _ble(board), strict=True):
         pytest.skip("BLE was started this boot; reboot the board first")

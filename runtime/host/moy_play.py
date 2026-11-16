@@ -47,6 +47,10 @@ import os
 
 import host_native
 import native_build
+from moy_play_face import (
+    moy_chrome_list_t as _ChList, moy_front_ops_t as _FrontOps, moy_match_io_t as _Io,
+    moy_match_peer_t as _Peer, moy_match_t as _MatchS,
+    moy_proc_row_t as _ProcRow, moy_tick_t)
 
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -99,24 +103,14 @@ ALPHA = 0.125
 _B, _U8, _U16, _U32 = ctypes.c_bool, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32
 _R = None                               # the model's real: moy_tick_real_t
 
-# moy_tick_t, field for field; "R" is the model's real.
-_TICK = (("rate", ctypes.c_int), ("period", "R"), ("tick_ms", _U32),
-         ("steady", _B), ("uncapped", _B), ("div", _U8), ("n", _U8),
-         ("draw", _B), ("ticks", _U32), ("draws", _U32), ("misses", _U32),
-         ("acc", "R"), ("phase", _U8), ("tick_cost", "R"), ("draw_frame", "R"),
-         ("tick_frame", "R"), ("late", "R"), ("probing", _B), ("probe_from", _U8),
-         ("probe_k", _U16), ("fail_cost", "R"), ("fresh_from", _U8),
-         ("clean", _U16), ("late_wins", _U16), ("warm", _B), ("d_known", _B),
-         ("t_known", _B), ("primed", _B), ("drew", _B), ("ticked", _B),
-         ("cyc_ticks", _U32), ("cyc_misses", _U32), ("cyc_stall", _B),
-         ("win_s", "R"), ("win_cycles", _U32), ("win_late", _U32),
-         ("win_stalls", _U32))
-
 
 def _tick_type(real):
-    class _Tick(ctypes.Structure):
-        _fields_ = [(n, real if t == "R" else t) for n, t in _TICK]
-    return _Tick
+    """moy_tick_t with the model's real (moy_tick_real_t) as `real`: the
+    console's float, or the parity build's double."""
+    if real is ctypes.c_float:
+        return moy_tick_t
+    return type("moy_tick_t_" + real.__name__, (ctypes.Structure,), {"_fields_": [
+        (n, real if t is ctypes.c_float else t) for n, t in moy_tick_t._fields_]})
 
 
 def build(verbose=False, real="float"):
@@ -581,18 +575,6 @@ def mute(run, on):
     _rc(d.moy_play_mute(int(run), bool(on)))
 
 
-class _AppRun(ctypes.Structure):
-    """moy_app_run.h's moy_app_run_t."""
-    _fields_ = [("a", ctypes.c_void_p), ("sn", _U32), ("g", _U32), ("roles", _U32)]
-
-
-class _ProcRow(ctypes.Structure):
-    """moy_proc.h's moy_proc_row_t, field for field."""
-    _fields_ = [("pid", _U32), ("owner", _U32), ("run", _U32), ("engine", ctypes.c_void_p),
-                ("app", _AppRun), ("exit", ctypes.c_int32), ("tier", _U8), ("kind", _U8),
-                ("state", _U8), ("id", ctypes.c_char * 32)]
-
-
 def proc_row(run):
     """The run's process row (moy_proc.h): (pid, tier, kind, state, bound,
     grant), or None for a VM run or a stale handle."""
@@ -641,20 +623,9 @@ def front_live():
 # The kernel loop's half of a run in front, on the host (no VM module has
 # these: on a board the loop calls them). Host only.
 
-_FCANVAS = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
-                            ctypes.POINTER(ctypes.c_int))
-_FPRESENT = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_bool)
-_FMAP = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32),
-                         ctypes.POINTER(ctypes.c_int32))
-_FFRAME = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-                           ctypes.POINTER(ctypes.c_void_p))
-_FFENCE = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-
-
-class _FrontOps(ctypes.Structure):
-    """moy_front_ops_t (native/moy_play/moy_play.h)."""
-    _fields_ = [("canvas", _FCANVAS), ("present", _FPRESENT), ("map", _FMAP),
-                ("ctx", ctypes.c_void_p), ("frame", _FFRAME), ("frame_fence", _FFENCE)]
+_FRONT_CB = dict(_FrontOps._fields_)
+_FCANVAS, _FPRESENT, _FMAP = _FRONT_CB["canvas"], _FRONT_CB["present"], _FRONT_CB["map"]
+_FFRAME, _FFENCE = _FRONT_CB["frame"], _FRONT_CB["frame_fence"]
 
 
 _FRONT = []
@@ -775,55 +746,7 @@ _M_PORTS = 8
 _M_PORT_DEPTH = 4
 
 
-class _Peer(ctypes.Structure):
-    _fields_ = [("mac", _U8 * 6), ("name", ctypes.c_char * 24),
-                ("board", ctypes.c_char * 16), ("cart", ctypes.c_char * _M_CART),
-                ("state", _U8), ("seen", _U32), ("used", _B), ("hz", _U8),
-                ("ch", _U8), ("pinned", _B)]
-
-
 _I32, _F32 = ctypes.c_int32, ctypes.c_float
-
-
-class _Lockstep(ctypes.Structure):
-    _fields_ = [("live", _B), ("index", ctypes.c_int), ("peer", ctypes.c_int),
-                ("seed", _U32), ("session", _U8), ("tick_ms", _U32),
-                ("has_next", _B), ("next_ms", _U32), ("delay", ctypes.c_int),
-                ("redundancy", ctypes.c_int), ("frame", _I32), ("stalls", _U32),
-                ("stall_ticks", _U32), ("packets_in", _U32), ("packets_out", _U32),
-                ("waiting", _B), ("dead", _B), ("last_peer_frame", _I32),
-                ("peer_need", _I32), ("has_sent", _B), ("last_sent", _I32),
-                ("stall_mark", _U32), ("mine_f", _I32 * _M_TAPE),
-                ("theirs_f", _I32 * _M_TAPE), ("mine_m", _U8 * _M_TAPE),
-                ("theirs_m", _U8 * _M_TAPE), ("arr_f", _I32 * 64), ("arr_t", _U32 * 64),
-                ("has_ema", _B), ("m_ema", _F32), ("win_mark", _I32),
-                ("win_stalls", _U32), ("tps_f", _I32), ("has_tps", _B), ("tps_ms", _U32),
-                ("held", _U8 * 2), ("prev", _U8 * 2), ("pressed", _U8 * 2),
-                ("frame_seed", _U32), ("config", ctypes.c_char * _M_CFG),
-                ("hist", _U32), ("world_f", _I32), ("world_d", _U32),
-                ("ck_f", _I32 * _M_CHECKS), ("ck_in", _U32 * _M_CHECKS),
-                ("ck_w", _U32 * _M_CHECKS), ("ck_last", _I32), ("peer_ck_f", _I32),
-                ("peer_ck_in", _U32), ("peer_ck_w", _U32), ("peer_ck_cmp", _I32),
-                ("desync", _I32), ("desync_kind", _U8), ("checks", _U32),
-                ("tick_hz", _U16), ("tick_rem", _U16), ("delay_max", ctypes.c_int),
-                ("escalate_ticks", _I32), ("escalate_at", _U32),
-                ("peer_margin", _U8), ("rep_min", _U8), ("last_win", _U8),
-                ("peer_win", _U8), ("delay_mark", _I32), ("raises", _U32), ("lowers", _U32),
-                ("hz0", _U16), ("step_hz", _U8), ("step_from", _I32), ("stepped", _B),
-                ("hold", _B), ("has_win_ms", _B), ("win_ms", _U32), ("has_lock", _B),
-                ("lock_at", _U32), ("late_ms", _U32), ("stall_ms", _U32),
-                ("slew_ms", _I32), ("peer_mac", _U8 * 6), ("bound", _B)]
-
-
-class _Budget(ctypes.Structure):
-    _fields_ = [("credit", _U32), ("at", _U32), ("has_at", _B)]
-
-
-class _Port(ctypes.Structure):
-    _fields_ = [("port", _U16), ("from_", _U8), ("n", _U8), ("head", _U8), ("drops", _U32),
-                ("sent", _U32), ("refused", _U32), ("budget", _Budget),
-                ("mac", (_U8 * 6) * _M_PORT_DEPTH), ("len", _U8 * _M_PORT_DEPTH),
-                ("data", (_U8 * _M_MSG) * _M_PORT_DEPTH)]
 
 
 def _port(port):
@@ -831,39 +754,9 @@ def _port(port):
     return port if 0 < port <= 0xFFFF else 0
 
 
-class _MatchS(ctypes.Structure):
-    _fields_ = [("io", ctypes.c_void_p), ("active", _B), ("mac", _U8 * 6),
-                ("name", ctypes.c_char * 24), ("board", ctypes.c_char * 16),
-                ("cart", ctypes.c_char * _M_CART), ("cfg", ctypes.c_char * _M_CFG),
-                ("state", _U8), ("peers", _Peer * 8), ("s", _Lockstep),
-                ("session_id", _U8), ("start_frame", _U8 * _M_FRAME),
-                ("start_len", _U16), ("start_peer", _U8 * 6), ("start_tries", _U32),
-                ("beaconed", _B), ("beacon_at", _U32), ("rx", _U32), ("tx", _U32),
-                ("drops", _U32), ("recovers", _U32), ("rng", _U32), ("defer_n", _U8),
-                ("defer_mac", (_U8 * 6) * 8), ("defer_len", _U8 * 8),
-                ("defer", (_U8 * _M_FRAME) * 8), ("inbox_n", _U8), ("inbox_head", _U8),
-                ("inbox_len", _U8 * 8), ("inbox", (_U8 * _M_FRAME) * 8),
-                ("inbox_drops", _U32), ("ports", _Port * _M_PORTS), ("act", _U8),
-                ("act_cart", ctypes.c_char * _M_CART),
-                ("error", ctypes.c_char * 48), ("world_check", _B), ("rate", _U8),
-                ("hold", _B), ("ch", _U8), ("pinned", _B), ("probe", _U8), ("probe_at", _U8),
-                ("ports_budget", _Budget)]
-
-
-_SEND = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
-                         ctypes.POINTER(_U8), ctypes.c_size_t)
-_RECV = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8),
-                         ctypes.POINTER(_U8), _U32)
-_ADD = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(_U8))
-_RECOVER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
-_CHANNEL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int)
-_SAY = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_char_p)
-
-
-class _Io(ctypes.Structure):
-    _fields_ = [("send", _SEND), ("recv", _RECV), ("add_peer", _ADD),
-                ("recover", _RECOVER), ("channel", _CHANNEL), ("say", _SAY),
-                ("ctx", ctypes.c_void_p)]
+_IO_CB = dict(_Io._fields_)
+_SEND, _RECV, _ADD = _IO_CB["send"], _IO_CB["recv"], _IO_CB["add_peer"]
+_RECOVER, _CHANNEL, _SAY = _IO_CB["recover"], _IO_CB["channel"], _IO_CB["say"]
 
 
 _MSIGS = (
@@ -1252,17 +1145,6 @@ class Match:
 
 CH_RECT, CH_RECTB, CH_TEXT, CH_GLYPH, CH_ICON = 1, 2, 3, 4, 5
 INKS = 21
-
-
-class _ChOp(ctypes.Structure):
-    _fields_ = [("op", _U8), ("c", _U8), ("scale", _U8), ("src", _U8),
-                ("x", ctypes.c_int16), ("y", ctypes.c_int16), ("w", ctypes.c_int16),
-                ("h", ctypes.c_int16), ("s", _U16), ("n", _U16)]
-
-
-class _ChList(ctypes.Structure):
-    _fields_ = [("n", _U16), ("tn", _U16), ("full", _B), ("op", _ChOp * 128),
-                ("text", ctypes.c_char * 1536)]
 
 
 _CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p

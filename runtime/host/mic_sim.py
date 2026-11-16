@@ -8,6 +8,7 @@ over the driver, so a test hears what an app reads.
   remove()                no microphone again"""
 
 import math
+from array import array
 
 import moy_mic as _N
 
@@ -23,7 +24,7 @@ def remove():
 
 
 def push(samples):
-    _N.push([int(s) for s in samples])
+    _N.push(array("h", [int(s) for s in samples]))
 
 
 def tone(hz, n, amp=8000):
@@ -35,5 +36,5 @@ def tone(hz, n, amp=8000):
         out.append(int(amp * math.sin(p)))
         p += step
     _PHASE[0] = p
-    _N.push(out)
+    _N.push(array("h", out))
     return out

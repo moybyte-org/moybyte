@@ -110,16 +110,14 @@ class _FramebufModule:
 
 
 def install():
-    """Put `moy_gfx`, `moy_glass` and `framebuf` where an `import` will find them.
+    """Put `framebuf` and `moy_font` where an `import` will find them, and the
+    board tree's modules on the path. (`moy_gfx` and `moy_glass` are host faces:
+    runtime/host/faces.py registers them.)
 
     Idempotent, and it never displaces a real module: on a tier that HAS these
     (a board, the browser) the setdefault does nothing, which is what keeps this
     file from being a second implementation of anything.
     """
-    sys.modules.setdefault("moy_gfx", gfx_binding)
-    # The glass: canvas and buffer rows, over the same C the boards build.
-    from . import glass_binding
-    sys.modules.setdefault("moy_glass", glass_binding)
     sys.modules.setdefault("framebuf", _FramebufModule)
     # `moy_font` is what build.sh stages runtime/toolkit/font.py AS, and device_canvas
     # gates its native text op on being able to import it. That file is a

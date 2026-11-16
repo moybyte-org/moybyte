@@ -15,3 +15,8 @@ from the boards' ESP-IDF tree and stamps `native/moy_net/mbedtls_vendor.json`;
 `tests/test_mbedtls_vendor.py` fails on any edit. An ESP-IDF that moves to
 another release moves this copy with it, so the host and the wasm run the
 crypto the boards run. Licence: `LICENSE` (Apache-2.0, `THIRD_PARTY.md` §2.8).
+
+`make vendor-advisories` (`tools/vendor_advisories.py`, weekly in CI) asks
+OSV.dev, NVD and upstream's GitHub advisories which known vulnerabilities reach
+the pinned release; an advisory it reports is bumped past or acknowledged, with
+a reason, in `tools/vendor_advisories_ack.json`.

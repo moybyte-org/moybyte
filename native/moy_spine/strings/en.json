@@ -42,6 +42,8 @@
     "say.noload_text": "Its files didn't read back right. Get it again from Get Carts.",
     "say.console": "This game needs the console.",
     "say.console_text": "Open it again from home to play it.",
+    "say.chip": "Not made for this console.",
+    "say.chip_text": "It was built for another kind of console. A copy built for this one will play here.",
     "stuck.text": "stuck: one frame ran over %u s. Look for a loop that never ends.",
     "fit.this_game": "This game",
     "fit.megabytes": "%u.%u MB",

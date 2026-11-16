@@ -1836,8 +1836,8 @@ int moy_ppa_k_crisp(uint16_t *dst_px, int dw, int dh, int dx, int dy, const uint
             s_band[i] = heap_caps_aligned_alloc(
                 64, CRISP_BAND_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
             if (s_band[i] == NULL) {
-                s_band_failed = true;        // latch: don't re-probe per frame
                 crisp_free_bands();
+                s_band_failed = true;        // latch: don't re-probe per frame
                 return -1;
             }
         }

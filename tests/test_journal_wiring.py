@@ -5,6 +5,7 @@ whose snapshot is byte-identical to what landed on disk.
 """
 
 import json
+from tests import journal_files as jf
 from pathlib import Path
 
 from ws_helpers import build_ws_with_cart
@@ -18,7 +19,7 @@ def _make_ws_with_cart(tmp_path, src, title="Journaled", **kw):
 
 def _entries(cart_path):
     from runtime import moy_carts
-    return moy_carts._journal_load_entries(cart_path + "/journal/journal.jsonl")
+    return jf.entries(cart_path + "/journal/journal.jsonl")
 
 
 def _snap(cart_path, entry):
@@ -26,7 +27,7 @@ def _snap(cart_path, entry):
     # backup keeps moy_fs's stamp line, so the bytes an undo would restore are
     # what this asserts on, not the file's layout (#154).
     from runtime import moy_journal
-    return moy_journal._journal_read_snap(cart_path + "/journal", entry)
+    return jf.read_snap(cart_path + "/journal", entry)
 
 
 def test_commit_code_journals_the_saved_source(tmp_path):

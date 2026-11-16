@@ -14,8 +14,9 @@ import os
 import face_ctypes
 import native_build
 from moy_lease_face import *  # noqa: F401,F403
-from moy_lease_face import (EDGES, PIN_MAX, SHELL, _moy_lease_offer_t, _moy_lease_row_t,
-                            _raise_lease)
+from moy_lease_face import (EDGES, PIN_MAX, SHELL, _raise_lease,
+                            moy_lease_offer_t as _moy_lease_offer_t,
+                            moy_lease_row_t as _moy_lease_row_t)
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
@@ -44,7 +45,6 @@ _SIGS = (
      ctypes.c_int),
     ("moy_lease_wifi_mask", [], _U32),
     ("moy_lease_wifi_holder", [_U32, ctypes.POINTER(_U32), ctypes.POINTER(_U32)], ctypes.c_int),
-    ("moy_lease_wifi_reset", [], None),
 )
 
 
@@ -147,5 +147,3 @@ class Wifi:
         return out
 
 
-def wifi_reset():
-    _lib().moy_lease_wifi_reset()

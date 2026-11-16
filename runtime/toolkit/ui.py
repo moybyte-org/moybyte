@@ -487,6 +487,16 @@ def _opts(items):
     return b
 
 
+def _words(colours):
+    """The choice options of `colours` (0xRRGGBB each): a little-endian word
+    a colour, what the swatch row reads."""
+    b = _memo_get(colours, -2)
+    if b is None:
+        b = _memo_put(colours, -2, b"".join([_pack("<i", int(c) & 0xffffff) for c in colours]),
+                      None if type(colours) is tuple else [c for c in colours])
+    return b
+
+
 def cycle(label, items, cur, o=None):
     """`items[cur]` between chevrons; left and right step it (wrapping) while
     focused, activation takes the next: the new `cur`."""
@@ -511,12 +521,11 @@ def swatches(label, colours, cur, o=None):
     """A row of colour dots (each 0xRRGGBB), `colours[cur]` wearing the
     current mark; left and right move it while focused, a tap picks: the new
     `cur`."""
+    # GENERATED from native/os_calls.json's ui.swatches. Do not edit.
     t = _T
-    b = _memo_get(colours, -2)
-    if b is None:
-        b = _memo_put(colours, -2, b"".join([_pack("<i", int(c) & 0xffffff) for c in colours]),
-                      None if type(colours) is tuple else [c for c in colours])
-    return _C.api_choice(t[0], t[1], t[2], 5, label, b, -1 if cur is None else cur, _over(o))
+    return _C.api_choice(t[0], t[1], t[2], 5, label, _words(colours), -1 if cur is None else cur,
+                         _over(o))
+    # END GENERATED
 
 
 def hints(items, o=None):

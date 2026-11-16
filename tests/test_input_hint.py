@@ -35,13 +35,20 @@ SYSTEM_CARTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_input_kinds_default_and_filtering():
-    assert moy_carts._normalize_input_kinds(None) is None
-    assert moy_carts._normalize_input_kinds("touch") is None          # not a list
-    assert moy_carts._normalize_input_kinds([]) is None                # empty -> None
-    assert moy_carts._normalize_input_kinds(["bogus"]) is None         # nothing valid
-    assert moy_carts._normalize_input_kinds(["touch", "bogus"]) == ("touch",)
-    assert moy_carts._normalize_input_kinds(["buttons", "keyboard"]) == ("buttons", "keyboard")
+def test_an_input_hint_reads_as_its_known_kinds(tmp_path):
+    """A manifest's "input" as the store reads it: the kinds it knows, in
+    order, or None when it is not a list or holds none of them."""
+    carts_dir = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts_dir)
+    cart = moy_carts.create("Hinted", carts_dir, src="def _draw():\n    cls(0)\n")
+    man_path = cart["path"] + "/manifest.json"
+    man = json.loads(open(man_path, encoding="utf-8").read())
+    for value, want in ((None, None), ("touch", None), ([], None), (["bogus"], None),
+                        (["touch", "bogus"], ("touch",)),
+                        (["buttons", "keyboard"], ("buttons", "keyboard"))):
+        man["input"] = value
+        open(man_path, "w", encoding="utf-8").write(json.dumps(man))
+        assert moy_carts.entry(cart["path"])["input"] == want, value
 
 
 def test_cart_without_hint_defaults_to_none_zero_regression(tmp_path):

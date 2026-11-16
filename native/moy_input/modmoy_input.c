@@ -469,8 +469,6 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
 
 // -- the event rings: readers (moy_input.h) -------------------------------------------
 
-// A record's fields in a caller's buffer of 32-bit ints, EV_FIELDS a record.
-enum { EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B, EV_FIELDS };
 
 // time.ticks_us's mask, at most the boards' 2^30 so a stamp is a small int.
 static inline uint32_t ev_ticks_mask(void) {
@@ -502,7 +500,7 @@ static mp_obj_t table_reader_free(mp_obj_t self_in, mp_obj_t r) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(table_reader_free_obj, table_reader_free);
 
-// events(into, r) -> n: reader r's records into `into` (an array('i'), EV_FIELDS
+// events(into, r) -> n: reader r's records into `into` (an array('i'), MOY_EV_FIELDS
 // ints a record, as many as fit), each stamp on time.ticks_us's clock.
 // Allocates nothing.
 static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
@@ -513,7 +511,7 @@ static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
         mp_raise_TypeError(MP_ERROR_TEXT("events: an array('i')"));
     }
     int r = mp_obj_get_int(r_in);
-    size_t cap = bi.len / (sizeof(int32_t) * EV_FIELDS);
+    size_t cap = bi.len / (sizeof(int32_t) * MOY_EV_FIELDS);
     int32_t *w = bi.buf;
     uint32_t clock = moy_input_now_us();
     uint32_t ticks = (uint32_t)mp_hal_ticks_us();
@@ -524,14 +522,14 @@ static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
         size_t got = moy_input_events(s->t, r, chunk, want);
         for (size_t i = 0; i < got; i++, k++) {
             const moy_event_t *e = &chunk[i];
-            int32_t *f = &w[k * EV_FIELDS];
-            f[EV_T] = (int32_t)((ticks - (clock - e->t_us)) & ev_ticks_mask());
-            f[EV_SRC] = e->src;
-            f[EV_KIND] = e->kind;
-            f[EV_PROV] = e->prov;
-            f[EV_A] = e->a;
-            f[EV_ID] = e->id;
-            f[EV_B] = (int32_t)e->b;
+            int32_t *f = &w[k * MOY_EV_FIELDS];
+            f[MOY_EV_F_T] = (int32_t)((ticks - (clock - e->t_us)) & ev_ticks_mask());
+            f[MOY_EV_F_SRC] = e->src;
+            f[MOY_EV_F_KIND] = e->kind;
+            f[MOY_EV_F_PROV] = e->prov;
+            f[MOY_EV_F_A] = e->a;
+            f[MOY_EV_F_ID] = e->id;
+            f[MOY_EV_F_B] = (int32_t)e->b;
         }
         if (got < want) {
             break;
@@ -2110,69 +2108,8 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&input_loop_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },
     { MP_ROM_QSTR(MP_QSTR_ball_coast), MP_ROM_PTR(&input_ball_coast_obj) },
-    { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
-    { MP_ROM_QSTR(MP_QSTR_RING_SOURCES), MP_ROM_INT(MOY_INPUT_RING_SOURCES) },
-    { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
-    { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },
-    { MP_ROM_QSTR(MP_QSTR_CURSOR_IDLE_MS), MP_ROM_INT(MOY_INPUT_CURSOR_IDLE_MS) },
-    { MP_ROM_QSTR(MP_QSTR_POINTER_LINGER_MS), MP_ROM_INT(MOY_INPUT_POINTER_LINGER_MS) },
-    { MP_ROM_QSTR(MP_QSTR_P_NONE), MP_ROM_INT(MOY_INPUT_P_NONE) },
-    { MP_ROM_QSTR(MP_QSTR_P_LIVE), MP_ROM_INT(MOY_INPUT_P_LIVE) },
-    { MP_ROM_QSTR(MP_QSTR_P_HELD), MP_ROM_INT(MOY_INPUT_P_HELD) },
-    { MP_ROM_QSTR(MP_QSTR_P_CLICK), MP_ROM_INT(MOY_INPUT_P_CLICK) },
     MOY_FACE_MOY_INPUT_ROWS
     { MP_ROM_QSTR(MP_QSTR_event), MP_ROM_PTR(&input_event_obj) },
-    { MP_ROM_QSTR(MP_QSTR_MODS_AT), MP_ROM_INT(MOY_INPUT_MODS_AT) },
-    { MP_ROM_QSTR(MP_QSTR_CTRL), MP_ROM_INT(MOY_INPUT_MOD_CTRL) },
-    { MP_ROM_QSTR(MP_QSTR_SHIFT), MP_ROM_INT(MOY_INPUT_MOD_SHIFT) },
-    { MP_ROM_QSTR(MP_QSTR_ALT), MP_ROM_INT(MOY_INPUT_MOD_ALT) },
-    { MP_ROM_QSTR(MP_QSTR_SUPER), MP_ROM_INT(MOY_INPUT_MOD_SUPER) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_F1), MP_ROM_INT(MOY_INPUT_KEY_F1) },
-    { MP_ROM_QSTR(MP_QSTR_PB_PRIMARY), MP_ROM_INT(MOY_INPUT_PB_PRIMARY) },
-    { MP_ROM_QSTR(MP_QSTR_PB_MIDDLE), MP_ROM_INT(MOY_INPUT_PB_MIDDLE) },
-    { MP_ROM_QSTR(MP_QSTR_PB_SECONDARY), MP_ROM_INT(MOY_INPUT_PB_SECONDARY) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_LEFT), MP_ROM_INT(MOY_INPUT_KEY_LEFT) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_RIGHT), MP_ROM_INT(MOY_INPUT_KEY_RIGHT) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_UP), MP_ROM_INT(MOY_INPUT_KEY_UP) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_PGUP), MP_ROM_INT(MOY_INPUT_KEY_PGUP) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_PGDN), MP_ROM_INT(MOY_INPUT_KEY_PGDN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_VERSION), MP_ROM_INT(MOY_EVENT_VERSION) },
-    { MP_ROM_QSTR(MP_QSTR_EV_FIELDS), MP_ROM_INT(EV_FIELDS) },
-    { MP_ROM_QSTR(MP_QSTR_EV_T), MP_ROM_INT(EV_T) },
-    { MP_ROM_QSTR(MP_QSTR_EV_SRC), MP_ROM_INT(EV_SRC) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KIND), MP_ROM_INT(EV_KIND) },
-    { MP_ROM_QSTR(MP_QSTR_EV_PROV), MP_ROM_INT(EV_PROV) },
-    { MP_ROM_QSTR(MP_QSTR_EV_A), MP_ROM_INT(EV_A) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ID), MP_ROM_INT(EV_ID) },
-    { MP_ROM_QSTR(MP_QSTR_EV_B), MP_ROM_INT(EV_B) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEY_DOWN), MP_ROM_INT(MOY_EV_KEY_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEY_UP), MP_ROM_INT(MOY_EV_KEY_UP) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TEXT), MP_ROM_INT(MOY_EV_TEXT) },
-    { MP_ROM_QSTR(MP_QSTR_EV_BTN), MP_ROM_INT(MOY_EV_BTN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_DOWN), MP_ROM_INT(MOY_EV_TOUCH_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_MOVE), MP_ROM_INT(MOY_EV_TOUCH_MOVE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_UP), MP_ROM_INT(MOY_EV_TOUCH_UP) },
-    { MP_ROM_QSTR(MP_QSTR_EV_EDGE), MP_ROM_INT(MOY_EV_EDGE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_UART), MP_ROM_INT(MOY_EV_UART) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LINK), MP_ROM_INT(MOY_EV_LINK) },
-    { MP_ROM_QSTR(MP_QSTR_EV_MEDIA), MP_ROM_INT(MOY_EV_MEDIA) },
-    { MP_ROM_QSTR(MP_QSTR_EV_NET), MP_ROM_INT(MOY_EV_NET) },
-    { MP_ROM_QSTR(MP_QSTR_EV_BLE), MP_ROM_INT(MOY_EV_BLE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LORA), MP_ROM_INT(MOY_EV_LORA) },
-    { MP_ROM_QSTR(MP_QSTR_EV_WINCH), MP_ROM_INT(MOY_EV_WINCH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_USB), MP_ROM_INT(MOY_EV_USB) },
-    { MP_ROM_QSTR(MP_QSTR_EV_MIDI), MP_ROM_INT(MOY_EV_MIDI) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LOST), MP_ROM_INT(MOY_EV_LOST) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEYS), MP_ROM_INT(MOY_EV_KEYS) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH), MP_ROM_INT(MOY_EV_TOUCH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_PAD), MP_ROM_INT(MOY_EV_PAD) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ALL), MP_ROM_INT(MOY_EV_ALL) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_ISR), MP_ROM_INT(MOY_EV_ISR) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_FIFO), MP_ROM_INT(MOY_EV_FIFO) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_POLL), MP_ROM_INT(MOY_EV_POLL) },
-    { MP_ROM_QSTR(MP_QSTR_EV_DEPTH), MP_ROM_INT(MOY_EV_DEPTH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ISR_DEPTH_MAX), MP_ROM_INT(MOY_EV_ISR_DEPTH_MAX) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

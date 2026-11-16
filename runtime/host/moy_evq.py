@@ -12,7 +12,9 @@ import os
 import face_ctypes
 import native_build
 from moy_evq_face import *  # noqa: F401,F403
-from moy_evq_face import OK, RANGE, _moy_notes_note_t, _moy_status_item_t
+from moy_evq_face import OK, RANGE
+from moy_evq_face import (moy_evq_ev_t as _Ev, moy_notes_note_t as _moy_notes_note_t,
+                          moy_status_item_t as _moy_status_item_t)
 
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 
@@ -32,11 +34,6 @@ _NAME = 24
 
 _U32, _I, _P, _SZ, _B = ctypes.c_uint32, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_bool
 _VP = ctypes.c_void_p
-
-
-class _Ev(ctypes.Structure):
-    _fields_ = [("frm", _U32), ("n", _U32), ("app", ctypes.c_char * _APP),
-                ("name", ctypes.c_char * _NAME)]
 
 
 _SIGS = (
@@ -99,7 +96,7 @@ def take(pid):
         rc = _lib().moy_evq_take(pid, ctypes.byref(ev), buf, len(buf))
     if rc != OK:
         return None
-    return (ev.frm, ev.app.decode(), ev.name.decode(), buf.raw[:ev.n].decode())
+    return (ev.from_, ev.app.decode(), ev.name.decode(), buf.raw[:ev.n].decode())
 
 
 def screen_frame(pid, held, pressed, ms, max_ms, words=None):

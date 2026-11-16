@@ -1616,7 +1616,7 @@ try:
 except ImportError:                         # CPython: the C over ctypes
     sys.path.insert(0, @REPO@)
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     import moy_net
 import moy_sync
 import moy_ota_health
@@ -1805,8 +1805,8 @@ try:
     import moy_audio as na                  # the usermod, on a VM
 except ImportError:                         # CPython: the same C over ctypes
     sys.path.insert(0, @REPO@)
-    from runtime import audio_binding
-    na = audio_binding.install()
+    import runtime                          # noqa: F401  (faces.py registers it)
+    import moy_audio as na
 import json
 
 from audio import AudioBank
@@ -2444,7 +2444,9 @@ time.sleep_ms(50)
 '''
 
 
-def _roles_trace_board(exe, tmp_path, driver=None):
+def _roles_trace_board(exe, tmp_path, driver=None, carts=None):
+    """The roles driver's trace on the board model; `carts(folder)` adds
+    carts to the staged store's first."""
     import test_frame_alloc as fa
     sys.path.insert(0, str(ROOT / "tools"))
     try:
@@ -2452,6 +2454,8 @@ def _roles_trace_board(exe, tmp_path, driver=None):
     finally:
         sys.path.pop(0)
     fa._stage(tmp_path, exe)
+    if carts is not None:
+        carts(tmp_path / "carts")
     stage = tmp_path / "stage"
     (stage / "carts_data.mpy").unlink()
     (stage / "carts_data.py").write_text(gen_device_carts.render_packed_module(

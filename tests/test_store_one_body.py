@@ -2,8 +2,8 @@
 on every tier, CPython included (runtime/host/moy_store_binding.py).
 
   * no module under runtime/carts defines a body for a function the C store
-    exports to CPython: a def named after one of its rows (or the name
-    runtime/carts' store modules call it by) only calls the row;
+    exports: a def named after one of its rows (or the name runtime/carts'
+    store modules call it by) only calls the row;
   * the trial's store (tests/fixtures/store_trial/, STORE_FORMAT 1) opens,
     unchanged, on the current tree, and a format step goes through the one
     door with the export before it and the warm bar after it;
@@ -34,10 +34,11 @@ ROSTER = [{"title": "Bench", "type": "game", "src": body, "cfg": {"speed": 2},
            "version": 1}]
 
 
-def _host_rows():
+def _rows():
+    """Every row of the C store's face, whichever tiers carry it."""
     with open(os.path.join(ROOT, "native", "moy_store", "face.json")) as f:
         rows = json.load(f)["moy_store"]["rows"]
-    return {r["py"].split("(")[0] for r in rows if "host" not in r.get("absent", ())}
+    return {r["py"].split("(")[0] for r in rows}
 
 
 def _aliases(tree):
@@ -70,9 +71,8 @@ def _fallback(node, alias):
 def test_no_store_module_keeps_a_body_of_a_row_the_c_exports():
     """A twin is a def that reaches a row through the store AND branches on
     whether the store is there, a name bound to a row that is also def'd, or a
-    hasattr gate on a row: none is left for a row CPython reaches (face.json's
-    host rows)."""
-    rows = _host_rows()
+    hasattr gate on a row: none is left for any row of the store's face."""
+    rows = _rows()
     bodies = []
     folder = os.path.dirname(os.path.abspath(moy_seed.__file__))
     for f in sorted(os.listdir(folder)):
@@ -105,6 +105,41 @@ def test_no_store_module_keeps_a_body_of_a_row_the_c_exports():
                     and isinstance(n.args[1], ast.Constant) and n.args[1].value in rows):
                 bodies.append("%s: hasattr(%s)" % (f, n.args[1].value))
     assert bodies == [], "a body of a row the C store exports: %s" % bodies
+
+
+# A name runtime/carts keeps for what a row computes: its def is the row's call
+# and nothing else. `slug` stays a body of its own, since callers name a
+# slug without the folder around it and the C has no row for one.
+FRONTS = {"cart_folder": "folder"}
+
+
+def test_a_name_kept_for_a_row_is_the_call_of_that_row():
+    """`cart_folder` computes what the store's `folder` row computes: the def
+    returns that row's call, whether or not some other body recomputes it."""
+    rows = _rows()
+    folder = os.path.dirname(os.path.abspath(moy_seed.__file__))
+    found, bad = set(), []
+    for f in sorted(os.listdir(folder)):
+        if not f.endswith(".py"):
+            continue
+        with open(os.path.join(folder, f)) as fh:
+            tree = ast.parse(fh.read())
+        alias = _aliases(tree)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef) or fn.name not in FRONTS:
+                continue
+            found.add(fn.name)
+            row = FRONTS[fn.name]
+            assert row in rows
+            body = [n for n in fn.body
+                    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+            call = body[0].value if len(body) == 1 and isinstance(body[0], ast.Return) else None
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id in alias and call.func.attr == row):
+                bad.append("%s: %s" % (f, fn.name))
+    assert found == set(FRONTS), "a front the test names is gone: %s" % (set(FRONTS) - found)
+    assert bad == [], "a body of a row the C store exports: %s" % bad
 
 
 def _tree(base, skip_thumbs=False):
@@ -250,6 +285,37 @@ def test_what_is_not_a_backup_restores_nothing(trial, tmp_path):
     os.makedirs(fresh)
     with pytest.raises(ValueError):
         moy_backup.restore(str(tmp_path / "cart.moy"), fresh)
+    assert os.listdir(fresh) == []
+
+
+def test_a_restore_that_does_not_fit_is_refused_before_it_writes(trial, tmp_path, monkeypatch):
+    root = trial + "/carts"
+    path, _n = moy_backup.archive(root)
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        unpacked = sum(i.file_size for i in z.infolist())
+    assert moy_backup.needs(path, 4096) >= unpacked
+    fresh = str(tmp_path / "fresh" / "moybyte")
+    croot = fresh + "/carts"
+    os.makedirs(croot)
+    want = moy_backup.needs(path, 4096)
+    monkeypatch.setattr(moy_backup, "room", lambda root: (want - 4096, 4096))
+    with pytest.raises(OSError) as e:
+        moy_backup.restore(path, croot)
+    assert e.value.errno == moy_backup.ENOSPC
+    assert _tree(fresh) == {}, "nothing written: no member, no stage"
+    monkeypatch.setattr(moy_backup, "room", lambda root: (want * 2, 4096))
+    assert moy_backup.restore(path, croot) == _n
+
+
+def test_what_is_not_an_archive_restores_nothing(trial, tmp_path):
+    junk = str(tmp_path / "junk.zip")
+    with open(junk, "wb") as f:
+        f.write(b"not a zip" * 100)
+    fresh = str(tmp_path / "fresh" / "moybyte") + "/carts"
+    os.makedirs(fresh)
+    with pytest.raises(ValueError):
+        moy_backup.restore(junk, fresh)
     assert os.listdir(fresh) == []
 
 

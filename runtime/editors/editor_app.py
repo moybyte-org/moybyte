@@ -48,7 +48,7 @@ tab's first build, so the shell's start does not load the paint/map cores.
 """
 
 from editors_code import CodeEditor
-from bar_layer import _BAR_ICON
+from bar_layer import _BAR_ICON, glyph as _bar_glyph
 from code_layer import _CODE_INSET
 
 
@@ -679,7 +679,7 @@ class EditorApp:
                 self._bare_play(cv, play_r)
             else:
                 _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                           glyph_draw=ws.glyph)
+                           glyph_draw=_bar_glyph)
             return
         # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
         # one on the bar's current mark with its name where the bar has the
@@ -806,7 +806,7 @@ class EditorApp:
             self._bare_play(cv, play_r)
         else:
             _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                            glyph_draw=ws.glyph)
+                            glyph_draw=_bar_glyph)
 
     def _row_tap(self, px, py, rect, desk):
         tabs, undo_r, redo_r, _line, play_r = self._row_layout(rect, desk)
@@ -907,7 +907,7 @@ class EditorApp:
             m = 4 * fs
             cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
         elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
-            ws.glyph(slot, (x, y, box, box), ink, cv)
+            _bar_glyph(slot, (x, y, box, box), ink, cv)
         line = _ui_draw.font("ui")[2] * fs
         cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
@@ -1081,7 +1081,7 @@ class EditorApp:
             return
         ink = _ui_draw.disabled_ink(ws.theme_colors)
         if not ws.draw_icon(glyph, (x, y, ic, ic), ink, cv):
-            ws.glyph(glyph, (x, y, ic, ic), ink, cv)
+            _bar_glyph(glyph, (x, y, ic, ic), ink, cv)
 
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also

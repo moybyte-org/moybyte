@@ -32,7 +32,7 @@ import pytest
 
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
-from tools import gen_ui_tables
+from tools.gen_os import style as gen_ui_tables
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unix_mp import require_unix_mp  # noqa: E402
@@ -202,7 +202,7 @@ def test_a_picked_accent_sets_value_and_the_rim_tied_to_the_accent():
     card's rim the source ties to its accent (lift-and-ring stays legal
     data, docs/theme_and_shell_2026-11.md §3.3): both follow the pick; with
     no pick the source's own stand."""
-    src = json.loads(open(os.path.join(os.path.dirname(gen_ui_tables.__file__), "..",
+    src = json.loads(open(os.path.join(gen_ui_tables.ROOT,
                                        "native", "moy_ui", "themes", "moy.json")).read())
     for v in ("dark", "light"):
         src["look"][v].setdefault("marks", {})["card"] = {"focus": {"lift": {

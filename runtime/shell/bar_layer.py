@@ -27,8 +27,8 @@ fullscreen tiers only (the windowed WM suppressed it). Do not re-grow it;
 `tests/test_desktop_shell.py::test_the_pre_2026_07_bottom_dock_is_gone` is the
 ratchet.
 
-`BarLayer` reaches everything else through its `self.ws` back-ref (the shared draw
-toolkit ws.glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
+`BarLayer` reaches everything else through its `self.ws` back-ref; the chrome's
+glyph and chip (`glyph`, `mini_btn`) are this module's functions. Only
 `NAMES` (palette) is injected at construction -- the same circular-import dodge the
 other extracted UIs use, since console.py builds the one BarLayer instance a
 Workstation holds; the rect hit-test `_in` is widgets', imported directly. The trivial time helpers `_ticks_ms`/
@@ -185,6 +185,26 @@ def _band_part():
     return _ui_draw.BAR_HH_BAND
 
 
+# -- the chrome's glyph and chip ----------------------------------------------
+# What the bar, the windows' title bars, the desk's tiles and the Editor's
+# chrome draw their icons and Settings-style chips with: the toolkit's raster,
+# taken with the argument order of a `glyph_draw=` hook (kind first, the
+# canvas after).
+
+def glyph(kind, rect, c, cv, scale=None):
+    """Glyph `kind` centred in `rect` in colour `c` on `cv`, each glyph pixel
+    a `scale` square (the canvas's font scale by default; the bar passes its
+    chrome scale so a glyph fills its slot, #203). An unknown kind draws
+    nothing."""
+    _ui_draw.glyph(cv, kind, rect, c, scale)
+
+
+def mini_btn(label, rect, fill, cv, label_rect=None):
+    """A tiny labelled chip on `cv` (ui_draw.mini_btn): the Settings steppers'
+    and the update screen's vocabulary."""
+    _ui_draw.mini_btn(cv, rect, label, fill, label_rect)
+
+
 # The strip each content surface takes, keyed by its layer's id: the frame
 # draws it after the surface's page (`BarLayer.draw_surface`).
 STRIP_OF = {"settings": "settings", "tasks": "tasks", "webconsole": "webconsole",
@@ -238,8 +258,9 @@ class BarLayer:
     hold. `_render_cart_bar(cv, key, i)` renders bar `i` of the zoned layout.
 
     Boundary decisions (deliberate, see the doc):
-      * The shared draw toolkit (ws.glyph / ws.icon / ws.mini_btn / ws.bar_image)
-        stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
+      * The chrome's glyph and chip are this module's `glyph` and `mini_btn`;
+        the icon toolkit (ws.icon / ws.bar_image) stays on Workstation and the
+        bar is a consumer of it (via self.ws).
       * `bar_img_cache` (per-kind icon Image cache backing ws.icon) stays on ws;
         `_bar_cache_gen` (the strip cache generation) lives here, bumped
         through invalidate(); the look's changes reach the strips through
@@ -251,7 +272,7 @@ class BarLayer:
     at their rects (`bar_rects`), LAST over each content's paint, which lays
     out in what the bars leave (`content_rect`). The frame draws a surface's
     strip after its page (`draw_surface`, `STRIP_OF`), but for the surfaces
-    `STRIP_SELF` names, which call _draw_status_strip(where) themselves; the
+    `STRIP_SELF` names, which call draw_status_strip(where) themselves; the
     pointer methods delegate their bar slice to
     handle_bar_tap(where, ...), which takes
     canvas coordinates and hit-test in the coordinates of the bar they land on.
@@ -1263,7 +1284,7 @@ class BarLayer:
         side = 16 * u
         gy = (thick - side) // 2
         if not ws.draw_icon("back", (x, gy, side, side), ink, cv):
-            ws.glyph("arr_l", (x, gy, side, side), ink, cv, u)
+            glyph("arr_l", (x, gy, side, side), ink, cv, u)
         if not title:
             return x + side
         tf = _ui_draw.font("title")
@@ -1364,7 +1385,7 @@ class BarLayer:
                     _ui_draw.print_font(was)
                 continue
             if not ws.draw_icon(name, r, ink, cv):
-                ws.glyph(name, r, ink, cv)
+                glyph(name, r, ink, cv)
 
     def _title_end(self, where, zone, bar, game):
         """Where the back chevron's title ends in bar coordinates: what the
@@ -1458,7 +1479,7 @@ class BarLayer:
             if name == "battery":
                 _battery(cv, gx, gy, side, u, ink)
             else:
-                ws.glyph(name, (gx, gy, side, side), ink, cv, u)
+                glyph(name, (gx, gy, side, side), ink, cv, u)
             return
         if name == "separator":
             if across:

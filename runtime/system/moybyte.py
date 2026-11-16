@@ -803,12 +803,8 @@ def _aud():
         try:
             import moy_audio
             _AUD[0] = moy_audio
-        except ImportError:  # host: the runtime package's ctypes build of the same C
-            try:
-                from runtime import audio_binding
-            except ImportError:  # pragma: no cover - a host without its audio
-                return None
-            _AUD[0] = audio_binding.get()
+        except ImportError:  # an image without audio, a host without a compiler
+            return None
     return _AUD[0]
 
 

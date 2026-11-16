@@ -37,7 +37,7 @@ def chrome_inks(th, names):
 
 def replay(ops, cv, ws=None):
     """Draw a chrome display list through `cv`: rect, rectb, print, a 12x12
-    glyph (`ws.glyph`) and a bar icon (`ws.icon`), the scale 0 meaning the
+    glyph (`ui_draw.glyph`) and a bar icon (`ws.icon`), the scale 0 meaning the
     canvas's own."""
     for op, c, sc, x, y, w, h, t in ops:
         if op == 1:
@@ -47,7 +47,7 @@ def replay(ops, cv, ws=None):
         elif op == 3:
             cv.print(t, x, y, c, sc)
         elif op == 4:
-            ws.glyph(t, (x, y, w, h), c, cv, sc or None)
+            _ui_draw.glyph(cv, t, (x, y, w, h), c, sc or None)
         elif op == 5:
             ws.icon(t, x, y, cv, sc or None)
 

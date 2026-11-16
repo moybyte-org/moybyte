@@ -33,6 +33,7 @@ ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 
 import ui as _ui
 import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
 from layers import Layer
 import layout_base as _layout_base
 import text_modes as _modes
@@ -473,7 +474,7 @@ class CardsLayer(Layer):
         else:
             icons = f.get("icons") or []
             side = max(12, min(w, h) // 2)
-            ws.glyph(icons[k] if k < len(icons) else "dot",
+            _bar_glyph(icons[k] if k < len(icons) else "dot",
                       (x + (w - side) // 2, y + (h - side) // 2, side, side),
                       ws.theme_colors["ink"], cv)
 

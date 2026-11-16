@@ -4,9 +4,8 @@ store module shares.
 The directory and extension names, the sibling-path formula (system state
 lives BESIDE the carts dir), `ensure_dirs`, the cart NAME rule (`slug`), the
 manifest canvas-field codec, the rows of a sprite sheet a launcher icon is cut
-from (`icon_rows`, which the shelf's scan and the sheet codec both read) and
-the directory primitives `moy_fs` lacks: a folder's listing, what it proves
-absent, and a scan's walk into a folder (`_enter`/`_leave`).
+from (`icon_rows`, which the sheet codec and the shelf read) and the directory
+primitives `moy_fs` lacks: a folder's listing and what it proves absent.
 `moy_carts` (the store core) and `moy_seed` import from here and never from
 each other's callers, so either can be imported first. `moy_carts` re-exports
 every name under its old spelling.
@@ -335,7 +334,7 @@ def builtin_name(path):
 def cart_folder(name, ns=None):
     """The folder a cart named `name` (a title, or a slug already) is stored
     in: `<ns>.<slug>` and the extension, or the bare slug with no `ns`."""
-    return (slug(ns) + "." if ns else "") + slug(name) + CART_EXT
+    return _store.folder(name, ns)
 
 
 def store_path(root, rel):
@@ -449,35 +448,6 @@ def _has(folder, path, name):
     if _absent(folder, name):
         return False
     return _exists(path + "/" + name)
-
-
-def _cwd():
-    try:
-        return os.getcwd()
-    except (OSError, AttributeError):
-        return None
-
-
-def _enter(path):
-    """Move the working directory into the folder at `path` and return its
-    listing, or None when either fails -- the caller then reads by full path.
-    On FAT a name opened from inside the folder is looked up in that folder
-    alone, where a full path walks every directory above it again. Nothing may
-    import while a scan is inside a folder: `""` on sys.path is the working
-    directory, so a cart's own files would be searched, and could shadow a
-    module."""
-    try:
-        os.chdir(path)
-    except (OSError, AttributeError):
-        return None
-    return _listing("")
-
-
-def _leave(here):
-    try:
-        os.chdir(here)
-    except (OSError, AttributeError):
-        pass
 
 
 def _rmtree(path):

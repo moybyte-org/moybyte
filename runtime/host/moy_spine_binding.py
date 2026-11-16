@@ -19,21 +19,12 @@ import os
 import types
 
 import native_parts
+from moy_spine_face import moy_app_t as _App, moy_kind_t as _Kind
 
 c = ctypes
 OK, STALE, FULL, NOMEM, DUP, BAD = range(6)
 NOSLOT = 0xFFFFFFFF
 _ENOSPC = 28
-
-
-class _Kind(c.Structure):
-    _fields_ = [("len", c.c_uint8), ("s", c.c_char * 15)]
-
-
-class _App(c.Structure):
-    _fields_ = [("id", _Kind), ("has_min", c.c_uint8),
-                ("min_w", c.c_int32), ("min_h", c.c_int32),
-                ("title_len", c.c_uint32), ("title", c.c_void_p)]
 
 
 _P = c.c_void_p

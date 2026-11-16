@@ -41,9 +41,10 @@
                                                 --skip-build, --no-flash, --shot,
                                                 --no-perf)
     tools/board.py perf-baseline tdeck --image COMMIT  the pass's perf stage
-                                                alone, on the image the board has
-                                                (built from COMMIT): recorded and
-                                                set beside the last run
+                                                alone, on the image a just-booted
+                                                board has (built from COMMIT):
+                                                recorded `fresh` and set beside
+                                                the last fresh run
                                                 (tools/perf_pass.py)
 
 The board is its `[board] ota` id (p4, tdeck, guition_s3, guition_p4,

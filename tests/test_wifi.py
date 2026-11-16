@@ -735,10 +735,12 @@ def test_a_device_radio_that_will_not_stop_is_a_diag_line_not_a_crash(tmp_path):
 
 
 def test_the_device_remembers_that_its_driver_came_up(tmp_path):
-    """`driver_up` is one-way: radio_off() stops the radio but the ESP-IDF
-    driver keeps its internal-RAM allocation for the rest of the boot, so the
-    on-glass idle-SRAM check (tests/on_glass.py, the wasm engine's) refuses a
-    desk that has had it up rather than comparing against a fresh boot."""
+    """Over the port's network.WLAN `driver_up` is one-way: radio_off() stops
+    the radio but the ESP-IDF driver keeps its internal-RAM allocation for the
+    rest of the boot, so the on-glass idle-SRAM check (tests/on_glass.py, the
+    wasm engine's) refuses a desk that has had it up rather than comparing
+    against a fresh boot. The kernel's driver answers for itself
+    (test_the_kernel_driver_says_whether_it_is_up)."""
     net = _FakeNetwork()
     dev = _device_wifi_over(net, tmp_path)
     try:
@@ -751,6 +753,24 @@ def test_the_device_remembers_that_its_driver_came_up(tmp_path):
         assert dev.driver_up is True
     finally:
         sys.modules.pop("network", None)
+
+
+def test_the_kernel_driver_says_whether_it_is_up(tmp_path, monkeypatch):
+    """Over the kernel's driver `driver_up` is the driver's own answer
+    (moy_net.wifi_status()'s first field): on an S3 the station's stop ends
+    the driver and gives its internal RAM back, so a desk whose radio came
+    up and went down again reads False."""
+    import types
+    status = [False, False, False, None, None, 0]
+    stub = types.SimpleNamespace(wifi_on=lambda: None,
+                                 wifi_status=lambda: tuple(status))
+    monkeypatch.setitem(sys.modules, "moy_net", stub)
+    dev = _device_wifi_class()(None, str(tmp_path))
+    assert dev.driver_up is False
+    status[0] = True
+    assert dev.driver_up is True
+    status[0] = False
+    assert dev.driver_up is False
 
 
 # -- the radio's slow halves are polled, never waited on -----------------------
@@ -1002,7 +1022,7 @@ def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
 
 def _wire_links():
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     if str(ROOT / "device") not in sys.path:
         sys.path.insert(0, str(ROOT / "device"))
     import wire_links

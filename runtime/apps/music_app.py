@@ -423,15 +423,17 @@ def what_of(n):
     return kind, n.get("title") or n.get("who") or _stem(src), src
 
 
-def follow(ws=None):
+def follow(nav_of=None):
     """A run of the media service the face found (dev_media.listen: any
     client's play that started one, or the run a VM stop left playing)
-    shown in the bar, its section opening the app."""
+    shown in the bar, its section opening the app. `nav_of()` makes the nav
+    role the section opens the app through, asked only when no app built
+    the section."""
     s = STREAM
-    if s.section is None and ws is not None:
+    if s.section is None and nav_of is not None:
         nav = None
         try:
-            nav = ws.app_context(MusicAppLayer.id, ("nav",)).nav
+            nav = nav_of()
         except Exception:  # noqa: BLE001 -- a section with no head still shows the card
             nav = None
         s.section = MusicSection(s, nav)

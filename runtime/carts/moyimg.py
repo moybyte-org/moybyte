@@ -204,7 +204,7 @@ def decode_moyimg(text):
     choice to skip this one picture and try again later.
 
     The whole raster is still built here, because a caller that asks for pixels
-    needs pixels -- and the retry after a collect is `moy_carts._read_main`'s
+    needs pixels -- and the retry after a collect is modmoy_store.c's `big_str`
     idiom for the same reason: it is one big CONTIGUOUS allocation on a heap that
     fragments over a session, so the run that serves it routinely exists and is
     merely not free yet. Costing nothing when the heap is fine is the point of

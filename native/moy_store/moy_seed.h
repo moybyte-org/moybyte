@@ -1,8 +1,8 @@
 // The seed (docs/history/kernel_store_2026-10.md section 7): a built-in from the
 // packed roster written into a store root.
 //
-// runtime/carts/moy_seed.py's `seed_builtins` is the reference, file for file and
-// byte for byte on the host: the manifest regenerated from the cart's fields
+// runtime/carts/moy_seed.py's `seed_builtins` documents the rules: the
+// manifest regenerated from the cart's fields
 // in its key order, every payload the cart carries, and a cart's saves and
 // config (pmem.json, config.json) kept across a re-seed. A roster blob is one
 // cart's JSON as raw deflate (tools/gen_device_carts.py --packed), inflated
@@ -20,12 +20,6 @@
 
 #define MOY_SEED_WBITS 15
 #define MOY_SEED_MAX (4u << 20)     // what one cart may inflate to
-
-// The folder a cart titled `title` is seeded into: `<ns>.<slug>.moy`
-// (runtime/carts/moy_store_base.py's cart_folder). Writes up to `cap` bytes and a
-// NUL, returns the length the whole needs.
-size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
-                       size_t cap);
 
 // The roster blob `blob` inflated: 0 and its JSON text, or an errno value
 // (EINVAL for a stream that is not one cart).

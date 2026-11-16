@@ -1,6 +1,5 @@
 # Map (grep -n a name to jump there):
 #   build            the C built for the host (the one library)
-#   install          this module as `moy_net`
 #   encode_batch     a sync batch's wire JSON (and decode_batch, sync_batch)
 #   sync_apply       one batch's ops applied into a store
 #   web_start        the webhost: started, polled, its parked request answered
@@ -32,7 +31,9 @@ same C built for the host.
   http_*           the streaming client Get Carts and the updater fetch through
   clock_*          the wall clock's state and the NTP server it asks
 
-`install()` puts this module where `import moy_net` finds it. What it adds to
+The module is not registered as `moy_net` on the host (faces.py): host
+code that tells a board by `import moy_net` stays on its host path, and a test
+that drives the board half puts it in `sys.modules` itself. What it adds to
 the C is what ctypes cannot do by itself: JSON text for a batch's ops (the
 boards' module prints them with the port's own printer) and Python values from
 the spans the C returns. The rules each function keeps are moy_net.h's.
@@ -43,12 +44,15 @@ from __future__ import annotations
 import ctypes
 import json
 import os
-import sys
 import threading
 
 from . import host_native, native_build
 from .moy_net_face import *  # noqa: F401,F403
 from .moy_net_face import PW_ITER
+from .moy_net_face import (
+    moy_http_req_t as _Req, moy_sync_batch_t as _Batch,
+    moy_sync_env_t as _Env, moy_sync_result_t as _Result, moy_sync_store_t as _Store,
+    moy_wc_state_t as _WcState, moy_web_cfg_t as _WebCfg)
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -70,63 +74,6 @@ _PP = ctypes.POINTER(ctypes.c_char_p)
 _PZ = ctypes.POINTER(ctypes.c_size_t)
 
 
-class _Req(ctypes.Structure):
-    _fields_ = [("method", ctypes.c_void_p), ("method_n", _Z),
-                ("target", ctypes.c_void_p), ("target_n", _Z),
-                ("clen", ctypes.c_uint32), ("head_end", _Z)]
-
-
-class _Batch(ctypes.Structure):
-    _fields_ = [("root", _I), ("ops", ctypes.c_void_p),
-                ("ops_end", ctypes.c_void_p)]
-
-
-class _Store(ctypes.Structure):
-    _fields_ = [("carts", _P), ("files", _P), ("kinds", _P), ("journal", _I),
-                ("ts", ctypes.c_int64), ("shelf", ctypes.c_void_p),
-                ("shelf_cap", _Z), ("apps", _P)]
-
-
-class _Err(ctypes.Structure):
-    _fields_ = [("index", ctypes.c_uint32), ("why", ctypes.c_char * 40)]
-
-
-class _Result(ctypes.Structure):
-    _fields_ = [("applied", ctypes.c_uint32), ("refused", ctypes.c_uint32),
-                ("shelf", _I), ("nerr", ctypes.c_uint32), ("err", _Err * 8)]
-
-
-class _WebCfg(ctypes.Structure):
-    _fields_ = [("port", ctypes.c_uint16), ("carts", _P), ("files", _P),
-                ("kinds", _P), ("system", _P), ("defer", _P), ("apps", _P)]
-
-
-class _WebState(ctypes.Structure):
-    _fields_ = [("serving", ctypes.c_uint8), ("closing", ctypes.c_uint8),
-                ("parked", ctypes.c_uint8), ("listening", ctypes.c_uint8),
-                ("port", ctypes.c_uint16),
-                ("requests", ctypes.c_uint32), ("events", ctypes.c_uint32),
-                ("err", _I)]
-
-
-class _OtaState(ctypes.Structure):
-    _fields_ = [("phase", ctypes.c_uint8), ("sink", ctypes.c_uint8),
-                ("dl_done", ctypes.c_uint32), ("dl_total", ctypes.c_uint32),
-                ("done", ctypes.c_uint32), ("total", ctypes.c_uint32),
-                ("err", ctypes.c_char * 48)]
-
-
-class _WcState(ctypes.Structure):
-    _fields_ = [("state", ctypes.c_uint8), ("parked", ctypes.c_uint8),
-                ("dialled", ctypes.c_uint8), ("port", ctypes.c_uint16),
-                ("ip", ctypes.c_uint32), ("err", _I)]
-
-
-class _Env(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_void_p) for n in (
-        "v", "v_end", "root", "root_end", "ops", "ops_end")]
-
-
 _SIGS = (
     ("moy_http_parse", [ctypes.c_void_p, _Z, ctypes.POINTER(_Req)], _I),
     ("moy_http_query", [ctypes.c_void_p, _Z, _P, _Z,
@@ -135,8 +82,6 @@ _SIGS = (
     ("moy_sync_decode", [ctypes.c_void_p, _Z, ctypes.POINTER(_Env)], _I),
     ("moy_sync_encode", [ctypes.c_void_p, _Z, _P, _Z, _P, _Z, _P, _Z], _Z),
     ("moy_sync_batch", [ctypes.c_void_p, _Z, ctypes.POINTER(_Batch)], _I),
-    ("moy_sync_path", [_P, _Z, _I], _I),
-    ("moy_sync_song", [_P, _Z], _I),
     ("moy_sync_apply", [ctypes.POINTER(_Store), _I, ctypes.c_void_p,
                         ctypes.c_void_p, ctypes.POINTER(_Result)], None),
     ("moy_web_start", [ctypes.POINTER(_WebCfg)], _I),
@@ -155,8 +100,6 @@ _SIGS = (
     ("moy_seal_spake_verifier", [ctypes.c_void_p, _P, _P, _P], _I),
     ("moy_seal_spake_keys", [ctypes.c_void_p, _P, _Z, _P, _Z, _P, _Z, _P, ctypes.c_char_p,
                              ctypes.c_char_p, ctypes.c_char_p], _I),
-    ("moy_web_poll", [], _I),
-    ("moy_web_state", [ctypes.POINTER(_WebState)], None),
     ("moy_web_events", [], ctypes.c_uint32),
     ("moy_web_shelf", [ctypes.c_void_p, _Z], _Z),
     ("moy_web_take", [ctypes.POINTER(ctypes.c_void_p), _PZ,
@@ -197,7 +140,6 @@ _SIGS = (
     ("moy_ota_slot_close", [], _I),
     ("moy_ota_activate", [ctypes.c_void_p, _Z], _I),
     ("moy_ota_c6_commit", [], _I),
-    ("moy_ota_state", [ctypes.c_void_p], None),
     ("moy_httpc_open", [_P, _P, ctypes.POINTER(_I),
                         ctypes.POINTER(ctypes.c_uint32)], _I),
     ("moy_httpc_read", [_I, ctypes.c_void_p, _Z], _I),
@@ -239,12 +181,6 @@ def _lib():
             raise ImportError("moy_net: no C compiler for the host build")
         _LIB[0] = native_build.load_cdll(path, _SIGS)
     return _LIB[0]
-
-
-def install():
-    """Make `import moy_net` reach this module, as a board's import reaches
-    the usermod."""
-    sys.modules.setdefault("moy_net", sys.modules[__name__])
 
 
 def _bytes(x):
@@ -386,19 +322,6 @@ def sync_batch(body):
     return (_ROOT_NAMES[b.root], ops)
 
 
-def sync_path(rel, history):
-    """The segments of a store path the receiver takes, 0 for one it
-    refuses (moy_net.h's moy_sync_path)."""
-    raw = _bytes(rel)
-    return _lib().moy_sync_path(raw, len(raw), 1 if history else 0)
-
-
-def sync_song(name):
-    """Whether `name` is a song of the music folder (moy_sync_song)."""
-    raw = _bytes(name)
-    return bool(_lib().moy_sync_song(raw, len(raw)))
-
-
 def _names(names):
     if names is None:
         return None
@@ -460,14 +383,6 @@ def wc_on(port, carts, files, kinds, system, defer, ip, apps=None):
         raise OSError(rc, os.strerror(rc))
 
 
-def wc_off(why=None):
-    _lib().moy_wc_off(None if why is None else _bytes(why))
-
-
-def wc_poll():
-    return bool(_lib().moy_wc_poll())
-
-
 def wc_state():
     """(state, parked, dialled, port, ip or None, err)"""
     st = _WcState()
@@ -498,30 +413,10 @@ def dns_start(ip, port):
     return 0 <= port <= 65535 and _lib().moy_dns_start(_ip_of(ip), port) == 0
 
 
-def dns_port():
-    return _lib().moy_dns_port()
-
-
-def dns_poll():
-    return _lib().moy_dns_poll()
-
-
-def dns_stop():
-    _lib().moy_dns_stop()
-
-
-def wc_park(on):
-    _lib().moy_wc_park(1 if on else 0)
-
-
 def wc_url(paired):
     out = ctypes.create_string_buffer(160)
     n = _lib().moy_wc_url(out, 160, 1 if paired else 0)
     return out.raw[:min(n, 159)].decode("utf-8")
-
-
-def web_stop(why=None):
-    _lib().moy_web_stop(None if why is None else _bytes(why))
 
 
 def web_auth(system):
@@ -556,18 +451,6 @@ def web_keys():
     return rows
 
 
-def web_key_drop(kid):
-    return _lib().moy_web_key_drop(_bytes(kid))
-
-
-def web_signout():
-    """Every session ended and a web terminal cut (the password changed):
-    how many sessions went. The paired browsers stay."""
-    return _lib().moy_web_signout()
-
-
-
-
 def pw_hash(password, salt):
     """The console password's record, `$moy2$ITER$SALT$W0$L`
     (moy_seal_pw_record, moy_seal.h's THE PASSWORD)."""
@@ -583,22 +466,6 @@ def pw_check(password, record):
     """Whether `password` is the one `record` was made from (moy_seal_pw_check)."""
     p, r = _bytes(password), _bytes(record)
     return bool(_lib().moy_seal_pw_check(p, len(p), r, len(r)))
-
-
-def web_poll():
-    return bool(_lib().moy_web_poll())
-
-
-def web_state():
-    """(serving, closing, parked, port, requests, err)"""
-    st = _WebState()
-    _lib().moy_web_state(ctypes.byref(st))
-    return (bool(st.serving), bool(st.closing), bool(st.parked), st.port,
-            st.requests, st.err)
-
-
-def web_events():
-    return _lib().moy_web_events()
 
 
 _SHELF_BYTES = 256
@@ -626,11 +493,6 @@ def web_take():
     got = [ctypes.string_at(p[i].value, n[i].value) if n[i].value else b""
            for i in range(3)]
     return (_text(got[0]), _text(got[1]), got[2])
-
-
-def web_answer(resp):
-    raw = _bytes(resp)
-    _lib().moy_web_answer(raw, len(raw))
 
 
 def _taken(out, n):
@@ -696,11 +558,6 @@ def web_pack(root, kinds, binary=False):
     if rc:
         raise OSError(rc, os.strerror(rc))
     return raw.decode("utf-8")
-
-
-def web_stamp():
-    s = _lib().moy_web_stamp_text()
-    return None if s is None else s.decode("utf-8")
 
 
 # -- the updater and its client (moy_ota.h) -------------------------------------
@@ -824,30 +681,9 @@ def ota_dl_begin(url, size, sha256, sink):
         raise ValueError(_ota_err())
 
 
-def ota_dl_step(max_bytes):
-    return _lib().moy_ota_dl_step(int(max_bytes))
-
-
-def ota_dl_finish():
-    return _lib().moy_ota_dl_finish() == 0
-
-
-def ota_cancel():
-    _lib().moy_ota_cancel()
-
-
 def ota_slot_begin(size):
     if _lib().moy_ota_slot_begin(int(size)) != 0:
         raise ValueError(_ota_err())
-
-
-def ota_slot_write(data):
-    raw = bytes(data)
-    return _lib().moy_ota_slot_write(raw, len(raw)) == 0
-
-
-def ota_slot_close():
-    return _lib().moy_ota_slot_close() == 0
 
 
 def ota_activate():
@@ -857,21 +693,9 @@ def ota_activate():
     return out.value.decode("utf-8")
 
 
-def ota_c6_commit():
-    return _lib().moy_ota_c6_commit() == 0
-
-
 def ota_c6_version():
     v = _lib().moy_c6_version()
     return None if v < 0 else v
-
-
-def ota_state():
-    """(phase, sink, dl_done, dl_total, done, total, error)"""
-    st = _OtaState()
-    _lib().moy_ota_state(ctypes.byref(st))
-    return (st.phase, st.sink, st.dl_done, st.dl_total, st.done, st.total,
-            st.err.decode("utf-8"))
 
 
 def http_open(url, agent):
@@ -894,10 +718,6 @@ def http_readinto(h, buf):
         raise OSError(-k, os.strerror(-k))
     buf[:k] = tmp.raw[:k]
     return k
-
-
-def http_close(h):
-    _lib().moy_httpc_close(int(h))
 
 
 def net_vm_stop():

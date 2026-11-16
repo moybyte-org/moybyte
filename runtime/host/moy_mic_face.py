@@ -7,8 +7,8 @@ import ctypes as _c
 import face_ctypes as _f
 
 __all__ = (
-    "open", "close", "sweep", "owner", "read", "rate", "drops", "pending", "present", "sim",
-    "reset", "RING",
+    "open", "close", "sweep", "owner", "read", "push", "rate", "drops", "pending", "present",
+    "sim", "reset", "RING",
 )
 
 RING = 16384
@@ -20,6 +20,7 @@ _SIGS = (
     ("moy_mic_sweep", [_c.c_uint32], _c.c_uint32),
     ("moy_mic_owner", [], _c.c_uint32),
     ("moy_mic_read", [_c.c_uint32, _c.c_void_p, _c.c_uint32], _c.c_int),
+    ("moy_mic_push", [_c.c_void_p, _c.c_uint32], None),
     ("moy_mic_rate", [], _c.c_uint32),
     ("moy_mic_drops", [], _c.c_uint32),
     ("moy_mic_pending", [], _c.c_uint32),
@@ -52,6 +53,11 @@ def owner():
 def read(owner, buf):
     buf_b = _f.wbuf(buf)
     return _lib().moy_mic_read(int(owner), buf_b, len(buf_b) // 2)
+
+
+def push(buf):
+    buf_b = _f.span(buf)
+    _lib().moy_mic_push(buf_b, len(buf_b) // 2)
 
 
 def rate():
