@@ -559,12 +559,14 @@ class _Parking:
     def __init__(self, port):
         self.port = port
         self.seen = []
+        self.bodies = []
 
     def poll(self):
         nb.web_poll()
         req = nb.web_take()
         if req is not None:
             self.seen.append((req[0], req[1].split("?", 1)[0]))
+            self.bodies.append(req[2])
             nb.web_answer(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
                           b"Connection: close\r\n\r\nok")
 
@@ -589,6 +591,38 @@ def test_the_setup_forms_host_parks_every_request_in_the_clear(tmp_path):
             assert b"200" in h_status(got), got
         assert h.seen == [("GET", "/"), ("GET", "/generate_204"), ("GET", "/carts.json"),
                           ("POST", "/setup")]
+    finally:
+        nb.web_stop()
+
+
+def test_a_parked_body_longer_than_the_kept_head_reaches_the_vm_whole(tmp_path):
+    """A head and a short body are read into the host's kept bytes; a longer
+    body gets a buffer of its own that lives while its request is parked and
+    goes back when the VM answers (moy_webhost.c, HEAD_CAP). The request after
+    it reads into the kept bytes again, and one past MOY_HTTP_REQ_MAX is still
+    cut there."""
+    port = free_port()
+    nb.web_start(port, "/", None, None, None, ["*"])
+    try:
+        h = _Parking(port)
+        body = bytes(range(256)) * 160                      # 40 KB, every byte value
+        for raw in (b"POST /setup HTTP/1.1\r\nContent-Length: %d\r\n\r\n" % len(body) + body,
+                    b"POST /setup HTTP/1.1\r\nContent-Length: 3\r\n\r\na=b"):
+            got = _exchange(h, raw)
+            assert b"200" in h_status(got), got
+        assert h.bodies == [body, b"a=b"]
+        head = b"POST /setup HTTP/1.1\r\nContent-Length: 70000\r\n\r\n"
+        c = socket.create_connection(("127.0.0.1", port), timeout=5)
+        c.sendall(head + b"y" * 70000)
+        # a close with bytes unread is a reset, which may lose the answer: what
+        # the VM was handed is the check
+        for _ in range(400):
+            h.poll()
+            if len(h.bodies) == 3:
+                break
+            time.sleep(0.005)
+        c.close()
+        assert h.bodies[-1] == b"y" * (65536 - len(head))
     finally:
         nb.web_stop()
 

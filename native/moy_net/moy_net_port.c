@@ -254,6 +254,17 @@ int moy_http_recv(int fd, char *buf, size_t cap, moy_http_req_t *r,
     return head == MOY_HTTP_OK ? MOY_HTTP_OK : MOY_HTTP_BAD;
 }
 
+size_t moy_http_recv_more(int fd, char *buf, size_t n, size_t cap) {
+    while (n < cap) {
+        ssize_t k = recv(fd, buf + n, cap - n < 1460u ? cap - n : 1460u, 0);
+        if (k <= 0) {
+            break;                  // the peer closed, timed out or failed
+        }
+        n += (size_t)k;
+    }
+    return n;
+}
+
 int moy_http_send(int fd, const void *p, size_t n) {
     const char *c = p;
     while (n > 0) {
