@@ -2193,8 +2193,9 @@ def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
     ws.bar_layer.redraw_clock = lambda where: (
         clocks.__setitem__(0, clocks[0] + 1), real_clock(where))[1]
     try:
-        # The clock string changes, as at a minute boundary.
-        ws.bar_layer.clock_text = lambda: "12:34"
+        # The clock string changes, as at a minute boundary: to a time no
+        # wall clock reads, so the run's own minute can never equal it.
+        ws.bar_layer.clock_text = lambda: "99:99"
         for _ in range(4):
             ws.mark_dirty()
             drv.frame(1 / 30)
