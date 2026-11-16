@@ -23,7 +23,9 @@ thing the store holds across them, so its rows are what take handles.
                                    against `shelf`, the root's catalogue: the
                                    entries' versions say what to write, and
                                    the shelf comes back with each folder the
-                                   seed wrote read again
+                                   seed wrote read again; the shelf's record
+                                   (installed.json) is held to the shelf
+                                   first (moy_seed.keep_record)
   embedded_floor(seed)             the read-only built-ins, for a board with no
                                    writable store: carts with no path and no "h"
   catalogue(root) -> [entry]       the shelf: one entry per cart folder, in
@@ -140,6 +142,7 @@ def seed(seed, root, shelf, progress=None):
     present = {}
     for e in shelf:
         present[e["path"][len(root) + 1:]] = e["version"]
+    moy_carts.keep_record(root, present)
     wrote = moy_carts.seed_any(seed, root, present, progress)
     if not wrote:
         return shelf

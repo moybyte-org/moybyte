@@ -1,9 +1,11 @@
 # Map (grep -n a name to jump there):
 #   members          what an archive holds, as paths under the store's folder
 #   archive          one call writes one archive
-#   needs, room      the space a restore's stage takes, and the store's free space
-#   restore          one call restores it
-"""The store's backup (#127): a kid's work in one archive, and back.
+"""The format door's export: the store as one archive, written before a
+format step (moy_seed.step_store, CLAUDE.md "A store format change goes
+through ONE door"). A backup of a console is a copy of its whole folder, made
+off the device (#127, tools/console_backup.py); this archive guards a step,
+not a lost card.
 
 An archive is a plain zip of the store's layout, written by the store's own
 packer (native/moy_store/moy_pack.h's `moy_pack_paths`, a member of any size
@@ -23,19 +25,8 @@ streamed through one chunk), all under one top folder:
 
 Thumbnails are left out (the wire's rule, moy_store_skip); they are made
 again. The archive lands in the user files' `Backups/`, where the USB drive
-and SFTP reach it. A restore unpacks into a stage beside the store, takes an
-archive of an older format through the store's door (moy_seed.step_store),
-then moves each member into place, a cart or an app folder replacing the
-store's. The stage sits on the store's own volume beside the archive, so a
-restore first sets what its members take unpacked (`needs`, read from the
-archive's directory) against the volume's free space (`room`) and refuses
-one that does not fit before it writes a file. The seed's rules hold after
-it: a restored built-in keeps its
-manifest's version, so a seed at the same version leaves it as restored and a
-newer one replaces its code and keeps its saves.
-
-`tools/console_backup.py` pulls and pushes an archive from a host; the dev
-channel's `backup` and `restore` words are these two calls.
+and SFTP reach it. Putting it back is unzipping its top folder over the
+store's folder and booting: the door steps its older format again.
 MicroPython-safe.
 """
 
@@ -46,9 +37,9 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-from moy_store_base import (APPS_DIR, CART_EXT, CARTS_DIR, FILES_DIR, _listing, _rmtree,
+from moy_store_base import (APPS_DIR, CART_EXT, CARTS_DIR, FILES_DIR, _listing,
                             _sibling_path, builtin_ns, cart_path)
-from moy_fs import _exists, _mkdir, _read, _remove, _write
+from moy_fs import _mkdir, _remove, _write
 from moy_fs import _native as _store
 import moy_seed
 
@@ -60,8 +51,6 @@ NAME = "moybyte-backup.zip"
 RECORD = "installed.json"
 _JOURNAL = "journal"
 _SAVES = "pmem.json"
-ENOSPC = 28
-_SLACK = 8           # blocks over the members': the format step's writes, the file system's own
 
 
 def _firmware():
@@ -123,148 +112,3 @@ def archive(root=CARTS_DIR, dest=None, name=NAME):
     _remove(dest)
     os.rename(part, dest)
     return dest, n
-
-
-def _manifest(stage):
-    """The archive's manifest from its stage; ValueError for one that is not
-    a backup, or is a newer store's."""
-    try:
-        man = json.loads(_read(stage + "/" + MANIFEST))
-    except OSError:
-        raise ValueError("not a backup: no manifest")
-    if type(man) is not dict or man.get("format") != FORMAT:
-        raise ValueError("not a backup")
-    fmt, carts = man.get("store"), man.get("carts")
-    if type(fmt) is not int or fmt < 1 or type(carts) is not str or not carts \
-            or "/" in carts:
-        raise ValueError("not a backup")
-    if fmt > moy_seed.STORE_FORMAT:
-        raise ValueError("a newer console's backup")
-    return man
-
-
-def _u16(b, i):
-    return b[i] | b[i + 1] << 8
-
-
-def _u32(b, i):
-    return _u16(b, i) | _u16(b, i + 2) << 16
-
-
-def _entries(path):
-    """(name, unpacked size) of each member, from the archive's central
-    directory; ValueError for a file that is not a zip."""
-    with open(path, "rb") as f:
-        f.seek(0, 2)
-        size = f.tell()
-        tail = min(size, 22 + 0xFFFF)
-        f.seek(size - tail)
-        t = f.read(tail)
-        at = t.rfind(b"PK\x05\x06")
-        if at < 0 or at + 22 > len(t):
-            raise ValueError("not a backup: not an archive")
-        count, cd = _u16(t, at + 10), _u32(t, at + 16)
-        t = None
-        f.seek(cd)
-        out = []
-        for _ in range(count):
-            h = f.read(46)
-            if len(h) < 46 or _u32(h, 0) != 0x02014B50:
-                raise ValueError("not a backup: a broken archive")
-            n, extra, note = _u16(h, 28), _u16(h, 30), _u16(h, 32)
-            out.append((f.read(n).decode(), _u32(h, 24)))
-            f.seek(extra + note, 1)
-    return out
-
-
-def needs(path, block):
-    """The bytes the archive at `path` takes unpacked on a volume of
-    `block`-byte blocks: each file's blocks, one at least, two for each
-    folder (a littlefs folder is a block pair) and a few over for the format
-    step's writes. ValueError for a file that is not a zip."""
-    blocks, dirs = 0, set()
-    for name, size in _entries(path):
-        parts = name.rstrip("/").split("/")
-        for i in range(1, len(parts)):
-            dirs.add("/".join(parts[:i]))
-        if name.endswith("/"):
-            dirs.add(name.rstrip("/"))
-        else:
-            blocks += max(1, (size + block - 1) // block)
-    return (blocks + 2 * len(dirs) + _SLACK) * block
-
-
-def room(root=CARTS_DIR):
-    """(free bytes, block size) of the volume the store at `root` is on, or
-    None where the file system does not say."""
-    try:
-        st = os.statvfs(root.rstrip("/").rsplit("/", 1)[0] or "/")
-    except (OSError, AttributeError):
-        return None
-    block = st[1] or st[0]
-    return (block * st[4], block) if block else None
-
-
-def _merge(src, dst):
-    """Every file under `src` moved to the same place under `dst`, replacing
-    what is there; folders made as needed."""
-    _mkdir(dst)
-    for name, is_dir in (_listing(src) or {}).items():
-        s, d = src + "/" + name, dst + "/" + name
-        if is_dir:
-            _merge(s, d)
-        else:
-            _remove(d)
-            os.rename(s, d)
-
-
-def _place(src, dst):
-    """The folder `src` in place of `dst`, whatever was there gone."""
-    if _exists(dst):
-        _store.adopt(src, dst)
-    else:
-        os.rename(src, dst)
-
-
-def restore(path, root=CARTS_DIR):
-    """The archive at `path` restored into the store at `root`. Returns the
-    files it held. ValueError for an archive that is not a backup or is a
-    newer console's, and OSError ENOSPC for one whose stage would not fit
-    the volume's free space (`needs`, `room`): the store is untouched then.
-    An OSError while the members move into place leaves those moved before
-    it."""
-    base = root.rstrip("/").rsplit("/", 1)[0]
-    _mkdir(base)
-    _mkdir(root)
-    _mkdir(_sibling_path(root, "install"))
-    stage = _sibling_path(root, "install") + "/restore"
-    _rmtree(stage)
-    free = room(root)
-    if free is not None:
-        want = needs(path, free[1])
-        if want > free[0]:
-            raise OSError(ENOSPC, "the restore needs %d KB free and the store has %d KB"
-                          % (want // 1024, free[0] // 1024))
-    try:
-        n, _top = _store.unpack(path, stage, True)
-        man = _manifest(stage)
-        sroot = stage + "/" + man["carts"]
-        ver = moy_seed.load_store_version(sroot) or (man["store"], 0)
-        if ver[0] < moy_seed.STORE_FORMAT:
-            moy_seed.step_store(sroot, ver, None)
-        for name, is_dir in (_listing(sroot) or {}).items():
-            if is_dir and name.endswith(CART_EXT):
-                _place(sroot + "/" + name, cart_path(root, name))
-        sapps = stage + "/" + APPS_DIR
-        _mkdir(_sibling_path(root, APPS_DIR))
-        for name, is_dir in (_listing(sapps) or {}).items():
-            if is_dir:
-                _place(sapps + "/" + name, _sibling_path(root, APPS_DIR) + "/" + name)
-        if _exists(stage + "/" + FILES_DIR):
-            _merge(stage + "/" + FILES_DIR, _sibling_path(root, FILES_DIR))
-        for name in (RECORD, moy_seed.STORE_VER_NAME):  # the store's own, if it has one
-            if _exists(stage + "/" + name) and not _exists(_sibling_path(root, name)):
-                os.rename(stage + "/" + name, _sibling_path(root, name))
-    finally:
-        _rmtree(stage)
-    return n

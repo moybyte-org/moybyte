@@ -1089,6 +1089,7 @@ from moy_seed import (
     _SEED_WBITS, unpack_seed, seed_packed, is_packed,
     RETIRED, RETIRED_GEN, STORE_FORMAT, FORMAT_STEPS, store_version_path,
     load_store_version, load_retired_version, prune_retired, step_store, sweep_store,
+    BOARD_STAMP_NAME, board_id, stamp_board, forget_device, keep_record,
     seed_any,
     embedded_floor)
 

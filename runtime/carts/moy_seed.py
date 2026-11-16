@@ -6,6 +6,8 @@
 #   seed_packed             the packed roster, one cart inflated at a time
 #   prune_retired           the folders of seeds that no longer ship, once per store
 #   sweep_store             the store's format stamp (STORE_FORMAT) and its one door
+#   stamp_board             the board stamp, and the rows a foreign one drops
+#   keep_record             installed.json held to the cart folders
 #   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
@@ -19,7 +21,7 @@ the core, so `moy_carts` re-exports these names rather than the reverse.
 import json
 
 from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
-                    _remove, _write, _write_bytes)
+                    _remove, _write, _write_atomic, _write_bytes)
 from moy_store_base import (CARTS_DIR, _has, _listing, _rmtree, _sibling_path, cart_path,
                             cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
 from moy_fs import _native as _store
@@ -457,10 +459,16 @@ RETIRED_GEN = 8
 # that cannot be written runs no step: the store stays in its format, readable
 # by nothing that changed, and the next boot tries again. A store AHEAD of this
 # firmware (a newer image's, then a downgrade) is not touched. No step exists:
-# none is written until a format changes (CLAUDE.md, "No store migrations
-# until there are users", of which this door is the one exception).
+# none is written until a format changes (CLAUDE.md, "A store format change
+# goes through ONE door").
+#
+# A BACKUP is a copy of the whole folder the carts folder sits in, `system/`
+# and its settings included, and a restore is that folder put back and a boot
+# (#127, tools/console_backup.py). A folder older than this firmware comes
+# through the door above like any store.
 STORE_FORMAT = 1
 STORE_VER_NAME = "store.ver"
+RECORD_NAME = "installed.json"
 FORMAT_STEPS = {}
 _VER_HEAD = "moystore "
 
@@ -547,7 +555,7 @@ def step_store(root, ver, export=_export):
     return (fmt, gen)
 
 
-def sweep_store(root=CARTS_DIR, seed=None, export=_export):
+def sweep_store(root=CARTS_DIR, seed=None, export=_export, board=None):
     """The one-shot pass a store OPENING runs, behind one door. Returns the
     number of retired folders removed. `seed` is the roster the store is
     seeded from, whose titles' bare folders generation 5 takes.
@@ -555,7 +563,9 @@ def sweep_store(root=CARTS_DIR, seed=None, export=_export):
     The door is gated on the store's stamp, so the warm path is one small
     read: a store behind STORE_FORMAT is stepped (the format door above, its
     export first), one ahead of it is left alone, and a store behind
-    RETIRED_GEN is swept (`prune_retired`)."""
+    RETIRED_GEN is swept (`prune_retired`). A store in this firmware's format
+    then has its board stamp checked (`stamp_board`) against `board`, None
+    for this board's own id (`board_id`)."""
     ver = load_store_version(root)
     if ver is not None and ver[0] > STORE_FORMAT:
         return 0
@@ -568,8 +578,120 @@ def sweep_store(root=CARTS_DIR, seed=None, export=_export):
     titles = list(RETIRED)
     if seed:
         titles += [item[0] if is_packed(seed) else item["title"] for item in seed]
-    return prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS,
+    gone = prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS,
                          ver=ver)
+    stamp_board(root, board_id() if board is None else board)
+    return gone
+
+
+# THE BOARD STAMP. `system/board`, beside the settings, names the board the
+# store last opened on: one line "moyboard <id>\n", the id the hex of the
+# chip's unique id (machine.unique_id(), its factory MAC). A backup copies the
+# whole folder (above), so a folder can open on another board, and a few of
+# the things it carries belong to the board that wrote them:
+#
+#   system/webkeys        the paired browsers and the web console's board id
+#                         (moy_webauth.c): a browser pairs again by the QR
+#   system/ssh_host_key   Dropbear's host key (moy_ssh.c makes one at the
+#                         next setup)
+#   app_guard, wallpaper_guard   the crash guard's strike ledgers in
+#                         system/settings (runtime/shell/crash_guard.py): what
+#                         failed on one board is no strike on another
+#
+# A store that opens with another board's stamp loses those, then takes this
+# board's stamp; on its own board the check is one small read. A store with no
+# stamp (a new one, or one from before the stamp) is taken as this board's and
+# loses nothing. Bluetooth bonds, the kernel's crash record and touch
+# calibration are not in the folder: the bonds and the record live in the
+# board's NVS, and a panel's touch mapping is its board's code. A tier with no
+# unique id (the CPython host, the browser) keeps no stamp.
+BOARD_STAMP_NAME = "system/board"
+DEVICE_FILES = ("system/webkeys", "system/ssh_host_key")
+DEVICE_ROWS = ("app_guard", "wallpaper_guard")
+_BOARD_HEAD = "moyboard "
+
+
+def board_id():
+    """This board's id, the hex of machine.unique_id(), or None on a tier
+    that has none."""
+    try:
+        import machine
+        from binascii import hexlify
+        return hexlify(machine.unique_id()).decode()
+    except (ImportError, AttributeError):
+        return None
+
+
+def board_stamp_path(root=CARTS_DIR):
+    return _sibling_path(root, BOARD_STAMP_NAME)
+
+
+def forget_device(root=CARTS_DIR):
+    """Drop what the store holds that belongs to the board that wrote it:
+    DEVICE_FILES (each with its crash-safe backup) and DEVICE_ROWS."""
+    for name in DEVICE_FILES:
+        path = _sibling_path(root, name)
+        _remove(path)
+        _remove(path + ".bak")
+    import moy_docs
+    rows = moy_docs.load_system(root)
+    if any(k in rows for k in DEVICE_ROWS):
+        for k in DEVICE_ROWS:
+            rows.pop(k, None)
+        moy_docs.save_system(rows, root)
+
+
+def stamp_board(root, me):
+    """The board stamp checked against `me`, this board's id (None: no
+    stamp). Another board's stamp drops the device's rows (`forget_device`);
+    a store with none, or another's, then takes this one. Returns whether
+    rows were dropped. The warm path, this board's own stamp, is one small
+    read."""
+    if not me:
+        return False
+    want = _BOARD_HEAD + me + "\n"
+    try:
+        line = _read(board_stamp_path(root))
+    except (OSError, ValueError):
+        line = None
+    if line == want:
+        return False
+    if line is not None:
+        forget_device(root)
+    try:
+        _mkdir(_sibling_path(root, "system"))
+        _write(board_stamp_path(root), want)
+    except OSError:
+        pass                 # a read-only store: checked again next boot
+    return line is not None
+
+
+def keep_record(root, folders):
+    """The shelf's record (installed.json, native/moy_store/moy_shelf.h) held
+    to the cart folders: an entry whose folder is not among `folders` (the
+    boot's scan, so this lists nothing) is dropped and the record written
+    again. Returns the entries dropped. A record that names only folders
+    there is read and left; while `install/` holds a stage, the record is
+    left to cart_index.recover_steps, whose old copy may come back."""
+    text = _store.shelf_record(root)
+    if text is None:
+        return 0
+    try:
+        rec = json.loads(text)
+    except ValueError:
+        return 0
+    carts = rec.get("carts") if type(rec) is dict else None
+    if type(carts) is not dict:
+        return 0
+    have = set(f.lower() for f in folders)
+    gone = [f for f in carts if f.lower() not in have]
+    if not gone or _listing(_sibling_path(root, "install")):
+        return 0
+    for f in gone:
+        del carts[f]
+    _write_atomic(_sibling_path(root, RECORD_NAME),
+                  json.dumps({"version": 1, "carts": carts}))
+    return len(gone)
 
 
 def seed_any(seed, root, present, progress=None):

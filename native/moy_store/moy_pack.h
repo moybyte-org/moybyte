@@ -38,7 +38,8 @@ int moy_pack_paths(const char *base, const char *const *rels, size_t n, const ch
 // of files, or a negative errno value (EINVAL: no archive). `top` gets the
 // folder its entries sat under ("" for none), cut at `cap`.
 int moy_unpack(const char *archive, const char *dest, char *top, size_t cap);
-// moy_unpack, the journal let through with `history` (a backup's restore).
+// moy_unpack, the journal let through with `history` (the format door's export
+// is packed with it).
 int moy_unpack_all(const char *archive, const char *dest, char *top, size_t cap,
                    int history);
 
