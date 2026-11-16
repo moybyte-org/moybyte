@@ -180,19 +180,94 @@ moybyte_clone_micropython() {
   bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}"
 }
 
-# Resolve + activate ESP-IDF v5.5.1 for $1 (the idf.py target, e.g. esp32s3).
-# Reuse an existing checkout when one is passed as $2..$n (they are ~500MB and
-# the same version): an explicit IDF_DIR wins, then the candidates in order,
-# then a clone into ${BUILD_DIR}/esp-idf.
-#
-# The toolchains + IDF python env live in ~/.espressif, OUTSIDE the esp-idf
-# tree: a runner can have the tree (restored .build cache) but not the tools
-# (evicted ~/.espressif cache). export.sh can NOT be trusted to report that --
-# v5.5.1 ends in an unconditional `return 0` (only its inner activate.py
-# fails) -- so probe the real outcome (idf.py on PATH) and self-heal with the
-# official installer.
-moybyte_setup_idf() {
-  local chip="$1"; shift
+# The ESP-IDF release every board builds against: the one place it is named.
+MOYBYTE_IDF_VER="v5.5.6"
+
+# The release an ESP-IDF checkout at $1 is, as `vX.Y.Z`, read from its
+# tools/cmake/version.cmake (a `--depth 1` clone holds no tag to describe).
+# Prints nothing when $1 is not a checkout.
+moybyte_idf_version() {
+  local f="$1/tools/cmake/version.cmake"
+  [ -f "${f}" ] || return 0
+  awk -F'[( )]' '/^set\(IDF_VERSION_(MAJOR|MINOR|PATCH) /{v[$2]=$3}
+    END{print "v" v["IDF_VERSION_MAJOR"] "." v["IDF_VERSION_MINOR"] "." v["IDF_VERSION_PATCH"]}' "${f}"
+}
+
+# MicroPython v1.28's ports/esp32/network_wlan.c pins the size of ESP-IDF's
+# wifi_auth_mode_t with a static assertion that predates ESP-IDF v5.5.6, which
+# appended WIFI_AUTH_UNKNOWN (WIFI_AUTH_MAX 17 -> 18). The constants table the
+# assertion guards ends before it, so on v5.5.6 the assertion takes 18, and 17
+# too: a P4 compiles the enum from esp_wifi_remote's own v5.5 copy. Run by
+# moybyte_setup_idf for every board. A no-op on a tree already edited, and a
+# FAILURE when the line changed shape. Reads MPY_DIR.
+moybyte_mpy_wlan_auth_max() {
+  local f="${MPY_DIR}/ports/esp32/network_wlan.c"
+  [ -f "${f}" ] || return 0
+  grep -q "Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN" "${f}" && return 0
+  local old='#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)'
+  if [ "$(grep -cF -- "${old}" "${f}")" != "2" ] \
+     || ! grep -q '^_Static_assert(WIFI_AUTH_MAX == 17, ' "${f}"; then
+    echo "!! network_wlan.c's WIFI_AUTH_MAX assertion changed shape" >&2
+    exit 1
+  fi
+  awk -v old="${old}" '
+    !done && $0 == old { getline nxt
+      if (nxt ~ /^_Static_assert\(WIFI_AUTH_MAX == 17, /) {
+        print "// Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN (tools/esp32_build_lib.sh)."
+        print "#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 6)"
+        print "_Static_assert(WIFI_AUTH_MAX == 17 || WIFI_AUTH_MAX == 18, \"Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h\");"
+        print "#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)"
+        print nxt; done = 1; next }
+      print; print nxt; next }
+    { print }' "${f}" > "${f}.moy" && mv "${f}.moy" "${f}"
+  grep -q "Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN" "${f}" || {
+    echo "!! network_wlan.c's WIFI_AUTH_MAX assertion did not take the edit" >&2
+    exit 1
+  }
+  echo "== patched ports/esp32/network_wlan.c: WIFI_AUTH_MAX of ESP-IDF v5.5.6"
+}
+
+# MicroPython v1.28's USB-Serial/JTAG console (ports/esp32/usb_serial_jtag.c)
+# enables the start-of-frame interrupt and clears it in an ISR that does
+# nothing else with it, once a millisecond. ESP-IDF v5.5.6's console VFS
+# writes and reads only while its connection monitor saw that raw bit in the
+# last tick, so with the ISR clearing it first every C printf on the console
+# was dropped (the kernel's "interrupted -> REPL", a stop's error line, every
+# ESP_LOG). The edit leaves the SOF interrupt off; nothing in the port reads
+# it. Run by moybyte_setup_idf for every board. A no-op on a tree already
+# edited, and a FAILURE when the line changed shape. Reads MPY_DIR.
+moybyte_mpy_usj_sof() {
+  local f="${MPY_DIR}/ports/esp32/usb_serial_jtag.c"
+  [ -f "${f}" ] || return 0
+  grep -q "Moybyte: no SOF interrupt" "${f}" && return 0
+  local old='        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);'
+  if [ "$(grep -cxF -- "${old}" "${f}")" != "1" ]; then
+    echo "!! usb_serial_jtag.c's interrupt enable changed shape" >&2
+    exit 1
+  fi
+  awk -v old="${old}" '
+    $0 == old {
+      print "        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);"
+      print "    // Moybyte: no SOF interrupt: ESP-IDF v5.5.6'"'"'s console VFS reads its raw bit"
+      print "    // (tools/esp32_build_lib.sh, moybyte_mpy_usj_sof)."
+      next }
+    { print }' "${f}" > "${f}.moy" && mv "${f}.moy" "${f}"
+  grep -q "Moybyte: no SOF interrupt" "${f}" || {
+    echo "!! usb_serial_jtag.c's interrupt enable did not take the edit" >&2
+    exit 1
+  }
+  echo "== patched ports/esp32/usb_serial_jtag.c: the SOF interrupt stays off"
+}
+
+# Pick the ESP-IDF checkout for this build into IDF_DIR: an explicit IDF_DIR
+# wins, then the first of the candidates $1..$n that exists (they are ~600MB
+# and one release, so a board reuses its sibling's), then a clone of
+# MOYBYTE_IDF_VER into ${BUILD_DIR}/esp-idf. Whichever it picks must BE
+# MOYBYTE_IDF_VER, or the build stops and names it: a warm checkout at another
+# release would otherwise compile, with the patches below cut against the
+# wrong sources, and nothing would say so. The fix is to move that checkout
+# aside; the owning board's next build clones the pinned release.
+moybyte_resolve_idf() {
   if [ -z "${IDF_DIR:-}" ]; then
     local cand
     for cand in "$@"; do
@@ -202,21 +277,57 @@ moybyte_setup_idf() {
   if [ -z "${IDF_DIR:-}" ]; then
     IDF_DIR="${BUILD_DIR}/esp-idf"
     if [ ! -f "${IDF_DIR}/export.sh" ]; then
-      echo "== cloning esp-idf v5.5.1"
-      git clone --depth 1 -b v5.5.1 --recursive --shallow-submodules \
-        https://github.com/espressif/esp-idf "${IDF_DIR}"
+      echo "== cloning esp-idf ${MOYBYTE_IDF_VER}"
+      git clone --depth 1 -b "${MOYBYTE_IDF_VER}" --recursive --shallow-submodules \
+        https://github.com/espressif/esp-idf "${IDF_DIR}" || return 1
     fi
   fi
-  echo "== using ESP-IDF at ${IDF_DIR}"
+  local have
+  have="$(moybyte_idf_version "${IDF_DIR}")"
+  if [ "${have}" != "${MOYBYTE_IDF_VER}" ]; then
+    echo "!! ${IDF_DIR} is ESP-IDF ${have:-of no known release}; this build needs ${MOYBYTE_IDF_VER}." >&2
+    echo "!! Move it aside: the board that owns it clones ${MOYBYTE_IDF_VER} on its next build." >&2
+    return 1
+  fi
+}
+
+# Resolve (moybyte_resolve_idf, over the candidates $2..$n) and activate
+# ESP-IDF for $1 (the idf.py target, e.g. esp32s3).
+#
+# The toolchains + IDF python env live in ~/.espressif, OUTSIDE the esp-idf
+# tree: a runner can have the tree (restored .build cache) but not the tools
+# (evicted ~/.espressif cache), and a machine can hold another release's
+# compiler for this chip, or this release's for another chip only (the P4's
+# build installs the RISC-V one; an S3 build after it needs Xtensa). export.sh
+# can NOT be trusted to report either -- it ends in an unconditional
+# `return 0` (only its inner activate.py fails) and puts idf.py on PATH while
+# the chip's compiler is missing -- so probe the real outcome (idf.py AND the
+# chip's compiler on PATH) and self-heal with the official installer.
+moybyte_idf_compiler() {
+  case "$1" in
+    esp32|esp32s2|esp32s3) echo "xtensa-$1-elf-gcc" ;;
+    *) echo "riscv32-esp-elf-gcc" ;;
+  esac
+}
+
+moybyte_setup_idf() {
+  local chip="$1"; shift
+  moybyte_resolve_idf "$@" || exit 1
+  echo "== using ESP-IDF ${MOYBYTE_IDF_VER} at ${IDF_DIR}"
+  moybyte_mpy_wlan_auth_max
+  moybyte_mpy_usj_sof
+  local cc
+  cc="$(moybyte_idf_compiler "${chip}")"
   set +u
   # shellcheck disable=SC1091
   source "${IDF_DIR}/export.sh" >/dev/null 2>&1 || true
-  if ! command -v idf.py >/dev/null 2>&1; then
-    echo "== ESP-IDF tools missing (fresh runner / evicted cache): running install.sh ${chip}"
+  if ! command -v idf.py >/dev/null 2>&1 || ! command -v "${cc}" >/dev/null 2>&1; then
+    echo "== ESP-IDF tools for ${chip} missing (fresh runner / evicted cache / new release): running install.sh ${chip}"
     "${IDF_DIR}/install.sh" "${chip}"
     # shellcheck disable=SC1091
     source "${IDF_DIR}/export.sh" >/dev/null
     command -v idf.py >/dev/null 2>&1 || { echo "!! idf.py still missing after install.sh" >&2; exit 1; }
+    command -v "${cc}" >/dev/null 2>&1 || { echo "!! ${cc} still missing after install.sh" >&2; exit 1; }
   fi
   set -u
   moybyte_ccache
@@ -506,13 +617,15 @@ moybyte_patch_gc_split_reserve() {
 # by every P4 board since 2026-09-06 (it was the Waveshare's own `patches/`
 # until the Guition P4 became its second consumer):
 #
-#   dsi_underrun      #106: backport current ESP-IDF's dedicated DSI
-#                     bridge-underrun ISR and keep the frame-restart DW-GDMA
-#                     interrupt above ESP-Hosted's SDIO interrupt. IDF v5.5
-#                     checks the bridge only from the DMA callback; if SDIO
-#                     delays that callback the panel has already gone blue.
-#                     Patches the (possibly shared) ESP-IDF checkout, so the
-#                     marker is what makes two P4 builds over one IDF safe.
+#   dsi_underrun      #106: raise ESP-IDF's DSI bridge-underrun ISR to level
+#                     3, keep the frame-restart DW-GDMA interrupt at level 3,
+#                     both above ESP-Hosted's level-1 SDIO interrupt (a BLE
+#                     burst there otherwise delays the restart past the
+#                     panel's blanking window), and call the board's weak
+#                     moy_dsi_note_underrun hook from the ISR so native/p4
+#                     counts each underrun. Patches the (possibly shared)
+#                     ESP-IDF checkout, so the marker is what makes two P4
+#                     builds over one IDF safe.
 moybyte_patch_p4_dsi_underrun() {
   local f="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
   if [ -f "${f}" ] && \
@@ -524,8 +637,9 @@ moybyte_patch_p4_dsi_underrun() {
 
 # The ESP32-P4 SRM macro-block-order patch (both P4 boards, marker-guarded
 # like the DSI one because the IDF checkout is shared): ESP-IDF's DIG-734
-# workaround, backported from release/v5.5 (1b13ef0498) and extended to
-# 90/270 rotations. The SRM's macro-block reorder deadlocks against the 2D-DMA
+# workaround, which measures an operation's last transfer unit on the input
+# block only, extended to measure a 90/270 rotation's turned block as well.
+# The SRM's macro-block reorder deadlocks against the 2D-DMA
 # RX FIFO when an operation's last transfer unit is smaller than the FIFO:
 # the TX channel delivers the whole input, the RX FIFO fills and never drains,
 # no EOF comes, and every later PPA transaction queues behind it -- the
@@ -537,6 +651,23 @@ moybyte_patch_p4_ppa_srm_mb_order() {
   if [ -f "${f}" ] && ! grep -q "Moybyte P4: the SRM engine's macro-block reorder" "${f}"; then
     echo "== applying P4 PPA SRM macro-block-order bypass (DIG-734)"
     patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_ppa_srm_mb_order_bypass.patch"
+  fi
+}
+
+# The ESP32-P4 core-dump DRAM patch (both P4 boards, marker-guarded like the
+# two above): ESP-IDF's linker template for a rev < v3 P4 maps dram0_data a
+# second time into the high SRAM's .dram1.data. That mapping places nothing
+# (the first one already took every section it names) but defines the
+# SURROUND symbols again, so _coredump_dram_start/_end end up equal and a core
+# dump carries none of the COREDUMP_DRAM_ATTR data: neither ESP-IDF's nor the
+# kernel's module table (native/moy_elf/moy_elf_maps.c), which
+# `tools/coredump.py check-elf` refuses at the end of every build. The patch
+# drops the second mapping.
+moybyte_patch_p4_coredump_dram() {
+  local f="${IDF_DIR}/components/esp_system/ld/ld.dram.sections"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: dram0_data is mapped once" "${f}"; then
+    echo "== applying P4 core-dump DRAM linker patch (one dram0_data mapping)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_coredump_dram_mapped_once.patch"
   fi
 }
 

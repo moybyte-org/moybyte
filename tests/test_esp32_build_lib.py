@@ -610,7 +610,7 @@ def test_the_stdin_ring_patch_sizes_the_array_the_ring_is_built_over(tmp_path):
     r = _stdin_ring(tmp_path)
     assert r.returncode == 0, r.stderr
     c = f.read_text(encoding="utf-8")
-    assert "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
+    assert "static uint8_t SPM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
     assert "#include \"esp_attr.h\"" in c
     assert "[260]" not in c
     assert "{stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0}" in c
@@ -973,6 +973,168 @@ def test_the_native_code_free_patch_skips_an_already_patched_tree(tmp_path):
            MPY_DIR=str(tmp_path), REPO_ROOT=str(ROOT))
     assert r.returncode == 0 and r.stdout.strip() == ""
     assert "moybyte_native_code_free" in f.read_text(encoding="utf-8")
+
+
+# -- the ESP-IDF checkout -------------------------------------------------------
+
+
+def _idf(path, version):
+    """An ESP-IDF checkout in the two shapes the resolver reads."""
+    major, minor, patch = version.lstrip("v").split(".")
+    (path / "tools" / "cmake").mkdir(parents=True)
+    (path / "export.sh").write_text("return 0\n", encoding="utf-8")
+    (path / "tools" / "cmake" / "version.cmake").write_text(
+        "set(IDF_VERSION_MAJOR %s)\nset(IDF_VERSION_MINOR %s)\n"
+        "set(IDF_VERSION_PATCH %s)\n\n"
+        'set(ENV{IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")\n'
+        % (major, minor, patch), encoding="utf-8")
+    return path
+
+
+def _pinned():
+    r = sh('echo "$MOYBYTE_IDF_VER"')
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_the_idf_version_is_read_from_the_checkout_not_its_tags(tmp_path):
+    idf = _idf(tmp_path / "esp-idf", "v5.5.6")
+    r = sh("moybyte_idf_version '%s'" % idf)
+    assert r.returncode == 0 and r.stdout.strip() == "v5.5.6"
+
+
+def test_a_sibling_checkout_at_the_pinned_release_is_reused(tmp_path):
+    sib = _idf(tmp_path / "sibling" / "esp-idf", _pinned())
+    r = sh("moybyte_resolve_idf '%s' && echo \"IDF=$IDF_DIR\"" % sib,
+           BUILD_DIR=str(tmp_path / "own"))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().endswith("IDF=%s" % sib)
+    assert not (tmp_path / "own").exists()
+
+
+def test_a_checkout_at_another_release_STOPS_the_build(tmp_path):
+    """A warm tree at the old release would compile, with the IDF patches cut
+    against other sources, and the image would say nothing about it."""
+    sib = _idf(tmp_path / "sibling" / "esp-idf", "v5.5.1")
+    r = sh("moybyte_resolve_idf '%s'" % sib, BUILD_DIR=str(tmp_path / "own"))
+    assert r.returncode != 0
+    assert "is ESP-IDF v5.5.1" in r.stderr and _pinned() in r.stderr
+    assert not (tmp_path / "own").exists()
+
+
+def test_an_explicit_IDF_DIR_is_held_to_the_pin_too(tmp_path):
+    old = _idf(tmp_path / "mine", "v5.4.2")
+    r = sh("moybyte_resolve_idf", IDF_DIR=str(old), BUILD_DIR=str(tmp_path))
+    assert r.returncode != 0 and "is ESP-IDF v5.4.2" in r.stderr
+
+
+@pytest.mark.parametrize("chip,cc", [("esp32s3", "xtensa-esp32s3-elf-gcc"),
+                                     ("esp32p4", "riscv32-esp-elf-gcc"),
+                                     ("esp32c6", "riscv32-esp-elf-gcc")])
+def test_the_tools_probe_asks_for_the_chips_own_compiler(chip, cc):
+    """idf.py on PATH says nothing about the chip: the P4's build installs
+    the RISC-V compiler only, and an S3 build after it must still install
+    Xtensa rather than configure against a compiler that is not there."""
+    r = sh("moybyte_idf_compiler %s" % chip)
+    assert r.returncode == 0 and r.stdout.strip() == cc
+
+
+_WLAN = """\
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+    { MP_ROM_QSTR(MP_QSTR_SEC_WPA_ENT), MP_ROM_INT(WIFI_AUTH_WPA_ENTERPRISE) },
+    #endif
+};
+static MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+_Static_assert(WIFI_AUTH_MAX == 17, "Synchronize");
+#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+_Static_assert(WIFI_AUTH_MAX == 16, "Synchronize");
+#endif
+"""
+
+
+def _wlan(tmp_path, text=_WLAN):
+    f = tmp_path / "ports" / "esp32" / "network_wlan.c"
+    f.parent.mkdir(parents=True)
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_the_wlan_auth_max_edit_takes_v5_5_6s_appended_mode(tmp_path):
+    f = _wlan(tmp_path)
+    for _ in range(2):
+        r = sh("moybyte_mpy_wlan_auth_max", MPY_DIR=str(tmp_path))
+        assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert c.count("VERSION_VAL(5, 5, 6)") == 1
+    assert "WIFI_AUTH_MAX == 17 || WIFI_AUTH_MAX == 18" in c
+    assert "#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)\n" \
+           "_Static_assert(WIFI_AUTH_MAX == 17, " in c
+    assert c.startswith("    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)\n")
+
+
+def test_a_wlan_auth_max_line_that_changed_shape_FAILS(tmp_path):
+    f = _wlan(tmp_path, _WLAN.replace("== 17", "== 19"))
+    r = sh("moybyte_mpy_wlan_auth_max", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0 and "changed shape" in r.stderr
+    assert "Moybyte" not in f.read_text(encoding="utf-8")
+
+
+_USJ = """\
+void usb_serial_jtag_init(void) {
+    usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF);
+    usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE, ESP_INTR_FLAG_LEVEL1,
+        usb_serial_jtag_isr_handler, NULL, NULL));
+}
+"""
+
+
+def _usj_sof(tmp_path, text=_USJ):
+    f = tmp_path / "ports" / "esp32" / "usb_serial_jtag.c"
+    f.parent.mkdir(parents=True)
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_the_usj_console_leaves_the_sof_bit_to_esp_idfs_monitor(tmp_path):
+    """ESP-IDF v5.5.6's console VFS drops every write while its connection
+    monitor has not seen the raw SOF bit in a tick; an ISR enabled for SOF
+    clears it each millisecond, so the edit keeps SOF out of the enable mask
+    (the stale-bit clear before it stays)."""
+    f = _usj_sof(tmp_path)
+    for _ in range(2):
+        r = sh("moybyte_mpy_usj_sof", MPY_DIR=str(tmp_path))
+        assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    enable = c.split("usb_serial_jtag_ll_ena_intr_mask(", 1)[1].split(";", 1)[0]
+    assert "SOF" not in enable and "SERIAL_IN_EMPTY" in enable
+    assert c.count("Moybyte: no SOF interrupt") == 1
+
+
+def test_a_usj_enable_that_changed_shape_FAILS(tmp_path):
+    f = _usj_sof(tmp_path, _USJ.replace("INTR_SOF | USB", "INTR_SOF |  USB"))
+    r = sh("moybyte_mpy_usj_sof", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0 and "changed shape" in r.stderr
+    assert "Moybyte" not in f.read_text(encoding="utf-8")
+
+
+def test_every_board_and_the_ci_cache_name_the_one_pinned_release():
+    """MOYBYTE_IDF_VER is the release; nothing else that builds or caches
+    for a board may spell another one."""
+    pinned = _pinned()
+    wf = (ROOT / ".github" / "workflows" / "firmware-build.yml").read_text(
+        encoding="utf-8")
+    assert "idf-${{ matrix.board }}-${{ runner.os }}-%s" % pinned in wf
+    for build in (ROOT / "firmware").glob("*/build.sh"):
+        text = build.read_text(encoding="utf-8")
+        for word in text.split():
+            if word.startswith("v5.") or word.startswith("v6."):
+                assert word.rstrip(".,;:)") == pinned, (
+                    "%s names ESP-IDF %s" % (build, word))
 
 
 # -- the OTA identity stamp -----------------------------------------------------

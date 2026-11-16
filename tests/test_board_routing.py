@@ -756,7 +756,7 @@ def _idf_candidates(build):
 
 
 def test_exactly_one_board_owns_the_esp_idf_checkout():
-    """ESP-IDF v5.5.1 is ~600MB and identical for all three boards, so they
+    """ESP-IDF is ~600MB and identical for every board, so they
     share ONE clone: `moybyte_setup_idf` takes a candidate list and falls back
     to cloning into its own `.build/esp-idf`. That makes the ownership a
     GRAPH, and the graph is what rots.

@@ -184,12 +184,15 @@ jobs:
 
       # Cache the installed Xtensa/RISC-V toolchains (the expensive part); the
       # .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
+      # The key names the ESP-IDF release (tools/esp32_build_lib.sh's
+      # MOYBYTE_IDF_VER): a release that wants other tools installs them over
+      # the restored ones once and saves them under its own key.
       - name: Cache ESP-IDF toolchains
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.espressif
-          key: idf-${{ matrix.board }}-${{ runner.os }}-v1
+          key: idf-${{ matrix.board }}-${{ runner.os }}-v5.5.6
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
       # ccache 4 writes ~/.cache/ccache unless told; name the directory the

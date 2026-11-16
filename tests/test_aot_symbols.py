@@ -45,7 +45,7 @@ CMAKE = os.path.join(ROOT, "native", "moy_wasm", "micropython.cmake")
 # Each console chip: the micropython.cmake branch its build takes, and the
 # cross compiler's predefined macros for the board's -march/-mabi -- every
 # __riscv one `riscv32-esp-elf-gcc -march=rv32imafc_zicsr_zifencei_xesppie
-# -mabi=ilp32f -dM -E` gives (ESP-IDF v5.5.1, esp-14.2.0_20241119). The
+# -mabi=ilp32f -dM -E` gives (ESP-IDF v5.5.6, esp-14.2.0_20260121). The
 # Xtensa table reads no predefined macro but newlib's, which picks a square
 # root's address and never its name.
 CHIPS = {

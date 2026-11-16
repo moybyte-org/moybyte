@@ -749,7 +749,7 @@ world, and those binaries carry these obligations wherever they went.
 | Project | Upstream | Licence |
 |---|---|---|
 | MicroPython v1.28.0 | <https://github.com/micropython/micropython> | MIT |
-| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+| ESP-IDF v5.5.6 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
 ### 5.3 LilyGO T-Deck Plus on mainline (`firmware/lilygo_t_deck_plus_mainline/build.sh`)
 
@@ -760,7 +760,7 @@ next to §5.1's: LVGL, its MicroPython binding, pycparser and the fork itself.
 |---|---|---|
 | MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
 | Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
-| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+| ESP-IDF v5.5.6 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
 The ST7789 register values this build sends are carried in-tree and are covered
 by §2.4, not by this table.
@@ -791,7 +791,7 @@ console.
 |---|---|---|
 | MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
 | Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
-| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+| ESP-IDF v5.5.6 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
 The AXS15231B register values this build sends are carried in-tree and are
 covered by §2.6, not by this table.
@@ -799,7 +799,7 @@ covered by §2.6, not by this table.
 ### 5.6 Guition JC8012P4A1C, ESP32-P4 (`firmware/guition_jc8012p4a1c/build.sh`)
 
 The Waveshare P4's build (§5.2) on the second ESP32-P4 board: the same
-mainline MicroPython v1.28.0, ESP-IDF v5.5.1, ESP-Hosted 2.12.12 and
+mainline MicroPython v1.28.0, ESP-IDF v5.5.6, ESP-Hosted 2.12.12 and
 managed components, the same patch ladder, the shared `native/p4/` modules
 (§2.3, §2.3a) and this board's GSL3680 firmware (§2.3b) frozen into the
 image. Nothing else is pulled in.

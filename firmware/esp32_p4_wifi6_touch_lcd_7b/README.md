@@ -139,10 +139,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 esp32p4 --port /dev/ttyACM0 --baud 3000000 write_flash 0x2000
 dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
-- `build.sh` clones MicroPython v1.28.0 into `.build/`, reuses the T-Deck
-  build's ESP-IDF v5.5.1 checkout when present (clones its own otherwise),
-  patches `esp_lcd` into the port's `IDF_COMPONENTS` (see below), and builds
-  with `BOARD_DIR=boards/MOYBYTE_P4`.
+- `build.sh` clones MicroPython v1.28.0 into `.build/` and ESP-IDF v5.5.6
+  (`MOYBYTE_IDF_VER` in `tools/esp32_build_lib.sh`) into `.build/esp-idf`,
+  the checkout every other board reuses, patches `esp_lcd` into the port's
+  `IDF_COMPONENTS` (see below), and builds with `BOARD_DIR=boards/MOYBYTE_P4`.
 - Serial is the CH343 USB-UART bridge (`/dev/ttyACM0`); `mpremote` works, and
   unlike the T-Deck there is no native-takeover USB starvation — the REPL stays
   available.
@@ -294,9 +294,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   default low-priority completion interrupt; ESP-Hosted SDIO bursts during BLE
   connection could delay that restart past vertical blank and briefly turn the
   panel blue even though both framebuffers were valid (#106). The build's
-  `esp_lcd_dsi_underrun_hook.patch` backports the dedicated DSI bridge interrupt
-  used by current ESP-IDF and raises only the scan-out DMA restart interrupt to
-  priority 3. `CONFIG_LCD_DSI_ISR_IRAM_SAFE` keeps that path in IRAM. Repeated
+  `patches/p4_esp_lcd_dsi_underrun_hook.patch` raises ESP-IDF's dedicated DSI
+  bridge interrupt and the scan-out DMA restart interrupt to priority 3 and
+  counts each underrun through `moy_dsi_note_underrun`.
+  `CONFIG_LCD_DSI_ISR_CACHE_SAFE` keeps that path in IRAM. Repeated
   hardware connects produced no blue frames and left the bridge-underrun counter
   at zero. Keep
   `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the

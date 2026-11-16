@@ -91,7 +91,7 @@ DSI vendor drivers) are outside every count.
 | G6 | verified | `WindowedWM` 106 methods, `BarLayer` 92, `SettingsLayer` 88, `Appearance` 92, `GetCartsAppLayer` 103, `EditorDesk` 100, each within a few lines of the size given. |
 | G7 | verified | `DeviceCanvas`: 96 methods in a 3,037-line file. |
 | X1 | verified | The store's one door for a format change is `prune_retired` (`runtime/carts/moy_seed.py:590`), gated on a generation sidecar. No store carries a format version a reader checks. |
-| X2 | verified | 22 `moybyte_patch_*` functions over MicroPython and ESP-IDF v5.5.1 (`tools/esp32_build_lib.sh`). |
+| X2 | verified | 22 `moybyte_patch_*` functions over MicroPython and ESP-IDF v5.5.6 (`tools/esp32_build_lib.sh`). |
 | X3 | verified | Seven `*_vendor.json` pins and a `make vendor-*` target each; nothing compares a pin with upstream. |
 | X4 | corrected | 44 configurations, 1,013 hashes. The "after" picture already exists on demand: `tools/golden_png.py` renders a configuration's surfaces as the hash saw them. Missing are the "before" picture, the diff, and a failure message that produces them. |
 | X5 | verified | No document under `docs/` or `native/moy_kernel` states which task may touch what. |
