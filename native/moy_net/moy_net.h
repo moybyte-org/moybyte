@@ -89,6 +89,9 @@ int moy_http_accept(int lfd, uint32_t *peer);
 // MOY_HTTP_BAD when no head arrived.
 int moy_http_recv(int fd, char *buf, size_t cap, moy_http_req_t *r,
                   size_t *got);
+// Read on into `buf`, which holds `n` bytes, until it holds `cap` or the peer
+// stops sending: the bytes it then holds.
+size_t moy_http_recv_more(int fd, char *buf, size_t n, size_t cap);
 // All `n` bytes, or -1 when the client stopped taking them.
 int moy_http_send(int fd, const void *p, size_t n);
 void moy_http_close(int fd);

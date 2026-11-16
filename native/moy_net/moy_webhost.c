@@ -142,6 +142,11 @@ static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 #define DOC_MAX 512
 #define READ_CHUNK 4096
 #define BIN_CHUNK 3072              // READ_CHUNK * 3 / 4: whole base64 quanta
+// A request's head, and a body that fits beside it, are read into these kept
+// bytes; a longer body gets a buffer sized to its request (cut at
+// MOY_HTTP_REQ_MAX) that goes back when the request ends, so an idle host
+// keeps no request-sized block (a board with no PSRAM has none to spare).
+#define HEAD_CAP 4096
 #define WALK_DEPTH 16
 #define MEDIA_DIR MOY_SYNC_MUSIC
 #define MEDIA_NAME_MAX 128
@@ -182,7 +187,9 @@ typedef struct {
     size_t pbn;                     // its body's length, opened
     moy_wa_seal_t pseal;            // its answer's seal
     moy_wa_seal_t hseal;            // moy_web_handle's parked request's
-    char *req;                      // MOY_HTTP_REQ_MAX + 1 bytes
+    char *req;                      // the request in hand: `head`, or `big` for a longer one
+    char *head;                     // HEAD_CAP + 1 bytes, kept
+    char *big;                      // a longer request's own, until it ends; NULL when none
     char *chunk;                    // CHUNK_HEAD + CHUNK_MIN + 2
     char *io;                       // READ_CHUNK + 4 (a UTF-8 carry)
     char *b64;                      // BIN_CHUNK / 3 * 4
@@ -215,12 +222,12 @@ static int ensure(void) {
     if (w == NULL) {
         return 0;
     }
-    w->req = moy_net_alloc(MOY_HTTP_REQ_MAX + 1u);
+    w->req = w->head = moy_net_alloc(HEAD_CAP + 1u);
     w->chunk = moy_net_alloc(CHUNK_ALLOC);
     w->io = moy_net_alloc(READ_CHUNK + 4u);
     w->b64 = moy_net_alloc(BIN_CHUNK / 3u * 4u + 4u);
-    if (w->req == NULL || w->chunk == NULL || w->io == NULL || w->b64 == NULL) {
-        moy_net_free(w->req);
+    if (w->head == NULL || w->chunk == NULL || w->io == NULL || w->b64 == NULL) {
+        moy_net_free(w->head);
         moy_net_free(w->chunk);
         moy_net_free(w->io);
         moy_net_free(w->b64);
@@ -274,6 +281,14 @@ static void close_conn(int *fd) {
         moy_http_close(*fd);
         *fd = -1;
     }
+}
+
+// The request in hand has ended (answered, handed on, or its park over): a
+// longer one's buffer goes back.
+static void req_done(void) {
+    moy_net_free(W->big);
+    W->big = NULL;
+    W->req = W->head;
 }
 
 int moy_web_start(const moy_web_cfg_t *cfg) {
@@ -336,6 +351,9 @@ static void stop_now(void) {
     close_conn(&W->lfd);
     close_conn(&W->pfd);
     close_conn(&W->afd);
+    if (W->cur < 0) {
+        req_done();                 // a stop from inside a route leaves serve() its request
+    }
     W->closing = 0;
     W->taken = 0;
     W->events |= MOY_WEB_EV_STOPPED;
@@ -1529,11 +1547,45 @@ static int term(out_t *o, const moy_http_req_t *r) {
 
 // -- the poll -------------------------------------------------------------------------
 
+// Read the request on `fd` into W->req (HEAD_CAP's comment): 1 when it is in
+// hand, 0 when no head arrived, -1 when a longer body found no memory, which
+// is answered 503 once its bytes are read off (a close with bytes unread is a
+// reset, and the page would see no answer at all).
+static int read_req(int fd, moy_http_req_t *r, size_t *got) {
+    W->req = W->head;
+    if (moy_http_recv(fd, W->head, HEAD_CAP, r, got) != MOY_HTTP_OK) {
+        return 0;
+    }
+    size_t max = MOY_HTTP_REQ_MAX;
+    size_t want = r->clen < max - r->head_end ? r->head_end + r->clen : max;
+    if (*got >= want || *got < HEAD_CAP) {
+        return 1;                   // whole, or the peer stopped sending
+    }
+    char *big = moy_net_alloc(want + 1u);
+    if (big == NULL) {
+        for (size_t left = want - *got; left > 0;) {
+            size_t k = moy_http_recv_more(fd, W->io, 0, left < READ_CHUNK ? left : READ_CHUNK);
+            if (k == 0) {
+                break;
+            }
+            left -= k;
+        }
+        out_t o = {.fd = fd};
+        json(&o, 503, "{\"error\":\"busy\"}");
+        return -1;
+    }
+    memcpy(big, W->head, *got);
+    *got = moy_http_recv_more(fd, big, *got, want);
+    W->req = W->big = big;
+    moy_http_parse(big, *got, r);   // its spans, into the buffer that now holds them
+    return 1;
+}
+
 static void serve(int fd) {
     W->requests++;
     size_t got = 0;
     moy_http_req_t r;
-    if (moy_http_recv(fd, W->req, MOY_HTTP_REQ_MAX, &r, &got) != MOY_HTTP_OK) {
+    if (read_req(fd, &r, &got) != 1) {
         moy_http_close(fd);
         return;
     }
@@ -1548,6 +1600,7 @@ static void serve(int fd) {
         W->cur = fd;
         int kept = term(&o, &r);
         W->cur = -1;
+        req_done();
         if (!kept) {
             moy_http_close(fd);
         }
@@ -1557,15 +1610,17 @@ static void serve(int fd) {
     int done = route(&o, r.method, r.method_n, r.target, r.target_n, W->req + r.head_end, bn);
     W->cur = -1;
     if (done == ROUTE_DONE) {
+        req_done();
         moy_http_close(fd);
         return;
     }
     if (done == ROUTE_LATER) {
+        req_done();
         close_conn(&W->afd);
         W->afd = fd;
         return;
     }
-    W->pfd = fd;
+    W->pfd = fd;                    // parked: its spans and body stay in W->req until it ends
     W->preq = r;
     W->pbn = o.bn;
     W->pseal = o.sealed;
@@ -1605,6 +1660,7 @@ int moy_web_poll(void) {
         out_t o = {.fd = W->pfd, .seal = W->pseal.on ? &W->pseal : NULL};
         json(&o, 503, "{\"error\":\"busy\"}");
         close_conn(&W->pfd);
+        req_done();
         W->taken = 0;
     }
     int did = 0;
@@ -1666,6 +1722,7 @@ void moy_web_answer(const void *resp, size_t n) {
     out_t o = {.fd = W->pfd, .seal = W->pseal.on ? &W->pseal : NULL};
     answer_vm(&o, resp, n);
     close_conn(&W->pfd);
+    req_done();
     moy_seal_wipe(&W->pseal, sizeof W->pseal);
     W->taken = 0;
 }
