@@ -29,7 +29,7 @@ DEST = os.path.join(ROOT, "native", "moy_net", "mbedtls")
 RECORD = os.path.join(ROOT, "native", "moy_net", "mbedtls_vendor.json")
 IDF_SRC = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b", ".build",
                        "esp-idf", "components", "mbedtls", "mbedtls")
-VERSION = "3.6.4"
+VERSION = "3.6.7"
 
 LIBRARY = ["aes", "block_cipher", "bignum", "bignum_core", "ccm", "constant_time", "ecp",
            "ecp_curves", "gcm", "hmac_drbg", "md", "platform_util", "sha256"]
@@ -38,7 +38,7 @@ HEADERS = ["aes", "bignum", "block_cipher", "build_info", "ccm", "check_config",
            "constant_time", "ecp", "error", "gcm", "hmac_drbg", "md", "md5", "platform",
            "platform_util", "private_access", "ripemd160", "sha1", "sha256", "sha3",
            "sha512", "threading"]
-INTERNAL = ["alignment", "bignum_core", "bignum_internal", "bignum_mod",
+INTERNAL = ["alignment", "bignum_core", "bignum_core_invasive", "bignum_internal", "bignum_mod",
             "block_cipher_internal", "bn_mul", "common", "constant_time_impl",
             "constant_time_internal", "ctr", "ecp_internal_alt", "ecp_invasive", "md_wrap"]
 FILES = (["LICENSE"]

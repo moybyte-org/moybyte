@@ -27,7 +27,7 @@ separate question from what is committed.
 |---|---|---|---|---|
 | Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | WAMR 2.4.5 AOT runtime (WebAssembly cart engine), Moybyte's fork | `native/moy_wasm/wamr/` | [moybyte-org/wasm-micro-runtime](https://github.com/moybyte-org/wasm-micro-runtime) (fork of [bytecodealliance/wasm-micro-runtime](https://github.com/bytecodealliance/wasm-micro-runtime)) | Apache-2.0 WITH LLVM-exception | **Yes** — the fork's commits |
-| mbedTLS 3.6.4, its crypto subset (the browser sign-in, host and wasm) | `native/moy_net/mbedtls/` | [Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls), as ESP-IDF v5.5.1 carries it | Apache-2.0 OR GPL-2.0-or-later (used under Apache-2.0) | No |
+| mbedTLS 3.6.7, its crypto subset (the browser sign-in, host and wasm) | `native/moy_net/mbedtls/` | [Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls), as ESP-IDF v5.5.6 carries it | Apache-2.0 OR GPL-2.0-or-later (used under Apache-2.0) | No |
 | Monocypher 4.0.3, its core and Ed25519 (the apps' Ed25519 rows, every tier) | `native/moy_net/monocypher/` | [monocypher.org](https://monocypher.org/) ([LoupVaillant/Monocypher](https://github.com/LoupVaillant/Monocypher)) | CC0-1.0 OR BSD-2-Clause | No |
 | Jet software 3D rasteriser (the compiled Jet carts) | `ports/jet/jet/` | [CubeCoders/Jet](https://github.com/CubeCoders/Jet) | MIT | No |
 | Utah teapot mesh + the scene it is lit in (the showcase cart) | `ports/jet/teapot.moy/teapot.obj`, `ports/jet/teapot.moy/src/scene.cpp` | [CubeCoders/JetExamples](https://github.com/CubeCoders/JetExamples), from freeglut's teapot data | MIT; freeglut's X11-style notice | Converted to OBJ; the scene ported |
@@ -304,8 +304,8 @@ AES-GCM, AES-CTR, AES-CCM, SHA-256, HMAC and X25519 over Curve25519. A board lin
 and SHA); the host's library and the browser's wasm compile this one, the same
 release, under the config `native/moy_net/moy_seal_mbedtls.h`.
 
-- **Upstream:** mbedTLS 3.6.4 — <https://github.com/Mbed-TLS/mbedtls>, the
-  copy in ESP-IDF v5.5.1's `components/mbedtls/mbedtls` at the commit
+- **Upstream:** mbedTLS 3.6.7 — <https://github.com/Mbed-TLS/mbedtls>, the
+  copy in ESP-IDF v5.5.6's `components/mbedtls/mbedtls` at the commit
   `native/moy_net/mbedtls_vendor.json` records. `tools/vendor_mbedtls.py`
   (`make vendor-mbedtls`) copies the sources and headers the subset needs,
   under upstream's paths.
@@ -772,7 +772,7 @@ by §2.4, not by this table.
 | MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
 | Emscripten / emsdk | <https://github.com/emscripten-core/emsdk> | MIT (with NCSA for legacy components) |
 | Lua 5.4.7 | vendored, §2.1 | MIT |
-| mbedTLS 3.6.4, its crypto subset | vendored, §2.8 | Apache-2.0 |
+| mbedTLS 3.6.7, its crypto subset | vendored, §2.8 | Apache-2.0 |
 | Monocypher 4.0.3, its core and Ed25519 | vendored, §2.9 | CC0-1.0 OR BSD-2-Clause |
 
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains

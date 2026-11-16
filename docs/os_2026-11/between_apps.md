@@ -235,7 +235,7 @@ stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
   beside the sign-in's `moy_seal.c`, whose random source it shares
   (`moy_seal_random`: an HMAC-DRBG a board seeds at boot with the SAR ADC's
   noise mixed into its RNG, the host and the browser from `getentropy`;
-  `moy_seal.h`, THE RANDOM SOURCE). A board compiles it against the ESP-IDF's mbedTLS 3.6.4 (AES and
+  `moy_seal.h`, THE RANDOM SOURCE). A board compiles it against the ESP-IDF's mbedTLS 3.6.7 (AES and
   SHA in hardware), the host's library and the browser's wasm against the
   vendored copy of the same release (`native/moy_net/mbedtls/README.md`), so
   every tier runs the same code; Python reaches it through the module
