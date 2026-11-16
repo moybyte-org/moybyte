@@ -48,6 +48,7 @@ except ImportError:  # pragma: no cover - an image without the kernel
 
 import scheduler as _sched
 import wallclock as _wc
+from moy_store_base import session_root as _session_root
 
 SHELL = 1
 JOB = "job"                     # a running job's kind in the scheduler's table
@@ -500,8 +501,7 @@ class Cron:
             self._end(pid, face, code)
 
     def _host_root(self):
-        from terminal_app import _host_root
-        return _host_root(getattr(self.ws, "carts_root", None) or "")
+        return _session_root(getattr(self.ws, "carts_root", None) or "")
 
     def _poll(self):
         job = self.job

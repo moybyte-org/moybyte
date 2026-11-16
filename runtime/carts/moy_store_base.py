@@ -188,6 +188,16 @@ def apps_root(root):
     return _sibling_path(root, APPS_DIR)
 
 
+def session_root(carts_root):
+    """The files tree a shell session sees: the folder whose `sd/moybyte/carts`
+    is the carts root, as on a board, else the carts root's own folder."""
+    r = (carts_root or "").rstrip("/")
+    if r.endswith(CARTS_DIR):
+        return r[:-len(CARTS_DIR)] or "/"
+    i = r.rfind("/")
+    return r[:i] if i > 0 else r
+
+
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and
 # nowhere else (native/moy_index/moy_index.h): a store that shards its
 # root or keeps a cart elsewhere changes these and no caller.

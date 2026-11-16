@@ -16,7 +16,7 @@ The screens, in the order a kid meets them:
 
   CHECKING   the radio comes up under the "carts" lease and every index is
              fetched -- moybyte-org's carts repository unless `system/sources`
-             names others (runtime/carts/pkg.py, the shell's `pkg`) --
+             names others (runtime/shell/pkg.py, the shell's `pkg`) --
              then the covers they name that this session has not drawn yet:
              one busy page, the shelves counted as they come.
   LIST       the shelf: a card per cart, its whole cover (the 128 x 128

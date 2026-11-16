@@ -505,7 +505,7 @@ else gets a file face until a command needs one.
 
 `pkg` (owner, 2026-11-03) is apt-shaped: a repository is a URL serving an
 index and the carts it lists; moybyte-org/carts is the first. A `.moy` is the
-package. As built (P3.2), one installer has two faces: `runtime/carts/pkg.py`
+package. As built (P3.2), one installer has two faces: `runtime/shell/pkg.py`
 holds the verbs and the checks over `runtime/carts/cart_index.py` (with the
 `install` role's store, network and radio lease), and Get Carts
 (`runtime/apps/getcarts_app.py`) is its GUI face, making the same checks

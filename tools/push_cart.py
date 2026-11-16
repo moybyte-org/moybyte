@@ -257,7 +257,7 @@ def _drop(p):
 """
 
 # A pushed folder taken back off the store, the way the console removes a
-# cart: `pkg.removed` (runtime/carts/pkg.py) over the install role, the steps
+# cart: `pkg.removed` (runtime/shell/pkg.py) over the install role, the steps
 # Get Carts' Remove and `pkg remove` take -- the shelf record's entry, the
 # folder, the files the cart wrote (`apps/<id>`), its consent and its keys,
 # then the shelf re-read there. A folder that is no cart (the modules a suite

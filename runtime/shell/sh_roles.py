@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   _wait                             a wait a step at a time (`yield from`), Ctrl-C ends it
 #   r_settings                        system/settings
-#   r_pkg                             runtime/carts/pkg.py's verbs, stepped
+#   r_pkg                             runtime/shell/pkg.py's verbs, stepped
 #   r_passwd                          the console's password, the paired browsers
 #   r_http                            a GET by the http worker, stepped
 #   r_snd                             stdin through the audio ring
@@ -54,7 +54,7 @@ the http worker's own wait), never `online()`.
   media play SRC | stop | pause | resume | next | prev | seek SECONDS | volume [V]
   snd                        the audio ring's counters
   snd play [FRAMES]          stdin (PCM16 mono, 22,050 Hz) through the ring
-  pkg update | list | sources the package verbs (runtime/carts/pkg.py), over the
+  pkg update | list | sources the package verbs (runtime/shell/pkg.py), over the
   pkg search WORD...         store's one installer, Get Carts' (cart_index):
   pkg install [-y] ID...     -y answers a licence and the install prompt yes,
   pkg remove ID...           else each is asked on stdin (y/N)

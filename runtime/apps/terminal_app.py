@@ -16,6 +16,7 @@ import ui as _ui
 import ui_draw as _ui_draw
 from layers import AppLayer
 import layout_base as _lb
+from moy_store_base import session_root as _session_root
 
 try:
     import moy_sh as _sh
@@ -115,7 +116,7 @@ class TerminalAppLayer(AppLayer):
         if self.face is None and _sh is not None:
             try:
                 if getattr(_sh, "HOST", False) or _BROWSER_SHELL:
-                    self.face = _sh.Face(_host_root(self._install.root()))
+                    self.face = _sh.Face(_session_root(self._install.root()))
                 else:
                     self.face = _sh.Face()
             except OSError:
@@ -198,12 +199,3 @@ class TerminalAppLayer(AppLayer):
             self._damage.all()
 
 
-def _host_root(carts_root):
-    """The files tree a host session sees: the folder whose `sd/moybyte/carts`
-    is the carts root, as on a board, else the carts root's own folder."""
-    r = (carts_root or "").rstrip("/")
-    tail = "/sd/moybyte/carts"
-    if r.endswith(tail):
-        return r[:-len(tail)] or "/"
-    i = r.rfind("/")
-    return r[:i] if i > 0 else r
