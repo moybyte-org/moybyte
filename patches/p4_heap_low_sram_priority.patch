@@ -1,0 +1,19 @@
+--- a/components/heap/port/esp32p4/memory_layout.c
++++ b/components/heap/port/esp32p4/memory_layout.c
+@@ -63,7 +63,16 @@
+  */
+ const soc_memory_type_desc_t soc_memory_types[SOC_MEMORY_TYPE_NUM] = {
+     /*                                  Mem Type Name   | High Priority Matching                                            | Medium Priority Matching                     | Low Priority Matching */
++#if CONFIG_ESP32P4_SELECTS_REV_LESS_V3
++    /* Moybyte P4: on a rev < v3 P4 the low SRAM is a general-purpose heap at
++     * the priority of the rest of L2MEM. At medium priority every internal
++     * allocation would fill the high SRAM, the only region with room for two
++     * 64 KB DMA blocks, before it took a byte of the low one. At one priority
++     * the heaps are tried smallest first, so the high SRAM's blocks go last. */
++    [SOC_MEMORY_TYPE_RETENT_MEM]    = { "RETENT_RAM",   { MALLOC_L2MEM_BASE_CAPS | MALLOC_CAP_RETENTION | MALLOC_CAP_SIMD,    0,                                             0 }},
++#else
+     [SOC_MEMORY_TYPE_RETENT_MEM]    = { "RETENT_RAM",   { MALLOC_CAP_RETENTION | MALLOC_CAP_SIMD,                             MALLOC_L2MEM_BASE_CAPS,                        0 }},
++#endif
+     [SOC_MEMORY_TYPE_L2MEM]         = { "RAM",          { MALLOC_L2MEM_BASE_CAPS | MALLOC_CAP_SIMD,                           0,                                             0 }},
+     [SOC_MEMORY_TYPE_SPIRAM]        = { "SPIRAM",       { MALLOC_CAP_SPIRAM,                                                  0,                                             ESP32P4_MEM_COMMON_CAPS | MALLOC_CAP_SIMD }},
+     [SOC_MEMORY_TYPE_SPM]           = { "SPM",          { MALLOC_CAP_SPM,                                                     0,                                             ESP32P4_MEM_COMMON_CAPS | MALLOC_CAP_INTERNAL }},

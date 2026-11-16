@@ -114,6 +114,9 @@ moybyte_patch_mdns_psram
 # DECLINED moybyte_patch_p4_coredump_dram -- an ESP32-P4 linker patch: the
 # rev < v3 P4's high-SRAM data section. The S3's linker script has none.
 
+# DECLINED moybyte_patch_p4_heap_low_sram -- an ESP32-P4 heap patch: the
+# rev < v3 P4's low-SRAM heap priority. The S3 has no such region.
+
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE
 # are on-die, and nothing in its build pulls esp_hosted in at all.

@@ -671,6 +671,22 @@ moybyte_patch_p4_coredump_dram() {
   fi
 }
 
+# The ESP32-P4 heap-priority patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF registers a rev < v3 P4's low SRAM as RETENT_RAM, which
+# serves a plain internal allocation only at medium priority, after every
+# L2MEM heap: each internal allocation then fills the high SRAM first, the one
+# region with room for the crisp PPA path's two 64 KB DMA blocks, which the
+# idle desk then no longer had. The patch puts the low SRAM at the high
+# priority of the rest of L2MEM; at one priority the heaps are tried smallest
+# first. The retention cap stays the low SRAM's alone.
+moybyte_patch_p4_heap_low_sram() {
+  local f="${IDF_DIR}/components/heap/port/esp32p4/memory_layout.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: on a rev < v3 P4 the low SRAM" "${f}"; then
+    echo "== applying P4 low-SRAM heap priority patch"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_heap_low_sram_priority.patch"
+  fi
+}
+
 # PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
 # 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
 # for verified flash vendor IDs (0xC8/0x20) and otherwise returns
