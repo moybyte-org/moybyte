@@ -5,16 +5,18 @@
 #  in-package flash (the C3FH4: Super Mini and its kin), USB-Serial/JTAG on
 #  the chip, WiFi and no PSRAM. It is the Zero's VARIANT, not a second design:
 #  the same tier, the same store host (device/zero_host.py and its two
-#  siblings, which both Zero boards take) and the same module sets but one
-#  (no SSH server: its denial below says why), so every other reason the
-#  XIAO's board.toml gives for a module crossing or not is this board's reason
-#  too, and is not restated here. What this file records is what the chip
-#  changes:
+#  siblings, which both Zero boards take) and the same module sets, so every
+#  reason the XIAO's board.toml gives for a module crossing or not is this
+#  board's reason too, and is not restated here. What this file records is
+#  what the chip changes:
 #
 #  * NO PSRAM. The kernel's PSRAM placements are the one internal heap on a
 #    build without it (native/moy_kernel/moy_platform.h, MOY_HAS_PSRAM), and
 #    the kernel keeps no small-block pool. WiFi, the VM's heap and every
-#    native block share roughly 300 KB.
+#    native block share roughly 300 KB, so what the C takes while it works
+#    is sized for it: the SSH server's stacks and session arena, SFTP refused
+#    (README.md's SSH paragraph), and the Python heap's ceiling
+#    (boards/MOYBYTE_C3_ZERO/mpconfigboard.h).
 #  * ONE APP SLOT. The image (the baked browser console is more than half of
 #    it) does not fit twice in 4 MB, so this board is the Zero "without OTA"
 #    that the XIAO's `[image]` names as a way out: a factory slot, no otadata,
@@ -283,16 +285,6 @@ why = "The terminal's C shell; with no glass and a bare REPL, its faces are the 
 [[native.shared.take]]
 module = "moy_tty"
 why = "The shell's face over a stream: SSH, the web terminal and SFTP into the store (the XIAO's reason)."
-
-[[native.shared.deny]]
-module = "moy_ssh"
-why = """
-The SSH server and SFTP do not fit beside the web host on this chip. Running,
-the server holds its task's stack, Dropbear's state and the host key in the
-one internal heap, and with it a C3 Zero serving the console had no heap left
-for a browser's parallel requests: every asset after the first got its
-headers and no body. ssh_service reads the absence as "no server in the
-image"; the web terminal is the shell's face here (moy_tty over the webhost)."""
 
 [[native.shared.deny]]
 module = "moy_png"

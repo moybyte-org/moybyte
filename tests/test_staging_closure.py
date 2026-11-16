@@ -272,9 +272,6 @@ PACKAGES = {"tdeck-mainline": {"moybyte"}, "p4": {"moybyte"},
 # declaration that drifts from them fails here as the Zero's own would.
 for _table in (NATIVE, HOST_ONLY, GENERATED, PACKAGES):
     _table["c3-zero"] = _table["zero"]
-# ...but one: the SSH server does not fit beside the web host in the C3's
-# internal heap (its board.toml's moy_ssh denial).
-NATIVE["c3-zero"] = NATIVE["zero"] - {"moy_ssh"}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not

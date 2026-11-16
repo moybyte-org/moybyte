@@ -51,8 +51,11 @@
 // split heap leaves this much of the internal heap outside it. On this chip
 // that heap is the only one, shared by WiFi's buffers, lwIP, the webhost's and
 // the shell's C blocks and every task stack, and stock growth takes it to the
-// last byte. The first area (MicroPython's 64 KB) is not affected.
-#define MOYBYTE_GC_SPLIT_RESERVE            (48 * 1024)
+// last byte. What it keeps is the room the C takes while it works: an upload's
+// own buffer (up to MOY_HTTP_REQ_MAX, native/moy_net/moy_webhost.c's HEAD_CAP)
+// and an SSH session (the README's SSH paragraph), each in blocks the Python
+// heap's areas would otherwise fragment. The first area is not affected.
+#define MOYBYTE_GC_SPLIT_RESERVE            (100 * 1024)
 
 // The serial-only recovery floor takes SAFE after this long (the XIAO's
 // reason: the board's only interface is its USB port).
