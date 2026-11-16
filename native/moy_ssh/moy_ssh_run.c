@@ -11,10 +11,18 @@
 
 #include <unistd.h>
 
+#include "moy_platform.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
 
+// A board with no PSRAM pays the stack in its one internal heap: the size the
+// key exchange and a session were measured to need there, with room over it
+// (README.md, Memory).
+#if defined(MOY_ON_BOARD) && !defined(MOY_HAS_PSRAM)
+#define SERVER_STACK (10 * 1024)
+#else
 #define SERVER_STACK (16 * 1024)
+#endif
 
 enum { RUN, STOP, ENDING };
 
