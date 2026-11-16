@@ -13,6 +13,7 @@
 #include "dbmalloc.h"
 
 #include "moy_kmem.h"
+#include "moy_platform.h"
 #include "moy_seal.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
@@ -456,8 +457,14 @@ static void mark_shell(void) {
 
 // The `sftp` subsystem arrives as the command SFTPSERVER_PATH
 // (port/localoptions.h), and so does an `exec` of that name, as on OpenSSH.
+// A board with no PSRAM refuses it: its buffers (native/moy_tty/README.md,
+// Memory) do not fit beside a session in the one internal heap, and a refusal
+// is what the client reports, where running out would cut a transfer short.
 int moy_ssh_command(const char *cmd, int pty, int cols, int rows, int *fd, pid_t *pid) {
     if (cmd != NULL && strcmp(cmd, SFTPSERVER_PATH) == 0) {
+        #if defined(MOY_ON_BOARD) && !defined(MOY_HAS_PSRAM)
+        return -1;
+        #endif
         cmd = NULL;
         pty = MOY_TTY_SFTP;
     }

@@ -26,7 +26,11 @@
 #include "moy_sh_board.h"
 #include "moy_tty.h"
 
+#if defined(MOY_ON_BOARD) && !defined(MOY_HAS_PSRAM)
+#define ARENA (12u * 1024u)             // a session's arena where it is internal SRAM
+#else
 #define ARENA (32u * 1024u)             // a session's arena (README.md, Memory)
+#endif
 #define NAMES_BYTES 4096u               // a Tab's names
 #define ROW_BYTES 2048u
 

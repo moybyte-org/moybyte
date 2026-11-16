@@ -5,6 +5,7 @@
 #include "moy_tasks.h"
 
 #include "moy_kmem.h"
+#include "moy_platform.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -146,7 +147,14 @@ int moy_tty_pair(int fds[2]) {
 }
 #endif
 
+// A board with no PSRAM pays the stack in its one internal heap, so it gets
+// the size a session was measured to need there, with room over it
+// (README.md, Memory).
+#if defined(MOY_ON_BOARD) && !defined(MOY_HAS_PSRAM)
+#define FACE_STACK (12 * 1024)
+#else
 #define FACE_STACK (24 * 1024)
+#endif
 
 static moy_tty_state_t *s_t;
 
