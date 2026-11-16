@@ -311,7 +311,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   patches are `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
   `moybyte_patch_p4_dsi_underrun` and `patches/p4_ppa_srm_mb_order_bypass.patch`
   (the SRM deadlock a rotate with a sub-FIFO last unit hits) behind
-  `moybyte_patch_p4_ppa_srm_mb_order`. Status and numbers: #58, #202.
+  `moybyte_patch_p4_ppa_srm_mb_order`. Three more patch ESP-IDF v5.5.6 for
+  a rev < v3 chip: `p4_coredump_dram_mapped_once.patch`
+  (`moybyte_patch_p4_coredump_dram`), `p4_heap_low_sram_priority.patch`
+  (`moybyte_patch_p4_heap_low_sram`: the low SRAM serves plain internal
+  allocations first, or the high SRAM loses its large blocks) and
+  `p4_ppa_trans_context_internal_only.patch`
+  (`moybyte_patch_p4_ppa_trans_context`). Each is in `patches/`, and each
+  patcher is in `tools/esp32_build_lib.sh`. Status and numbers: #58, #202.
 - **A native module runs in U-mode on a P4, and the boot PMP layout and the
   vectors are the kernel's** (`native/moy_elf/moy_umode.h`): both P4 boards
   build with `CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n` and
