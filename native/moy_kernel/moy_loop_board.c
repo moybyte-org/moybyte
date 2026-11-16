@@ -139,13 +139,29 @@ static void b_inputs(uint32_t now, bool *click, bool *active) {
 // dev channel's lines with it) and the last drawn frame -- it reads the heap
 // (a walk of the allocation table) and collects when more than 3/4 of it is
 // allocated or its longest free run is under QUIET_RUN. The heap's growth
-// stays the allocator's: below that mark nothing is collected early. A cart
-// that draws every frame is never quiet, and a screen nobody touches is
-// read once.
+// stays the allocator's: below that mark nothing is collected early. A
+// collect that leaves the heap over the mark found it live, not garbage (a
+// one-area heap a fresh boot left 4/5 full of the shelf), and the next can
+// reclaim at most what was allocated since: none is taken until the heap
+// has allocated another 1/32 of itself or another collect has run, or
+// every pause after a keypress would mark and sweep the whole heap for
+// nothing. A cart that draws every frame is never quiet, and a screen
+// nobody touches is read once.
 #if MOY_ON_BOARD
 #define QUIET_MS 1000u
 #define QUIET_RUN (16u * 1024u)
 static uint32_t s_drew_at, s_checked_at;
+static size_t s_retry_used;
+static uint32_t s_retry_n;
+
+static uint32_t collections(void) {
+    return &moybyte_gc_pause != NULL ? moybyte_gc_pause[0] : 0u;
+}
+
+static bool over_mark(const gc_info_t *info) {
+    return info->used > info->total - info->total / 4
+        || info->max_free * MICROPY_BYTES_PER_GC_BLOCK < QUIET_RUN;
+}
 #endif
 
 static void quiet_collect(uint32_t now, bool drew) {
@@ -162,10 +178,17 @@ static void quiet_collect(uint32_t now, bool drew) {
     s_checked_at = now;
     gc_info_t info;
     gc_info(&info);
-    if (info.used > info.total - info.total / 4
-        || info.max_free * MICROPY_BYTES_PER_GC_BLOCK < QUIET_RUN) {
-        gc_collect();
+    if (!over_mark(&info)) {
+        s_retry_used = 0;
+        return;
     }
+    if (info.used < s_retry_used && collections() == s_retry_n) {
+        return;
+    }
+    gc_collect();
+    gc_info(&info);
+    s_retry_used = over_mark(&info) ? info.used + info.total / 32 : 0;
+    s_retry_n = collections();
     #else
     (void)now;
     (void)drew;

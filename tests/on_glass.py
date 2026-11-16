@@ -1978,6 +1978,36 @@ def a_quiet_console_collects_its_garbage(board):
     assert c1 > c0, "no collection in a quiet pause over a heap %d of %d bytes" % (used, held)
 
 
+def a_quiet_console_leaves_a_live_heap_alone(board):
+    """The quiet collect's retry (native/moy_kernel/moy_loop_board.c): a
+    collect that leaves the heap over its mark found it live, and the pauses
+    after it take none until the heap has allocated more -- a fresh S3
+    boot's one-area heap is 4/5 shelf, and without the retry every line and
+    keypress was followed by a whole-heap collect that freed nothing. The
+    fill is kept live, in the 512-byte objects the garbage test uses."""
+    import time
+    board.pyexec("import gc\n"
+                 "gc.collect()\n"
+                 "ws._qg = []\n"
+                 "for _ in range(8):\n"
+                 "    n = (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 512\n"
+                 "    if n <= 0:\n"
+                 "        break\n"
+                 "    ws._qg.extend(bytearray(496) for _ in range(n))\n"
+                 "ws._qr = (gc.areas()[1], gc.mem_alloc())", strict=True)
+    try:
+        held, used = board.pyval("ws._qr", strict=True)
+        assert used * 4 > held * 3, "the fill left the heap %d of %d bytes" % (used, held)
+        time.sleep(3.0)
+        c1 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+        time.sleep(3.0)
+        c2 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+        assert c2 == c1, ("%d collections in a pause over a live heap %d of %d bytes"
+                          % (c2 - c1, used, held))
+    finally:
+        board.pyexec("ws._qg = None\n__import__('gc').collect()", strict=True)
+
+
 def a_leaked_session_leaves_the_panel_flushing(board):
     """The bus rule of the app ABI's sessions (native/moy_app/README.md): on the T-Deck the card shares the panel's SPI host, and the
     gate that drains the flush is held only around one store op, never by a
