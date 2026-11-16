@@ -687,6 +687,21 @@ moybyte_patch_p4_heap_low_sram() {
   fi
 }
 
+# The ESP32-P4 PPA transaction patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF allocates each of a PPA client's transaction elements
+# whole from internal RAM because one part of it, the 2D-DMA transaction
+# context, holds an atomic; a client holds max_pending_trans_num of them for as
+# long as it is registered, and moy_ppa's SRM client queues 24. The patch
+# allocates the 16-byte context from internal RAM and the rest of the element
+# with the driver's PPA_MEM_ALLOC_CAPS, which puts it in PSRAM.
+moybyte_patch_p4_ppa_trans_context() {
+  local f="${IDF_DIR}/components/esp_driver_ppa/src/ppa_core.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: only the 2D-DMA transaction context" "${f}"; then
+    echo "== applying P4 PPA transaction context patch"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_ppa_trans_context_internal_only.patch"
+  fi
+}
+
 # PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
 # 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
 # for verified flash vendor IDs (0xC8/0x20) and otherwise returns

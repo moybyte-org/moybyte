@@ -148,6 +148,9 @@ moybyte_patch_pwm_ledc_book
 # DECLINED moybyte_patch_p4_heap_low_sram -- an ESP32-P4 heap patch: the
 #    rev < v3 P4's low-SRAM heap priority. The S3 has no such region.
 #
+# DECLINED moybyte_patch_p4_ppa_trans_context -- an ESP32-P4 driver patch: the
+#    PPA's transaction elements. This board has no PPA.
+#
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.
