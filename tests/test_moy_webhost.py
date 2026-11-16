@@ -552,6 +552,27 @@ def test_a_request_the_vm_answers_is_parked_and_answered(serving):
     assert seen == ["hop"]
 
 
+def test_a_parked_body_the_vms_heap_cannot_hold_is_busy_not_fatal(serving, monkeypatch):
+    """The poll copies a parked request's body into the VM's heap, which on a
+    board with no PSRAM may not hold it. That is a 503 the page sends again,
+    and the next request is served: a MemoryError out of the poll would end
+    the loop that serves the board."""
+    seen = []
+    h = serving(on_run=lambda name: (seen.append(name), "Hop")[1])
+    take = wh.moy_net.web_take
+
+    def full():
+        take()
+        raise MemoryError
+
+    monkeypatch.setattr(wh.moy_net, "web_take", full)
+    got = _exchange(h, b'POST /run HTTP/1.1\r\nContent-Length: 15\r\n\r\n{"cart": "hop"}')
+    assert b"503" in h_status(got) and b"busy" in got
+    monkeypatch.setattr(wh.moy_net, "web_take", take)
+    got = _exchange(h, b'POST /run HTTP/1.1\r\nContent-Length: 15\r\n\r\n{"cart": "hop"}')
+    assert b"200" in h_status(got) and seen == ["hop"]
+
+
 class _Parking:
     """_exchange's host for a bare kernel listener: each parked request is
     noted and answered 200, as the VM's poll would."""

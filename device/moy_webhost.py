@@ -446,7 +446,14 @@ class WebHost:
                 self.on_paired()
             except Exception as exc:     # noqa: BLE001 -- a hook is never fatal
                 print("WEBHOST on_paired:", exc)
-        req = moy_net.web_take()
+        try:
+            req = moy_net.web_take()
+        except MemoryError:
+            # The parked body is copied into this heap, which on a board with
+            # no PSRAM may not hold it: busy, which the page sends again,
+            # rather than an error out of the loop that serves the board.
+            moy_net.web_answer(http_response(503, '{"error":"busy"}'))
+            req = None
         if req is not None:
             did = True
             try:
