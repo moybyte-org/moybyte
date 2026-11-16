@@ -8,7 +8,8 @@
       {"py": "free()", "hand": true},
       {"py": "stats()", "hand": true},
       {"py": "dump()", "hand": true},
-      {"py": "hist(frame=SELF, top=40)", "hand": true},
+      {"py": "hist(frame=SELF, top=40, phase=-1)", "hand": true},
+      {"py": "phase(n=None)", "hand": true},
       {"py": "SELF", "hand": true},
       {"py": "FRAMES", "hand": true}
     ]
