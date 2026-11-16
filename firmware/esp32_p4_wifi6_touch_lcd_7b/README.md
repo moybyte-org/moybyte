@@ -394,7 +394,9 @@ below, so re-check against those, not against it.
 ## Board map (from the factory xiaozhi boot log + Waveshare/xiaozhi sources)
 
 - Panel: **EK79007**, 2-lane MIPI-DSI @ 900Mbps, 1024×600 RGB565, DPI clock
-  52MHz; LCD reset GPIO33; **panel mounted 180° rotated**; DSI PHY power =
+  60MHz, a 69.7Hz refresh (the vendor's 52MHz is no whole divisor of the
+  240MHz PLL; `MOY_DSI_DPI_MHZ` in `native/p4/moy_dsi/modmoy_dsi.c` says why
+  the image sets 60); LCD reset GPIO33; **panel mounted 180° rotated**; DSI PHY power =
   LDO chan 3 @ 2500mV; **backlight GPIO32, active-low**.
 - Touch: **GT911** (same chip as the T-Deck) on I2C **SDA=7 / SCL=8** @ 0x5D,
   INT/RST not wired; self-configured for 1024×600; plain status-register
