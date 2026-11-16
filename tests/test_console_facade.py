@@ -43,7 +43,8 @@ count:
      its AppContext's roles alone. The console's own modules (runtime/system/,
      runtime/editors/, Settings and the task manager among them) call
      `ws.<service>` directly and are not routed through roles: the gain is
-     minor, and the console may move to C.
+     minor, as they ship and change with the console, which stays Python
+     (native/moy_kernel/README.md).
 """
 
 import ast

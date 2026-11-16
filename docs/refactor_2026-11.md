@@ -677,7 +677,8 @@ decision 3.
 holds its `AppContext`'s roles and nothing of the console. The console's own
 system and editor modules call `ws.<service>` directly and keep doing so;
 routing them through `app_context` roles too was declined, because the gain
-is minor and the console may move to C.
+is minor: those modules ship and change with the console, which stays
+Python (`native/moy_kernel/README.md`).
 
 **Changes**
 
@@ -997,8 +998,10 @@ the shape before the rest follow.
 - *Declined:* keeping the mixins and only renaming the most-read privates.
 - *The boundary (owner, 2026-11-15):* apps reach no `ws` at all; the
   console's own system and editor modules call `ws.<service>` directly. The
-  gain of routing them through `app_context` roles is minor, and the console
-  may move to C. `tests/test_console_facade.py`'s rule 6 holds it.
+  gain of routing them through `app_context` roles is minor: they ship and
+  change with the console, which stays Python
+  (`native/moy_kernel/README.md`). `tests/test_console_facade.py`'s rule 6
+  holds it.
 
 **4. The trial's store.** A format stamp; a committed fixture of a
 trial-format store; `sweep_store`'s generation-gated pass as the one door;
