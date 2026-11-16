@@ -408,11 +408,14 @@ stages 1–6 all absent. Its README is the authority; what bites:
   its module push is opt-in and undoable, and the board announces it at boot.
 - **The C3 Zero (`firmware/esp32c3_zero/`, `c3_zero`) is the Zero on an
   ESP32-C3**: the same store host (`device/zero_*.py`, which both Zeros take)
-  and module sets but the SSH server, on a chip with no PSRAM, one core, one
-  I2C controller and 4 MB of flash. A build without PSRAM (`MOY_HAS_PSRAM`
-  unset, `native/moy_kernel/moy_platform.h`) serves every PSRAM placement from
-  the internal heap and keeps no kernel pool, so a native block a PSRAM board
+  and module sets, on a chip with no PSRAM, one core, one I2C controller and
+  4 MB of flash. A build without PSRAM (`MOY_HAS_PSRAM` unset,
+  `native/moy_kernel/moy_platform.h`) serves every PSRAM placement from the
+  internal heap and keeps no kernel pool, so a native block a PSRAM board
   hides costs this one internal SRAM, and a new resident task or buffer on a
-  Zero is measured there before it ships (the README's `moy_ssh` story). One
-  factory slot and no OTA: a new image goes on by cable. Its README is the
-  authority.
+  Zero is measured there before it ships: SSH fits only with its stacks and
+  arena sized for it, SFTP refused, the webhost's upload buffer made per
+  request and the Python heap's ceiling kept clear of both (the README's SSH
+  paragraph). A block that lives for good is made at start, beside the
+  others: one made mid-session splits the free heap for good. One factory
+  slot and no OTA: a new image goes on by cable. Its README is the authority.

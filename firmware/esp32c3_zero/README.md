@@ -7,7 +7,7 @@ the chip, WiFi, and no PSRAM.
 
 It is a **variant** of the XIAO Zero, not a second design. Both boards take
 the same store host (`device/zero_host.py`, `device/zero_setup.py`,
-`device/zero_shell.py`) and the same module sets but the SSH server, so how
+`device/zero_shell.py`) and the same module sets, so how
 the Zero is set up, paired, synced and signed into is
 `firmware/seeed_xiao_esp32s3_zero/README.md`, and is not repeated here. This
 file is what the chip changes.
@@ -22,21 +22,30 @@ file is what the chip changes.
   the native tier share the chip's internal SRAM, so the Python heap starts
   at 32 KB and grows only while `MOYBYTE_GC_SPLIT_RESERVE` stays outside it
   (`boards/MOYBYTE_C3_ZERO/mpconfigboard.h`, `moybyte_patch_gc_split_reserve`):
-  the Zero's Python drives the C that does the work. The webhost's request
-  buffer (`MOY_HTTP_REQ_MAX`, `native/moy_net/moy_net.h`) is the largest
-  single tenant, held for the sync batches' size. The WiFi/lwIP window set
-  the XIAO takes is left out for the same reason
-  (`boards/MOYBYTE_C3_ZERO/sdkconfig.board`).
+  the Zero's Python drives the C that does the work, and the reserve is the
+  room that C takes while it works. A sync batch is the largest of it: the
+  webhost reads an upload longer than its kept head into a buffer of its
+  own, up to `MOY_HTTP_REQ_MAX`, and gives it back when the request ends
+  (`native/moy_net/moy_webhost.c`, `HEAD_CAP`), so the room is there between
+  requests rather than held. The WiFi/lwIP window set the XIAO takes is left
+  out for the same reason (`boards/MOYBYTE_C3_ZERO/sdkconfig.board`).
 - **One app slot, no OTA.** The image carries its own browser console, which
   is more than half of it, so two slots do not fit in 4 MB: the table is a
   factory slot and the store (`boards/MOYBYTE_C3_ZERO/partitions-moybyte-c3-zero.csv`).
   The updater reports itself unavailable (`moy_ota.OtaUpdater.available()`),
   so the console's update screen shows no update to offer, and a new image
   goes on by cable. The store is the space after the slot.
-- **No SSH server.** Running, it held its stack, Dropbear's state and the host
-  key in the same heap, and the web host then had none left for a browser's
-  parallel requests (`board.toml`'s `moy_ssh` denial). The web terminal is the
-  shell's face here; `passwd` still sets the password a browser pairs with.
+- **SSH, without SFTP.** The server and the shell's face run in the same
+  internal heap, so a build without PSRAM sizes them to what a session was
+  measured to use there: the server's and the face's stacks and the session's
+  arena (`native/moy_ssh/moy_ssh_run.c`, `native/moy_tty/moy_tty_sys.c`,
+  `native/moy_tty/moy_tty_sh.c`). The face task is made when the server
+  starts, beside the other long-lived blocks, because made at a session's
+  start it stayed in the middle of the free heap and cut the block an upload
+  needs. The `sftp` subsystem is refused (`native/moy_ssh/moy_ssh.c`): its
+  buffers do not fit beside a session, and a client reports a refusal where
+  running out would cut a transfer short. While a session runs, an upload
+  that finds no room is answered 503 and the page sends it again.
 - **Single core, RISC-V.** Every task the native tier starts runs on core 0
   (`native/moy_kernel/moy_tasks.h`).
 - **One I2C controller.** The kernel's device bus takes port 0, so this board
