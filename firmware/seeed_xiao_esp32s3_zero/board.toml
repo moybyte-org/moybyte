@@ -299,14 +299,15 @@ image = [
 # WEDGED the CDC. Every flash needed a human holding BOOT. mpconfigboard.h
 # carries that evidence; the BOOT hold remains the recovery, not the routine.
 #
-# `after` stays watchdog_reset, which is PROVEN on this board, rather than
-# following the peripheral to the console boards' hard_reset. hard_reset did
-# nothing here on CDC -- a cable flash left the board sitting in the loader,
-# reading exactly like an image that did not take -- and one change at a time is
-# how that was found out.
+# No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)
+# boots the app and the USB device stays put, as on the C3. `watchdog_reset`
+# (this board's until 2026-11-17, from its CDC days, when hard_reset left it
+# in the loader) resets the whole chip, USB included: the host drops the
+# device and enumerates it again under a new ttyACM number while the board
+# boots, and a port opened in that window wedged the USB until a replug
+# (twice on 2026-11-17, the cable flash's add-on install opening it).
 image          = "dist/zero/moybyte_zero.bin"
 offset         = "0x0"
-after          = "watchdog_reset"
 baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"

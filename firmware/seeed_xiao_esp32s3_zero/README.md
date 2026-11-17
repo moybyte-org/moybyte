@@ -76,11 +76,9 @@ the slot the cable flash just wrote.
 same table to publish the asset the page serves. Both tables read the reset
 pair off this board's `[flash]` block, so the page asks for the default reset
 (esptool-js takes its USB-Serial/JTAG path off the `303a:1001` PID and drives
-this board into the loader exactly as it does the Guition) and asks for no
-reset afterwards, because the `watchdog_reset` that gets it out is not one
-of the line sequences the page plays (`site/build.py` `HARD_RESET_LINES`). So the browser's gesture is a replug when the
-write finishes, and holding BOOT while plugging in is the escape hatch on the
-card.
+this board into the loader exactly as it does the Guition) and the hard
+reset after it (`site/build.py` `HARD_RESET_LINES`), so nobody replugs the
+board; holding BOOT while plugging in is the escape hatch on the card.
 
 **A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
 `0x720000` (since 2026-11-07; `0x6A0000` from 2026-10-18, `0x620000` from
@@ -806,11 +804,13 @@ new image's host did not come up.
   nothing on the network and looks dead while being perfectly healthy. Follow
   any `mpremote` with `mpremote connect <port> reset`. This is how a
   "moybyte-zero.local refused to connect" was self-inflicted twice.
-- **Getting OUT of the ROM loader needs no replug** (2026-08-25):
-  `esptool --after watchdog_reset` exits download mode cleanly on this board.
-  The old note ("only a physical replug exits ROM mode") predates it — that
-  was `hard_reset`, which indeed does nothing here. Getting IN is esptool's
-  default reset, since the USB-Serial/JTAG promotion; `machine.bootloader()` is
+- **Getting OUT of the ROM loader is esptool's `hard_reset`** (2026-11-17),
+  an RTS pulse through the USB-Serial/JTAG that boots the app with the USB
+  device kept. `--after watchdog_reset`, this board's exit since its CDC days
+  (when `hard_reset` did nothing), resets the USB too: the host enumerates
+  the board again under a new ttyACM number while it boots, and a port
+  opened in that window wedged the USB until a replug, twice on 2026-11-17.
+  Getting IN is esptool's default reset, since the USB-Serial/JTAG promotion; `machine.bootloader()` is
   an endless loop on this chip and is never the way. The BOOT button is the last
   resort: hold it while powering on.
 - **The console dual-OTA partition table does not fit this 8MB flash**, and the

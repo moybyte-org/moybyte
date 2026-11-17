@@ -38,12 +38,9 @@ until a panic writes one.
 leaves the ROM loader is a hardware fact and not a preference. The T-Deck
 declares `before = usb_reset` (measured: default_reset write-times-out against
 a wedged USB-Serial/JTAG node, usb_reset connects); the P4's CH343 is happy
-with the esptool default. `after` defaults to hard_reset, which is what the
-console boards want -- and the Zero declares `watchdog_reset`, the verb that
-is PROVEN on it: hard_reset left it sitting in the loader when it ran as CDC,
-which reads exactly like an image that did not take, and the verb stayed when
-the board moved to USB-Serial/JTAG rather than changing two things at once.
-That fact lives in the board's own toml, which this file reads.
+with the esptool default. `after` defaults to hard_reset, which every board
+takes: an RTS pulse that boots the app and keeps a USB-Serial/JTAG board's
+USB device, where a watchdog reset re-enumerates it while it boots.
 
 `stub` picks the flasher stub esptool uploads, and every esptool run of a
 flash takes it as `ESPTOOL_STUB_VERSION` (read from 4.12, the variable behind
@@ -311,10 +308,11 @@ def flash(board_dir, port, verify=True):
 
 def _let_boot(port):
     """Leave a board esptool just reset alone for FLASHED_BOOT_S: opened and
-    closed while it boots, a Zero's USB-Serial/JTAG wedged twice on
-    2026-11-17 (no web host, every open of the port hanging, only a power
-    cycle bringing it back), where a board that had finished booting took a
-    whole provisioning over the same port."""
+    closed while it boots out of a watchdog reset, which enumerates its USB
+    again, a Zero's USB-Serial/JTAG wedged twice on 2026-11-17 (no web host,
+    every open of the port hanging, only a power cycle bringing it back),
+    where a board that had finished booting took a whole provisioning over
+    the same port."""
     import time
     print("   leaving %s to boot for %d s" % (port, FLASHED_BOOT_S))
     time.sleep(FLASHED_BOOT_S)

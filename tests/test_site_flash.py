@@ -373,27 +373,18 @@ def test_the_reset_is_the_boards_own_declaration():
     assert p4["rest"] == {"dtr": False, "rts": False}
 
 
-def test_the_zero_is_reset_into_the_loader_but_not_out_of_it():
-    """The Zero (#41) shares the Guition's chip and, since 2026-08-30, its USB
-    peripheral: USB-Serial/JTAG at 303a:1001, which is the PID esptool-js takes
-    its JTAG reset path off -- so the page drives this board into the loader the
-    same way. Coming back out is the half it cannot do: the board declares
-    `after = watchdog_reset` (proven here; `hard_reset` is an RTS wiggle with no
-    circuit behind it), and esptool-js implements no such sequence, so the card
-    asks for a replug instead."""
+def test_the_zero_is_reset_into_the_loader_and_out_of_it():
+    """The Zero (#41) shares the Guition's chip and its USB peripheral:
+    USB-Serial/JTAG at 303a:1001, which is the PID esptool-js takes its JTAG
+    reset path off -- so the page drives this board into the loader and back
+    out the same way, and nobody replugs it."""
     zero = {b["id"]: b for b in build.BOARDS}["xiao_zero"]
     assert zero["chip"] == "ESP32-S3"
-    assert zero["reset"] == "default_reset"   # in: the peripheral does it
-    assert zero["after"] is None              # out: the human replugs
-    assert zero["after_lines"] is None
-    assert "plug" in zero["done"]
+    assert zero["reset"] == "default_reset"
+    assert zero["after"] == "hard_reset"
+    assert zero["after_lines"] == build.HARD_RESET_LINES[True]
+    assert "plug it back" not in zero["done"] + zero["prep"]
     assert zero["manual"] and "BOOT" in zero["manual"]
-    # The board's own file is the authority for both halves; if it stops saying
-    # so, the values above are the ones to revisit.
-    toml = open(os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero",
-                             "board.toml"), encoding="utf-8").read()
-    assert '303a:1001' in toml
-    assert "watchdog_reset" in toml
     # It IS the cart store -- no card slot -- so its install note cannot
     # borrow a console's "an SD card is not touched", and it updates from its
     # browser page.

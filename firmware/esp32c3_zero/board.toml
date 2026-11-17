@@ -145,10 +145,10 @@ install = []
 
 [flash]
 # No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)
-# boots the C3's app and its USB device stays put. The XIAO's watchdog_reset
-# resets the whole chip, USB included, under esptool's still-open handle, so
-# the host gives the board a new ttyACM number (seen 2026-11-13: ttyACM0 came
-# back as ttyACM1), which a fixed device passthrough cannot follow.
+# boots the C3's app and its USB device stays put. A watchdog_reset resets the
+# whole chip, USB included, under esptool's still-open handle, so the host
+# gives the board a new ttyACM number (seen 2026-11-13: ttyACM0 came back as
+# ttyACM1), which a fixed device passthrough cannot follow.
 image  = "dist/c3_zero/moybyte_c3_zero.bin"
 offset = "0x0"
 baud   = 460800

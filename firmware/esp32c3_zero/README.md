@@ -77,9 +77,6 @@ file is what the chip changes.
   the XIAO's (`[serial]` in `board.toml`): both LOW is a chip reset under the
   open handle. esptool's default reset reaches the ROM loader and its default
   `hard_reset` (an RTS pulse) leaves it into the app; nothing has to be held.
-  Unlike the XIAO it declares no `watchdog_reset`: that resets the chip's USB
-  too, under esptool's open handle, and the board comes back under a new
-  ttyACM number (`[flash]` in `board.toml`).
 - **Recovery:** hold BOOT (GPIO9) while plugging in, then flash. Ctrl-C on
   the serial port stops the store host at the REPL and Ctrl-D starts it again.
   A main.py written to the store's root does not replace the frozen one:

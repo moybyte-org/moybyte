@@ -429,9 +429,10 @@ stages 1–6 all absent. Its README is the authority; what bites:
   other one says why not (`# DECLINED <fn>`). Do not give it the
   #169 retune without the 120 MHz profile; the spike suite refuses the pairing.
 - USB-Serial/JTAG since 2026-08-30: opens like the console S3s, reaches the ROM
-  loader through esptool's default reset and leaves it with `--after
-  watchdog_reset` (never `hard_reset`; `machine.bootloader()` loops forever on
-  this chip). Holding BOOT while plugging in is the recovery. It has no dev
+  loader through esptool's default reset and leaves it with `hard_reset`
+  (never `watchdog_reset`: it re-enumerates the USB while the board boots,
+  and a port opened then wedged it until a replug; `machine.bootloader()`
+  loops forever on this chip). Holding BOOT while plugging in is the recovery. It has no dev
   channel, so `tools/board.py` knows it by the USB serial in its board.toml.
 - A pushed `.py` SHADOWS the frozen one (`/` is searched before `.frozen`), so
   its module push is opt-in and undoable, and the board announces it at boot.

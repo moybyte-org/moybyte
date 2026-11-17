@@ -688,20 +688,12 @@ def test_flash_facts_are_declared_and_shaped(board):
     assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
 
 
-def test_the_way_out_of_the_loader_is_declared_where_it_is_not_hard_reset():
-    """`after` is optional and means "hard_reset", which is what the three
-    console boards want. The Zero must DECLARE watchdog_reset, because
-    hard_reset does nothing on its TinyUSB CDC (its README's hardware facts) --
-    and a board left sitting in the loader after a flash reads exactly like an
-    image that did not take.
-
-    This is pinned because the fact was already written in that board's own
-    toml prose while board_flash.py hardcoded the opposite, which is the shape
-    of bug this repo keeps turning declarations into data to avoid."""
-    assert board_config.load(ZERO)["flash"].get("after") == "watchdog_reset"
-    # The C3 Zero takes the default: an RTS pulse boots its app and keeps its
-    # USB device, where a watchdog reset re-enumerates it (its board.toml).
-    for name in ("tdeck", "p4", "guition-s3", "guition-p4", "c3-zero"):
+def test_every_board_leaves_the_loader_by_hard_reset():
+    """`after` is optional and means "hard_reset": an RTS pulse that boots the
+    app and, on a USB-Serial/JTAG board, keeps the USB device. A watchdog
+    reset re-enumerates the device while the board boots, and a port opened
+    in that window wedged the XIAO's USB until a replug (its board.toml)."""
+    for name in BOARDS:
         fl = board_config.load(BOARDS[name])["flash"]
         assert fl.get("after", "hard_reset") == "hard_reset", name
 

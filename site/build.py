@@ -302,13 +302,9 @@ BOARDS = [
         # browser console pairs with, so whoever flashes it is holding a board
         # there is nothing to look at afterwards.
         #
-        # Derives to (default_reset, None). It took the USB-Serial/JTAG
-        # promotion on 2026-08-30 and enumerates 303a:1001, which is the PID
-        # esptool-js picks its JTAG reset path off, so the page drives it into
-        # the loader exactly as it does the Guition. Coming back out is the half
-        # it cannot do: this board declares `after = watchdog_reset` (proven
-        # here; `hard_reset` is an RTS wiggle with no circuit behind it), and
-        # the page performs no such sequence -- so the card asks for a replug.
+        # Derives to (default_reset, hard_reset). It enumerates 303a:1001, the
+        # PID esptool-js picks its JTAG reset path off, so the page drives it
+        # into the loader and back out exactly as it does the Guition.
         "id": "xiao_zero",
         "label": "Seeed XIAO ESP32-S3 (Zero)",
         "chip": "ESP32-S3",
@@ -318,10 +314,9 @@ BOARDS = [
         "manual": "Skip the reset &mdash; I have put the board in download mode "
                   "myself (hold <b>BOOT</b> while you plug it in). Try this if "
                   "connecting fails.",
-        "done": "Written. Unplug the board and plug it back in to start it.",
-        "prep": "This board has no screen. It resets into the loader on its "
-                "own, but when the write finishes <b>unplug it and plug it back "
-                "in</b> to start it.",
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "This board has no screen. Plug it into its USB-C port; it "
+                "resets into the loader and back on its own.",
         "install": "Installs Moybyte fresh. Erases the board&rsquo;s internal "
                    "storage, its carts and saves with it. To update, use the "
                    "board&rsquo;s update in its browser page.",
@@ -366,7 +361,7 @@ ESPTOOL_JS_BEFORE = ("default_reset", "usb_reset", "no_reset")
 # to esptool-js because its 0.6.0 `after("hard_reset")` only ever RELEASES RTS
 # -- it prints "Hard resetting via RTS pin..." and pulses nothing, which left a
 # Waveshare P4 in the flasher stub with a dark screen (2026-11-11). A declared
-# exit that is not here (the Zero's `watchdog_reset`) is the human's.
+# exit that is not here (esptool's `watchdog_reset`) is the human's.
 USB_SERIAL_JTAG = "303a:1001"
 HARD_RESET_LINES = {False: "D0|R1|W100|R0", True: "D0|R1|W200|R0|W200"}
 
