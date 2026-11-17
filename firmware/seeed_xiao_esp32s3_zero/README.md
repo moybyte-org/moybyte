@@ -195,7 +195,8 @@ non-zero, with what the board said. The official carts are
 official cart the store holds at an older version that the image does not
 carry (the image's own are its seed's), the kid's saves and config kept; the
 store's reserve (`zero_host.SEED_RESERVE`) stays free, and a cart it does not
-fit is named.
+fit is named. Every `mpremote` call it makes has a deadline, and a board that
+stops answering is named with the cure (unplug and replug it).
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.

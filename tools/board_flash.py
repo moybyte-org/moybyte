@@ -75,6 +75,11 @@ in by one rename, and the store's reserve (zero_host.SEED_RESERVE) is kept.
 The XIAO brings them to a new release by itself after an update
 (runtime/carts/web_addon.py); the C3, with no OTA, by this.
 
+EVERY MPREMOTE CALL HAS A DEADLINE (`_mpremote`): a wedged USB-Serial/JTAG
+answers an open with nothing, and on 2026-11-17 one held a flash for 45
+minutes. The REPL probe gets PROBE_S, a command EXEC_S, a copy longer by
+its size; running out is `NoAnswer`, which names the port and the cure.
+
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
 current board (both of this session's T-Deck flashes ran plain esptool); it
@@ -301,6 +306,21 @@ def flash(board_dir, port, verify=True):
 
 
 ADDON_BOOT_S = 30          # how long a flashed board has to answer its REPL
+# Every mpremote call has a deadline: a wedged USB-Serial/JTAG answers an open
+# with nothing, never an error, and an mpremote with no deadline waits on it
+# for good. The REPL probe is short; a command is given EXEC_S; a copy EXEC_S
+# and a second for every COPY_RATE bytes it carries.
+PROBE_S = 15
+EXEC_S = 120
+COPY_RATE = 8 * 1024
+
+
+class NoAnswer(Exception):
+    """An mpremote call that outlived its deadline."""
+
+    def __init__(self, port, seconds):
+        Exception.__init__(self, "no answer from %s after %d s: unplug and replug "
+                                 "the board" % (port, seconds))
 
 
 def addon_folder(board_dir, out):
@@ -317,15 +337,30 @@ def addon_folder(board_dir, out):
     return os.path.join(out, web_pack.cart_id(page[1]) + ".moy")
 
 
-def _mpremote(port, *args):
+def _mpremote(port, *args, timeout=EXEC_S):
+    """mpremote's `args` on `port`, given `timeout` seconds; NoAnswer past it."""
     cmd = [sys.executable, "-m", "mpremote", "connect", port] + list(args)
-    return subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise NoAnswer(port, timeout)
+
+
+def _copy_s(path):
+    """The deadline of a copy of `path`, a file or a folder."""
+    n = 0
+    if os.path.isdir(path):
+        for base, _dirs, names in os.walk(path):
+            n += sum(os.path.getsize(os.path.join(base, f)) for f in names)
+    else:
+        n = os.path.getsize(path)
+    return EXEC_S + n // COPY_RATE
 
 
 def _await_repl(board_dir, port, what):
     import time
     end = time.monotonic() + ADDON_BOOT_S
-    while _mpremote(port, "exec", "pass").returncode != 0:
+    while _mpremote(port, "exec", "pass", timeout=PROBE_S).returncode != 0:
         if time.monotonic() > end:
             print("!! %s: no REPL on %s to install %s" % (board_dir, port, what))
             return False
@@ -333,6 +368,21 @@ def _await_repl(board_dir, port, what):
     return True
 
 
+def _answered(fn):
+    """`fn`, an install over a board's REPL, with an mpremote call that
+    outlived its deadline (NoAnswer) its named failure: 1."""
+    def run(board_dir, port, *a, **kw):
+        try:
+            return fn(board_dir, port, *a, **kw)
+        except NoAnswer as exc:
+            print("!! %s: %s" % (board_dir, exc))
+            return 1
+    run.__name__ = fn.__name__
+    run.__doc__ = fn.__doc__
+    return run
+
+
+@_answered
 def install_addon(board_dir, port, reset=True):
     """The add-on that fits the built image into `[flash] addon`, the carts
     folder, over the board's REPL (mpremote's Ctrl-C stops what the board
@@ -369,7 +419,7 @@ def install_addon(board_dir, port, reset=True):
                  ("exec", "import os\nassert os.stat(%r)[6] == %d\nprint('MOY' + 'OK')"
                   % ("%s/%s/moybyte_web.pack" % (root, name), size)))
         for step in steps:
-            r = _mpremote(port, *step)
+            r = _mpremote(port, *step, timeout=_copy_s(folder) if step[0] == "cp" else EXEC_S)
             if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
                 print("!! the browser console add-on did not install (%s):\n%s%s"
                       % (step[0], r.stdout, r.stderr))
@@ -426,6 +476,7 @@ def _reserve():
     return zero_host.SEED_RESERVE
 
 
+@_answered
 def install_carts(board_dir, port, reset=True, seeds=SEED_DIR):
     """The official carts this tree publishes into `[flash] addon`, the carts
     folder, over the board's REPL (carts_plan: a new store's `[roster]
@@ -499,7 +550,8 @@ def install_carts(board_dir, port, reset=True, seeds=SEED_DIR):
                      ("exec", swap % (stage + "/" + folder, root + "/" + folder, KEPT,
                                       os.path.getsize(os.path.join(clean, "manifest.json")))))
             for step in steps:
-                r = _mpremote(port, *step)
+                r = _mpremote(port, *step,
+                              timeout=_copy_s(clean) if step[0] == "cp" else EXEC_S)
                 if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
                     print("!! %s did not install (%s):\n%s%s"
                           % (folder, step[0], r.stdout, r.stderr))

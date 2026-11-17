@@ -11,6 +11,7 @@ esptool is stubbed to a recorder, so every assertion is on the sequence of
 commands the tool would have run, not on a return value.
 """
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -538,3 +539,78 @@ def test_a_failed_write_installs_no_add_on(monkeypatch, tmp_path):
 def test_the_console_boards_install_theirs_through_the_dev_channel():
     for board_dir in (TDECK, P4, GUITION, GUITION_P4):
         assert "addon" not in board_config.load(board_dir)["flash"], board_dir
+
+
+# -- the cable install's deadlines ------------------------------------------------
+
+
+class _Mpremote:
+    """Stands in for `subprocess` inside board_flash's REPL installs: records
+    each mpremote argv and its deadline, and answers `answer(argv)` -- a
+    CompletedProcess, or None for a call that never returns."""
+
+    TimeoutExpired = subprocess.TimeoutExpired
+
+    def __init__(self, answer):
+        self.calls = []
+        self._answer = answer
+
+    def run(self, cmd, capture_output=False, text=False, timeout=None):
+        args = cmd[cmd.index("connect") + 2:]
+        self.calls.append((args, timeout))
+        got = self._answer(args)
+        if got is None:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        return got
+
+
+def _done(stdout=""):
+    return subprocess.CompletedProcess([], 0, stdout, "")
+
+
+def _addon_pack(monkeypatch, tmp_path, size):
+    folder = tmp_path / "web_console_0123456789ab.moy"
+    folder.mkdir()
+    (folder / "moybyte_web.pack").write_bytes(b"\0" * size)
+    monkeypatch.setattr(board_flash, "addon_folder", lambda _d, _out: str(folder))
+
+
+@pytest.mark.parametrize("verb", ["install_addon", "install_carts"])
+def test_a_wedged_port_is_a_named_failure_not_a_hang(monkeypatch, tmp_path, capsys, verb):
+    """2026-11-17: an open of a wedged USB-Serial/JTAG never returned and held
+    a cable flash for 45 minutes. The REPL probe has a short deadline, and
+    running out of it names the port and the cure."""
+    _addon_pack(monkeypatch, tmp_path, 1024)
+    fake = _Mpremote(lambda _args: None)
+    monkeypatch.setattr(board_flash, "subprocess", fake)
+    assert getattr(board_flash, verb)(str(C3_ZERO), "/dev/fake") == 1
+    assert fake.calls == [(["exec", "pass"], board_flash.PROBE_S)]
+    out = capsys.readouterr().out
+    assert "no answer from /dev/fake after %d s: unplug and replug the board" \
+        % board_flash.PROBE_S in out
+
+
+def test_every_call_of_the_add_on_s_install_has_a_deadline_the_copy_a_long_one(
+        monkeypatch, tmp_path, capsys):
+    size = 1900 * 1024
+    _addon_pack(monkeypatch, tmp_path, size)
+
+    def answer(args):
+        return _done("MOYOK" if args[0] == "exec" and "assert" in args[1] else "")
+    fake = _Mpremote(answer)
+    monkeypatch.setattr(board_flash, "subprocess", fake)
+    assert board_flash.install_addon(str(C3_ZERO), "/dev/fake") == 0
+    verbs = [(a[0], t) for a, t in fake.calls]
+    assert verbs[0] == ("exec", board_flash.PROBE_S)
+    copy = [t for v, t in verbs if v == "cp"]
+    assert copy == [board_flash.EXEC_S + size // board_flash.COPY_RATE]
+    assert all(t for _v, t in verbs), "every call has a deadline"
+
+
+def test_a_copy_that_stops_answering_fails_by_name(monkeypatch, tmp_path, capsys):
+    _addon_pack(monkeypatch, tmp_path, 4096)
+    fake = _Mpremote(lambda args: None if args[0] == "cp" else _done())
+    monkeypatch.setattr(board_flash, "subprocess", fake)
+    assert board_flash.install_addon(str(C3_ZERO), "/dev/fake") == 1
+    assert "no answer from /dev/fake after %d s" % board_flash.EXEC_S \
+        in capsys.readouterr().out

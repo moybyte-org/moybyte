@@ -418,7 +418,9 @@ stages 1–6 all absent. Its README is the authority; what bites:
   board is its store's one writer). Its README says which carts each Zero
   carries and how a cable flash, provisioning and an update bring the rest.
 - With no browser console add-on in its store a Zero fetches the one that
-  fits from its release (`zero_host.make_addon`, `tend_addon`).
+  fits from its release (`zero_host.make_addon`, `tend_addon`). The cable
+  install (`tools/board_flash.py`) gives each `mpremote` call a deadline,
+  because a wedged USB-Serial/JTAG never answers an open.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the
