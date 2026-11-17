@@ -3,7 +3,7 @@
 Our C decides what it is built for, reads the clock, makes a lock, allocates,
 starts a task and names an optional symbol through one owner each:
 
-  native/moy_kernel/moy_platform.[ch]  the board probe, the monotonic clock, the mutex
+  native/moy_kernel/moy_platform.[ch]  the board probe and what it has, the clock, the mutex
   native/moy_kernel/moy_kmem.[ch]   every allocation, its placement in its flags
   native/moy_kernel/moy_tasks.[ch]  every task, one table and one spawn
   the owning module's header        an optional symbol's declaration; the
@@ -221,3 +221,44 @@ def test_an_optional_symbol_is_declared_by_its_owner():
                 if own != st:
                     bad.append("%s: %r is not %s's declaration (%r)" % (rel, st, header, own))
     assert not bad, "\n".join(bad)
+
+
+INCLUDES = {os.path.basename(rel): rel for rel in _ours()}
+
+
+def _brings_platform(rel, seen):
+    """Whether `rel` includes moy_platform.h, itself or through a header of ours."""
+    for h in re.findall(r'^[ \t]*#include "([\w.]+)"', _code(rel), re.M):
+        if h == "moy_platform.h":
+            return True
+        inc = INCLUDES.get(h)
+        if inc is not None and inc not in seen:
+            seen.add(inc)
+            if _brings_platform(inc, seen):
+                return True
+    return False
+
+
+def test_a_file_that_asks_for_psram_has_the_answer():
+    """MOY_HAS_PSRAM is moy_platform.h's, and it is defined only where it holds:
+    a file that tests it without that header reads it unset and gives a PSRAM
+    board the no-PSRAM sizes and placements without a word. Each file that
+    tests it includes moy_platform.h, itself or through a header of ours,
+    before its first test."""
+    bad = []
+    for rel in _ours():
+        if rel == "moy_kernel/moy_platform.h":
+            continue
+        code = _code(rel)
+        m = re.search(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b[^\n]*\bMOY_HAS_PSRAM\b", code, re.M)
+        if m is None:
+            continue
+        head = code[:m.start()]
+        includes = re.findall(r'^[ \t]*#include "([\w.]+)"', head, re.M)
+        if "moy_platform.h" in includes:
+            continue
+        if not any(INCLUDES.get(h) and (h == "moy_platform.h"
+                                        or _brings_platform(INCLUDES[h], {INCLUDES[h]}))
+                   for h in includes):
+            bad.append(rel)
+    assert not bad, "tests MOY_HAS_PSRAM without moy_platform.h: %s" % bad
