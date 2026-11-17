@@ -1073,8 +1073,8 @@ moybyte_native_config() {
 # names code it no longer has (`undefined reference to moy_kernel_module`).
 # $1 is the build dir: when the native configuration is not the one it was last
 # built with, its genhdr starts afresh, and so does frozen_content.c, which
-# cites the qstrs the C provided (a denied module's own name among them:
-# `'MP_QSTR_moy_ssh' undeclared` once the C3 Zero denied it). The record is written here, before the
+# cites the qstrs the C provided (a newly denied module's own name among them:
+# `'MP_QSTR_<module>' undeclared`). The record is written here, before the
 # build, so a build that fails half-way still leaves genhdr and the record
 # naming the same configuration. A build dir with no record has none to trust.
 # Reads BUILD_PYTHON SCRIPT_DIR.

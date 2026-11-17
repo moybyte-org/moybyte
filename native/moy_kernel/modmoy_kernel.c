@@ -263,7 +263,8 @@ static mp_obj_t mod_kpool(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_kpool_obj, mod_kpool);
 
 static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_kpool), MP_ROM_PTR(&mod_kpool_obj) },    { MP_ROM_QSTR(MP_QSTR_time_imports), MP_ROM_PTR(&mod_time_imports_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kpool), MP_ROM_PTR(&mod_kpool_obj) },
+    { MP_ROM_QSTR(MP_QSTR_time_imports), MP_ROM_PTR(&mod_time_imports_obj) },
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_kernel) },
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },
