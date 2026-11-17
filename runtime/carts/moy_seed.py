@@ -686,9 +686,13 @@ def stamp_board(root, me):
 # folder a line, so the seed (moy_catalogue.seed) never writes it again, a
 # newer version's replacement included. Installing it from Get Carts drops its
 # line (pkg.landed), and from then on the seed keeps it current as it does
-# every built-in. The record is a sidecar whose absence means nothing was
-# removed, so a store from before it reads as it did and takes no format
-# step; a firmware that predates it seeds the cart back, which loses nothing.
+# every built-in. The record is native/moy_store/moy_removed.c's on every
+# tier, which the C shell's `pkg remove` and a page's delete over the sync
+# wire write too; its CORE is moy_core.h, generated from this tuple
+# (tools/gen_core_carts.py). The record is a sidecar whose absence means
+# nothing was removed, so a store from before it reads as it did and takes no
+# format step; a firmware that predates it seeds the cart back, which loses
+# nothing.
 CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
         "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
 REMOVED_NAME = "system/removed"
@@ -712,43 +716,18 @@ def removable(name):
 
 def load_removed(root=CARTS_DIR):
     """The folders of the built-ins removed from the store at `root`."""
-    try:
-        text = _read(_sibling_path(root, REMOVED_NAME))
-    except (OSError, ValueError):
-        return []
-    out = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if line and removable(line) and line not in out:
-            out.append(line)
-    return out
-
-
-def _save_removed(root, folders):
-    _mkdir(_sibling_path(root, "system"))
-    _write_atomic(_sibling_path(root, REMOVED_NAME),
-                  "".join(f + "\n" for f in folders))
+    return _store.removed_load(root).split("\n")[:-1]
 
 
 def note_removed(root, folder):
     """Record that the built-in `folder` was removed: the seed writes it no
     more. A core cart, or a folder outside the built-ins, records nothing."""
-    if not removable(folder):
-        return False
-    had = load_removed(root)
-    if folder in had:
-        return False
-    _save_removed(root, had + [folder])
-    return True
+    return _store.removed_note(root, folder)
 
 
 def unremove(root, folders):
     """The built-ins `folders` taken off the removal record: those it held."""
-    had = load_removed(root)
-    gone = [f for f in had if f in folders]
-    if gone:
-        _save_removed(root, [f for f in had if f not in gone])
-    return gone
+    return [f for f in folders if _store.removed_drop(root, f)]
 
 
 def unremoved(seed, root):

@@ -565,7 +565,11 @@ a keeper before anything is deleted), the folder's rename out of the carts
 folder and delete, and the cart's written files. `cart_index`'s
 `load_record`, `find_installed` and `remove_steps` call it on every tier, and
 with the VM stopped the C shell's `pkg list` and `pkg remove` serve it, the
-removal forgetting the cart's consent through the settings rows.
+removal forgetting the cart's consent through the settings rows. The removal
+record of the optional built-ins (`system/removed`) is the same store's
+(`native/moy_store/moy_removed.h`): `pkg`'s and Get Carts' removal, the C
+shell's `pkg remove` and a page's cart delete over the sync wire all write
+it, and its core set is generated from `moy_seed.CORE`.
 
 **An install's landing and a removal are stepped, a store op a frame**
 (2026-11-07), where one frame used to hold them whole (diag's HITCH lines

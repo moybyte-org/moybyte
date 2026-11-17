@@ -53,6 +53,7 @@
 #include "moy_pack.h"
 #include "moy_seed.h"
 #include "moy_shelf.h"
+#include "moy_removed.h"
 
 // -- the allocator -------------------------------------------------------------
 //
@@ -1407,6 +1408,57 @@ static mp_obj_t mod_shelf_find(mp_obj_t root, mp_obj_t ident) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_find_obj, mod_shelf_find);
 
+// -- the removal record (moy_removed.h) ------------------------------------------------
+
+// removed_load(root) -> the record's folders, one a line, each ending in "\n".
+static mp_obj_t mod_removed_load(mp_obj_t root) {
+    const char *r = path_arg(root);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_load(r, &b);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_removed_load_obj, mod_removed_load);
+
+// removed_note(root, folder) -> whether `folder` was recorded now.
+static mp_obj_t mod_removed_note(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_note(r, f);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_false;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_removed_note_obj, mod_removed_note);
+
+// removed_drop(root, folder) -> whether the record held `folder`.
+static mp_obj_t mod_removed_drop(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_drop(r, f);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_false;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_removed_drop_obj, mod_removed_drop);
+
 // canon(text): what json.dumps(json.loads(text)) writes, the C's way.
 static mp_obj_t mod_canon(mp_obj_t text) {
     size_t n;
@@ -1821,6 +1873,9 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_shelf_take), MP_ROM_PTR(&mod_shelf_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_written), MP_ROM_PTR(&mod_shelf_written_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_find), MP_ROM_PTR(&mod_shelf_find_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_load), MP_ROM_PTR(&mod_removed_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_note), MP_ROM_PTR(&mod_removed_note_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_drop), MP_ROM_PTR(&mod_removed_drop_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_files), MP_ROM_PTR(&mod_copy_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_canon), MP_ROM_PTR(&mod_canon_obj) },
     { MP_ROM_QSTR(MP_QSTR_seed), MP_ROM_PTR(&mod_seed_obj) },

@@ -12,6 +12,10 @@
 // cannot be written costs a history entry, never the write. On the apps root
 // a file is `<id>/<key>` of one app's flat folder and lands as bytes alone
 // (moy_net.h's moy_sync_store_t), with no `.bak` left beside it.
+// A cart delete (`dc`) of a built-in is the console's own removal: a core
+// cart is refused, an optional one's removal recorded before it goes, and
+// the first file to land in a cart folder drops the folder's line
+// (native/moy_store/moy_removed.h).
 
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +26,7 @@
 #include "moy_journal.h"
 #include "moy_json.h"
 #include "moy_net.h"
+#include "moy_removed.h"
 #include "moy_vol.h"
 
 // What a builder here grows in: the store's call scratch.
@@ -45,6 +50,7 @@ typedef struct {
     char tree[PATH_CAP];            // rmtree's one path, grown and cut in place
     char full[PATH_CAP];            // the op's file
     char a[PATH_CAP], b[PATH_CAP];  // scratch paths: never on the VM's stack
+    int fresh;                      // the op landed the first file of a cart folder
 } op_t;
 
 static const char *const SHELF[] = {"manifest.json", "sheet.json", "cover.png"};
@@ -384,6 +390,7 @@ static int in_kinds(const char *kinds, const char *seg, size_t n) {
 static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
                      char *out) {
     *shelf = 0;
+    o->fresh = 0;
     if (moy_json_kind(op, op_end) != MOY_JSON_OBJ) {
         why(out, "not an op");
         return 1;
@@ -437,6 +444,19 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
             why(out, "bad dc target");
             return 1;
         }
+        if (o->root == MOY_SYNC_CARTS) {
+            // A built-in goes as the console's own removal does: a core cart
+            // stays, an optional one is recorded first (moy_removed.h).
+            if (moy_removed_core(o->rel)) {
+                why(out, "a core cart");
+                return 1;
+            }
+            int rc = moy_removed_note(o->dir, o->rel);
+            if (rc != 0 && rc != MOY_FS_NONE) {
+                oserr(out, rc);
+                return 1;
+            }
+        }
         memcpy(o->tree, full, strlen(full) + 1u);
         rmtree(o, strlen(full), 0);
         *shelf = o->root == MOY_SYNC_CARTS;
@@ -481,6 +501,7 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
         }
         journal(o, NULL, 0);
         *shelf = shelf_dirty(o, new_item);
+        o->fresh = new_item;
         return 0;
     }
     int part = part_of(op, op_end);
@@ -524,6 +545,7 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
             return 1;
         }
         *shelf = part < 0 && shelf_dirty(o, new_item);
+        o->fresh = new_item;
         return 0;
     }
     size_t tn = 0, tcap = 0;
@@ -555,6 +577,7 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
         return 1;
     }
     *shelf = part < 0 && shelf_dirty(o, new_item);
+    o->fresh = new_item;
     return 0;
 }
 
@@ -576,6 +599,17 @@ static int shelf_note(const moy_sync_store_t *s, const char *name, size_t n) {
     p[n] = '\0';
     p[n + 1u] = '\0';
     return 1;
+}
+
+// A cart folder the op began: an optional built-in's removal record dropped,
+// as an install drops it (moy_removed.h).
+static void landed(op_t *o) {
+    size_t n = o->seg_n[0];
+    memcpy(o->a, o->rel + o->seg[0], n);
+    o->a[n] = '\0';
+    if (moy_removed_removable(o->a)) {
+        moy_removed_drop(o->dir, o->a);
+    }
 }
 
 void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
@@ -608,6 +642,9 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
             res->refused++;
         } else {
             res->applied++;
+            if (o->fresh) {
+                landed(o);
+            }
             if (shelf) {
                 res->shelf |= 1;
                 if (s->shelf != NULL

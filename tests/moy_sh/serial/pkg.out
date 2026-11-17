@@ -66,4 +66,21 @@ SH end 1
 > sh pkg remove
 SH pkg: needs the console
 SH end 1
+> sh mkdir -p /sd/moybyte/carts/moybyte.sky_run.moy /sd/moybyte/carts/moybyte.files.moy
+SH end 0
+> sh printf '{"title": "Sky Run", "id": "moybyte.sky_run"}' > /sd/moybyte/carts/moybyte.sky_run.moy/manifest.json
+SH end 0
+> sh printf '{"title": "Files", "id": "moybyte.files"}' > /sd/moybyte/carts/moybyte.files.moy/manifest.json
+SH end 0
+> sh pkg remove moybyte.sky_run moybyte.files moybyte.gone
+SH moybyte.sky_run removed
+SH pkg: moybyte.files: a core cart, which a console keeps
+SH pkg: moybyte.gone: not installed by pkg
+SH end 1
+> sh cat /sd/moybyte/system/removed
+SH moybyte.sky_run.moy
+SH end 0
+> sh ls /sd/moybyte/carts
+SH mine.moy/  moybyte.files.moy/
+SH end 0
 [exit 0]

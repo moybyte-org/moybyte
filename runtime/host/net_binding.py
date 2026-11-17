@@ -63,7 +63,8 @@ _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_
             "moy_webhost.c", "moy_seal.h", "moy_webauth.h", "moy_webauth.c", "moy_seal_web.c",
             "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
-            "moy_journal.h", "moy_journal.c", "moy_store_host.c",
+            "moy_journal.h", "moy_journal.c", "moy_removed.h", "moy_removed.c", "moy_core.h",
+            "moy_store_host.c",
             "moy_web_blob.h", "moy_page.h", "moy_page.c")
 _LIB = [None]
 

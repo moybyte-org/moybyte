@@ -18,6 +18,7 @@
 #include "moy_settings.h"
 #include "moy_sh_board.h"
 #include "moy_shelf.h"
+#include "moy_removed.h"
 
 #define USAGE 2
 #define MOY_SH_STORE_ARGS 32     // the words `pkg` takes with no VM
@@ -312,9 +313,25 @@ static int forget_consent(moy_sh_t *s, const char *root, const char *aid) {
     return code;
 }
 
+// The folder of the optional built-in `ident` names (its id or its folder)
+// where the store holds it: 0, or MOY_FS_NONE (pkg.py's _official_here).
+static int official_here(const char *carts, const char *ident, char *folder, size_t cap) {
+    size_t n = strlen(ident);
+    int ext = n >= 4 && strcmp(ident + n - 4, ".moy") == 0;
+    int w = snprintf(folder, cap, "%s%s", ident, ext ? "" : ".moy");
+    if (w <= 0 || (size_t)w >= cap || !moy_removed_removable(folder)) {
+        return MOY_FS_NONE;
+    }
+    char cart[MOY_SH_STORE_PATH];
+    w = snprintf(cart, sizeof cart, "%s/%s", carts, folder);
+    return w > 0 && (size_t)w < sizeof cart && moy_fs_exists(cart) ? 0 : MOY_FS_NONE;
+}
+
 // pkg remove: pkg's Pkg.remove and removed() with no console -- the cart
-// found in the record, taken off the shelf through moy_shelf.h, its consent
-// forgotten. The console rescans at its next start.
+// found in the record, or an optional built-in in the store; its removal
+// recorded (moy_removed.h), the cart taken off the shelf through moy_shelf.h,
+// its consent forgotten. A core cart is not found. The console rescans at
+// its next start.
 static int pkg_remove(moy_sh_t *s, const char *root, int argc, char **argv) {
     char carts[MOY_SH_STORE_PATH], folder[MOY_SH_STORE_PATH], cart[MOY_SH_STORE_PATH];
     if (!carts_root(root, carts, sizeof carts)) {
@@ -326,7 +343,11 @@ static int pkg_remove(moy_sh_t *s, const char *root, int argc, char **argv) {
         const char *ident = argv[i];
         int rc = moy_shelf_find(carts, ident, folder, sizeof folder);
         if (rc == MOY_FS_NONE) {
-            sayf(s, 2, "pkg: %s: %s\n", ident, "not installed by pkg");
+            rc = official_here(carts, ident, folder, sizeof folder);
+        }
+        if (rc == MOY_FS_NONE) {
+            sayf(s, 2, "pkg: %s: %s\n", ident, moy_removed_core(ident)
+                 ? "a core cart, which a console keeps" : "not installed by pkg");
             code = 1;
             continue;
         }
@@ -334,6 +355,12 @@ static int pkg_remove(moy_sh_t *s, const char *root, int argc, char **argv) {
         int n = rc == 0 ? snprintf(cart, sizeof cart, "%s/%s", carts, folder) : -1;
         if (n > 0 && (size_t)n < sizeof cart) {
             moy_cat_entry(cart, app_id_of, NULL, &aid);
+        }
+        if (rc == 0 && moy_removed_removable(folder)) {
+            rc = moy_removed_note(carts, folder);
+            if (rc == MOY_FS_NONE) {
+                rc = 0;
+            }
         }
         moy_buf_t text = { NULL, 0 };
         if (rc == 0) {

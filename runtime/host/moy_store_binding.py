@@ -2,11 +2,12 @@
 `moy_store` the boards' modmoy_store.c registers, with the names CPython
 runs -- the crash-safe write and its readers (moy_fs.h), the catalogue and
 the whole-cart load (moy_cat.h, moy_load.h), the seed (moy_seed.h), the
-journal (moy_journal.h), a cart as it travels (moy_pack.h), the tree removal
-and the shelf (moy_shelf.h). The runtime package registers it under that name
-(runtime/__init__.py), so runtime/carts' store modules call the one C on
-every tier. An entry and a cart are the dicts modmoy_store.c builds, from
-the generated mirrors of the C's structs (runtime/host/moy_store_face.py).
+journal (moy_journal.h), a cart as it travels (moy_pack.h), the tree removal,
+the shelf (moy_shelf.h) and the removal record (moy_removed.h). The runtime
+package registers it under that name (runtime/__init__.py), so runtime/carts'
+store modules call the one C on every tier. An entry and a cart are the dicts
+modmoy_store.c builds, from the generated mirrors of the C's structs
+(runtime/host/moy_store_face.py).
 
 The rows the host leaves out are face.json's `absent`: the card and the
 internal volume, the store task and the meters, a VM's own.
@@ -72,6 +73,9 @@ _SIGS = (
     ("moy_shelf_written", [_P, _P, _P, _S], c.c_int),
     ("moy_shelf_remove", [_P, _P, _P, _S], c.c_int),
     ("moy_shelf_find", [_P, _P, _P, _S], c.c_int),
+    ("moy_removed_load", [_P, _PB], c.c_int),
+    ("moy_removed_note", [_P, _P], c.c_int),
+    ("moy_removed_drop", [_P, _P], c.c_int),
     ("moy_cat_scan", [_P, _CATFN, _NOTE, c.c_void_p], c.c_int),
     ("moy_cat_entry", [_P, _CATFN, _NOTE, c.c_void_p], c.c_int),
     ("moy_cat_load", [_P, _LOADFN, _NOTE, c.c_void_p], c.c_int),
@@ -477,6 +481,24 @@ def binding():
             return None
         _ok(rc)
         return out.value.decode()
+
+    def removed_load(root):
+        lib, buf = _lib(), _Buf()
+        return _text(lib, lib.moy_removed_load(_path(root), c.byref(buf)), buf)
+
+    def removed_note(root, folder):
+        rc = _lib().moy_removed_note(_path(root), folder.encode())
+        if rc == _NONE:
+            return False
+        _ok(rc)
+        return True
+
+    def removed_drop(root, folder):
+        rc = _lib().moy_removed_drop(_path(root), folder.encode())
+        if rc == _NONE:
+            return False
+        _ok(rc)
+        return True
 
     def catalogue(root):
         r = os.fspath(root)

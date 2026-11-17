@@ -55,6 +55,41 @@ def test_the_core_set_is_one_list_every_reader_shares():
     assert not moy_seed.removable("dm.moy"), "only a built-in is the seed's to keep away"
 
 
+def test_the_c_reads_the_core_set_from_its_one_source(tmp_path):
+    """The removal record is C (native/moy_store/moy_removed.c), whose core
+    set is moy_core.h, generated from moy_seed.CORE: the header is what the
+    generator writes, and the C records exactly the names Python calls
+    removable."""
+    import gen_core_carts
+    assert gen_core_carts.main(["--check"]) == 0, "run tools/gen_core_carts.py"
+    names = ["moybyte.x", "moybyte.", "moybyte", "moybyte.moy", "moybytes.x.moy",
+             "dm.moy", "kenny.jet", "x.moybyte.moy"]
+    for cid in _manifests():
+        names += [cid, cid + ".moy"]
+    for i, name in enumerate(names):
+        root = str(tmp_path / str(i) / "carts")
+        os.makedirs(root)
+        assert moy_carts.note_removed(root, name) == moy_seed.removable(name), name
+        assert moy_carts.load_removed(root) == ([name] if moy_seed.removable(name) else [])
+
+
+def test_the_record_reads_only_optional_built_ins_once_each(tmp_path):
+    root = str(tmp_path / "moybyte" / "carts")
+    os.makedirs(root)
+    rec = tmp_path / "moybyte" / "system" / "removed"
+    rec.parent.mkdir()
+    rec.write_text(" moybyte.sky_run.moy \r\nmoybyte.files.moy\ndm.moy\n\n"
+                   "moybyte.sky_run.moy\nmoybyte.hop_quest.moy")
+    assert moy_carts.load_removed(root) == ["moybyte.sky_run.moy", "moybyte.hop_quest.moy"]
+    assert not moy_carts.note_removed(root, "moybyte.hop_quest.moy")
+    assert moy_carts.note_removed(root, "moybyte.paint.moy")
+    assert rec.read_text() == ("moybyte.sky_run.moy\nmoybyte.hop_quest.moy\n"
+                               "moybyte.paint.moy\n"), "a write rewrites the record as read"
+    assert moy_carts.unremove(root, ["moybyte.hop_quest.moy", "dm.moy"]) == [
+        "moybyte.hop_quest.moy"]
+    assert rec.read_text() == "moybyte.sky_run.moy\nmoybyte.paint.moy\n"
+
+
 def test_the_core_set_holds_what_the_shell_opens_and_names():
     """Each core cart's reason, held to the code that gives it."""
     mans = _manifests()
@@ -277,6 +312,31 @@ def test_pkg_remove_takes_an_optional_built_in_and_keeps_a_core_one(tmp_path):
     assert moy_carts.load_removed(root) == ["moybyte.sky_run.moy"]
     assert _done(p.remove(["moybyte.files"])) == 1
     assert "core" in err[-1] and os.path.exists(root + "/moybyte.files.moy")
+
+
+def test_a_page_s_delete_over_the_sync_wire_is_the_console_s_removal(tmp_path):
+    """A board-served page deletes a cart with a `dc` op
+    (native/moy_net/moy_sync_apply.c): an optional built-in's removal is
+    recorded as pkg.removed records it, a core cart stays, and a cart folder
+    the wire brings back drops the line as an install does. The C shell's
+    `pkg remove` is tests/moy_sh/serial/pkg.sh's transcript."""
+    from runtime.moy_sync import apply_ops
+    root, seed, _shelf = _seeded(tmp_path)
+    sky = "moybyte.sky_run.moy"
+    applied, errors, _ = apply_ops(root, [{"p": sky, "dc": 1}])
+    assert (applied, errors) == (1, [])
+    assert not os.path.exists(root + "/" + sky)
+    assert moy_carts.load_removed(root) == [sky]
+    moy_catalogue.seed(seed, root, moy_catalogue.catalogue(root))
+    assert not os.path.exists(root + "/" + sky), "the next boot's seed keeps it away"
+    _, errors, _ = apply_ops(root, [{"p": "moybyte.files.moy", "dc": 1}])
+    assert [why for _i, why in errors] == ["a core cart"]
+    assert os.path.exists(root + "/moybyte.files.moy/manifest.json")
+    applied, errors, _ = apply_ops(root, [{"p": "dm.moy/main.py", "t": "x = 1"},
+                                          {"p": "dm.moy", "dc": 1}])
+    assert (applied, errors) == (2, []) and moy_carts.load_removed(root) == [sky]
+    applied, errors, _ = apply_ops(root, [{"p": sky + "/main.py", "t": "x = 1"}])
+    assert (applied, errors) == (1, []) and moy_carts.load_removed(root) == []
 
 
 def _done(g):
