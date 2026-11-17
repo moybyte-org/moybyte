@@ -79,6 +79,8 @@ EVERY MPREMOTE CALL HAS A DEADLINE (`_mpremote`): a wedged USB-Serial/JTAG
 answers an open with nothing, and on 2026-11-17 one held a flash for 45
 minutes. The REPL probe gets PROBE_S, a command EXEC_S, a copy longer by
 its size; running out is `NoAnswer`, which names the port and the cure.
+And nothing opens the port while a flashed board boots (`_let_boot`), then
+the probes come PROBE_GAP_S apart: opened while it booted, a Zero wedged.
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
@@ -301,11 +303,25 @@ def flash(board_dir, port, verify=True):
              str(fl["offset"]), str(image)]
     rc = _esptool(chip, port, baud, *args, stub=stub)
     if rc == 0 and fl.get("addon"):
+        _let_boot(port)
         rc = install_addon(board_dir, port, reset=False) or install_carts(board_dir, port)
     return rc
 
 
+def _let_boot(port):
+    """Leave a board esptool just reset alone for FLASHED_BOOT_S: opened and
+    closed while it boots, a Zero's USB-Serial/JTAG wedged twice on
+    2026-11-17 (no web host, every open of the port hanging, only a power
+    cycle bringing it back), where a board that had finished booting took a
+    whole provisioning over the same port."""
+    import time
+    print("   leaving %s to boot for %d s" % (port, FLASHED_BOOT_S))
+    time.sleep(FLASHED_BOOT_S)
+
+
 ADDON_BOOT_S = 30          # how long a flashed board has to answer its REPL
+FLASHED_BOOT_S = 25        # a flashed board's boot, untouched (_let_boot)
+PROBE_GAP_S = 5            # between REPL probes: each one opens the port
 # Every mpremote call has a deadline: a wedged USB-Serial/JTAG answers an open
 # with nothing, never an error, and an mpremote with no deadline waits on it
 # for good. The REPL probe is short; a command is given EXEC_S; a copy EXEC_S
@@ -364,7 +380,7 @@ def _await_repl(board_dir, port, what):
         if time.monotonic() > end:
             print("!! %s: no REPL on %s to install %s" % (board_dir, port, what))
             return False
-        time.sleep(1)
+        time.sleep(PROBE_GAP_S)
     return True
 
 

@@ -511,17 +511,20 @@ def test_a_zero_s_cable_flash_installs_the_add_on_that_fits_into_its_store(
     carts follow its image; both Zeros speak a bare REPL, so the install goes
     over it, into the carts folder their store host serves
     (device/zero_host.py): the add-on, then the official carts, then one
-    reset."""
+    reset, after the board's boot is left alone: opened while it boots, a
+    Zero's USB-Serial/JTAG wedged."""
     sys.path.insert(0, str(ROOT / "device"))
     import zero_host
     assert board_config.load(board_dir)["flash"]["addon"] == zero_host.CARTS_DIR
     got = []
+    monkeypatch.setattr(board_flash, "_let_boot", lambda p: got.append(("boot", p)))
     monkeypatch.setattr(board_flash, "install_addon",
                         lambda d, p, reset=True: got.append(("addon", d, p, reset)) or 0)
     monkeypatch.setattr(board_flash, "install_carts",
                         lambda d, p, reset=True: got.append(("carts", d, p, reset)) or 0)
     rc, fake = _flash(monkeypatch, tmp_path, board_dir)
-    assert rc == 0 and got == [("addon", str(board_dir), "/dev/fake", False),
+    assert rc == 0 and got == [("boot", "/dev/fake"),
+                               ("addon", str(board_dir), "/dev/fake", False),
                                ("carts", str(board_dir), "/dev/fake", True)]
     assert _verbs(fake.calls)[-1] == "write_flash"
 
