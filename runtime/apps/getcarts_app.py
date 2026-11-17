@@ -642,7 +642,7 @@ class GetCartsAppLayer(ListShellApp):
                 return
             root = self._inst.root()
             if root is not None and self._inst.writable():
-                self.indexes = self._inst.op(lambda: _ci.load_indexes(root))
+                self.indexes = self._inst.op(lambda: _ci.load_indexes(root, self._inst.own()))
             else:
                 self.indexes = list(_ci.DEFAULT_INDEXES)
             self._step = 1
@@ -654,7 +654,7 @@ class GetCartsAppLayer(ListShellApp):
                 data = self._fetched(lambda: _ci.index_fetch(net, url), ("index", i))
                 if data is None:
                     return
-                self._found.extend(_ci.parse_index(data, url))
+                self._found.extend(_ci.fitting(_ci.parse_index(data, url)))
             except _ci.InstallError as exc:
                 self.unreached += 1
                 self.starved = self.starved or exc.text == _ci.NET_MEMORY
@@ -765,8 +765,7 @@ class GetCartsAppLayer(ListShellApp):
                 out.append({"cart": c, "plan": p,
                             "state": _ci.cart_state(c, p, entry, present, man),
                             "had": entry.get("version") if entry is not None else None,
-                            "runs": c["runtime"] in _ci.RUNTIMES
-                            and (c["runtime"] in have or c["runtime"] == "theme"),
+                            "runs": _ci.runs_on(c, have),
                             "fit": None})
             return out, (inst.free() if root is not None else None)
         try:

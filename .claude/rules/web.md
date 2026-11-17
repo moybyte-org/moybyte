@@ -22,12 +22,19 @@ nor those docs will warn you about:
   565 system canvas** — `wallpaper._backdrop_blit` probes for it and otherwise
   expands a palette-INDEX buffer that does not exist, drawing nothing: a black
   desk with correct chrome on top, which is exactly what the first build did.
-- **The bundle rides the firmware image on every board, and that is its ONLY
-  source.** There is no copy on storage and no way to change what one board
-  serves without reflashing it, so "which console is this board serving?" is
-  answered by its firmware version alone. Changing a web build means
-  `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board. For that reason the page, the two worker
+- **A board serves the bundle from the browser console ADD-ON CART, and only
+  the one its image names** (2026-11-17; `native/moy_net/moy_page.h` is the
+  authority). Every board's build packs the bundle (`moybyte_web.pack`,
+  `tools/gen_web_blob.py --pack`) and bakes into the image only the sha256 of
+  the pack's body; the release publishes the cart beside the payload
+  (`.claude/rules/ota.md`), Get Carts installs it, and after an update
+  `runtime/carts/web_addon.py` installs the one that fits the new image. Any
+  other pack is "needs its page updated", none is "install it from Get
+  Carts", so "which console is this board serving?" is still answered by its
+  firmware version alone. Changing a web build means
+  `firmware/web_runner/build.sh`, then rebuild, reflash and install the add-on
+  that fits (`tools/board.py BOARD addon`). The pack sits in the store beside
+  the carts, so its size is the store's to pay. For that reason the page, the two worker
   modules and the VM's loader ship without their comments (build.sh re-prints
   their scripts with emsdk's terser, nothing renamed or compressed): read
   `page_core.html`, `page_tail.js`, `worker.js` and `moy_store.mjs` in the
@@ -49,8 +56,8 @@ nor those docs will warn you about:
   (`web_boot.DESK_DIAGONAL_IN`), so it lays out on the desk's metrics as that
   board does. `build.sh` generates `fonts_data` (`tools/make_font.py module`)
   for board.toml's `font_tier` -- both tiers -- and freezes it into the wasm,
-  faces and icon masks together, so they ride the baked, compressed
-  `micropython.wasm` (Zero image headroom pays for them: the build prints it).
+  faces and icon masks together, so they ride the compressed
+  `micropython.wasm` in the add-on's pack.
   **A class the image lacks the tier of falls back to petme128 and the
   shell's own icons with nothing failing**: `tests/test_web_look_parity.py`
   holds the image's sets and the desk's glass to the boards' and, under
@@ -61,9 +68,9 @@ nor those docs will warn you about:
 - **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
   `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
   no-op, another version is moved to it, one that cannot be had fails the
-  build). emcc's output is not byte-reproducible across versions and this
-  bundle rides every board image, so an emsdk cloned under `latest` made two
-  machines' bundles differ. The pin is the version moy-spec's preflight builds
+  build). emcc's output is not byte-reproducible across versions and every
+  board image names its bundle by digest, so an emsdk cloned under `latest`
+  made two machines' bundles differ. The pin is the version moy-spec's preflight builds
   its player in; bump the two together. A move shares its emsdk with every
   worktree (`tools/worktree.py` links it).
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
@@ -239,7 +246,7 @@ nor those docs will warn you about:
     answers NOSYS, and the first-run question is asked at the prompt and
     answered by the next line (`moy_sh_ask`), never read during the run.
   - The worker's command engine (about 1 KB of script gzipped) rides the
-    baked bundle too; its C does not. `tests/test_web_term_e2e.py` runs
+    bundle too; its C does not. `tests/test_web_term_e2e.py` runs
     wasi-sdk's modules in Chrome.
 - **Music plays in the browser on the boards' decoder (#251)**: `moy_media`
   is in the wasm with no task and no HTTP client (`moy_media.h`, THE

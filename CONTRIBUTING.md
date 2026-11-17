@@ -63,7 +63,7 @@ make doctor         # environment sanity check, if something looks off
 
 `make test` is the part of CI that needs nothing but the venv. The steps
 `make preflight` adds are the ones that compare a **derived artifact** against
-the sources it was built from — the baked web console, the desktop MicroPython
+the sources it was built from — the web console's pack, the desktop MicroPython
 the parity checks run under, the paths the docs claim — so they are exactly the
 steps a source change invalidates without anything going red locally. Run
 preflight before pushing; `tools/preflight.sh`'s header says why its order

@@ -146,9 +146,7 @@ def blocker(inst, cart, plan, free, runs, fit=None):
 
 
 def runs_here(inst, cart):
-    have = inst.runtimes()
-    return cart["runtime"] in _ci.RUNTIMES and (cart["runtime"] in have
-                                                or cart["runtime"] == "theme")
+    return _ci.runs_on(cart, inst.runtimes())
 
 
 def installed_ids(shelf):
@@ -364,7 +362,7 @@ class Pkg:
             self.inst.op(end)
 
     def sources(self):
-        return self.inst.op(lambda: _ci.load_indexes(self.inst.root()))
+        return self.inst.op(lambda: _ci.load_indexes(self.inst.root(), self.inst.own()))
 
     def _fetch(self, url):
         """`yield from` it: `url`'s index, fetched, checked and cached: its
@@ -372,7 +370,7 @@ class Pkg:
         yield from self._online()
         data = yield from self._wait(_ci.index_fetch(self._net(), url))
         yield
-        carts = _ci.parse_index(data, url)
+        carts = _ci.fitting(_ci.parse_index(data, url))
         yield from self._keep(url, data)
         return carts
 
@@ -386,7 +384,7 @@ class Pkg:
             yield
             try:
                 if data is not None:
-                    out.extend(_ci.parse_index(data, url))
+                    out.extend(_ci.fitting(_ci.parse_index(data, url)))
                 elif fetch:
                     out.extend((yield from self._fetch(url)))
             except _ci.InstallError as exc:

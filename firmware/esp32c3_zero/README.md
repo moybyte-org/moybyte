@@ -29,12 +29,14 @@ file is what the chip changes.
   (`native/moy_net/moy_webhost.c`, `HEAD_CAP`), so the room is there between
   requests rather than held. The WiFi/lwIP window set the XIAO takes is left
   out for the same reason (`boards/MOYBYTE_C3_ZERO/sdkconfig.board`).
-- **One app slot, no OTA.** The image carries its own browser console, which
-  is more than half of it, so two slots do not fit in 4 MB: the table is a
-  factory slot and the store (`boards/MOYBYTE_C3_ZERO/partitions-moybyte-c3-zero.csv`).
+- **One app slot, no OTA** (owner, 2026-11-17). The table is a factory slot
+  and the store (`boards/MOYBYTE_C3_ZERO/partitions-moybyte-c3-zero.csv`).
   The updater reports itself unavailable (`moy_ota.OtaUpdater.available()`),
   so the console's update screen shows no update to offer, and a new image
-  goes on by cable. The store is the space after the slot.
+  goes on by cable. The store is the space after the slot, and holds the
+  browser console: the add-on cart whose digest the image names
+  (`native/moy_net/moy_page.h`), which the cable flash installs into it over
+  the REPL (`[flash] addon`, `tools/board_flash.py`).
 - **SSH, without SFTP.** The server and the shell's face run in the same
   internal heap, so a build without PSRAM sizes them to what a session was
   measured to use there: the server's and the face's stacks and the session's
@@ -85,6 +87,7 @@ make firmware-monitor-c3-zero PORT=/dev/ttyACM0
 ```
 
 `build.sh` runs from a worktree like every board's (`tools/worktree.py`), and
-the browser console it bakes is that tree's own (`firmware/web_runner/`). The
+the browser console its image names is that tree's own (`firmware/web_runner/`),
+and the flash installs it. The
 build fails when the image outgrows the factory slot (the #168 guard reads the
 slot from this board's CSV). A flash that changes the table formats the store.

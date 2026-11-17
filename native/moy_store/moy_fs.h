@@ -77,7 +77,8 @@ int moy_fs_claim(const char *path, const char *dest, uint32_t chars,
 void moy_fs_forget_bak(const char *path);
 
 // `_skip`: what never crosses the wire or goes into an archive -- journal/,
-// thumbs/, __pycache__/, journal.jsonl, and moy_fs's .bak and .tmp. With
+// thumbs/, __pycache__/, journal.jsonl, the browser console's
+// moybyte_web.pack, and moy_fs's .bak and .tmp. With
 // `history`, journal/ and journal.jsonl are let through.
 int moy_store_skip(const char *name, size_t n, int history);
 

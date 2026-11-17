@@ -1,6 +1,5 @@
 # Unix-port user-module glue: moy_web is VM-neutral C (py/obj.h + py/runtime.h
-# plus one generated table), so it also builds into ports/unix -- which is how
-# the baked bundle can be opened without a board.
+# plus one generated file), so it also builds into ports/unix.
 #
 # This must stay the twin of micropython.cmake. When six verbs became calls into
 # vendored libmoy, moy_gfx's cmake gained the sources and its .mk did not, the

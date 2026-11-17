@@ -216,7 +216,7 @@ def test_an_optional_symbol_is_declared_by_its_owner():
             header = m.group(1)
             for line in m.group(2).split("\n"):
                 st = " ".join(line.split())
-                name = re.match(r"^(?:extern\s+)?[\w\s\*]*?\b(\w+)\s*[(\[]", st)
+                name = re.match(r"^(?:extern\s+)?[\w\s\*]*?\b(\w+)\s*[(\[;]", st)
                 own = decls.get(name.group(1), {}).get(header) if name else None
                 if own != st:
                     bad.append("%s: %r is not %s's declaration (%r)" % (rel, st, header, own))

@@ -83,10 +83,10 @@ def test_parts_are_the_loaded_sections_by_object(build):
     p = got["parts"]
     assert got["loaded"] == 0x300                     # no bss, no debug
     assert p["MicroPython"] == 0x60
-    assert p["our C"] == 0x40 + 0x40                  # moy_ui, and WAMR's archive
-    assert got["native"] == {"moy_ui": 0x40, "moy_wasm": 0x40}
+    assert p["our C"] == 0x40 + 0x40 + 0x80           # moy_ui, WAMR's archive, moy_web
+    assert got["native"] == {"moy_ui": 0x40, "moy_wasm": 0x40, "moy_web": 0x80}
     assert p["radios: Wi-Fi, BT, lwIP"] == 0x40
-    assert p["browser console (baked)"] == 0x80
+    assert "browser console (baked)" not in p
     assert p["frozen Python console"] == 0x60
     assert p["C library, compiler runtime"] == 0x60
     assert p["image format"] == 0x40
@@ -109,7 +109,8 @@ def _record(date, image=7_000_000, board="tdeck"):
             "flash": 16 << 20, "slot": 7 << 20, "image": image, "floor": 256 << 10,
             "partitions": [["ota_0", "app", "ota_0", 0x20000, 7 << 20],
                            ["vfs", "data", "fat", 0xE40000, 0x1C0000]],
-            "parts": {"browser console (baked)": 1_900_000, "image format": 100},
+            "parts": {"frozen Python console": 1_500_000, "image format": 100},
+            "addon": 1_900_000,
             "native": {"moy_ui": 300_000}, "loaded": image - 100}
 
 

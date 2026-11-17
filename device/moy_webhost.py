@@ -88,12 +88,21 @@ def pack_store(carts_root, tops=None, binary=False):
     return _json.loads(moy_net.web_pack(carts_root, tops, binary))
 
 
+def _unprefixed(target):
+    """`target` without the page's prefix, `/p/<12 hex>/`, as the kernel's
+    router takes it off (moy_webhost.c, THE PAGE'S PREFIX)."""
+    if target.startswith("/p/") and len(target) >= 16 and target[15] == "/":
+        return target[15:]
+    return target
+
+
 def baked_stamp():
-    """The image's own bundle as "<count> <bytes> <digest>", or None.
+    """The bundle this board serves as "<count> <bytes> <digest>": the one
+    its image names, while the add-on cart that fits it is installed; else
+    None.
 
     WHICH console is this board serving? Reachable from a REPL
-    (`py moy_webhost.baked_stamp()`), so the check costs one line and no
-    reflash."""
+    (`py moy_webhost.baked_stamp()`), so the check costs one line."""
     stamp = getattr(moy_net, "web_stamp", None)
     return stamp() if stamp is not None else None
 
@@ -407,10 +416,14 @@ class WebHost:
             pass
 
     def source_note(self):
-        """One line naming the bundle this board serves: the image's, always."""
+        """One line naming the bundle this board serves: the browser console
+        add-on cart that fits this image, or why there is none."""
         stamp = baked_stamp()
-        return "serving the bundle baked into this firmware (%s)" % (
-            stamp or "NONE -- this image has no web console")
+        if stamp:
+            return "serving the browser console add-on (%s)" % stamp
+        why = getattr(moy_net, "page_why", None)
+        return "serving no browser console -- %s" % (
+            (why() if why is not None else None) or "this image names none")
 
     def adopt(self, ws):
         """A host the kernel kept serving across a soft reset: take the radio
@@ -573,7 +586,7 @@ class WebHost:
         resp, plain = moy_net.web_handle(method, target, body or b"")
         if resp is not None:
             return resp
-        resp = self.answer_vm(method, target, plain)
+        resp = self.answer_vm(method, _unprefixed(target), plain)
         return None if resp is None else moy_net.web_handle_answer(resp)
 
     def answer_vm(self, method, target, body):

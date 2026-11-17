@@ -22,6 +22,8 @@
     tools/board.py tdeck perf "Brick Siege"     median drawn fps; --diag adds phase ms
     tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
                                                 a compiled cart gets its chip's module
+    tools/board.py tdeck addon                  install the browser console add-on
+                                                that fits the board's built image
     tools/board.py tdeck remove x.moy           take it off the store as the console
                                                 removes a cart (push's counterpart)
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
@@ -1133,6 +1135,9 @@ def parser(dirs):
                             "consent and keys); push's counterpart")
     p.add_argument("folders", nargs="+", metavar="FOLDER",
                    help="a name in the carts folder (elf_hello.moy)")
+    p = verb("addon", help="push the browser console add-on cart that fits "
+                           "this board's built image (its dist/ pack), as "
+                           "Get Carts would install it")
     p = verb("refresh-wasm", help="rebuild the stale compiled-cart modules "
                                   "this BOARD'S STORE actually has "
                                   "(tools/refresh_wasm.py) -- what a "
@@ -1211,6 +1216,17 @@ def main(argv=None):
             if a.no_rescan:
                 argv2.append("--no-rescan")
             return push_cart.main(argv2)
+        if a.verb == "addon":
+            port = a.port or resolve(a.board, dirs)[0]
+            if not a.force:
+                refuse_if_held(port)
+            import push_cart
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                import board_flash
+                folder = board_flash.addon_folder(dirs[a.board], tmp)
+                print("pushing %s" % os.path.basename(folder))
+                return push_cart.main([folder, "--board", a.board, "--port", port])
         if a.verb == "refresh-wasm":
             port = a.port or resolve(a.board, dirs)[0]
             if not a.force:

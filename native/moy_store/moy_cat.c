@@ -944,7 +944,9 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             }
         }
     }
-    if (c != NULL && !e->compiled) {
+    // A web cart's main is the browser console's pack (native/moy_net/moy_page.h):
+    // bytes the webhost serves a piece at a time, never text a load reads.
+    if (c != NULL && !e->compiled && !is_str(e->runtime, "web")) {
         moy_buf_t b = { NULL, 0 };
         char *full = ajoin(&r->a, r->path, main);
         int src_rc = full == NULL ? MOY_ENOMEM
@@ -976,7 +978,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
         }
         return 0;
     } else if (c != NULL) {
-        c->src = "";                    // a module has no text; src/ is the code
+        c->src = "";                    // a module or a pack has no text
     }
     e->main = main;
     e->main_n = main_n;

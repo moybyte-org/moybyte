@@ -21,8 +21,7 @@ WHAT A PART IS. The bytes an image carries are its loaded sections: the ELF's
 allocated PROGBITS sections, the flash-mapped text and rodata and the
 initialised RAM the bootloader copies. The link map attributes each input
 section to the object that brought it, and each object falls in one part by its
-path (`PARTS`, first match wins): the baked browser console
-(native/moy_web's generated table), the frozen Python console, our C (each
+path (`PARTS`, first match wins): the frozen Python console, our C (each
 module under `native/`, named), MicroPython, the radios' stacks, mbedTLS, the C
 library and the rest of ESP-IDF. The linker merges every object's C string
 literals into one section and names the first object as its owner, so they are
@@ -71,7 +70,6 @@ TOOLCHAIN_LIBS = ("c", "c_nano", "m", "m_nano", "gcc", "stdc++", "g", "gcov",
 
 # (part, test on the object path) in order; the first match names the part.
 PARTS = (
-    ("browser console (baked)", lambda p: _obj(p) == "moy_web_blob.gen.c.obj"),
     ("frozen Python console", lambda p: _obj(p) == "frozen_content.c.obj"),
     ("our C", lambda p: "/native/" in p or (_lib(p) or "").startswith("moy_")),
     ("MicroPython", lambda p: "esp-idf/main/libmain.a" in p
@@ -278,10 +276,11 @@ def partitions(board_dir):
 
 
 def slot_bytes(rows):
-    for name, _t, _s, _off, size in rows:
-        if name == "ota_0":
-            return size
-    raise ValueError("no ota_0 in the partition table")
+    for slot in ("ota_0", "factory"):
+        for name, _t, _s, _off, size in rows:
+            if name == slot:
+                return size
+    raise ValueError("no ota_0 or factory slot in the partition table")
 
 
 # -- records -------------------------------------------------------------------------
@@ -318,8 +317,18 @@ def make_record(board_dir, build_dir, app_bin, date=None, commit=None):
         "image": image,
         "floor": floor,
         "partitions": [list(r) for r in rows],
+        "addon": _addon(app_bin),
         **got,
     }
+
+
+def _addon(app_bin):
+    """The browser console add-on's pack the build wrote beside the image
+    (tools/gen_web_blob.py --pack): installed in the store, never in a slot."""
+    try:
+        return os.path.getsize(os.path.join(os.path.dirname(app_bin), "moybyte_web.pack"))
+    except OSError:
+        return None
 
 
 def append(rec, directory=None):
@@ -402,31 +411,24 @@ def _store(rec):
     return None
 
 
-def _web_part(rec):
-    for name, _t, _s, _off, size in rec["partitions"]:
-        if name == "web":
-            return size
-    return None
-
-
 def summary(picked):
     rows = []
     for b, r in picked:
         p = r["parts"]
         store = _store(r)
-        web = p.get("browser console (baked)")
+        addon = r.get("addon")
         rows.append([
             "`%s`" % b,
             "%d MiB" % (r["flash"] >> 20) if r["flash"] else "-",
             _b(r["slot"]), _b(r["image"]),
             "%s (%s)" % (_b(headroom(r)), _pct(headroom(r), r["slot"])),
             _kib(r["floor"]) if r["floor"] else "0",
-            _b(web) if web else ("own partition" if _web_part(r) else "-"),
+            _b(addon) if addon else "-",
             _b(p.get("frozen Python console", 0)),
             _kib(store) if store else "none",
         ])
     return _table(["board", "flash", "slot (B)", "image (B)", "headroom (B)",
-                   "floor", "browser console in the image (B)",
+                   "floor", "browser console add-on, in the store (B)",
                    "frozen Python (B)", "internal store"], rows,
                   right=range(2, 9))
 
@@ -474,7 +476,8 @@ def render(picked):
            "edit it: regenerate it with `python3 tools/image_ledger.py` after "
            "the builds and commit the result.",
            "",
-           "The slot is the board's `ota_0`; the image must fit it and keep the "
+           "The slot is the board's `ota_0` (its `factory` slot where it has one "
+           "slot); the image must fit it and keep the "
            "board's headroom floor (`[image] headroom_floor_kib` in its "
            "board.toml), or the build fails (`moybyte_app_size_guard`, "
            "`tools/esp32_build_lib.sh`). Bytes are the app image's: every part "
@@ -542,11 +545,11 @@ def record_main(argv):
     rec = make_record(a.board_dir, a.build_dir, a.app_bin)
     append(rec, a.dir)
     p = rec["parts"]
-    print("Image ledger: %s %s B -- browser console %s, frozen Python %s, our C "
-          "%s; `python3 tools/image_ledger.py` writes docs/perf/image.md"
+    print("Image ledger: %s %s B -- frozen Python %s, our C %s; the browser "
+          "console add-on %s; `python3 tools/image_ledger.py` writes docs/perf/image.md"
           % (rec["board"], _b(rec["image"]),
-             _b(p.get("browser console (baked)", 0)),
-             _b(p.get("frozen Python console", 0)), _b(p.get("our C", 0))))
+             _b(p.get("frozen Python console", 0)), _b(p.get("our C", 0)),
+             _b(rec["addon"]) if rec["addon"] else "none"))
     return 0
 
 

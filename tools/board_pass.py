@@ -396,6 +396,10 @@ def _run_board(row, a, ctx):
     run(verb("desk"), path)
     if name in QUIET:
         run(verb("tail", "1", "--send", "vol 0", "--grep", "REMOTE"), path)
+    if not a.no_flash:
+        # The browser console add-on that fits the image just flashed, so the
+        # suite's add-on check serves it (tests/on_glass.py).
+        run(verb("addon"), path)
     suite, var = ctx["suites"][name]
     xml = os.path.join(logs, "%s.junit.xml" % name)
     cmd = [sys.executable, "-m", "pytest", suite, "-q", "-p", "no:cacheprovider",

@@ -48,10 +48,10 @@
 # not a list in a README:
 #
 #   * `make unix-micropython` must run AFTER any `firmware/web_runner/build.sh`,
-#     because the binary bakes the web blob and the cached one is not rebuilt by
-#     a bundle rebuild. Out of order, `tests/test_web_blob.py` fails with a size
-#     mismatch that reads like a generator bug. (Its own assertion message says
-#     so, which is how that afternoon ended.)
+#     because the binary names the web bundle's digest and the cached one is
+#     not rebuilt by a bundle rebuild. Out of order, `tests/test_web_blob.py`
+#     fails with a digest mismatch that reads like a generator bug. (Its own
+#     assertion message says so, which is how that afternoon ended.)
 #   * the redraw tests run ALONE: they assert exact repaint counts against real
 #     wall-clock deadlines, and the top-bar clock legitimately repaints on a
 #     minute rollover, so a long shared run can straddle :00. CI splits them for

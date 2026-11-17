@@ -317,7 +317,8 @@
     {"name": "moybyte.key_make", "server": "call", "perm": null, "py": ["moybyte.key_make"], "lua": ["moybyte.key_make"], "in": ["name:str", "public:out"], "ret": "len", "how": "hop", "example": ["probe"]},
     {"name": "moybyte.key_public", "server": "call", "perm": null, "py": ["moybyte.key_public"], "lua": ["moybyte.key_public"], "in": ["name:str", "public:out"], "ret": "len", "how": "hop", "example": ["probe"]},
     {"name": "moybyte.key_shared", "server": "call", "perm": null, "py": ["moybyte.key_shared"], "lua": ["moybyte.key_shared"], "in": ["name:str", "peer:str", "shared:out"], "ret": "len", "how": "hop", "example": ["probe", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]},
-    {"name": "moybyte.clock", "server": "c", "perm": null, "py": ["moybyte.clock"], "lua": ["moybyte.clock"], "in": ["local:int"], "ret": "int", "how": "here", "door": true, "wasm": true, "wasi": true, "elf": 125, "example": [0]}
+    {"name": "moybyte.clock", "server": "c", "perm": null, "py": ["moybyte.clock"], "lua": ["moybyte.clock"], "in": ["local:int"], "ret": "int", "how": "here", "door": true, "wasm": true, "wasi": true, "elf": 125, "example": [0]},
+    {"name": "install.own", "server": "shell"}
   ],
   "permissions": [
     {"perm": "graphics", "grants": "floor", "prompt": null, "needs": null, "py": [], "doc": "nothing extra: the floor every cart has", "spec": true},

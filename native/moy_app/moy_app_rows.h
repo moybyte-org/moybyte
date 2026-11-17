@@ -154,9 +154,9 @@ enum {
     MOY_T_MOYBYTE_STATUS_PANEL, MOY_T_MOYBYTE_STATUS_REMOVE, MOY_T_MOYBYTE_AES_CTR,
     MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CCM_OPEN, MOY_T_MOYBYTE_NAME,
     MOY_T_MOYBYTE_KEY_MAKE, MOY_T_MOYBYTE_KEY_PUBLIC, MOY_T_MOYBYTE_KEY_SHARED,
-    MOY_T_MOYBYTE_CLOCK,
+    MOY_T_MOYBYTE_CLOCK, MOY_T_INSTALL_OWN,
 };
-#define MOY_APP_TABLE_N 218u
+#define MOY_APP_TABLE_N 219u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -378,6 +378,7 @@ enum {
     { "moybyte.key_public", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.key_shared", MOY_ROLE_MOYBYTE, -1 }, \
     { "moybyte.clock", MOY_ROLE_MOYBYTE, MOY_ROW_MOYBYTE_CLOCK }, \
+    { "install.own", MOY_ROLE_INSTALL, -1 }, \
 }
 
 // The C rows the ROLE door serves (moy_app.c's door_c), each X(row, its

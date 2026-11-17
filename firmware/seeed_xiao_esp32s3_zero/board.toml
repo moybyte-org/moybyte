@@ -148,6 +148,17 @@ was the other name here until 2026-09, when the WebSocket half of the transport
 went with it -- the RPC it was kept for shipped as plain HTTP."""
 
 [[modules.shared.group]]
+files = ["web_addon.py", "cart_index.py", "cart_unpack.py", "cart_files.py",
+         "app_imports.py"]
+why = """
+The browser console is an add-on cart (runtime/carts/web_addon.py), and on
+this board it is the whole use: provisioning installs the one that fits the
+image (provision.sh), and after an update the image installs the one that
+fits it from its release's own signed index, through the console's one
+install (cart_index, which every file of the cart is checked by before it
+lands, and the modules it imports)."""
+
+[[modules.shared.group]]
 files = ["ssh_service.py"]
 why = """
 The SSH server's Python side (native/moy_ssh), the one every console runs:
@@ -224,6 +235,12 @@ access point and its terminal. They are in device/ because both Zero boards
 take them (this one and firmware/esp32c3_zero/), and nothing else does."""
 
 [[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+The transport cart_index fetches through on a board (the kernel's client):
+the add-on's install above is its one user here."""
+
+[[modules.device.group]]
 files = ["moy_webhost.py"]
 why = """
 The Settings contract over the kernel's webhost (native/moy_net): the store,
@@ -296,9 +313,12 @@ after          = "watchdog_reset"
 baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
+# The carts folder the browser console add-on that fits the flashed image is
+# installed into, over the REPL, after a cable flash (tools/board_flash.py).
+addon          = "/moy/carts"
 
 [image]
-# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The OTA-slot headroom this board's app image keeps.
 # The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
 # MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
 # to print; the floor is the design.
@@ -316,8 +336,10 @@ otadata_size   = "0x2000"
 # Zero's way out is a card-backed Zero or one without OTA, not a trim per
 # step. Only the slot-fit guard (#168) holds this image now. The slots grew by
 # 256 KiB each to 3.5 MiB (owner, 2026-11-07) for the C shell, the SSH server
-# and SFTP (the moy_sh, moy_tty and moy_ssh takes below), leaving an 896 KiB
-# store; the partition CSV carries the arithmetic.
+# and SFTP (the moy_sh, moy_tty and moy_ssh takes below). They are 2 MiB since
+# 2026-11-17, when the browser console left the image for its add-on cart
+# (native/moy_net/moy_page.h), and the store holds that add-on; the partition
+# CSV carries the arithmetic.
 headroom_floor_kib = 0
 
 [serial]

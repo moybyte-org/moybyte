@@ -12,6 +12,7 @@ lines.
 
     tools/board_flash.py flash   <board_dir> --port /dev/ttyACM0
     tools/board_flash.py monitor <board_dir> --port /dev/ttyACM0
+    tools/board_flash.py addon   <board_dir> --port /dev/ttyACM0   (a REPL board)
 
 The flash ORDER is fixed here, once: erase otadata FIRST (with --after
 no_reset), then write the merged image, so the board leaves the flash running
@@ -49,6 +50,15 @@ esptool's hidden `--stub-version`; 5.x defaults to 2). An older esptool ignores
 it and runs its own stub, so the flash is slower, never wrong. A board without
 the key gets esptool's default. The Waveshare P4 declares 2, and its board.toml
 says why.
+
+THE BROWSER CONSOLE ADD-ON. A board that declares `[flash] addon` (the carts
+folder, on a board that speaks a bare REPL: the two Zeros) has the add-on cart
+that fits the image just written installed into its store after the flash,
+over that REPL (`install_addon`), with the add-on folders that fit other
+images taken off. The C3 has no OTA, so a cable flash is the only way a new
+image arrives there and this is the only way its page follows; the XIAO
+installs it after an update by itself. The console boards install it through
+their dev channel (`tools/board.py BOARD addon`, which a board pass runs).
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
@@ -269,7 +279,82 @@ def flash(board_dir, port, verify=True):
         args += ["--before", str(fl["before"])]
     args += ["--after", str(fl.get("after", "hard_reset")), "write_flash",
              str(fl["offset"]), str(image)]
-    return _esptool(chip, port, baud, *args, stub=stub)
+    rc = _esptool(chip, port, baud, *args, stub=stub)
+    if rc == 0 and fl.get("addon"):
+        rc = install_addon(board_dir, port)
+    return rc
+
+
+ADDON_BOOT_S = 30          # how long a flashed board has to answer its REPL
+
+
+def addon_folder(board_dir, out):
+    """The browser console add-on cart that fits the image `board_dir`'s
+    build left in dist/ (tools/web_pack.py), unpacked under `out`."""
+    import zipfile
+    sys.path.insert(0, str(ROOT / "tools"))
+    import web_pack
+    cfg = board_config.load(board_dir)
+    page = web_pack.page_beside(str(ROOT / cfg["flash"]["image"]), cfg["board"]["ota"])
+    name, _ = web_pack.publish_cart(page, out)
+    with zipfile.ZipFile(os.path.join(out, name)) as z:
+        z.extractall(out)
+    return os.path.join(out, web_pack.cart_id(page[1]) + ".moy")
+
+
+def _mpremote(port, *args):
+    cmd = [sys.executable, "-m", "mpremote", "connect", port] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def install_addon(board_dir, port):
+    """The add-on that fits the built image into `[flash] addon`, the carts
+    folder, over the board's REPL (mpremote's Ctrl-C stops what the board
+    runs), the other add-on folders taken off, the pack's size checked; then
+    a reset, which starts the board again. 0, or 1 with what went wrong."""
+    import time
+    root = board_config.load(board_dir)["flash"]["addon"]
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = addon_folder(board_dir, tmp)
+        name = os.path.basename(folder)
+        size = os.path.getsize(os.path.join(folder, "moybyte_web.pack"))
+        end = time.monotonic() + ADDON_BOOT_S
+        while _mpremote(port, "exec", "pass").returncode != 0:
+            if time.monotonic() > end:
+                print("!! %s: no REPL on %s to install the browser console add-on"
+                      % (board_dir, port))
+                return 1
+            time.sleep(1)
+        clear = ("import os\n"
+                 "p = ''\n"
+                 "for d in %r.strip('/').split('/'):\n"
+                 "    p += '/' + d\n"
+                 "    try:\n"
+                 "        os.mkdir(p)\n"
+                 "    except OSError:\n"
+                 "        pass\n"
+                 "def rm(p):\n"
+                 "    try:\n"
+                 "        for n in os.listdir(p): rm(p + '/' + n)\n"
+                 "        os.rmdir(p)\n"
+                 "    except OSError:\n"
+                 "        os.remove(p)\n"
+                 "for n in os.listdir(%r):\n"
+                 "    if n.startswith('web_console_') and n != %r:\n"
+                 "        rm(%r + '/' + n)\n" % (root, root, name, root))
+        print("+ the browser console add-on: %s -> %s" % (name, root))
+        steps = (("exec", clear),
+                 ("cp", "-r", folder, ":%s/" % root),
+                 ("exec", "import os\nassert os.stat(%r)[6] == %d\nprint('MOY' + 'OK')"
+                  % ("%s/%s/moybyte_web.pack" % (root, name), size)))
+        for step in steps:
+            r = _mpremote(port, *step)
+            if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
+                print("!! the browser console add-on did not install (%s):\n%s%s"
+                      % (step[0], r.stdout, r.stderr))
+                return 1
+        _mpremote(port, "reset")
+    return 0
 
 
 def monitor(board_dir, port):
@@ -282,7 +367,7 @@ def monitor(board_dir, port):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("verb", choices=("flash", "monitor"))
+    ap.add_argument("verb", choices=("flash", "monitor", "addon"))
     ap.add_argument("board_dir")
     ap.add_argument("--port", required=True)
     ap.add_argument("--no-verify", action="store_true",
@@ -290,6 +375,8 @@ def main(argv):
     a = ap.parse_args(argv[1:])
     if a.verb == "flash":
         return flash(a.board_dir, a.port, verify=not a.no_verify)
+    if a.verb == "addon":
+        return install_addon(a.board_dir, a.port)
     return monitor(a.board_dir, a.port)
 
 

@@ -33,13 +33,14 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 ### What it replaced
 
 This build replaced the LVGL fork (deleted 2026-08-17) with the same console
-and the same baked browser bundle in a much smaller image: LVGL, `lcd_bus`,
+and the same browser bundle in a much smaller image: LVGL, `lcd_bus`,
 `st7789`, `task_handler`, `rgb_bus`, `spi3wire` and the fork's `i2c` are simply
 not in it, and the panel is one C file. Both builds stamped OTA board id
 `tdeck` against a byte-identical partition table, so a payload from either
 installed into the other's inactive slot — which made the migration an OTA
 rather than a cable flash. The build prints the image's headroom; nothing else
-is current. The slots are 7 MiB since 2026-10-26, and the 128 KiB coredump
+is current. The slots are 6 MiB since 2026-11-17 (the browser console is an
+add-on cart, not in the image), and the 128 KiB coredump
 partition after them (2026-11-09: a panic's ESP-IDF core dump,
 `tools/coredump.py`) came off the vfs; the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
@@ -294,7 +295,7 @@ from the REPL stops it.
 
 The real thing: `moy_runtime.run_desktop()` over the shared boot spine
 (`runtime/boot/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
-carts through `moycore`, OTA, and the browser console baked into the image.
+carts through `moycore`, OTA, and the browser console add-on its image names.
 
 Boot is the same sequence every console board runs, because it is the same
 code. What you should see:
@@ -967,8 +968,9 @@ the reading is meaningless. A stale or torn backdrop is the one failure here
 that is a correctness bug rather than a speed one: `LAYER_COPY_ASYNC = False`
 and reflash.
 
-The image includes the baked browser bundle. Build on a tree with no
-`firmware/web_runner/dist` and the image is that much smaller, with
-a warning — such an image serves a console only from a copy on its storage. The
-warning becomes a hard failure under `CI` (or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`),
-because a published image with no console is the whole bug the baking fixes.
+The image names the browser bundle it was built with, and the build writes
+that bundle's pack beside it (`dist/`) for the add-on cart. Build on a tree
+with no `firmware/web_runner/dist` and the image names none, with a warning —
+such an image serves no console. The warning becomes a hard failure under `CI`
+(or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`), because a published image with no
+console is a release with no add-on to publish.

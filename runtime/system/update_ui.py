@@ -115,6 +115,7 @@ class UpdateUI:
             return
         if self._boot_verdict_phase():
             return
+        self._addon_yields()
         self.ws.spine.wifi_hold("update")            # the radio lease: _exit_update lets go
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
@@ -132,9 +133,17 @@ class UpdateUI:
             self._upd_phase = "error"
             self._upd_msg = "no c6 updater"
             return
+        self._addon_yields()
         self.ws.spine.wifi_hold("update")            # the same lease: the manifest rides the link
         self._check_armed = False              # CHECKING... paints first
         self._upd_phase = "c6_checking"
+
+    def _addon_yields(self):
+        """The browser console add-on's step (runtime/carts/web_addon.py) gives
+        the kernel's updater and the "update" hold to this screen."""
+        addon = getattr(self.ws, "addon", None)
+        if addon is not None:
+            addon.stop(release=False)
 
     def _boot_verdict_phase(self):
         """If the last install left a verdict, show THAT before anything else.
@@ -190,6 +199,9 @@ class UpdateUI:
             except Exception:
                 pass
         self.ws.spine.wifi_release("update")        # the screen was the radio's reason
+        addon = getattr(self.ws, "addon", None)
+        if addon is not None:
+            addon.start(retry=True)                 # it yielded to this screen
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws.mark_dirty()
 

@@ -8,9 +8,10 @@ import face_ctypes as _f
 
 __all__ = (
     "sync_path", "sync_song", "web_stop", "web_key_drop", "web_signout", "web_poll",
-    "web_state", "web_events", "web_answer", "web_stamp", "wc_off", "wc_poll", "dns_port",
-    "dns_poll", "dns_stop", "wc_park", "ota_dl_step", "ota_dl_finish", "ota_cancel",
-    "ota_slot_write", "ota_slot_close", "ota_c6_commit", "ota_state", "http_close", "PW_ITER",
+    "web_state", "web_events", "web_answer", "web_stamp", "page_at", "page_state", "page_why",
+    "wc_off", "wc_poll", "dns_port", "dns_poll", "dns_stop", "wc_park", "ota_dl_step",
+    "ota_dl_finish", "ota_cancel", "ota_slot_write", "ota_slot_close", "ota_c6_commit",
+    "ota_state", "http_close", "PW_ITER",
 )
 
 PW_ITER = 32768
@@ -135,6 +136,9 @@ _SIGS = (
     ("moy_web_events", [], _c.c_uint32),
     ("moy_web_answer", [_c.c_void_p, _c.c_size_t], None),
     ("moy_web_stamp_text", [], _c.c_char_p),
+    ("moy_page_at", [_c.c_char_p], None),
+    ("moy_page_state", [], _c.c_int),
+    ("moy_page_why", [], _c.c_char_p),
     ("moy_wc_off", [_c.c_char_p], None),
     ("moy_wc_poll", [], _c.c_int),
     ("moy_dns_port", [], _c.c_uint16),
@@ -200,6 +204,18 @@ def web_answer(resp):
 
 def web_stamp():
     return _f.text(_lib().moy_web_stamp_text())
+
+
+def page_at(path):
+    _lib().moy_page_at(_f.cstr(path))
+
+
+def page_state():
+    return _lib().moy_page_state()
+
+
+def page_why():
+    return _f.text(_lib().moy_page_why())
 
 
 def wc_off(why=None):

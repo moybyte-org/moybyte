@@ -602,8 +602,8 @@ def test_the_cart_store_is_the_card_when_one_mounted(board):
     on_glass.cart_store_follows_the_card(board)
 
 
-def test_the_web_console_is_baked_into_this_image(board):
-    on_glass.web_console_is_baked_into_the_image(board)
+def test_the_web_console_add_on_fits_this_image(board):
+    on_glass.web_console_add_on_fits_the_image(board)
 
 
 def _skip_unparked(board, why):

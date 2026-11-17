@@ -126,6 +126,10 @@ SERVICES = {
     "cart_pick": "the #124 question for the player's own copy of an external "
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
+    "cart_own": "the index this console's own release publishes beside its "
+                "firmware, the browser console add-on's, which Get Carts reads last",
+    "addon": "the step that installs the browser console add-on fitting this "
+             "image after an update (runtime/carts/web_addon.py)",
     "media_net": "the page's bytes Music plays in the browser: a song from the "
                  "page's store or a board's sealed /media, a station through "
                  "the page's fetch (firmware/web_runner/media_link.py)",
@@ -172,6 +176,8 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": INJECTED,
@@ -215,6 +221,8 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
@@ -257,6 +265,8 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the board's README names no cell and no gauge pin",
@@ -297,6 +307,8 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
@@ -345,6 +357,8 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "cart_own": "the simulator has no release of its own to publish an add-on beside",
+        "addon": "the simulator serves no browser console",
         "media_net": "the host's media service reads its own files and URLs; media_net exists because a browser's VM cannot reach the network or its store itself",
         "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
@@ -402,6 +416,8 @@ WIRING = {
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
         "media_net": INJECTED,
+        "cart_own": "a page is the browser console; it installs no add-on",
+        "addon": "a page is the browser console; it installs no add-on",
         "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "

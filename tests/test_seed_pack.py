@@ -589,3 +589,22 @@ def test_the_whole_roster_seeds_inside_a_small_heap(tmp_path):
         "asset bigger than sakura_lua's 72 KB cover image:\n%s\n%s"
         % (r.stdout[-2000:], r.stderr[-2000:]))
     assert "RESULT " in r.stdout
+
+
+def test_the_zeros_seed_leaves_the_add_on_its_room(tmp_path, monkeypatch):
+    """A Zero's store holds the browser console add-on beside the roster, and
+    the add-on arrives after the seed (the cable flash, the provisioning): with
+    none installed the seed keeps the room the image's page will take."""
+    import types
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    web = types.ModuleType("moy_web")
+    web.stamp = lambda: "5 1900000 0123456789ab"
+    web.page_want = lambda: "ab" * 32
+    monkeypatch.setitem(sys.modules, "moy_web", web)
+    assert zero_host.addon_room(root) == 1900000 + zero_host.ADDON_FILES
+    os.makedirs(root + "/web_console_0123456789ab.moy")
+    assert zero_host.addon_room(root) == 0
+    web.page_want = lambda: None
+    assert zero_host.addon_room(str(tmp_path / "empty")) == 0

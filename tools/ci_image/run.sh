@@ -8,7 +8,7 @@
 #   tools/ci_image/run.sh --check           # is Docker here and reachable?
 #
 # The tree is mounted at its own path, so the absolute paths a build bakes in
-# (the web blob's .incbin, the usermod symlinks) and a worktree's links into the
+# (the usermod symlinks) and a worktree's links into the
 # main checkout resolve the same inside as out. A worktree's main checkout is
 # mounted read-only, its git directory read-write.
 #

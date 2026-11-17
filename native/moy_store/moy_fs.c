@@ -747,9 +747,12 @@ int moy_fs_claim(const char *path, const char *dest, uint32_t chars,
 }
 
 int moy_store_skip(const char *name, size_t n, int history) {
-    static const char *const dirs[] = { "thumbs", "__pycache__", "journal", "journal.jsonl" };
-    for (int i = 0; i < 4; i++) {
-        if ((i < 2 || !history) && strlen(dirs[i]) == n && memcmp(name, dirs[i], n) == 0) {
+    // The browser console's pack (the web_console cart's, native/moy_net/moy_page.h)
+    // is fetched again by the digest its manifest names, never carried.
+    static const char *const dirs[] = { "thumbs", "__pycache__", "moybyte_web.pack",
+                                        "journal", "journal.jsonl" };
+    for (int i = 0; i < 5; i++) {
+        if ((i < 3 || !history) && strlen(dirs[i]) == n && memcmp(name, dirs[i], n) == 0) {
             return 1;
         }
     }

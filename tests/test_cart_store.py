@@ -983,13 +983,13 @@ def test_the_host_transport_reports_a_missing_file_and_a_cut_body(tmp_path, serv
 
 
 def _board_net(wifi=None, dial=None):
-    """The board's transport (device/wire_links.CartNet) over the kernel's
+    """The board's transport (device/cart_net.CartNet) over the kernel's
     client, the C run by runtime/host/net_binding.py."""
     from runtime import net_binding
     sys.modules["moy_net"] = net_binding
     sys.path.insert(0, str(ROOT / "device"))
-    import wire_links
-    return wire_links, wire_links.CartNet(wifi, dial)
+    import cart_net
+    return cart_net, cart_net.CartNet(wifi, dial)
 
 
 def test_the_board_transport_follows_a_redirect_to_the_release(tmp_path, server):

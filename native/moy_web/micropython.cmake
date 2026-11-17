@@ -1,5 +1,5 @@
-# Moybyte moy_web native module: the browser console bundle, baked into the
-# image (see modmoy_web.c for why, and tools/gen_web_blob.py for how).
+# Moybyte moy_web native module: the digest of the browser console this image
+# names (see modmoy_web.c, and tools/gen_web_blob.py for how it is made).
 #
 # moy_web_blob.gen.c is GENERATED and gitignored -- both boards' build.sh run
 # tools/gen_web_blob.py before staging this directory, so the file is always

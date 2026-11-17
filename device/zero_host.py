@@ -27,9 +27,9 @@ lands on this flash about a second after its commit, and is still there --
 served back -- on the next visit. That is the whole product: a console in your
 pocket whose screen is whatever browser is nearby.
 
-The bundle comes from THIS IMAGE (native/moy_web, the same .incbin every other
-board carries), so the console this board serves is the one its firmware was
-built with and changes only when it is reflashed.
+The bundle is the browser console add-on cart (native/moy_net/moy_page.h),
+installed by provisioning and served only when it is the page this image
+names; after an update `make_addon`'s step installs the one that fits.
 
 `POST /gpio` is the second half of the same idea: the cart in the browser
 calls `pin_write`, the page batches it here, and this board -- which has the
@@ -150,6 +150,11 @@ def identity():
 # leaves 28 of the store's 224 blocks (112 KiB) free (owner, 2026-11-07: all
 # five games, the reserve lowered as far as that takes, never below 64 KiB).
 SEED_RESERVE = 96 * 1024
+# Beside it, a store with no browser console add-on keeps the room the add-on
+# that fits this image will take (its pack, as the image's stamp counts it,
+# plus the pack's head and the cart's other files), so the cable flash or the
+# provisioning that installs it after the seed finds it free.
+ADDON_FILES = 16 * 1024
 SEEDING = ".seeding"                # beside the carts folder, while a seed runs
 
 
@@ -171,6 +176,21 @@ def _free_bytes(root):
     except (OSError, AttributeError):
         return None
     return st[0] * st[3]
+
+
+def addon_room(root):
+    """The bytes the browser console add-on this image names needs in `root`,
+    0 while an add-on folder is there or the image names none."""
+    try:
+        if any(n.startswith("web_console_") for n in os.listdir(root)):
+            return 0
+    except OSError:
+        pass
+    try:
+        import moy_web
+        return int(moy_web.stamp().split()[1]) + ADDON_FILES if moy_web.page_want() else 0
+    except (ImportError, AttributeError, ValueError, IndexError):
+        return 0
 
 
 def seed_room(root=ROOT, reserve=None):
@@ -265,8 +285,9 @@ def seed_carts(root=CARTS_DIR):
         if missing:
             print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()
+        reserve = SEED_RESERVE + addon_room(root)
         written = moy_carts.seed_packed(CARTS_Z, root, only_new=True,
-                                        room=lambda: seed_room(root))
+                                        room=lambda: seed_room(root, reserve))
         elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
         _unmark(mark)
@@ -358,7 +379,8 @@ def connect(wait_ms=15000, hostname=None):
 #   * `GET /update` from a paired page -- the running version/label/channel/slot, the
 #     PREVIOUS install's verdict (moy_ota.boot_check: installed, or rolled back
 #     by the bootloader), and live progress.
-#   * the page itself -- the browser console is baked into the image, so a
+#   * the page itself -- the board serves only the browser console add-on its
+#     image names and installs that one after the confirm (make_addon), so a
 #     board that updated is serving a different console the next time it is
 #     opened.
 
@@ -782,6 +804,56 @@ def make_updater(me):
         return None, None
 
 
+class _ZeroInstall:
+    """The install role's server for the browser console add-on's step
+    (runtime/carts/web_addon.py): this board's store, its station (always
+    up while it serves, so nothing to hold), the kernel's client."""
+
+    def __init__(self, net):
+        self._net = net
+
+    def net(self):
+        return self._net
+
+    def root(self):
+        return CARTS_DIR
+
+    def op(self, fn):
+        return fn()
+
+    def chip(self):
+        return None, None
+
+    def hold(self):
+        return True
+
+    def release(self):
+        pass
+
+    def rescan(self, folder=None):
+        pass
+
+
+def make_addon(ota):
+    """The step that installs the browser console add-on fitting this
+    image (the page this board exists to serve) once it has confirmed
+    itself, or None: on a board with no OTA slots (the C3) a new image comes
+    by cable, and the flash installs its add-on (tools/board_flash.py).
+    Provisioning installs the first one (provision.sh)."""
+    if ota is None or not ota.available():
+        return None
+    try:
+        import web_addon
+        from cart_net import CartNet
+        return web_addon.AddonStep(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index)
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO addon: unavailable:", exc)
+        return None
+
+
+ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
+
+
 def serve():
     """Bring the store host up and pump it forever. Ctrl-C drops to the REPL
     (which is how provision.sh and mpremote get the board back)."""
@@ -806,6 +878,7 @@ def serve():
     _mkdir(SYSTEM_DIR)
     host = host_class()(CARTS_DIR, auth=SYSTEM_DIR)
     ota, task = make_updater(me)
+    addon = make_addon(ota)
     host.update = task
     if task is not None:
         # BEFORE the first poll: the marker names the slot the last install
@@ -863,6 +936,18 @@ def serve():
                     # for firmware before certifying its own can chase a bad
                     # image round a rollback loop forever.
                     task.boot_check_once()
+                    # ...and only now replace the browser console add-on with
+                    # the one this image fits: an image the bootloader takes
+                    # back never touched the add-on its predecessor serves.
+                    if addon is not None:
+                        addon.start()
+        if addon is not None and ota is not None and ota.confirmed:
+            # The page is this board's whole use: an add-on that does not
+            # fit is retried while it serves (web_addon.RETRY_MS apart).
+            if addon.phase is not None:
+                addon.tick(ADDON_SLICE_MS)
+            else:
+                addon.start(retry=True)
         # ...and `task.step()` is NOT called here: `WebHost.poll()` pumps the
         # injected update backend, which is the one place every board's does
         # its slice. A second call here would double this board's install rate

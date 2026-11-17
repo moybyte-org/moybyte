@@ -83,6 +83,24 @@ static mp_obj_t face_moy_net_web_stamp(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_web_stamp_obj, face_moy_net_web_stamp);
 
+static mp_obj_t face_moy_net_page_at(mp_obj_t a0) {
+    const char *root = mp_obj_str_get_str(a0);
+    moy_page_at(root);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_page_at_obj, face_moy_net_page_at);
+
+static mp_obj_t face_moy_net_page_state(void) {
+    return mp_obj_new_int(moy_page_state());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_page_state_obj, face_moy_net_page_state);
+
+static mp_obj_t face_moy_net_page_why(void) {
+    const char *r_ = moy_page_why();
+    return r_ ? mp_obj_new_str_from_cstr(r_) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_page_why_obj, face_moy_net_page_why);
+
 static mp_obj_t face_moy_net_wc_off(size_t n_args, const mp_obj_t *argv) {
     const char *why = n_args > 0 ? argv[0] == mp_const_none ? NULL : mp_obj_str_get_str(argv[0]) : NULL;
     moy_wc_off(why);
@@ -185,6 +203,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_http_close_obj, face_moy_net_http_
     { MP_ROM_QSTR(MP_QSTR_web_events), MP_ROM_PTR(&face_moy_net_web_events_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_answer), MP_ROM_PTR(&face_moy_net_web_answer_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_web_stamp), MP_ROM_PTR(&face_moy_net_web_stamp_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_page_at), MP_ROM_PTR(&face_moy_net_page_at_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_page_state), MP_ROM_PTR(&face_moy_net_page_state_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_page_why), MP_ROM_PTR(&face_moy_net_page_why_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_wc_off), MP_ROM_PTR(&face_moy_net_wc_off_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&face_moy_net_wc_poll_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_dns_port), MP_ROM_PTR(&face_moy_net_dns_port_obj) }, \

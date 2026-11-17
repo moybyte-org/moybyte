@@ -13,6 +13,7 @@ network reaching a file that is none of the browser's business.
 """
 
 import json
+import os
 from tests import journal_files as jf
 import socket
 import sys
@@ -309,9 +310,20 @@ def _host(tmp_path, **kw):
 
 
 @pytest.fixture
-def baked():
-    """Install a baked bundle (native/moy_web's table) for one test."""
-    return nb._bake
+def baked(tmp_path):
+    """Name a page the way an image does and install the add-on cart that
+    fits it in the `_store` tree, for one test."""
+    def bake(blobs, stamp="0 0 none"):
+        return nb._bake(blobs, stamp, carts=tmp_path / "carts")
+    yield bake
+    nb._bake({})
+
+
+def _paged(r):
+    """The page's own address, from the root's redirect."""
+    head = _head(r)
+    assert b"302" in h_status(r), head
+    return head.split("Location: ", 1)[1].split("\r\n", 1)[0]
 
 
 ASSETS = None
@@ -345,15 +357,38 @@ def test_a_root_a_board_could_not_hold_is_served_on_the_host(tmp_path):
     assert _pull(deep / "carts") == {"hop.moy/main.py": "x = 1\n"}
 
 
-def test_the_root_serves_the_console_page(tmp_path, baked):
-    baked({"index.html.gz": b"\x1f\x8bpage"})
+def test_the_root_sends_the_browser_to_the_page_s_own_address(tmp_path, baked):
+    """`/` names the page by its digest, and everything under that prefix is
+    the same bytes for as long as the digest is: kept for good."""
+    pack = baked({"index.html.gz": b"\x1f\x8bpage"})
+    tag = os.path.basename(os.path.dirname(pack))[len("web_console_"):-len(".moy")]
     h = _host(tmp_path)
     for path in ("/", "/index.html"):
-        r = h.handle_http("GET", path, b"")
-        assert b"200" in h_status(r), path
-        assert "Content-Type: text/html" in _head(r)
-        assert "Content-Encoding: gzip" in _head(r)
-        assert r.endswith(b"\x1f\x8bpage")
+        assert _paged(h.handle_http("GET", path, b"")) == "/p/%s/" % tag
+    r = h.handle_http("GET", "/p/%s/" % tag, b"")
+    assert b"200" in h_status(r)
+    assert "Content-Type: text/html" in _head(r)
+    assert "Content-Encoding: gzip" in _head(r)
+    assert "immutable" in _head(r)
+    assert r.endswith(b"\x1f\x8bpage")
+
+
+def test_a_prefix_naming_another_page_is_served_but_not_kept(tmp_path, baked):
+    """A tab opened before an update asks under the old digest: it gets this
+    image's bytes, which no cache may keep under that name."""
+    baked({"worker.js.gz": b"\x1f\x8bw"})
+    r = _host(tmp_path).handle_http("GET", "/p/000000000000/worker.js", b"")
+    assert b"200" in h_status(r) and r.endswith(b"\x1f\x8bw")
+    assert "no-cache" in _head(r) and "immutable" not in _head(r)
+
+
+def test_the_page_s_requests_route_under_its_prefix(tmp_path, baked):
+    """The page asks for /sync, /carts.json and the rest by relative URLs,
+    so they arrive under the prefix and route as they always did."""
+    baked({"index.html.gz": b"\x1f\x8b"})
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/p/0123456789ab/carts.json", b"")
+    assert _json(r)["hop.moy/main.py"].startswith("def _draw()")
 
 
 def test_carts_json_is_json_and_live(tmp_path):
@@ -381,18 +416,43 @@ def test_only_the_known_assets_are_reachable(tmp_path, baked):
 
 
 def test_a_query_string_does_not_hide_an_asset(tmp_path, baked):
-    """The page opens itself with `?dev=1`; a served index must survive it."""
+    """The page opens itself with `?dev=1` (and a pairing with `?pin=`): the
+    redirect keeps it, and the page under its prefix answers it."""
     baked({"index.html.gz": b"\x1f\x8bpage"})
-    r = _host(tmp_path).handle_http("GET", "/?dev=1", b"")
+    h = _host(tmp_path)
+    to = _paged(h.handle_http("GET", "/?dev=1", b""))
+    assert to.endswith("/?dev=1")
+    r = h.handle_http("GET", to, b"")
     assert b"200" in h_status(r) and r.endswith(b"page")
 
 
-def test_a_board_with_no_bundle_says_how_to_get_one(tmp_path):
-    """A firmware built with no web bundle looks exactly like a broken feature
-    in a browser. Name the build step, since that is the whole fix."""
+def test_a_console_with_no_add_on_says_where_to_get_it(tmp_path, baked):
+    """The browser console is an add-on cart: a board without it says so, and
+    says where it comes from, which is the whole fix."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.remove(pack)
+    os.rmdir(os.path.dirname(pack))
     r = _host(tmp_path).handle_http("GET", "/", b"")
     assert b"404" in h_status(r)
-    assert b"web_runner/dist" in r and b"reflash" in r
+    assert b"isn't installed" in r and b"Get Carts" in r
+
+
+def test_an_add_on_for_another_image_needs_its_page_updated(tmp_path, baked):
+    """After a firmware update the cart that was installed fits the old
+    image until the one that fits arrives."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.rename(os.path.dirname(pack),
+              os.path.join(os.path.dirname(os.path.dirname(pack)),
+                           "web_console_000000000000.moy"))
+    h = _host(tmp_path)
+    for path in ("/", "/p/000000000000/worker.js"):
+        r = h.handle_http("GET", path, b"")
+        assert b"503" in h_status(r) and b"needs its page updated" in r, path
+
+
+def test_an_image_that_names_no_page_says_so(tmp_path):
+    r = _host(tmp_path).handle_http("GET", "/", b"")
+    assert b"404" in h_status(r) and b"names no browser console" in r
 
 
 def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
@@ -405,13 +465,15 @@ def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
     assert "javascript" in _head(r)
 
 
-def test_the_baked_stamp_answers_which_console_this_board_serves(baked):
+def test_the_stamp_answers_which_console_this_board_serves(tmp_path, baked):
     baked({"index.html.gz": b"x"}, stamp="4 572693 d44b8756bf08")
+    host = _host(tmp_path)
+    host.handle_http("GET", "/", b"")
     assert wh.baked_stamp() == "4 572693 d44b8756bf08"
-    assert "4 572693 d44b8756bf08" in wh.WebHost("/x").source_note()
+    assert "4 572693 d44b8756bf08" in host.source_note()
     baked({})
     assert wh.baked_stamp() is None
-    assert "NONE" in wh.WebHost("/x").source_note()
+    assert "names no browser console" in host.source_note()
 
 
 @pytest.mark.parametrize("name", _assets())
@@ -420,7 +482,7 @@ def test_every_allowlisted_asset_has_a_sane_content_type(tmp_path, baked, name):
     booting and the browser refusing to instantiate it -- and it fails only in
     a real browser, which is the expensive place to find out."""
     baked({name + ".gz": b"\x1f\x8bx"})
-    ctype = _head(_host(tmp_path).handle_http("GET", "/" + name, b""))
+    ctype = _head(_host(tmp_path).handle_http("GET", "/p/0123456789ab/" + name, b""))
     ctype = [l for l in ctype.split("\r\n") if l.startswith("Content-Type")][0]
     if name.endswith(".wasm"):
         assert ctype == "Content-Type: application/wasm"
@@ -430,17 +492,19 @@ def test_every_allowlisted_asset_has_a_sane_content_type(tmp_path, baked, name):
         assert "text/html" in ctype
 
 
-def test_an_asset_is_never_cached(tmp_path, baked):
+def test_an_asset_outside_the_page_s_prefix_is_revalidated(tmp_path, baked):
     """The regression that shipped once: a day-long cache on files whose whole
-    delivery mechanism is a new build."""
+    delivery mechanism is a new build. Only an address naming the page's
+    digest may be kept."""
     baked({"worker.js.gz": b"\x1f\x8bx"})
-    assert "no-store" in _head(_host(tmp_path).handle_http("GET", "/worker.js", b""))
+    head = _head(_host(tmp_path).handle_http("GET", "/worker.js", b""))
+    assert "no-cache" in head and "immutable" not in head
 
 
-def test_the_bundle_send_drains_nothing(tmp_path, baked):
-    """The T-Deck's drain exists because its card shares the panel's SPI host.
-    The baked bundle is in flash and races nothing, so serving it waits on no
-    band in flight."""
+def test_the_pack_is_read_through_the_store_s_gate(tmp_path, baked):
+    """The pack is a file of the store: each piece is read under
+    moy_vol_gate_enter, which drains the panel's flush where a board's card
+    shares its bus. The webhost adds no drain of its own, and /sync none."""
     baked({"worker.js.gz": b"\x1f\x8bx"})
     h = _host(tmp_path)
     before = nb._drains()

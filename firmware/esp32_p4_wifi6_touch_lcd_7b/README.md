@@ -151,10 +151,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
 - `boards/MOYBYTE_P4/` — out-of-tree board def: the `C6_WIFI` variant's
   sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
-  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×8 MiB app
+  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×6.5 MiB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
   console — then the 128 KiB coredump partition a panic writes its ESP-IDF
-  core dump to (`tools/coredump.py` reads it), with the tail from 0x1030000
+  core dump to (`tools/coredump.py` reads it), with the tail from 0xD30000
   left unlisted so mainline auto-builds the vfs over it; a cable flash that moves it erases the new store's first
   blocks and the store re-seeds, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
@@ -176,10 +176,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   whose S3-only pieces are include-guarded, so they compile unchanged on the
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
   integer-upscale composite the windowed presentation needs. `moy_web` is
-  staged the same way: it is the **browser console baked into the image**
-  (the pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
-  `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
-  a flashed board always serves a console current with its own firmware
+  staged the same way: it names the **browser console this image serves**
+  (the digest of `firmware/web_runner/dist`'s pack, `tools/gen_web_blob.py`),
+  and the webhost serves only the add-on cart whose pack has that digest, so
+  a flashed board never serves a console older or newer than its own firmware
   (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):

@@ -242,7 +242,9 @@ def _want_sched(loop):
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, the OTA confirm's pending marker, once, the scheduler's
+    says goodbye, the OTA confirm's pending marker, once, the browser
+    console add-on's step (web_addon.AddonStep) from the confirm until the
+    add-on fits this image, the scheduler's
     `woken` while a service's task wants the VM (MOY_SVC_TASKS, the loop's
     own bit), and the background scheduler while any wake is registered or a
     message queued, with the frame's slack. Answers the bits it still
@@ -253,6 +255,13 @@ def make_service(ws, loop):
     tick = sched.tick
     woken = sched.woken
     sched.kernel_woken()
+    addon = getattr(ws, "addon", None)
+    if addon is not None:
+        services = loop.services
+
+        def _wake():
+            services(services() | SVC_UPDATE)
+        addon.wake = _wake
 
     def service(bits):
         keep = 0
@@ -268,8 +277,13 @@ def make_service(ws, loop):
             if upd is not None:
                 try:
                     upd.confirmed_by_kernel()
+                    if addon is not None:
+                        addon.start()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
+        if addon is not None and addon.phase is not None:
+            if not (bits & SVC_UPDATE) or addon.tick():
+                keep |= SVC_UPDATE
         if bits & SVC_TASKS:
             woken()
         if bits & SVC_SCHED or wakes.queued:

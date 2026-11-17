@@ -19,8 +19,9 @@ paths:
   #53**, not here.
   - **Every board but the C3 Zero is dual-OTA** (`otadata + ota_0 + ota_1 +
     vfs`), so the one-time migration is HISTORY. The C3 Zero is one factory
-    slot and the store (4 MB does not hold its image twice): its updater's
-    `available()` is False, and a new image goes on by cable. The slot sizes differ per board and are NOT
+    slot and the store (owner, 2026-11-17: no OTA): its updater's
+    `available()` is False, a new image goes on by cable, and the cable
+    flash installs the browser console add-on that fits it. The slot sizes differ per board and are NOT
     repeated here: each board's partition CSV is the only thing that decides
     whether an image fits, and the build prints the headroom against it (#168).
     **The Zero's is the one authored under a real constraint** — 8MB of flash,
@@ -56,7 +57,13 @@ paths:
     removed** and each index keeps the entries of the one it replaces, so a
     console a step behind its channel, rolled back or installed by hand still
     finds its own. A board whose run carries no page its image names keeps
-    the manifest already published and fails the publish.
+    the manifest already published and fails the publish. On the console,
+    the add-on that fits a new image is installed only AFTER that image
+    confirms itself (`runtime/carts/web_addon.py`, under the radio's "update"
+    hold), so a rollback finds the add-on its old image serves still on the
+    shelf; an install a reset cuts short resumes on the next boot, and the
+    recovery floor never touches the add-on (a person reinstalls it from Get
+    Carts).
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
     then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.

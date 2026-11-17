@@ -115,6 +115,7 @@ try:
 except Exception:
     pass
 
+OWN_INDEX = "carts-%s.json"      # tools/web_pack.py's INDEX_NAME, beside the manifest
 OTA_CFG_NAME = "ota.json"        # <update_dir>/ota.json -> {"channels": {"stable": url, ...}}
 
 # Where each channel lives when the card says nothing. The two branches publish
@@ -431,6 +432,17 @@ class OtaUpdater(SlotHealth):
         url, "unstable": url}}; a legacy {"manifest_url": url} is the one
         channel. The card WINS so a LAN host stays a one-file override."""
         return self._manifest_source(channel)[0]
+
+    def own_index(self):
+        """The index this console's release publishes beside its manifest,
+        `carts-<board>.json`, which lists the browser console add-on for each
+        page this board's images name (runtime/carts/web_addon.py;
+        tools/web_pack.py writes it). Beside the card's manifest when the card
+        names one, so a LAN mirror serves it as it serves the payload."""
+        url = self.manifest_url()
+        if not url or "/" not in url:
+            return None
+        return url.rsplit("/", 1)[0] + "/" + OWN_INDEX % BOARD
 
     def _manifest_source(self, channel=None):
         """(url, from_card): where the url came from decides whether an

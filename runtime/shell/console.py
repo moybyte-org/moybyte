@@ -808,11 +808,14 @@ class Workstation:
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
+        # The browser console add-on's step (runtime/carts/web_addon.AddonStep):
+        # the add-on that fits this image installed after an update; a board's.
+        self.addon = None
         # USB mass storage (runtime/system/usb_drive.py): a board whose card a
         # computer can take over USB; None where the image has no driver.
         self.usb_drive = None
         # The network Get Carts fetches carts through (#124, runtime/carts/cart_index.py):
-        # `online()` and `open(url)`, injected by a board (device/wire_links.CartNet),
+        # `online()` and `open(url)`, injected by a board (device/cart_net.CartNet),
         # by the live simulator (host_app.HostCartNet) and by a browser page
         # that keeps its own carts (firmware/web_runner/carts_link.py). None
         # elsewhere -- the app then says this console has no way to fetch.
@@ -825,6 +828,10 @@ class Workstation:
         self.cart_keep = None
         self.cart_pick = None
         self.cart_home = None
+        # The index this console's own release publishes beside its firmware
+        # (the browser console add-on's, runtime/carts/web_addon.py), set by a
+        # board (device/wire_links.py); Get Carts and `pkg` read it last.
+        self.cart_own = None
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
         # build without it, which is what makes the Settings row appear only where
@@ -2558,6 +2565,11 @@ class Workstation:
             if _app.is_app(selected):
                 self.spine.open_app(_app, selected)
                 return
+        if (selected or {}).get("runtime") == "web":
+            # The browser console add-on (runtime/carts/web_addon.py): opening
+            # it is turning it on, and its screen is the console's own.
+            self.web.open_addon()
+            return
         if (selected or {}).get("broken"):
             # A cart whose manifest will not parse cannot be RUN -- it has no
             # main, no fps and no permissions. A tap opens it where it can be

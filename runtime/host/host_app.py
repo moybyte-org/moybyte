@@ -136,7 +136,7 @@ class HostCartNet:
     """The network Get Carts fetches through on the host (#124):
     `runtime/carts/cart_index.py`'s transport over urllib, which follows redirects
     and checks certificates.
-    The board's twin is device/wire_links.CartNet; both answer `dial()`,
+    The board's twin is device/cart_net.CartNet; both answer `dial()`,
     `ready()` and `open(url)` -> status / length / readinto / close (and this
     one `online()`, the shape a transport with no `ready()` keeps).
     The PC is already on a network, so there is nothing to dial."""

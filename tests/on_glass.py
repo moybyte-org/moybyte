@@ -2307,44 +2307,48 @@ def sd_card_io_takes_no_internal_dma(board):
     return got
 
 
-def web_console_is_baked_into_the_image(board):
-    """The wasm console this board hands a browser lives in its OWN image, and
-    reads back correctly from flash -- the one part no host test can reach,
-    because it is the linker's answer, not the build script's.
+def web_console_add_on_fits_the_image(board):
+    """The browser console this board serves is the add-on cart that fits its
+    image (native/moy_net/moy_page.h), and the webhost's state agrees with
+    the store: READY with the fitting folder, ABSENT with none, STALE with
+    only others.
 
-    EVERY board asks, because the failure is silent on every board: a build
-    made without `firmware/web_runner/dist` produces an image that compiles,
-    boots and runs, and is about 700KB short -- two of them shipped on
-    2026-09-08 before anyone noticed. Self-consistent on purpose (the names
-    the webhost's table serves, not this checkout's `dist/`): a board may
-    legitimately run an older build, and the question is whether ITS console
-    is whole -- and whether the webhost names it as what it serves. A board
-    serves only through its socket (its moy_net has no web_handle), so the
-    response's headers are the C router's, held by tests/test_moy_webhost.py.
+    EVERY board asks, because the failures are silent: an image built without
+    `firmware/web_runner/dist` names no page and boots and runs (two shipped
+    on 2026-09-08 that way, when the console was baked in), and a pack whose
+    digest is not the one the image names is a page that never serves.
+    Self-consistent on purpose (what the image names, not this checkout's
+    `dist/`): a board may legitimately run an older build. A board serves only
+    through its socket, so the response's headers are the C router's, held by
+    tests/test_moy_webhost.py.
     """
-    import sys
-    sys.path.insert(0, os.path.join(ROOT, "tools"))
-    import gen_web_blob
     stamp = board.pyval("__import__('moy_web').stamp()")
-    assert stamp and stamp != "0 0 none", (
-        "this image has NO baked web console (stamp %r) -- it was built with "
+    want = board.pyval("__import__('moy_web').page_want()")
+    assert stamp and stamp != "0 0 none" and want and len(want) == 64, (
+        "this image names NO browser console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
-    count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    declared = sorted(gen_web_blob.asset_names())
-    assert count == len(declared), (stamp, declared)
-    assert total > 400000, "a bundle this small is not the wasm console"
-    names = board.pyval("__import__('moy_web').assets()")
-    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
-    got = board.pyval(
-        "[(n, len(__import__('moy_web').asset(n)), "
-        "bytes(__import__('moy_web').asset(n)[:3])) "
-        "for n in __import__('moy_web').assets()]")
-    assert sum(g[1] for g in got) == total, got
-    for name, size, magic in got:
-        assert magic == b"\x1f\x8b\x08", (name, magic)
-        assert size > 0, name
-    note = board.pyval("__import__('moy_webhost').WebHost('/moy/carts').source_note()")
-    assert "baked into this firmware" in note and stamp.split()[2] in note, (note, stamp)
+    assert int(stamp.split()[1]) > 400000, "a bundle this small is not the wasm console"
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    folders = board.pyval(
+        "[n for n in __import__('os').listdir(%r) if n.startswith('web_console_')]"
+        % root, timeout=20)
+    board.cmd("py ws.addon.point(True)", wait_for="PY")
+    state = board.pyval("__import__('moy_net').page_state()")
+    note = board.pyval("__import__('moy_webhost').WebHost(%r).source_note()" % root)
+    fits = "web_console_%s.moy" % want[:12]
+    if not folders:
+        assert state == 1 and "Get Carts" in note, (state, note)
+        return
+    if fits not in folders:
+        assert state == 2 and "page updated" in note, (state, folders, note)
+        return
+    assert state == 3, (state, folders)
+    head = board.pyval(
+        "__import__('binascii').hexlify(open(%r,'rb').read(48)).decode()"
+        % ("%s/%s/moybyte_web.pack" % (root, fits)), timeout=20)
+    assert bytes.fromhex(head[:16]) == b"MOYWEB01", head
+    assert head[32:96] == want, "the add-on's pack is not the page this image names"
+    assert stamp.split()[2] in note, (note, stamp)
 
 
 def _clear_to_console(board, clear):

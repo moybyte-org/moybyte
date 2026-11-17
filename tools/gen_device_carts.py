@@ -57,13 +57,11 @@ the plain one fits: 2,830,672 B of that board's 2,883,584 B OTA slot, 51 KB
 left -- under the board's headroom floor, a failed build, in a slot
 paid for twice. The packed image is 2,399,232 B and leaves 473 KB.
 
-Why a Python bytes literal and not a second `.incbin` beside the web bundle's:
-`moy_web` exists because a memoryview straight at flash goes to lwIP with
-nothing in between, and NOTHING here can use that -- `deflate.DeflateIO` reads a
+Why a Python bytes literal and not an `.incbin`: `deflate.DeflateIO` reads a
 STREAM, so a board pays one copy of one cart's compressed bytes whichever way
-the blob is spelled. What a literal buys instead is that this file stays the
-only thing between `system_carts/` and a board, with no C module to compile, no
-`[native]` entry to deny, and no fourth generated translation unit. The frozen
+the blob is spelled. What a literal buys is that this file stays the only
+thing between `system_carts/` and a board, with no C module to compile, no
+`[native]` entry to deny, and no generated translation unit. The frozen
 bytes land in ROM either way (`frozen_content.c` emits them as a `static const
 mp_obj_str_t`), which is the property that actually mattered.
 

@@ -509,6 +509,11 @@ class InstallServer:
         not it (the browser's OPFS), else None."""
         return self.__ws.cart_keep
 
+    def own(self, g):
+        """The index this console's own release publishes beside its
+        firmware (the browser console add-on's), or None."""
+        return self.__ws.cart_own
+
     def can_pick(self, g):
         """True where the player can hand this console a file of their own."""
         return self.__ws.cart_pick is not None

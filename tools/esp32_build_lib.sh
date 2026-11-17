@@ -755,8 +755,9 @@ moybyte_stage_native() {
   moybyte_board_impls
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
   # WHERE it staged them is the board's to say ([native] dest). Asked rather
-  # than restated: a board moving its dest would otherwise leave the blob
-  # ungenerated, and an image with no console is a silent pass.
+  # than restated: a board moving its dest would otherwise leave the digest
+  # ungenerated, and an image that names no console is a silent pass. The
+  # pack, the add-on cart's payload, goes beside the image (tools/web_pack.py).
   local dest
   dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
   local staged="${SCRIPT_DIR}/${dest}"
@@ -765,6 +766,8 @@ moybyte_stage_native() {
     if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_WEB_BUNDLE:-0}" = "1" ]; then
       args+=(--require)
     fi
+    mkdir -p "${DIST_DIR}"
+    args+=(--pack "${DIST_DIR}/moybyte_web.pack")
     moybyte_phase web-blob
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" "${args[@]}"
   fi
@@ -995,7 +998,7 @@ moybyte_app_size_guard() {
     echo "!!   slot:     ${slot_bytes} bytes (${slot}, $(basename "${csv}"))" >&2
     echo "!!   image:    ${size_bytes} bytes" >&2
     echo "!!   OVERFLOW: $(( -headroom )) bytes ($(( (-headroom) / 1024 )) KB)" >&2
-    echo "!! Trim it (the baked web console -- see tools/gen_web_blob.py)" >&2
+    echo "!! Trim it (docs/perf/image.md says what it is made of)" >&2
     echo "!! or change the partition table, which costs every deployed device a" >&2
     echo "!! full-erase USB flash." >&2
     exit 1

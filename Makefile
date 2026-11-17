@@ -275,9 +275,9 @@ UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 .PHONY: unix-micropython
 unix-micropython:
 	@mkdir -p $(UNIX_MP_DIR) $(UNIX_MP_USERMODS)
-# moy_web's blob table is build OUTPUT (gitignored): it .incbin's the web
-# runner's bundle, so on a tree that has never built one it has to exist as an
-# empty table or this build stops on a missing source file. REQUIRE=0 and quiet
+# moy_web's generated file is build OUTPUT (gitignored): it names the digest of
+# the web runner's bundle, so on a tree that has never built one it has to
+# exist naming none or this build stops on a missing source file. REQUIRE=0 and quiet
 # on purpose: the generator is strict under CI, where this binary is built and
 # where no wasm bundle exists -- and "this image has no browser console" is not
 # news about a test binary that is not an image.

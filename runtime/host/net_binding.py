@@ -64,7 +64,7 @@ _SOURCES = ("moy_net.h", "moy_http.c", "moy_net_port.c","moy_sync.c", "moy_sync_
             "moy_ota.h", "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_json.h", "moy_json.c", "moy_vol.h",
             "moy_vol.c", "moy_fs.h", "moy_fs.c", "moy_arena.h",
             "moy_journal.h", "moy_journal.c", "moy_store_host.c",
-            "moy_web_blob.h")
+            "moy_web_blob.h", "moy_page.h", "moy_page.c")
 _LIB = [None]
 
 _P = ctypes.c_char_p
@@ -112,8 +112,9 @@ _SIGS = (
     ("moy_web_pack", [_P, _P, _I, ctypes.POINTER(ctypes.c_void_p), _PZ], _I),
     ("moy_web_stamp_text", [], _P),
     ("moy_net_free", [ctypes.c_void_p], None),
-    ("moy_net_host_bake", [ctypes.c_uint, _P, ctypes.c_void_p, ctypes.c_uint,
-                           ctypes.c_uint, _P], None),
+    ("moy_net_host_stamp", [_P], None),
+    ("moy_page_name", [ctypes.c_void_p], None),
+    ("moy_page_forget", [], None),
     ("moy_net_host_use_stored", [_Z, _Z], _I),
     ("moy_net_host_remember", [_I, _P, _Z, _P, _Z], _I),
     ("moy_ota_keys", [], _I),
@@ -801,21 +802,32 @@ def _c6_record():
             ctypes.c_int.in_dll(d, "moy_net_host_c6_active").value,
             ctypes.c_int.in_dll(d, "moy_net_host_c6_writes").value)
 
-_BAKED = []
+def _bake(blobs, stamp="0 0 none", carts=None):
+    """Name the page {served name: bytes} the way an image names one, and
+    install it as the add-on cart's pack under `carts` when given (the host
+    names none for {}). Returns the pack's path, or None."""
+    import sys
+    tools = os.path.join(native_build.ROOT, "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import gen_web_blob
 
-
-def _bake(blobs, stamp="0 0 none"):
-    """Make {served name: bytes} the image's baked bundle; {} for none."""
     d = _lib()
-    del _BAKED[:]
-    items = sorted(blobs.items())
-    for i, (name, data) in enumerate(items):
-        n = _bytes(name)
-        buf = ctypes.create_string_buffer(bytes(data), len(data) or 1)
-        _BAKED.append((n, buf))
-        d.moy_net_host_bake(i, n, buf, len(data), len(items), _bytes(stamp))
-    if not items:
-        d.moy_net_host_bake(99, None, None, 0, 0, None)
+    d.moy_net_host_stamp(_bytes(stamp))
+    if not blobs:
+        d.moy_page_name(None)
+        return None
+    data, want = gen_web_blob.pack_bytes(sorted(blobs.items()))
+    d.moy_page_name(ctypes.create_string_buffer(want, 32))
+    if carts is None:
+        return None
+    folder = os.path.join(str(carts), "web_console_%s.moy" % want.hex()[:12])
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "moybyte_web.pack")
+    with open(path, "wb") as f:
+        f.write(data)
+    d.moy_page_forget()
+    return path
 
 
 def _drains():

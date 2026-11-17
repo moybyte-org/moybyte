@@ -103,17 +103,15 @@
 #include "moy_vol.h"
 #include "moy_webauth.h"
 
-// The bundle is native/moy_web's, where the image takes it; a build without it
-// (the browser's own) serves the 404 that says how to get one.
+// The bundle is the add-on cart's pack (moy_page.h); the stamp of the one this
+// image names is native/moy_web's, where the image links it.
+#include "moy_page.h"
 #if __has_include("moy_web_blob.h")
 #include "moy_web_blob.h"
-#define HAVE_BUNDLE 1
-#pragma weak moy_web_assets
-#pragma weak moy_web_asset_count
-#pragma weak moy_web_stamp
 #else
-#define HAVE_BUNDLE 0
+extern const char moy_web_stamp[];
 #endif
+#pragma weak moy_web_stamp
 #if __has_include("moy_flush.h")
 #include "moy_flush.h"
 #else
@@ -210,6 +208,8 @@ typedef struct {
     const moy_wa_seal_t *seal;      // NULL: the answer goes in the clear
     moy_wa_seal_t sealed;           // what `seal` points at for a gated route
     size_t bn;                      // the request body's length, once opened
+    uint8_t paged;                  // the target came under the page's prefix
+    uint8_t lasting;                // ...and that prefix names this image's page
 } out_t;
 
 // -- the host's state -----------------------------------------------------------
@@ -274,6 +274,7 @@ static void config(const moy_web_cfg_t *cfg) {
     copy_list(W->kinds, sizeof(W->kinds), cfg->kinds);
     copy_list(W->defer, sizeof(W->defer), cfg->defer);
     moy_wa_config(cfg->system);
+    moy_page_at(W->carts);
 }
 
 static void close_conn(int *fd) {
@@ -443,13 +444,51 @@ size_t moy_web_shelf(char *out, size_t cap) {
 }
 
 const char *moy_web_stamp_text(void) {
-    #if HAVE_BUNDLE
-    if (moy_web_stamp != NULL && moy_web_assets != NULL
-        && moy_web_asset_count != 0) {
+    if (moy_web_stamp != NULL && moy_page_state() == MOY_PAGE_READY) {
         return moy_web_stamp;
     }
-    #endif
     return NULL;
+}
+
+// THE PAGE'S PREFIX. `/` answers a redirect to /p/<12 hex of the digest this
+// image names>/, and every request under it is routed with the prefix taken
+// off. The page asks for everything by a relative URL (its assets, /sync,
+// /auth, the pulls), so it needs no change, and an asset under the prefix is
+// the same bytes for as long as the digest is: a browser keeps it for good.
+#define PAGE_PREFIX 16              // "/p/" + 12 hex + "/"
+
+static void page_tag(char out[13]) {
+    uint8_t want[32];
+    static const char hex[] = "0123456789abcdef";
+    if (!moy_page_want(want)) {
+        memset(want, 0, sizeof(want));
+    }
+    for (int i = 0; i < 6; i++) {
+        out[2 * i] = hex[want[i] >> 4];
+        out[2 * i + 1] = hex[want[i] & 15];
+    }
+    out[12] = '\0';
+}
+
+// Take the page's prefix off `*t`; `o` says it was there and whether it
+// names this image's page.
+static void unprefix(out_t *o, const char **t, size_t *tn) {
+    const char *p = *t;
+    if (*tn < PAGE_PREFIX || memcmp(p, "/p/", 3) != 0 || p[PAGE_PREFIX - 1] != '/') {
+        return;
+    }
+    for (int i = 3; i < PAGE_PREFIX - 1; i++) {
+        char c = p[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return;
+        }
+    }
+    char tag[13];
+    page_tag(tag);
+    o->paged = 1;
+    o->lasting = memcmp(p + 3, tag, 12) == 0;
+    *t = p + PAGE_PREFIX - 1;
+    *tn -= PAGE_PREFIX - 1;
 }
 
 // -- the response writer ---------------------------------------------------------
@@ -1016,35 +1055,34 @@ static int path_is(const char *p, size_t n, const char *want) {
 }
 
 static void asset(out_t *o, const char *name, const char *ctype) {
-    char gz[40];
+    char gz[48];
     snprintf(gz, sizeof(gz), "%s.gz", name);
-    const unsigned char *data = NULL;
-    unsigned len = 0;
+    uint32_t off = 0, len = 0;
     int zipped = 0;
-    #if HAVE_BUNDLE
-    const moy_web_asset_t *hit = NULL;
-    if (moy_web_assets != NULL && moy_web_asset_count != 0) {
-        for (unsigned i = 0; i < moy_web_asset_count && hit == NULL; i++) {
-            if (strcmp(moy_web_assets[i].name, gz) == 0) {
-                hit = &moy_web_assets[i];
-                zipped = 1;
-            }
-        }
-        for (unsigned i = 0; i < moy_web_asset_count && hit == NULL; i++) {
-            if (strcmp(moy_web_assets[i].name, name) == 0) {
-                hit = &moy_web_assets[i];
-            }
+    const char *why = moy_page_why();
+    if (why == NULL) {
+        if (moy_page_find(gz, &off, &len) == 0) {
+            zipped = 1;
+        } else if (moy_page_find(name, &off, &len) != 0) {
+            simple(o, 404, "text/plain; charset=utf-8", "not found");
+            return;
         }
     }
-    if (hit != NULL) {
-        data = hit->data;
-        len = hit->len;
+    if (why != NULL) {
+        simple(o, moy_page_state() == MOY_PAGE_STALE ? 503 : 404,
+               "text/plain; charset=utf-8", why);
+        return;
     }
-    #endif
-    if (data == NULL) {
-        simple(o, 404, "text/plain; charset=utf-8",
-               "this firmware has no web console baked in -- build "
-               "firmware/web_runner/dist and reflash");
+    moy_vol_file_t *f = NULL;
+    int gate = moy_vol_gate_enter(moy_page_path());
+    int rc = gate < 0 ? -1 : open_read(moy_page_path(), &f);
+    if (rc == 0 && moy_vol_seek(f, off) != 0) {
+        moy_vol_close(f);
+        rc = -1;
+    }
+    moy_vol_gate_leave(gate);
+    if (rc != 0) {
+        simple(o, 503, "text/plain; charset=utf-8", "the browser console could not be read");
         return;
     }
     char head[320];
@@ -1053,16 +1091,56 @@ static void asset(out_t *o, const char *name, const char *ctype) {
                      "Content-Type: %s\r\n"
                      "Content-Length: %u\r\n"
                      "%s"
-                     "Cache-Control: no-store\r\n"
+                     "Cache-Control: %s\r\n"
                      "Access-Control-Allow-Origin: *\r\n"
                      "Connection: close\r\n\r\n",
-                     ctype, len,
-                     zipped ? "Content-Encoding: gzip\r\n" : "");
+                     ctype, (unsigned)len,
+                     zipped ? "Content-Encoding: gzip\r\n" : "",
+                     o->lasting ? "public, max-age=31536000, immutable" : "no-cache");
     raw(o, head, (size_t)k);
-    for (unsigned i = 0; i < len && !o->err; i += 4096u) {
-        unsigned n = len - i < 4096u ? len - i : 4096u;
-        raw(o, data + i, n);
+    // A piece at a time, each read under the store's gate: a 1.4 MB wasm never
+    // sits in either heap, and the panel's flush waits only for one piece.
+    while (len > 0 && !o->err) {
+        size_t want = len < READ_CHUNK ? len : READ_CHUNK, got = 0;
+        gate = moy_vol_gate_enter(moy_page_path());
+        rc = gate < 0 ? -1 : read_some(f, W->io, want, &got);
+        moy_vol_gate_leave(gate);
+        if (rc != 0 || got != want) {
+            o->err = 1;
+            break;
+        }
+        raw(o, W->io, got);
+        len -= (uint32_t)got;
     }
+    gate = moy_vol_gate_enter(moy_page_path());
+    moy_vol_close(f);
+    moy_vol_gate_leave(gate);
+}
+
+// `/` and `/index.html` with no prefix: the page's own address, or why there
+// is none.
+static void page_root(out_t *o, const char *t, size_t tn) {
+    moy_page_forget();
+    const char *why = moy_page_why();
+    if (why != NULL) {
+        simple(o, moy_page_state() == MOY_PAGE_STALE ? 503 : 404,
+               "text/plain; charset=utf-8", why);
+        return;
+    }
+    const char *q = memchr(t, '?', tn);
+    size_t qn = q ? tn - (size_t)(q - t) : 0;
+    char tag[13];
+    page_tag(tag);
+    char head[384];
+    int k = snprintf(head, sizeof(head),
+                     "HTTP/1.1 302 Found\r\n"
+                     "Location: /p/%s/%.*s\r\n"
+                     "Content-Length: 0\r\n"
+                     "Cache-Control: no-store\r\n"
+                     "Connection: close\r\n\r\n",
+                     tag, (int)(qn < 256 ? qn : 0), q ? q : "");
+    raw(o, head, (size_t)k);
+    o->status = 302;
 }
 
 // THE SYSTEM ROOT IS THE VM'S. Which of a browser's Settings a board takes,
@@ -1373,7 +1451,11 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
         return ROUTE_DONE;
     }
     if (path_is(t, pn, "/") || path_is(t, pn, "/index.html")) {
-        asset(o, "index.html", ASSETS[0].ctype);
+        if (o->paged) {
+            asset(o, "index.html", ASSETS[0].ctype);
+        } else {
+            page_root(o, t, tn);
+        }
         return ROUTE_DONE;
     }
     for (size_t i = 0; i < sizeof(ASSETS) / sizeof(ASSETS[0]); i++) {
@@ -1597,6 +1679,7 @@ static void serve(int fd) {
         bn = r.clen;
     }
     out_t o = {.fd = fd};
+    unprefix(&o, &r.target, &r.target_n);
     const char *q = memchr(r.target, '?', r.target_n);
     size_t pn = q ? (size_t)(q - r.target) : r.target_n;
     if (!W->closing && path_is(r.method, r.method_n, "GET") && path_is(r.target, pn, "/term")) {
@@ -1741,6 +1824,7 @@ int moy_web_handle(const char *method, size_t method_n, const char *target,
     out_t o = {.fd = -1};
     W->peer = 0;
     moy_seal_wipe(&W->hseal, sizeof W->hseal);
+    unprefix(&o, &target, &target_n);
     int done = route(&o, method, method_n, target, target_n, b, body_n);
     if (done == ROUTE_PARKED) {
         moy_net_free(o.buf);

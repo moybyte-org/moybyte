@@ -57,9 +57,13 @@ What it does differently, because a console is not a PC:
     takes them with the cart.
   * it installs only what a sandbox runs or the loader validates (RUNTIMES):
     a compiled cart, whose native module a board loads only by its
-    signature, a Lua cart, or a theme package ("runtime": "theme"), data
+    signature, a Lua cart, a theme package ("runtime": "theme"), data
     the theme loader parses, validates and clamps (docs/theme_and_shell_2026-11.md
-    §6) and nothing runs. A board's TLS checks the server's certificate,
+    §6) and nothing runs, or the browser console add-on ("runtime": "web"),
+    whose pack only the webhost reads and only when its head names the page
+    this image names (native/moy_net/moy_page.h); an index lists one of those
+    a page and a console lists only the one that fits it (`fitting`). A
+    board's TLS checks the server's certificate,
     but a server is not proof of what it serves; what lands is sandboxed,
     signed or validated data.
 
@@ -89,7 +93,7 @@ and puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
-(runtime/host/host_app.py), the kernel's client on a board (device/wire_links.CartNet),
+(runtime/host/host_app.py), the kernel's client on a board (device/cart_net.CartNet),
 the page's fetch in the browser (firmware/web_runner/carts_link.py). A
 transport's `open(url)` answers an object with `status`, `length` (None when
 unknown), `readinto(buf)` and `close()`.
@@ -171,7 +175,11 @@ SIG_SCHEME = b"moybyte-index-v1\n"
 SIG_TAIL = b', "sig": "'
 INDEX_KEYS = None             # the keys an index verifies against; None: the image's
 STAGE_DIR = "install"
-RUNTIMES = ("wasm", "lua", "theme")
+RUNTIMES = ("wasm", "lua", "theme", "web")
+# The runtimes whose carts need no engine of this console's: a theme is data
+# the theme loader takes, and "web" is the browser console add-on, a pack the
+# webhost serves (native/moy_net/moy_page.h).
+DATA_RUNTIMES = ("theme", "web")
 
 INDEX_LIMIT = 262144          # an index read whole into RAM
 TEXT_LIMIT = 65536            # a licence text, likewise
@@ -500,14 +508,52 @@ def sources_text(urls):
     return "".join(u + "\n" for u in urls)
 
 
-def load_indexes(root):
+def load_indexes(root, own=None):
     """The indexes this console browses: `system/sources` beside the carts
-    folder when it names any, else DEFAULT_INDEXES."""
+    folder when it names any, else DEFAULT_INDEXES; and `own` last, the index
+    the console's own release publishes beside its firmware (the browser
+    console add-on, one entry a page, each naming the page it fits;
+    tools/web_pack.py writes it, moy_ota.OtaUpdater.own_index names it)."""
     try:
         got = parse_sources(_read_recover(_sibling_path(root, SOURCES_NAME)))
     except Exception:  # noqa: BLE001 -- an unreadable override is no override
         got = None
-    return got or list(DEFAULT_INDEXES)
+    got = got or list(DEFAULT_INDEXES)
+    if own and own not in got:
+        got.append(own)
+    return got
+
+
+def page_want():
+    """The 64 hex of the browser console's page this image names, or None
+    (the host, a build with no bundle)."""
+    try:
+        import moy_web
+        return moy_web.page_want()
+    except (ImportError, AttributeError):
+        return None
+
+
+def fits_here(c, want=None):
+    """Whether this console can use index entry `c`: every cart but a "web"
+    one, and a web one only when it fits the page this image names."""
+    if c.get("runtime") != "web":
+        return True
+    want = page_want() if want is None else want
+    return bool(want) and (c.get("moybyte") or {}).get("fits") == want
+
+
+def fitting(carts, want=None):
+    """parse_index's `carts` this console can use (fits_here)."""
+    want = page_want() if want is None else want
+    return [c for c in carts if fits_here(c, want)]
+
+
+def runs_on(c, have):
+    """Whether a cart of index entry `c` runs on a console whose engines are
+    `have` (`ws.runtimes`' names)."""
+    rt = c["runtime"]
+    return rt in RUNTIMES and (rt in have or rt in DATA_RUNTIMES)
 
 
 def save_sources(root, urls):

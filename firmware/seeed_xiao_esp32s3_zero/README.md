@@ -32,11 +32,12 @@ What ended the no-build arrangement is that the board stopped being a spike and
 became the thing a kid's carts actually live on. Three properties a pushed tree
 cannot have started to matter:
 
-- **The browser console rides the image.** `native/moy_web` bakes the gzipped
-  bundle into the firmware so the page a board serves cannot drift behind the
-  board serving it. That has been true of every console board since 2026-08-15;
-  this board had no image, so it was the last place the drift survived — its
-  bundle was only ever a copy somebody pushed.
+- **The browser console is the page the image names.** The image carries
+  the digest of the bundle it was built with, and the board serves only the
+  add-on cart whose pack has that digest (`native/moy_net/moy_page.h`), so the
+  page a board serves cannot drift behind the board serving it. This board had
+  no image, so it was the last place the drift survived — its bundle was only
+  ever a copy somebody pushed.
 - **A second app slot**, so the board can be updated by anyone who is not
   holding a cable. It is headless and lives on a shelf; a cable is a real cost.
 - **One declaration of what it runs.** The module set was a `cp` list in a shell
@@ -134,6 +135,10 @@ them back on the next visit — but anything that existed *only* here is.
   only: a cart the kid deletes stays deleted (`zero_host.seed_carts`). The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
   overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
   `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
+  On 2026-11-17 the browser console left the image for its add-on cart and
+  the slots became **2 MiB** (`0x200000`, at `0x20000` and `0x220000`), the
+  store the **3,968 KiB** `vfs` at `0x420000`, which holds the add-on (one
+  pack, about 1.9 MB) beside the roster; provisioning installs the add-on.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
@@ -153,17 +158,19 @@ them back on the next visit — but anything that existed *only* here is.
   `moy_web` and the terminal (`moy_sh`, `moy_tty`, `moy_ssh`).** Every other one is denied with the hardware or the workload that
   is missing. The driver halves with no caller here are off in the board's own
   files: wired Ethernet, WPA-Enterprise, ESP-NOW and I2S (`sdkconfig.board`,
-  `mpconfigboard.h`), because the image's growth is the browser console it
-  bakes and the headroom floor is not the lever.
+  `mpconfigboard.h`), because every slot byte comes off the store twice and
+  the headroom floor is not the lever.
 
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--carts] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+./provision.sh [--modules] [--carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 ```
 
-Default: make the directories, optionally write the credentials and (`--password`) the
-board's password, reboot, and print where to pair. Every write is checked on
+Default: make the directories, install the browser console add-on that fits
+the image this checkout built (`dist/zero`; `--no-console` skips it),
+optionally write the credentials and (`--password`) the board's password,
+reboot, and print where to pair. Every write is checked on
 the board: one it refuses (a full store) stops the script, non-zero, with what
 the board said. It pushes no carts by default, because the image seeds an
 empty store on the reboot it ends with; `--carts` pushes the image's roster
@@ -267,8 +274,9 @@ glass.
   `rolled_back` (the bootloader gave up on it). That is the headless replacement
   for the console's notice banner, and it is why the pending marker is cleared
   at the CONFIRM rather than at the read.
-- **the page itself** — the console is baked into the image, so a board that
-  updated is serving a different console the next time it is opened.
+- **the page itself** — the board serves only the add-on that fits its image
+  and installs that one after the confirm (`zero_host.make_addon`), so a board
+  that updated is serving a different console the next time it is opened.
 
 **The rollback confirm is the one piece of OTA that could not be reused.**
 `confirm_when_healthy` waits for frames on the glass, and this board paints
@@ -529,7 +537,7 @@ update state machine and one whole first run end to end), plus
 below used to hold:
 
 - **The image, end to end.** The authored dual-OTA table boots — no silent
-  bootloader loop — and the board comes up on WiFi, serves the baked bundle, and
+  bootloader loop — and the board comes up on WiFi, serves the bundle, and
   answers `GET /update` with a real verdict (`no build published on this channel
   yet`, which is the correct answer to a channel with nothing on it, and proves
   the endpoint rather than the install).

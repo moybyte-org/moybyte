@@ -17,12 +17,13 @@
 #    is sized for it: the SSH server's stacks and session arena, SFTP refused
 #    (README.md's SSH paragraph), and the Python heap's ceiling
 #    (boards/MOYBYTE_C3_ZERO/mpconfigboard.h).
-#  * ONE APP SLOT. The image (the baked browser console is more than half of
-#    it) does not fit twice in 4 MB, so this board is the Zero "without OTA"
-#    that the XIAO's `[image]` names as a way out: a factory slot, no otadata,
-#    and `moy_ota.OtaUpdater.available()` False, which is how the shared
-#    update screen already reads a board it cannot update. A new image goes
-#    on by cable.
+#  * ONE APP SLOT (owner, 2026-11-17: the C3 keeps the browser console and
+#    has no OTA). This board is the Zero "without OTA" that the XIAO's
+#    `[image]` names as a way out: a factory slot, no otadata, and
+#    `moy_ota.OtaUpdater.available()` False, which is how the shared update
+#    screen already reads a board it cannot update. A new image goes on by
+#    cable, and the flash installs the browser console add-on that fits it
+#    into the store (`[flash] addon`).
 #  * SINGLE CORE, RISC-V. Every task the native tier starts is on core 0
 #    (native/moy_kernel/moy_tasks.h).
 
@@ -133,6 +134,10 @@ skip = [
 image  = "dist/c3_zero/moybyte_c3_zero.bin"
 offset = "0x0"
 baud   = 460800
+# The carts folder the browser console add-on that fits the flashed image is
+# installed into, over the REPL, after a cable flash (tools/board_flash.py):
+# with no OTA, a cable flash is how a new image arrives, and its page with it.
+addon  = "/moy/carts"
 
 [image]
 # One factory slot (boards/MOYBYTE_C3_ZERO/partitions-moybyte-c3-zero.csv has
@@ -197,8 +202,8 @@ dest = "native/.staged"
 source   = "native"
 why = """
 The XIAO's set: the store, the kernel's entry, the links, the shell, the
-terminal, SSH and moy_web, whose baked browser console is why this board has
-an image at all. Every denial is the XIAO's, for the XIAO's reason (no glass,
+terminal, SSH and moy_web, which names the browser console add-on this
+board serves. Every denial is the XIAO's, for the XIAO's reason (no glass,
 no card, no audio, no carts run here); each is one line below and the reasoning
 is that file's."""
 

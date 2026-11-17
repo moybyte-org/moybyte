@@ -127,9 +127,10 @@ commit under the same protocol (`after-suite` for the pass, `fresh` for
 `<<< WORSE` a move past its noise band (the module header has the rule). It is
 a report, never a gate: the exit code stays the suites'. A number is published
 by regenerating `docs/perf/ledger.md` with the command the pass prints. A
-pass that builds builds the browser console first, because every image bakes
-the tree's own (a board built without one fails its suite's baked-console
-check). Run it
+pass that builds builds the browser console first, because every image names
+the tree's own (a board built without one fails its suite's add-on check), and
+a pass that flashes installs the add-on that fits (`tools/board.py BOARD
+addon`). Run it
 from a worktree (`tools/worktree.py new NAME`): in the main checkout a build is
 refused without `--main`, because its `dist/` is what every other session
 flashes. It skips a board whose port is held, naming the holder, never touches

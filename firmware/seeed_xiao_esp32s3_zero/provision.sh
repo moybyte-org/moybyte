@@ -4,7 +4,15 @@
 # whenever the credentials change. A write the board refuses (a full store)
 # stops the script with what the board said, and a non-zero exit.
 #
-#   ./provision.sh [--modules] [--carts] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+#   ./provision.sh [--modules] [--carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+#
+# THE BROWSER CONSOLE is an add-on cart (native/moy_net/moy_page.h), and this
+# board's whole product, so it is installed by default: the cart that fits the
+# image this checkout built (dist/zero), copied into the store with the add-on
+# folders that fit other images taken off (tools/board_flash.py's
+# install_addon, which a cable flash of this board runs too). After an update
+# the board installs the one that fits on its own (zero_host.make_addon).
+# `--no-console` skips it.
 #
 # WHAT THIS SCRIPT IS, SINCE 2026-08-29. It used to be the whole port: this
 # board ran stock MicroPython, and the nine shared modules it needs were PUSHED
@@ -52,6 +60,7 @@ set -euo pipefail
 
 PUSH_MODULES=0
 PUSH_CARTS=0
+PUSH_CONSOLE=1
 CLEAN=0
 SET_PASSWORD=0
 while [ $# -gt 0 ]; do
@@ -59,8 +68,9 @@ while [ $# -gt 0 ]; do
     --modules) PUSH_MODULES=1; shift ;;
     --password) SET_PASSWORD=1; shift ;;
     --carts)   PUSH_CARTS=1; shift ;;
+    --no-console) PUSH_CONSOLE=0; shift ;;
     --clean)   CLEAN=1; shift ;;
-    -h|--help) sed -n '2,54p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,58p' "$0"; exit 0 ;;
     *) break ;;
   esac
 done
@@ -177,6 +187,11 @@ if [ "${PUSH_CARTS}" = "1" ]; then
     board_write "${id}" "import os
 assert os.stat('/moy/carts/${id}.moy/manifest.json')[6] == $(wc -c < "${cart}/manifest.json")"
   done
+fi
+
+if [ "${PUSH_CONSOLE}" = "1" ]; then
+  echo "== the browser console add-on (the cart that fits dist/zero's image)"
+  "${PY}" "${REPO}/tools/board_flash.py" addon "${HERE}" --port "${PORT}"
 fi
 
 if [ -n "${WIFI}" ]; then

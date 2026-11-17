@@ -581,8 +581,8 @@ def test_draw_gates_take_the_traffic(board):
     on_glass.draw_gates_take_the_traffic(board)
 
 
-def test_the_web_console_is_baked_into_this_image(board):
-    on_glass.web_console_is_baked_into_the_image(board)
+def test_the_web_console_add_on_fits_this_image(board):
+    on_glass.web_console_add_on_fits_the_image(board)
 
 
 def test_idle_screen_blank_and_wake(board):

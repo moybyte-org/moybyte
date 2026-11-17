@@ -17,6 +17,7 @@
 #include "moy_webauth.h"
 #include "moy_seal.h"
 #include "moy_ota.h"
+#include "moy_page.h"
 
 #pragma weak moy_c6_version
 

@@ -497,3 +497,37 @@ def test_a_flash_over_the_same_coredump_partition_keeps_its_dump(monkeypatch, tm
     rc, fake = _flash_over(monkeypatch, tmp_path, _table(CORE_6M), CORE_6M)
     assert rc == 0
     assert _verbs(fake.calls) == ["read_flash", "erase_region", "write_flash"]
+
+
+ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
+C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
+
+
+@pytest.mark.parametrize("board_dir", [ZERO, C3_ZERO], ids=["zero", "c3-zero"])
+def test_a_zero_s_cable_flash_installs_the_add_on_that_fits_into_its_store(
+        monkeypatch, tmp_path, board_dir):
+    """The C3 has no OTA, so a cable flash is how its page follows its image;
+    both Zeros speak a bare REPL, so the install goes over it, into the
+    carts folder their store host serves (device/zero_host.py)."""
+    sys.path.insert(0, str(ROOT / "device"))
+    import zero_host
+    assert board_config.load(board_dir)["flash"]["addon"] == zero_host.CARTS_DIR
+    got = []
+    monkeypatch.setattr(board_flash, "install_addon",
+                        lambda d, p: got.append((d, p)) or 0)
+    rc, fake = _flash(monkeypatch, tmp_path, board_dir)
+    assert rc == 0 and got == [(str(board_dir), "/dev/fake")]
+    assert _verbs(fake.calls)[-1] == "write_flash"
+
+
+def test_a_failed_write_installs_no_add_on(monkeypatch, tmp_path):
+    got = []
+    monkeypatch.setattr(board_flash, "install_addon",
+                        lambda d, p: got.append(d) or 0)
+    rc, _ = _flash(monkeypatch, tmp_path, C3_ZERO, codes=[1])
+    assert rc == 1 and got == []
+
+
+def test_the_console_boards_install_theirs_through_the_dev_channel():
+    for board_dir in (TDECK, P4, GUITION, GUITION_P4):
+        assert "addon" not in board_config.load(board_dir)["flash"], board_dir

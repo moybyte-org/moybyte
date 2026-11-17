@@ -18,8 +18,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 ## One build system, six boards
 
 - **The shared half of every `build.sh` is `tools/esp32_build_lib.sh`**: the
-  toolchain and its self-heal, IDF components, native staging, the web blob
-  (generated into the STAGED copy — a build never writes into `native/`), the
+  toolchain and its self-heal, IDF components, native staging, the browser
+  console's pack and the digest the image names (generated into the STAGED
+  copy and `dist/` — a build never writes into `native/`), the
   OTA identity stamp from `device/moy_ota.py`, the frozen manifest and its
   fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
@@ -97,8 +98,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   session flashes, and a build there overwrites them (it happened twice before
   2026-10-03). `tools/worktree.py new NAME` makes a worktree that builds as it
   is: its own MicroPython trees, local clones of the main checkout's, over the
-  one shared ESP-IDF, and its own browser console, which every image bakes
-  (an image built with none fails the suites' baked-console check).
+  one shared ESP-IDF, and its own browser console, whose digest every image
+  names (an image built with none fails the suites' add-on check).
   `tools/board.py pass` refuses a build in the main checkout without `--main`.
 - **Every ESP32 build checks out micropython's tinyusb fork from the component
   manager's one git cache** (`~/.cache/Espressif/ComponentManager`) while it
@@ -432,4 +433,6 @@ stages 1–6 all absent. Its README is the authority; what bites:
   request and the Python heap's ceiling kept clear of both (the README's SSH
   paragraph). A block that lives for good is made at start, beside the
   others: one made mid-session splits the free heap for good. One factory
-  slot and no OTA: a new image goes on by cable. Its README is the authority.
+  slot and no OTA (owner, 2026-11-17): a new image goes on by cable, and the
+  flash installs the browser console add-on that fits it into the store
+  (`[flash] addon`, `tools/board_flash.py`). Its README is the authority.

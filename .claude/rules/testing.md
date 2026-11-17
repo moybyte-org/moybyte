@@ -103,7 +103,7 @@ paths:
   - **A check every board can make belongs in `on_glass.py`, and then EVERY
     board makes it.** The suites keep their own `def test_*` so a failure names
     its board, but the body is shared, and which boards call it is coverage,
-    not taste. Audited 2026-09-09: the draw gates, the baked web console, the
+    not taste. Audited 2026-09-09: the draw gates, the web console, the
     Lua-tier cart run, the `py` probe, the diag toggle, the heap report and the
     display underruns were each pinned on ONE board and silently unpinned on
     the others. A tier difference is an ARGUMENT to the shared body, never a

@@ -3,7 +3,7 @@
 # arrangement.
 #
 # WHY THIS IS NOT THE CONSOLE TABLE. The S3 console layout is
-# nvs/otadata/phy + two 6-7 MiB app slots + a vfs, and it needs 16MB. Pointing
+# nvs/otadata/phy + two 6 MiB app slots + a vfs, and it needs 16MB. Pointing
 # this board at it does not fail at build time: the BOOTLOADER rejects the
 # table and the board boot loops with no console at all, which on a board with
 # no screen is indistinguishable from a dead one. That was learned here (see
@@ -18,37 +18,33 @@
 # where a transposed digit between two S3 boards is a real hazard (the T-Deck's
 # 0x1D000 vs the P4's 0xD000 has already been typed wrong once, by hand).
 #
-# THE SLOT SIZE, and what it is sized against: 3.5 MiB (0x380000) per slot
-# since 2026-11-07 (owner), each slot grown by 256 KiB out of the store for the
-# C shell, the SSH server and SFTP (docs/os_2026-11.md section 7, phase 4: the
-# Zero over SSH), which the 3.25 MiB slots of 2026-10-18 had no room for
-# (docs/os_2026-11/web_terminal_spike.md); before them 3 MiB (2026-10-07,
-# board.toml's [image] says why) and the first table's 2.75 MiB.
-#
-#   Most of the image is the browser console every board bakes
-#   (native/moy_web, ~808 KB gzipped, 91% of it micropython.wasm.gz), which
-#   grows with the console rather than with this board; the shell, Dropbear
-#   and its libtomcrypt are this board's own growth. The build prints the
-#   headroom on every run.
+# THE SLOT SIZE, and what it is sized against: 2 MiB (0x200000) per slot
+# since 2026-11-17, when the browser console left the image for its add-on
+# cart (native/moy_net/moy_page.h) and its 1.9 MB with it; before that 3.5 MiB
+# (2026-11-07, owner, for the C shell, the SSH server and SFTP), 3.25 MiB
+# (2026-10-18), 3 MiB (2026-10-07) and the first table's 2.75 MiB. The shell,
+# Dropbear and its libtomcrypt are this board's own growth; the build prints
+# the headroom on every run.
 #
 #   Arithmetic, on 8 MiB (0x800000) of flash:
-#     ota_0  0x020000 + 0x380000 = 0x3A0000   (3,670,016 B, 64 KB aligned)
-#     ota_1  0x3A0000 + 0x380000 = 0x720000   (64 KB aligned)
-#     vfs    0x720000 + 0x0E0000 = 0x800000   (896 KiB, ends on the last byte)
+#     ota_0  0x020000 + 0x200000 = 0x220000   (2,097,152 B, 64 KB aligned)
+#     ota_1  0x220000 + 0x200000 = 0x420000   (64 KB aligned)
+#     vfs    0x420000 + 0x3E0000 = 0x800000   (3,968 KiB, ends on the last byte)
 #
-#   The price is the store, and it is the store that sets the ceiling: this
-#   board is a CART STORE. By blocks (littlefs, 4 KiB; a file costs a block, a
-#   folder two) the seed roster's files and folders filled the 352 blocks of
-#   the 1.375 MiB store (measured on glass 2026-10-23); this one has 224. No
-#   backup was taken for the change (owner, 2026-11-07): the table change wipes
-#   the store and the image's roster seeds the empty one on first boot. Every
-#   slot byte is paid for twice and comes off the store.
+#   The store sets the ceiling: this board is a CART STORE, and it holds the
+#   browser console add-on (one pack, about 1.9 MB) beside the seed roster and
+#   a kid's carts. By blocks (littlefs, 4 KiB; a file costs a block, a folder
+#   two) the seed roster's files and folders filled the 352 blocks of the
+#   1.375 MiB store (measured on glass 2026-10-23). Every slot byte is paid
+#   for twice and comes off the store; a table change wipes the store, the
+#   image's roster seeds the empty one on first boot, and provisioning
+#   installs the add-on.
 #
 # NO COREDUMP PARTITION (2026-11-09), where every console board has one
 # (docs/os_2026-11/processes.md section 10). This board runs no native module
 # (it denies moy_elf), its kernel's crash record keeps a panic's pc and
 # backtrace, and the partition's 64-128 KiB would come off a store that is the
-# only copy of a browser-made cart, or off slots 131 KB above the image; and
+# only copy of a browser-made cart, or off the slots; and
 # any change to this table costs every deployed Zero a cable flash and its
 # store. The image keeps CONFIG_ESP_COREDUMP_ENABLE_TO_NONE.
 #
@@ -66,6 +62,6 @@
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x380000,
-ota_1,    app,  ota_1,   0x3A0000, 0x380000,
-vfs,      data, fat,     0x720000, 0xE0000,
+ota_0,    app,  ota_0,   0x20000,  0x200000,
+ota_1,    app,  ota_1,   0x220000, 0x200000,
+vfs,      data, fat,     0x420000, 0x3E0000,

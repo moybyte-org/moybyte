@@ -198,6 +198,9 @@ class Inst:
     def keep(self):
         return None
 
+    def own(self):
+        return None
+
     def consent(self):
         return self._consent
 
