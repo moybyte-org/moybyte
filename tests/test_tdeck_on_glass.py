@@ -87,14 +87,23 @@ MOVED_SRAM = 4560
 # every row, so they stay internal. 24 bytes of .bss by the link map against
 # dev 57dfc2d20, 2026-11-11.
 TAP_FONTS_SRAM = 24
-# And ADDON_SRAM, what the idle desk gives up while the browser console's
-# add-on cart (native/moy_net/moy_page.h) is on the store, which every console
-# keeps it on: 125783 free without it and 125539 with it, one image, fresh
-# boots, 2026-11-17. It is the add-on's and not one cart's more: a second
-# small cart moved neither number.
-ADDON_SRAM = 244
+# And STATICS_1116_SRAM, the internal statics added against dev b909d0d96
+# (2026-11-16): the back-stack's kind-to-qstr cache (native/moy_spine/
+# modmoy_spine.c's `s_kq`, 161), the desk restore's shadow fill and its
+# colour table (native/moy_ui/moy_shape.c, 52), the browser console page's
+# state (native/moy_net/moy_page.c, 16), the quiet collect's retry counters
+# and the window stamp's (native/moy_kernel/moy_loop_board.c, 16) and the
+# profiler's phase (4): 249 bytes of .bss and .data by the link maps, which
+# move the heap's start a 256-byte step, against bc539dd86, 2026-11-17. The
+# browser console's add-on cart on the store costs nothing: fresh boots of one
+# image read the same with and without it, and move by up to 156 bytes (the
+# largest block by a 4096-byte step) with the store's folders alone. A cart
+# pushed over the cable costs 240 bytes once a boot (the SHA engine's first
+# digest and the first `recv`), which is why a board pass reboots after it
+# installs the add-on.
+STATICS_1116_SRAM = 256
 WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM
-                      - ADDON_SRAM,
+                      - STATICS_1116_SRAM,
                       86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
