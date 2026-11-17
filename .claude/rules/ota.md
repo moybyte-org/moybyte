@@ -43,17 +43,19 @@ paths:
     (`moybyte_web.pack`, `tools/gen_web_blob.py --pack`) and its image carries
     only the sha256 of the pack's body. The release and the LAN mirror
     (`tools/publish_firmware_release.py`, `tools/gen_ota_manifest.py`, both
-    through `tools/web_pack.py`) put beside the payload, named by that digest,
-    the cart `moybyte_web-<digest>.moy.zip` (`web_console.moy`, whose
-    manifest's `moybyte.fits` is the digest) -- the file a console installs
-    -- with the bare pack `moy_ota.page_url` names, the licence, and
-    `carts-<board>.json`, an index in moy-spec's format listing the cart for
-    the board's current image, signed as a carts index is. That happens on
-    both channels for every board, whether or not any console has the add-on.
-    The manifest names the cart and the pack (`cart`, `page`), unsigned: a
-    console holds a page to the digest its own image carries. **Nothing
-    published is removed**, so a rolled-back or hand-installed image still
-    finds its own, and a board whose run carries no page its image names keeps
+    through `tools/web_pack.py`) put beside the payload the cart
+    `moybyte_web-<digest>.moy.zip`, its licence, and `carts-<board>.json`: an
+    index in moy-spec's format (version 1, signed as a carts index is) with
+    one entry per add-on ever published for the board, newest first. An
+    index lists an id once, so an entry's id is `web_console_<12 hex of the
+    digest>` and its `moybyte.fits` the whole digest; a console installs the
+    entry that fits its running image, through the ordinary Install, which
+    holds the cart to the index's size and sha256. That happens on both
+    channels for every board, whether or not any console has the add-on, and
+    the manifest names the cart (`cart`, unsigned). **Nothing published is
+    removed** and each index keeps the entries of the one it replaces, so a
+    console a step behind its channel, rolled back or installed by hand still
+    finds its own. A board whose run carries no page its image names keeps
     the manifest already published and fails the publish.
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is

@@ -14,10 +14,10 @@ Per release:
 
 The image names a page too, the browser console add-on its build packed beside
 it. This tool puts the add-on beside the payload as a console installs it
-(tools/web_pack.py: the cart `moybyte_web-<digest>.moy.zip`, its pack, its
-licence and the index `carts-<board>.json`) and names the cart and the pack in
-the manifest's `cart` and `page`. Earlier ones stay where they are, so an
-earlier image still finds its own. An image whose page is not beside it is
+(tools/web_pack.py: the cart `moybyte_web-<digest>.moy.zip`, its licence and
+the index `carts-<board>.json`, which keeps every earlier entry it held) and
+names the cart in the manifest's `cart`. Earlier carts stay where they are, so
+an earlier image still finds its own. An image whose page is not beside it is
 refused.
 
 Usage:
@@ -115,7 +115,7 @@ def build_manifest(bin_path, url, version, channel="stable", label=None,
         "sha256": hashlib.sha256(data).hexdigest(),
     }
     if addon:
-        manifest["page"], manifest["cart"] = addon["page"], addon["cart"]
+        manifest["cart"] = addon["cart"]
     return manifest
 
 

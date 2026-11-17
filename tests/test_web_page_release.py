@@ -1,11 +1,11 @@
-"""The browser console's page where a release and a LAN mirror publish it.
+"""The browser console add-on where a release and a LAN mirror publish it.
 
-The browser console is an add-on: an image names its page by digest, and a
-console installs that page from beside the payload its channel offers
-(moy_ota.page_url), whether or not anyone has installed it before. So a
-release's manifest, the digest its image carries and the pack published
-beside it have to be one page on every board and channel, and an earlier page
-has to stay published for the images that still name it."""
+An image names its page by digest, and a console installs the add-on cart
+whose index entry fits that digest, from the index beside the payload its
+channel offers, whether or not anyone has installed it before. So a release's
+manifest, the digest its image carries, the cart and the index have to be one
+page on every board and channel, and every earlier cart has to stay published
+and listed for the images that still name it."""
 
 import hashlib
 import importlib.util
@@ -13,7 +13,6 @@ import json
 import os
 import stat
 import sys
-import types
 import zipfile
 from pathlib import Path
 
@@ -73,38 +72,29 @@ def _unsigned(monkeypatch):
     monkeypatch.delenv("MOYBYTE_OTA_SIGNING_KEY", raising=False)
 
 
-def _device_page_url(monkeypatch, payload_url, want_hex):
-    """What the device asks for: moy_ota.page_url under an image naming
-    `want_hex`."""
-    import moy_ota
-    monkeypatch.setitem(sys.modules, "moy_web",
-                        types.SimpleNamespace(page_want=lambda: want_hex))
-    return moy_ota.page_url(payload_url)
-
-
 def _addon(folder, board, index_url, digest):
-    """Hold what a console installs the add-on from, in `folder`, to the page
-    `digest` names, and read its index as the console's Get Carts does.
-    -> the index's one entry, its URLs resolved."""
+    """Hold the add-on cart of the page `digest`, in `folder`, to that page,
+    and find it in the board's index as the console's Get Carts reads it:
+    the entry whose moybyte.fits is the digest. -> (that entry, its URL
+    resolved; every entry's digest, in the index's order)."""
     from runtime import cart_index as ci
-    page = (folder / (web_pack.PAGE_NAME % digest)).read_bytes()
-    assert web_pack.digest_of(page) == digest
     cart = folder / (web_pack.CART_NAME % digest)
     with zipfile.ZipFile(str(cart)) as z:
         members = {n: z.read(n) for n in z.namelist()}
-    top = web_pack.CART_FOLDER + "/"
+    top = web_pack.cart_id(digest) + ".moy/"
     assert sorted(members) == [top + "LICENSE.md", top + "manifest.json",
                                top + web_pack.PACK_FILE]
-    assert members[top + web_pack.PACK_FILE] == page
+    assert web_pack.digest_of(members[top + web_pack.PACK_FILE]) == digest
     manifest = json.loads(members[top + "manifest.json"])
     assert manifest["moybyte"]["fits"] == digest
     assert manifest["main"] == web_pack.PACK_FILE
 
     got = ci.parse_index((folder / (web_pack.INDEX_NAME % board)).read_bytes(),
                          index_url)
-    assert [c["id"] for c in got] == [web_pack.CART_ID]
-    entry = got[0]
-    assert entry["moybyte"]["fits"] == digest
+    assert len({c["id"] for c in got}) == len(got)           # an id once
+    entry, = [c for c in got if c["moybyte"]["fits"] == digest]
+    assert entry["id"] == web_pack.cart_id(digest)
+    assert entry["folder"] == entry["id"] + ".moy"
     asset, = entry["assets"]
     data = cart.read_bytes()
     assert (asset["size"], asset["sha256"]) == (len(data), hashlib.sha256(data).hexdigest())
@@ -113,13 +103,10 @@ def _addon(folder, board, index_url, digest):
         assert (meta["size"], meta["sha256"]) == (len(body), hashlib.sha256(body).hexdigest())
     lic = (folder / entry["licence"]["url"]).read_bytes()
     assert entry["licence"]["sha256"] == hashlib.sha256(lic).hexdigest()
-    entry["asset_url"] = ci.resolve(index_url, asset["url"])
-    return entry
+    return ci.resolve(index_url, asset["url"]), [c["moybyte"]["fits"] for c in got]
 
 
-def test_one_name_for_the_page_everywhere():
-    import moy_ota
-    assert web_pack.PAGE_NAME == moy_ota.PAGE_NAME
+def test_the_build_writes_the_pack_the_publisher_reads():
     build = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
     assert "${DIST_DIR}/%s" % web_pack.PACK_FILE in build
 
@@ -136,11 +123,10 @@ def test_a_pack_is_checked_against_its_own_head(tmp_path):
 
 
 @pytest.mark.parametrize("channel", sorted(publish.CHANNELS))
-def test_a_release_its_manifests_its_images_and_its_pages_agree(
-        tmp_path, monkeypatch, channel):
-    """On every channel, every board's manifest names the page its image
-    carries the digest of; that page is published beside the payload, under
-    the name a console installs it by; and its bytes hash to that digest."""
+def test_a_release_its_manifests_its_images_and_its_carts_agree(tmp_path, channel):
+    """On every channel, every board's manifest names the add-on cart of the
+    page its image carries the digest of, and the board's index lists that
+    cart, under that digest, where the manifest's payload is."""
     artifacts = tmp_path / "artifacts"
     for i, board in enumerate(sorted(publish.OTA_IMAGES)):
         _artifacts(artifacts, board, seed=1, channel=channel, as_hex=i % 2)
@@ -149,23 +135,23 @@ def test_a_release_its_manifests_its_images_and_its_pages_agree(
     tag = publish.CHANNELS[channel]["tag"]
     got = publish.stage_ota_all(tag, channel, str(artifacts), str(out), repo=REPO)
     assert set(got) == set(publish.OTA_IMAGES)
-    pages = [n for n in os.listdir(str(out)) if n.endswith(".pack")]
-    assert len(pages) == 1                  # one bundle, one page, any number of boards
+    carts = [n for n in os.listdir(str(out)) if n.endswith(".moy.zip")]
+    assert len(carts) == 1                  # one bundle, one cart, any number of boards
+    assert not [n for n in os.listdir(str(out)) if n.endswith(".pack")]
     for board, m in got.items():
-        page = out / m["page"]
-        digest = web_pack.digest_of(page.read_bytes())
-        assert m["page"] == web_pack.PAGE_NAME % digest
         image = (out / m["filename"]).read_bytes()
+        assert hashlib.sha256(image).hexdigest() == m["sha256"]
+        digest = m["cart"][len("moybyte_web-"):-len(".moy.zip")]
+        assert m["cart"] == web_pack.CART_NAME % digest
         assert bytes.fromhex(digest) in image or digest.encode() in image
-        assert hashlib.sha256((out / m["filename"]).read_bytes()).hexdigest() == m["sha256"]
-        assert _device_page_url(monkeypatch, m["url"], digest) == \
-            publish.asset_url(tag, m["page"], repo=REPO)
+        assert "page" not in m
         on_disk = json.loads((out / publish.manifest_name(board)).read_text())
-        assert on_disk["page"] == m["page"]
-        entry = _addon(out, board, publish.asset_url(
-            tag, web_pack.INDEX_NAME % board, repo=REPO), digest)
-        assert entry["asset_url"] == publish.asset_url(tag, m["cart"], repo=REPO)
-        assert entry["version"] == m["version"]
+        assert on_disk["cart"] == m["cart"]
+        index_url = publish.asset_url(tag, web_pack.INDEX_NAME % board, repo=REPO)
+        url, fits = _addon(out, board, index_url, digest)
+        assert url == publish.asset_url(tag, m["cart"], repo=REPO)
+        assert url.rsplit("/", 1)[0] == m["url"].rsplit("/", 1)[0]
+        assert fits == [digest]
 
 
 def test_a_board_whose_image_names_a_page_it_has_not_got_is_refused(
@@ -214,9 +200,10 @@ else:
 '''
 
 
-def test_an_earlier_page_stays_published(tmp_path, monkeypatch):
-    """Two publishes with two consoles: the first image's page is still there
-    for a board rolled back to it, or given it by hand."""
+def test_every_add_on_published_stays_in_the_index(tmp_path, monkeypatch):
+    """Three publishes, two consoles: both carts stay on the release, and
+    the board's index lists each once, newest first, so a console a step
+    behind its channel still finds the one its image fits."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
@@ -226,21 +213,38 @@ def test_an_earlier_page_stays_published(tmp_path, monkeypatch):
     release = tmp_path / "release"
     monkeypatch.setenv("MOY_FAKE_RELEASE", str(release))
 
-    names = []
-    for seed in (1, 2):
-        artifacts = tmp_path / ("artifacts%d" % seed)
-        digest = _artifacts(artifacts, "tdeck", seed=seed).hex()
-        names.append(web_pack.PAGE_NAME % digest)
+    digests = []
+    for n, seed in enumerate((1, 2, 2)):
+        artifacts = tmp_path / ("artifacts%d" % n)
+        digests.append(_artifacts(artifacts, "tdeck", seed=seed).hex())
         monkeypatch.setattr(sys, "argv", ["publish", "--artifacts", str(artifacts),
                                           "--channel", "unstable"])
         assert publish.main() == 0
-    assert names[0] != names[1]
-    for name in names:
-        assert (release / name).exists()
-        assert (release / name.replace(".pack", ".moy.zip")).exists()
+    old, new = digests[0], digests[1]
+    assert old != new == digests[2]
     m = json.loads((release / publish.manifest_name("tdeck")).read_text())
-    assert m["page"] == names[1]
-    _addon(release, "tdeck", "https://x/carts-tdeck.json", digest)
+    assert m["cart"] == web_pack.CART_NAME % new
+    for digest in (old, new):
+        url, fits = _addon(release, "tdeck", "https://x/carts-tdeck.json", digest)
+        assert url == "https://x/" + web_pack.CART_NAME % digest
+        assert fits == [new, old]
+
+
+def test_an_earlier_signed_index_keeps_its_entries(tmp_path):
+    first = tmp_path / "a"
+    first.mkdir()
+    digest = _pack(first, 1).hex()
+    page = (str(first / web_pack.PACK_FILE), digest)
+    web_pack.publish_addon(page, str(first), "p4", 7)
+    signed = (first / "carts-p4.json").read_bytes().rstrip()[:-1] + b', "sig": "00"}\n'
+    second = tmp_path / "b"
+    second.mkdir()
+    other = _pack(second, 2).hex()
+    web_pack.publish_addon((str(second / web_pack.PACK_FILE), other), str(second),
+                           "p4", 8, earlier=signed)
+    doc = json.loads((second / "carts-p4.json").read_text())
+    assert [c["moybyte"]["fits"] for c in doc["carts"]] == [other, digest]
+    assert [c["version"] for c in doc["carts"]] == [8, 7]
 
 
 def test_a_signed_release_signs_the_index(tmp_path, monkeypatch):
@@ -292,34 +296,32 @@ def _built(tmp_path, seed=1):
     return app, digest.hex()
 
 
-def test_the_mirror_puts_the_page_beside_the_payload(tmp_path, monkeypatch):
+def test_the_mirror_puts_the_add_on_beside_the_payload(tmp_path):
     root = tmp_path / "ota"
-    seen = []
+    digests = []
     for seed in (1, 2):
         app, digest = _built(tmp_path, seed)
-        seen.append(web_pack.PAGE_NAME % digest)
+        digests.append(digest)
         assert gom.main([str(app), "--root", str(root), "--channel", "unstable",
                          "--base-url", "http://h:8000"]) == 0
     chan = root / "unstable"
     man = json.loads((chan / "latest.json").read_text())
-    assert man["page"] == seen[1]
-    for name in seen:                       # the earlier add-on stays served
-        assert (chan / name).exists()
-        assert (chan / name.replace(".pack", ".moy.zip")).exists()
-    entry = _addon(chan, "tdeck", "http://h:8000/unstable/carts-tdeck.json", digest)
-    assert entry["asset_url"] == "http://h:8000/unstable/" + man["cart"]
-    assert web_pack.digest_of((chan / seen[1]).read_bytes()) in seen[1]
-    assert _device_page_url(monkeypatch, man["url"], digest) == \
-        "http://h:8000/unstable/" + seen[1]
+    assert man["cart"] == web_pack.CART_NAME % digests[1]
+    assert not [n for n in os.listdir(str(chan)) if n.endswith(".pack")]
+    for digest in digests:                  # the earlier add-on stays served and listed
+        url, fits = _addon(chan, "tdeck", "http://h:8000/unstable/carts-tdeck.json",
+                           digest)
+        assert url == "http://h:8000/unstable/" + web_pack.CART_NAME % digest
+        assert fits == digests[::-1]
 
 
-def test_a_card_mirror_serves_the_page_from_the_build_folder(tmp_path):
+def test_a_card_mirror_serves_the_add_on_from_the_build_folder(tmp_path):
     app, digest = _built(tmp_path)
     assert gom.main([str(app), "--base-url", "http://h:8000"]) == 0
     man = json.loads((app.parent / "latest.json").read_text())
     assert man["url"] == "http://h:8000/" + app.name
-    assert man["page"] == web_pack.PAGE_NAME % digest
-    _addon(app.parent, "tdeck", "http://h:8000/carts-tdeck.json", digest)
+    url, _fits = _addon(app.parent, "tdeck", "http://h:8000/carts-tdeck.json", digest)
+    assert url == "http://h:8000/" + man["cart"]
 
 
 def test_the_mirror_refuses_an_image_without_its_page(tmp_path):
