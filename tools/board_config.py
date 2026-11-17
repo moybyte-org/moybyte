@@ -335,14 +335,19 @@ def _roster(board_dir):
 
 
 def roster_only(board_dir):
-    """The system carts a board's image carries, when `[roster] image =
-    "core"` cuts it to the core set (core_carts); () where the image carries
-    every one."""
+    """The system carts a board's image carries, when `[roster] image` cuts
+    the roster: "core" the core set (core_carts), a list of cart ids the core
+    set and those; () where the image carries every one ("all")."""
     image = _roster(board_dir).get("image", "all")
-    if image not in ("all", "core"):
-        raise ValueError('%s/board.toml: [roster] image must be "all" or "core"'
-                         % board_dir)
-    return core_carts() if image == "core" else ()
+    if image == "all":
+        return ()
+    if image == "core":
+        return core_carts()
+    if isinstance(image, list) and all(isinstance(s, str) for s in image):
+        core = core_carts()
+        return core + tuple(c for c in image if c not in core)
+    raise ValueError('%s/board.toml: [roster] image must be "all", "core" or a list '
+                     'of cart ids' % board_dir)
 
 
 def roster_install(board_dir):

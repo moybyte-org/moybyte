@@ -5,7 +5,7 @@ except the Zero, which carried none at all and whose carts therefore arrived
 over a USB cable, or never. Its `provision.sh` header called that "what an image
 cannot carry: a kid's carts". Since 2026-08-30 the image carries them
 compressed: one raw-deflate stream per cart, 201,716 B, inflated one cart at a
-time into an EMPTY store on first boot.
+time into the store as a console seeds its own.
 
 MEASURED, on the two things a change like this can get wrong:
 
@@ -26,7 +26,8 @@ WHAT IS PINNED HERE, in the order the failures would happen:
     a wrong-looking inflate);
   * a packed roster seeds a store BYTE FOR BYTE identically to a plain one --
     which is what makes this a change of representation and not of content;
-  * the emptiness gate the Zero seeds behind, in both directions;
+  * the Zero's seed keeping the consoles' rule (a removed cart stays out, a
+    newer one replaces the store's) and its reserve;
   * and the whole thing running on a REAL MicroPython, because none of the
     above proves `deflate` accepts what CPython's `zlib` produced.
 """
@@ -108,25 +109,28 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
         "plain one (%d B)" % (comp, plain))
 
 
-def test_the_zero_images_carry_the_core_carts_alone():
-    """A Zero's image carries the core carts (moy_seed.CORE, board.toml's
-    `[roster] image = "core"`), which its build passes to the generator; the
-    rest are official carts a cable flash or provisioning installs
-    (`[roster] install`)."""
+def test_the_zero_images_carry_the_roster_their_board_names():
+    """A Zero's image carries the carts board.toml's `[roster] image` names,
+    which its build passes to the generator: the XIAO's the core, every app and
+    five games, the C3's the core alone, its others official carts a cable
+    flash or provisioning installs (`[roster] install`)."""
     from runtime import moy_seed
-    for zero in (ZERO, os.path.join(os.path.dirname(ZERO), "esp32c3_zero")):
+    c3 = os.path.join(os.path.dirname(ZERO), "esp32c3_zero")
+    for zero in (ZERO, c3):
         with open(os.path.join(zero, "build.sh")) as f:
             build = f.read()
         assert "roster-only" in build and '--only "${ZERO_ONLY}"' in build
         only = board_config.roster_only(zero)
-        assert only == moy_seed.CORE
+        assert only[:len(moy_seed.CORE)] == moy_seed.CORE
         packed = gen.build_packed(SYSTEM_CARTS, only)
         folders = {moy_seed.cart_folder(t, moy_seed.BUILTIN_NS) for t, _v, _b in packed}
-        assert folders == {c + ".moy" for c in moy_seed.CORE}
-        install = board_config.roster_install(zero)
-        assert install and not set(install) & set(moy_seed.CORE)
-        for cid in install:
-            assert os.path.isdir(os.path.join(SYSTEM_CARTS, cid + ".moy")), cid
+        assert folders == {c + ".moy" for c in only}
+    assert board_config.roster_only(c3) == moy_seed.CORE
+    xiao = board_config.roster_only(ZERO)
+    assert "moybyte.notes" in xiao and "moybyte.star_catcher" in xiao
+    assert board_config.roster_install(ZERO) == ()
+    install = board_config.roster_install(c3)
+    assert set(install) == set(xiao) - set(moy_seed.CORE)
 
 
 def test_an_only_that_names_no_cart_is_refused():
@@ -213,33 +217,12 @@ def _zero_host(tmp_path, monkeypatch):
     return zero_host
 
 
-def test_an_empty_store_is_one_with_no_cart_in_it(tmp_path, monkeypatch):
-    """`store_is_empty` no longer gates the seed (that is per-cart presence
-    now), but provision.sh still asks it -- over the cable, on the board, with
-    this exact read -- to decide whether a board needs the roster pushed at all.
-    Sidecars a sync leaves behind are not carts."""
-    zero_host = _zero_host(tmp_path, monkeypatch)
-    root = str(tmp_path / "carts")
-    os.makedirs(root)
-    assert zero_host.store_is_empty(root) is True
-
-    # Sidecars are not carts: a store holding only these is still empty.
-    os.makedirs(root + "/.history")
-    os.makedirs(root + "/journal")
-    assert zero_host.store_is_empty(root) is True
-
-    os.makedirs(root + "/moybyte.hop_quest.moy")
-    assert zero_host.store_is_empty(root) is False
-
-
 def _fake_roster(monkeypatch):
     """A `carts_data` module with the real packed roster in it.
 
-    Injected even by the test that expects NOTHING to be seeded, and that is
+    Injected even by the tests that expect NOTHING to be seeded, and that is
     the point: without it `seed_carts` takes its no-roster-in-this-image branch
-    and returns 0 for a reason that has nothing to do with the store. Removing
-    the emptiness gate then leaves the suite green -- which is exactly what
-    happened when this was written, so it is asserted here rather than trusted.
+    and returns 0 for a reason that has nothing to do with the store.
     """
     import types
     mod = types.ModuleType("carts_data")
@@ -248,63 +231,71 @@ def _fake_roster(monkeypatch):
     return mod
 
 
-def test_the_zeros_seed_never_touches_a_store_with_a_cart_in_it(tmp_path, monkeypatch):
-    """The rule that protects a kid's work: an EMPTY store is seeded, and one
-    with a cart in it is left exactly as it is, even though the roster carries
-    a cart of that name at a newer version -- because on this board that
-    folder may be the only copy of something a kid changed in a browser."""
-    zero_host = _zero_host(tmp_path, monkeypatch)
-    _fake_roster(monkeypatch)
-    root = str(tmp_path / "carts")
-    os.makedirs(root + "/moybyte.hop_quest.moy")
-    with open(root + "/moybyte.hop_quest.moy/main.py", "w") as f:
-        f.write("the kid's own")
-
-    assert zero_host.seed_carts(root) == 0
-    with open(root + "/moybyte.hop_quest.moy/main.py") as f:
-        assert f.read() == "the kid's own", \
-            "a baked version bump overwrote a cart the kid edited"
-    assert os.listdir(root) == ["moybyte.hop_quest.moy"]
-
-
-def test_a_seed_cart_the_kid_deleted_never_comes_back(tmp_path, monkeypatch):
-    """Owner, 2026-11-07: the seed is the empty store's, once. A built-in the
-    kid deleted stays deleted, and a newer image's new built-in does not reach
-    a store already in use."""
-    zero_host = _zero_host(tmp_path, monkeypatch)
-    mod = _fake_roster(monkeypatch)
-    root = str(tmp_path / "carts")
-    os.makedirs(root)
-    assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
-
-    gone = sorted(n for n in os.listdir(root) if n.endswith(".moy"))[0]
-    moy_carts._rmtree(root + "/" + gone)
-    fresh = dict(gen.build_carts(SYSTEM_CARTS)[0], title="Brand New")
-    mod.CARTS_Z = mod.CARTS_Z + [("Brand New", 1, gen.pack_cart(fresh))]
-
-    assert zero_host.seed_carts(root) == 0
-    assert not os.path.exists(root + "/" + gone)
-    assert not os.path.exists(root + "/moybyte.brand_new.moy")
+def _carts(root):
+    return sorted(n for n in os.listdir(root) if n.endswith(".moy"))
 
 
 def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
-    """...and the same call on an empty store DOES seed, so the tests above are
-    measuring the gate and not a function that never runs."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
 
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
-    seeded = sorted(n for n in os.listdir(root) if n.endswith(".moy"))
-    assert len(seeded) == len(mod.CARTS_Z)
+    assert len(_carts(root)) == len(mod.CARTS_Z)
+    with open(str(tmp_path / zero_host.SEEDED)) as f:
+        assert f.read() == zero_host.roster_stamp(mod.CARTS_Z)
     assert zero_host.seed_carts(root) == 0          # ...and nothing on a warm boot
 
 
-def test_a_warm_boot_says_nothing_about_inflating(tmp_path, monkeypatch, capsys):
-    """The "inflating N carts" line counts what is MISSING, under the folder
-    names the seed really writes (`moybyte.<slug>.moy`). Counted under the bare
-    slug it read every cart as missing on every boot of a fully seeded store."""
+def test_a_seed_cart_the_kid_removed_stays_out_and_a_lost_one_comes_back(
+        tmp_path, monkeypatch):
+    """Owner, 2026-11-17: the consoles' rule. A removal is recorded
+    (`system/removed`, which the page's delete and Get Carts write) and the
+    seed honours it; a seed cart gone with no record (a store wiped by hand)
+    is written again on the next boot."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
+
+    removable = [n for n in _carts(root) if moy_carts.removable(n)]
+    removed, lost = removable[0], removable[1]
+    moy_carts._rmtree(root + "/" + removed)
+    assert moy_carts.note_removed(root, removed)
+    moy_carts._rmtree(root + "/" + lost)
+
+    assert zero_host.seed_carts(root) == 1
+    assert not os.path.exists(root + "/" + removed)
+    assert os.path.exists(root + "/" + lost + "/manifest.json")
+
+
+def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkeypatch):
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
+            "cfg": {}, "edit": []}
+    mod.CARTS_Z = [("Hop", 1, gen.pack_cart(cart))]
+    assert zero_host.seed_carts(root) == 1
+    hop = root + "/moybyte.hop.moy"
+    with open(hop + "/pmem.json", "w") as f:
+        f.write("[7]")
+    with open(hop + "/main.py", "w") as f:
+        f.write("the kid's own")
+    assert zero_host.seed_carts(root) == 0, "the same image rewrites nothing"
+
+    mod.CARTS_Z = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
+    assert zero_host.seed_carts(root) == 1
+    assert moy_carts._read(hop + "/main.py") == "NEW"
+    assert moy_carts._read(hop + "/pmem.json") == "[7]"
+
+
+def test_a_warm_boot_reads_no_seed_cart_s_manifest(tmp_path, monkeypatch, capsys):
+    """The stamp names the roster the store was seeded from, so a boot of the
+    same image lists the store and reads nothing more."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
@@ -312,6 +303,11 @@ def test_a_warm_boot_says_nothing_about_inflating(tmp_path, monkeypatch, capsys)
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
     assert "inflating %d carts" % len(mod.CARTS_Z) in capsys.readouterr().out
 
+    def boom(_path):
+        raise AssertionError("a warm boot read a seed cart's version")
+
+    monkeypatch.setattr(moy_seed, "_cart_version", boom)
+    monkeypatch.setattr(moy_seed, "unpack_seed", boom)
     assert zero_host.seed_carts(root) == 0
     assert "ZERO seed" not in capsys.readouterr().out
 
@@ -340,44 +336,68 @@ def test_a_seed_into_a_full_store_names_the_store_as_full(tmp_path, monkeypatch,
 
 
 def test_an_interrupted_seed_is_finished_on_the_next_boot(tmp_path, monkeypatch):
-    """A power cut, or provision.sh's Ctrl-C, mid-seed leaves the store not
-    empty; the seed's mark beside the carts folder says it never ended, so
-    the next boot writes what is still missing and then drops the mark."""
+    """A power cut, or provision.sh's Ctrl-C, mid-seed leaves the store
+    unstamped and a cart half written (a folder with no manifest): the next
+    boot reads the versions, writes that cart again and what is still missing,
+    and stamps the store."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
-    mark = str(tmp_path / zero_host.SEEDING)
-    with open(mark, "w") as f:
-        f.write("1")
     moy_carts.seed_packed(mod.CARTS_Z[:3], root)
+    half = root + "/" + moy_carts.cart_folder(mod.CARTS_Z[3][0], moy_carts.BUILTIN_NS)
+    os.makedirs(half)
+    with open(half + "/main.py", "w") as f:
+        f.write("cut")
 
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z) - 3
-    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == len(mod.CARTS_Z)
-    assert not os.path.exists(mark)
+    assert os.path.exists(half + "/manifest.json")
+    assert len(_carts(root)) == len(mod.CARTS_Z)
+    assert os.path.exists(str(tmp_path / zero_host.SEEDED))
     assert zero_host.seed_carts(root) == 0
 
 
 def test_the_seed_stops_while_the_reserve_is_still_free(tmp_path, monkeypatch, capsys):
-    """SEED_RESERVE: a cart that would leave less free is taken back out and
-    the seed ends, so the system folder and a kid's carts always fit; the
-    seed has ended, so the next boot does not try again."""
+    """SEED_RESERVE: a new cart that would leave less free is taken back out
+    and the seed ends, so the system folder and a kid's carts always fit; a
+    later boot with no more room writes nothing and says nothing."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
 
     def free(_root):
-        n = len([x for x in os.listdir(root) if x.endswith(".moy")])
+        n = len(_carts(root))
         return zero_host.SEED_RESERVE + 1 + (4 - n) * 50000
 
     monkeypatch.setattr(zero_host, "_free_bytes", free)
     assert zero_host.seed_carts(root) == 4
-    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == 4
+    assert len(_carts(root)) == 4
     assert free(root) > zero_host.SEED_RESERVE
     assert "%d left out, the store's reserve" % (len(mod.CARTS_Z) - 4) in capsys.readouterr().out
-    assert not os.path.exists(str(tmp_path / zero_host.SEEDING))
     assert zero_host.seed_carts(root) == 0
+    assert "ZERO seed" not in capsys.readouterr().out
+
+
+def test_a_replacement_the_reserve_stops_keeps_the_cart(tmp_path, monkeypatch):
+    """A newer seed written over a cart the store holds is the kid's cart
+    still: when the room runs out after it, it stays, its saves in it."""
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
+            "cfg": {}, "edit": []}
+    moy_carts.seed_packed([("Hop", 1, gen.pack_cart(cart))], root)
+    with open(root + "/moybyte.hop.moy/pmem.json", "w") as f:
+        f.write("[7]")
+    asked = []
+
+    def room():
+        asked.append(1)
+        return len(asked) == 1
+    newer = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
+    assert moy_carts.seed_packed(newer, root, room=room) == 1
+    assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "NEW"
+    assert moy_carts._read(root + "/moybyte.hop.moy/pmem.json") == "[7]"
 
 
 # -- the build wiring ------------------------------------------------------

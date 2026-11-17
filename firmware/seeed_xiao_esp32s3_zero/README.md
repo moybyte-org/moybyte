@@ -52,10 +52,10 @@ cannot have started to matter:
 `provision.sh` survives and **changed jobs**: it provisions the credentials and,
 with `--password`, the password browsers pair with, installs the browser
 console add-on and the official carts, and keeps the module push as an opt-in
-dev loop. The image carries the core carts and inflates them on first boot;
-every other system cart is an official cart its release publishes, which
-provisioning and a cable flash install, and which the browser console the
-board serves adds and removes: its Get Carts asks the board through the
+dev loop. The image carries its seed carts (the core carts, every app and
+five games) and seeds them as a console seeds its own; every other system
+cart is an official cart its release publishes, which the browser console
+the board serves adds and removes: its Get Carts asks the board through the
 sealed `/official` (`zero_host.make_official`), and the board fetches the
 cart from its release and writes its own store. See "Provisioning" below.
 
@@ -91,8 +91,9 @@ erases the moved store's first blocks and says so). A table change needs a USB
 flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
 the app slot, never the table. Run
 `./provision.sh` afterwards to put the credentials and the password back; the
-core carts the image carries seed themselves on the next boot, and the cable
-flash (or the script) installs the add-on and the other official carts. A kid's browser-made
+carts the image carries seed themselves on the next boot, and the cable flash
+(or the script) installs the add-on, which a board with none also fetches
+from its release once it is on a network. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
 them back on the next visit — but anything that existed *only* here is.
 
@@ -136,21 +137,26 @@ them back on the next visit — but anything that existed *only* here is.
   `[roster]`), and the seed stops while `zero_host.SEED_RESERVE` (96 KiB) is
   still free, so
   the system folder (`/moy/system`: the password, the SSH host key, the
-  browsers' keys) and a kid's carts always fit. The seed is the EMPTY store's
-  only: a cart the kid deletes stays deleted (`zero_host.seed_carts`). The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  browsers' keys) and a kid's carts always fit. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
   overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
   `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
   On 2026-11-17 the browser console left the image for its add-on cart and
   the slots became **2 MiB** (`0x200000`, at `0x20000` and `0x220000`), the
   store the **3,968 KiB** `vfs` at `0x420000`, which holds the add-on (one
   pack, about 1.9 MB) beside the carts; provisioning installs the add-on.
-  The same day (owner) the image's roster became the CORE carts alone
-  (`moy_seed.CORE`, board.toml's `[roster] image`): the other system carts are
-  official carts the release publishes in `carts-xiao_zero.json`, a cable
-  flash or provisioning installs `[roster] install` into a new store (every
-  app and the five games), and after an update the board brings every
-  official cart it holds to the new release (`runtime/carts/web_addon.py`).
-  The image's headroom is in `docs/perf/image.md`.
+  The image's roster is the core carts (`moy_seed.CORE`), every app and the
+  five games (board.toml's `[roster] image`; owner, 2026-11-17), seeded as a
+  console seeds its own (`zero_host.seed_carts`): present unless the kid
+  removed one (`system/removed`, which the page's delete and Get Carts'
+  remove write), a newer one in a new image replacing the store's with its
+  saves and config kept. The other system carts are official carts the
+  release publishes in `carts-xiao_zero.json`, which the page this board
+  serves installs (`/official`); after an update the board brings the ones
+  it holds to the new release (`runtime/carts/web_addon.py`). A board with no
+  add-on (the website's flasher writes the app image alone, or a wiped
+  store) installs the one its image fits from its release once the image
+  confirms itself (`zero_host.make_addon`). The image's headroom is in
+  `docs/perf/image.md`.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
@@ -159,9 +165,9 @@ them back on the next visit — but anything that existed *only* here is.
   the same 35 carts as one raw-deflate stream each it is **2,399,232 B — 473 KB
   left**, against **2,194,112 B / 673 KB** for the image that carried no roster
   at all. `tools/gen_device_carts.py --packed` emits it (201,716 B of blobs
-  against 731,592 B of plain source); `zero_host.seed_carts()` inflates it into
-  an **empty** store on first boot, one cart at a time, through MicroPython's
-  built-in `deflate`.
+  against 731,592 B of plain source); `zero_host.seed_carts()` inflates it
+  into the store one cart at a time, through MicroPython's built-in
+  `deflate`.
 - **The frozen set is `board.toml`.** This is the one board whose
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
@@ -185,11 +191,11 @@ official carts (`--no-carts` skips them), optionally write the credentials and
 (`--password`) the board's password, reboot, and print where to pair. Every
 write is checked on the board: one it refuses (a full store) stops the script,
 non-zero, with what the board said. The official carts are
-`tools/board_flash.py`'s `install_carts`, which a cable flash runs too: into a
-new store (one holding only core carts and add-ons) board.toml's `[roster]
-install`, and into any store every official cart it holds at an older
-version, the kid's saves and config kept; the store's reserve
-(`zero_host.SEED_RESERVE`) stays free, and a cart it does not fit is named.
+`tools/board_flash.py`'s `install_carts`, which a cable flash runs too: every
+official cart the store holds at an older version that the image does not
+carry (the image's own are its seed's), the kid's saves and config kept; the
+store's reserve (`zero_host.SEED_RESERVE`) stays free, and a cart it does not
+fit is named.
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -563,7 +569,7 @@ below used to hold:
   (`carts_data.CARTS_Z`) inflated on first boot with no cable step: 36 carts
   served from `GET /carts.json` on a board that had just been erased. This was
   the last thing standing between "flashed" and "usable" and it is gone.
-- **The seed adds what is missing and rewrites nothing.** A later image carrying
+- **The seed adds what is missing and leaves a kid's carts alone.** A later image carrying
   one new cart (`Pin Light`) was flashed onto a board holding 43: all 36 roster
   carts ended up present, the new one among them, and the eight browser-made
   carts beside them — an imported PICO-8 Celeste included — were untouched.
@@ -785,13 +791,12 @@ new image's host did not come up.
     changed in the store stays changed, and the old image is not running to
     undo it — but it means the board is off the network until it is power-cycled.
   - **So do store surgery over HTTP, not over the cable.** The sync protocol has
-    a whole-cart delete, which is the one store edit this board actually needs
-    (replacing a built-in that shipped broken — the seed never writes into a
-    store with carts, so a new image will not replace it): deleting the cart
-    from a paired page's launcher sends it, and it takes the journal with it.
-    The seed does not bring it back: the page's sync pushes its own copy, or
-    `./provision.sh --carts` the repo's. No stopped console, and nothing that
-    can wedge USB.
+    a whole-cart delete, which is the one store edit this board needs:
+    deleting the cart from a paired page's launcher sends it, it takes the
+    journal with it, and a seed cart's removal is recorded, so the seed does
+    not bring it back (Get Carts installs it again). A built-in that shipped
+    broken is replaced by the next image's seed, a newer version. No stopped
+    console, and nothing that can wedge USB.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow

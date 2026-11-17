@@ -1,8 +1,10 @@
 # Map (grep -n a name to jump there):
 #   identity                    this board's name and write PIN (/moy/zero.json)
-#   seed_carts                  the image's carts written into an empty store; seed_room, store_is_empty
+#   seed_carts                  the image's carts seeded as a console seeds them; seed_room
+#   recover_installs            an install a reset cut short, finished before the seed
 #   connect                     join the first saved network that answers
 #   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
+#   make_addon                  the release's add-on (and the XIAO's official carts) brought to the store; tend_addon runs it
 #   make_official               /official: the page's Get Carts, this board installing
 #   host_class                  the store host: the boards' WebHost
 #   serve                       bring the store host up and pump it forever
@@ -29,8 +31,9 @@ served back -- on the next visit. That is the whole product: a console in your
 pocket whose screen is whatever browser is nearby.
 
 The bundle is the browser console add-on cart (native/moy_net/moy_page.h),
-installed by provisioning and served only when it is the page this image
-names; after an update `make_addon`'s step installs the one that fits.
+installed by a cable flash or provisioning and served only when it is the
+page this image names; where there is none, or after an update, `make_addon`'s
+step installs the one that fits from this board's release.
 
 `POST /gpio` is the second half of the same idea: the cart in the browser
 calls `pin_write`, the page batches it here, and this board -- which has the
@@ -123,39 +126,44 @@ def identity():
 
 # -- the seed roster, carried by the image (2026-08-30) ----------------------
 #
-# The image carries the CORE carts (moy_seed.CORE, board.toml's `[roster]
-# image`) as one raw-deflate stream each, `carts_data.CARTS_Z`, and this
-# function inflates them, so a Zero flashed from the website's flasher
-# (site/build.py's BOARDS) has a working console with no second, cabled step.
-# The other system carts are OFFICIAL carts its release publishes
-# (tools/web_pack.py): a cable flash or provisioning installs `[roster]
-# install` (tools/board_flash.py's install_carts), and after an update
-# web_addon.AddonStep brings every official cart the store holds to the new
-# release, a newer one replacing its folder with the kid's saves and edited
-# config carried, as a console's seed does (#47).
+# The image carries its seed carts (board.toml's `[roster] image`: the XIAO's
+# the core carts, every app and five games; the C3's the core alone) as one
+# raw-deflate stream each, `carts_data.CARTS_Z`, and this function inflates
+# them, so a Zero flashed from the website's flasher (site/build.py's BOARDS)
+# has a working console with no second, cabled step. Every other system cart
+# is an OFFICIAL cart its release publishes, which the page this board serves
+# installs (`/official`, make_official) and a cable flash refreshes
+# (tools/board_flash.py's install_carts).
 #
-# AN EMPTY STORE, ONCE (owner, 2026-11-07). The store is the RECORD -- the only
-# copy of a cart a kid made in the browser, with a `moy_journal` history
-# behind it -- so the image seeds a store with no cart in it and leaves one
-# with carts alone: a cart the kid deleted stays deleted. A seed that did not
-# finish (a power cut, provision.sh's Ctrl-C) leaves SEEDING behind, and the
-# next boot writes what is still missing; a store emptied by hand is a new one.
+# THE CONSOLES' RULE (owner, 2026-11-17). A seed cart is in the store unless
+# the kid removed it -- the removal is recorded in `system/removed`
+# (moy_seed.note_removed: the page's delete and Get Carts' remove write it),
+# and a core cart is never removed -- and a newer one in the image replaces
+# the store's copy, its saves and config kept (#47). The image's roster is
+# stamped in `system/seeded` once a seed ends, so a warm boot of the same
+# image lists the store once and writes only a seed cart that is missing; a
+# new image, or a seed a power cut stopped, reads each seed cart's version.
 #
 # SEED_RESERVE is the room a seed leaves: it stops while that much of the store
 # is still free, so the system folder (the password, the SSH host key, the
-# browsers' keys) and a kid's own carts always fit. The cable install of the
-# official carts keeps the same reserve.
+# browsers' keys) and a kid's own carts always fit. The installs of the
+# official carts keep the same reserve.
 SEED_RESERVE = 96 * 1024
 # Beside it, a store with no browser console add-on keeps the room the add-on
 # that fits this image will take (its pack, as the image's stamp counts it,
-# plus the pack's head and the cart's other files), so the cable flash or the
-# provisioning that installs it after the seed finds it free.
+# plus the pack's head and the cart's other files), so the install that
+# brings it after the seed (make_addon's step, or a cable flash) finds it free.
 ADDON_FILES = 16 * 1024
-SEEDING = ".seeding"                # beside the carts folder, while a seed runs
+SEEDED = "system/seeded"            # beside the carts folder: the roster the store was seeded from
+# The room a missing seed cart is guessed to take before a warm boot tries
+# it: four times its packed bytes (the roster packs about 3.6 times) and a
+# folder's blocks.
+SEED_RATIO = 4
+SEED_FOLDER = 32 * 1024
 
 
-def _seeding_mark(root):
-    return root.rsplit("/", 1)[0] + "/" + SEEDING
+def _seeded_path(root):
+    return root.rsplit("/", 1)[0] + "/" + SEEDED
 
 
 def _exists(path):
@@ -198,23 +206,6 @@ def seed_room(root=ROOT, reserve=None):
     return free is None or free > reserve
 
 
-def store_is_empty(root=CARTS_DIR):
-    """Is there no cart at all under `root`?
-
-    `.moy` folders only. A store holding just the sidecars a sync leaves behind
-    (`.history/`, a stray `journal/`) has no carts in it and should still be
-    seeded; a store holding one cart should not.
-    """
-    try:
-        names = os.listdir(root)
-    except OSError:                      # no store yet -> nothing to protect
-        return True
-    for name in names:
-        if name.endswith(".moy"):
-            return False
-    return True
-
-
 def _space_note(root):
     """What a failed seed says about the store's room: a full littlefs refuses
     `mkdir` with ENOSPC, `moy_fs._mkdir` swallows every OSError, and the first
@@ -229,27 +220,33 @@ def _space_note(root):
     return "(%d of %d blocks free)" % (st[3], st[2])
 
 
+def roster_stamp(packed):
+    """The `system/seeded` text of the packed roster `packed`: each seed's
+    title and version, a line each."""
+    return "".join("%s %d\n" % (t, int(v)) for t, v, _b in packed)
+
+
+def _read_stamp(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def seed_carts(root=CARTS_DIR):
-    """Write the image's baked carts into an EMPTY store, or finish a seed
-    that did not end (SEEDING), up to SEED_RESERVE.
+    """The image's baked carts seeded into the store (the consoles' rule,
+    above), up to SEED_RESERVE.
 
     Returns the count written -- 0 on the ordinary warm boot, which is one
-    listing of the store and inflates nothing.
+    listing of the store and one read of the stamp, and inflates nothing.
 
     Best-effort in every direction, because none of the ways this can fail may
     cost the board its job -- which is serving whatever carts it DOES have. An
     image built without a roster (the module is generated, so a hand-assembled
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
-
-    A built-in that ships BROKEN is fixed by a #47 version bump in a
-    release: the update's step (web_addon.AddonStep) or a cable flash
-    (tools/board_flash.py's install_carts) brings the newer one, never this
-    seed.
     """
-    mark = _seeding_mark(root)
-    if not _exists(mark) and not store_is_empty(root):
-        return 0
     try:
         from carts_data import CARTS_Z
     except ImportError:
@@ -265,44 +262,71 @@ def seed_carts(root=CARTS_DIR):
         import ticks
 
         moy_carts.ensure_dirs(root)
-        with open(mark, "w") as f:
-            f.write("1")
+        stamp_path = _seeded_path(root)
+        stamp = roster_stamp(CARTS_Z)
+        same = _read_stamp(stamp_path) == stamp
+        seed = moy_carts.unremoved(CARTS_Z, root)
+        try:
+            names = os.listdir(root)
+        except OSError:
+            names = []
+        missing = [e for e in seed
+                   if moy_carts.cart_folder(e[0], moy_carts.BUILTIN_NS) not in names]
+        reserve = SEED_RESERVE + addon_room(root)
+        if same:
+            # Only the missing carts, and of them only one whose guessed room
+            # is free above the reserve: a store kept near its reserve is not
+            # written and taken back on every boot.
+            free = _free_bytes(root)
+            seed = [e for e in missing if free is None
+                    or free - reserve > SEED_RATIO * len(e[2]) + SEED_FOLDER]
+            if not seed:
+                return 0
+            # Unstamped while it writes: a cart a power cut leaves half
+            # written is a folder with no manifest, which only the versions'
+            # read (an unstamped store's) writes again.
+            os.remove(stamp_path)
         # SAID BEFORE it starts, not only after. This runs before the radio and
         # writes the roster to the internal VFS, so on a first boot it is the
         # longest silence in the log -- and on a board with no screen a
         # silence is what a hang looks like.
-        missing = sum(1 for t, _v, _b in CARTS_Z
-                      if not moy_carts._exists(moy_carts.cart_path(
-                          root, moy_carts.cart_folder(t, moy_carts.BUILTIN_NS))))
-        if missing:
-            print("ZERO seed: inflating %d carts from the image" % missing)
+        print("ZERO seed: %s from the image"
+              % ("inflating %d carts" % len(missing) if missing
+                 else "checking the seed carts' versions"))
         started = ticks._ticks_ms()
-        reserve = SEED_RESERVE + addon_room(root)
-        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True,
+        written = moy_carts.seed_packed(seed, root, only_new=same,
                                         room=lambda: seed_room(root, reserve))
         elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
+        _mkdir(stamp_path.rsplit("/", 1)[0])
+        with open(stamp_path, "w") as f:
+            f.write(stamp)
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
-        _unmark(mark)
         print("ZERO seed: FAILED (the store may be partly seeded):", exc,
               _space_note(root))
         return 0
-    # Only an interrupted seed (a KeyboardInterrupt, a power cut) keeps the
-    # mark: an ended one, or one that failed, is not tried again.
-    _unmark(mark)
     if not written:
         return 0
-    left = missing - written
+    left = len(missing) - written
     print("ZERO seed: %d carts inflated from the image in %d ms %s%s"
           % (written, elapsed, _space_note(root),
              " -- %d left out, the store's reserve" % left if left > 0 else ""))
     return written
 
 
-def _unmark(mark):
+def recover_installs(root=CARTS_DIR):
+    """An install a reset cut short (the add-on's step, `/official`'s, a cable
+    install's) finished or taken away (cart_index.recover), so its stage in
+    `install/` beside the carts folder holds no room the seed counts. One
+    listing on a boot with nothing there."""
     try:
-        os.remove(mark)
-    except OSError:
-        pass
+        import cart_index
+        n = cart_index.recover(root)
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO install: the stage was not cleared:", exc)
+        return 0
+    if n:
+        print("ZERO install: %d entries an install left were finished" % n)
+    return n
 
 
 def connect(wait_ms=15000, hostname=None):
@@ -828,19 +852,22 @@ class _ZeroInstall:
 
 def make_addon(ota):
     """The step that brings this image's release to the store once the
-    image has confirmed itself: the browser console add-on fitting it (the
-    page this board exists to serve) and the official carts the store holds
-    (web_addon.AddonStep's `carts`; the image seeds only the core ones). None
-    on a board with no OTA slots (the C3): a new image comes by cable, and the
-    flash installs both (tools/board_flash.py). Provisioning installs the
-    first ones (provision.sh)."""
-    if ota is None or not ota.available():
+    image has confirmed itself: the browser console add-on that fits it (the
+    page this board exists to serve), installed over one that does not fit
+    and where there is none (web_addon.AddonStep's `absent`: a board the
+    website's flasher wrote, a wiped store); and on a board with OTA slots
+    (the XIAO) the official carts the store holds that its image does not
+    carry, which the page installed (`carts`; the image's own are current by
+    its seed). The C3, with no OTA slot, takes a new image by cable, and the
+    flash brings its official carts (tools/board_flash.py). None where the
+    image names no release index (no updater)."""
+    if ota is None:
         return None
     try:
         import web_addon
         from cart_net import CartNet
         return web_addon.AddonStep(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
-                                   carts=True)
+                                   carts=ota.available(), absent=True)
     except Exception as exc:             # noqa: BLE001 -- the store serves regardless
         print("ZERO addon: unavailable:", exc)
         return None
@@ -873,6 +900,22 @@ def make_official(ota, addon=None):
 ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
 
 
+def tend_addon(addon, official):
+    """The serving loop's turn of `addon` (make_addon's step), once the
+    image has confirmed itself: a slice of a running step, or a start where
+    the store wants one and `official` (make_official's) is idle. The page is
+    this board's whole use, so an add-on that does not fit, or is not there,
+    is asked for again while it serves (web_addon.RETRY_MS apart). True
+    while the step runs."""
+    if addon is None:
+        return False
+    if addon.phase is not None:
+        return addon.tick(ADDON_SLICE_MS)
+    if official is not None and official.busy():
+        return False
+    return addon.start(retry=True)
+
+
 def serve():
     """Bring the store host up and pump it forever. Ctrl-C drops to the REPL
     (which is how provision.sh and mpremote get the board back)."""
@@ -882,6 +925,7 @@ def serve():
     # find a network still ends up with a store -- it goes on to host the setup
     # AP, and the first page served after that form is answered has carts behind
     # it rather than an empty shelf.
+    recover_installs(CARTS_DIR)
     seed_carts(CARTS_DIR)
     me = identity()
     name = me.get("name") or HOSTNAME
@@ -957,19 +1001,11 @@ def serve():
                     # for firmware before certifying its own can chase a bad
                     # image round a rollback loop forever.
                     task.boot_check_once()
-                    # ...and only now replace the browser console add-on with
-                    # the one this image fits: an image the bootloader takes
-                    # back never touched the add-on its predecessor serves.
-                    if addon is not None and (official is None
-                                              or not official.busy()):
-                        addon.start()
-        if addon is not None and ota is not None and ota.confirmed:
-            # The page is this board's whole use: an add-on that does not
-            # fit is retried while it serves (web_addon.RETRY_MS apart).
-            if addon.phase is not None:
-                addon.tick(ADDON_SLICE_MS)
-            elif official is None or not official.busy():
-                addon.start(retry=True)
+        if ota is not None and ota.confirmed:
+            # ...and only now install the browser console add-on this image
+            # fits: an image the bootloader takes back never touched the
+            # add-on its predecessor serves.
+            tend_addon(addon, official)
         # ...and `task.step()` is NOT called here: `WebHost.poll()` pumps the
         # injected update backend, which is the one place every board's does
         # its slice. A second call here would double this board's install rate

@@ -247,8 +247,8 @@ GENERATED = {
     # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
     # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
     # fallback for a missing card), and this board freezes the PACKED form
-    # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
-    # inflates into an empty store on first boot. It did not carry one at all
+    # (`CARTS_Z`, raw-deflate blobs of the carts its `[roster] image` names)
+    # that `zero_host.seed_carts` inflates into its store. It did not carry one at all
     # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
     # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.

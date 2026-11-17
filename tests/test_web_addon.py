@@ -159,6 +159,50 @@ def test_a_console_with_no_add_on_installs_none_by_itself(tmp_path, monkeypatch,
     assert not step.start() and os.listdir(root) == []
 
 
+def test_a_zero_with_no_add_on_installs_the_one_that_fits(tmp_path, monkeypatch, board):
+    """A Zero's page is its whole use (`absent`): a store with none -- the
+    website's flasher writes the app image alone -- gets the one its image
+    fits from its release."""
+    pages, routes = _release(tmp_path, b"old", b"new")
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    _names(pages[1][1], monkeypatch)
+    nb.page_at(root)
+    assert nb.page_state() == web_addon.STATE_ABSENT
+    inst = Inst(root, MemNet(routes))
+    step = web_addon.AddonStep(inst, BASE + "carts-tdeck.json", absent=True)
+    assert step.start()
+    while step.tick(1000):
+        pass
+    assert step.error is None
+    assert os.listdir(root) == [web_pack.cart_id(pages[1][1]) + ".moy"]
+    assert nb.page_state() == 3 and inst.held == 0
+    assert not step.start(), "an add-on that fits wants nothing"
+
+
+def test_a_release_with_no_add_on_for_the_image_is_not_asked_again_by_the_loop(
+        tmp_path, monkeypatch, board):
+    """An image its release publishes no add-on for (a build of this tree)
+    is told so once; the serving loop's retries fetch the index no more, and
+    a boot's or a person's start still asks."""
+    pages, routes = _release(tmp_path, b"old")
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    _names(_page(tmp_path, b"unpublished")[1], monkeypatch)
+    nb.page_at(root)
+    net = MemNet(routes)
+    step = web_addon.AddonStep(Inst(root, net), BASE + "carts-tdeck.json", absent=True)
+    assert step.start()
+    while step.tick(1000):
+        pass
+    assert step.error == "no browser console for this firmware"
+    monkeypatch.setattr(web_addon, "RETRY_MS", 0)
+    assert not step.start(retry=True)
+    assert len(net.opened) == 1
+    assert step.start()
+    step.stop()
+
+
 def test_a_failed_attempt_waits_before_a_browser_s_retry(tmp_path, monkeypatch, board):
     pages, routes = _release(tmp_path, b"old", b"new")
     root = str(tmp_path / "carts")

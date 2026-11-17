@@ -10,8 +10,9 @@
 # board's whole product, so it is installed by default: the cart that fits the
 # image this checkout built (dist/zero), copied into the store with the add-on
 # folders that fit other images taken off (tools/board_flash.py's
-# install_addon, which a cable flash of this board runs too). After an update
-# the board installs the one that fits on its own (zero_host.make_addon).
+# install_addon, which a cable flash of this board runs too). After an update,
+# or on a store with none, the board installs the one that fits from its
+# release on its own (zero_host.make_addon).
 # `--no-console` skips it.
 #
 # WHAT THIS SCRIPT IS, SINCE 2026-08-29. It used to be the whole port: this
@@ -23,15 +24,15 @@
 # and the board's own password, which a browser types once to pair (the Zero
 # has no screen for a pairing code; docs/os_2026-11/system.md section 3).
 #
-# THE CARTS. The image carries the CORE carts (moy_seed.CORE) compressed
-# (`carts_data.CARTS_Z`), and `zero_host.seed_carts()` inflates them into an
-# EMPTY store on first boot, so a Zero flashed from the website's flasher has
-# a working console with no cabled step. The other system carts are official
-# carts the release publishes: this script installs them by default
-# (tools/board_flash.py's install_carts, which a cable flash runs too) -- into
-# a new store board.toml's `[roster] install`, and into any store every
-# official cart it holds at an older version, the kid's saves and config
-# kept. `--no-carts` skips it.
+# THE CARTS. The image carries its seed carts compressed (board.toml's
+# `[roster] image`: the core carts, every app and five games;
+# `carts_data.CARTS_Z`), and `zero_host.seed_carts()` seeds them as a console
+# seeds its own, so a Zero flashed from the website's flasher has a working
+# console with no cabled step. The other system carts are official carts the
+# release publishes, which the page the board serves installs; this script
+# brings the ones a store holds at an older version to this tree, the kid's
+# saves and config kept (tools/board_flash.py's install_carts, which a cable
+# flash runs too). `--no-carts` skips it.
 #
 # The module push is OPT-IN (`--modules`): a sub-minute dev
 # loop for a module that changed since the image was built. The hazard is why
@@ -172,7 +173,7 @@ if [ "${PUSH_CONSOLE}" = "1" ]; then
 fi
 
 if [ "${PUSH_CARTS}" = "1" ]; then
-  echo "== the official carts (board.toml [roster] install, and every older one)"
+  echo "== the official carts (every older one the image does not carry)"
   "${PY}" "${REPO}/tools/board_flash.py" carts "${HERE}" --port "${PORT}"
 fi
 

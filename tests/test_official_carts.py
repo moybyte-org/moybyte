@@ -125,13 +125,14 @@ def test_the_core_set_holds_what_the_shell_opens_and_names():
         assert folder[app] in core, "%s opens %s, whose cart is not core" % (sources, app)
 
 
-def test_a_zero_installs_no_core_cart_and_only_seed_carts():
+def test_a_zero_installs_no_cart_its_image_carries_and_only_seed_carts():
+    mans = _manifests()
     for zero in ("seeed_xiao_esp32s3_zero", "esp32c3_zero"):
         d = ROOT / "firmware" / zero
-        assert board_config.roster_only(str(d)) == moy_seed.CORE
-        mans = _manifests()
+        image = board_config.roster_only(str(d))
+        assert set(moy_seed.CORE) <= set(image) and set(image) <= set(mans)
         for cid in board_config.roster_install(str(d)):
-            assert cid in mans and cid not in moy_seed.CORE
+            assert cid in mans and cid not in image
 
 
 # -- the release publishes them ---------------------------------------------------
@@ -456,14 +457,19 @@ def test_a_console_board_s_step_is_the_add_on_s_alone(tmp_path, monkeypatch):
 def test_a_cable_flash_installs_a_new_store_s_set_and_updates_what_a_store_holds():
     offered = {"moybyte.files.moy": 6, "moybyte.hop_quest.moy": 17,
                "moybyte.tap_game.moy": 11, "moybyte.sky_run.moy": 14}
-    core = ("moybyte.files",)
+    image = ("moybyte.files",)
     install = ("moybyte.hop_quest", "moybyte.tap_game")
     new = {"moybyte.files.moy": 6, "web_console_0123456789ab.moy": 0}
-    assert board_flash.carts_plan(new, offered, install, core) == [
+    assert board_flash.carts_plan(new, offered, install, image) == [
         "moybyte.hop_quest.moy", "moybyte.tap_game.moy"]
-    used = {"moybyte.files.moy": 5, "moybyte.hop_quest.moy": 17, "kids.moy": 1}
-    assert board_flash.carts_plan(used, offered, install, core) == ["moybyte.files.moy"], \
+    used = {"moybyte.files.moy": 5, "moybyte.hop_quest.moy": 16, "kids.moy": 1}
+    assert board_flash.carts_plan(used, offered, install, image) == ["moybyte.hop_quest.moy"], \
         "a store in use gets the newer versions of what it holds and nothing it lacks"
+    assert board_flash.carts_plan(used, offered, (), image + install) == [], \
+        "the image's own seed keeps the carts it carries"
+    held = dict(used, **{"moybyte.sky_run.moy": 13})
+    assert board_flash.carts_plan(held, offered, (), image + install) == [
+        "moybyte.sky_run.moy"], "an official cart the page installed is brought to the tree"
 
 
 def test_pkg_installs_a_removed_built_in_from_its_release_asking_nothing(

@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   PREFIX                 the add-on's folder names: web_console_<12 hex>.moy
 #   installed              the add-on folders a carts root holds
-#   AddonStep              the add-on that fits this image, and on a Zero the official carts, brought to it
+#   AddonStep              the add-on that fits this image, and on the XIAO Zero the official carts, brought to it
 #   official_behind        the official carts a store holds that its release has newer
 #   OfficialCarts          /official's backend: the official carts a page asks a headless board for
 """The browser console add-on: a cart, one per page (tools/web_pack.py makes
@@ -26,12 +26,20 @@ index, installs the entry that fits, and takes the add-on folders that no
 longer fit off the shelf. A step is one frame's share (`tick`); the radio is
 the caller's lease (`inst.hold`/`release`).
 
-WITH `carts` (the Zero, whose image carries only the core carts) the same
-step brings the OFFICIAL carts to the release too: every official entry of
-the index (cart_index.parse_index, the console's own index with its signature
-verified) whose cart the store holds at an older manifest version -- the
-seed's own rule (#47) -- is installed over it through the same Install, a cart at a time, its saves and
-an edited config carried; an unchanged cart is not fetched at all. The
+WITH `absent` (the Zeros, whose page is their whole use) a store with NO
+add-on gets the one that fits too: a Zero written by the website's flasher
+(the app image alone), a wiped store, or a cable flash whose add-on step
+failed. A console's add-on is optional, and Get Carts installs it.
+
+WITH `carts` (the XIAO Zero, which updates over the air) the same step
+brings the OFFICIAL carts the store holds to the release: every official
+entry of the index (cart_index.parse_index, the console's own index with its
+signature verified) whose cart the store holds at an older manifest version
+-- the seed's own rule (#47) -- is installed over it through the same
+Install, a cart at a time, its saves and an edited config carried; an
+unchanged cart is not fetched at all. The carts its image carries are
+current already (the new image's seed, zero_host.seed_carts, runs before
+the step), so what it fetches is the official carts the page installed. The
 release it brought them to is the stamp `system/official` beside the carts
 folder (the page digest the image names), so a cut one resumes and a store
 already there asks nothing. A console board's image carries every seed cart
@@ -57,6 +65,7 @@ from moy_fs import _exists, _read, _write_atomic, _mkdir
 from moy_store_base import _sibling_path, cart_path as _cart_path
 
 PREFIX = "web_console_"         # tools/web_pack.py's CART_ID, then 12 hex, then .moy
+STATE_ABSENT = 1                # moy_page.h's MOY_PAGE_ABSENT
 STATE_STALE = 2                 # moy_page.h's MOY_PAGE_STALE
 STEP_MS = 8                     # an install's work in one frame
 RETRY_MS = 60000                # a failed attempt starts again no sooner
@@ -137,17 +146,21 @@ def official_behind(root, carts):
 
 
 class AddonStep:
-    """The add-on that fits this image, installed over the one that does not,
-    and with `carts` the official carts the store holds brought to the
-    release (the module's docstring). `phase` is None while idle; `error` the
-    last attempt's failure; `progress` (done, total) while it installs."""
+    """The add-on that fits this image, installed over the one that does not
+    (and with `absent` where there is none), and with `carts` the official
+    carts the store holds brought to the release (the module's docstring).
+    `phase` is None while idle; `error` the last attempt's failure;
+    `progress` (done, total) while it installs."""
 
-    def __init__(self, inst, index, carts=False):
+    def __init__(self, inst, index, carts=False, absent=False):
         self.inst = inst
         self.index = index
         self.carts = carts
+        self.absent = absent
         self._queue = []
         self._addon = False
+        self._stamp = False           # the official stamp, once read (False: unread)
+        self._fitless = False         # the release lists no add-on for this image
         self.phase = None
         self.error = None
         self.wake = None              # called when a step starts: tick me each frame
@@ -165,18 +178,27 @@ class AddonStep:
             self._pointed = True
             point(self.inst.root())
 
+    def _addon_wanted(self):
+        state = page_state()
+        return state == STATE_STALE or (self.absent and state == STATE_ABSENT)
+
     def wanted(self):
-        """An add-on is installed and none of them fits this image; or with
-        `carts`, the official carts were last brought to another release."""
+        """An add-on is installed and none of them fits this image, or with
+        `absent` none is installed; or with `carts`, the official carts were
+        last brought to another release."""
         self.point()
-        return page_state() == STATE_STALE or self._behind()
+        return self._addon_wanted() or self._behind()
 
     def _behind(self):
         if not self.carts:
             return False
         want = _ci.page_want()
-        root = self.inst.root()
-        return bool(want) and self.inst.op(lambda: official_stamp(root)) != want
+        if not want:
+            return False
+        if self._stamp is False:
+            root = self.inst.root()
+            self._stamp = self.inst.op(lambda: official_stamp(root))
+        return self._stamp != want
 
     def busy(self):
         return self.phase is not None
@@ -192,14 +214,15 @@ class AddonStep:
         a boot's start and a person's button do not."""
         if self.phase is not None:
             return True
-        if not self.wanted():
+        if retry and (self._fitless or self._ended is not None
+                      and _ci._ticks_diff(_now(), self._ended) < RETRY_MS):
             return False
-        if retry and self._ended is not None \
-                and _ci._ticks_diff(_now(), self._ended) < RETRY_MS:
+        if not self.wanted():
             return False
         url = self.index() if callable(self.index) else self.index
         if not url:
             self.error = "no update address"
+            self._ended = _now()
             return False
         self._url = url
         self.error = None
@@ -207,7 +230,7 @@ class AddonStep:
         if not self._held:
             self._held = True
             self.inst.hold()
-        self._addon = page_state() == STATE_STALE
+        self._addon = self._addon_wanted()
         _ci._log("release: bringing %s to this firmware"
                  % ("the browser console add-on" if self._addon else "the official carts"))
         if self.wake is not None:
@@ -266,6 +289,10 @@ class AddonStep:
         if self._addon:
             fits = [c for c in carts if c.get("runtime") == "web"]
             if not fits:
+                # The release does not change under its image: asking again
+                # until a person or a boot does is a fetch of the index a
+                # minute for nothing.
+                self._fitless = True
                 return self._end("no browser console for this firmware")
             self._keep = fits[0]["folder"]
             self._queue.append(fits[0])
@@ -306,6 +333,7 @@ class AddonStep:
             want = _ci.page_want()
             if want:
                 self.inst.op(lambda: save_official_stamp(root, want))
+                self._stamp = want
         if not self._addon:
             return self._end(None)
         old = [f for f in installed(root, self.inst.op) if f != self._keep]

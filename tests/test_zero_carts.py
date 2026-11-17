@@ -1,7 +1,7 @@
 """A Zero's official carts, asked for by the page it serves (`/official`).
 
-The Zero's image carries only the core carts; the rest are official carts its
-release publishes (tools/web_pack.py). The browser console the board serves
+A Zero's image carries the seed carts its board.toml's `[roster] image`
+names; the rest are official carts its release publishes (tools/web_pack.py). The browser console the board serves
 lists them in Get Carts and asks the BOARD to install or remove one: the board
 fetches from its own release and writes its own store, the one writer, the
 way it installs its firmware (`/update`, tests/test_zero_update.py). What is
@@ -204,6 +204,76 @@ def test_the_zero_builds_the_backend_beside_its_updater():
     assert isinstance(o, web_addon.OfficialCarts)
     assert o.reserve == zero_host.SEED_RESERVE and o.index() == OWN
     assert zero_host.make_official(None) is None
+
+
+@pytest.mark.parametrize("slots", [True, False], ids=["xiao", "c3"])
+def test_a_zero_with_no_browser_console_installs_the_one_its_release_has(
+        tmp_path, monkeypatch, slots):
+    """A Zero the website's flasher wrote (the app image alone), or one whose
+    store was wiped, serves no page: once its image has confirmed itself the
+    serving loop (zero_host.tend_addon) installs the add-on that fits from its
+    release, on both Zeros, and holds back while /official works. Only the
+    XIAO, which updates over the air, also brings its official carts."""
+    import zero_host
+    from runtime import net_binding as nb
+    from test_web_addon import _names
+    monkeypatch.setitem(sys.modules, "moy_net", nb)
+    monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
+    seeds = tmp_path / "seeds"
+    shutil.copytree(str(SEEDS / "moybyte.files.moy"), str(seeds / "moybyte.files.moy"))
+    digest, routes = _release(tmp_path, seeds=seeds)
+    carts = tmp_path / "moy" / "carts"
+    carts.mkdir(parents=True)
+
+    class Ota:
+        def available(self):
+            return slots
+
+        def own_index(self):
+            return OWN
+
+    class Official:
+        working = True
+
+        def busy(self):
+            return self.working
+
+    try:
+        _names(digest, monkeypatch)
+        addon = zero_host.make_addon(Ota())
+        assert addon.absent and addon.carts is slots
+        net = MemNet(routes)
+        addon.inst = ZeroInst(str(carts), net)
+        official = Official()
+        assert not zero_host.tend_addon(addon, official) and net.opened == []
+        official.working = False
+        n = 0
+        while zero_host.tend_addon(addon, official):
+            n += 1
+            assert n < 10000
+        assert addon.error is None
+        assert nb.page_state() == 3 and nb.page_why() is None    # MOY_PAGE_READY
+        assert [f for f in os.listdir(str(carts)) if f.startswith(web_addon.PREFIX)]
+        fetched = len(net.opened)
+        assert not zero_host.tend_addon(addon, official)
+        assert len(net.opened) == fetched, "a store with its page asks nothing more"
+    finally:
+        nb._bake({})
+        nb.page_at("")
+
+
+def test_a_boot_clears_the_stage_an_install_a_reset_cut_left(tmp_path):
+    """An install's stage (`install/` beside the carts folder) holds no room
+    the seed counts after a reset cuts it short: the boot finishes it."""
+    import zero_host
+    carts = tmp_path / "moy" / "carts"
+    carts.mkdir(parents=True)
+    cut = tmp_path / "moy" / "install" / "web_console_0123456789ab.moy"
+    cut.mkdir(parents=True)
+    (cut / "moybyte_web.pack").write_bytes(b"\0" * 4096)
+    assert zero_host.recover_installs(str(carts)) == 1
+    assert os.listdir(str(tmp_path / "moy" / "install")) == []
+    assert zero_host.recover_installs(str(carts)) == 0
 
 
 # -- the page's half: Get Carts asking the board ------------------------------------

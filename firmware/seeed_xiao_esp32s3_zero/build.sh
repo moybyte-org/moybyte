@@ -183,13 +183,13 @@ moybyte_patch_pwm_ledc_book
 #    the shared Python modules (board.toml [modules.*]).
 #
 #    ...then the seed roster, PACKED (2026-08-30: one raw deflate stream a
-#    cart, `zero_host.seed_carts()` inflating them into an EMPTY store on
-#    first boot), and only the CORE carts (moy_seed.CORE, board.toml's
-#    `[roster] image`): the rest are official carts the release publishes,
-#    which a cable flash or provisioning installs and an update keeps current
-#    (`[roster] install`, runtime/carts/web_addon.py). `--packed` and `--only`
-#    are the differences from the console boards' invocation: same generator,
-#    same manifests, same declarations.
+#    cart, which `zero_host.seed_carts()` seeds as a console seeds its own),
+#    and only the carts board.toml's `[roster] image` names (the core carts,
+#    every app and five games): the rest are official carts the release
+#    publishes, which the page this board serves installs and an update keeps
+#    current (runtime/carts/web_addon.py). `--packed` and `--only` are the
+#    differences from the console boards' invocation: same generator, same
+#    manifests, same declarations.
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"

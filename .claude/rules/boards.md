@@ -409,20 +409,16 @@ stages 1–6 all absent. Its README is the authority; what bites:
 
 - 8 MB of flash: the console table does not fit, and the bootloader rejects an
   oversized table into a silent boot loop. Its partition CSV is authored.
-- Its image carries only the CORE carts (`moy_seed.CORE`, board.toml's
-  `[roster] image`) COMPRESSED (`tools/gen_device_carts.py --packed --only`,
-  `CARTS_Z`), inflated one cart at a time into an EMPTY store on first boot,
-  stopping while `zero_host.SEED_RESERVE` is still free — gated on emptiness,
-  because its store is the record (the only copy of a browser-made cart): a
-  cart the kid deletes stays deleted. The other system carts are official
-  carts from the release's index: a cable flash and provisioning install
-  `[roster] install` into a new store and bring every official cart a store
-  holds to the image's release (`tools/board_flash.py`'s `install_carts`),
-  and on the XIAO the update's step does it after an OTA
-  (`runtime/carts/web_addon.py`, `carts=True`). The browser console a Zero
-  serves adds and removes the others: its Get Carts asks the board through
-  the sealed `/official` (`web_addon.OfficialCarts`), and the board fetches
-  from its release and writes its own store, its one writer.
+- Its seed carts are board.toml's `[roster] image`, packed into the image
+  (`tools/gen_device_carts.py --packed --only`, `CARTS_Z`), and
+  `zero_host.seed_carts` keeps the consoles' rule over them (owner,
+  2026-11-17): a removal recorded in `system/removed` holds, a newer version
+  replaces, `SEED_RESERVE` stays free. Everything else is an official cart
+  of the release, which the page asks the board for over `/official` (the
+  board is its store's one writer). Its README says which carts each Zero
+  carries and how a cable flash, provisioning and an update bring the rest.
+- With no browser console add-on in its store a Zero fetches the one that
+  fits from its release (`zero_host.make_addon`, `tend_addon`).
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the

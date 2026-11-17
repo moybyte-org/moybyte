@@ -409,8 +409,8 @@ def pack_cart(cart):
 
 def build_packed(system_carts_dir, only=()):
     """The packed roster: [(title, version, blob)], in seed order; with
-    `only` (cart ids), those alone -- the Zeros' image carries the core
-    set (moy_seed.CORE, board.toml's `[roster] image`)."""
+    `only` (cart ids), those alone -- a Zero's image carries the set its
+    board.toml's `[roster] image` names (board_config.roster_only)."""
     mans = read_manifests(system_carts_dir)
     folders = [f for f, _m in mans]
     unknown = set(only) - set(folders)

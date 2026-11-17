@@ -56,17 +56,20 @@ THE BROWSER CONSOLE ADD-ON. A board that declares `[flash] addon` (the carts
 folder, on a board that speaks a bare REPL: the two Zeros) has the add-on cart
 that fits the image just written installed into its store after the flash,
 over that REPL (`install_addon`), with the add-on folders that fit other
-images taken off. The C3 has no OTA, so a cable flash is the only way a new
-image arrives there and this is the only way its page follows; the XIAO
-installs it after an update by itself. The console boards install it through
+images taken off. Either Zero also fetches the one that fits from its
+release by itself when it has none, and the XIAO after an update
+(zero_host.make_addon); the cable install is how a build of this tree, which
+no release publishes, gets its page. The console boards install it through
 their dev channel (`tools/board.py BOARD addon`, which a board pass runs).
 
-THE OFFICIAL CARTS. On the same boards the image seeds only the core carts
-(moy_seed.CORE); the flash then installs the other official carts from this
-tree's system_carts/, the bytes its release publishes (`install_carts`): into
-a NEW store -- one holding nothing but core carts and add-ons -- the set
-board.toml's `[roster] install` names, and into any store every official cart
-it holds at an older version, replaced with the kid's saves and config kept
+THE OFFICIAL CARTS. On the same boards the image seeds the carts board.toml's
+`[roster] image` names (the XIAO's the core carts, every app and five games;
+the C3's the core alone); the flash then installs the other official carts
+from this tree's system_carts/, the bytes its release publishes
+(`install_carts`): into a NEW store -- one holding nothing but the image's
+carts and add-ons -- the set board.toml's `[roster] install` names (the
+C3's), and into any store every official cart it holds at an older version
+that the image does not carry, replaced with the kid's saves and config kept
 (the seed's own rule, #47). Each is copied beside the carts folder and moved
 in by one rename, and the store's reserve (zero_host.SEED_RESERVE) is kept.
 The XIAO brings them to a new release by itself after an update
@@ -392,17 +395,18 @@ def offered_carts(seeds=SEED_DIR):
     return out
 
 
-def carts_plan(have, offered, install, core):
+def carts_plan(have, offered, install, image):
     """The official carts to write into a store holding `have` ({folder:
-    manifest version}, every cart folder in it), of `offered` (offered_carts):
-    each one the store holds at an older version, and into a NEW store -- one
-    holding nothing but core carts (`core`, ids) and add-ons -- each of
+    manifest version}, every cart folder in it), of `offered` (offered_carts),
+    leaving out the ones the image carries (`image`, ids), which its own seed
+    keeps: each one the store holds at an older version, and into a NEW store
+    -- one holding nothing but the image's carts and add-ons -- each of
     `install` (ids) it lacks. In `offered`'s order."""
-    core = set(c + ".moy" for c in core)
+    image = set(c + ".moy" for c in image)
     want = set(c + ".moy" for c in install)
-    new = all(f in core or f.startswith("web_console_") for f in have)
-    return [f for f, v in offered.items()
-            if (f in have and have[f] < v) or (f not in have and new and f in want)]
+    new = all(f in image or f.startswith("web_console_") for f in have)
+    return [f for f, v in offered.items() if f not in image and (
+        (f in have and have[f] < v) or (f not in have and new and f in want))]
 
 
 def _cart_bytes(src, block):
@@ -452,8 +456,9 @@ def install_carts(board_dir, port, reset=True, seeds=SEED_DIR):
         print("!! the official carts: the store did not answer:\n%s%s" % (r.stdout, r.stderr))
         return 1
     got = json.loads(line[-1].split(" ", 1)[1])
-    plan = carts_plan(got["have"], offered_carts(seeds), board_config.roster_install(board_dir),
-                      board_config.core_carts())
+    offered = offered_carts(seeds)
+    image = board_config.roster_only(board_dir) or tuple(f[:-4] for f in offered)
+    plan = carts_plan(got["have"], offered, board_config.roster_install(board_dir), image)
     free, reserve = got["free"], _reserve()
     rm = ("import os\n"
           "def rm(p):\n"

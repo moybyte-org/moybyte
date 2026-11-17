@@ -328,21 +328,16 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
     directory stats and no decompression at all, which is what keeps this off
     the warm-boot path rather than merely cheap on it.
 
-    `only_new` changes the skip rule from "already CURRENT" to "already THERE",
-    and it is the Zero's (2026-08-30). On a console board the store is a CACHE
-    of the image's built-ins, so #47 replaces a cart whose baked version is
-    newer and accepts that on-device edits to a built-in's code are lost. On the
-    Zero the store is the RECORD -- the only copy of a cart made in a browser,
-    with a `moy_journal` history behind it -- and `seed_builtins` names a folder
-    by the TITLE slug, so a version bump is exactly what would overwrite a kid's
-    edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
-    which is the whole difference: this seeds what is MISSING and never rewrites
-    what is present.
+    `only_new` changes the skip rule from "already CURRENT" to "already THERE":
+    the versions are not read, and only a missing cart is written. The Zero
+    asks it while its store's stamp names the roster it was seeded from
+    (zero_host.seed_carts), so a warm boot of the same image reads no manifest.
 
     `room`, where given, is asked before each cart and again once it has
-    landed: False before stops the seed, False after removes the cart just
-    written and stops it, so the room it keeps is never spent on a seed (the
-    Zero's SEED_RESERVE).
+    landed: False before stops the seed, False after removes a cart that was
+    not there before and stops it (a replaced one stays, the kid's saves in
+    it), so the room it keeps is never spent on a new seed (the Zero's
+    SEED_RESERVE).
 
     Returns the number of carts actually written.
     """
@@ -360,8 +355,8 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
                 progress = None
         name = cart_folder(title, ns)
         d = cart_path(root, name)
-        if _has(names, root, name) and (only_new
-                                        or int(version) <= _cart_version(d)):
+        there = _has(names, root, name)
+        if there and (only_new or int(version) <= _cart_version(d)):
             continue
         if room is not None and not room():
             break
@@ -369,7 +364,10 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
         # no progress hook, because the counting is this loop's.
         _store.seed(root, [entry], {}, None, ns)
         if room is not None and not room():
-            _rmtree(d)
+            if not there:
+                _rmtree(d)
+                break
+            written += 1
             break
         if names is not None:
             names[name] = True
@@ -405,10 +403,6 @@ def is_packed(seed):
 # after a sweep, so the pass runs when a store is behind and never again: a kid
 # who later makes their own cart under a retired title keeps it. Bump
 # RETIRED_GEN in the same commit that adds titles, or the new ones never sweep.
-#
-# The Zero is deliberately NOT a caller (it seeds `seed_packed(only_new=True)`
-# directly): its store is the RECORD -- the only copy of a cart made in a
-# browser -- where a console board's store is a CACHE of the image's built-ins.
 #
 # The list is the 2026-09-06 bench fold (three benches became phases of Bench
 # and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the

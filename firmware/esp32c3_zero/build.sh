@@ -99,7 +99,7 @@ moybyte_patch_gc_split_reserve
 # 3) Stage: the shared native modules (board.toml [native.shared]) with the web
 #    blob generated INTO the staged copy, the shared Python modules (board.toml
 #    [modules.*]), then the seed roster PACKED and cut to the core carts by
-#    board.toml [roster], as on the XIAO.
+#    board.toml [roster] (the XIAO's carries its apps and five games too).
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"

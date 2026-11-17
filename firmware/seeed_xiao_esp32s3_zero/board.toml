@@ -267,19 +267,18 @@ boot verdict and the rollback confirm the frame loop drives."""
 # ---------------------------------------------------------------------------
 
 [roster]
-# The image carries only the CORE carts (moy_seed.CORE: Get Carts, Files,
-# Appearance, Achievements, the Wallpaper slot and Moy Night, the default
-# backdrop), which zero_host.seed_carts inflates into an empty store. Every
-# other system cart is an official cart the release publishes in
-# carts-<board>.json. `install` is the set a cable flash or a provisioning
-# puts into a new store beside the core (tools/board_flash.py's
-# install_carts): every app, and the five games the store kept since
-# 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon Pop, Star
-# Catcher). A cable flash brings the official carts the store holds to the
-# image's release, and after an update the board does it itself
-# (runtime/carts/web_addon.py).
-image = "core"
-install = [
+# The seed carts the image carries beside the core (moy_seed.CORE: Get Carts,
+# Files, Appearance, Achievements, the Wallpaper slot and Moy Night, the
+# default backdrop), compressed: every app, and the five games the store kept
+# since 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon Pop, Star
+# Catcher). zero_host.seed_carts seeds them as a console seeds its own (owner,
+# 2026-11-17): present unless the kid removed one, a newer one in a new image
+# replacing the store's. Every other system cart is an official cart the
+# release publishes in carts-<board>.json, which the page this board serves
+# installs (`/official`); after an update the board brings the ones it holds
+# to the new release (runtime/carts/web_addon.py), and a cable flash brings
+# them to this tree's (tools/board_flash.py's install_carts).
+image = [
   "moybyte.calc", "moybyte.music", "moybyte.my_art", "moybyte.notes",
   "moybyte.paint", "moybyte.storybook", "moybyte.terminal",
   "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_game",

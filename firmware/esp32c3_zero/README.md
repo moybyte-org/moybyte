@@ -36,14 +36,17 @@ file is what the chip changes.
   goes on by cable. The store is the space after the slot, and holds the
   browser console: the add-on cart whose digest the image names
   (`native/moy_net/moy_page.h`), which the cable flash installs into it over
-  the REPL (`[flash] addon`, `tools/board_flash.py`).
+  the REPL (`[flash] addon`, `tools/board_flash.py`). Like the XIAO, a C3
+  whose store holds no add-on fetches one from its release
+  (`zero_host.make_addon`), with buffers made for the fetch and freed after.
 - **The image carries the core carts alone** (owner, 2026-11-17;
-  `moy_seed.CORE`, board.toml's `[roster] image`), seeded into an empty store
-  on first boot. The other system carts are official carts the release
+  `moy_seed.CORE`, board.toml's `[roster] image`), under the XIAO's seed
+  rule (`zero_host.seed_carts`). The other system carts are official carts the release
   publishes in `carts-c3_zero.json`, and with no OTA the cable flash is how
   they arrive and follow a new image (`tools/board_flash.py`'s
   `install_carts`): board.toml's `[roster] install` into a new store, and
-  every official cart a store holds at an older version. The page this board
+  every official cart a store holds at an older version (the core carts are
+  the image's seed's). The page this board
   serves adds and removes the rest as the XIAO's does (its README), the
   install's modules frozen here for it; each request's buffers (its release
   index read whole, about 45 KB, and the cart's download) are made for it
