@@ -110,8 +110,10 @@ OTA_IMAGES = {
     "guition_p4": "moybyte_guition_p4_app.bin",
 }
 # Boards whose partition table has ONE app slot, so no OTA payload can install
-# on them: their build is no miss in OTA_IMAGES. The C3 Zero (its board.toml).
-NO_OTA = {"c3_zero"}
+# on them: their build is no miss in OTA_IMAGES, and the release publishes
+# only their browser console add-on and its index, which a cable flash
+# installs from (tools/board_flash.py). The C3 Zero (its board.toml).
+NO_OTA = {"c3_zero": "moybyte_c3_zero_app.bin"}
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
 
@@ -276,6 +278,14 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
                       "-- no OTA manifest will be published for it"
                       % entry[len(prefix):])
     out = {}
+    for board in sorted(NO_OTA):
+        try:
+            stage_addon_only(artifacts, workdir, board,
+                             earlier(board) if earlier else None)
+        except web_pack.PageError as exc:
+            print("::error::%s -- its add-on stays as published" % exc)
+            if refused is not None:
+                refused.append(board)
     for board in sorted(OTA_IMAGES):
         try:
             got = stage_ota(tag, channel, artifacts, workdir, repo, board,
@@ -288,6 +298,23 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
         if got:
             out[board] = got
     return out
+
+
+def stage_addon_only(artifacts, workdir, board, earlier=None):
+    """Stage a NO_OTA board's add-on cart and its index, or nothing when this
+    run did not build the board. Raises web_pack.PageError like stage_ota."""
+    src = os.path.join(artifacts, "moybyte-firmware-%s" % board, NO_OTA[board])
+    if not os.path.exists(src):
+        print("%-6s no %s in this run -- add-on unchanged" % (board, NO_OTA[board]))
+        return None
+    page = web_pack.page_beside(src, board)
+    version = read_stamp(artifacts, board).get("version")
+    if version is None:
+        version = read_firmware_version()
+    addon = web_pack.publish_addon(page, workdir, board, version,
+                                   ota_sign.read_key(), earlier or b"")
+    print("%-6s staged %s and %s (no OTA)" % (board, addon["cart"], addon["index"]))
+    return addon
 
 
 def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck",

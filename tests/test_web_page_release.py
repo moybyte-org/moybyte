@@ -59,7 +59,8 @@ def _artifacts(root, board, seed=1, pack=True, named=True, channel="unstable",
     named_digest = digest if named else hashlib.sha256(b"stale").digest()
     if as_hex:
         named_digest = named_digest.hex().encode()
-    (folder / publish.OTA_IMAGES[board]).write_bytes(
+    image = publish.OTA_IMAGES.get(board) or publish.NO_OTA[board]
+    (folder / image).write_bytes(
         b"\xe9APP:" + board.encode() + b"\0" * 64 + named_digest + b"\0" * 64)
     (folder / publish.OTA_STAMP).write_text(json.dumps(
         {"channel": channel, "version": 1754161200 + seed,
@@ -152,6 +153,25 @@ def test_a_release_its_manifests_its_images_and_its_carts_agree(tmp_path, channe
         assert url == publish.asset_url(tag, m["cart"], repo=REPO)
         assert url.rsplit("/", 1)[0] == m["url"].rsplit("/", 1)[0]
         assert fits == [digest]
+
+
+def test_a_board_with_no_ota_gets_its_add_on_and_no_manifest(tmp_path):
+    """A one-slot board (the C3 Zero) installs its browser console by cable
+    from the release's index, so the release carries its cart and index
+    though no manifest can name an image for it."""
+    artifacts = tmp_path / "artifacts"
+    board = sorted(publish.NO_OTA)[0]
+    digest = _artifacts(artifacts, board, seed=3).hex()
+    out = tmp_path / "release"
+    out.mkdir()
+    tag = publish.CHANNELS["unstable"]["tag"]
+    got = publish.stage_ota_all(tag, "unstable", str(artifacts), str(out), repo=REPO)
+    assert board not in got
+    assert not (out / publish.manifest_name(board)).exists()
+    index_url = publish.asset_url(tag, web_pack.INDEX_NAME % board, repo=REPO)
+    url, fits = _addon(out, board, index_url, digest)
+    assert url == publish.asset_url(tag, web_pack.CART_NAME % digest, repo=REPO)
+    assert fits == [digest]
 
 
 def test_a_board_whose_image_names_a_page_it_has_not_got_is_refused(
