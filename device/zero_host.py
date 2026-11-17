@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   identity                    this board's name and write PIN (/moy/zero.json)
+#   seed_carts                  the image's carts written into an empty store; seed_room, store_is_empty
+#   connect                     join the first saved network that answers
+#   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
+#   host_class                  the store host: the boards' WebHost
+#   serve                       bring the store host up and pump it forever
 """The Zero: a pocketable cart-store the browser console pairs with (#41).
 
 This is the re-based Zero (moycore plan 3.2, owner call 2026-08-12): no panel,

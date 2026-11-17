@@ -1,3 +1,12 @@
+# Map (grep -n a name to jump there):
+#   ap_ssid                     the setup AP's name, from its MAC
+#   parse_form                  a urlencoded body to fields; validate, clean_name beside it
+#   is_password                 whether a password matches the board's record; console_hash writes one
+#   dns_reply                   the captive DNS answer to one query
+#   DnsRedirect                 the responder on :53 that serves dns_reply
+#   SetupServer                 the setup form over the kernel's webhost
+#   save_setup                  persist one accepted form
+#   run                         host the setup AP and serve the form until it is filled in
 """First-run setup: the AP a Zero hosts when it has no way onto a network (#41).
 
 A headless board has one honest failure mode and this is it -- no screen to
