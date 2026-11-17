@@ -926,6 +926,7 @@ class SpritesLayer(Layer):
     # Esc closes theme mode back to Appearance (its handle_input), not
     # the Editor's leave.
     ESC_LEAVES = False
+    KEYS_IDLE = True                # its keys move the cursor and act on a press
 
     id = TAB_SPRITES
     domain = "system"

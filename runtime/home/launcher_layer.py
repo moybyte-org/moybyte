@@ -103,6 +103,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
     strip = "home"            # the bar strip it draws and taps (BarLayer's `where`)
     ON_WALLPAPER = True
     searchable = True         # Games carries SEARCH (the query is the home's)
+    KEYS_IDLE = True          # its keys step the grid and the tabs; the glides are its draw's
 
     def __init__(self, ws, names):
         self.ws = ws

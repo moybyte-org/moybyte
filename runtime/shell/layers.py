@@ -207,6 +207,7 @@ class _PlayerLayer(Layer):
     id = "desktop"
     domain = "game"
     ESC_LEAVES = False
+    KEYS_IDLE = True                  # `Player.handle_input` takes nothing: the cart reads its own keys
 
     def ball_steps(self):
         """An app's page takes the trackball as its W A S D (`AppFace.ball_steps`);
@@ -292,6 +293,7 @@ class _UpdateLayer(Layer):
 
     id = "update"
     domain = "system"
+    KEYS_IDLE = True                  # its phases move on a press alone; the pump is the draw's
 
     def draw(self, dt):
         self.ws.update_ui._pump_update(dt)   # advance the install / reboot countdown
