@@ -95,7 +95,7 @@ PERF_PY = os.path.join(HERE, "perf_pass.py")
 # pass that builds images builds the bundle first.
 WEB_BUILD = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
 # Boards whose speaker stays silent on this desk.
-QUIET = ("tdeck",)
+QUIET = ("tdeck", "p4")
 # What a build that lost the component cache's index.lock prints, CMake's
 # wrap between the two halves included; such a build runs again after a pause
 # drawn from RETRY_PAUSE_S.
