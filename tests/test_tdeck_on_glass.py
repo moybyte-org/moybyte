@@ -87,7 +87,14 @@ MOVED_SRAM = 4560
 # every row, so they stay internal. 24 bytes of .bss by the link map against
 # dev 57dfc2d20, 2026-11-11.
 TAP_FONTS_SRAM = 24
-WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM,
+# And ADDON_SRAM, what the idle desk gives up while the browser console's
+# add-on cart (native/moy_net/moy_page.h) is on the store, which every console
+# keeps it on: 125783 free without it and 125539 with it, one image, fresh
+# boots, 2026-11-17. It is the add-on's and not one cart's more: a second
+# small cart moved neither number.
+ADDON_SRAM = 244
+WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM
+                      - ADDON_SRAM,
                       86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

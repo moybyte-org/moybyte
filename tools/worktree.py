@@ -66,7 +66,7 @@ TOOLCHAIN_GLOBS = ("firmware/*/.build/esp-idf", "firmware/*/.build/emsdk")
 # a lock, so a worktree with other sources adds entries instead of
 # overwriting the main checkout's.
 SHARED_CACHES = ("host", "host_audio", "host_wamr", "jet", "jet_cart")
-# Every board image bakes the browser console from the tree's own bundle.
+# Every board image names the digest of the tree's own browser console bundle.
 WEB_BUILD = "firmware/web_runner/build.sh"
 MPY_GLOBS = ("firmware/*/.build/micropython", ".build/unix_micropython/micropython")
 

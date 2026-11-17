@@ -151,7 +151,7 @@ def gate(skip_tests):
 
     `tools/preflight.sh`, not `make test`. The steps preflight adds over the
     suite are the ones that compare a DERIVED ARTIFACT against the sources it
-    was built from -- the baked web blob, the desktop MicroPython, the docs'
+    was built from -- the browser console's pack, the desktop MicroPython, the docs'
     paths -- and a release is precisely the moment a stale artifact escapes
     onto a device. Its own header carries the argument and the ORDER.
 

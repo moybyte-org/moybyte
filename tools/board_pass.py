@@ -42,8 +42,8 @@ stage one at a time, because two consoles in the same two-player cart form a
 match and measure its shared tick.
 
 A PASS THAT BUILDS builds the browser console first
-(`firmware/web_runner/build.sh`, once), because every image bakes this tree's
-bundle and one built without it fails its suite's baked-console check.
+(`firmware/web_runner/build.sh`, once), because every image names the digest
+of this tree's bundle and the add-on cart the pass installs is packed from it.
 
 THE MAIN CHECKOUT IS REFUSED FOR A BUILD (`--main` overrides): a build writes
 `dist/` and each board's `.build/`, and those are the images every other
@@ -91,8 +91,8 @@ import timings                                                     # noqa: E402
 
 BOARD_PY = os.path.join(HERE, "board.py")
 PERF_PY = os.path.join(HERE, "perf_pass.py")
-# Every image bakes the browser console from this tree's bundle, so a pass
-# that builds images builds the bundle first.
+# Every image names the digest of this tree's browser console bundle, so a
+# pass that builds images builds the bundle first.
 WEB_BUILD = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
 # Boards whose speaker stays silent on this desk.
 QUIET = ("tdeck",)
