@@ -1117,11 +1117,36 @@ static void asset(out_t *o, const char *name, const char *ctype) {
     moy_vol_gate_leave(gate);
 }
 
+// The root's answer where the page is ABSENT on a board that offers the way
+// back (moy_page.h): why, and the link that asks for the console again; the
+// link followed is counted and answered with what happens next.
+static void way_back(out_t *o, const char *why, const char *t, size_t tn) {
+    size_t an = sizeof(MOY_PAGE_ASK) - 1u;
+    int asked = tn == an && memcmp(t, MOY_PAGE_ASK, an) == 0;
+    if (asked) {
+        moy_page_ask();
+    }
+    char doc[512];
+    snprintf(doc, sizeof(doc),
+             "<!doctype html><meta charset=utf-8>"
+             "<meta name=viewport content=\"width=device-width\"><title>Moybyte</title>"
+             "<p>%s</p>%s", asked
+             ? "The browser console is being installed on this board. Reload this "
+               "page in a minute." : why,
+             asked ? "" : "<p><a href=\"" MOY_PAGE_ASK "\">Install the browser console "
+                          "again</a></p>");
+    simple(o, 404, "text/html; charset=utf-8", doc);
+}
+
 // `/` and `/index.html` with no prefix: the page's own address, or why there
 // is none.
 static void page_root(out_t *o, const char *t, size_t tn) {
     moy_page_forget();
     const char *why = moy_page_why();
+    if (why != NULL && moy_page_state() == MOY_PAGE_ABSENT && moy_page_offers()) {
+        way_back(o, why, t, tn);
+        return;
+    }
     if (why != NULL) {
         simple(o, moy_page_state() == MOY_PAGE_STALE ? 503 : 404,
                "text/plain; charset=utf-8", why);

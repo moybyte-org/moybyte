@@ -31,15 +31,15 @@ class Card {
     this.el = el;
     this.board = BOARDS[el.dataset.board];
     this.go = el.querySelector(".go");
-    this.erase = el.querySelector(".erase input");
     this.hand = el.querySelector(".manual input");
     this.bar = el.querySelector(".prog i");
     this.progress = el.querySelector(".prog");
     this.log = el.querySelector(".log");
     this.state = el.querySelector(".state");
-    // The build picker (site/build.py VARIANTS). A card with one build has no
-    // <select>, so `builds` falls back to the board's own default record and
-    // everything below reads the same shape either way.
+    // The build picker (site/build.py VARIANTS, and on the C3 the install or
+    // the update of each). A card with one build has no <select>, so `builds`
+    // falls back to the board's own default record and everything below reads
+    // the same shape either way.
     this.picker = el.querySelector("select.variant");
     this.file = el.querySelector(".older input[type=file]");
     this.builds = (this.board && this.board.builds && this.board.builds.length)
@@ -54,7 +54,7 @@ class Card {
   // -- see VARIANTS -- so handing the file back is how they get flashed).
   build() {
     const want = this.picker ? this.picker.value : null;
-    return this.builds.find((b) => b && b.variant === want) || this.builds[0];
+    return this.builds.find((b) => b && b.pick === want) || this.builds[0];
   }
 
   chosenFile() {
@@ -65,7 +65,7 @@ class Card {
   // Toggling rather than rewriting: those lines carry links, and generating
   // them here would mean building markup in JS.
   showBuild() {
-    const want = this.build().variant;
+    const want = this.build().pick;
     for (const el of this.el.querySelectorAll("[data-variant]"))
       el.hidden = el.dataset.variant !== want;
     const file = this.chosenFile();
@@ -162,9 +162,14 @@ class Card {
                + bytes.length + " bytes, not checksummed by this page)");
       return bytes;
     }
-    const res = await fetch(b.url, { cache: "no-store" });
+    // The gzip beside it where the browser inflates one: an install is mostly
+    // erased flash, a tenth of its size on the wire.
+    const zipped = b.gz && typeof DecompressionStream !== "undefined";
+    const res = await fetch(zipped ? b.gz : b.url, { cache: "no-store" });
     if (!res.ok) throw new Error("could not download the image (HTTP " + res.status + ")");
-    const buf = await res.arrayBuffer();
+    const buf = zipped
+      ? await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer()
+      : await res.arrayBuffer();
     if (buf.byteLength !== b.size)
       throw new Error("the image is " + buf.byteLength + " bytes, expected " + b.size);
     if (crypto.subtle) {
@@ -239,7 +244,9 @@ class Card {
         flashMode: "keep",
         flashFreq: "keep",
         flashSize: "keep",
-        eraseAll: !!(this.erase && this.erase.checked),
+        // Never the whole chip: an install writes its own store, and an
+        // update keeps the board's.
+        eraseAll: false,
         compress: true,
         reportProgress: (_i, written, total) => {
           this.pct(written / total);

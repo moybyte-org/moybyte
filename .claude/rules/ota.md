@@ -20,8 +20,9 @@ paths:
   - **Every board but the C3 Zero is dual-OTA** (`otadata + ota_0 + ota_1 +
     vfs`), so the one-time migration is HISTORY. The C3 Zero is one factory
     slot and the store (owner, 2026-11-17: no OTA): its updater's
-    `available()` is False, a new image goes on by cable, and the cable
-    flash installs the browser console add-on that fits it. The slot sizes differ per board and are NOT
+    `available()` is False, a new image goes on by cable (the cable flash, or
+    the website's update download, which keeps its carts), and the board
+    installs the browser console add-on that fits it. The slot sizes differ per board and are NOT
     repeated here: each board's partition CSV is the only thing that decides
     whether an image fits, and the build prints the headroom against it (#168).
     **The Zero's is the one authored under a real constraint** — 8MB of flash,
@@ -67,8 +68,15 @@ paths:
     confirms itself (`runtime/carts/web_addon.py`, under the radio's "update"
     hold), so a rollback finds the add-on its old image serves still on the
     shelf; an install a reset cuts short resumes on the next boot, and the
-    recovery floor never touches the add-on (a person reinstalls it from Get
-    Carts).
+    recovery floor never touches the add-on. The same step brings one to a
+    board that has none, unless its owner removed it (`.claude/rules/web.md`).
+  - **The website's download is an INSTALL, not an update** (owner,
+    2026-11-17): each board's is its merged image followed, at the internal
+    store's offset, by a store holding the add-on that fits
+    (`tools/store_image.py`, which CI's firmware build runs; site/build.py's
+    `downloads`), so it erases the internal store and an SD card is not
+    touched. A board updates over the air; the C3, with no OTA, also offers
+    its merged image as it is, an update that keeps its carts.
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
     then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.

@@ -437,6 +437,35 @@ def test_a_console_with_no_add_on_says_where_to_get_it(tmp_path, baked):
     assert b"isn't installed" in r and b"Get Carts" in r
 
 
+def test_a_zero_s_root_says_what_it_does_and_links_the_way_back(tmp_path, baked):
+    """A board whose page is its only face (a Zero) says its own sentence
+    where the console is absent (moy_page_say); where its owner removed the
+    console the root links the way back, and following the link is counted
+    (moy_page_asked) for the board to install it again
+    (device/zero_host.way_back)."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.remove(pack)
+    os.rmdir(os.path.dirname(pack))
+    h = _host(tmp_path)
+    try:
+        nb.page_say("This board is fetching its browser console.", 0)
+        r = h.handle_http("GET", "/", b"")
+        assert b"404" in h_status(r) and r.endswith(b"fetching its browser console.")
+        assert b"text/plain" in r
+        nb.page_say("The browser console was removed from this board.", 1)
+        asked = nb.page_asked()
+        r = h.handle_http("GET", "/", b"")
+        assert b"text/html" in r and b"was removed" in r
+        assert b'href="/?console=install"' in r and nb.page_asked() == asked
+        r = h.handle_http("GET", "/?console=install", b"")
+        assert nb.page_asked() == asked + 1
+        assert b"being installed" in r and b"href=" not in r
+    finally:
+        nb.page_say("", 0)
+    r = h.handle_http("GET", "/", b"")
+    assert b"isn't installed" in r and b"Get Carts" in r
+
+
 def test_an_add_on_for_another_image_needs_its_page_updated(tmp_path, baked):
     """After a firmware update the cart that was installed fits the old
     image until the one that fits arrives."""

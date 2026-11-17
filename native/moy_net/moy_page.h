@@ -11,7 +11,9 @@
 // out under the carts root the webhost gives it (moy_page_at):
 //
 //   NONE    this image names no page (the browser's own build, the host)
-//   ABSENT  no add-on cart: MOY_PAGE_ABSENT_WHY
+//   ABSENT  no add-on cart: MOY_PAGE_ABSENT_WHY, or the board's own
+//           sentence (moy_page_say); every board fetches the one that fits
+//           unless its owner removed it (runtime/carts/web_addon.py)
 //   STALE   an add-on cart that fits another image, or a pack whose head does
 //           not parse: MOY_PAGE_STALE_WHY, until the one that fits installs
 //           (runtime/carts/web_addon.py's AddonStep does it after an update,
@@ -88,5 +90,17 @@ const char *moy_page_asset(unsigned i, uint32_t *len);
 
 // Read the head again at the next question (the file changed).
 void moy_page_forget(void);
+
+// THE WAY BACK on a board whose page is its only face (a Zero): the
+// sentence ABSENT answers with in place of MOY_PAGE_ABSENT_WHY (NULL or ""
+// for that), and with `offer` the root's answer also links
+// MOY_PAGE_ASK, which is counted (moy_page_asked) for the board to
+// install the console again (runtime/carts/web_addon.py's restore).
+#define MOY_PAGE_ASK "/?console=install"
+void moy_page_say(const char *why, int offer);
+int moy_page_offers(void);
+// The root asked with MOY_PAGE_ASK while ABSENT and offering: counted.
+void moy_page_ask(void);
+unsigned moy_page_asked(void);
 
 #endif

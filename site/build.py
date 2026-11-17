@@ -190,12 +190,16 @@ TIERS = [
 #
 # Every one writes a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
-# the flasher passes "keep" for all of them rather than re-deriving them here. The
-# partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
-# so an ordinary flash leaves the board's own storage alone.
+# the flasher passes "keep" for all of them rather than re-deriving them here.
 #
-# `images` is a preference list: the first name present in the board's artifact
-# folder is the one published.
+# THE PAGE OFFERS THE INSTALL (owner, 2026-11-17): `images[0]` is the merged
+# image the cable flash writes, and what the page publishes is its INSTALL
+# (tools/store_image.py's install_name), that image followed, at the internal
+# store's offset, by a store holding the browser console add-on that fits it --
+# one download that starts the board fresh and erases its internal store (an SD
+# card is not touched). `install` says so on the card. A board updates itself
+# over the air; the C3 Zero, which has no OTA slot, also offers its merged
+# image as it is (`update`: the app, its carts kept), its only update.
 #
 # `beta`, on a board that has it, is why that board is not ready yet: plain text
 # (the release notes reuse it as Markdown), with `#N` linked to the issue on the
@@ -209,6 +213,11 @@ TIERS = [
 # board noticing -- this table asserted a TinyUSB CDC id for the Zero, and drew
 # `no_reset` out of it, for a fortnight after that board moved to
 # USB-Serial/JTAG (2026-08-30).
+INSTALL_CONSOLE = ("Installs Moybyte fresh. Erases the board&rsquo;s internal "
+                   "storage; an SD card is not touched. To update, use the "
+                   "board&rsquo;s own update (Settings).")
+KINDS = {"install": "install fresh", "update": "update, keeps your carts"}
+
 BOARDS = [
     {
         "id": "tdeck",
@@ -227,9 +236,7 @@ BOARDS = [
         "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
                 "loader on its own; when the write finishes, <b>press "
                 "RST</b>.",
-        "erase": "Erase the whole chip first. Carts on an SD card survive it; "
-                 "with no card they are on internal flash, and this deletes them "
-                 "and their saves.",
+        "install": INSTALL_CONSOLE,
         "cli": "make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0",
     },
     {
@@ -242,8 +249,7 @@ BOARDS = [
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C debug port. It resets into "
                 "the loader and back on its own.",
-        "erase": "Erase the whole chip first. This board keeps its carts on "
-                 "internal flash, so this deletes them and their saves.",
+        "install": INSTALL_CONSOLE,
         # The escape hatch for a reset that will not take: hold BOOT (GPIO35 on
         # this board), tap RESET, and the browser skips its own reset entirely.
         "manual": "Skip the reset &mdash; I have put the board in download mode "
@@ -263,8 +269,7 @@ BOARDS = [
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
                 "loader and back on its own.",
-        "erase": "Erase the whole chip first. This board keeps its carts on "
-                 "internal flash, so this deletes them and their saves.",
+        "install": INSTALL_CONSOLE,
         "manual": "Skip the reset &mdash; I have put the board in download mode "
                   "myself (hold <b>BOOT</b>, tap <b>RST</b>, release BOOT). Try "
                   "this if connecting fails.",
@@ -285,9 +290,7 @@ BOARDS = [
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. It resets into the "
                 "loader and back on its own.",
-        "erase": "Erase the whole chip first. Carts on a TF card survive it; "
-                 "with no card they are on internal flash, and this deletes them "
-                 "and their saves.",
+        "install": INSTALL_CONSOLE,
         "manual": "Skip the reset &mdash; I have put the board in download "
                   "mode myself (hold <b>BOOT</b>, tap <b>RST</b>, release "
                   "BOOT). Try this if connecting fails.",
@@ -319,9 +322,34 @@ BOARDS = [
         "prep": "This board has no screen. It resets into the loader on its "
                 "own, but when the write finishes <b>unplug it and plug it back "
                 "in</b> to start it.",
-        "erase": "Erase the whole chip first. This board keeps its carts on "
-                 "internal flash, so this deletes them and their saves.",
+        "install": "Installs Moybyte fresh. Erases the board&rsquo;s internal "
+                   "storage, its carts and saves with it. To update, use the "
+                   "board&rsquo;s update in its browser page.",
         "cli": "make firmware-flash-zero PORT=/dev/ttyACM0",
+    },
+    {
+        # The C3 Zero: the Zero on an ESP32-C3 (firmware/esp32c3_zero), with
+        # one app slot and no OTA, so a cable flash is its only update: the
+        # card offers the install and the app image as it is (`update`).
+        "id": "c3_zero",
+        "label": "ESP32-C3 Zero",
+        "chip": "ESP32-C3",
+        "images": ("moybyte_c3_zero.bin",),
+        "offset": 0x0,
+        "baud": 460800,
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b> while you plug it in). Try this if "
+                  "connecting fails.",
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "This board has no screen. Plug it into its USB-C port; it "
+                "resets into the loader and back on its own.",
+        "install": "Installs Moybyte fresh. Erases the board&rsquo;s internal "
+                   "storage, its carts and saves with it. To update later, pick "
+                   "the <b>update</b> build: it keeps them.",
+        "update": "Updates Moybyte and keeps the board&rsquo;s carts and saves. "
+                  "The board fetches the browser console that fits once it is "
+                  "online.",
+        "cli": "make firmware-flash-c3-zero PORT=/dev/ttyACM0",
     },
 ]
 
@@ -391,6 +419,17 @@ def reset_facts(cfg):
         facts["after"] = after
         facts["after_lines"] = HARD_RESET_LINES[usb]
     return facts
+
+
+def downloads(board):
+    """[(kind, file name)] the page offers for `board`: the install, and with
+    `update` the merged image as it is."""
+    from tools.store_image import install_name
+    name = board["images"][0]
+    out = [("install", install_name(name))]
+    if board.get("update"):
+        out.append(("update", name))
+    return out
 
 
 _DECLARED = declared_boards()
@@ -514,24 +553,18 @@ def moy_mark(pal, scale=3):
 
 
 def publish_image(board, folder, out, variant, vlabel):
-    """Copy one board's image for one variant into the site. -> record or None.
+    """Copy one board's downloads for one variant into the site. -> [record].
 
-    The record is what site/flash.js reads to flash it: where the file is, how
-    big it should be, what it should hash to, and the board's own write
-    parameters.
+    A record is what site/flash.js reads to flash it: where the file is (and
+    its gzip, which the page fetches and inflates: an install is mostly
+    erased flash), how big it should be, what it should hash to, and the
+    board's own write parameters. `pick` is the picker's key, the variant's
+    name for the install and with "_update" for an update.
     """
-    name = next((n for n in board["images"]
-                 if os.path.exists(os.path.join(folder, n))), None)
-    if not name:
-        return None
-
-    blob = open(os.path.join(folder, name), "rb").read()
-    # Variant in the PATH, so two channels' images can sit side by side under
-    # the same board without one overwriting the other.
-    dest = os.path.join(out, "firmware", variant, board["id"])
-    os.makedirs(dest, exist_ok=True)
-    with open(os.path.join(dest, name), "wb") as f:
-        f.write(blob)
+    found = [(kind, name) for kind, name in downloads(board)
+             if os.path.exists(os.path.join(folder, name))]
+    if not found:
+        return []
 
     def sidecar(name):
         path = os.path.join(folder, name)
@@ -546,33 +579,50 @@ def publish_image(board, folder, out, variant, vlabel):
     # The OTA manifest, when the fetch came from a release: the only place the
     # human version string lives.
     ota = sidecar("manifest.json")
-    return {
-        "id": board["id"],
-        "label": board["label"],
-        "chip": board["chip"],
-        "variant": variant,
-        "variant_label": vlabel,
-        "file": name,
-        "url": "firmware/%s/%s/%s" % (variant, board["id"], name),
-        "size": len(blob),
-        "sha256": hashlib.sha256(blob).hexdigest(),
-        "offset": board["offset"],
-        "baud": board["baud"],
-        "reset": board["reset"],
-        "after": board["after"],
-        "after_lines": board["after_lines"],
-        "rest": board["rest"],
-        "done": board["done"],
-        # Provenance: the page states which build it is about to write, so
-        # "the latest build" is checkable rather than a claim.
-        "commit": source.get("commit", ""),
-        "run_url": source.get("run_url", ""),
-        "run_number": source.get("run_number"),
-        "built": source.get("built", ""),
-        # What the DEVICE will call this once it is running -- the same string
-        # the update screen shows, so the page and the board agree.
-        "version": ota.get("label") or "",
-    }
+    # Variant in the PATH, so two channels' images can sit side by side under
+    # the same board without one overwriting the other.
+    dest = os.path.join(out, "firmware", variant, board["id"])
+    os.makedirs(dest, exist_ok=True)
+    records = []
+    for kind, name in found:
+        blob = open(os.path.join(folder, name), "rb").read()
+        with open(os.path.join(dest, name), "wb") as f:
+            f.write(blob)
+        with gzip.open(os.path.join(dest, name + ".gz"), "wb", compresslevel=9) as f:
+            f.write(blob)
+        url = "firmware/%s/%s/%s" % (variant, board["id"], name)
+        records.append({
+            "id": board["id"],
+            "label": board["label"],
+            "chip": board["chip"],
+            "variant": variant,
+            "variant_label": vlabel,
+            "kind": kind,
+            "pick": variant if kind == "install" else variant + "_update",
+            "note": board[kind],
+            "file": name,
+            "url": url,
+            "gz": url + ".gz",
+            "size": len(blob),
+            "sha256": hashlib.sha256(blob).hexdigest(),
+            "offset": board["offset"],
+            "baud": board["baud"],
+            "reset": board["reset"],
+            "after": board["after"],
+            "after_lines": board["after_lines"],
+            "rest": board["rest"],
+            "done": board["done"],
+            # Provenance: the page states which build it is about to write, so
+            # "the latest build" is checkable rather than a claim.
+            "commit": source.get("commit", ""),
+            "run_url": source.get("run_url", ""),
+            "run_number": source.get("run_number"),
+            "built": source.get("built", ""),
+            # What the DEVICE will call this once it is running -- the same
+            # string the update screen shows, so the page and the board agree.
+            "version": ota.get("label") or "",
+        })
+    return records
 
 
 def firmware(src, out, prefer=None):
@@ -601,17 +651,13 @@ def firmware(src, out, prefer=None):
             folder = os.path.join(src, variant, board["id"])
             if not os.path.isdir(folder):
                 continue
-            got = publish_image(board, folder, out, variant, vlabel)
-            if got:
-                builds.append(got)
+            builds += publish_image(board, folder, out, variant, vlabel)
         if not builds:
             # The pre-picker layout: no variant subtrees, board folders at the top.
             folder = os.path.join(src, board["id"])
             if os.path.isdir(folder):
-                got = publish_image(board, folder, out, VARIANTS[0][0], VARIANTS[0][1])
-                if got:
-                    builds.append(got)
-        builds.sort(key=lambda b: b["variant"] != prefer)
+                builds += publish_image(board, folder, out, VARIANTS[0][0], VARIANTS[0][1])
+        builds.sort(key=lambda b: (b["variant"] != prefer, b["kind"] != "install"))
         cards.append(dict(board, builds=builds, fw=builds[0] if builds else None))
     return cards
 
@@ -644,7 +690,7 @@ def font_face():
 
 # The at-a-glance list beside the hero. Dots are role colours (ok / wip / warn).
 STATUS = [
-    ("ok", "Five boards", "ESP32-S3 and ESP32-P4"),
+    ("ok", "Six boards", "ESP32-S3, ESP32-P4 and ESP32-C3"),
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "stable and beta"),
     ("ok", "In the browser", "nothing to install"),
@@ -678,10 +724,11 @@ def flash_cards(cards):
         # The picker only earns its space when there is a choice to make.
         if len(builds) > 1:
             opts = "".join(
-                '<option value="%s"%s>%s%s</option>'
-                % (b["variant"], " selected" if i == 0 else "",
+                '<option value="%s"%s>%s%s%s</option>'
+                % (b["pick"], " selected" if i == 0 else "",
                    b["variant_label"],
-                   " &mdash; %s" % b["version"] if b["version"] else "")
+                   " &mdash; %s" % b["version"] if b["version"] else "",
+                   " &middot; %s" % KINDS[b["kind"]] if c.get("update") else "")
                 for i, b in enumerate(builds))
             li.append('<label class="pick"><span>Build</span>'
                       '<select class="variant">%s</select></label>' % opts)
@@ -699,12 +746,15 @@ def flash_cards(cards):
                             % (REPO, b["commit"], b["commit"][:7]))
             bits.append("%s &rarr; 0x%x" % (size_mb(b["size"]), b["offset"]))
             li.append('<p class="fwmeta" data-variant="%s"%s>%s</p>'
-                      % (b["variant"], "" if i == 0 else " hidden",
+                      % (b["pick"], "" if i == 0 else " hidden",
                          " &middot; ".join(bits)))
         li.append("<p>%s</p>" % c["prep"])
+        for i, b in enumerate(builds):
+            li.append('<p class="fwnote" data-variant="%s"%s>%s</p>'
+                      % (b["pick"], "" if i == 0 else " hidden", b["note"]))
         dls = "".join(
             '<a class="btn dl" data-variant="%s" href="%s"%s download>'
-            'Download the .bin</a>' % (b["variant"], b["url"], "" if i == 0 else " hidden")
+            'Download the .bin</a>' % (b["pick"], b["url"], "" if i == 0 else " hidden")
             for i, b in enumerate(builds))
         li.append('<p class="act">'
                   '<button class="btn pri go" type="button">Flash this board</button>'
@@ -718,8 +768,6 @@ def flash_cards(cards):
                   'board\'s <code>%s-*.bin</code>, then choose it here.</p>'
                   '<label class="file"><input type="file" accept=".bin"></label>'
                   '</details>' % (REPO, c["id"]))
-        li.append('<label class="erase"><input type="checkbox">'
-                  '<span>%s</span></label>' % c["erase"])
         if c["manual"]:
             li.append('<label class="erase manual"><input type="checkbox">'
                       '<span>%s</span></label>' % c["manual"])
@@ -939,8 +987,9 @@ def page(pal, has_player, cards, channel=None, stills=False):
     # to write.
     flash_hint = "" if not published else (
         '  <div class="hint">\n'
-        '    <span>Your carts and saves are left alone unless you tick the erase box.</span>\n'
-        '    <span><b>After an erase</b> the first boot takes about half a minute.</span>\n'
+        '    <span>The install starts a board fresh: it erases the carts and saves '
+        'kept on the board itself. An SD card is not touched.</span>\n'
+        '    <span>The first boot after it takes about half a minute.</span>\n'
         '  </div>\n')
     flash_js = ""
     if published:

@@ -43,7 +43,9 @@ from cart_net import CartNet  # noqa: F401 -- ws.cart_net's class, and the tests
 
 class _AddonInst:
     """The install role's server for the add-on's step: the shell's, with
-    the radio held as the update's ("update"), not Get Carts' ("carts")."""
+    the radio held as the update's ("update"), not Get Carts' ("carts"); a
+    network saved (`configured`) and a game playing (`playing`) as the step
+    asks."""
 
     def __init__(self, ws):
         from shell_servers import ShellInstall
@@ -58,6 +60,14 @@ class _AddonInst:
 
     def release(self):
         self._ws.spine.wifi_release("update")
+
+    def configured(self):
+        w = getattr(self._ws, "wifi", None)
+        return bool(w is not None and w.known())
+
+    def playing(self):
+        procs = getattr(self._ws, "procs", None)
+        return bool(procs is not None and procs.playing())
 
 
 def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
@@ -99,13 +109,16 @@ def wire_links(ws, link_id, update_dir, carts_root, with_sd, c6_updater, log,
     ws.cart_net = CartNet(ws.wifi, autoconnect_wifi)
     # The browser console add-on (runtime/carts/web_addon.py): the release's own
     # index beside the update manifest is one more Get Carts reads, and the
-    # step that installs the add-on fitting this image runs after the confirm
-    # (desktop_spine.make_service) under the radio's "update" hold.
+    # step that installs the add-on fitting this image -- over one that does
+    # not fit, and where there is none unless the console was removed -- runs
+    # after the confirm (desktop_spine.make_service) under the radio's
+    # "update" hold.
     if ws.updater is not None:
         try:
             import web_addon
             ws.cart_own = ws.updater.own_index()
-            ws.addon = web_addon.AddonStep(_AddonInst(ws), ws.updater.own_index)
+            ws.addon = web_addon.AddonStep(_AddonInst(ws), ws.updater.own_index,
+                                           absent=True)
         except Exception as exc:  # noqa: BLE001
             log("boot", "browser console add-on step unavailable: %s" % exc)
     if c6_updater is not None and ws.updater is not None:

@@ -25,10 +25,10 @@ Two sources, in order:
 Either way the output is the same tree, which site/build.py reads:
 
     dist/ci-firmware/<variant>/
-      tdeck/moybyte_tdeck.bin
+      tdeck/moybyte_tdeck_install.bin          <- the install (tools/store_image.py)
       tdeck/source.json                        <- run id/url, commit, date
       tdeck/manifest.json                      <- the OTA manifest (its version)
-      p4/moybyte_p4.bin
+      p4/moybyte_p4_install.bin
       p4/source.json
 
 Boards are resolved independently: the build workflow is dispatched per board,
@@ -61,7 +61,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # BOARDS ids: this tuple decides what gets pulled, that table decides what the
 # page can flash, and a board in one and not the other is a card with no image
 # or an image no card offers.
-BOARDS = ("tdeck", "p4", "guition_p4", "guition_s3", "xiao_zero")
+BOARDS = ("tdeck", "p4", "guition_p4", "guition_s3", "xiao_zero", "c3_zero")
 WORKFLOW = "firmware-build.yml"
 ARTIFACT = "moybyte-firmware-%s"
 RELEASE_TAG = "firmware-latest"

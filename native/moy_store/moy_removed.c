@@ -34,12 +34,35 @@ static int removable_n(const char *name, size_t n) {
            && !core_n(name, n);
 }
 
+// A browser console add-on's folder or id, or the console's own line.
+static int addon_n(const char *name, size_t n) {
+    size_t k = id_len(name, n);
+    size_t pn = sizeof MOY_REMOVED_ADDON_CART - 1u;
+    return (k == sizeof MOY_REMOVED_ADDON - 1u && memcmp(name, MOY_REMOVED_ADDON, k) == 0)
+           || (k > pn && memcmp(name, MOY_REMOVED_ADDON_CART, pn) == 0);
+}
+
+// The line a removal of `name` records, its length, or 0 when it records none.
+static size_t line_of(const char *name, size_t n, const char **line) {
+    if (addon_n(name, n)) {
+        *line = MOY_REMOVED_ADDON;
+        return sizeof MOY_REMOVED_ADDON - 1u;
+    }
+    *line = name;
+    return removable_n(name, n) ? n : 0u;
+}
+
 int moy_removed_core(const char *name) {
     return core_n(name, strlen(name));
 }
 
 int moy_removed_removable(const char *name) {
     return removable_n(name, strlen(name));
+}
+
+int moy_removed_recorded(const char *name) {
+    const char *line;
+    return line_of(name, strlen(name), &line) != 0u;
 }
 
 // `name` beside the carts folder `root` (moy_store_base._sibling_path).
@@ -98,7 +121,8 @@ int moy_removed_load(const char *root, moy_buf_t *out) {
             e--;
         }
         size_t k = (size_t)(e - s);
-        if (k && removable_n(s, k) && !holds(o, on, s, k)) {
+        int addon = k == sizeof MOY_REMOVED_ADDON - 1u && memcmp(s, MOY_REMOVED_ADDON, k) == 0;
+        if (k && (addon || removable_n(s, k)) && !holds(o, on, s, k)) {
             memcpy(o + on, s, k);
             on += k;
             o[on++] = '\n';
@@ -136,9 +160,10 @@ static int save(const char *root, const char *text, size_t n) {
     return moy_fs_publish(path, text, n);
 }
 
-int moy_removed_note(const char *root, const char *folder) {
-    size_t fn = strlen(folder);
-    if (!removable_n(folder, fn)) {
+int moy_removed_note(const char *root, const char *name) {
+    const char *folder;
+    size_t fn = line_of(name, strlen(name), &folder);
+    if (!fn) {
         return MOY_FS_NONE;
     }
     moy_buf_t had;
@@ -165,8 +190,9 @@ int moy_removed_note(const char *root, const char *folder) {
     return rc;
 }
 
-int moy_removed_drop(const char *root, const char *folder) {
-    size_t fn = strlen(folder);
+int moy_removed_drop(const char *root, const char *name) {
+    const char *folder;
+    size_t fn = line_of(name, strlen(name), &folder);
     moy_buf_t had;
     int rc = moy_removed_load(root, &had);
     if (rc != 0) {

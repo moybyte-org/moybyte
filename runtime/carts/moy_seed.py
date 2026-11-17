@@ -8,8 +8,9 @@
 #   sweep_store             the store's format stamp (STORE_FORMAT) and its one door
 #   stamp_board             the board stamp, and the rows a foreign one drops
 #   is_core                 CORE, the official carts a console never removes; removable
-#   note_removed            a removed built-in's record, which the seed honours
+#   note_removed            a removed built-in's record, which the seed honours; the browser console's line
 #   keep_record             installed.json held to the cart folders
+#   bring_addon             the browser console the internal store holds, moved to a card's store
 #   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
@@ -687,9 +688,18 @@ def stamp_board(root, me):
 # nothing was removed, so a store from before it reads as it did and takes no
 # format step; a firmware that predates it seeds the cart back, which loses
 # nothing.
+#
+# THE BROWSER CONSOLE is one line of the same record, ADDON_LINE: its add-on
+# is a folder per page (ADDON_PREFIX and the page's 12 hex, moy_page.h's
+# MOY_PAGE_CART), and removing any of them -- Get Carts' Remove, the shelf's
+# delete, `pkg remove`, a page's delete -- records the console, so the board
+# never fetches it again (runtime/carts/web_addon.py's AddonStep); installing
+# one drops the line. `recorded` is what a removal writes a line for.
 CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
         "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
 REMOVED_NAME = "system/removed"
+ADDON_LINE = "web_console"
+ADDON_PREFIX = "web_console_"
 
 
 def _cart_id(name):
@@ -708,6 +718,23 @@ def removable(name):
     return cid.startswith(BUILTIN_NS + ".") and cid not in CORE
 
 
+def is_addon(name):
+    """Whether `name` (an id or a folder) is a browser console add-on's."""
+    cid = _cart_id(name)
+    return cid == ADDON_LINE or (cid.startswith(ADDON_PREFIX) and len(cid) > len(ADDON_PREFIX))
+
+
+def recorded(name):
+    """Whether a removal of `name` (an id or a folder) is recorded: an
+    optional built-in, or a browser console add-on."""
+    return removable(name) or is_addon(name)
+
+
+def addon_removed(root=CARTS_DIR):
+    """Whether the browser console was removed from the store at `root`."""
+    return ADDON_LINE in load_removed(root)
+
+
 def load_removed(root=CARTS_DIR):
     """The folders of the built-ins removed from the store at `root`."""
     return _store.removed_load(root).split("\n")[:-1]
@@ -715,12 +742,14 @@ def load_removed(root=CARTS_DIR):
 
 def note_removed(root, folder):
     """Record that the built-in `folder` was removed: the seed writes it no
-    more. A core cart, or a folder outside the built-ins, records nothing."""
+    more; a browser console add-on's records ADDON_LINE. A core cart, or any
+    other folder, records nothing."""
     return _store.removed_note(root, folder)
 
 
 def unremove(root, folders):
-    """The built-ins `folders` taken off the removal record: those it held."""
+    """The built-ins `folders` taken off the removal record (an add-on's
+    folder takes ADDON_LINE off): those it held."""
     return [f for f in folders if _store.removed_drop(root, f)]
 
 
@@ -750,6 +779,60 @@ def put_back(root, seed, titles):
         unremove(root, [cart_folder(t, BUILTIN_NS) for t in back])
         seed_any(entries, root, {})
     return back
+
+
+# THE BROWSER CONSOLE ON A CARD. The website's install writes a board's
+# internal store with the add-on that fits its image in it (tools/
+# store_image.py) and nothing else; a board whose carts live on a card seeds
+# the card, so its first boot on the card moves the add-on there: copied
+# into the card's carts folder (unless that holds it already) under a name
+# no scan reads, renamed into place, then taken off the internal store. Every
+# later boot pays one lookup on the internal flash.
+_PART = ".part"
+_COPY_CHUNK = 16384
+
+
+def _page_want():
+    try:
+        import moy_web
+        return moy_web.page_want()
+    except (ImportError, AttributeError):
+        return None
+
+
+def _copy_folder(src, dst):
+    import os
+    os.mkdir(dst)
+    for name in os.listdir(src):
+        with open(src + "/" + name, "rb") as f, open(dst + "/" + name, "wb") as g:
+            while True:
+                b = f.read(_COPY_CHUNK)
+                if not b:
+                    break
+                g.write(b)
+
+
+def bring_addon(src, root, want=None):
+    """The add-on for the page `want` (64 hex; None for the one this image
+    names) moved from the carts folder `src` (the internal store) to `root`
+    (the card's): True when there was one to move."""
+    if want is None:
+        want = _page_want()
+    if not want or src == root:
+        return False
+    folder = ADDON_PREFIX + want[:12] + CART_EXT
+    have = cart_path(src, folder)
+    if not _exists(have):
+        return False
+    dest = cart_path(root, folder)
+    if not _exists(dest):
+        import os
+        part = dest + _PART
+        _rmtree(part)
+        _copy_folder(have, part)
+        os.rename(part, dest)
+    _rmtree(have)
+    return True
 
 
 def keep_record(root, folders):

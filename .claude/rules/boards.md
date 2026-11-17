@@ -418,7 +418,10 @@ stages 1–6 all absent. Its README is the authority; what bites:
   board is its store's one writer). Its README says which carts each Zero
   carries and how a cable flash, provisioning and an update bring the rest.
 - With no browser console add-on in its store a Zero fetches the one that
-  fits from its release (`zero_host.make_addon`, `tend_addon`). The cable
+  fits from its release (`zero_host.make_addon`, `tend_addon`), unless its
+  owner removed it (`system/removed`'s console line): its root then says so
+  and links `/?console=install`, which drops the record and fetches it
+  (`way_back`, `moy_page_say`), the page being a Zero's only face. The cable
   install (`tools/board_flash.py`) gives each `mpremote` call a deadline,
   because a wedged USB-Serial/JTAG never answers an open.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
@@ -446,4 +449,5 @@ stages 1–6 all absent. Its README is the authority; what bites:
   others: one made mid-session splits the free heap for good. One factory
   slot and no OTA (owner, 2026-11-17): a new image goes on by cable, and the
   flash installs the browser console add-on that fits it into the store
-  (`[flash] addon`, `tools/board_flash.py`). Its README is the authority.
+  (`[flash] addon`, `tools/board_flash.py`); the website's card offers the
+  install and the app image as its update. Its README is the authority.

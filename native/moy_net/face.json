@@ -70,6 +70,8 @@
       {"py": "page_at(path)", "c": "moy_page_at", "when": "SERVE"},
       {"py": "page_state()", "c": "moy_page_state", "when": "SERVE"},
       {"py": "page_why()", "c": "moy_page_why", "when": "SERVE"},
+      {"py": "page_say(why, offer)", "c": "moy_page_say", "when": "SERVE"},
+      {"py": "page_asked()", "c": "moy_page_asked", "when": "SERVE"},
       {"py": "wc_on(port, carts, files, kinds, system, defer, ip, apps=None)", "hand": true},
       {"py": "wc_off(why=None)", "c": "moy_wc_off", "null": ["why"], "when": "SERVE"},
       {"py": "wc_poll()", "c": "moy_wc_poll", "ret": "bool", "when": "SERVE"},

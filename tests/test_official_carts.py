@@ -340,6 +340,44 @@ def test_a_page_s_delete_over_the_sync_wire_is_the_console_s_removal(tmp_path):
     assert (applied, errors) == (1, []) and moy_carts.load_removed(root) == []
 
 
+def _addon(root, digest):
+    folder = "web_console_%s.moy" % digest[:12]
+    os.makedirs(root + "/" + folder)
+    with open(root + "/" + folder + "/manifest.json", "w") as f:
+        json.dump({"format": "moy-1", "title": "Browser console", "runtime": "web",
+                   "main": "moybyte_web.pack", "moybyte": {"type": "web", "fits": digest}}, f)
+    return folder
+
+
+def test_removing_the_browser_console_is_one_line_and_an_install_drops_it(tmp_path):
+    """Every removal of a browser console add-on -- the shelf's and Get
+    Carts' (pkg.removed), `pkg remove` of one the board installed itself, a
+    page's delete over the sync wire -- records the console once
+    (moy_seed.ADDON_LINE), whichever page's folder it was, so no board fetches
+    it again (web_addon.AddonStep); an install of one drops the line."""
+    from runtime.moy_sync import apply_ops
+    root, _seed, _shelf = _seeded(tmp_path)
+    inst = OwnInst(root)
+    a = _addon(root, "a" * 64)
+    _drain(pkg.removed(inst, a))
+    assert not os.path.exists(root + "/" + a)
+    assert moy_carts.load_removed(root) == [moy_carts.ADDON_LINE]
+    assert moy_carts.addon_removed(root)
+    _drain(pkg.landed(inst, root + "/" + _addon(root, "b" * 64), None))
+    assert moy_carts.load_removed(root) == []
+    out, err = [], []
+    p = pkg.Pkg(inst, out.append, err.append)
+    assert _done(p.remove(["web_console_" + "b" * 12])) == 0, err
+    assert moy_carts.load_removed(root) == [moy_carts.ADDON_LINE]
+    assert moy_carts.unremove(root, [moy_carts.ADDON_LINE]) == [moy_carts.ADDON_LINE]
+    c = _addon(root, "c" * 64)
+    applied, errors, _ = apply_ops(root, [{"p": c, "dc": 1}])
+    assert (applied, errors) == (1, []) and not os.path.exists(root + "/" + c)
+    assert moy_carts.load_removed(root) == [moy_carts.ADDON_LINE]
+    applied, errors, _ = apply_ops(root, [{"p": c + "/manifest.json", "t": "{}"}])
+    assert (applied, errors) == (1, []) and moy_carts.load_removed(root) == []
+
+
 def _done(g):
     try:
         while True:

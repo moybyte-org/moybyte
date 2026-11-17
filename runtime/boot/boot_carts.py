@@ -94,7 +94,8 @@ class BootCarts:
                 pass                    # a build with no moycore staged
             if root is None:
                 root = store.CARTS_DIR
-            carts = self._try_store(store, seed, root, session, media)
+            bring = fallback_root if fallback_root != root else None
+            carts = self._try_store(store, seed, root, session, media, bring)
             if carts:
                 return carts, root
             if fallback_root is not None and fallback_root != root:
@@ -107,13 +108,21 @@ class BootCarts:
         finally:
             sram_census("carts")
 
-    def _try_store(self, store, seed, root, session, media):
+    def _try_store(self, store, seed, root, session, media, bring=None):
         """One store attempt: scan it, seed it, say what happened. [] on any
         failure OR an empty scan -- the caller decides whether another store is
-        left to try."""
+        left to try. `bring` is the internal store's carts folder where `root`
+        is a card's: the browser console add-on the website's install left
+        there moves to the card first (moy_seed.bring_addon)."""
         try:
             def _scan_and_seed():
                 store.ensure_dirs(root)
+                if bring is not None and hasattr(store, "bring_addon"):
+                    try:
+                        if store.bring_addon(bring, root):
+                            self.say("moved the browser console to %s" % media)
+                    except Exception as exc:  # noqa: BLE001 -- it stays where it was
+                        self.say("browser console not moved: %s" % exc)
                 store.sweep_store(root, seed)
                 shelf = store.catalogue(root)  # the shelf; a cart's payloads at open
                 sram_census("scanned")

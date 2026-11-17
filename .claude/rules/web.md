@@ -27,8 +27,17 @@ nor those docs will warn you about:
   authority). Every board's build packs the bundle (`moybyte_web.pack`,
   `tools/gen_web_blob.py --pack`) and bakes into the image only the sha256 of
   the pack's body; the release publishes the cart beside the payload
-  (`.claude/rules/ota.md`), Get Carts installs it, and after an update
-  `runtime/carts/web_addon.py` installs the one that fits the new image. Any
+  (`.claude/rules/ota.md`). EVERY BOARD HAS IT BY DEFAULT (owner,
+  2026-11-17): the website's install writes it into the board's internal
+  store (`tools/store_image.py`; a board on a card moves it there on its
+  first boot, `moy_seed.bring_addon`), and `runtime/carts/web_addon.py`'s
+  step installs the one that fits after an update and wherever there is
+  none -- once a network is saved, never during a game, backing off on
+  failure -- unless its owner removed it: any removal of it (Get Carts, the
+  shelf, `pkg remove`, a page's delete) records the console as one line of
+  `system/removed` (`moy_seed.ADDON_LINE`, `native/moy_store/moy_removed.c`),
+  which installing one from Get Carts drops. A Zero honours the record too,
+  and its root links the way back (`device/zero_host.py`'s `way_back`). Any
   other pack is "needs its page updated", none is "install it from Get
   Carts", so "which console is this board serving?" is still answered by its
   firmware version alone. Changing a web build means

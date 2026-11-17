@@ -3,7 +3,7 @@
 #   _hold                    a minimised game held; _unhold gives it back
 #   Proc                     a running game or app beside the front one
 #   Procs                    the running set (`ws.procs`)
-#   -- the running set       handheld, _front_live, _detachable, running, find
+#   -- the running set       handheld, playing, _front_live, _detachable, running, find
 #   -- launching             launch, refuse, title_of
 #   -- runs                  _fresh, detach, minimise, switch, promote, close
 #   -- the frame             frame, _step, _front_state, _pace
@@ -252,6 +252,14 @@ class Procs:
     def handheld(self):
         """The WM has no desk: the running set keeps no windows."""
         return not getattr(self.ws.wm, "has_desk", False)
+
+    def playing(self):
+        """A game runs: the front run is a live game, or one waits in the
+        running set (an app or a tool is no game)."""
+        for p in self.list:
+            if not p.app:
+                return True
+        return self._front_live() and not self.ws.run.player.is_app()
 
     def _front_live(self):
         """The front run is a live game in a desk window, or on a

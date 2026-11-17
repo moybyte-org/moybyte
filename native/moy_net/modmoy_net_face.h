@@ -101,6 +101,19 @@ static mp_obj_t face_moy_net_page_why(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_page_why_obj, face_moy_net_page_why);
 
+static mp_obj_t face_moy_net_page_say(mp_obj_t a0, mp_obj_t a1) {
+    const char *why = mp_obj_str_get_str(a0);
+    int offer = (int)mp_obj_get_int(a1);
+    moy_page_say(why, offer);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(face_moy_net_page_say_obj, face_moy_net_page_say);
+
+static mp_obj_t face_moy_net_page_asked(void) {
+    return mp_obj_new_int_from_uint(moy_page_asked());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(face_moy_net_page_asked_obj, face_moy_net_page_asked);
+
 static mp_obj_t face_moy_net_wc_off(size_t n_args, const mp_obj_t *argv) {
     const char *why = n_args > 0 ? argv[0] == mp_const_none ? NULL : mp_obj_str_get_str(argv[0]) : NULL;
     moy_wc_off(why);
@@ -206,6 +219,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(face_moy_net_http_close_obj, face_moy_net_http_
     { MP_ROM_QSTR(MP_QSTR_page_at), MP_ROM_PTR(&face_moy_net_page_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_page_state), MP_ROM_PTR(&face_moy_net_page_state_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_page_why), MP_ROM_PTR(&face_moy_net_page_why_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_page_say), MP_ROM_PTR(&face_moy_net_page_say_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_page_asked), MP_ROM_PTR(&face_moy_net_page_asked_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_wc_off), MP_ROM_PTR(&face_moy_net_wc_off_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_wc_poll), MP_ROM_PTR(&face_moy_net_wc_poll_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_dns_port), MP_ROM_PTR(&face_moy_net_dns_port_obj) }, \

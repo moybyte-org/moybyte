@@ -313,13 +313,14 @@ static int forget_consent(moy_sh_t *s, const char *root, const char *aid) {
     return code;
 }
 
-// The folder of the optional built-in `ident` names (its id or its folder)
-// where the store holds it: 0, or MOY_FS_NONE (pkg.py's _official_here).
+// The folder of the optional built-in or browser console add-on `ident`
+// names (its id or its folder) where the store holds it: 0, or MOY_FS_NONE
+// (pkg.py's _official_here).
 static int official_here(const char *carts, const char *ident, char *folder, size_t cap) {
     size_t n = strlen(ident);
     int ext = n >= 4 && strcmp(ident + n - 4, ".moy") == 0;
     int w = snprintf(folder, cap, "%s%s", ident, ext ? "" : ".moy");
-    if (w <= 0 || (size_t)w >= cap || !moy_removed_removable(folder)) {
+    if (w <= 0 || (size_t)w >= cap || !moy_removed_recorded(folder)) {
         return MOY_FS_NONE;
     }
     char cart[MOY_SH_STORE_PATH];
@@ -356,7 +357,7 @@ static int pkg_remove(moy_sh_t *s, const char *root, int argc, char **argv) {
         if (n > 0 && (size_t)n < sizeof cart) {
             moy_cat_entry(cart, app_id_of, NULL, &aid);
         }
-        if (rc == 0 && moy_removed_removable(folder)) {
+        if (rc == 0 && moy_removed_recorded(folder)) {
             rc = moy_removed_note(carts, folder);
             if (rc == MOY_FS_NONE) {
                 rc = 0;

@@ -23,6 +23,8 @@ typedef struct {
     char root[MOY_WEB_PATH_MAX];        // the carts root the add-on is looked for in
     char path[MOY_WEB_PATH_MAX + 64];   // the pack that fits this image, under it
     uint8_t name[32];                   // a test's digest (moy_page_name)
+    char say[160];                      // ABSENT's sentence (moy_page_say), "" for the default
+    uint8_t offer;                      // the root links MOY_PAGE_ASK
     moy_web_pack_head_t head;           // the pack's head, while READY
 } page_t;
 
@@ -30,6 +32,7 @@ static page_t *s_p;
 static int s_read;                  // the head below is the file's
 static int s_state = MOY_PAGE_NONE;
 static int s_named = -1;            // -1: the image's own, else the tests'
+static unsigned s_asked;            // the root's MOY_PAGE_ASK, counted
 
 static page_t *page(void) {
     if (s_p == NULL) {
@@ -69,6 +72,25 @@ void moy_page_at(const char *root) {
         snprintf(s_p->root, sizeof(s_p->root), "%s", root != NULL ? root : "");
     }
     s_read = 0;
+}
+
+void moy_page_say(const char *why, int offer) {
+    if (page() != NULL) {
+        snprintf(s_p->say, sizeof(s_p->say), "%s", why != NULL ? why : "");
+        s_p->offer = offer != 0;
+    }
+}
+
+int moy_page_offers(void) {
+    return s_p != NULL && s_p->offer;
+}
+
+void moy_page_ask(void) {
+    s_asked++;
+}
+
+unsigned moy_page_asked(void) {
+    return s_asked;
 }
 
 const char *moy_page_path(void) {
@@ -190,7 +212,7 @@ const char *moy_page_why(void) {
     case MOY_PAGE_STALE:
         return MOY_PAGE_STALE_WHY;
     case MOY_PAGE_ABSENT:
-        return MOY_PAGE_ABSENT_WHY;
+        return s_p != NULL && s_p->say[0] ? s_p->say : MOY_PAGE_ABSENT_WHY;
     default:
         return "this firmware names no browser console";
     }

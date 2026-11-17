@@ -111,9 +111,9 @@ jobs:
           - board: guition_p4
             dir: firmware/guition_jc8012p4a1c
             make_target: firmware-build-guition-p4
-          # The C3 Zero: the Zero on an ESP32-C3, one app slot and no OTA. Its
-          # image is this run's artifact for a cable flash; it has no OTA
-          # manifest (publish_firmware_release.NO_OTA) and no flasher card.
+          # The C3 Zero: the Zero on an ESP32-C3, one app slot and no OTA. It
+          # has no OTA manifest (publish_firmware_release.NO_OTA); its flasher
+          # card offers the install and the app image, its only update.
           - board: c3_zero
             dir: firmware/esp32c3_zero
             make_target: firmware-build-c3-zero
@@ -352,6 +352,14 @@ jobs:
       - name: Build the C6 co-processor image
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
         run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh
+
+      # The website's install of this board (tools/store_image.py): the
+      # merged image, then the internal store holding the browser console
+      # add-on that fits it, as `<stem>_install.bin` beside the image, which
+      # the collect below carries. `make setup`'s venv has littlefs-python.
+      - name: The website's install image
+        if: steps.gate.outputs.run == 'true'
+        run: .venv/bin/python tools/store_image.py ${{ matrix.dir }}
 
       - name: Collect images
         if: steps.gate.outputs.run == 'true'

@@ -446,7 +446,8 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
         }
         if (o->root == MOY_SYNC_CARTS) {
             // A built-in goes as the console's own removal does: a core cart
-            // stays, an optional one is recorded first (moy_removed.h).
+            // stays, an optional one and the browser console add-on are
+            // recorded first (moy_removed.h).
             if (moy_removed_core(o->rel)) {
                 why(out, "a core cart");
                 return 1;
@@ -601,13 +602,13 @@ static int shelf_note(const moy_sync_store_t *s, const char *name, size_t n) {
     return 1;
 }
 
-// A cart folder the op began: an optional built-in's removal record dropped,
-// as an install drops it (moy_removed.h).
+// A cart folder the op began: an optional built-in's or the browser console's
+// removal record dropped, as an install drops it (moy_removed.h).
 static void landed(op_t *o) {
     size_t n = o->seg_n[0];
     memcpy(o->a, o->rel + o->seg[0], n);
     o->a[n] = '\0';
-    if (moy_removed_removable(o->a)) {
+    if (moy_removed_recorded(o->a)) {
         moy_removed_drop(o->dir, o->a);
     }
 }

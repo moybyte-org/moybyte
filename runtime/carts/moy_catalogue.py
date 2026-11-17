@@ -18,6 +18,10 @@ thing the store holds across them, so its rows are what take handles.
   ensure_dirs(root)                make the root and its parent
   sweep_store(root)                the once-per-store sweep of retired seeds,
                                    which a boot runs before its catalogue
+  bring_addon(src, root)           the browser console add-on the website's
+                                   install wrote into the internal store
+                                   (`src`) moved to a card's store, which a
+                                   boot on a card runs before its catalogue
   seed(seed, root, shelf, progress) -> [entry]
                                    seed the built-in roster (packed or listed)
                                    against `shelf`, the root's catalogue: the
@@ -93,6 +97,7 @@ from moy_store_base import BUILTIN_NS, cart_folder, seeded
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs
 sweep_store = moy_carts.sweep_store
+bring_addon = moy_carts.bring_addon
 embedded_floor = moy_carts.embedded_floor
 
 _index = Index()

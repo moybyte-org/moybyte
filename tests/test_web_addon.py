@@ -148,36 +148,141 @@ def test_an_update_installs_the_add_on_that_fits_and_takes_the_old_one_away(
     assert not step.start(), "an add-on that fits wants nothing"
 
 
-def test_a_console_with_no_add_on_installs_none_by_itself(tmp_path, monkeypatch, board):
-    """The add-on is optional: the step replaces one, never brings the first."""
-    pages, routes = _release(tmp_path, b"new")
+class Console(Inst):
+    """A console's server: a network saved or not, a game playing or not."""
+
+    def __init__(self, root, net, configured=True):
+        Inst.__init__(self, root, net)
+        self.saved = configured
+        self.game = False
+
+    def configured(self):
+        return self.saved
+
+    def playing(self):
+        return self.game
+
+
+def _absent(tmp_path, monkeypatch, *tags):
+    """A store with no add-on, its image naming the last of `tags`' pages."""
+    pages, routes = _release(tmp_path, *tags)
     root = str(tmp_path / "carts")
     os.makedirs(root)
-    _names(pages[0][1], monkeypatch)
+    _names(pages[-1][1], monkeypatch)
     nb.page_at(root)
+    assert nb.page_state() == web_addon.STATE_ABSENT
+    return pages, routes, root
+
+
+def _run(step):
+    n = 0
+    while step.tick(1000):
+        n += 1
+        assert n < 1000
+
+
+def test_every_board_with_no_add_on_installs_the_one_that_fits(tmp_path, monkeypatch, board):
+    """Every board's step has `absent` (a console's since 2026-11-17, a
+    Zero's whose page is its whole use): a store with none -- a wiped one, a
+    console that never had it -- gets the one its image fits from its
+    release."""
+    pages, routes, root = _absent(tmp_path, monkeypatch, b"old", b"new")
+    inst = Console(root, MemNet(routes))
+    step = web_addon.AddonStep(inst, BASE + "carts-tdeck.json", absent=True)
+    assert step.start()
+    _run(step)
+    assert step.error is None and step.due is None
+    assert os.listdir(root) == [web_pack.cart_id(pages[1][1]) + ".moy"]
+    assert nb.page_state() == 3 and inst.held == 0
+    assert not step.start(), "an add-on that fits wants nothing"
+
+
+def test_a_step_without_absent_brings_no_first_add_on(tmp_path, monkeypatch, board):
+    _pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
     step = web_addon.AddonStep(Inst(root, MemNet(routes)), BASE + "carts-tdeck.json")
     assert not step.start() and os.listdir(root) == []
 
 
-def test_a_zero_with_no_add_on_installs_the_one_that_fits(tmp_path, monkeypatch, board):
-    """A Zero's page is its whole use (`absent`): a store with none -- the
-    website's flasher writes the app image alone -- gets the one its image
-    fits from its release."""
-    pages, routes = _release(tmp_path, b"old", b"new")
-    root = str(tmp_path / "carts")
-    os.makedirs(root)
-    _names(pages[1][1], monkeypatch)
-    nb.page_at(root)
-    assert nb.page_state() == web_addon.STATE_ABSENT
-    inst = Inst(root, MemNet(routes))
+def test_a_removed_console_is_never_fetched_and_its_install_brings_it_back(
+        tmp_path, monkeypatch, board):
+    """A removal records the console (moy_seed.ADDON_LINE): the step never
+    fetches it, whichever page's folder was removed, until an install drops
+    the line (pkg.landed) or a Zero's page asks for it again (`restore`)."""
+    pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
+    assert moy_carts.note_removed(root, web_pack.cart_id("ab" * 32) + ".moy")
+    assert moy_carts.load_removed(root) == [moy_carts.ADDON_LINE]
+    net = MemNet(routes)
+    step = web_addon.AddonStep(Console(root, net), BASE + "carts-tdeck.json", absent=True)
+    assert step.removed() and not step.wanted()
+    assert not step.start() and not step.start(retry=True)
+    assert net.opened == [] and os.listdir(root) == []
+    assert step.restore()
+    _run(step)
+    assert step.error is None and moy_carts.load_removed(root) == []
+    assert os.listdir(root) == [web_pack.cart_id(pages[0][1]) + ".moy"]
+
+
+def test_a_console_with_no_network_saved_does_nothing_at_all(tmp_path, monkeypatch, board):
+    _pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
+    net = MemNet(routes)
+    inst = Console(root, net, configured=False)
     step = web_addon.AddonStep(inst, BASE + "carts-tdeck.json", absent=True)
-    assert step.start()
-    while step.tick(1000):
-        pass
-    assert step.error is None
-    assert os.listdir(root) == [web_pack.cart_id(pages[1][1]) + ".moy"]
-    assert nb.page_state() == 3 and inst.held == 0
-    assert not step.start(), "an add-on that fits wants nothing"
+    assert not step.start() and not step.nudge()
+    assert inst.held == 0 and step.error is None and step.due is None
+    assert net.opened == []
+    inst.saved = True                  # a network joined: Settings nudges it
+    assert step.nudge()
+    _run(step)
+    assert step.error is None and len(os.listdir(root)) == 1
+
+
+def test_a_game_puts_the_step_off_and_stops_a_running_one(tmp_path, monkeypatch, board):
+    """Never during play: a start while a game runs is put off (`due`, which
+    the console's frame polls), and a game that starts stops a running step,
+    the shelf as it was and the radio let go, to start again after it."""
+    _pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
+    clock = [0]
+    monkeypatch.setattr(web_addon, "_now", lambda: clock[0])
+    inst = Console(root, MemNet(routes))
+    step = web_addon.AddonStep(inst, BASE + "carts-tdeck.json", absent=True)
+    inst.game = True
+    assert not step.start() and step.due is not None and inst.held == 0
+    clock[0] += web_addon.RETRY_MS - 1
+    assert not step.poll(), "not before its wait is over"
+    inst.game = False
+    clock[0] += 1
+    assert step.poll() and step.due is None and inst.held == 1
+    inst.game = True
+    assert not step.tick(1000)
+    assert step.phase is None and inst.held == 0 and os.listdir(root) == []
+    assert step.due is not None and step.error is None
+    inst.game = False
+    clock[0] += web_addon.RETRY_MS
+    assert step.poll()
+    _run(step)
+    assert step.error is None and len(os.listdir(root)) == 1
+
+
+def test_a_failure_backs_off_doubling_to_its_ceiling(tmp_path, monkeypatch, board):
+    _pages, _routes, root = _absent(tmp_path, monkeypatch, b"new")
+    clock = [0]
+    monkeypatch.setattr(web_addon, "_now", lambda: clock[0])
+    step = web_addon.AddonStep(Console(root, MemNet({})), BASE + "carts-tdeck.json",
+                               absent=True)
+    waits = []
+    for _ in range(9):
+        assert step.start(retry=True)
+        _run(step)
+        assert step.error and step.due is not None
+        waits.append(step._due_ms)
+        clock[0] += step._due_ms - 1
+        assert not step.poll(), "a failure waits its back-off out"
+        clock[0] += 1
+    assert waits[:3] == [web_addon.RETRY_MS, 2 * web_addon.RETRY_MS, 4 * web_addon.RETRY_MS]
+    assert waits[-1] == web_addon.RETRY_MAX_MS
+    step.nudge()                       # a join forgets the back-off
+    assert step.phase is not None
+    step.stop()
 
 
 def test_a_release_with_no_add_on_for_the_image_is_not_asked_again_by_the_loop(
@@ -255,3 +360,35 @@ def test_opening_the_add_on_never_reads_its_pack(tmp_path):
     assert cart is not None and cart["src"] == ""
     assert [e["path"] for e in moy_carts.catalogue(str(tmp_path / "carts"))] \
         == [str(folder)]
+
+
+def test_a_zero_s_root_undoes_a_removal_when_its_link_is_followed(
+        tmp_path, monkeypatch, board):
+    """A Zero has no face but its page, so where its owner removed the
+    console the root says so and links the way back (device/zero_host.
+    way_back over moy_page_say); the link followed restores the record and
+    the next turn installs the console. Unfollowed, a removal holds."""
+    sys.path.insert(0, str(ROOT / "device"))
+    try:
+        import zero_host
+    finally:
+        sys.path.pop(0)
+    monkeypatch.setattr(zero_host, "_PAGE", [None, nb.page_asked()])
+    pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
+    moy_carts.note_removed(root, web_pack.cart_id(pages[0][1]) + ".moy")
+    net = MemNet(routes)
+    step = web_addon.AddonStep(Inst(root, net), BASE + "carts-tdeck.json", absent=True)
+    try:
+        assert not zero_host.tend_addon(step, None)
+        assert nb.page_why() == zero_host.PAGE_REMOVED and net.opened == []
+        assert not zero_host.tend_addon(step, None), "a removal holds"
+        nb.page_at(root)
+        nb.page_state()
+        nb._lib().moy_page_ask()               # the root's link, followed
+        assert zero_host.tend_addon(step, None)
+        while zero_host.tend_addon(step, None):
+            pass
+        assert step.error is None and moy_carts.load_removed(root) == []
+        assert nb.page_state() == 3
+    finally:
+        nb.page_say("", 0)

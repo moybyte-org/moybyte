@@ -142,8 +142,9 @@ class WebConsole:
         return why[:1].upper() + why[1:]
 
     def page_stale(self):
-        """True while an installed add-on fits another firmware and nothing
-        is updating it: the screen offers Update."""
+        """True while the page wants an add-on (the one installed fits
+        another firmware, or none is and the console was not removed) and
+        nothing is installing it: the screen offers Update."""
         addon = getattr(self.ws, "addon", None)
         return addon is not None and not addon.busy() and addon.wanted()
 

@@ -4,7 +4,7 @@
 #   recover_installs            an install a reset cut short, finished before the seed
 #   connect                     join the first saved network that answers
 #   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
-#   make_addon                  the release's add-on (and the XIAO's official carts) brought to the store; tend_addon runs it
+#   make_addon                  the release's add-on (and the XIAO's official carts) brought to the store; tend_addon runs it, way_back undoes a removal
 #   make_official               /official: the page's Get Carts, this board installing
 #   host_class                  the store host: the boards' WebHost
 #   serve                       bring the store host up and pump it forever
@@ -31,9 +31,11 @@ served back -- on the next visit. That is the whole product: a console in your
 pocket whose screen is whatever browser is nearby.
 
 The bundle is the browser console add-on cart (native/moy_net/moy_page.h),
-installed by a cable flash or provisioning and served only when it is the
-page this image names; where there is none, or after an update, `make_addon`'s
-step installs the one that fits from this board's release.
+in the store the website's flasher writes, installed by a cable flash or
+provisioning, and served only when it is the page this image names; after an
+update, or where there is none and its owner did not remove it, `make_addon`'s
+step installs the one that fits from this board's release. A removal holds
+(moy_seed.ADDON_LINE), and the root then links the way back (`tend_addon`).
 
 `POST /gpio` is the second half of the same idea: the cart in the browser
 calls `pin_write`, the page batches it here, and this board -- which has the
@@ -854,8 +856,9 @@ def make_addon(ota):
     """The step that brings this image's release to the store once the
     image has confirmed itself: the browser console add-on that fits it (the
     page this board exists to serve), installed over one that does not fit
-    and where there is none (web_addon.AddonStep's `absent`: a board the
-    website's flasher wrote, a wiped store); and on a board with OTA slots
+    and where there is none unless its owner removed it (web_addon.
+    AddonStep's `absent`: a wiped store, a cable flash whose add-on step
+    failed); and on a board with OTA slots
     (the XIAO) the official carts the store holds that its image does not
     carry, which the page installed (`carts`; the image's own are current by
     its seed). The C3, with no OTA slot, takes a new image by cable, and the
@@ -900,20 +903,58 @@ def make_official(ota, addon=None):
 ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
 
 
+# What a Zero's root answers while it has no browser console (moy_page_say):
+# the board fetches it by itself, or its owner removed it, and the root links
+# the way back. A Zero has no other face, so a removal there is undone from
+# the page's own address: the link (moy_page.h's MOY_PAGE_ASK) is counted,
+# and the next turn drops the record and fetches the console.
+PAGE_FETCHING = ("This board is fetching its browser console from its release. "
+                 "Reload this page in a minute.")
+PAGE_REMOVED = "The browser console was removed from this board."
+_PAGE = [None, 0]                       # the removal the root last said, the asks seen
+
+
 def tend_addon(addon, official):
     """The serving loop's turn of `addon` (make_addon's step), once the
     image has confirmed itself: a slice of a running step, or a start where
     the store wants one and `official` (make_official's) is idle. The page is
-    this board's whole use, so an add-on that does not fit, or is not there,
-    is asked for again while it serves (web_addon.RETRY_MS apart). True
-    while the step runs."""
+    this board's whole use, so an add-on that does not fit, or is not there
+    and was not removed, is asked for again while it serves (the step's
+    back-off apart), and a removed one when the root's link asks for it
+    (`way_back`). True while the step runs."""
     if addon is None:
         return False
     if addon.phase is not None:
         return addon.tick(ADDON_SLICE_MS)
     if official is not None and official.busy():
         return False
+    way_back(addon)
     return addon.start(retry=True)
+
+
+def way_back(addon):
+    """While the page is absent: what the root says (PAGE_FETCHING, or
+    PAGE_REMOVED with the link), and the link followed restores the
+    console (`AddonStep.restore`)."""
+    try:
+        import moy_net
+        import web_addon
+    except ImportError:
+        return
+    say = getattr(moy_net, "page_say", None)
+    if say is None or web_addon.page_state() != web_addon.STATE_ABSENT:
+        return
+    removed = addon.removed()
+    if removed != _PAGE[0]:
+        _PAGE[0] = removed
+        say(PAGE_REMOVED if removed else PAGE_FETCHING, 1 if removed else 0)
+    asked = moy_net.page_asked()
+    if asked != _PAGE[1]:
+        _PAGE[1] = asked
+        if removed:
+            print("ZERO addon: the page asked for the browser console again")
+            addon.restore()
+            _PAGE[0] = None
 
 
 def serve():

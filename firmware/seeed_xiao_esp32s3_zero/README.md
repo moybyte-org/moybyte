@@ -93,7 +93,7 @@ the app slot, never the table. Run
 `./provision.sh` afterwards to put the credentials and the password back; the
 carts the image carries seed themselves on the next boot, and the cable flash
 (or the script) installs the add-on, which a board with none also fetches
-from its release once it is on a network. A kid's browser-made
+from its release once it is on a network, unless its owner removed it. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
 them back on the next visit — but anything that existed *only* here is.
 
@@ -152,10 +152,13 @@ them back on the next visit — but anything that existed *only* here is.
   saves and config kept. The other system carts are official carts the
   release publishes in `carts-xiao_zero.json`, which the page this board
   serves installs (`/official`); after an update the board brings the ones
-  it holds to the new release (`runtime/carts/web_addon.py`). A board with no
-  add-on (the website's flasher writes the app image alone, or a wiped
-  store) installs the one its image fits from its release once the image
-  confirms itself (`zero_host.make_addon`). The image's headroom is in
+  it holds to the new release (`runtime/carts/web_addon.py`). The website's
+  install writes the store with the add-on in it (`tools/store_image.py`);
+  a board with none (a wiped store) installs the one its image fits from its
+  release once the image confirms itself (`zero_host.make_addon`). A removal
+  of it is recorded (`system/removed`'s console line) and holds; the root
+  then says so and links `/?console=install`, which brings it back
+  (`zero_host.way_back`). The image's headroom is in
   `docs/perf/image.md`.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out

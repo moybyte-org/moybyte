@@ -74,6 +74,7 @@ Outputs land in `dist/tdeck_mainline/`:
 |---|---|---|
 | `moybyte_tdeck.bin` | bootloader + partition table + app, merged | cable flash at **0x0** (the S3's bootloader offset; the P4's is 0x2000) |
 | `moybyte_tdeck_app.bin` | the app partition alone | what an OTA writes into the inactive slot |
+| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC40000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
 
 The merged image leaves `otadata` (0x1D000) erased, so the bootloader falls back
 to `ota_0` — the same effect the fork build got by erasing that region

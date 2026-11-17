@@ -880,6 +880,9 @@ class SettingsLayer(Layer):
                 pass
         if not ok and locked and not pw:
             self._wifi_ask(ssid)
+        addon = getattr(ws, "addon", None)
+        if ok and addon is not None:
+            addon.nudge()       # a console with no browser console fetches it now
         ws.mark_dirty()
         return ok
 

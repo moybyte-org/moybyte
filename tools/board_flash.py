@@ -56,8 +56,9 @@ THE BROWSER CONSOLE ADD-ON. A board that declares `[flash] addon` (the carts
 folder, on a board that speaks a bare REPL: the two Zeros) has the add-on cart
 that fits the image just written installed into its store after the flash,
 over that REPL (`install_addon`), with the add-on folders that fit other
-images taken off. Either Zero also fetches the one that fits from its
-release by itself when it has none, and the XIAO after an update
+images taken off, and a removal of the console its store recorded dropped.
+Either Zero also fetches the one that fits from its release by itself when
+it has none and its owner did not remove it, and the XIAO after an update
 (zero_host.make_addon); the cable install is how a build of this tree, which
 no release publishes, gets its page. The console boards install it through
 their dev channel (`tools/board.py BOARD addon`, which a board pass runs).
@@ -402,9 +403,10 @@ def _answered(fn):
 def install_addon(board_dir, port, reset=True):
     """The add-on that fits the built image into `[flash] addon`, the carts
     folder, over the board's REPL (mpremote's Ctrl-C stops what the board
-    runs), the other add-on folders taken off, the pack's size checked; then
-    with `reset` a reset, which starts the board again. 0, or 1 with what
-    went wrong."""
+    runs), the other add-on folders taken off, the pack's size checked and a
+    removal of the console the store recorded dropped, as an install drops
+    it (moy_seed.ADDON_LINE); then with `reset` a reset, which starts the
+    board again. 0, or 1 with what went wrong."""
     root = board_config.load(board_dir)["flash"]["addon"]
     with tempfile.TemporaryDirectory() as tmp:
         folder = addon_folder(board_dir, tmp)
@@ -432,8 +434,10 @@ def install_addon(board_dir, port, reset=True):
         print("+ the browser console add-on: %s -> %s" % (name, root))
         steps = (("exec", clear),
                  ("cp", "-r", folder, ":%s/" % root),
-                 ("exec", "import os\nassert os.stat(%r)[6] == %d\nprint('MOY' + 'OK')"
-                  % ("%s/%s/moybyte_web.pack" % (root, name), size)))
+                 ("exec", "import os\nassert os.stat(%r)[6] == %d\n"
+                  "import moy_store\nmoy_store.removed_drop(%r, 'web_console')\n"
+                  "print('MOY' + 'OK')"
+                  % ("%s/%s/moybyte_web.pack" % (root, name), size, root)))
         for step in steps:
             r = _mpremote(port, *step, timeout=_copy_s(folder) if step[0] == "cp" else EXEC_S)
             if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):

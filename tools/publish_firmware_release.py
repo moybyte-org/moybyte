@@ -18,10 +18,13 @@ That is deliberate -- the build workflow also runs per board -- and each image
 carries its own provenance beside it:
 
     firmware-latest/
-      tdeck-moybyte_tdeck.bin
+      tdeck-moybyte_tdeck_install.bin  <- the website's install: the image,
+                                          then a store holding the browser
+                                          console (tools/store_image.py)
       tdeck-source.json          <- commit, run, date for THAT image
-      p4-moybyte_p4.bin
+      p4-moybyte_p4_install.bin
       p4-source.json
+      c3_zero-moybyte_c3_zero.bin  <- the C3's update: its app, carts kept
       tdeck-moybyte_tdeck_app.bin  <- the OTA payload (app slot, not 0x0)
       latest-tdeck.json            <- the OTA manifest pointing at it
       moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
@@ -37,9 +40,9 @@ The `<board>-` prefix is how flat release assets keep the per-board layout that
 tools/fetch_ci_firmware.py rebuilds on the way back down; board ids therefore
 must not contain a dash.
 
-Which image each board publishes is NOT decided here: it is read out of
-site/build.py's BOARDS table, the same table the page's flasher writes from, so
-there is one list of "the image we flash" and not two.
+Which images each board publishes is NOT decided here: they are read out of
+site/build.py's BOARDS table (`downloads`), the same table the page's flasher
+writes from, so there is one list of "the image we flash" and not two.
 
     tools/publish_firmware_release.py --artifacts artifacts --channel stable
 
@@ -137,7 +140,8 @@ two can come from different commits — `<board>-source.json` beside each image
 records which. The tag itself is a fixed anchor, not the commit the images were
 built from.
 
-Flash it from the site, or over a cable:
+Flash it from the site, which installs a board fresh (its internal store
+erased, an SD card not touched), or over a cable, which keeps the store:
 
 {cable}
 """
@@ -184,13 +188,23 @@ def cable_block(boards):
     return "```\n" + "\n".join(lines) + "\n```"
 
 
-def boards_table():
-    """site/build.py's BOARDS -- the one list of what we flash per board."""
+def _site():
     path = os.path.join(ROOT, "site", "build.py")
     spec = importlib.util.spec_from_file_location("_moy_site_build", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.BOARDS
+    return mod
+
+
+def boards_table():
+    """site/build.py's BOARDS -- the one list of what we flash per board."""
+    return _site().BOARDS
+
+
+def site_downloads(board):
+    """site/build.py's downloads of `board`: [(kind, file name)], the
+    install (tools/store_image.py, which CI's build writes) first."""
+    return _site().downloads(board)
 
 
 def gh(*args, check=True):
@@ -209,14 +223,16 @@ def stage(boards, artifacts, workdir):
     for board in boards:
         assert "-" not in board["id"], "board ids carry the asset prefix"
         folder = os.path.join(artifacts, "moybyte-firmware-%s" % board["id"])
-        name = next((n for n in board["images"]
-                     if os.path.exists(os.path.join(folder, n))), None)
-        if not name:
+        names = [n for _kind, n in site_downloads(board)
+                 if os.path.exists(os.path.join(folder, n))]
+        if not names:
             print("%-6s not in this run's artifacts -- leaving the release's "
                   "copy alone" % board["id"])
             continue
-        shutil.copyfile(os.path.join(folder, name),
-                        os.path.join(workdir, "%s-%s" % (board["id"], name)))
+        name = names[0]
+        for n in names:
+            shutil.copyfile(os.path.join(folder, n),
+                            os.path.join(workdir, "%s-%s" % (board["id"], n)))
         source = {
             "board": board["id"],
             "image": name,

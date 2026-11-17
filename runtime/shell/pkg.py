@@ -220,10 +220,11 @@ def removed(inst, folder):
     the consent it was installed with forgotten, its keys deleted
     (app_keys.forget), and the shelf re-read
     there; an optional built-in's removal recorded first, so the seed never
-    writes it again (moy_seed.note_removed). Get Carts' Remove, `pkg remove`
-    and the shelf's Delete all step it, through `through`."""
+    writes it again, and the browser console's, so the board never fetches it
+    again (moy_seed.note_removed). Get Carts' Remove, `pkg remove` and the
+    shelf's Delete all step it, through `through`."""
     had = inst.find(folder)
-    if _store.removable(folder):
+    if _store.recorded(folder):
         inst.op(lambda: _store.note_removed(inst.root(), folder))
     yield from _ci.stepped(inst.op, _ci.remove_steps(inst.root(), folder, inst.keep()))
     if had is not None:
@@ -250,13 +251,14 @@ def landed(inst, path, consented):
     """`yield from` it once an install put its cart at `path`, a step a
     frame: the consent the install prompt was answered with (`(app id,
     permissions)`, or None when it asked nothing) recorded, a built-in's
-    removal record dropped (it is the seed's to keep current again), then
-    the shelf re-read there. Get Carts and `pkg install` both step it."""
+    removal record dropped (it is the seed's to keep current again) and so is
+    the browser console's, then the shelf re-read there. Get Carts and `pkg
+    install` both step it."""
     if consented is not None:
         yield
         yield from inst.consent().record_steps(consented[0], consented[1])
     folder = path.rsplit("/", 1)[-1]
-    if _store.removable(folder):
+    if _store.recorded(folder):
         yield
         inst.op(lambda: _store.unremove(inst.root(), [folder]))
     yield
@@ -264,11 +266,12 @@ def landed(inst, path, consented):
 
 
 def _official_here(root, ident):
-    """The folder of the optional built-in `ident` names (its id or its
-    folder) where the store holds it, or None: a seed has no install record,
-    and `pkg remove` takes it as Get Carts does."""
+    """The folder of the optional built-in or browser console add-on `ident`
+    names (its id or its folder) where the store holds it, or None: a seed
+    and an add-on the board installed itself have no install record, and
+    `pkg remove` takes them as Get Carts does."""
     folder = ident if ident.endswith(".moy") else ident + ".moy"
-    if _store.removable(folder) and _exists(_cart_path(root, folder)):
+    if _store.recorded(folder) and _exists(_cart_path(root, folder)):
         return folder
     return None
 

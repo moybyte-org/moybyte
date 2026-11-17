@@ -1016,3 +1016,59 @@ def test_a_compound_perf_field_renders_an_absent_component_as_a_dash():
     assert "ppa=1/-/2/3/0" in line and "fence_ms=-" in line
     got = parse_perf(line)
     assert got["ppa"] == (1.0, None, 2.0, 3.0, 0.0) and got["fence_ms"] is None
+
+
+# -- the browser console the website's install left on internal flash -----------
+
+
+class CardStore(FakeStore):
+    def __init__(self, **kw):
+        FakeStore.__init__(self, **kw)
+        self.brought = []
+
+    def bring_addon(self, src, root):
+        self.calls.append(("bring_addon", src, root))
+        return True
+
+
+def test_a_boot_on_a_card_brings_the_console_from_internal_flash_first(capsys):
+    """The website's install writes the add-on into the internal store; a
+    board whose carts live on a card moves it there before the scan
+    (moy_seed.bring_addon), and a boot on internal flash has nothing to move."""
+    boot, _, _ = _boot()
+    store = CardStore()
+    boot.load_carts(store, [{"title": "s"}], fallback_root="/moy/carts")
+    names = [c[0] for c in store.calls]
+    assert store.calls[names.index("bring_addon")] == ("bring_addon", "/moy/carts",
+                                                       store.CARTS_DIR)
+    assert names.index("bring_addon") < names.index("catalogue")
+    assert "moved the browser console to SD" in capsys.readouterr().out
+    store = CardStore(dead_root=FakeStore.CARTS_DIR)
+    boot.load_carts(store, [{"title": "s"}], fallback_root="/moy/carts")
+    assert "bring_addon" not in [c[0] for c in store.calls]
+
+
+def test_bring_addon_moves_the_fitting_console_once(tmp_path):
+    from runtime import moy_seed
+    want = "ab" * 32
+    flash, card = tmp_path / "moy" / "carts", tmp_path / "sd" / "carts"
+    folder = flash / ("web_console_%s.moy" % want[:12])
+    folder.mkdir(parents=True)
+    card.mkdir(parents=True)
+    pack = bytes(range(256)) * 300
+    (folder / "moybyte_web.pack").write_bytes(pack)
+    (folder / "manifest.json").write_text('{"moybyte": {"fits": "%s"}}' % want)
+    other = flash / "web_console_000000000000.moy"
+    other.mkdir()
+    assert moy_seed.bring_addon(str(flash), str(card), want)
+    got = card / folder.name
+    assert (got / "moybyte_web.pack").read_bytes() == pack
+    assert sorted(p.name for p in card.iterdir()) == [folder.name], "no .part left"
+    assert not folder.exists() and other.exists(), "only the one that fits moves"
+    assert not moy_seed.bring_addon(str(flash), str(card), want), "a warm boot: one look"
+    # a card that holds it already: the internal copy just goes
+    folder.mkdir()
+    (folder / "moybyte_web.pack").write_bytes(b"older copy")
+    assert moy_seed.bring_addon(str(flash), str(card), want)
+    assert not folder.exists() and (got / "moybyte_web.pack").read_bytes() == pack
+    assert not moy_seed.bring_addon(str(flash), str(card), None), "an image naming no page"

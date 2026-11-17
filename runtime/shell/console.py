@@ -3257,6 +3257,11 @@ class Workstation:
         # The look's change, applied once a frame, and `custom`'s autosave
         # debounce (theming phase 6 step 5): one attribute read when idle.
         self.look.tick(dt)
+        # The browser console add-on's attempt a game or a failure put off
+        # (web_addon.AddonStep.due): two attribute reads while none is.
+        ad = self.addon
+        if ad is not None and ad.due is not None:
+            ad.poll()
         # A banner over the system canvas this frame (the unlock's, a notice):
         # its soft edges blend over what is under them, so an app that paints
         # a part of its page (Paint's stroke frame) paints it whole meanwhile.

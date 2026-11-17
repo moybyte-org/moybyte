@@ -10,11 +10,12 @@ Zero the official carts, which its release publishes in the same index.
 
 The firmware names the page it serves (moy_web.page_want), and its release
 publishes, beside its manifest, a signed index listing every add-on it ever
-published, each naming the page it fits (`moybyte.fits`). A console installs
+published, each naming the page it fits (`moybyte.fits`). Every board gets
 the one that fits it through the ordinary install (cart_index.Install: every
-file checked against the signed index before the folder moves into place),
-from Get Carts like any cart, and that is the only way one arrives over the
-air.
+file checked against the signed index before the folder moves into place):
+from Get Carts like any cart, or by this module's step (`AddonStep`). The
+website's install writes it into the store with the image
+(tools/store_image.py).
 
 AFTER A FIRMWARE UPDATE the add-on that was installed fits the old image, so
 the webhost answers "needs its page updated" until the one that fits the new
@@ -26,10 +27,19 @@ index, installs the entry that fits, and takes the add-on folders that no
 longer fit off the shelf. A step is one frame's share (`tick`); the radio is
 the caller's lease (`inst.hold`/`release`).
 
-WITH `absent` (the Zeros, whose page is their whole use) a store with NO
-add-on gets the one that fits too: a Zero written by the website's flasher
-(the app image alone), a wiped store, or a cable flash whose add-on step
-failed. A console's add-on is optional, and Get Carts installs it.
+WITH `absent` (every board) a store with NO add-on gets the one that fits
+too, unless its owner removed the console: a removal records it
+(moy_seed.ADDON_LINE in `system/removed`, which Get Carts' install of it
+drops again), and a board with that line never fetches it. A board the
+website's flasher wrote carries the add-on in its store already; the step
+brings it to a wiped store, a cable flash whose add-on step failed, and a
+console that had none before. On a console it waits for a network: it does
+nothing at all where none is saved (`inst.configured()`), never runs while a
+game plays (`inst.playing()`: a start is put off and a running step stops,
+the shelf as it was), and a failed attempt is tried again after RETRY_MS,
+doubling to RETRY_MAX_MS (`due`, which the console's frame polls; a Zero's
+serving loop asks again itself). A boot's confirm starts it, a WiFi join
+(`nudge`) and the update screen's exit start it again.
 
 WITH `carts` (the XIAO Zero, which updates over the air) the same step
 brings the OFFICIAL carts the store holds to the release: every official
@@ -62,6 +72,8 @@ import json
 
 import cart_index as _ci
 from moy_fs import _exists, _read, _write_atomic, _mkdir
+from moy_seed import ADDON_LINE as _ADDON_LINE, addon_removed as _addon_removed, \
+    unremove as _unremove
 from moy_store_base import _sibling_path, cart_path as _cart_path
 
 PREFIX = "web_console_"         # tools/web_pack.py's CART_ID, then 12 hex, then .moy
@@ -69,6 +81,7 @@ STATE_ABSENT = 1                # moy_page.h's MOY_PAGE_ABSENT
 STATE_STALE = 2                 # moy_page.h's MOY_PAGE_STALE
 STEP_MS = 8                     # an install's work in one frame
 RETRY_MS = 60000                # a failed attempt starts again no sooner
+RETRY_MAX_MS = 3600000          # and each failure doubles the wait, up to this
 
 
 def installed(root, op):
@@ -147,10 +160,12 @@ def official_behind(root, carts):
 
 class AddonStep:
     """The add-on that fits this image, installed over the one that does not
-    (and with `absent` where there is none), and with `carts` the official
-    carts the store holds brought to the release (the module's docstring).
-    `phase` is None while idle; `error` the last attempt's failure;
-    `progress` (done, total) while it installs."""
+    (and with `absent` where there is none and the console was not removed),
+    and with `carts` the official carts the store holds brought to the
+    release (the module's docstring). `phase` is None while idle; `error` the
+    last attempt's failure; `progress` (done, total) while it installs; `due`
+    the ticks_ms an attempt was put off at, else None (`poll` starts it once
+    its wait is over)."""
 
     def __init__(self, inst, index, carts=False, absent=False):
         self.inst = inst
@@ -169,25 +184,79 @@ class AddonStep:
         self._fetch = None
         self._gone = None
         self._ended = None
+        self._wait = RETRY_MS
         self._pointed = False
+        self._removed = None          # the record's console line, once read
+        self._removed_at = None       # ...under this page state
+        self.due = None
+        self._due_ms = 0
 
     def point(self, again=False):
         """The page's state read from this console's store: once, or `again`
-        when a cart may have arrived (the console's screen opening)."""
+        when a cart may have arrived or gone (the console's screen opening),
+        the removal record with it."""
         if again or not self._pointed:
             self._pointed = True
+            self._removed = None
             point(self.inst.root())
+
+    def removed(self):
+        """Whether the console's owner removed the browser console
+        (moy_seed.addon_removed): read again when the page's state has
+        changed since (a removal takes the add-on away) or at a point."""
+        state = page_state()
+        if self._removed is None or self._removed_at != state:
+            root = self.inst.root()
+            self._removed = bool(self.inst.op(lambda: _addon_removed(root)))
+            self._removed_at = state
+        return self._removed
+
+    def restore(self):
+        """The console asked for again where it was removed (a Zero's page,
+        its only face): the record's line dropped and the step started."""
+        root = self.inst.root()
+        self.inst.op(lambda: _unremove(root, [_ADDON_LINE]))
+        self._removed = None
+        return self.nudge()
 
     def _addon_wanted(self):
         state = page_state()
-        return state == STATE_STALE or (self.absent and state == STATE_ABSENT)
+        if state == STATE_STALE:
+            return True
+        return self.absent and state == STATE_ABSENT and not self.removed()
 
     def wanted(self):
         """An add-on is installed and none of them fits this image, or with
-        `absent` none is installed; or with `carts`, the official carts were
-        last brought to another release."""
+        `absent` none is installed and the console was not removed; or with
+        `carts`, the official carts were last brought to another release."""
         self.point()
         return self._addon_wanted() or self._behind()
+
+    def _ask(self, name):
+        fn = getattr(self.inst, name, None)
+        return None if fn is None else fn()
+
+    def _put_off(self, ms):
+        self.due = _now()
+        self._due_ms = ms
+
+    def poll(self, now=None):
+        """The console's frame, while `due` is set: the put-off attempt
+        started once it is due. True while a step runs."""
+        if self.due is None or self.phase is not None:
+            return self.phase is not None
+        if _ci._ticks_diff(_now() if now is None else now, self.due) < self._due_ms:
+            return False
+        self.due = None
+        return self.start(retry=True)
+
+    def nudge(self):
+        """A network was joined: an attempt now, the back-off forgotten."""
+        self._ended = None
+        self._wait = RETRY_MS
+        self._fitless = False
+        self.due = None
+        return self.start()
 
     def _behind(self):
         if not self.carts:
@@ -210,14 +279,19 @@ class AddonStep:
 
     def start(self, retry=False):
         """Begin when the add-on needs it: True while a step runs. `retry`
-        waits out RETRY_MS after a failed attempt (a browser asking again);
-        a boot's start and a person's button do not."""
+        waits out the back-off after a failed attempt (a browser asking
+        again, the console's put-off attempt); a boot's start and a person's
+        button do not. Nothing starts where no network is saved, and a game
+        playing puts it off."""
         if self.phase is not None:
             return True
         if retry and (self._fitless or self._ended is not None
-                      and _ci._ticks_diff(_now(), self._ended) < RETRY_MS):
+                      and _ci._ticks_diff(_now(), self._ended) < self._wait):
             return False
-        if not self.wanted():
+        if self._ask("configured") is False or not self.wanted():
+            return False
+        if self._ask("playing"):
+            self._put_off(RETRY_MS)
             return False
         url = self.index() if callable(self.index) else self.index
         if not url:
@@ -258,8 +332,13 @@ class AddonStep:
                 self.inst.release()
 
     def tick(self, budget_ms=STEP_MS):
-        """One frame's share: True while the step wants the next frame."""
+        """One frame's share: True while the step wants the next frame. A
+        game that starts stops it, to start again after it."""
         if self.phase is None:
+            return False
+        if self._ask("playing"):
+            self.stop()
+            self._put_off(RETRY_MS)
             return False
         try:
             return getattr(self, "_" + self.phase)(budget_ms)
@@ -358,10 +437,15 @@ class AddonStep:
         self.error = error
         if error is None:
             self._ended = None
+            self._wait = RETRY_MS
             _ci._log("release: this firmware's browser console add-on and official "
                      "carts are installed")
         else:
+            if self._ended is not None:
+                self._wait = min(self._wait * 2, RETRY_MAX_MS)
             self._ended = _now()
+            if not self._fitless:
+                self._put_off(self._wait)
             _ci._log("release: %s" % error)
         if self._job is not None:
             self._job = None
