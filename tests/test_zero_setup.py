@@ -254,6 +254,60 @@ def test_a_bad_post_re_serves_the_form_with_the_reason_and_saves_nothing():
     assert got == [] and srv.saved is None and srv.reboot_at is None
 
 
+def test_a_board_with_a_password_is_not_set_up_again_without_it():
+    """The setup AP comes up whenever no saved network answers, so a configured
+    board away from its network hosts it too. Its form asks for the password
+    the board has, and a neighbour who does not know it changes nothing."""
+    record = zero_setup.console_hash("old-board-pass")
+    got = []
+    srv = zero_setup.SetupServer("ap", got.append, lambda: [], record=lambda: record)
+    assert b'name="current"' in srv.handle_http("GET", "/", b"")
+    form = b"name=attic&console=new-board-pass&ssid=evil&password="
+    for cur in (b"", b"&current=wrong-pass"):
+        body = srv.handle_http("POST", "/setup", form + cur)
+        assert b"403 " in body and b"Nothing was changed" in body
+    assert got == [] and srv.reboot_at is None
+    body = srv.handle_http("POST", "/setup", form + b"&current=old-board-pass")
+    assert b"200 OK" in body and len(got) == 1 and srv.reboot_at is not None
+
+
+def test_a_configured_boards_form_takes_few_guesses_a_boot():
+    record = zero_setup.console_hash("old-board-pass")
+    got = []
+    srv = zero_setup.SetupServer("ap", got.append, lambda: [], record=lambda: record)
+    form = b"name=attic&console=new-board-pass&ssid=evil&password=&current="
+    for i in range(zero_setup.CURRENT_TRIES):
+        assert b"403 " in srv.handle_http("POST", "/setup", form + b"guess-%d" % i)
+    body = srv.handle_http("POST", "/setup", form + b"old-board-pass")
+    assert b"403 " in body and b"restart the board" in body and got == []
+
+
+def test_an_unconfigured_boards_form_asks_for_no_current_password():
+    assert b'name="current"' not in _server().handle_http("GET", "/", b"")
+    assert not zero_setup.is_password("anything", None)
+    assert not zero_setup.is_password("anything", "$moy2$junk")
+
+
+def test_a_body_the_vms_heap_cannot_hold_is_busy_not_the_end_of_setup(monkeypatch):
+    """The poll copies a parked body into the VM's heap, which on a board with
+    no PSRAM may not hold a long one: a 503, and the form goes on serving."""
+    answers = []
+
+    class Net:
+        web_poll = staticmethod(lambda: 1)
+        web_answer = staticmethod(answers.append)
+
+        @staticmethod
+        def web_take():
+            raise MemoryError
+
+    monkeypatch.setattr(zero_setup, "moy_net", Net)
+    srv = _server()
+    srv.serving = True
+    assert srv.poll()
+    assert len(answers) == 1 and b"503 " in answers[0]
+
+
 def test_a_failed_write_is_a_500_that_says_nothing_changed_not_a_reboot():
     def boom(clean):
         raise OSError(28, "ENOSPC")

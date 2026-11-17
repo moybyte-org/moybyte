@@ -122,8 +122,9 @@ exchange but never finish it, and the password never crosses the network.
 Its limits in short: the page itself crosses plain HTTP, so an active attacker on the LAN can serve a page that captures what is
 typed into it; a paired browser can write and run any cart, one that arrives as files
 being asked on the glass at its first run (§3); the password pairs against the record's PBKDF2 cost
-(above) and the backoff. The Zero's setup network is open
-while it is unconfigured (`device/zero_setup.py`).
+(above) and the backoff. The Zero's setup network is open whenever
+no saved network answers, and on a board that already has a password its form
+changes nothing without that password, five tries a boot (`device/zero_setup.py`).
 
 **Fetches.** The kernel's client (`native/moy_net/moy_net_port.c`) verifies an
 https server against the image's CA bundle, with the host's name, and a build

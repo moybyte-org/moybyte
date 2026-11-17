@@ -310,11 +310,13 @@ because a board either serves or hosts this AP and never both. It is a plain
 `<form>` — the page's only script fills the network list, offers the reveal on
 the password field and tells you what the scan found, so a phone with a broken
 script still has a page with a correct static state to type into. The AP is
-**open on purpose**: there is nothing behind it but the form, it exists only
-while the board is unconfigured, and the secrets that cross it belong to the
-person standing next to the board. What it costs is that a neighbour in
-range during that minute could configure the board first; what it buys is a
-setup that needs no printed key and no instructions.
+**open on purpose**: there is nothing behind it but the form, it comes up
+whenever no saved network answers, and the secrets that cross it belong to the
+person standing next to the board. On a board with no password yet, what it
+costs is that a neighbour in range during that minute could configure the board
+first; what it buys is a setup that needs no printed key and no instructions. A
+board that already has a password asks for it on the form too, and takes five
+wrong answers a boot (`zero_setup.CURRENT_TRIES`).
 
 **It is a captive portal since 2026-08-29, reversing this port's own recorded
 decline** (the argument, its price and what would reverse it back live in

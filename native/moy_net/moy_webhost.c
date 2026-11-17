@@ -1323,10 +1323,11 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
         return ROUTE_DONE;
     }
     // THE SETUP FORM'S HOST (device/zero_setup.py) defers every path ("*"),
-    // and no other host does: it runs before the board has a sign-in, on the
-    // setup network that is open by design (docs/os_2026-11/threat_model.md).
-    // Every request parks for the VM in the clear, and no built-in route --
-    // the store's, /auth, /gpio -- is served.
+    // and no other host does: it is configured with no sign-in folder, on the
+    // setup network that is open by design (docs/os_2026-11/threat_model.md),
+    // and the form itself asks a board that has a password for it. Every
+    // request parks for the VM in the clear, and no built-in route -- the
+    // store's, /auth, /gpio -- is served.
     if (defers_all()) {
         o->bn = bn;
         return ROUTE_PARKED;

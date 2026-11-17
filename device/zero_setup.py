@@ -21,15 +21,18 @@ will not save without one (native/moy_net/moy_webauth.c; the hash goes into
 the system folder's `password`, as `passwd` writes it on a console).
 
 THE AP IS OPEN, deliberately. A WPA key would have to be printed on the board
-or guessed, and there is nothing behind this AP to protect: it exists only
-while the board has no configuration, it serves one form, and the one secret
-that crosses it -- the WiFi password being typed in -- is a secret the person
-typing it already owns and is standing next to. What it costs is that a
-neighbour in range during the setup minute could join and set the board up
-first; what it buys is a setup that works with a phone and no instructions.
-The moment it succeeds the AP is gone and the board is on STA behind the
-router's own security. (A pairing button or a printed key is #41's if this
-ever ships beyond a desk.)
+or guessed. It comes up whenever no saved network answers, it serves one form,
+and the one secret that crosses it -- the WiFi password being typed in -- is a
+secret the person typing it already owns and is standing next to. On a board
+with no password yet there is nothing behind it to protect: what it costs is
+that a neighbour in range during the setup minute could join and set the board
+up first; what it buys is a setup that works with a phone and no
+instructions. A board that HAS a password (a configured board whose network
+is gone) is not given away the same way: its form also asks for that
+password, checks it against the record, and after CURRENT_TRIES wrong answers
+takes no more until the board restarts. The moment the form succeeds the AP is
+gone and the board is on STA behind the router's own security. (A pairing
+button or a printed key is #41's if this ever ships beyond a desk.)
 
 STA is still the SERVING mode and that is not re-litigated here: the deleted
 streaming port measured SoftAP throughput as the cause of its multi-second
@@ -130,6 +133,11 @@ _NAME_OK = "abcdefghijklmnopqrstuvwxyz0123456789-"
 # it hopeless, short enough to type on a phone.
 CONSOLE_MIN = 8
 CONSOLE_MAX = 64
+
+# Wrong current passwords a configured board's form takes before it takes no
+# more until a restart: someone standing at the board can power-cycle it, and
+# a neighbour guessing from across the street gets this many a boot.
+CURRENT_TRIES = 5
 
 
 def ap_ssid(mac):
@@ -268,6 +276,18 @@ def console_hash(password, salt=None):
         import os
         salt = "".join("%02x" % b for b in os.urandom(16))
     return moy_net.pw_hash(password, salt)
+
+
+def is_password(password, record):
+    """Whether `password` is the one the record (`$moy2$ITER$SALT$W0$L`) was
+    made from: the record made again over its own salt, compared whole."""
+    parts = str(record or "").strip().split("$")
+    if len(parts) != 6 or not password:
+        return False
+    try:
+        return console_hash(password, parts[3]) == "$".join(parts)
+    except ValueError:
+        return False
 
 
 def scan_json(nets):
@@ -426,7 +446,7 @@ button{width:100%%;padding:.85rem;font-size:1.05rem;min-height:48px;border:0;
 <label><span>name for this board</span>
 <input name="name" value="%s" maxlength="24" autocapitalize="off"
  autocorrect="off" autocomplete="off" spellcheck="false"></label>
-<label><span>a password for this board (a browser types it once, to pair)</span>
+%s<label><span>a password for this board (a browser types it once, to pair)</span>
 <input name="console" type="password" minlength="8" maxlength="64"
  autocapitalize="off" autocorrect="off" autocomplete="new-password"
  spellcheck="false" required></label>
@@ -484,11 +504,18 @@ devices will show it as <b>%s</b> &mdash; the address there works too.</p>
 </body></html>"""
 
 
-def page(ap_name, error=None, name=DEFAULT_NAME):
+_CURRENT = """<label><span>this board's password now (it already has one)</span>
+<input name="current" type="password" maxlength="64" autocapitalize="off"
+ autocorrect="off" autocomplete="current-password" spellcheck="false"
+ required></label>
+"""
+
+
+def page(ap_name, error=None, name=DEFAULT_NAME, current=False):
     return _PAGE % (
         "connected to %s &mdash; tell this board where to live" % ap_name,
         ('<p class="err">%s</p>' % error) if error else "",
-        name)
+        name, _CURRENT if current else "")
 
 
 class SetupServer:
@@ -498,9 +525,11 @@ class SetupServer:
     `save(clean)` and `scan()` are injected: the persistence and the radio are
     the two things a host test cannot have, and everything between them --
     parsing, validating, what the page says -- is then ordinary testable code.
+    `record()` is the board's password record, or None while it has none
+    (the module docstring: a board that has one is asked for it).
     """
 
-    def __init__(self, ap_name, save, scan, port=SETUP_PORT, ip=AP_IP):
+    def __init__(self, ap_name, save, scan, port=SETUP_PORT, ip=AP_IP, record=None):
         self.port = port
         self.serving = False
         self.ap_name = ap_name
@@ -511,12 +540,18 @@ class SetupServer:
         self.reboot_at = None        # set by a good POST; the loop watches it
         self._scan_cache = None
         self._scan_at = 0
+        self._record = record or (lambda: None)
+        self._wrong = 0              # wrong current passwords this boot
+
+    def _page(self, error=None, status=200):
+        return http_response(status, page(self.ap_name, error,
+                                          current=bool(self._record())),
+                             "text/html; charset=utf-8")
 
     def handle_http(self, method, path, body):
         path = path.split("?", 1)[0]
         if method == "GET" and path in ("/", "/index.html"):
-            return http_response(200, page(self.ap_name),
-                                 "text/html; charset=utf-8")
+            return self._page()
         if method == "GET" and path == "/scan":
             return http_response(200, self.scan_cached())
         if method == "POST" and path == "/setup":
@@ -548,7 +583,14 @@ class SetupServer:
         if not self.serving:
             return False
         did = moy_net.web_poll()
-        req = moy_net.web_take()
+        try:
+            req = moy_net.web_take()
+        except MemoryError:
+            # The parked body is copied into this heap, which on a board with
+            # no PSRAM may not hold it: busy, rather than an error out of the
+            # loop that is the board's only way in.
+            moy_net.web_answer(http_response(503, '{"error":"busy"}'))
+            req = None
         if req is not None:
             did = True
             try:
@@ -579,18 +621,25 @@ class SetupServer:
         return self._scan_cache
 
     def _setup(self, body):
-        clean, why = validate(parse_form(body))
+        fields = parse_form(body)
+        clean, why = validate(fields)
         if clean is None:
-            return http_response(400, page(self.ap_name, why),
-                                 "text/html; charset=utf-8")
+            return self._page(why, 400)
+        record = self._record()
+        if record:
+            if self._wrong >= CURRENT_TRIES:
+                return self._page("Too many wrong passwords: restart the board "
+                                  "to try again.", 403)
+            if not is_password(str(fields.get("current") or ""), record):
+                self._wrong += 1
+                return self._page("That is not this board's password. Nothing "
+                                  "was changed.", 403)
         try:
             self._save(clean)
         except Exception as exc:      # noqa: BLE001 -- a full/broken fs
             print("ZERO SETUP save failed:", exc)
-            return http_response(500, page(
-                self.ap_name, "This board could not write the settings down "
-                              "(%s). Nothing was changed." % exc),
-                "text/html; charset=utf-8")
+            return self._page("This board could not write the settings down "
+                              "(%s). Nothing was changed." % exc, 500)
         self.saved = clean
         # The reset is DEFERRED, not called here: this returns the response the
         # phone is waiting for, and a machine.reset() on the way out of a
@@ -638,6 +687,14 @@ def _write_json(path, doc):
         f.write(json.dumps(doc))
 
 
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def _write_text(path, text):
     try:
         import os
@@ -667,7 +724,8 @@ def run(wifi_store, zero_store, system_dir, port=SETUP_PORT, sleep_ms=10):
     ip = moy_net.wifi_ap(ssid) or AP_IP
     srv = SetupServer(ssid,
                       lambda clean: save_setup(clean, wifi_store, zero_store, system_dir),
-                      _scan, port=port, ip=ip)
+                      _scan, port=port, ip=ip,
+                      record=lambda: _read_text(system_dir + "/password"))
     if not srv.start(ip):
         raise OSError("setup port %d busy" % port)
     # The portal, second and optional: the form is the thing that must come up.
