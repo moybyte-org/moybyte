@@ -2327,6 +2327,7 @@ def roles_trace(ws):
     say("op", i.op(lambda: 7))
     say("wifi page", i.wifi_open(), i.wifi(), i.wifi_open())
     say("consent", i.consent() is ws.consent)
+    say("own", i.own() == ws.cart_own)
     ws.settings_layer.back()                # the panel goes back to where it was
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
@@ -2538,6 +2539,7 @@ lease True None
 op 7
 wifi page False None True
 consent True
+own True
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2
