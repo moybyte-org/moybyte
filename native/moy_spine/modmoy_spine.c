@@ -139,8 +139,37 @@ static const char *kind_arg(mp_obj_t o, size_t *len) {
     return s;
 }
 
+// The qstr each kind was last made into: the back-stack is read several times
+// a frame (`top`, `kinds`), and a kind is found in the qstr pools once, not on
+// every read. An entry is checked against the pools before it is used, so one
+// a VM restart left behind is looked up again, never trusted.
+#define KIND_QS 8
+static struct {
+    qstr q;
+    uint8_t len;
+    char s[MOY_ID_MAX];
+} s_kq[KIND_QS];
+static uint8_t s_kq_next;
+
 static mp_obj_t kind_obj(const moy_kind_t *k) {
-    return MP_OBJ_NEW_QSTR(qstr_from_strn(k->s, k->len));
+    const qstr_pool_t *pool = MP_STATE_VM(last_pool);
+    size_t total = pool->total_prev_len + pool->len;
+    for (int i = 0; i < KIND_QS; i++) {
+        if (s_kq[i].len == k->len && s_kq[i].q != MP_QSTRnull && s_kq[i].q < total
+                && memcmp(s_kq[i].s, k->s, k->len) == 0) {
+            size_t n;
+            const byte *d = qstr_data(s_kq[i].q, &n);
+            if (n == k->len && memcmp(d, k->s, n) == 0) {
+                return MP_OBJ_NEW_QSTR(s_kq[i].q);
+            }
+        }
+    }
+    qstr q = qstr_from_strn(k->s, k->len);
+    int i = s_kq_next++ % KIND_QS;
+    s_kq[i].q = q;
+    s_kq[i].len = k->len;
+    memcpy(s_kq[i].s, k->s, k->len);
+    return MP_OBJ_NEW_QSTR(q);
 }
 
 static mp_obj_t kind_or_none(const moy_kind_t *k) {
