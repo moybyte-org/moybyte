@@ -3,7 +3,10 @@ OPFS keeper behind `ws.cart_keep` (which keeps compiled carts' written files
 too) and the page's file picker behind `ws.cart_pick` -- what a board does with a socket and its own store, done by
 the worker for this VM. Only a page that keeps its own carts (site mode) gets
 them; a page a board serves shows the board's carts, and the board gets its
-own (web_boot sets `ws.cart_home` instead).
+own (web_boot sets `ws.cart_home` instead). A board with no screen (a Zero)
+gets its own when this page asks: `ws.cart_board` (`BoardCarts`) asks it
+through its sealed /official and, once the board has written a cart, pulls
+that cart's files into this page's copy of the store.
 
 SHAPE: gpio_link's and update_link's. A capability reaches this VM by
 QUEUEING on the Python side while the worker does the I/O and hands the answer
@@ -35,6 +38,8 @@ Events the worker sends back (`event_json`), each a JSON object:
     {"id": n, "picked": path}     the player's own file, in the VFS
     {"id": n, "cancel": 1}        the player closed the picker
     {"room": [usage, quota]}      the browser's own estimate of its store
+    {"id": n, "status": s} and {"id": n, "end": 1}   /official's answer, in its spool
+    {"id": n, "kept": 1}          a refold: the cart's files are this page's
 """
 
 import json
@@ -44,7 +49,9 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
+from moy_store_base import cart_path as _cart_path
 from web_vfs import SPOOL
+from ticks import _ticks_ms, _ticks_diff
 
 try:
     import moycore as _moycore
@@ -299,3 +306,225 @@ class _Pick:
             self.link.forget(self.rid)
             self.link.queue({"op": "unpick", "id": self.rid})
             self.link = None
+
+
+# -- ws.cart_board: the official carts of a board with no screen ----------------
+
+POLL_MS = 400                   # how often a request in hand asks where it stands
+POLL_LOST = 25                  # unanswered asks in a row before the board is lost
+LOST = "The console isn't answering."
+
+
+class BoardCarts:
+    """`ws.cart_board` on a page a console with no screen serves (a Zero),
+    whose webhost answers /official (device/moy_webhost.py,
+    runtime/carts/web_addon.py's OfficialCarts): the official carts of that
+    console's own release, which it installs and removes in its own store
+    when this page asks. The page asks and waits; the board fetches and
+    writes, the one writer of its carts.
+
+    Each verb is a job the app steps a frame at a time (`BoardAsk`). An
+    install ends by REFOLDING the cart: the worker pulls the board's carts
+    again and replaces this page's copy of that one folder, and the watcher
+    adopts it (`landed`), so nothing the board just wrote travels back as an
+    edit; a removal deletes this page's copy the same way."""
+
+    def __init__(self, link, root):
+        self.link = link
+        self.root = root
+
+    def check(self):
+        return BoardAsk(self, "check", None)
+
+    def install(self, folder):
+        return BoardAsk(self, "install", folder)
+
+    def remove(self, folder):
+        return BoardAsk(self, "remove", folder)
+
+    def ask(self, doc=None):
+        """An answer (`_Answer`) to /official: a POST of `doc`, or a GET."""
+        a = _Answer(self.link, self.link._id())
+        self.link._live[a.rid] = a
+        self.link.queue({"op": "official", "id": a.rid, "path": a.path,
+                         "body": None if doc is None else json.dumps(doc)})
+        return a
+
+    def refold(self, folder):
+        """The board's copy of `folder` pulled over this page's: a job whose
+        `kept` (True, or the error's text) says when it is done."""
+        r = _Refold(self, folder)
+        self.link._live[r.rid] = r
+        self.link.queue({"op": "refold", "id": r.rid, "root": self.root, "folder": folder})
+        return r
+
+    def drop(self, folder):
+        """This page's copy of `folder` deleted and adopted: the board took
+        its own off."""
+        import cart_index
+        path = _cart_path(self.root, folder)
+        for _ in cart_index.rmtree_steps(path):
+            pass
+        self.landed(folder)
+
+    def landed(self, folder):
+        hook = self.link.landed_hook
+        if hook is not None:
+            hook(folder)
+
+
+class _Refold:
+    def __init__(self, board, folder):
+        self.board = board
+        self.folder = folder
+        self.rid = board.link._id()
+        self.kept = None
+
+    def hear(self, ev):
+        if ev.get("kept"):
+            self.board.link.forget(self.rid)
+            self.board.landed(self.folder)
+            self.kept = True
+        elif "error" in ev:
+            self.board.link.forget(self.rid)
+            self.kept = str(ev["error"]) or "the cart did not come"
+
+
+def _read_answer(a):
+    """(status, document or None) of an ended answer, which it closes."""
+    try:
+        with open(a.path, "rb") as f:
+            text = f.read()
+        doc = json.loads(text.decode("utf-8")) if text else None
+    except (OSError, ValueError):
+        doc = None
+    status = a.status if a.error is None else 0
+    a.close()
+    return status, doc if isinstance(doc, dict) else None
+
+
+class BoardAsk:
+    """One request to the board, stepped a frame at a time: the POST, then a
+    GET every POLL_MS until the board says it is done, then (an install's or
+    a removal's) this page's copy brought to the board's. The face
+    cart_index.Install shows Get Carts: `step()` True while it runs, `done`
+    and `total` the board's download, `path` the cart's folder here once it
+    landed, `error` the board's reason; and `doc`, a check's list."""
+
+    keeping = False
+    asking = None
+
+    def __init__(self, board, action, folder):
+        self.board = board
+        self.action = action
+        self.folder = folder
+        self.doc = None
+        self.error = None
+        self.path = None
+        self.done = 0
+        self.total = 0
+        self.finished = False
+        self.dropping = False
+        self._at = None
+        self._lost = 0
+        self._refold = None
+        body = {"action": action}
+        if folder is not None:
+            body["folder"] = folder
+        self._answer = board.ask(body)
+        self._posting = True
+
+    @property
+    def landing(self):
+        """The board has it, and this page's copy is coming."""
+        return self._refold is not None and not self.finished
+
+    def rate(self):
+        return 0
+
+    def cancel(self):
+        """Ask the board to stop an install: False once it has landed there
+        (this page's copy is being brought over) or for a check or removal
+        that is past asking."""
+        if self.finished or self._refold is not None or self.action != "install":
+            return False
+        if not self.dropping:
+            self.dropping = True
+            self._drop_answer()
+            self._answer = self.board.ask({"action": "cancel"})
+            self._posting = True
+        return True
+
+    def finish(self):
+        pass
+
+    def close(self):
+        """Let it go unfinished: the board goes on with what it was asked."""
+        if not self.finished:
+            self._end(None)
+
+    def _drop_answer(self):
+        a, self._answer = self._answer, None
+        if a is not None:
+            a.close()
+
+    def _end(self, error=None):
+        self._drop_answer()
+        self.error = error
+        self.finished = True
+        return False
+
+    def step(self, _budget=None):
+        if self.finished:
+            return False
+        if self._refold is not None:
+            kept = self._refold.kept
+            if kept is None:
+                return True
+            if kept is True:
+                self.path = _cart_path(self.board.root, self.folder)
+                return self._end(None)
+            return self._end(kept)
+        a = self._answer
+        if a is None:
+            if self._at is not None and _ticks_diff(_ticks_ms(), self._at) < POLL_MS:
+                return True
+            self._answer = self.board.ask()
+            self._posting = False
+            return True
+        if not (a.ended or a.error is not None):
+            return True
+        self._answer = None
+        posted = self._posting
+        status, doc = _read_answer(a)
+        self._at = _ticks_ms()
+        if self.dropping and posted:
+            return self._end(None)              # the board stops; nothing landed
+        if posted and status == 409:
+            return self._end((doc or {}).get("message") or LOST)
+        if status != 200 or doc is None:
+            self._lost += 1
+            return True if self._lost < POLL_LOST else self._end(LOST)
+        self._lost = 0
+        return self._heard(doc, posted)
+
+    def _heard(self, doc, posted):
+        state = doc.get("state")
+        prog = doc.get("progress")
+        if isinstance(prog, list) and len(prog) == 2:
+            self.done, self.total = prog[0] or 0, prog[1] or 0
+        if posted or state in ("checking", "installing", "removing"):
+            return True
+        if state == "listed" and self.action == "check":
+            self.doc = doc
+            return self._end(None)
+        if state == "error":
+            return self._end(doc.get("error") or LOST)
+        if state == "done" and doc.get("folder") == self.folder \
+                and doc.get("action") == self.action:
+            if self.action == "remove":
+                self.board.drop(self.folder)
+                return self._end(None)
+            self._refold = self.board.refold(self.folder)
+            return True
+        return self._end(LOST)

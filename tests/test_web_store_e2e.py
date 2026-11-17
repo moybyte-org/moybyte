@@ -424,3 +424,70 @@ def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
     finally:
         p.terminate()
         p.wait(timeout=10)
+
+
+def test_a_zero_s_page_asks_the_board_for_an_official_cart(tmp_path):
+    """A Zero's page: Get Carts lists the official carts of the BOARD's
+    release (serve.py's twin runs the board's own /official backend over its
+    store) and Get asks the board, which fetches from its release and writes
+    its own store; the page then has the board's copy and plays it."""
+    web_e2e.require("store", "carts", "official")
+    sys.path.insert(0, str(ROOT / "tests"))
+    sys.path.insert(0, str(ROOT / "tools"))
+    import web_pack
+    from test_official_carts import _page
+    from test_ota_signing import TEST_KEYS
+    from test_pkg import _sign
+    seeds = tmp_path / "seeds"
+    for cid in ("moybyte.calc", "moybyte.tap_game"):
+        shutil.copytree(ROOT / "system_carts" / (cid + ".moy"), seeds / (cid + ".moy"))
+    release = tmp_path / "release"
+    release.mkdir()
+    page = _page(tmp_path)
+    web_pack.publish_addon(page, str(release), "tdeck", 9, seeds=str(seeds))
+    idx = release / "carts-tdeck.json"
+    idx.write_bytes(_sign(idx.read_bytes()))
+    (release / "twin.json").write_text(json.dumps(
+        {"index": "carts-tdeck.json", "want": page[1], "keys": TEST_KEYS}))
+    store = tmp_path / "store"
+    store.mkdir()
+    for cid in ("moybyte.get_carts", "moybyte.calc"):
+        shutil.copytree(ROOT / "system_carts" / (cid + ".moy"), store / (cid + ".moy"))
+    site = _console(tmp_path, "http://127.0.0.1:9/index.json")
+    port = web_e2e.free_port()
+    p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site),
+                          "--carts", str(store), "--update", "headless",
+                          "--official", str(release)],
+                         cwd=RUNNER, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    base = "http://127.0.0.1:%d" % port
+    state = "__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error}))"
+    at = web_e2e.get_carts_taps(2)
+    try:
+        for _ in range(50):
+            try:
+                urllib.request.urlopen(base + "/index.html", timeout=1).read(64)
+                break
+            except OSError:
+                time.sleep(0.1)
+        out, js = web_e2e.run(tmp_path, "zero", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
+            {"note": "Get Carts asks the board for its list", "wait": 4000},
+            {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},
+            {"shot": "list"},
+            {"note": "Tap Game: on the release, not on the board", "click": at["cards"][1]},
+            {"wait": 800}, {"shot": "tap_game"},
+            {"click": at["verb"]},
+            {"note": "the board installs it, then the page pulls its copy", "wait": 8000},
+            {"shot": "ready"},
+            {"note": "Play has the focus", "key": "Enter"},
+            {"wait": 2000},
+            {"js": state},
+        ], base, tmp_path / "chrome")
+        assert len(js) == 2, "the scenario did not run to its end:\n%s" % out[-4000:]
+        svc = json.loads(js[0])
+        assert svc["cart_home"] == "headless" and svc["cart_board"] is True, svc
+        assert (store / "moybyte.tap_game.moy" / "manifest.json").exists(), out[-3000:]
+        st = json.loads(js[1])
+        assert st["cart"] == "Tap Game" and st["err"] is None, (st, out[-3000:])
+    finally:
+        p.terminate()
+        p.wait(timeout=10)

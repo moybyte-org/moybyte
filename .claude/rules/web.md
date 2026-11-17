@@ -179,12 +179,22 @@ nor those docs will warn you about:
   bites is that `Root.site` is False, so the worker's `initStore` and
   `web_boot._build_watchers` both skip it in site mode, where the keeper owns
   OPFS `apps/`.
-- **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
+- **Get Carts installs in a page that keeps its own carts (#124), and in no
+  other; a page a board with no screen serves ASKS that board.**
   In site mode `carts_link.py` gives the console the page's fetch
   (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker
   (`ws.cart_pick`); a board-served page gets `ws.cart_home` instead and the app
   says the board gets its own carts -- the two-writer rule again, and the sync
-  wire could not carry a module anyway. What bites:
+  wire could not carry a module anyway. A Zero's page also gets `ws.cart_board`
+  (`carts_link.BoardCarts`, which boot binds when the worker's probe of the
+  sealed `/official` answered, `web_boot.official_enable`): Get Carts lists the
+  official carts of the board's own release and Get or Remove asks the board
+  (`runtime/carts/web_addon.py`'s `OfficialCarts`, a slice per poll like
+  `/update`), which fetches from its release and writes its own store; once
+  it has, the worker pulls the board's carts again and replaces the page's
+  copy of that one folder in one turn of its thread, and the watcher adopts
+  it, so nothing the board wrote travels back as an edit. A board with glass
+  answers no `/official`: its own Get Carts installs. What bites:
   - **Nothing may wait for the network inside a step.** The VM has no
     ASYNCIFY and the worker delivers bytes only between frames, so every fetch
     is a `cart_index` job that gives the frame back; a Python loop waiting for

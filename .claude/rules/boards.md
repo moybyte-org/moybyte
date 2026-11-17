@@ -419,7 +419,10 @@ stages 1–6 all absent. Its README is the authority; what bites:
   `[roster] install` into a new store and bring every official cart a store
   holds to the image's release (`tools/board_flash.py`'s `install_carts`),
   and on the XIAO the update's step does it after an OTA
-  (`runtime/carts/web_addon.py`, `carts=True`).
+  (`runtime/carts/web_addon.py`, `carts=True`). The browser console a Zero
+  serves adds and removes the others: its Get Carts asks the board through
+  the sealed `/official` (`web_addon.OfficialCarts`), and the board fetches
+  from its release and writes its own store, its one writer.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the

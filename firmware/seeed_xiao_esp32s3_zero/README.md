@@ -54,7 +54,10 @@ with `--password`, the password browsers pair with, installs the browser
 console add-on and the official carts, and keeps the module push as an opt-in
 dev loop. The image carries the core carts and inflates them on first boot;
 every other system cart is an official cart its release publishes, which
-provisioning and a cable flash install. See "Provisioning" below.
+provisioning and a cable flash install, and which the browser console the
+board serves adds and removes: its Get Carts asks the board through the
+sealed `/official` (`zero_host.make_official`), and the board fetches the
+cart from its release and writes its own store. See "Provisioning" below.
 
 ## Build, flash, look
 

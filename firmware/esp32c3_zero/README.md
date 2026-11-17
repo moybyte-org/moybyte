@@ -43,7 +43,11 @@ file is what the chip changes.
   publishes in `carts-c3_zero.json`, and with no OTA the cable flash is how
   they arrive and follow a new image (`tools/board_flash.py`'s
   `install_carts`): board.toml's `[roster] install` into a new store, and
-  every official cart a store holds at an older version.
+  every official cart a store holds at an older version. The page this board
+  serves adds and removes the rest as the XIAO's does (its README), the
+  install's modules frozen here for it; each request's buffers (its release
+  index read whole, about 45 KB, and the cart's download) are made for it
+  and given back when it ends.
 - **SSH, without SFTP.** The server and the shell's face run in the same
   internal heap, so a build without PSRAM sizes them to what a session was
   measured to use there: the server's and the face's stacks and the session's

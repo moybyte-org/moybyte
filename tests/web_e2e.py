@@ -88,6 +88,12 @@ FEATURES = {
                        and b"carts_link" in (DIST / "micropython.wasm").read_bytes()),
               "dist/ predates Get Carts in the browser (no carts pump, no file "
               "question, or no carts_link frozen in the wasm)"),
+    # A Zero's Get Carts: the worker asks the board's /official, and the
+    # frozen bridge has the board's link.
+    "official": (lambda: ("/official" in (DIST / "worker.js").read_text()
+                          and b"BoardCarts" in (DIST / "micropython.wasm").read_bytes()),
+                 "dist/ predates a Zero's Get Carts (no /official in the worker, "
+                 "or no BoardCarts frozen in the wasm)"),
     # The first-run theme and the start option: the page reads the scheme and
     # hands it to the worker, and the frozen console has to know both.
     "firstrun": (lambda: ("moyScheme" in (DIST / "index.html").read_text()

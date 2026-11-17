@@ -731,7 +731,8 @@ def _shelf(tmp_path):
 
 
 def test_a_page_a_board_serves_says_where_carts_come_from(tmp_path):
-    for home, words in (("board", "turn Web console off"), ("headless", "no screen")):
+    for home, words in (("board", "turn Web console off"),
+                        ("headless", "Update this console")):
         ws, app = _app_ws(tmp_path / home, None, [], home=home)
         ws.spine.open_app(app)
         _frame(ws)

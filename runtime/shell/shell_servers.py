@@ -504,6 +504,11 @@ class InstallServer:
         serves, else None."""
         return self.__ws.cart_home
 
+    def board(self, g):
+        """The console with no screen that serves this page, asked to install
+        and remove its own official carts (`BoardCarts`), or None."""
+        return self.__ws.cart_board
+
     def keep(self, g):
         """The store of record's keeper where the files an install writes are
         not it (the browser's OPFS), else None."""

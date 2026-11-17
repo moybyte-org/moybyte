@@ -828,6 +828,10 @@ class Workstation:
         self.cart_keep = None
         self.cart_pick = None
         self.cart_home = None
+        # `cart_board`, on a page a console with no screen serves (a Zero):
+        # that console asked to install or remove its own release's official
+        # carts (firmware/web_runner/carts_link.BoardCarts), None everywhere else.
+        self.cart_board = None
         # The index this console's own release publishes beside its firmware
         # (the browser console add-on's, runtime/carts/web_addon.py), set by a
         # board (device/wire_links.py); Get Carts and `pkg` read it last.

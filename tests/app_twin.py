@@ -864,7 +864,7 @@ _SERVED = {
     "notify": "award groups today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
-                "writable op rescan free find net keep wifi wifi_open consent own"),
+                "writable op rescan free find net keep wifi wifi_open consent own board"),
     "wifi": "hold release station",
     "bt": "keyboard",
     "usb": "drive turn_on turn_off poll",

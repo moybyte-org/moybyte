@@ -78,6 +78,16 @@ why = "The wrap-safe ms clock zero_setup and moy_webhost import, as on the XIAO.
 files = ["ssh_service.py"]
 why = "The SSH server's Python side, which zero_shell hands its console, as on the XIAO."
 
+[[modules.shared.group]]
+files = ["web_addon.py", "cart_index.py", "cart_unpack.py", "cart_files.py",
+         "app_imports.py"]
+why = """
+The install the browser console's Get Carts asks this board for: the official
+carts of its release, fetched over its own network and checked file by file
+before they land (web_addon.OfficialCarts over cart_index, as on the XIAO).
+With no OTA slot the image never runs the add-on's step, which the cable flash
+does for it."""
+
 [[modules.shared.lazy]]
 module = "blocks"
 why = "moy_carts.save_blocks() reaches the block compiler through an ImportError ladder; no Zero freezes its callers (the XIAO's reason)."
@@ -101,6 +111,10 @@ packages_why = "No device package crosses: the store host is flat modules."
 [[modules.device.group]]
 files = ["zero_host.py", "zero_setup.py", "zero_shell.py"]
 why = "The Zero's store host, its first-boot setup and its terminal: both Zero boards' main.py."
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = "The transport cart_index fetches through on a board (the kernel's client), as on the XIAO."
 
 [[modules.device.group]]
 files = ["moy_webhost.py"]

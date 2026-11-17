@@ -3,6 +3,7 @@
 #   seed_carts                  the image's carts written into an empty store; seed_room, store_is_empty
 #   connect                     join the first saved network that answers
 #   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
+#   make_official               /official: the page's Get Carts, this board installing
 #   host_class                  the store host: the boards' WebHost
 #   serve                       bring the store host up and pump it forever
 """The Zero: a pocketable cart-store the browser console pairs with (#41).
@@ -44,6 +45,11 @@ Settings screen, driven here by a state machine in the poll loop because this
 board has no screen to put it on. The browser console this board serves is
 where a person triggers it and watches it, which is the whole point of the
 endpoints being sealed JSON rather than a UI.
+
+`GET/POST /official` is the fourth (make_official, below): the browser
+console's Get Carts lists the official carts of this board's own release and
+asks the board to install or remove one, and the board fetches it from its
+release and writes its own store, as it installs its firmware.
 
 A browser signs in with a device key it got by pairing once with this board's
 password (the setup form sets it; native/moy_net/moy_webhost.c's header and
@@ -840,6 +846,30 @@ def make_addon(ota):
         return None
 
 
+def make_official(ota, addon=None):
+    """The backend of the webhost's `/official` (web_addon.OfficialCarts):
+    the official carts of this image's release, which the browser console
+    this board serves lists in its Get Carts and asks this board to install
+    or remove; the board fetches from its release over its own network and
+    writes its own store, its one writer, keeping SEED_RESERVE free. While
+    `addon`'s step brings the store to a new release it holds a request
+    back. None where the image names no release index (no updater) or does
+    not carry the install: the route is then absent, and the page says this
+    console gets no carts. The C3 has no OTA slot but a release all the
+    same, so it serves the route too."""
+    if ota is None:
+        return None
+    try:
+        import web_addon
+        from cart_net import CartNet
+    except ImportError as exc:           # an image without the install
+        print("ZERO carts: unavailable:", exc)
+        return None
+    busy = None if addon is None else addon.busy
+    return web_addon.OfficialCarts(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
+                                   busy=busy, reserve=SEED_RESERVE)
+
+
 ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
 
 
@@ -868,7 +898,9 @@ def serve():
     host = host_class()(CARTS_DIR, auth=SYSTEM_DIR)
     ota, task = make_updater(me)
     addon = make_addon(ota)
+    official = make_official(ota, addon)
     host.update = task
+    host.official = official
     if task is not None:
         # BEFORE the first poll: the marker names the slot the last install
         # pointed the bootloader at, and reading it is how a rollback stops
@@ -928,14 +960,15 @@ def serve():
                     # ...and only now replace the browser console add-on with
                     # the one this image fits: an image the bootloader takes
                     # back never touched the add-on its predecessor serves.
-                    if addon is not None:
+                    if addon is not None and (official is None
+                                              or not official.busy()):
                         addon.start()
         if addon is not None and ota is not None and ota.confirmed:
             # The page is this board's whole use: an add-on that does not
             # fit is retried while it serves (web_addon.RETRY_MS apart).
             if addon.phase is not None:
                 addon.tick(ADDON_SLICE_MS)
-            else:
+            elif official is None or not official.busy():
                 addon.start(retry=True)
         # ...and `task.step()` is NOT called here: `WebHost.poll()` pumps the
         # injected update backend, which is the one place every board's does

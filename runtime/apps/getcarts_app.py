@@ -67,6 +67,12 @@ The screens, in the order a kid meets them:
              coming back from it checks again at once.
   ON THE CONSOLE  a page a board serves: the carts it shows are the board's,
              and the board gets its own, so this one fetches nothing.
+  A ZERO'S PAGE  a page a console with no screen serves (`install.board()`,
+             its sealed /official): the shelf is that console's official
+             carts, from its own release, and Get and Remove ASK it -- it
+             fetches and writes its own store, the page waiting with its
+             progress, then brings its copy of the cart over this page's.
+             A cover shows for a cart the console holds.
 
 The installing is cart_index's; this module is the screens and the lease. The
 radio is held while something is fetched -- the indexes, a licence and the
@@ -139,6 +145,15 @@ _AWAY = ("nonet", "nowifi", "unreached", "nomemory")
 
 
 _mb = _pkg.size_text
+
+
+def _asked(job):
+    """`yield from` it: a request to a console with no screen
+    (carts_link.BoardAsk) stepped a frame a step; its refusal raised."""
+    while job.step():
+        yield
+    if job.error is not None:
+        raise _ci.InstallError(job.error)
 
 
 def _host_of(url):
@@ -376,6 +391,7 @@ class GetCartsAppLayer(ListShellApp):
         self._grab = None             # a drag over the licence: (y, first line) at its press
         self._focus = None            # the id focus moves to on the next frame
         self._focused = None          # the focused id as the last frame left it
+        self._board_free = None       # a Zero's page: the room the console reported
 
     # -- the app protocol (docs/app_api_v1.md) --------------------------------
 
@@ -384,9 +400,10 @@ class GetCartsAppLayer(ListShellApp):
         self.job = None               # one the keeper still holds lands by itself
         self.lic = None
         self._away = False
-        if self._inst.home() is not None:
+        board = self._inst.board()
+        if self._inst.home() is not None and board is None:
             self._go("board")
-        elif self._inst.net() is None:
+        elif board is None and self._inst.net() is None:
             self._go("nonet")
             self._focus = vid("TRY AGAIN")
         else:
@@ -633,6 +650,10 @@ class GetCartsAppLayer(ListShellApp):
         return _ci.net_text(self._inst.net(), None) == _ci.NET_MEMORY
 
     def _pump_check(self):
+        board = self._inst.board()
+        if board is not None:
+            self._pump_board_check(board)
+            return
         net = self._inst.net()
         if self._step == 0:
             up = self._online()
@@ -679,13 +700,48 @@ class GetCartsAppLayer(ListShellApp):
         if self.rows:
             self._focus = self._card_id(self.cur if self.cur in self.rows else self.rows[0])
 
+    def _pump_board_check(self, board):
+        """The console's official carts, asked of it: its list as this
+        page's shelf, and the room in its store."""
+        if self._fetching != "board":
+            self._drop_fetch()
+            self._fetch = board.check()
+            self._fetching = "board"
+        job = self._fetch
+        if job.step():
+            return
+        self._fetch = None
+        self._fetching = None
+        if job.error is not None:
+            _ci._log("the console's carts: %s" % job.error)
+            self._go("nomemory" if job.error == _ci.NET_MEMORY else "unreached")
+            return
+        doc = job.doc
+        free = doc.get("free")
+        self._board_free = (free[0], free[1]) if isinstance(free, list) and len(free) == 2 \
+            else None
+        self.indexes = ()
+        self.carts = [dict(c, official=True) for c in doc.get("carts") or ()
+                      if isinstance(c, dict) and isinstance(c.get("assets"), list)]
+        self.fetched_at = _ticks_ms()
+        self._covers = self._covers_to_fetch(self.carts)
+        self._build_rows()
+        self._go("list")
+        if self.rows:
+            self._focus = self._card_id(self.cur if self.cur in self.rows else self.rows[0])
+
     def _pump_covers(self):
         """The shelf's covers, fetched after it shows rather than before: a
         step of the next one each drawn frame while any is owed, a card
-        drawing its cover from the frame it lands in."""
-        self._hold()
+        drawing its cover from the frame it lands in. On a Zero's page a
+        cover is the copy of a cart the console holds."""
+        board = self._inst.board() is not None
+        if not board:
+            self._hold()
         try:
-            done = self._fetch_cover(self._inst.net(), self._covers[-1])
+            cart = self._covers[-1]
+            done = self._local_cover(cart) if board else \
+                self._fetch_cover(self._inst.net(), cart)
         except Exception as exc:  # noqa: BLE001 -- a cover never takes the shelf down
             _ci._log("%r" % (exc,))
             done = True
@@ -702,9 +758,12 @@ class GetCartsAppLayer(ListShellApp):
         side = self.layout.side
         out = []
         seen = {}
+        root = self._inst.root() if self._inst.board() is not None else None
         for c in carts:
             ref = c.get("cover")
             if ref is None or ref["sha256"] in seen:
+                continue
+            if root is not None and not _exists("%s/%s/cover.png" % (root, c["folder"])):
                 continue
             seen[ref["sha256"]] = True
             got = self.thumbs.get(ref["sha256"])
@@ -724,6 +783,27 @@ class GetCartsAppLayer(ListShellApp):
             return True
         if data is None:
             return False
+        self._decode_cover(cart, data)
+        return True
+
+    def _local_cover(self, cart):
+        """One cover read from the cart's copy here and decoded: True."""
+        sha = cart["cover"]["sha256"]
+        self.thumbs[sha] = None
+        path = "%s/%s/cover.png" % (self._inst.root(), cart["folder"])
+
+        def _bytes():
+            with open(path, "rb") as f:
+                return f.read()
+        try:
+            data = self._inst.op(_bytes)
+        except OSError:
+            return True
+        self._decode_cover(cart, data)
+        return True
+
+    def _decode_cover(self, cart, data):
+        sha = cart["cover"]["sha256"]
         import cover_png as _cp
         side = self.layout.side
         swapped = getattr(self._surf.canvas(), "swapped565", False)
@@ -739,7 +819,6 @@ class GetCartsAppLayer(ListShellApp):
             _ci._log("%s's cover does not decode" % cart["id"])
         else:
             self.thumbs[sha] = (side, pix)
-        return True
 
     def _build_rows(self):
         inst = self._inst
@@ -748,6 +827,7 @@ class GetCartsAppLayer(ListShellApp):
         have = inst.runtimes()
         ranges = bool(getattr(inst.net(), "ranges", False))
         carts = self.carts
+        board = inst.board()
 
         def _scan():
             rec = _ci.load_record(root) if root is not None else {}
@@ -769,6 +849,8 @@ class GetCartsAppLayer(ListShellApp):
                             "had": entry.get("version") if entry is not None else None,
                             "runs": _ci.runs_on(c, have),
                             "fit": None})
+            if board is not None:
+                return out, self._board_free
             return out, (inst.free() if root is not None else None)
         try:
             rows, free = inst.op(_scan)
@@ -1024,6 +1106,12 @@ class GetCartsAppLayer(ListShellApp):
         return out
 
     def _pump_connect(self):
+        board = self._inst.board()
+        if board is not None:
+            self.job = board.install(self.cur["cart"]["folder"])
+            self._go("getting")
+            self.armed = True
+            return
         up = self._online()
         if up is None:
             return
@@ -1064,7 +1152,9 @@ class GetCartsAppLayer(ListShellApp):
             return
         self._release()
         self._unpick()
-        if job.path:
+        if job.path and self._inst.board() is not None:
+            self._got()                 # the console landed it, its copy is here
+        elif job.path:
             consented, self._consented = self._consented, None
             self._run(_pkg.landed(self._inst, job.path, consented), self._got,
                       lambda exc: self._fail(_ci.STOPPED))
@@ -1075,6 +1165,8 @@ class GetCartsAppLayer(ListShellApp):
             self._focus_go()
 
     def _got(self):
+        if self._inst.board() is not None:
+            self._covers = self._covers_to_fetch(self.carts)
         self._build_rows()
         self._go("done")
         self._say("%s is on your shelf" % self.cur["cart"]["name"])
@@ -1143,8 +1235,10 @@ class GetCartsAppLayer(ListShellApp):
         what Remove's dialog said; and the consent it was installed with."""
         self.asking = False
         row = self.cur
-        self._run(_pkg.removed(self._inst, row["cart"]["folder"]),
-                  lambda: self._removed(row), self._not_removed)
+        board = self._inst.board()
+        steps = _asked(board.remove(row["cart"]["folder"])) if board is not None \
+            else _pkg.removed(self._inst, row["cart"]["folder"])
+        self._run(steps, lambda: self._removed(row), self._not_removed)
 
     def _removed(self, row):
         self._build_rows()
@@ -1887,6 +1981,8 @@ class GetCartsAppLayer(ListShellApp):
         if ph == "picked":
             return ("Your copy", "Checking your copy…")
         if ph == "connecting":
+            if self._inst.board() is not None:
+                return ("Connecting", "Asking the console…")
             return ("Connecting", "Turning on Wi-Fi…")
         return ("", "")
 
@@ -1921,7 +2017,7 @@ class GetCartsAppLayer(ListShellApp):
             lines = self._lines("This page shows the carts kept on the console that "
                                 "served it.")
             if self._inst.home() == "headless":
-                lines += self._lines("A console with no screen can't get carts.")
+                lines += self._lines("Update this console to get carts from here.")
             else:
                 lines += self._lines("Get new carts on the console itself: turn Web "
                                      "console off there and open Get Carts.")

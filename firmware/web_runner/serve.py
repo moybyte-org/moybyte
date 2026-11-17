@@ -37,6 +37,16 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # there. `glass` is a console: the
                                             # trigger hands its own screen back
                                             # and this page stops being it.
+    python serve.py ... --carts D --official R
+                                            # ...and a Zero's /official on top:
+                                            # the board's own backend
+                                            # (web_addon.OfficialCarts) with D
+                                            # as its store and R as its
+                                            # release (R/twin.json names the
+                                            # index, the page digest it fits
+                                            # and the keys it is signed with),
+                                            # stepped in the background as a
+                                            # board's poll steps it.
     python serve.py ... --carts D --one-link  # ...over a board's LINK: one
                                             # connection at a time, each send
                                             # held to the board's budget
@@ -109,6 +119,13 @@ if "--close-after" in args:
     i = args.index("--close-after")
     close_after = float(args[i + 1])
     del args[i:i + 2]
+official_dir = None
+if "--official" in args:
+    i = args.index("--official")
+    official_dir = os.path.abspath(args[i + 1])
+    del args[i:i + 2]
+    if "--carts" not in sys.argv:
+        raise SystemExit("--official needs --carts (it is part of the board twin)")
 no_system = "--no-system" in args
 if no_system:
     args.remove("--no-system")
@@ -295,6 +312,79 @@ else:
 
     update = TwinUpdate(update_mode == "glass") if update_mode else None
 
+    def twin_official(release, carts):
+        """`--official`: the board's own /official backend over this twin's
+        store, its release a directory, stepped in a thread a slice at a
+        time as a board's poll steps it. (backend, lock)."""
+        import io
+        from runtime import cart_index, web_addon
+        with open(os.path.join(release, "twin.json")) as f:
+            cfg = json.load(f)
+        cart_index.INDEX_KEYS = tuple(tuple(k) for k in cfg["keys"])
+        cart_index.page_want = lambda: cfg["want"]
+        base = "http://release.invalid/"
+
+        class Resp:
+            def __init__(self, data, status=200):
+                self._b = io.BytesIO(data)
+                self.status = status
+                self.length = len(data)
+
+            def readinto(self, buf):
+                return self._b.readinto(buf)
+
+            def close(self):
+                pass
+
+        class Net:
+            def online(self):
+                return True
+
+            def open(self, url):
+                name = url[len(base):] if url.startswith(base) else ""
+                path = os.path.join(release, name)
+                if not name or "/" in name or not os.path.isfile(path):
+                    return Resp(b"not found", 404)
+                with open(path, "rb") as f:
+                    return Resp(f.read())
+
+        class Inst:
+            net_ = Net()
+
+            def net(self):
+                return self.net_
+
+            def root(self):
+                return carts
+
+            def op(self, fn):
+                return fn()
+
+            def chip(self):
+                return None, None
+
+            def hold(self):
+                return True
+
+            def release(self):
+                pass
+
+            def rescan(self, folder=None):
+                pass
+
+        backend = web_addon.OfficialCarts(Inst(), base + cfg["index"])
+        lock = threading.Lock()
+
+        def pump():
+            while True:
+                with lock:
+                    more = backend.busy() and backend.step(40)
+                time.sleep(0.005 if more else 0.05)
+        threading.Thread(target=pump, daemon=True).start()
+        return backend, lock
+
+    official = twin_official(official_dir, carts_dir) if official_dir else None
+
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=root, **kw)
@@ -373,6 +463,10 @@ else:
                     return
                 self._send(200, json.dumps(update.status()).encode())
                 return
+            if path == "/official" and official is not None:
+                with official[1]:
+                    self._send(200, official[0].answer().encode())
+                return
             super().do_GET()          # the boot assets: never gated
 
         def do_POST(self):
@@ -397,6 +491,19 @@ else:
                 out["ok"] = ok
                 out["message"] = msg
                 self._send(200 if ok else 409, json.dumps(out).encode())
+                return
+            if path == "/official" and official is not None:
+                n = int(self.headers.get("Content-Length") or 0)
+                try:
+                    doc = json.loads(self.rfile.read(n) or b"{}")
+                except ValueError:
+                    self._send(400, b'{"error":"bad json"}')
+                    return
+                with official[1]:
+                    ok, msg = official[0].request(doc.get("action") or "",
+                                                  doc.get("folder"))
+                    body = official[0].answer(ok, msg).encode()
+                self._send(200 if ok else 409, body)
                 return
             if path == "/auth":
                 # An open host says so, as a board with no system folder
@@ -517,6 +624,8 @@ with server_class(("0.0.0.0", port), handler) as srv:
     note = (" + carts/sync over %s" % carts_dir) if carts_dir else ""
     if update_mode:
         note += " + a faked /update (%s)" % update_mode
+    if official_dir:
+        note += " + /official from %s" % official_dir
     if one_link:
         note += " over one link at a time"
     if board_to:

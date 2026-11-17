@@ -365,11 +365,12 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # to appear.
     ws.launcher.items = ws.home.launcher_items(ws.carts.all)
     # Get Carts (#124), by where this page's carts live (`_cart_seams`).
-    seams = _cart_seams(ws, _S.get("store_mode"))
+    seams = _cart_seams(ws, _S.get("store_mode"), carts_root)
     ws.cart_net = seams[0]
     ws.cart_keep = seams[1]
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
+    ws.cart_board = seams[4]
     ws.media_net = _media_net(ws, _S.get("store_mode"), carts_root)
     # The Moybyte shell's achievements are gamification for the kid console,
     # which the console page is, as on a board; they are no part of the
@@ -484,27 +485,34 @@ def _site_carts_made(ws):
                       or (c.get("path") or "").rsplit("/", 1)[-1] in served])
 
 
-def _cart_seams(ws, mode):
-    """(cart_net, cart_keep, cart_pick, cart_home) for Get Carts (#124), by
-    the page's mode, which is where its carts live.
+def _cart_seams(ws, mode, root):
+    """(cart_net, cart_keep, cart_pick, cart_home, cart_board) for Get Carts
+    (#124), by the page's mode, which is where its carts live.
 
     BOARD: the carts this page shows are the serving console's, and that
     console gets its own -- with its own module for its own chip, and while
     this page is connected its glass is parked, so the two never install side
     by side. The page fetches nothing and the app says where carts come from
-    ("board"; `update_enable` learns whether that console has a screen).
+    ("board"; `update_enable` learns whether that console has a screen); one
+    with no screen that answered the /official probe (`official_enable`)
+    installs its official carts when this page asks (`carts_link.BoardCarts`).
     SITE: the page's own store, so the page's fetch is the network and OPFS
     keeps what lands (`carts_link`). NONE (no OPFS): the same network, and an
     install lives in this tab like every other edit here, which the page
     already says out loud."""
     if mode == "board":
-        return None, None, None, "board"
+        board = None
+        link = _worker_link(ws, mode) if _S.get("official") else None
+        if link is not None:
+            import carts_link
+            board = carts_link.BoardCarts(link, root)
+        return None, None, None, "board", board
     link = _worker_link(ws, mode)
     if link is None:
-        return None, None, None, None
+        return None, None, None, None, None
     import carts_link
     keep = carts_link.WebCartKeep(link) if mode == "site" else None
-    return carts_link.WebCartNet(link), keep, link.pick, None
+    return carts_link.WebCartNet(link), keep, link.pick, None, None
 
 
 def _worker_link(ws, mode):
@@ -1284,6 +1292,7 @@ def services_json():
         "cart_net": getattr(ws, "cart_net", None) is not None,
         "cart_keep": getattr(ws, "cart_keep", None) is not None,
         "cart_home": getattr(ws, "cart_home", None),
+        "cart_board": getattr(ws, "cart_board", None) is not None,
     })
 
 
@@ -1317,6 +1326,15 @@ def update_enable(status_json):
         print("update unavailable:", exc)
     if _S["ws"].cart_home is not None and not doc.get("screen"):
         _S["ws"].cart_home = "headless"
+    return ""
+
+
+def official_enable():
+    """The serving console answered the /official probe: it has no screen
+    and installs its official carts when this page asks. Called before
+    `boot`, which hands Get Carts the asking (`_cart_seams`), so the app
+    never opens on a page that says the console gets its own."""
+    _S["official"] = True
     return ""
 
 
