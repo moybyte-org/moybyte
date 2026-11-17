@@ -10,7 +10,15 @@ Per release:
     1. bump FIRMWARE_VERSION in moy_ota.py, rebuild the firmware
     2. run this tool (it reads FIRMWARE_VERSION back out, so the manifest version
        always matches the image you actually built)
-    3. upload the .bin + latest.json to your host
+    3. upload the .bin + latest.json to your host, and the page beside them
+
+The image names a page too, the browser console add-on its build packed beside
+it. This tool puts the add-on beside the payload as a console installs it
+(tools/web_pack.py: the cart `moybyte_web-<digest>.moy.zip`, its pack, its
+licence and the index `carts-<board>.json`) and names the cart and the pack in
+the manifest's `cart` and `page`. Earlier ones stay where they are, so an
+earlier image still finds its own. An image whose page is not beside it is
+refused.
 
 Usage:
     python tools/gen_ota_manifest.py [BIN] [--base-url URL | --url URL]
@@ -27,6 +35,10 @@ import re
 import socket
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ota_sign  # noqa: E402
+import web_pack  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # The T-Deck build writes to a repo-root dist/ now (the board directory no
@@ -81,15 +93,18 @@ def detect_lan_ip():
 
 
 def build_manifest(bin_path, url, version, channel="stable", label=None,
-                   board="tdeck"):
+                   board="tdeck", addon=None):
     """The manifest dict the device consumes: board/version/channel/label/url/size/
     sha256 (+ filename for humans). size + sha256 are computed from the actual bytes on
     disk. `channel` lets the device offer a cross-channel switch (stable<->beta);
     `label` is a human string shown on the update screen (a beta's version is an epoch
     int); `board` is what stops one board installing another's app image -- it is inside
-    the signature, and the device refuses a manifest naming a board it is not."""
+    the signature, and the device refuses a manifest naming a board it is not.
+    `addon` is web_pack.publish_addon's names of the browser console add-on
+    the image names, beside `url`: unsigned, because a console holds a page
+    to the digest its own image carries."""
     data = Path(bin_path).read_bytes()
-    return {
+    manifest = {
         "board": board,
         "version": int(version),
         "channel": channel,
@@ -99,6 +114,9 @@ def build_manifest(bin_path, url, version, channel="stable", label=None,
         "size": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
     }
+    if addon:
+        manifest["page"], manifest["cart"] = addon["page"], addon["cart"]
+    return manifest
 
 
 def _resolve_url(args, bin_path):
@@ -147,6 +165,10 @@ def main(argv=None):
         version = read_firmware_version()
     label = args.label or bld.get("label") or ("v%d" % int(version))
     board = args.board or bld.get("board") or "tdeck"
+    try:
+        page = web_pack.page_beside(bin_path, board)
+    except web_pack.PageError as exc:
+        ap.error(str(exc))
 
     if args.root:
         # Publish: ROOT/<channel>/{firmware.bin, latest.json}; url points at the bin.
@@ -164,12 +186,19 @@ def main(argv=None):
         url = _resolve_url(args, bin_path)
         out = Path(args.out) if args.out else bin_path.with_name("latest.json")
 
-    manifest = build_manifest(dest_bin, url, version, channel, label, board)
+    addon = web_pack.publish_addon(page, str(dest_bin.parent), board, version,
+                                   ota_sign.read_key())
+    manifest = build_manifest(dest_bin, url, version, channel, label, board,
+                              addon)
     out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     print("Wrote %s  (board=%s channel=%s label=%s)"
           % (out, board, channel, label))
     print(json.dumps(manifest, indent=2))
+    print()
+    print("Its browser console add-on, served beside the payload where a "
+          "console installs it from: %s, listed by %s/%s"
+          % (addon["cart"], dest_bin.parent, addon["index"]))
     if args.root:
         base = url.rsplit("/", 2)[0]
         print()

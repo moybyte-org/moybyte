@@ -382,6 +382,11 @@ jobs:
           # The C6 slave's identity stamp (P4 job only) -- the publisher reads
           # c6.version out of it; the .bin itself rode the find above.
           cp dist/p4/c6_build.json out/ 2>/dev/null || true
+          # The browser console add-on every board's build packs: the
+          # publisher puts it beside the payload under the digest the image
+          # names (tools/web_pack.py), and refuses that board's manifest when
+          # the run carries no page its image names.
+          cp dist/*/moybyte_web.pack out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

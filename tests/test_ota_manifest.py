@@ -6,10 +6,22 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import gen_ota_manifest as gom  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_page(monkeypatch):
+    """These tests are about the manifest; the page beside it is
+    tests/test_web_page_release.py's."""
+    monkeypatch.setattr(gom.web_pack, "page_beside",
+                        lambda image, board: (str(image), "0" * 64))
+    monkeypatch.setattr(gom.web_pack, "publish_addon",
+                        lambda *a: {"page": "p", "cart": "c", "index": "i"})
 
 
 def test_build_manifest_computes_size_and_sha256(tmp_path):

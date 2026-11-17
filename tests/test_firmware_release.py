@@ -34,6 +34,9 @@ def _load(path, name):
 
 
 publish = _load("tools/publish_firmware_release.py", "_moy_publish")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import gen_web_blob as gwb  # noqa: E402
+import web_pack  # noqa: E402
 fetch = _load("tools/fetch_ci_firmware.py", "_moy_fetch")
 build = _load("site/build.py", "_moy_site_build")
 
@@ -225,8 +228,14 @@ def _artifacts_with_ota(tmp_path, stamp=STAMP, board="tdeck", app=True):
     spec = next(b for b in build.BOARDS if b["id"] == board)
     (folder / spec["images"][0]).write_bytes(b"IMAGE:" + board.encode())
     if app:
+        # The page its build writes beside it, named in the image.
+        asset = folder / "page.html"
+        asset.write_bytes(b"<p>" + board.encode())
+        data, named = gwb.pack([("index.html.gz", str(asset), 4 + len(board), "-")])
+        asset.unlink()
+        (folder / web_pack.PACK_FILE).write_bytes(data)
         (folder / publish.OTA_IMAGES[board]).write_bytes(
-            b"\xe9APP:" + board.encode() * 8)
+            b"\xe9APP:" + board.encode() * 8 + named)
     if stamp is not None:
         (folder / publish.OTA_STAMP).write_text(json.dumps(dict(stamp, board=board)))
     return tmp_path / "artifacts"

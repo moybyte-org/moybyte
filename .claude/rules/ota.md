@@ -7,6 +7,8 @@ paths:
   - "tools/ota_*.py"
   - "tools/release.py"
   - "tools/publish_firmware_release.py"
+  - "tools/gen_ota_manifest.py"
+  - "tools/web_pack.py"
 ---
 
 <!-- Firmware updates: install machine, channels, signature policy. -->
@@ -36,6 +38,23 @@ paths:
   - **The OTA payload is the APP-PARTITION image, never the merged one.**
     `…_app.bin` is the payload; `…​.bin` is bootloader+table+app for a cable flash.
     The merged one is refused at close: it does not verify as an app image.
+  - **The browser console is an add-on cart, published beside every payload**
+    (owner, 2026-11-17). Every board's build packs the console
+    (`moybyte_web.pack`, `tools/gen_web_blob.py --pack`) and its image carries
+    only the sha256 of the pack's body. The release and the LAN mirror
+    (`tools/publish_firmware_release.py`, `tools/gen_ota_manifest.py`, both
+    through `tools/web_pack.py`) put beside the payload, named by that digest,
+    the cart `moybyte_web-<digest>.moy.zip` (`web_console.moy`, whose
+    manifest's `moybyte.fits` is the digest) -- the file a console installs
+    -- with the bare pack `moy_ota.page_url` names, the licence, and
+    `carts-<board>.json`, an index in moy-spec's format listing the cart for
+    the board's current image, signed as a carts index is. That happens on
+    both channels for every board, whether or not any console has the add-on.
+    The manifest names the cart and the pack (`cart`, `page`), unsigned: a
+    console holds a page to the digest its own image carries. **Nothing
+    published is removed**, so a rolled-back or hand-installed image still
+    finds its own, and a board whose run carries no page its image names keeps
+    the manifest already published and fails the publish.
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
     then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.
