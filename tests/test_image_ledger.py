@@ -138,3 +138,9 @@ def test_check_skips_where_the_records_are_absent(tmp_path):
     assert il.main(["--check", "--out", str(out), "--dir", str(tmp_path / "none")]) == 0
 
 
+
+
+def test_the_committed_ledger_names_its_records():
+    dates = il.file_dates(il.LEDGER)
+    assert dates, "docs/perf/image.md names no records: regenerate it"
+    assert il.main(["--check"]) == 0
