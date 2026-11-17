@@ -279,8 +279,16 @@ def test_perf_samples_give_drawn_fps_and_frame_ms():
                {"fps": (59.0, 59.0), "loop_ms": None, "busy": None}]
     m = pp.perf_metrics(samples, "window drag")
     assert m["window drag fps"]["value"] == 59.0
-    assert m["window drag frame"]["value"] == 10.0
+    assert m["window drag frame"]["value"] == round((9.0 * 60 + 11.0 * 58) / 118, 2)
     assert m["window drag frame"]["n"] == 2
+
+
+def test_a_frame_over_samples_of_unequal_cost_is_their_work_over_their_frames():
+    # A turning teapot: 40 ms frames for one sample, 50 ms for the next.
+    samples = [{"fps": (25.0, 25.0), "loop_ms": 40.0},
+               {"fps": (20.0, 20.0), "loop_ms": 50.0}]
+    m = pp.perf_metrics(samples, "Jet Teapot uncapped")
+    assert m["Jet Teapot uncapped frame"]["value"] == round(2000.0 / 45, 2)
 
 
 def test_the_history_keeps_the_metrics_in_the_order_they_were_taken():

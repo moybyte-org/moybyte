@@ -121,6 +121,9 @@ COMPILED_FOLDER = "jet_teapot.moy"
 # the first, which straddles the switch.
 FPS_SECS = 6.0
 PERF_SAMPLES = 2
+# Jet Teapot's frame cost follows the teapot's turn, 39 to 54 ms on an S3
+# over about 9 s: two samples read whichever half of the turn they landed on.
+COMPILED_SAMPLES = 5
 IDLE_SECS = 6.0
 DRAG_FRAMES = 300
 # Loop frames per drawn frame past which a loop spins rather than paces.
@@ -525,14 +528,20 @@ def frame_ms(s):
 
 
 def perf_metrics(samples, prefix):
-    """{name: metric} of PERF samples: drawn fps and ms per drawn frame."""
+    """{name: metric} of PERF samples: drawn fps and ms per drawn frame, the
+    latter the samples' work over their drawn frames, so a cart whose cost
+    varies across the span reads the frame its fps over that span implies."""
     fps = [s["fps"][0] for s in samples if s.get("fps")]
-    ms = [v for v in map(frame_ms, samples) if v is not None]
+    pairs = [(v, s["fps"][0]) for s, v in zip(samples, map(frame_ms, samples))
+             if v is not None]
+    ms = [v for v, _ in pairs]
+    drawn = sum(d for _, d in pairs)
     return {
         "%s fps" % prefix: metric(statistics.median(fps) if fps else None,
                                   "fps", HIGHER, fps),
-        "%s frame" % prefix: metric(statistics.median(ms) if ms else None,
-                                    "ms", LOWER, ms),
+        "%s frame" % prefix: metric(
+            sum(v * d for v, d in pairs) / drawn if pairs else None,
+            "ms", LOWER, ms),
     }
 
 
@@ -642,11 +651,11 @@ class Stage:
                 b.open("settings")
                 b.drain(1.0)
 
-    def cart(self, title, label=None):
+    def cart(self, title, label=None, samples=PERF_SAMPLES):
         with radio_room(title):
-            self._cart(title, label)
+            self._cart(title, label, samples)
 
-    def _cart(self, title, label):
+    def _cart(self, title, label, n):
         import p4_perf
         b = self.b
         label = label or title
@@ -667,7 +676,7 @@ class Stage:
             n0 = len(b.lines)
             self.diag(True)
             try:
-                samples = self.perf_samples(r["title"], since=n0)
+                samples = self.perf_samples(r["title"], n=n, since=n0)
             finally:
                 self.diag(False)
             self.metrics["%s frame" % label] = perf_metrics(samples, label)[
@@ -720,7 +729,7 @@ class Stage:
         uncap_was = bool(b.pyval("getattr(ws, 'uncap', False)", timeout=10))
         try:
             b.cmd("uncap 1", wait_for="REMOTE uncap")
-            self.cart(COMPILED, "%s uncapped" % COMPILED)
+            self.cart(COMPILED, "%s uncapped" % COMPILED, COMPILED_SAMPLES)
         finally:
             b.cmd("uncap %d" % uncap_was, wait_for="REMOTE uncap")
             if COMPILED_FOLDER not in had:
