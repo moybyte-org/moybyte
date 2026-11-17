@@ -317,28 +317,46 @@ class WindowChrome:
         which the windows stay off too. Over a window, the casts of the windows
         above it are its own repaint's (`_cast_onto`), so each lands once on
         freshly painted pixels. A window being dragged or resized casts the
-        same shadow as a still one: a moving thing keeps its shadow."""
-        if not _ui_draw.depth()[12]:
-            return
-        rc = self.root_canvas
-        th = self.ws.theme_colors
-        x0, y0, w, h = self.desk_rect()
-        x1, y1 = x0 + w, y0 + h
-        if clip is not None:
-            x0, y0 = max(x0, clip[0]), max(y0, clip[1])
-            x1, y1 = min(x1, clip[0] + clip[2]), min(y1, clip[1] + clip[3])
-        if x1 <= x0 or y1 <= y0:
-            return
-        rc.clip(x0, y0, x1 - x0, y1 - y0)
+        same shadow as a still one: a moving thing keeps its shadow. A cache
+        restore `_blit_backdrop_cache` left to it (`_fill`) is laid with the
+        first shadow, in one pass."""
+        fill = self._fill
+        self._fill = None
         try:
-            for key in self.z_order:
-                win = self.windows.get(key)
-                if win is None or win.minimized or win.saved is not None:
-                    continue
-                _ui_draw.frame_under(rc, th, self._shown_rect(win), win.title_h,
-                                key == self.focus_key)
+            if not _ui_draw.depth()[12]:
+                return
+            rc = self.root_canvas
+            th = self.ws.theme_colors
+            x0, y0, w, h = self.desk_rect()
+            x1, y1 = x0 + w, y0 + h
+            if clip is not None:
+                x0, y0 = max(x0, clip[0]), max(y0, clip[1])
+                x1, y1 = min(x1, clip[0] + clip[2]), min(y1, clip[1] + clip[3])
+            if x1 <= x0 or y1 <= y0:
+                return
+            rc.clip(x0, y0, x1 - x0, y1 - y0)
+            try:
+                for key in self.z_order:
+                    win = self.windows.get(key)
+                    if win is None or win.minimized or win.saved is not None:
+                        continue
+                    if fill is None:
+                        _ui_draw.frame_under(rc, th, self._shown_rect(win), win.title_h,
+                                             key == self.focus_key)
+                    else:
+                        cache = fill[0]
+                        ba = getattr(cache, "_batch_arr", None)
+                        if ba is not None and ba[0] > 4:
+                            cache.flush_batch()
+                        _ui_draw.frame_under_fill(rc, th, self._shown_rect(win), win.title_h,
+                                                  key == self.focus_key, cache._buf, fill[1],
+                                                  fill[2])
+                        fill = None
+            finally:
+                rc.clip()
         finally:
-            rc.clip()
+            if fill is not None:
+                self._lay(self._laid)
 
     def _shown_rect(self, win):
         """Where `win` stands this frame: a live resize's rubber rect, else

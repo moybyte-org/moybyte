@@ -121,6 +121,15 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
 // does not touch is left as it was in both. NULL, NULL: in place again.
 void moy_shape_shadow_io(const uint16_t *src, uint16_t *also);
 
+// The next shadow also lays `src`, laid out as the target, into every pixel
+// of buffer rect `outer` but those of `inner` (each x, y, w, h; the clip
+// does not apply): blended under the shadow where it falls, copied where it
+// does not -- a restore and the shadow over it in one pass, each pixel read
+// and stored once. NULL: none. moy_shape_shadow_fill_end lays a fill no
+// shadow took (one that drew nothing) as the copy alone.
+void moy_shape_shadow_fill(const uint16_t *src, const int outer[4], const int inner[4]);
+int moy_shape_shadow_fill_end(const moy_text_target_t *t);
+
 // Canonical `f` over canonical `b` at `alpha` (0..255): the colour a shadow
 // of `f` at `alpha` leaves over `b` inside its corners, so a solid fill that
 // stands for a tint, painted beside one, matches it to the bit.

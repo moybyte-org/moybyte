@@ -6,7 +6,7 @@
 #   -- the style                      metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
 #   -- window frames                  frame, frame_buttons, frame_band (C)
-#   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_onto, cast (C)
+#   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_fill, frame_under_onto, cast (C)
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
@@ -1409,6 +1409,15 @@ def frame_under(cv, th, rect, title_h, active, mode=UNDER_FULL):
     """What window `rect` leaves to the pixels under it: its shadow at `mode`'s
     size and its outline's partly covered pixels, blended over them."""
     _C.frame_under(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode)
+
+
+def frame_under_fill(cv, th, rect, title_h, active, src, outer, inner, mode=UNDER_FULL):
+    """`frame_under` over `src`, a buffer laid out as the canvas's: `src`
+    laid into buffer rect `outer` but `inner` (the clip does not apply), the
+    shadow blended over it where it falls, each pixel once -- a cache's
+    restore and the first window's shadow over it in one pass."""
+    _C.frame_under_fill(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode,
+                        src, outer, inner)
 
 
 def frame_under_onto(cv, th, rect, title_h, active, onto, onto_th, onto_active,

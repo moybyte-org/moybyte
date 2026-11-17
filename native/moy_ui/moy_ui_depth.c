@@ -546,14 +546,21 @@ void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int acti
     frame_body(&d, w, th, active, MOY_SHAPE_INNER, matte);
 }
 
-static void under(const dd_t *d, moy_ui_box_t w, int th, int active, int mode) {
+// `src`: a fill the shadow lays as it draws (moy_shape_shadow_fill), laid
+// before the fringe whether or not a shadow drew.
+static void under(const dd_t *d, moy_ui_box_t w, int th, int active, int mode,
+                  const uint16_t *src, const int *outer, const int *inner) {
     int g[MOY_UI_GEOM];
     moy_ui_frame_geom(w.w, w.h, th, active, mode, g);
     moy_shape_shadow_t sh;
     if (shadow_of(&s_depth, g[0], active, mode, &sh)) {
         moy_shape_hole_t body = {w.x, w.y, w.w, w.h, g[0]};
+        moy_shape_shadow_fill(src, outer, inner);
         moy_shape_shadow(&d->t, w.x, w.y, w.w, w.h, &sh, &body);
+    } else {
+        moy_shape_shadow_fill(src, outer, inner);
     }
+    moy_shape_shadow_fill_end(&d->t);
     frame_body(d, w, th, active, MOY_SHAPE_FRINGE, 0);
 }
 
@@ -563,7 +570,25 @@ int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int activ
     if (!s_depth.frames) {
         return MOY_UI_OK;
     }
-    under(&d, w, th, active, mode);
+    under(&d, w, th, active, mode, NULL, NULL, NULL);
+    return MOY_UI_OK;
+}
+
+int moy_ui_frame_under_fill(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
+                            int mode, const void *src, size_t len, moy_ui_box_t outer,
+                            moy_ui_box_t inner) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    if (src == NULL || len < d.t.cap * 2u) {
+        return MOY_UI_BAD;
+    }
+    int o[4] = {outer.x, outer.y, outer.w, outer.h}, in[4] = {inner.x, inner.y, inner.w, inner.h};
+    if (!s_depth.frames) {
+        moy_shape_shadow_fill((const uint16_t *)src, o, in);
+        moy_shape_shadow_fill_end(&d.t);
+        return MOY_UI_OK;
+    }
+    under(&d, w, th, active, mode, (const uint16_t *)src, o, in);
     return MOY_UI_OK;
 }
 
@@ -627,7 +652,7 @@ int moy_ui_frame_under_onto(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int 
         d.t.cy0 = by + i;
         d.t.cy1 = by + j;
         if (d.t.cx1 > d.t.cx0) {
-            under(&d, w, th, active, mode);
+            under(&d, w, th, active, mode, NULL, NULL, NULL);
         }
         i = j;
     }

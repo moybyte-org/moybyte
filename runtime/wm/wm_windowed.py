@@ -200,6 +200,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                                       # rect, None (all of it) or False (nothing)
         self._restored_f = -1         # ...and the frame it was this frame's in
         self._laid = []               # the rects of it the desk was laid in
+        self._fill = None             # (cache, outer, inner): a restore draw_unders
+                                      # lays with the first shadow (`_fill_ok`)
+        self._fill_on = None          # (canvas, cache, ok): `_fill_ok`'s answer
         self._clock_held = [None, -1, 0]  # the desk clock: text, frame, in a row
         self._foot_gen = None         # the look the windows' feet were sized under
         self._root_marks = None       # ui.marks' active before a window's install

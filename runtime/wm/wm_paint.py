@@ -243,6 +243,7 @@ class WindowPaint:
         laid = self._laid
         del laid[:]
         if win is None or bx0 >= bx1 or by0 >= by1:
+            bx0 = bx1 = by0 = by1 = 0
             laid.append((x0, y0, x1 - x0, y1 - y0))
         else:
             if by0 > y0:                                       # top strip
@@ -253,11 +254,45 @@ class WindowPaint:
                 laid.append((x0, by0, bx0 - x0, by1 - by0))
             if bx1 < x1:                                       # right strip
                 laid.append((bx1, by0, x1 - bx1, by1 - by0))
-        for r in laid:
-            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+        if self._fill_ok(rc, laid):
+            # laid by draw_unders with the first shadow over it, one pass
+            self._fill = (self._backdrop, (x0, y0, x1 - x0, y1 - y0),
+                          (bx0, by0, bx1 - bx0, by1 - by0))
+        else:
+            self._lay(laid)
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
         self._restored = (x0, y0, x1 - x0, y1 - y0)
         return self._restored
+
+    def _lay(self, laid):
+        rc = self.root_canvas
+        for r in laid:
+            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+
+    def _fill_ok(self, rc, laid):
+        """Whether draw_unders lays the cache's `laid` rects with the first
+        shadow it draws (ui_draw.frame_under_fill): the depth's shadows are
+        on, the cache's buffer is laid out as the root canvas's, and no rect
+        is one the canvas moves by DMA (`FBCPY_MIN_PX`)."""
+        if not _ui_draw.depth()[12]:
+            return False
+        cache = self._backdrop
+        f = self._fill_on
+        if f is None or f[0] is not rc or f[1] is not cache:
+            ok = (getattr(rc, "_ui", None) is not None and getattr(cache, "_buf", None) is not None
+                  and getattr(rc, "_ox", 0) == 0 and getattr(rc, "_oy", 0) == 0
+                  and getattr(rc, "_stride", rc.w) == getattr(cache, "_stride", cache.w)
+                  and getattr(rc, "_bh", rc.h) == cache.h)
+            f = self._fill_on = (rc, cache, ok,
+                                 getattr(rc, "FBCPY_MIN_PX", None) if ok else None)
+        if not f[2]:
+            return False
+        mn = f[3]
+        if mn is not None:
+            for r in laid:
+                if r[2] * r[3] >= mn:
+                    return False
+        return True
 
     @staticmethod
     def _union_bbox(rects):

@@ -188,6 +188,8 @@ _DRAW_SIGS = (
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
     ("moy_ui_frame_under", [c.POINTER(_Sink), _Box, _I, _I, _I], _I),
+    ("moy_ui_frame_under_fill", [c.POINTER(_Sink), _Box, _I, _I, _I, c.c_void_p, c.c_size_t,
+                                 _Box, _Box], _I),
     ("moy_ui_frame_under_onto", [c.POINTER(_Sink), _Box, _I, _I, _I, _Box, _I, _I], _I),
     ("moy_ui_cast", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_focus", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, c.POINTER(_Box),

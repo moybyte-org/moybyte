@@ -137,6 +137,47 @@ def test_a_drag_frame_is_its_live_render(tmp_path):
     assert _below_bar(ws) == cached
 
 
+@pytest.mark.parametrize("beside", [False, True])
+def test_a_drag_restore_laid_with_the_first_shadow_is_the_restore_then_the_shadow(
+        tmp_path, monkeypatch, beside):
+    """The cache restore a drag frame lays with the first shadow over it, in
+    one pass (ui_draw.frame_under_fill), leaves every pixel the restore and
+    then the shadow leave: frame for frame, beside a still window or alone,
+    the window moving every frame by a step that is not the last's."""
+    fills = _spy(monkeypatch, wm_chrome, "frame_under_fill")
+    shots = []
+    for fused in (True, False):
+        ws, drv = _desk(tmp_path / str(fused))
+        if not fused:
+            ws.wm._fill_ok = lambda rc, laid: False
+        if beside:
+            ws.home.open_projects()
+            drv.frame(0.0)
+        ws.open_settings()
+        drv.frame(0.0)
+        _quiet(ws)
+        win = ws.wm.windows["settings"]
+        gx, gy = win.x + win.w // 2, win.y + 4
+        drv.touch(gx, gy)
+        drv.frame(0.0)
+        frames = []
+        for k in range(8):
+            gx += (5, -3, 11, 0, -7, 2, 6, -13)[k]
+            gy += (2, 4, -6, 9, 1, -3, 0, 5)[k]
+            drv.touch_drag(gx, gy)
+            drv.frame(0.0)
+            frames.append(bytes(ws.sys_canvas._buf))
+        assert ws.wm._drag is not None
+        shots.append(frames)
+        if fused:
+            assert fills, "no drag frame laid its restore with a shadow"
+            del fills[:]
+        else:
+            assert not fills
+    for k, (a, b) in enumerate(zip(*shots)):
+        assert a == b, "drag frame %d differs" % k
+
+
 def test_a_released_window_settles_to_its_full_shadow(tmp_path):
     ws, drv = _desk(tmp_path, variant="dark")
     win, (hx, hy) = _drag(ws, drv)

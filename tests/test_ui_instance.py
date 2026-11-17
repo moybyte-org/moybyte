@@ -116,6 +116,8 @@ SHARED.update({
     ("moy_shape.c", "s_mask"): DRAWER,
     ("moy_shape.c", "s_run"): DRAWER,
     ("moy_shape.c", "s_io"): DRAWER + ": set for the shadow drawn next",
+    ("moy_shape.c", "s_lut"): DRAWER,
+    ("moy_shape.c", "s_fill"): DRAWER + ": set for the shadow drawn next",
     ("moy_path.c", "s_edges"): DRAWER,
     ("moy_path.c", "s_edge_cap"): DRAWER,
     ("moy_path.c", "s_acc"): DRAWER,
