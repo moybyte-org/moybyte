@@ -247,8 +247,9 @@ class InputRouter:
         # Windowed WM (#73): while a window OTHER than the playtest holds input
         # focus, the game-space pointer publishes with click/down stripped, so a
         # background running cart never eats the taps meant for the editor beside
-        # it. The fullscreen-stack WM has no hook -> unchanged.
-        _pp = getattr(ws.wm, "player_has_pointer", None)
+        # it. The fullscreen-stack WM strips nothing.
+        wm = ws.wm
+        windowed = wm.has_desk
         # The idle publish is REUSED, not rebuilt (#66 lever 1, 2026-09-08).
         # While a healthy GAME owns the glass and the pointer did nothing this
         # frame -- no click, no held finger, not moved -- the game pointer this
@@ -257,12 +258,15 @@ class InputRouter:
         # stripping a tap, a wallpaper -- replaced the object) and the geometry
         # it was mapped through has not moved. Rebuilding it anyway cost the
         # mapping's tuples every loop iteration of every play frame (~0.4 ms
-        # a loop on the S3, see wm.py). The fullscreen tiers only: the
-        # windowed WM's focus can strip a tap without the pointer moving, so
-        # it keeps the unconditional publish. Under an app the publish is kept
-        # the same way, and the layer walk below still runs.
+        # a loop on the S3, see wm.py). A desk's focus strips only a click
+        # or a held finger, which an idle frame has none of; its mapping is
+        # the player window's, so there the key adds the viewport's answer:
+        # the same object while nothing it maps through moved (a player
+        # window's is made fresh each call, which never keeps). Under an app
+        # the publish is kept the same way, and the layer walk below still
+        # runs.
         kept = False
-        if (_pp is None and not click and not p.down and not ws._ptr_was_down
+        if (not click and not p.down and not ws._ptr_was_down
                 and px == ws._ptr_last_x and py == ws._ptr_last_y
                 and ws.run.player.cart_error is None
                 and ws.input.game_pointer is ws._gp_idle):
@@ -278,15 +282,16 @@ class InputRouter:
             if (gc is k[1] and sc is k[2]
                     and run.view is k[0]
                     and gc.w == k[3] and gc.h == k[4]
-                    and sc.w == k[5] and sc.h == k[6]):
-                if ws.wm.top_is_player():
+                    and sc.w == k[5] and sc.h == k[6]
+                    and (not windowed or wm.viewport() is k[7])):
+                if wm.top_is_player():
                     if _perf:
                         ws._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
                     return
                 kept = True
         if not kept:
             gx, gy = ws.game_xy(px, py)
-            _live = _pp() if _pp is not None else True
+            _live = wm.player_has_pointer() if windowed else True
             gp = (gx, gy, click and _live, p.down and _live)
             ws.input.game_pointer = gp
             if click or p.down:
@@ -306,6 +311,7 @@ class InputRouter:
                 k[4] = gc.h
                 k[5] = sc.w
                 k[6] = sc.h
+                k[7] = wm.viewport() if windowed else None
         if _perf:
             ws._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
         # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and

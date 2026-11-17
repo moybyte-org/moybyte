@@ -2777,6 +2777,41 @@ def test_branch_slots_reads_the_mode(tmp_path):
     ws.wm.stack.goto("launcher")
 
 
+def test_an_idle_desk_frame_lists_no_stack_and_keeps_its_game_pointer(tmp_path):
+    """Every routed pointer frame syncs the windows and publishes the game
+    pointer. While the stack and the pointer stand still, the sync asks the
+    stack kind by kind (`_slots_same`) and the publish is the one standing:
+    a board's idle desk makes no list and no tuple a frame. A change to
+    the stack still syncs."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    st = ws.wm.stack
+    listed = []
+    real = st.kinds
+    st.kinds = lambda: listed.append(1) or real()
+    for windows in ([], ["settings", "calc", "menu"]):
+        if windows:
+            _desk_with_three(ws, drv)
+        for _ in range(3):
+            drv.frame(1 / 30)
+        del listed[:]
+        gp = ws.input.game_pointer
+        for _ in range(5):
+            drv.frame(1 / 30)
+        assert not listed, windows
+        assert ws.input.game_pointer is gp, windows
+        assert ws.wm._kinds == windows
+    ws.home.open_library()
+    ws.wm.sync_windows()
+    assert ws.wm._kinds == []
+    assert listed
+    # A local a comprehension or a closure reads is a cell, made at every
+    # call on a board (CPython before 3.12 compiles the same cells).
+    for fn in (type(ws.wm).sync_windows, type(ws.wm)._slots_same,
+               type(ws.router)._route_taps, type(ws).animating, type(ws)._needs_redraw):
+        assert not fn.__code__.co_cellvars, (fn.__name__, fn.__code__.co_cellvars)
+
+
 def test_branch_keeps_animating_reads_the_mode(tmp_path, monkeypatch):
     ws = _ws(tmp_path)
     monkeypatch.setattr(ws.wallpaper, "is_animating", lambda dt: True)

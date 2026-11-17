@@ -3044,9 +3044,9 @@ class Workstation:
             return True
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
-        # editor beside a playtest). No hook on the fullscreen-stack WM.
-        _ka = getattr(self.wm, "keeps_animating", None)
-        if _ka is not None and _ka(dt, pages):
+        # editor beside a playtest). Called, never looked up: a getattr of a
+        # method makes a bound method each frame.
+        if self.wm.keeps_animating(dt, pages):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
         # button (and clearing the flag when the effect ends) without input (#50).

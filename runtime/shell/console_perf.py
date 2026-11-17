@@ -83,8 +83,9 @@ class PerfMeters:
         ws._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
         ws._ptr_was_down = False  # ...and whether it was held (release edge)
         ws._gp_idle = None      # the idle game_pointer we last published, and
-        ws._gp_key = [None] * 7  # the geometry it was mapped through: the
+        ws._gp_key = [None] * 8  # the geometry it was mapped through: the
                                    # declared view, both canvases, their dims
+                                   # and, on a desk, the viewport's answer
         # Per-frame method probes, cached by the object they were taken on
         # (#66 lever 1): getattr on a method allocates a bound method each call.
         ws._rs_cv = None        # _reset_canvas_state's canvas / reset_state

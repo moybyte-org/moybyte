@@ -716,6 +716,26 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         st = self.stack.kinds()
         return st[base:]
 
+    def _slots_same(self):
+        """Whether `_slots()` would answer `self._kinds`, asked of the stack
+        kind by kind: a kind sits once in a back-stack, so the depth and
+        each kind's index settle it with no list made, as every routed
+        pointer frame asks."""
+        kinds = self._kinds
+        if self.mode == "console":
+            return not kinds
+        st = self.stack
+        i = st.index("desk") + 1
+        if not i:
+            return not kinds
+        if st.depth() != i + len(kinds):
+            return False
+        for k in kinds:
+            if st.index(k) != i:
+                return False
+            i += 1
+        return True
+
     def window_kinds(self):
         """The kinds open as windows on the desk, bottom -> top (none in
         console mode)."""
@@ -725,7 +745,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         """Mirror the back-stack into window records: drop windows whose kind
         was popped, create records (buffer + layout context + cascade
         position) for newly-pushed ones."""
-        keys = self._slots()
+        keys = self._kinds if self._slots_same() else self._slots()
         front, self._front = self._front, None
         if keys != self._kinds:
             alive = set(keys)
@@ -740,7 +760,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                     self.windows[g] = self._make_window(g, g, depth)
             # The z-order keeps its windows where they were; a new one opens
             # on top.
-            order = [g for g in self.z_order if g in alive]
+            # A loop, not a comprehension: one would close over `alive`,
+            # and a closed-over local is a cell made at every call.
+            order = []
+            for g in self.z_order:
+                if g in alive:
+                    order.append(g)
             for g in keys:
                 if g not in order:
                     order.append(g)

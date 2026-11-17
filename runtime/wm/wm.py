@@ -192,6 +192,11 @@ class FullscreenStackWM:
         frame now would pay it; never here."""
         return False
 
+    def keeps_animating(self, dt, pages=True):
+        """True while a window keeps frames flowing that the stack top would
+        not; no windows here."""
+        return False
+
     def refill_step(self):
         """A frame with nothing to paint brings a window's buffer up to the
         glass (the windowed WM); nothing here, no windows."""
