@@ -22,7 +22,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/.build"
 MPY_DIR="${BUILD_DIR}/micropython"
-MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_C3_ZERO"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 DIST_DIR="${REPO_ROOT}/dist/c3_zero"
@@ -81,6 +80,10 @@ moybyte_patch_gc_split_reserve
 # DECLINED moybyte_patch_p4_ppa_srm_mb_order -- an ESP32-P4 silicon patch.
 # DECLINED moybyte_patch_p4_coredump_dram -- an ESP32-P4 linker patch: the
 #    rev < v3 P4's high-SRAM data section. The C3's linker script has none.
+# DECLINED moybyte_patch_p4_heap_low_sram -- an ESP32-P4 heap patch: the
+#    rev < v3 P4's low-SRAM heap priority. The C3 has no such region.
+# DECLINED moybyte_patch_p4_ppa_trans_context -- an ESP32-P4 driver patch: the
+#    PPA's transaction elements. No PPA.
 # DECLINED moybyte_patch_esp_hosted_bump -- the P4's radio; this one is on-die.
 # DECLINED moybyte_patch_lfs_sizes -- measured on the P4s' flash only (the
 #    XIAO's reason).
