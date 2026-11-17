@@ -190,6 +190,8 @@ MOY_CRASH_IRAM int moy_kstate_open_id(const moy_kstate_t *st, const char **id) {
         *id = st->open_wallpaper;
         return MOY_ROLE_WALLPAPER;
     }
-    *id = "";
+    // The empty id is the state's own: the panic wrapper copies it with the
+    // flash cache possibly off, where a literal in flash is a second fault.
+    *id = st->open_app;
     return MOY_ROLE_NONE;
 }

@@ -327,6 +327,16 @@ def test_a_crash_names_the_app_before_the_wallpaper(lib):
     assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_WALLPAPER
 
 
+def test_no_open_id_is_an_empty_string_in_the_state_itself(lib):
+    # The panic wrapper copies the id with the flash cache possibly off, so the
+    # empty one must live where the state does, never in flash .rodata.
+    st = _state(lib)
+    out = ctypes.c_char_p()
+    assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == 0
+    assert out.value == b""
+    at = ctypes.cast(out, ctypes.c_void_p).value
+    assert ctypes.addressof(st) <= at < ctypes.addressof(st) + ctypes.sizeof(st)
+
 def test_a_crash_names_a_game_between_the_app_and_the_wallpaper(lib):
     st = _state(lib)
     out = ctypes.c_char_p()
