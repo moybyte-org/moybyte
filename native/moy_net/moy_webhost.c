@@ -1550,9 +1550,11 @@ static int term(out_t *o, const moy_http_req_t *r) {
 // Read the request on `fd` into W->req (HEAD_CAP's comment): 1 when it is in
 // hand, 0 when no head arrived, -1 when a longer body found no memory, which
 // is answered 503 once its bytes are read off (a close with bytes unread is a
-// reset, and the page would see no answer at all).
+// reset, and the page would see no answer at all). A longer request's buffer
+// still held here is one whose serve() an exception unwound (WEB_GUARD in
+// modmoy_net.c): no request is parked while serve() runs, so it goes back.
 static int read_req(int fd, moy_http_req_t *r, size_t *got) {
-    W->req = W->head;
+    req_done();
     if (moy_http_recv(fd, W->head, HEAD_CAP, r, got) != MOY_HTTP_OK) {
         return 0;
     }
