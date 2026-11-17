@@ -324,6 +324,23 @@ static int is_str(moy_cat_json_t f, const char *s) {
     return f.v != NULL && *f.v == '"' && moy_json_str_is(f.v, f.e, s, strlen(s));
 }
 
+// SPEC.md 13's `format`: "moy-" and a level, a decimal integer from 1 with no
+// sign and no leading zero. A cart at any level is a spec cart; the Player
+// compares the level with the console's (player_fit.FORMAT_LEVEL).
+static int is_moy_format(moy_cat_json_t f) {
+    if (f.v == NULL || *f.v != '"' || f.e - f.v < 7 || strncmp(f.v + 1, "moy-", 4) != 0) {
+        return 0;
+    }
+    const char *p = f.v + 5, *end = f.e - 1;
+    if (*p < '1' || *p > '9') {
+        return 0;
+    }
+    while (p < end && *p >= '0' && *p <= '9') {
+        p++;
+    }
+    return p == end;
+}
+
 // A string field decoded into the arena; NULL when it is not a string.
 static char *str_of(arena_t *a, moy_cat_json_t f, size_t *n) {
     if (f.v == NULL || *f.v != '"') {
@@ -872,7 +889,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     const char *man = e->man, *mend = e->man + e->man_n;
 
     e->format = field(man, mend, "format");
-    e->spec = is_str(e->format, "moy-1");
+    e->spec = is_moy_format(e->format);
     e->runtime = field(man, mend, "runtime");
     e->compiled = is_str(e->runtime, "wasm");
     // A native cart (docs/os_2026-11/tiers.md section 1) is compiled too, its

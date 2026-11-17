@@ -156,7 +156,8 @@ from editor_handle import EditorHandle
 from player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES, _compiled,
                         INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, INTERP_NOTICE_SUB_DEFAULT,
                         _Refused, newer_notice, fit_notice, _cart_fit, _fits, _cart_unbuilt,
-                        _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where)
+                        _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where,
+                        _format_newer)
 from player_diag import PlayerDiag, _heap_stats, _moycore_sram
 from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
 
@@ -798,6 +799,10 @@ class Player(PlayerDiag):
         cart = self._begin_run(ws, project, t0)
         self._log_begin(cart)
         self.verdict = _verdict(cart)
+        newer = _format_newer(cart)
+        if newer is not None:
+            return self._refuse_notice(newer_notice([newer]),
+                                       _ch.say_title(_ch.SAY_NEWER))
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)
@@ -992,6 +997,14 @@ class Player(PlayerDiag):
         self.cart_error = msg
         self.crash_line = None
         self.crash_file = None
+        return False
+
+    def _refuse_notice(self, text, title):
+        """Refuse a run before any of the cart's code has run, on the panel
+        drawn as a notice under `title`."""
+        self._refuse(text)
+        self._notice = text
+        self.notice_title = title
         return False
 
     def _begin_run(self, ws, project, t0):
@@ -2064,9 +2077,10 @@ class Player(PlayerDiag):
 
     @property
     def notice(self):
-        """A notice's text while it is the panel up, else None: a compiled
-        cart refused before it loaded, for want of room, of a signature or of
-        an import this console has."""
+        """A notice's text while it is the panel up, else None: a cart
+        refused before it loaded, for a format level above this console's, or
+        a compiled one for want of room, of a signature or of an import this
+        console has."""
         n = self._notice
         return n if n is not None and n == self.cart_error else None
 

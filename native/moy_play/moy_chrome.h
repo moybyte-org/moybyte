@@ -91,7 +91,7 @@ enum {
     MOY_SAY_CRASH = 0,          // a raise, on line N when there is one
     MOY_SAY_STUCK = 1,          // the runaway watch ended a frame
     MOY_SAY_FIT = 2,            // a compiled cart too big for what is free
-    MOY_SAY_NEWER = 3,          // a compiled cart built for a newer console
+    MOY_SAY_NEWER = 3,          // a cart built for a newer console
     MOY_SAY_NOLOAD = 4,         // a cart whose files will not load
     MOY_SAY_CONSOLE = 5,        // a stopped run that needs the console to go on
     MOY_SAYS = 6,
@@ -111,8 +111,8 @@ int moy_chrome_stuck_text(char *out, size_t n, uint32_t budget_ms);
 // never reads as a fit.
 int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
                         uint32_t block, uint32_t free_, uint32_t largest);
-// The newer-console notice: `missing`, the imports this console's table
-// lacks, comma-separated.
+// The newer-console notice: `missing`, what this console lacks, comma-separated:
+// the imports its table lacks, or the cart's format level (SPEC.md 13).
 int moy_chrome_newer_text(char *out, size_t n, const char *missing);
 // The stopped run's own two refusals' texts (NOLOAD, CONSOLE).
 const char *moy_chrome_say_text(int say);

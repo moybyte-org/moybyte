@@ -44,6 +44,13 @@ PNG, indexed or RGB, at most 64 KB (SPEC.md §3.6 has the profile). Paint opens 
 a cart without one shows its icon instead, and a file outside the profile is
 ignored, never refused.
 
+A manifest's `format` says the console a cart needs (SPEC.md §13): `"moy-"` and a
+level. This console runs level 1 (`runtime/run/player_fit.py`'s `FORMAT_LEVEL`), and a
+cart above it, in any language, is refused before any of its code runs, on the
+"Needs a newer console." notice a compiled cart missing an import gets. A `format`
+that names no level, such as the `"moybyte-cart-v1"` a cart made here carries, is a
+Moybyte cart and runs.
+
 Three more manifest fields say what the cart is in a list (SPEC.md §3.7), and
 none of them is ever a reason to refuse it: `description` (plain text, at most
 240 bytes), `genre` (one of twelve words; any other is no genre) and `tags` (at

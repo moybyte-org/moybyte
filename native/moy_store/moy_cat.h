@@ -69,7 +69,7 @@ typedef struct {
     const char *broken;         // NULL, or why the manifest would not read
     const char *man;            // the manifest's text (a synthesised one when broken)
     size_t man_n;
-    int spec;                   // "format": "moy-1"
+    int spec;                   // "format": "moy-" and a level (SPEC.md 13)
     int compiled;               // "runtime": "wasm", or a native cart
     const char *main;           // the main script's name, decoded
     size_t main_n;

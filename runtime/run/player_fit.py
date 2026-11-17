@@ -4,6 +4,7 @@
 #   _exc_cart_line        the cart line a Python exception was raised at
 #   _compiled             a compiled ("runtime": "wasm") cart
 #   newer_notice          the notice for a cart built for a newer console
+#   _format_newer         a cart whose format level is above this console's
 #   fit_notice            the notice for a cart too big to load
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
@@ -171,6 +172,26 @@ INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 class _Refused(Exception):
     """A compiled cart refused before it loads: args are the notice and
     the title it is drawn under."""
+
+
+# The moy-spec format level this console implements (SPEC.md 13). A cart whose
+# `format` names a level above it was built for a newer console, and is refused
+# before any of its code runs, whatever its runtime, on the notice a compiled
+# cart missing an import gets. A `format` that names no level -- Moybyte's own
+# "moybyte-cart-v1", or none -- is a Moybyte cart and runs.
+FORMAT_LEVEL = 1
+
+
+def _format_newer(cart):
+    """The cart's `format` when it names a level above FORMAT_LEVEL ("moy-"
+    and a decimal integer from 1, no sign, no leading zero), else None."""
+    fmt = (cart or {}).get("format")
+    if not isinstance(fmt, str) or not fmt.startswith("moy-"):
+        return None
+    digits = fmt[4:]
+    if not digits or digits[0] == "0" or any(d not in "0123456789" for d in digits):
+        return None
+    return fmt if int(digits) > FORMAT_LEVEL else None
 
 
 def newer_notice(missing):
