@@ -908,6 +908,7 @@ same here as on any other console that implements the spec.
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
 | `rnd(n=1.0)` | random float in `[0, n)` |
+| `srand(seed=0)` | seed `rnd`: the same seed replays the same sequence on the same tier |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
 | `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |

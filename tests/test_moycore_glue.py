@@ -52,6 +52,7 @@ from pathlib import Path
 import pytest
 
 from tools.wasm_module import format_version
+import spec_table
 
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
@@ -881,19 +882,6 @@ def test_a_pmem_holder_that_has_not_loaded_its_cells_starts_from_zeroes(w):
 # -- the superset: a DENY list, not an allow list ------------------------------
 
 
-def _libmoy_installed_globals():
-    """The global names libmoy's own binding installs, parsed from it."""
-    src = (ROOT / "native" / "moycore" / "libmoy" / "moy_lua.c").read_text(
-        encoding="utf-8")
-    head = src.index("static const luaL_Reg VERBS[] = {")
-    table = src[head:]
-    table = table[:table.index("{NULL, NULL}")]
-    names = set(re.findall(r'\{"(\w+)",', table))
-    host = src[src.index("static void open_host_verbs"):head]
-    # W and H are integers (SPEC.md 9's canvas size), not verbs.
-    return names | set(re.findall(r'lua_setglobal\(L, "(\w+)"\)', host))
-
-
 def test_the_deny_list_is_exactly_what_libmoys_binding_installs():
     """The list the registration loop subtracts is only as good as its
     contents, and every test below derives its namespace FROM it -- so this is
@@ -909,7 +897,7 @@ def test_the_deny_list_is_exactly_what_libmoys_binding_installs():
     # which is why they sit in NOT_REGISTRABLE instead.
     overridden = {"make_layer", "draw_layer"}
     assert overridden <= NOT_REGISTRABLE
-    installed = _libmoy_installed_globals()
+    installed = spec_table.verbs()
     assert installed - overridden - LIBMOY_VERBS == set(), \
         "libmoy installs verbs LIBMOY_VERBS has not learnt"
     assert LIBMOY_VERBS - installed == set(), \
