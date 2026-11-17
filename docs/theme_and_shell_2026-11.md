@@ -732,7 +732,7 @@ another role than `title` hands the toolbar's text that role's ink of
 - **The text never reaches a draw.** The loader compiles every surface once
   into a small integer record (a style id, `stid`; not
   `docs/surface_model_v1.md`'s Surface `sid`) in a C table. A draw is **one C
-  call through the toolkit's sink** (`docs/kernel_toolkit_2026-10.md` §3.1),
+  call through the toolkit's sink** (`docs/history/kernel_toolkit_2026-10.md` §3.1),
   the path every primitive already draws through: a primitive whose kind has a
   surface paints it in place of its field and edge, and the WMs' decorations
   reach it through one `ui` face. Colours stay MOY64 indices resolved through
@@ -870,7 +870,7 @@ Font preset of Appearance (style.json's `preset_fonts`) and the face of a
 package that names it. Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
 `mg_text_raw`. The one text path for every app runtime is sprint 6's
-`moy_text` (`docs/kernel_toolkit_2026-10.md` §4).
+`moy_text` (`docs/history/kernel_toolkit_2026-10.md` §4).
 
 - **A theme font is a row behind `moy_text`'s font argument.** The call takes
   a `uint32` font id (petme128 is 0) at every scale; a theme font is another
@@ -1161,7 +1161,7 @@ host runs instead).
   read on glass, the planned answer is a label pill under the focused
   card's title; it is not built.
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
-  Python VM up, against the memory goal of `docs/native_kernel_2026-09.md` §4.4. Images and
+  Python VM up, against the memory goal of `docs/history/native_kernel_2026-09.md` §4.4. Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
   charged as such.
 
@@ -1343,7 +1343,7 @@ since the face's preview ring holds four looks and would thrash.
   **No cache keys on object identity.** A freed theme's `id()` can be reused by
   MicroPython, and identity keying is what `docs/surface_model_v1.md` §7 retired.
   The kernel ABI's theme handle carries the same generation (index plus
-  generation, `docs/native_kernel_2026-09.md` §4.3). This is the existing dirty protocol, not a new
+  generation, `docs/history/native_kernel_2026-09.md` §4.3). This is the existing dirty protocol, not a new
   mechanism; `set_theme` pokes no cache. `tests/test_theme_look_gen.py`
   re-installs a package under its own name with one role changed and holds the
   live console's pixels to a console booted under the edited package.
@@ -1398,8 +1398,8 @@ Kids will trade themes, so a theme is untrusted input:
 
 ## 7. Placement against the native kernel
 
-Sprint 6 of `docs/native_kernel_2026-09.md` put the toolkit's bodies in C with
-style as data (`docs/kernel_toolkit_2026-10.md`); the WMs stay Python (its §10
+Sprint 6 of `docs/history/native_kernel_2026-09.md` put the toolkit's bodies in C with
+style as data (`docs/history/kernel_toolkit_2026-10.md`); the WMs stay Python (its §10
 question 8: sprint 7 does not run); sprint 5 turned the app roles into an
 import-shaped ABI with a live token table and its generation. **Theming is
 written in C against the toolkit, with no Python reference** (owner,
@@ -1410,10 +1410,10 @@ written in C against the toolkit, with no Python reference** (owner,
 | the package format and the loader: validate, clamp, inherit, derive, readability (§2-§4, §6) | **C**, `native/moy_ui/moy_theme.c`, with its rules and seeds as style.json data | the toolkit's look is C; the loader writes the token row the look resolves against, and the boards, the host and the browser run the same reader |
 | the seeds as packages and style data | data | data crosses unchanged |
 | toolkit reach | Python surfaces calling the C toolkit | the apps and the WMs stay Python; a screen on the toolkit draws through its C primitives |
-| the surface painter and pattern lane, 9-slice and mask blits | **C**, `native/moy_ui` over `moy_gfx` and upstream libmoy | draw kernels are C; "a hot loop lives on one side" (`docs/native_kernel_2026-09.md` §4.1). The painter is an op of the toolkit's sink |
+| the surface painter and pattern lane, 9-slice and mask blits | **C**, `native/moy_ui` over `moy_gfx` and upstream libmoy | draw kernels are C; "a hot loop lives on one side" (`docs/history/native_kernel_2026-09.md` §4.1). The painter is an op of the toolkit's sink |
 | frame styles | **C** beside the primitives, reached from the WMs' decoration path | a style is our code, a theme only names it (§3.5) |
 | fonts | **C**, a row behind `moy_text`'s font argument | the one text call exists; a font is data behind it |
-| theme assets (fonts, sheets, images) | loader-owned buffers in PSRAM (`MALLOC_CAP_SPIRAM`), each a BUF row of the kernel's handle table with a role, as every off-heap buffer is (`docs/kernel_survival_2026-10.md`) | no second handle mechanism |
+| theme assets (fonts, sheets, images) | loader-owned buffers in PSRAM (`MALLOC_CAP_SPIRAM`), each a BUF row of the kernel's handle table with a role, as every off-heap buffer is (`docs/history/kernel_survival_2026-10.md`) | no second handle mechanism |
 
 **Memory rule.** On the S3 boards, PSRAM outside the Python heap is the
 cart-runtime reserve, and the biggest carts need most of it
@@ -1421,7 +1421,7 @@ cart-runtime reserve, and the biggest carts need most of it
 holds the seeds as flash constants and one installed package beside them),
 a hard byte cap (a theme.json is capped at 16384 bytes; owner, 2026-10-18:
 a theme may be big, the cap only has to exist), no per-tint bakes (§3.6),
-and the internal-SRAM gate of `docs/native_kernel_2026-09.md` §4.6. The
+and the internal-SRAM gate of `docs/history/native_kernel_2026-09.md` §4.6. The
 loader allocates nothing at boot: the installed slot is allocated on the
 first install. A new theme is data and moves only its own goldens.
 
@@ -1434,7 +1434,7 @@ PLAY opens) are the owner's (2026-09-27); the owner's direction on scope
 and a desktop mode for large ones; a layout is a short list of bars holding
 built-in widgets; a widget opens its component as a popover; fancy desktop
 things are wallpaper carts' job (§12.2). The rulings are §1.2's table (L0-L18).
-The WMs stay Python (`docs/native_kernel_2026-09.md` §10 question 8, and §7
+The WMs stay Python (`docs/history/native_kernel_2026-09.md` §10 question 8, and §7
 here).
 
 ### 8.1 The two modes, and the switch as explicit state
@@ -1787,7 +1787,7 @@ strip — is declined (§12.2).
 |---|---|
 | app carts (Python, `type: app`) | nothing breaks: `bar_h()` stays; `content_rect()` is the verb to move to; `docs/app_api_v1.md` says so in place |
 | shipped apps | read the content rect through their layouts (step 3 is byte-identical under the top bar) |
-| compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
+| compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/history/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
 | games | untouched: the Player surface is the cart's; no mode draws a bar over a game; on the desk a play opens full screen and the Editor's playtest docks (§8.1), and a game moved to a window keeps the size it opened at (#178) |
 | versioning | `docs/app_api_v1.md` stays v1: one additive verb; the role table's generation moves as any row addition does |
 
@@ -2242,7 +2242,7 @@ round them (design review R5-10, F6-04).
 
 | piece | side | why |
 |---|---|---|
-| both WMs and the mode state, the bar layer (a list of bars), the popover layer, the home layer, Settings rows, the resolver, slot packing (arithmetic once per relayout, cached on the layout object) | **Python** | `docs/native_kernel_2026-09.md` §10 question 8: sprint 7 does not run; the WMs are policy, and this doc adds policy, not kernels |
+| both WMs and the mode state, the bar layer (a list of bars), the popover layer, the home layer, Settings rows, the resolver, slot packing (arithmetic once per relayout, cached on the layout object) | **Python** | `docs/history/native_kernel_2026-09.md` §10 question 8: sprint 7 does not run; the WMs are policy, and this doc adds policy, not kernels |
 | the widget painters, the band, the tab row, the chips, the pill, the frames, the calendar grid | **C, existing and extended in place** | `moy_chrome_strip_band`, `chrome_strip_right` and the `ui` kinds are C already; a widget painter is one more op of the toolkit's sink, the calendar a grid of `ui.cell`s |
 | the RGB565 scaled blit | **C, a kernel** in `moy_gfx`: `blit565_resize` | one call per card, any ratio; benched on every board (#66) |
 | the compositor's strip rect list | **C, `native/moy_glass`** | a list set on relayout, each strip rotated only when it moved, is the Guition P4's lever (`docs/history/shell_layout_2026-10.md` §13 step 2); step 5 feeds it one strip a bar |
@@ -2769,7 +2769,7 @@ About eighteen systems were studied; the lessons that shaped this doc:
   is the ratchet; pinned apps are the desk's icon column, running ones the
   `chips` widget.
 - **A tiling WM**: two windows side by side need a reflowing compiled app,
-  which `docs/kernel_toolkit_2026-10.md` §12 defers; the Editor beside a
+  which `docs/history/kernel_toolkit_2026-10.md` §12 defers; the Editor beside a
   playtest is #178 and floating does it.
 - **Desktop mode on the T-Deck and the Guition S3**: §8.1's hardware reasons.
 - **Refusing PLAY while a playtest runs**: it is ended instead (owner,

@@ -64,7 +64,9 @@ def docs():
 # by NAME, not a path to one particular file, and demanding those resolve would
 # bury the real findings. Resolution is tried from the repo root, from the
 # document's own directory (UPSTREAM.md files legitimately say `../foo`), and
-# against docs/history/ for links into the archive.
+# the shorthand roots in ROOTS. A path with a directory part names that
+# directory: a file of the same basename elsewhere in the tree does not
+# resolve it.
 
 # The leading `+` is the PLANNED MARKER: `+runtime/_bootstrap.py` means "a file
 # this document proposes to create". It lives AT the reference rather than in a
@@ -99,7 +101,7 @@ BARE_RE = re.compile(
 # are here because CLAUDE.md says `native/moy_gfx/...` and `modules/moy_ota.py`
 # throughout -- shorthand for "inside the firmware tree being discussed", which
 # is idiomatic in that file and not worth expanding a hundred times.
-ROOTS = ("", "firmware/lilygo_t_deck_plus_mainline",
+ROOTS = ("", "native", "firmware/lilygo_t_deck_plus_mainline",
          "firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware/web_runner",
          "firmware/seeed_xiao_esp32s3_zero", "firmware/guition_jc3248w535",
          "firmware/guition_jc8012p4a1c", "docs/history")
@@ -158,18 +160,41 @@ NOT_OURS = (
     # The skin catalog, deleted by sprint 6's step 2 when its deltas moved
     # into native/moy_ui/style.json; the plans name it to say what crossed.
     "runtime/skin.py", "skin.py",
-    # The host-only modules' paths before runtime/host/ (2026-11-02), as the
-    # VENDORED copies name them (native/moy_audio/libmoy/UPSTREAM.md from
-    # moy-spec, native/moy_wasm/README.md from the WAMR fork). A copy is fixed
-    # upstream and re-vendored, never edited here.
-    "runtime/audio_binding.py", "runtime/moyhost_wasm.c", "runtime/moycore.py",
-    "runtime/wasm_host.py", "runtime/wasm_binding.py",
-    # Shared modules' paths before runtime/ grouped them into folders
-    # (2026-11-02), as the same vendored copies name them.
-    "runtime/console_notices.py", "runtime/cart_index.py", "runtime/cart_files.py",
-    "runtime/moy_sync.py", "runtime/audio.py", "runtime/player_fit.py",
-    "runtime/player.py",
 )
+
+
+# Paths a vendored document names as ITS upstream sees them. A copy is fixed
+# upstream and re-vendored, never edited here, so these resolve only from the
+# documents that carry them. A document of ours naming one is stale.
+VENDORED_DOCS = {
+    "native/moy_audio/libmoy/UPSTREAM.md": (
+        # The host-only modules' paths before runtime/host/ (2026-11-02), and
+        # shared modules' paths before runtime/ grouped them into folders.
+        "runtime/audio_binding.py", "runtime/moyhost_wasm.c", "runtime/audio.py"),
+    # moy-spec's own tree, named by the vectors copied from it.
+    "tests/cover_vectors/UPSTREAM.md": ("moycore/cover.py",),
+    "tests/listing_vectors/UPSTREAM.md": ("moycore/cart.py",),
+}
+
+
+def _is_file(entry):
+    return re.search(r"\.\w+$", entry) is not None
+
+
+def _not_ours(p, rel=None):
+    """True when `p` is a path this repo deliberately does not hold.
+
+    An entry with a file extension names ONE file and matches it whole or as
+    the tail of a longer path; an entry without one is a directory or prefix
+    and matches anywhere inside the path.
+    """
+    for entry in NOT_OURS + VENDORED_DOCS.get(rel, ()):
+        if _is_file(entry):
+            if p == entry or p.endswith("/" + entry):
+                return True
+        elif entry in p:
+            return True
+    return False
 
 
 def _candidates(rel, p):
@@ -180,7 +205,6 @@ def _candidates(rel, p):
     # A doc inside a vendored directory says `vendor/foo.c` meaning its own
     # directory as the parent sees it.
     out.append(os.path.normpath(os.path.join(os.path.dirname(here), p)))
-    out.append(os.path.join("docs/history", os.path.basename(p)))
     return out
 
 
@@ -203,7 +227,7 @@ def check_paths():
         for i, line in enumerate(lines, 1):
             for m in PATH_RE.finditer(line):
                 planned, p = m.group(1), m.group(2)
-                if any(t in p for t in NOT_OURS) or "*" in p or "..." in p:
+                if _not_ours(p, rel) or "*" in p or "..." in p:
                     continue
                 if planned:
                     # A document naming the file it intends to create is not
@@ -242,7 +266,7 @@ def check_paths():
             context = " ".join(lines[max(0, i - 3):i + 2])
             for m in BARE_RE.finditer(line):
                 planned, name = m.group(1), m.group(2)
-                if planned or any(t in name for t in NOT_OURS):
+                if planned or _not_ours(name, rel):
                     continue
                 if name in _basenames() or GENERATED_RE.search(name):
                     continue

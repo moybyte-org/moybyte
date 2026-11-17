@@ -25,7 +25,7 @@ more window-manager surface), #58 (the P4 "One" — the big-screen presentation)
 `docs/history/shell_ux_technical_plan_v1.md` (the staged migration that shipped this
 spec), `docs/history/shell_layers_refactor_v1.md` (the Layer decomposition),
 `docs/history/shell_os_architecture_v1.md` (the capability/syscall boundary; its
-per-surface API track remains open). `docs/shell_architecture_v1.md` (privileged
+per-surface API track remains open). `docs/history/shell_architecture_v1.md` (privileged
 system carts + layered compositor) is current. The kid-facing cart contract
 (`docs/moy_cart_api.md`) stayed frozen; the one addition is the `quit()` verb (§9).
 **One-line thesis:** there are exactly two concerns — *authoring* a cart and *playing*

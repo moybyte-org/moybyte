@@ -52,7 +52,7 @@ product), with the owner's later calls dated where they land.
   Lua (2026-09-30). A host without the tier refuses the runtime cleanly
   (SPEC.md §3.1) and pays nothing.
 - **One engine, one import table, every tier.** The host runs the same C
-  binding over WAMR through ctypes, as it runs Lua (`runtime/moycore.py`); a
+  binding over WAMR through ctypes, as it runs Lua (`runtime/host/moycore.py`); a
   host and a device that disagree about a verb is what deleted lupa. There is
   no wasmtime tier (the spike's runner stays an oracle in
   `experiments/wasm_aot/doom/`). The browser adapts the same C thunks in
@@ -74,7 +74,7 @@ product), with the owner's later calls dated where they land.
 - **A cart survives its firmware (owner, 2026-09-30, ESP 88).** A `.moy`
   carries `main.wasm` and any number of compiled modules, each named for its
   chip and format version (`tools/wasm_cart.py`'s `aot_name`); a console keeps
-  only its own (`tools/push_cart.py`'s `push_files`, `runtime/cart_index.py`),
+  only its own (`tools/push_cart.py`'s `push_files`, `runtime/carts/cart_index.py`),
   and with none the cart plays on the interpreter. The key names a FORMAT
   VERSION, never the fork commit ("Provenance"), so re-vendoring does not stale
   an installed cart.
@@ -91,7 +91,7 @@ product), with the owner's later calls dated where they land.
   without one. Assets are read through the cart's own folder and nothing else.
 - **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
   `writable` paths, kept beside the carts store in its app folder
-  `apps/<id>/` (`runtime/cart_files.py`) on every tier, untouched by an
+  `apps/<id>/` (`runtime/carts/cart_files.py`) on every tier, untouched by an
   install, an update or a push. A user's own files are a separate
   capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
   §2), which a compiled app reaches by its `moybyte.app` imports
@@ -258,7 +258,7 @@ the stop card as the cart's error, on the VM-stopped path
 traps in `_init` and counts its runs in a written file to hold both to it.
 The sync RPC
 declines binary files, so neither a module nor `main.wasm` crosses between a
-browser and a board (`runtime/moy_sync.py`): a compiled cart plays where it
+browser and a board (`runtime/carts/moy_sync.py`): a compiled cart plays where it
 was put -- on a board natively or on the interpreter, in a page that keeps its
 own carts on the browser's engine (`native/moy_wasm_web`); a page a board
 serves never lists it, having no `main.wasm` to scan.
@@ -401,7 +401,7 @@ through `footprint()` above -- and compares it with `mem()`'s PSRAM free total
 and largest block. A cart that does not fit opens the fit NOTICE: the Player's
 panel under the title "Too big for this console." naming the cart, what it
 needs and what the board has free, with the same way out as every panel and
-no EDIT (`runtime/player_fit.py`'s `fit_notice`). The footprint is the file's
+no EDIT (`runtime/run/player_fit.py`'s `fit_notice`). The footprint is the file's
 block (which the linear memory takes back), the pool, the module's own size
 for the text and data the loader maps, and the run stack; it over-counts the
 text by the module's relocations and symbols, so a cart it passes has the
@@ -425,7 +425,7 @@ refuses a cart too big: `moycore_glue.WasmRuntime.missing` reads the module's
 imports from its head (`wasm_head`) and holds them to `moycore.wasm_table()`,
 the table the engine registers, and a name it lacks opens the NOTICE under
 "Needs a newer console." naming the cart and every import missing
-(`runtime/player_fit.py`'s `newer_notice`). The comparison is
+(`runtime/run/player_fit.py`'s `newer_notice`). The comparison is
 `moycore_glue.missing_imports`, the one every tier's runtime uses: the host
 twin holds the module to the same table compiled into its binding. A cart is
 never linked short of an import and left to trap when it first calls it;
@@ -712,7 +712,7 @@ load and `device/moycore_glue.WasmRuntime.footprint`'s pre-check (via
 footprint also counts the module file as RESIDENT rather than reused -- the
 "module file is gone before its memory is allocated" guarantee above is
 AOT's alone, so an interpreted cart's file and its linear memory are two live
-allocations, not one reused as the other. The host (`runtime/wasm_host.py`)
+allocations, not one reused as the other. The host (`runtime/host/wasm_host.py`)
 always sizes by this rule too, because it always interprets. Measured peaks,
 the margin and the classic-vs-fast decision are #158's.
 
@@ -721,8 +721,8 @@ in Python: it looks for this console's own module by name first, and only
 opens the interpreter when there is none, or when the one it found does not
 check out for a reason that is not tamper evidence (an unsigned module, ESP 88's
 "Provenance" section). `self.interp` is the fact the Player reads --
-`runtime/player.py`'s `_start_runtime` -- to arm the timed system notice
-(`runtime/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
+`runtime/run/player.py`'s `_start_runtime` -- to arm the timed system notice
+(`runtime/shell/console_notices.py`'s `_draw_notice`, the same mechanism "MOYBYTE
 UPDATED" uses, never `_draw_toast`'s achievement banner): `ws.notices.notice(
 INTERP_NOTICE_TITLE, sub, "warn")`, where `sub` is `self.interp_cause`
 ("missing", "unsigned" or "firmware") read through `INTERP_NOTICE_SUB`. It
@@ -809,7 +809,7 @@ console's task until the loop returns.
   libmoy's. `tests/test_wasi_commands.py`'s hostile test drives WASI's
   imports raw with the arguments a hostile module passes.
 - `tests/test_wasm_cart.py`: the same import table on the host, over WAMR built
-  for Linux at this pin (`runtime/wasm_binding.py`, which always runs
+  for Linux at this pin (`runtime/host/wasm_binding.py`, which always runs
   main.wasm directly -- there is no per-chip AOT concept on the host) — the
   hello cart's pixel golden, the hooks under the tick model, par's items (one
   after another on the host), a trap, quit, the runtime-missing panel, the fit
