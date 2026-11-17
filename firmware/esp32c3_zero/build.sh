@@ -84,6 +84,8 @@ moybyte_patch_gc_split_reserve
 #    rev < v3 P4's low-SRAM heap priority. The C3 has no such region.
 # DECLINED moybyte_patch_p4_ppa_trans_context -- an ESP32-P4 driver patch: the
 #    PPA's transaction elements. No PPA.
+# DECLINED moybyte_patch_p4_clk_switch -- an ESP32-P4 startup patch: the
+#    P4's CPU clock switch. Not this chip.
 # DECLINED moybyte_patch_esp_hosted_bump -- the P4's radio; this one is on-die.
 # DECLINED moybyte_patch_lfs_sizes -- measured on the P4s' flash only (the
 #    XIAO's reason).

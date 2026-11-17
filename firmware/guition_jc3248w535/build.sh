@@ -118,6 +118,8 @@ moybyte_patch_mdns_psram
 
 # DECLINED moybyte_patch_p4_ppa_trans_context -- an ESP32-P4 driver patch: the
 # PPA's transaction elements. This board has no PPA.
+# DECLINED moybyte_patch_p4_clk_switch -- an ESP32-P4 startup patch: the
+# P4's CPU clock switch. This board is an ESP32-S3.
 
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 # component is the P4's radio: a C6 slave over SDIO. This board's WiFi and BLE

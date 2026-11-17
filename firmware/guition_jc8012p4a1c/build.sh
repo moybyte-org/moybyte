@@ -60,6 +60,10 @@ moybyte_patch_p4_heap_low_sram
 #     The PPA transactions' internal-RAM share (the lib says why).
 moybyte_patch_p4_ppa_trans_context
 
+#     The CPU clock switch's suspended-cache window kept in IRAM (the lib says
+#     why).
+moybyte_patch_p4_clk_switch
+
 # 2b) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.
 moybyte_idf_component esp_lcd

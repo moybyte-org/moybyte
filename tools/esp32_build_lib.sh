@@ -709,6 +709,25 @@ moybyte_patch_p4_ppa_trans_context() {
   fi
 }
 
+# The ESP32-P4 CPU clock switch patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF switches the CPU clock at startup with the external
+# memory cache suspended, in an IRAM_ATTR helper, but the helper is static
+# with one caller, esp_clk_init, which is in flash, so the compiler inlines it
+# there and the code between the suspend and the resume runs from flash. An
+# instruction fetch that misses the L1 cache in that window is a cache error
+# at the first boot step: no console is up, the panic cannot finish with the
+# cache off, and the bootloader's RTC watchdog resets the board 9 s later,
+# forever. Whether a fetch misses is the image's layout: the Guition P4's
+# image without the browser console put a cache line boundary inside the
+# window (2026-11-17). The patch keeps the helper out of line, in IRAM.
+moybyte_patch_p4_clk_switch() {
+  local f="${IDF_DIR}/components/esp_system/port/soc/esp32p4/clk.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: the isolated switch stays out of line" "${f}"; then
+    echo "== applying P4 CPU clock switch patch (the isolated switch out of line)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_clk_switch_out_of_line.patch"
+  fi
+}
+
 # PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
 # 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
 # for verified flash vendor IDs (0xC8/0x20) and otherwise returns
@@ -1126,6 +1145,23 @@ moybyte_submodules() {
   fi
 }
 
+# A P4 image's CPU clock switch, the code that runs with the external memory
+# cache suspended, must be its own function in internal RAM
+# (moybyte_patch_p4_clk_switch says why): an image where the compiler put it
+# back into flash-resident esp_clk_init is refused, since it may not boot.
+moybyte_p4_clk_switch_guard() {
+  local bout="$1"
+  grep -q '^CONFIG_IDF_TARGET_ESP32P4=y' "${bout}/sdkconfig" 2>/dev/null || return 0
+  local syms
+  syms="$(riscv32-esp-elf-nm "${bout}/micropython.elf")" || return 1
+  if ! grep -qE '^4ff[0-9a-f]{5} t esp_clk_cpu_freq_set_config_isolated$' <<< "${syms}"; then
+    echo "!! esp_clk_cpu_freq_set_config_isolated is not an IRAM function of its" >&2
+    echo "!! own in ${bout}/micropython.elf: the CPU clock switch would run from" >&2
+    echo "!! flash with the cache suspended (moybyte_patch_p4_clk_switch)" >&2
+    return 1
+  fi
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
   moybyte_phase mpy-cross
@@ -1173,7 +1209,8 @@ moybyte_build_and_collect() {
   # A core dump must carry the loaded modules' table (tools/coredump.py).
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
     || exit 1
-  echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
+  moybyte_p4_clk_switch_guard "${bout}" || exit 1
+  echo "OK ->${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }
 

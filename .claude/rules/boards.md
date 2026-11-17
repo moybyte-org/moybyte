@@ -325,7 +325,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (`moybyte_patch_p4_heap_low_sram`: the low SRAM serves plain internal
   allocations first, or the high SRAM loses its large blocks) and
   `p4_ppa_trans_context_internal_only.patch`
-  (`moybyte_patch_p4_ppa_trans_context`). Each is in `patches/`, and each
+  (`moybyte_patch_p4_ppa_trans_context`). `p4_clk_switch_out_of_line.patch`
+  (`moybyte_patch_p4_clk_switch`) keeps the startup CPU clock switch, which
+  runs with the external memory cache suspended, an IRAM function of its own:
+  inlined into flash-resident `esp_clk_init` it cache-faulted at the first
+  boot step of a Guition P4 image, silently, every boot (2026-11-17), and the
+  build refuses an image where it is inlined again. Each is in `patches/`, and each
   patcher is in `tools/esp32_build_lib.sh`. Status and numbers: #58, #202.
 - **A native module runs in U-mode on a P4, and the boot PMP layout and the
   vectors are the kernel's** (`native/moy_elf/moy_umode.h`): both P4 boards
