@@ -104,6 +104,11 @@ VENDOR = {
     os.path.join(ROOT, "tools"): {
         "wat.py": "tools/wat.py",
     },
+    # The Lua cart API's editor stubs (EmmyLua annotations, never executed):
+    # moy-spec's verb table as a language server reads it, the spec's file.
+    os.path.join(ROOT, "firmware", "web_runner"): {
+        "moy-api.lua": "moy-api.lua",
+    },
 }
 
 

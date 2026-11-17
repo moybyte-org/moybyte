@@ -5,22 +5,28 @@
 -- and typo squiggles on every console verb. The behavioural contract is the
 -- moy spec (SPEC.md); one line here per verb, the spec is the truth.
 --
--- Every verb below is CORE (runs on any conforming console) unless marked:
---   EXTENSION: <name> -- standard extension (SPEC.md 10); declare it in your
---                        manifest's "extensions" or hosts may lack it
---   DRAFT 6.1         -- provisional (SPEC.md 6.1): exists in the reference
---                        player, names/signatures still moving, NOT core 0.1
---   VENDOR            -- reference-console feature, no spec; a cart using it
---                        is non-portable by construction
+-- Every verb below is CORE -- it runs on any conforming console.
 --
--- Screen: 320x240, palette-indexed (64 colours, indices 0-63; 0-15 are the
--- classic base 16). Sheet: 512 8x8 tiles (16 per row). Origin top-left,
--- +x right, +y down. A cart defines up to three globals the console calls:
--- _init(), _update(dt), _draw().
+-- SPEC.md 10 defines no standard extensions, so nothing here needs declaring in
+-- your manifest's "extensions" and no verb below needs an `if v ~= nil` guard.
+-- Some are host-dependent in EFFECT -- view and background do more on a console
+-- that can, and exactly what you asked for on one that cannot -- but the call
+-- always works, which is what keeps them core.
+--
+-- Only core is listed. A console may offer more
+-- (the reference one does: a pointer verb, palette colour names, painted-image
+-- and spreadsheet/document assets); those belong to that console, so they are
+-- deliberately absent here -- a cart calling them is non-portable.
+--
+-- Screen: 320x240 by default -- a manifest may declare "canvas": "160x120" or
+-- "128x128" (SPEC.md 3.1) -- palette-indexed (64 colours, indices 0-63; 0-15
+-- are the classic base 16). Sheet: 512 8x8 tiles (16 per row). Origin
+-- top-left, +x right, +y down. A cart defines up to three globals the console
+-- calls: _init(), _update(dt), _draw().
 
----Screen width in pixels (320).
+---Canvas width in pixels (320 unless the manifest declares a smaller canvas).
 W = 320
----Screen height in pixels (240).
+---Canvas height in pixels (240 unless the manifest declares a smaller canvas).
 H = 240
 
 -- --- clear / pixels ---------------------------------------------------------
@@ -29,10 +35,12 @@ H = 240
 ---@param c? integer palette index 0-63
 function cls(c) end
 
----Set one pixel.
+---Set one pixel -- or, with two arguments, READ one: the palette index at
+---(x, y), camera-relative like the write, 0 off the canvas.
 ---@param x integer
 ---@param y integer
----@param c integer palette index 0-63
+---@param c? integer palette index 0-63; omit to read
+---@return integer? the index, only when reading
 function pix(x, y, c) end
 
 ---Line from (x0,y0) to (x1,y1).
@@ -75,7 +83,24 @@ function circ(cx, cy, r, c) end
 ---@param c integer
 function circb(cx, cy, r, c) end
 
----Filled triangle. DRAFT 6.1.
+---Filled ellipse inscribed in the w x h box at (x, y). w or h <= 0 draws
+---nothing; 1x1 is a pixel.
+---@param x integer
+---@param y integer
+---@param w integer
+---@param h integer
+---@param c integer
+function oval(x, y, w, h, c) end
+
+---Ellipse outline: the rim of oval()'s fill, pixel for pixel.
+---@param x integer
+---@param y integer
+---@param w integer
+---@param h integer
+---@param c integer
+function ovalb(x, y, w, h, c) end
+
+---Filled triangle (SPEC.md 6.1).
 ---@param x1 integer
 ---@param y1 integer
 ---@param x2 integer
@@ -85,7 +110,7 @@ function circb(cx, cy, r, c) end
 ---@param c integer
 function tri(x1, y1, x2, y2, x3, y3, c) end
 
----Triangle outline. DRAFT 6.1.
+---Triangle outline (SPEC.md 6.1).
 ---@param x1 integer
 ---@param y1 integer
 ---@param x2 integer
@@ -95,10 +120,22 @@ function tri(x1, y1, x2, y2, x3, y3, c) end
 ---@param c integer
 function trib(x1, y1, x2, y2, x3, y3, c) end
 
--- rect_batch / spans were declared here and never existed in Lua: a trampoline
--- cannot marshal a table or a span buffer, so a cart that believed these stubs
--- got a runtime error. They are gone from the Python side too as of 2026-08-14
--- (plan 6.10) -- a plain `rect` loop is what both languages write now.
+---Textured line: draw exactly line()'s pixels, sampling the MAP as a
+---virtual texture. u,v,du,dv are 16.16 FIXED-POINT integers (float * 65536);
+---before each pixel the texel (u>>16, v>>16) is sampled, then u,v advance by
+---du,dv. Empty map cells draw nothing. The Mode 7 verb: one call per
+---scanline, perspective lives in how du,dv change BETWEEN scanlines
+---(SPEC.md 6.1).
+---@param x0 integer
+---@param y0 integer
+---@param x1 integer
+---@param y1 integer
+---@param u integer 16.16 map-pixel x at the first pixel
+---@param v integer 16.16 map-pixel y at the first pixel
+---@param du integer 16.16 step per drawn pixel
+---@param dv integer 16.16 step per drawn pixel
+---@param colorkey? integer transparent colour (-1 = none)
+function tline(x0, y0, x1, y1, u, v, du, dv, colorkey) end
 
 -- --- sprites / map ----------------------------------------------------------
 
@@ -112,7 +149,8 @@ function trib(x1, y1, x2, y2, x3, y3, c) end
 function spr(n, x, y, colorkey, scale, flip) end
 
 ---Stretch-blit a sheet PIXEL region (sx,sy,sw,sh) to a dw x dh screen rect --
----arbitrary (non-integer) scaling; the textured-slice verb. DRAFT 6.1.
+---arbitrary (non-integer) scaling; the textured-slice verb (a raycaster's
+---wall column is sspr with dw=1). SPEC.md 6.1.
 ---@param sx integer sheet pixel x
 ---@param sy integer sheet pixel y
 ---@param sw integer
@@ -135,7 +173,8 @@ function sspr(sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip) end
 ---@param sy? integer
 ---@param colorkey? integer
 ---@param scale? integer
-function map(mx, my, w, h, sx, sy, colorkey, scale) end
+---@param layers? integer flag mask: draw only tiles whose flags share a bit (0 = all)
+function map(mx, my, w, h, sx, sy, colorkey, scale, layers) end
 
 ---Read a tilemap cell.
 ---@param x integer
@@ -148,6 +187,32 @@ function mget(x, y) end
 ---@param y integer
 ---@param tile integer
 function mset(x, y, tile) end
+
+---The palette index at sheet PIXEL (x, y); 0 off the sheet.
+---@param x integer
+---@param y integer
+---@return integer
+function sget(x, y) end
+
+---Write a sheet pixel (masked to 0-15). What you write is what the next spr
+---of that tile draws. Nothing resets the sheet between frames.
+---@param x integer
+---@param y integer
+---@param c integer
+function sset(x, y, c) end
+
+---Tile n's flag byte (flags.moyflags), or with `b` whether bit b (0-7) is set.
+---@param n integer tile id 0-511
+---@param b? integer bit 0-7
+---@return integer|boolean
+function fget(n, b) end
+
+---Write tile n's flag byte (2 args), or set/clear one bit of it (3 args).
+---What you set is what map(..., layers) filters on next.
+---@param n integer
+---@param b integer the byte, or the bit
+---@param on? boolean
+function fset(n, b, on) end
 
 -- --- text / draw state ------------------------------------------------------
 
@@ -170,22 +235,27 @@ function clip(x, y, w, h) end
 ---@param y? integer
 function camera(x, y) end
 
----Remap palette index c0 -> c1 for subsequent draws; pal() resets all.
+---Remap palette index c0 -> c1 for subsequent draws; with p = 1, remap it
+---when the frame is SHOWN instead (the screen palette: moves what is already
+---drawn -- fades, flashes). pal() resets both.
 ---@param c0? integer
 ---@param c1? integer
-function pal(c0, c1) end
+---@param p? integer 0 draw (default), 1 screen
+function pal(c0, c1, p) end
 
 ---Mark colour `c` transparent (on=true) for sprite blits; palt() resets.
 ---@param c? integer
 ---@param on? boolean
 function palt(c, on) end
 
----Resolve a colour name ("red", "sky", ...) or index to a palette index.
----VENDOR: names describe the DEFAULT table only (a cart-supplied palette
----renames every slot), so this stays out of the spec -- use plain indices.
----@param name_or_index string|integer
----@return integer
-function col(name_or_index) end
+---A 4x4 fill pattern for the shape verbs (line, rect, rectb, circ, circb,
+---oval, ovalb, tri, trib): 16 bits in reading order from the top-left, a SET
+---bit is a hole. Holes take colour `c`, or are left untouched when `c` is
+---absent or negative. Anchored to the screen, not the camera. No args resets
+---to solid; it also resets at the start of every frame like all draw state.
+---@param p? integer 0-0xFFFF
+---@param c? integer hole colour, or -1
+function fillp(p, c) end
 
 -- --- input ------------------------------------------------------------------
 
@@ -210,11 +280,6 @@ function players() end
 ---@return integer? x, integer? y, boolean? tapped, boolean? held
 function touch() end
 
----Mouse state, TIC-80-shaped: x, y, left, middle, right, scrollx, scrolly.
----VENDOR: use touch() for portable pointer input.
----@return integer x, integer y, boolean left, boolean middle, boolean right, integer sx, integer sy
-function mouse() end
-
 ---Last typed key's ASCII code (0 = none), or test a specific code:
 ---key(string.byte("a")).
 ---@param code? integer
@@ -226,8 +291,8 @@ function key(code) end
 ---@return integer|boolean
 function keyp(code) end
 
----Switch the keyboard to TEXT input (clean typeable ASCII, each typed key
----once, Backspace a typed delete) or back to game mode. A textmode(true) cart MUST provide its own
+---Switch the keyboard to TEXT input (clean typeable ASCII incl. autorepeat
+---delete) or back to game mode. A textmode(true) cart MUST provide its own
 ---exit via quit().
 ---@param on? boolean
 function textmode(on) end
@@ -242,6 +307,12 @@ function time() end
 ---@param n? number
 ---@return number
 function rnd(n) end
+
+---Seed rnd(): the same seed replays the same sequence on the same host. The
+---sequence is the host's own -- two consoles may differ -- so seed for replays
+---and daily puzzles, never for a frame a golden has to match.
+---@param seed integer
+function srand(seed) end
 
 ---Floor to an integer.
 ---@param x number
@@ -265,9 +336,9 @@ function pmem(i, v) end
 ---textmode(true) cart.
 function quit() end
 
----Declare a logical viewport: the console scales the centered w x h region of
----the canvas to the screen (a 128x128 game fills the display). view() resets.
----EXTENSION: viewport.
+---Declare a logical viewport: the console composites the centered w x h region
+---of the canvas at the largest integer scale that fits (a 128x128 game fills the
+---display); one that presents pixel-for-pixel draws it unscaled. view() resets.
 ---@param w? integer
 ---@param h? integer
 function view(w, h) end
@@ -300,16 +371,14 @@ function sound_stop(chan) end
 ---@param level number
 function volume(level) end
 
--- --- layers / images --------------------------------------------------------
+-- --- layers / images (core: SPEC.md 6, floor in 1.1) ------------------------
 
 ---@class MoyLayer
 ---@field W integer
 ---@field H integer
 local MoyLayer = {}
----Every drawing verb draws into a layer as a colon call with the screen
----verb's arguments (l:rect(...), l:print(...)); a layer's camera, clip, pal,
----palt and fillp are its own and keep their values across frames.
----@param img integer|MoyImage tile id or image handle
+---Draw into the layer with the same verbs (l:spr(...), l:cls(...)).
+---@param img integer tile id
 ---@param x? integer
 ---@param y? integer
 ---@param colorkey? integer
@@ -318,52 +387,26 @@ local MoyLayer = {}
 function MoyLayer:spr(img, x, y, colorkey, scale, flip) end
 ---@param c? integer
 function MoyLayer:cls(c) end
-function MoyLayer:pix(x, y, c) end
-function MoyLayer:line(x0, y0, x1, y1, c) end
-function MoyLayer:rect(x, y, w, h, c) end
-function MoyLayer:rectb(x, y, w, h, c) end
-function MoyLayer:circ(cx, cy, r, c) end
-function MoyLayer:circb(cx, cy, r, c) end
-function MoyLayer:oval(x, y, rx, ry, c) end
-function MoyLayer:ovalb(x, y, rx, ry, c) end
-function MoyLayer:tri(x1, y1, x2, y2, x3, y3, c) end
-function MoyLayer:trib(x1, y1, x2, y2, x3, y3, c) end
-function MoyLayer:print(s, x, y, c) end
-function MoyLayer:sspr(sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip) end
-function MoyLayer:map(mx, my, w, h, sx, sy, colorkey, scale) end
-function MoyLayer:tline(x0, y0, x1, y1, mx, my, mdx, mdy, colorkey) end
-function MoyLayer:camera(x, y) end
-function MoyLayer:clip(x, y, w, h) end
-function MoyLayer:pal(c0, c1) end
-function MoyLayer:palt(c, on) end
-function MoyLayer:fillp(p, c) end
 
 ---An off-screen canvas (w x h, may be wider than the screen): pre-render a
 ---level ONCE, then window-copy per frame with draw_layer -- the 60fps
----scroller pattern. EXTENSION: layers.
+---scroller pattern. SPEC.md 1.1's floor reserves one full-screen layer, so the
+---first call succeeds everywhere; a host may refuse a SECOND, returning nil.
 ---@param w integer
 ---@param h integer
----@return MoyLayer
+---@return MoyLayer|nil
 function make_layer(w, h) end
 
----Blit the visible window of `layer` at camera offset (cam_x, cam_y).
----EXTENSION: layers.
+---Blit the visible window of `layer` at camera offset (cam_x, cam_y). The
+---camera is clamped so the window stays inside the layer; past the edge of a
+---layer smaller than the screen, the screen keeps what it held.
 ---@param layer MoyLayer
 ---@param cam_x? integer
 ---@param cam_y? integer
 function draw_layer(layer, cam_x, cam_y) end
 
 ---Declare a backdrop the console repaints automatically each frame -- a
----colour index, or a layer to pin behind everything. EXTENSION: layers.
+---colour index, or a layer to pin behind everything. `cls` said once: a console
+---that cannot cache the backdrop simply clears, and the cart cannot tell.
 ---@param x integer|MoyLayer
 function background(x) end
-
----@class MoyImage
-local MoyImage = {}
-
----The cart's painted image asset images/<name>.moyimg as a drawable handle
----(place with a layer's l:spr(img, x, y)), or nil if absent. VENDOR.
----@param name string
----@return MoyImage?
-function image(name) end
-
