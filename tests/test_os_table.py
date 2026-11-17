@@ -297,3 +297,22 @@ def test_the_evq_errors_are_moy_evq_h_s_codes():
     with open(os.path.join(ROOT, "native", "moy_kernel", "moy_evq.h")) as f:
         codes = set(re.findall(r"^\s+MOY_EVQ_([A-Z]+) = \d+,", f.read(), re.M)) - {"OK"}
     assert {e["code"] for e in gen_os_table.load()["evq_errors"]} == codes
+
+
+def test_every_python_served_row_is_a_method_of_its_role_s_c_type():
+    """A role modmoy_app.c builds as a SERVED_ROLE (the board's and the
+    browser's face) has one SERVED method and one ROW for each of its rows
+    the Python console serves: the host's binding derives its methods from
+    the table, so a row missing here fails only on a board or a page."""
+    with open(os.path.join(ROOT, "native", "moy_app", "modmoy_app.c")) as f:
+        src = f.read()
+    rows = gen_os_table.load()["rows"]
+    roles = re.findall(r"^SERVED_ROLE\((\w+), \w+\)", src, re.M)
+    assert "install" in roles
+    for role in roles:
+        want = {r["name"].split(".", 1)[1] for r in rows
+                if r["name"].startswith(role + ".") and r.get("server") != "c"}
+        served = set(re.findall(r"^SERVED\(%s, \w+, (\w+)\)" % role, src, re.M))
+        listed = set(re.findall(r"ROW\(%s, (\w+)\)" % role, src))
+        assert served == want, (role, sorted(want ^ served))
+        assert served <= listed, (role, sorted(served - listed))
