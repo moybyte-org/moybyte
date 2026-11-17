@@ -67,8 +67,8 @@ THE OFFICIAL CARTS. On the same boards the image seeds the carts board.toml's
 the C3's the core alone); the flash then installs the other official carts
 from this tree's system_carts/, the bytes its release publishes
 (`install_carts`): into a NEW store -- one holding nothing but the image's
-carts and add-ons -- the set board.toml's `[roster] install` names (the
-C3's), and into any store every official cart it holds at an older version
+carts and add-ons -- the set board.toml's `[roster] install` names (empty on
+both Zeros today), and into any store every official cart it holds at an older version
 that the image does not carry, replaced with the kid's saves and config kept
 (the seed's own rule, #47). Each is copied beside the carts folder and moved
 in by one rename, and the store's reserve (zero_host.SEED_RESERVE) is kept.

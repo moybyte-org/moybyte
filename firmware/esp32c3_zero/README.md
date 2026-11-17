@@ -42,11 +42,11 @@ file is what the chip changes.
 - **The image carries the core carts alone** (owner, 2026-11-17;
   `moy_seed.CORE`, board.toml's `[roster] image`), under the XIAO's seed
   rule (`zero_host.seed_carts`). The other system carts are official carts the release
-  publishes in `carts-c3_zero.json`, and with no OTA the cable flash is how
-  they arrive and follow a new image (`tools/board_flash.py`'s
-  `install_carts`): board.toml's `[roster] install` into a new store, and
-  every official cart a store holds at an older version (the core carts are
-  the image's seed's). The page this board
+  publishes in `carts-c3_zero.json`. A new store gets nothing beside the
+  core: next to the add-on its little room is the kid's. With no OTA, a
+  cable flash brings every official cart a store holds to the image's
+  release (`tools/board_flash.py`'s `install_carts`; the core carts are the
+  image's seed's). The page this board
   serves adds and removes the rest as the XIAO's does (its README), the
   install's modules frozen here for it; each request's buffers (its release
   index read whole, about 45 KB, and the cart's download) are made for it

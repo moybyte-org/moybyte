@@ -112,8 +112,8 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
 def test_the_zero_images_carry_the_roster_their_board_names():
     """A Zero's image carries the carts board.toml's `[roster] image` names,
     which its build passes to the generator: the XIAO's the core, every app and
-    five games, the C3's the core alone, its others official carts a cable
-    flash or provisioning installs (`[roster] install`)."""
+    five games, the C3's the core alone, and a new C3 store gets nothing more
+    (`[roster] install` empty, owner 2026-11-17): its room is the kid's."""
     from runtime import moy_seed
     c3 = os.path.join(os.path.dirname(ZERO), "esp32c3_zero")
     for zero in (ZERO, c3):
@@ -129,8 +129,7 @@ def test_the_zero_images_carry_the_roster_their_board_names():
     xiao = board_config.roster_only(ZERO)
     assert "moybyte.notes" in xiao and "moybyte.star_catcher" in xiao
     assert board_config.roster_install(ZERO) == ()
-    install = board_config.roster_install(c3)
-    assert set(install) == set(xiao) - set(moy_seed.CORE)
+    assert board_config.roster_install(c3) == ()
 
 
 def test_an_only_that_names_no_cart_is_refused():

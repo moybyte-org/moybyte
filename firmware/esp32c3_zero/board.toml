@@ -133,21 +133,15 @@ updater's available() is False, and /update says so."""
 # The image carries only the CORE carts (moy_seed.CORE: Get Carts, Files,
 # Appearance, Achievements, the Wallpaper slot and Moy Night, the default
 # backdrop), which zero_host.seed_carts seeds as a console seeds its own
-# (present unless the kid removed one). Every other system cart is an
-# official cart the release publishes in carts-<board>.json. `install` is the
-# set a cable flash or a provisioning puts into a new store beside the core
-# (tools/board_flash.py's install_carts): every app, and the five games the
-# store kept since 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon
-# Pop, Star Catcher); the page this board serves adds and removes the rest
-# (`/official`). With no OTA, a cable flash also brings the official carts the
+# (present unless the kid removed one), and a new store gets nothing more
+# (owner, 2026-11-17): beside the browser console add-on the store has little
+# room above zero_host.SEED_RESERVE, and that room is the kid's. Every other
+# system cart is an official cart the release publishes in
+# carts-<board>.json, which the page this board serves adds and removes
+# (`/official`). With no OTA, a cable flash brings the official carts the
 # store holds to the image's release.
 image = "core"
-install = [
-  "moybyte.calc", "moybyte.music", "moybyte.my_art", "moybyte.notes",
-  "moybyte.paint", "moybyte.storybook", "moybyte.terminal",
-  "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_game",
-  "moybyte.harpoon_pop", "moybyte.star_catcher",
-]
+install = []
 
 [flash]
 # No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)
