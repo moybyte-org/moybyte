@@ -27,7 +27,10 @@ Beside every payload, whether or not any console has the add-on installed:
                                    cart: the folder as the tree holds it, named
                                    by the zip's digest, so one cart is one
                                    asset on every board's index and release
-    <cart id>-<12 hex>.png         its cover
+    <cart id>-<12 hex>.png         its cover; a release keeps the ones its
+                                   indexes reference, now and before this
+                                   publish (official_assets, the publisher's
+                                   prune_carts)
     carts-<board>.json             an index in moy-spec's format (cartindex.py,
                                    version 1): an entry per seed cart of THIS
                                    build, then one per add-on ever published
@@ -53,6 +56,7 @@ release's index with the signature verified (cart_index.parse_index).
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -78,6 +82,8 @@ SEED_DIR = os.path.join(ROOT, "system_carts")
 SEED_NAME = "%s-%s.zip"            # cart id, the zip's first ID_HEX hex
 COVER_NAME = "%s-%s.png"
 SEED_SKIP = ("thumbs", "__pycache__")
+# A seed cart's zip or cover by its name: an id with a namespace, the digest.
+OFFICIAL_ASSET = re.compile(r"^[a-z0-9_]+\.[A-Za-z0-9_.]+-[0-9a-f]{%d}\.(zip|png)$" % ID_HEX)
 LISTING = ("description", "genre", "tags")
 
 
@@ -274,19 +280,53 @@ def index_entry(digest, version, cart, folder):
     }
 
 
-def earlier_entries(data):
-    """The add-on entries of an index this module wrote before (its bytes,
-    signed or not), or [] for None or a document that is not one."""
-    if not data:
-        return []
+def _index_carts(data):
     import ota_sign
     try:
         doc = json.loads(ota_sign.index_unsigned(data).decode())
     except (ValueError, UnicodeError):
-        return []
+        return None
     carts = doc.get("carts") if isinstance(doc, dict) else None
+    return carts if isinstance(carts, list) else None
+
+
+def earlier_entries(data):
+    """The add-on entries of an index this module wrote before (its bytes,
+    signed or not), or [] for None or a document that is not one."""
+    carts = _index_carts(data) if data else None
     return [c for c in carts or () if isinstance(c, dict) and c.get("runtime") == CART_RUNTIME
             and isinstance(c.get("moybyte"), dict) and c["moybyte"].get("fits")]
+
+
+def referenced(data):
+    """The set of names the index `data` (its bytes, signed or not)
+    references: every entry's assets, cover and licence. None for a
+    document that is not an index."""
+    carts = _index_carts(data) if data else None
+    if carts is None:
+        return None
+    out = set()
+    for c in carts:
+        if not isinstance(c, dict):
+            continue
+        refs = [a for a in c.get("assets") or () if isinstance(a, dict)]
+        refs += [r for r in (c.get("cover"), c.get("licence")) if isinstance(r, dict)]
+        out |= {r["url"] for r in refs if isinstance(r.get("url"), str)}
+    return out
+
+
+def official_assets(names, indexes):
+    """The official carts' zips and covers among the release asset `names`
+    that none of the `indexes` (their bytes) references: what a release can
+    delete. Raises ValueError when one of them is not an index, which keeps
+    unknown what it references."""
+    keep = set()
+    for data in indexes:
+        refs = referenced(data)
+        if refs is None:
+            raise ValueError("an index that is not one")
+        keep |= refs
+    return sorted(n for n in names if OFFICIAL_ASSET.match(n) and n not in keep)
 
 
 def index_doc(board, entry, earlier=None, official=()):

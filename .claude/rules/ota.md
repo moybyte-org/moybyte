@@ -53,10 +53,15 @@ paths:
     entry that fits its running image, through the ordinary Install, which
     holds the cart to the index's size and sha256. That happens on both
     channels for every board, whether or not any console has the add-on, and
-    the manifest names the cart (`cart`, unsigned). **Nothing published is
+    the manifest names the cart (`cart`, unsigned). **No add-on published is
     removed** and each index keeps the entries of the one it replaces, so a
     console a step behind its channel, rolled back or installed by hand still
-    finds its own. A board whose run carries no page its image names keeps
+    finds its own. The seed carts' zips and covers (the official carts,
+    `.claude/rules/carts.md`) are the one thing a publish deletes: every
+    changed cart adds two assets and a release holds at most 1,000, so after
+    the upload one that no index on the release references, now or before
+    this publish, goes (`publish_firmware_release.prune_carts`; a dry run
+    names them). A board whose run carries no page its image names keeps
     the manifest already published and fails the publish. On the console,
     the add-on that fits a new image is installed only AFTER that image
     confirms itself (`runtime/carts/web_addon.py`, under the radio's "update"

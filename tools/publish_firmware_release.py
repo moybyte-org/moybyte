@@ -27,7 +27,8 @@ carries its own provenance beside it:
       moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
                                       names; every one ever published stays
       moybyte.<cart>-<hex>.zip     <- each seed cart, an official cart, and
-      moybyte.<cart>-<hex>.png        its cover: one asset for every board
+      moybyte.<cart>-<hex>.png        its cover: one asset for every board,
+                                      kept while an index references it
       carts-tdeck.json             <- the index listing this build's official
       moybyte_web-licence.md          carts and every add-on for that board
                                       (tools/web_pack.py)
@@ -54,6 +55,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -444,6 +446,59 @@ def published(tag, name):
             return f.read()
 
 
+def release_assets(tag):
+    """The names of the release's assets, or None when it cannot be read."""
+    got = gh("release", "view", tag, "--json", "assets", check=False)
+    if got.returncode != 0:
+        return None
+    try:
+        return [a["name"] for a in json.loads(got.stdout)["assets"]]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def prune_carts(tag, workdir, names, before, dry_run=False):
+    """Delete the official carts' zips and covers no index needs, after the
+    upload: kept is everything an index on the release references now (the
+    ones staged in `workdir`, and a board's this run did not build) or
+    referenced before this publish (`before`, each index's bytes by name, a
+    console a step behind its channel). The add-on carts are no official
+    assets and stay for good. `names` is the release's assets before the
+    upload. With `dry_run`, says what it would delete. -> those names."""
+    had = set(names)
+    names = had | set(os.listdir(workdir))
+    indexes = [b for b in before.values() if b is not None]
+    for name in sorted(names):
+        if not re.match(r"^carts-[^-]+\.json$", name):
+            continue
+        if name in had and name in before and before[name] is None:
+            print("::warning::%s could not be read before this publish "
+                  "-- no cart pruned" % name)
+            return []
+        staged = os.path.join(workdir, name)
+        if os.path.exists(staged):
+            with open(staged, "rb") as f:
+                indexes.append(f.read())
+        else:
+            data = before[name] if name in before else published(tag, name)
+            if data is None:
+                print("::warning::%s could not be read -- no cart pruned" % name)
+                return []
+            indexes.append(data)
+    try:
+        stale = web_pack.official_assets(names, indexes)
+    except ValueError:
+        print("::warning::an index on %s is not one -- no cart pruned" % tag)
+        return []
+    for name in stale:
+        if dry_run:
+            print("would delete %s" % name)
+        else:
+            gh("release", "delete-asset", tag, name, "--yes")
+            print("deleted %s" % name)
+    return stale
+
+
 def existing_source(tag, board_id, workdir):
     """The provenance of a board we did NOT rebuild, off the release itself."""
     got = gh("release", "download", tag, "-p", "%s-source.json" % board_id,
@@ -512,9 +567,14 @@ def main():
     try:
         staged = stage(boards, os.path.abspath(args.artifacts), workdir)
         refused = []
+        before = {}
+
+        def earlier(board):
+            name = web_pack.INDEX_NAME % board
+            before[name] = published(tag, name)
+            return before[name]
         manifests = stage_ota_all(tag, channel, os.path.abspath(args.artifacts),
-                                  workdir, refused=refused,
-                                  earlier=lambda b: published(tag, web_pack.INDEX_NAME % b))
+                                  workdir, refused=refused, earlier=earlier)
         if not staged and not manifests:
             print("nothing built in this run -- the release is unchanged")
             return 1 if refused else 0
@@ -530,9 +590,12 @@ def main():
             # not flash, so it stays whether or not the lists agree this week.
             print("no flashable images in this run -- publishing OTA manifests "
                   "only (%s)" % ", ".join(sorted(manifests)))
+        names = release_assets(tag)
         if args.dry_run:
             print("would upload to %s: %s"
                   % (tag, ", ".join(sorted(os.listdir(workdir)))))
+            if names is not None:
+                prune_carts(tag, workdir, names, before, dry_run=True)
             return 1 if refused else 0
 
         # Create on first use; after that every publish just replaces assets.
@@ -548,6 +611,7 @@ def main():
         files = [os.path.join(workdir, n) for n in sorted(os.listdir(workdir))]
         gh("release", "upload", tag, *files, "--clobber")
         print("uploaded: %s" % ", ".join(os.path.basename(f) for f in files))
+        prune_carts(tag, workdir, names or [], before)
 
         # Written AFTER the upload, so the table describes what is now there.
         body = os.path.join(workdir, "notes.md")

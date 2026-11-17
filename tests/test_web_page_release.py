@@ -209,6 +209,8 @@ elif argv[:2] == ["release", "upload"]:
             shutil.copyfile(f, os.path.join(rel, os.path.basename(f)))
 elif argv[:2] == ["release", "edit"]:
     pass
+elif argv[:2] == ["release", "delete-asset"] and "--yes" in argv:
+    os.remove(os.path.join(rel, argv[3]))
 elif argv[:2] == ["release", "download"]:
     hit = glob.glob(os.path.join(rel, argv[argv.index("-p") + 1]))
     if not hit:
@@ -221,10 +223,8 @@ else:
 '''
 
 
-def test_every_add_on_published_stays_in_the_index(tmp_path, monkeypatch):
-    """Three publishes, two consoles: both carts stay on the release, and
-    the board's index lists each once, newest first, so a console a step
-    behind its channel still finds the one its image fits."""
+def _fake_gh(tmp_path, monkeypatch):
+    """`gh` on PATH as FAKE_GH, over a release in a folder: -> the folder."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
@@ -233,6 +233,14 @@ def test_every_add_on_published_stays_in_the_index(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
     release = tmp_path / "release"
     monkeypatch.setenv("MOY_FAKE_RELEASE", str(release))
+    return release
+
+
+def test_every_add_on_published_stays_in_the_index(tmp_path, monkeypatch):
+    """Three publishes, two consoles: both carts stay on the release, and
+    the board's index lists each once, newest first, so a console a step
+    behind its channel still finds the one its image fits."""
+    release = _fake_gh(tmp_path, monkeypatch)
 
     digests = []
     for n, seed in enumerate((1, 2, 2)):
@@ -249,6 +257,65 @@ def test_every_add_on_published_stays_in_the_index(tmp_path, monkeypatch):
         url, fits = _addon(release, "tdeck", "https://x/carts-tdeck.json", digest)
         assert url == "https://x/" + web_pack.CART_NAME % digest
         assert fits == [new, old]
+
+
+def test_a_publish_deletes_the_official_carts_no_index_needs(tmp_path, monkeypatch,
+                                                              capsys):
+    """Each changed seed cart is a new asset. A publish keeps every one an
+    index on the release references, now or before this publish, and
+    deletes the rest; the add-on carts all stay, and a dry run says what
+    it would delete and deletes nothing."""
+    release = _fake_gh(tmp_path, monkeypatch)
+    run = [0]
+    real = web_pack.seed_files
+
+    def seed_files(src):
+        files = real(src)
+        if os.path.basename(src) == "moybyte.sky_run.moy":
+            files["main.py"] += b"\n# build %d\n" % run[0]
+        return files
+    monkeypatch.setattr(web_pack, "seed_files", seed_files)
+
+    def sky(board):
+        doc = json.loads((release / (web_pack.INDEX_NAME % board)).read_text())
+        entry, = [c for c in doc["carts"] if c["id"] == "moybyte.sky_run"]
+        return entry["assets"][0]["url"]
+
+    def official():
+        return {n for n in os.listdir(str(release)) if web_pack.OFFICIAL_ASSET.match(n)}
+
+    def publish_run(n, boards, *flags):
+        run[0] = n
+        artifacts = tmp_path / ("artifacts%d" % n)
+        for board in boards:
+            _artifacts(artifacts, board, seed=n + 1)
+        monkeypatch.setattr(sys, "argv", ["publish", "--artifacts", str(artifacts),
+                                          "--channel", "unstable"] + list(flags))
+        assert publish.main() == 0
+
+    publish_run(0, ("tdeck", "p4"))
+    z = {0: sky("tdeck")}
+    assert sky("p4") == z[0]
+    others = official() - {z[0]}
+    assert len(others) > 10 and any(n.endswith(".png") for n in others)
+    for n in (1, 2):
+        publish_run(n, ("tdeck",))
+        z[n] = sky("tdeck")
+    # p4's index still names the first, tdeck's had the one before its own
+    assert official() == others | {z[0], z[1], z[2]}
+    publish_run(3, ("tdeck", "p4"))
+    z[3] = sky("tdeck")
+    assert sky("p4") == z[3]
+    assert official() == others | {z[0], z[2], z[3]}
+    addons = [n for n in os.listdir(str(release)) if n.startswith("moybyte_web-")
+              and n.endswith(".moy.zip")]
+    assert len(addons) == 4, "every add-on stays"
+    capsys.readouterr()
+    publish_run(4, ("tdeck",), "--dry-run")
+    said = capsys.readouterr().out
+    assert sorted(ln.split()[-1] for ln in said.splitlines()
+                  if ln.startswith("would delete")) == sorted([z[0], z[2]])
+    assert official() == others | {z[0], z[2], z[3]}
 
 
 def test_an_earlier_signed_index_keeps_its_entries(tmp_path):

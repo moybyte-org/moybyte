@@ -23,9 +23,11 @@ payload and `latest-<board>.json`, and the browser console add-on its image
 names**: the cart `moybyte_web-<digest>.moy.zip`, its licence and the index
 `carts-<board>.json`, which lists every add-on published for the board, one
 entry per digest (`tools/web_pack.py`). The publisher replaces only what a run
-built, never deletes an asset, and writes each index over the one already
+built, never deletes an add-on, and writes each index over the one already
 published, so every add-on an image ever named stays on its channel's release
-and in its index. A board whose
+and in its index. The one asset it deletes is an official cart's zip or cover
+that no index on the release references now or referenced before the publish
+(`prune_carts`). A board whose
 artifacts carry no page its image names is refused (its published manifest
 stays) and the publish job fails. `make ota-publish-unstable` and
 `tools/gen_ota_manifest.py` write the same add-on beside a LAN mirror's
