@@ -17,7 +17,11 @@ lead ran out.
 What is read: the sink's counters (`__moyState().sink`), the pull's
 (`state.pcm`: samples sent, the sink's played), the decoder's (`media`:
 `decoded`, `pulled`, `starved`), and the page's output itself, tapped after
-the sink's gain node: its level, its tone and its runs of silence.
+the sink's gain node: its level, its tone and its runs of silence. A failure
+prints every snapshot, so the interval that held it shows, and names the
+stall: the sink's longest wait between chunks (`lull`) beside the worker
+loop's longest frame, step, collect, send and count (`__moyState().loop`),
+each with the play time it ended at.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_audio_stream_e2e.py
 """
@@ -73,11 +77,22 @@ TAP = r"""(() => {
 
 # One snapshot of every counter, the wall clock with it.
 SNAP = ("__moyState().then(s => 'SNAP ' + JSON.stringify({t: performance.now() / 1000,"
-        " sink: s.sink, pcm: s.pcm, media: s.media, out: Object.assign({}, window.__out)}))")
+        " sink: s.sink, loop: s.loop, pcm: s.pcm, media: s.media,"
+        " out: Object.assign({}, window.__out)}))")
 
 
 def _snaps(js):
     return [json.loads(j[5:]) for j in js if isinstance(j, str) and j.startswith("SNAP ")]
+
+
+def _show(snaps):
+    """Every snapshot, one line each: pytest prints them when the test fails."""
+    for s in snaps:
+        media = s.get("media") or {}
+        print("t %.1f sink %s loop %s pcm %s starved %s out %s" % (
+            s["t"], json.dumps(s["sink"]), json.dumps(s["loop"]), json.dumps(s["pcm"]),
+            media.get("starved"), json.dumps({k: s["out"].get(k) for k in
+                                              ("silences", "silent", "longest", "sound")})))
 
 
 def _music_station(url):
@@ -121,16 +136,15 @@ def test_a_live_station_plays_a_minute_at_the_sinks_rate_with_no_underrun(tmp_pa
         [{"wait": 3000}, {"js": SNAP}]
         + [s for _ in range(PLAY_S // 10) for s in ({"wait": 10000}, {"js": SNAP})])
     out, snaps = _run(tmp_path, "minute", steps, page_sink)
+    _show(snaps)
     assert len(snaps) == PLAY_S // 10 + 1, out[-3000:]
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     sink, pcm, media, tap = b["sink"], b["pcm"], b["media"], b["out"]
     rate = pcm["rate"]
     assert rate == tap["rate"], "the console mixes at the context's rate: %r" % b
     assert media["rate"] == 44100 and media["state"] == "playing", media
     # nothing lost, skipped, repeated or refused between the pull and the speaker
-    assert sink["under"] == 0 and sink["dry"] == 0, sink
+    assert sink["under"] == 0 and sink["dry"] == 0, (sink, b["loop"])
     assert sink["gap"] == 0 and sink["dup"] == 0 and sink["over"] == 0, sink
     assert sink["got"] == pcm["sent"] or pcm["sent"] - sink["got"] < rate // 10, (sink, pcm)
     # the decoder never ran dry, and its samples are the sink's, one for one
@@ -157,10 +171,9 @@ def test_a_station_that_stalls_plays_silence_and_counts_it(tmp_path):
          {"js": "fetch(%s).then(() => 'stalled')" % json.dumps(station.base + "/stall?s=12")}]
         + [s for _ in range(6) for s in ({"wait": 5000}, {"js": SNAP})])
     out, snaps = _run(tmp_path, "stall", steps, False)
+    _show(snaps)
     assert len(snaps) == 7, out[-3000:]
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     assert b["media"]["starved"] > 0, "the stall never reached the decoder: %r" % b["media"]
     assert b["out"]["silences"] >= 1 and b["out"]["silent"] > 0, b["out"]
     # the sink itself never ran dry: the silence is what the mix sent
@@ -171,14 +184,15 @@ def test_a_station_that_stalls_plays_silence_and_counts_it(tmp_path):
 def test_a_page_sink_starved_on_purpose_plays_silence_and_counts_the_underrun(tmp_path):
     """The page's own sink, its main thread held for 600 ms: what it had
     scheduled plays out, the sink runs dry, and the next chunk counts the
-    underrun and the dry samples it played as silence."""
+    underrun and the dry samples it played as silence, the wait its `lull`."""
     hold = "(() => { const e = performance.now() + 600; while (performance.now() < e); return 'held'; })()"
     steps = lambda station: [                                   # noqa: E731
         {"wait": 3000}, {"js": SNAP}, {"js": hold}, {"wait": 2000}, {"js": SNAP}]
     out, snaps = _run(tmp_path, "starve", steps, True)
+    _show(snaps)
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     assert a["sink"]["under"] == 0, a["sink"]
     assert b["sink"]["under"] >= 1 and b["sink"]["dry"] > 0.2 * b["pcm"]["rate"], b["sink"]
     assert b["sink"]["dup"] == 0 and b["sink"]["gap"] == 0, b["sink"]
+    # and the wait it starved through is its longest
+    assert b["sink"]["lull"] >= 500 and a["sink"]["lull"] < 500, (a["sink"], b["sink"])

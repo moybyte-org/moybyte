@@ -70,7 +70,7 @@ else if(m.t==="pick"){pkAsk(m);}
 else if(m.t==="unpick"){pkDone(m.id);}
 else if(m.t==="installed"){window.__moyInstalled=m.folder;}
 else if(m.t==="state"){var sw=stateWait;stateWait=[];
-var so=JSON.parse(m.json);if(so&&typeof so==="object")so.sink=m.sink||null;
+var so=JSON.parse(m.json);if(so&&typeof so==="object"){so.sink=m.sink||null;so.loop=m.loop||null;}
 for(var si=0;si<sw.length;si++)sw[si](so);}
 else if(m.t==="pcm"){playPCM(m);}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}

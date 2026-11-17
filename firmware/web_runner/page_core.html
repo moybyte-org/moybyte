@@ -236,21 +236,28 @@ PERF.mb=0;PERF.sb=0;PERF.mu=0;PERF.su=0;PERF.sn=0;}
 // `under` (the queue ran dry under a stream that went on: the dry samples in
 // `dry`, played as silence after a 2 ms fade, never as stale audio), `gap`
 // and `dup` (samples a chunk's `at` skipped or repeated) and `over` (samples
-// a full ring refused). A chunk the console marks `fresh` starts a stream
-// after a silence, so the dry run before it is no underrun.
+// a full ring refused), `lull` (the longest wait, in ms of the sink's own
+// clock, between two chunks arriving, `lullAt` the sink's play time in s
+// when it ended) and `low` (the least lead, in ms, a chunk found queued; -1
+// before the second). A chunk the console marks `fresh` starts a stream
+// after a silence, so the dry run and the wait before it are no underrun
+// and no lull.
 var AUDIO_RATE=22050,actx=null,audioOut=null,audioBlocked=false;
-var SS={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0},schedNext=-1,schedEnd=0;
+var SS={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0,lull:0,lullAt:0,low:-1},
+schedNext=-1,schedEnd=0,schedGot=-1;
 var AW_SRC="class MoyPCM extends AudioWorkletProcessor{"+
 "constructor(){super();this.b=new Float32Array(1<<16);this.m=this.b.length-1;this.r=0;this.w=0;this.n=0;"+
-"this.last=0;this.k=0;this.d=0;this.next=-1;this.q=null;"+
-"this.s={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0};"+
+"this.last=0;this.k=0;this.d=0;this.next=-1;this.q=null;this.f=0;this.fg=-1;"+
+"this.s={got:0,played:0,under:0,dry:0,gap:0,dup:0,over:0,lull:0,lullAt:0,low:-1};"+
 "this.port.onmessage=(e)=>{if(e.data.port){this.q=e.data.port;this.q.onmessage=(m)=>this.take(m.data);}};}"+
-"take(c){var a=c.p,n=a.length,s=this.s;"+
+"take(c){var a=c.p,n=a.length,s=this.s,ms=1000/sampleRate;"+
+"if(this.fg>=0&&!c.fresh){var l=Math.round((this.f-this.fg)*ms),q=Math.round(this.n*ms);"+
+"if(l>s.lull){s.lull=l;s.lullAt=Math.round(s.played*ms)/1000;}if(s.low<0||q<s.low)s.low=q;}this.fg=this.f;"+
 "if(this.next>=0&&c.at!==this.next){if(c.at>this.next)s.gap+=c.at-this.next;else s.dup+=this.next-c.at;}"+
 "this.next=c.at+n;if(this.d>0){if(!c.fresh){s.under++;s.dry+=this.d;}this.d=0;}"+
 "for(var i=0;i<n;i++){if(this.n>this.m){s.over+=n-i;break;}"+
 "this.b[this.w]=a[i]/32768;this.w=(this.w+1)&this.m;this.n++;}s.got+=n;}"+
-"process(ins,outs){var o=outs[0][0],s=this.s;"+
+"process(ins,outs){var o=outs[0][0],s=this.s;this.f+=o.length;"+
 "for(var i=0;i<o.length;i++){"+
 "if(this.n>0){var v=this.b[this.r];this.r=(this.r+1)&this.m;this.n--;s.played++;o[i]=v;this.last=v;}"+
 "else{this.last=Math.abs(this.last)<1e-4?0:this.last*0.9;o[i]=this.last;if(s.got>0)this.d++;}}"+
@@ -288,6 +295,9 @@ function playPCM(c){var a=c.p,n=a.length;if(!actx||n<=0)return;
 if(schedEnd>0&&c.at!==schedEnd){if(c.at>schedEnd)SS.gap+=c.at-schedEnd;else SS.dup+=schedEnd-c.at;}
 schedEnd=c.at+n;
 var now=actx.currentTime,t=schedNext;
+if(schedGot>=0&&!c.fresh){var l=Math.round((now-schedGot)*1000),q=Math.max(0,Math.round((t-now)*1000));
+if(l>SS.lull){SS.lull=l;SS.lullAt=Math.round(audioPlayed()/AUDIO_RATE*1000)/1000;}
+if(SS.low<0||q<SS.low)SS.low=q;}schedGot=now;
 if(t<now+0.005){if(t>=0&&!c.fresh){SS.under++;SS.dry+=Math.round((now+0.02-t)*AUDIO_RATE);}
 t=now+0.02;}
 var buf=actx.createBuffer(1,n,AUDIO_RATE),f=buf.getChannelData(0);

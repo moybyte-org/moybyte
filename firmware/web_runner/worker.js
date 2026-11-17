@@ -23,7 +23,7 @@
 //                        (pointer: coarse), `channel` its MOY_CHANNEL, `rate`
 //                        its AudioContext's sample rate (0: none), the output's
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
-//   {t:"sink", port?}    where a frame's samples go: the worklet's MessagePort,
+//   {t:"sink", port?, rate}  where a frame's samples go: the worklet's MessagePort,
 //                        which reports its counters back on it, or (no port)
 //                        the page, which reports them as {t:"played", s}
 //   {t:"played", s}      the page's sink's counters (page_core.html, THE SINK)
@@ -78,7 +78,8 @@
 //                        fetch from `host`: the page asks the player for theirs
 //   {t:"unpick", id}     ...and the question is over
 //   {t:"installed", folder, d}  an install reached the browser's store
-//   {t:"state", json}    the answer to {t:"state"}
+//   {t:"state", json, sink, loop}  the answer to {t:"state"}, with the sink's
+//                        counters and the loop's longest waits
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
@@ -237,11 +238,33 @@ let running = false, inbox = [];
 // The audio sink (page_core.html, THE SINK): null before the page names it,
 // "page", or the worklet's port; `played` its count of samples played, -1
 // with no sink, which the console's pull tops its depth up from.
-let sink = null, sinkStats = null, played = -1;
-function sinkSet(port) {
+let sink = null, sinkStats = null, played = -1, sinkRate = 0;
+function sinkSet(port, rate) {
     sink = port || "page";
+    sinkRate = +rate || 0;
     played = 0;
-    if (port) port.onmessage = (e) => { sinkStats = e.data; played = e.data.played; };
+    if (port) port.onmessage = (e) => { sinkHeard(e.data); };
+}
+function sinkHeard(s) {
+    const now = performance.now();
+    if (LOOP && waitFrom.heard) longest("heard", now - waitFrom.heard);
+    waitFrom.heard = now;
+    sinkStats = s;
+    played = s.played;
+}
+// The loop's longest waits since the stream that plays began (its `fresh`
+// chunk), for `__moyState().loop`, each in ms with the sink's play time in s
+// (`played` as this worker last heard it) when it ended: `frame` between two
+// frames, `step` one step of the console (a collection the VM's allocation
+// triggers lands in it), `gc` the loop's own collect, `ship` between two
+// chunks sent to the sink, `heard` between two of the sink's counts arriving.
+// Set against the sink's `lull` they say which side a stall was on.
+let LOOP = null;
+const waitFrom = { frame: 0, ship: 0, heard: 0 };
+function longest(k, ms) {
+    if (ms <= LOOP[k]) return;
+    LOOP[k] = Math.round(ms);
+    LOOP[k + "At"] = sinkRate ? Math.round(Math.max(0, played) * 1000 / sinkRate) / 1000 : 0;
 }
 // A frame's samples, read out of the wasm heap where the pull rendered them,
 // to the sink.
@@ -249,7 +272,11 @@ function shipPCM(f) {
     if (!sink) return;
     const n = f.pcm, b = new Int16Array(n);
     new Uint8Array(b.buffer).set(mp._module.HEAPU8.subarray(f.pa, f.pa + 2 * n));
-    const c = { p: b, at: f.at, fresh: f.fresh };
+    const c = { p: b, at: f.at, fresh: f.fresh }, now = performance.now();
+    if (f.fresh) LOOP = { frame: 0, frameAt: 0, step: 0, stepAt: 0, gc: 0, gcAt: 0,
+                          ship: 0, shipAt: 0, heard: 0, heardAt: 0 };
+    else if (LOOP) longest("ship", now - waitFrom.ship);
+    waitFrom.ship = now;
     if (sink === "page") self.postMessage(Object.assign({ t: "pcm" }, c), [b.buffer]);
     else sink.postMessage(c, [b.buffer]);
 }
@@ -2347,6 +2374,7 @@ function loop() {
     // that lateness EVERY frame and the game ran fast (~1.5x with an 8ms step).
     // Real elapsed is correct by construction: simulated time tracks the clock.
     const dt = lastStep ? Math.min(0.1, (now - lastStep) / 1000) : 1 / 60;
+    if (LOOP && lastStep) longest("frame", now - lastStep);
     lastStep = now;
     simTime += dt;
     if (!wallFrom) wallFrom = now;
@@ -2383,6 +2411,7 @@ function loop() {
         // what the browser does -- measure where it actually runs).
         WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
         if (_d > 20) WP.slow++;
+        if (LOOP) longest("step", _d);
         if (s) { WP.painted++; WP.bytes += s.length; }
         if (s) {
             if (s.indexOf('"pcm"') >= 0) shipPCM(JSON.parse(s));
@@ -2396,7 +2425,9 @@ function loop() {
             || framesSinceCollect >= COLLECT_MAX_FRAMES)) {
             const _g0 = performance.now();
             idleCollect();               // the collect lands as this call returns
-            WP.gc += performance.now() - _g0; WP.gcN++;
+            const _g = performance.now() - _g0;
+            WP.gc += _g; WP.gcN++;
+            if (LOOP) longest("gc", _g);
             idleCollected = true;
             framesSinceCollect = 0;
         }
@@ -2425,12 +2456,12 @@ self.onmessage = async (ev) => {
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "sink") {
-            sinkSet(m.port);
+            sinkSet(m.port, m.rate);
         } else if (m.t === "played") {
-            sinkStats = m.s;
-            played = m.s.played;
+            sinkHeard(m.s);
         } else if (m.t === "state") {
-            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null", sink: sinkStats });
+            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null", sink: sinkStats,
+                               loop: LOOP });
         } else if (m.t === "run") {
             // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
             // clamped jump measured from whenever the loop last ran.

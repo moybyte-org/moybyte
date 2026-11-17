@@ -430,7 +430,10 @@ nor those docs will warn you about:
   time until the decoder starved (the owner's stutter on the P4-served desk,
   2026-11-10). The pull tops the sink's depth up by COUNT (`_RunnerPump`:
   samples sent against the sink's `played`); a dry sink plays silence and
-  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`);
-  `tests/test_web_audio_stream_e2e.py` plays a live station a minute on both
-  sinks.
+  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`),
+  and its longest wait between chunks (`lull`) stands beside the worker
+  loop's longest frame, step, collect, send and count (`__moyState().loop`),
+  each with the play time it ended at, so an underrun names the side that
+  stalled; `tests/test_web_audio_stream_e2e.py` plays a live station a
+  minute on both sinks.
 

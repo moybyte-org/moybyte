@@ -4,7 +4,9 @@
 // held before; the next chunk of a stream that went on counts the underrun
 // and its dry samples, a fresh one does not; a chunk's `at` that skips or
 // repeats is counted; a full ring refuses and counts; and a ring that wraps
-// many times plays every sample once, in order.
+// many times plays every sample once, in order; the longest wait between two
+// chunks is counted on the sink's own clock, with the play time it ended at
+// and the least lead a chunk found.
 //     node sink_test.mjs
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -16,6 +18,7 @@ const m = page.match(/var AW_SRC=((?:"(?:[^"\\]|\\.)*"\+?\s*)+);/);
 if (!m) throw new Error("no AW_SRC in page_core.html");
 const src = new Function("return " + m[1])();
 
+globalThis.sampleRate = 48000;
 let Proc = null;
 class AudioWorkletProcessor { constructor() { this.port = { onmessage: null, postMessage() {} }; } }
 new Function("AudioWorkletProcessor", "registerProcessor", src)(
@@ -68,6 +71,21 @@ function sink() {
     s.block(512);
     s.send(10, Array(10).fill(1), true);
     check(s.p.s.under === 0 && s.p.s.dry === 0, "a fresh chunk counts no underrun");
+}
+
+// the longest wait between chunks, in ms of output, and the least lead
+{
+    const s = sink();
+    s.send(0, Array(4800).fill(1), true);
+    for (let b = 0; b < 10; b++) s.block();                 // 1280 out
+    s.send(4800, Array(960).fill(1), false);
+    for (let b = 0; b < 30; b++) s.block();                 // 3840 out: 640 left
+    s.send(5760, Array(960).fill(1), false);
+    check(s.p.s.lull === 80 && s.p.s.lullAt === 0.107 && s.p.s.low === 13,
+          "the longest lull, when it ended, the least lead: " + JSON.stringify(s.p.s));
+    for (let b = 0; b < 100; b++) s.block();
+    s.send(0, Array(10).fill(1), true);
+    check(s.p.s.lull === 80, "the wait before a fresh chunk is no lull");
 }
 
 // gaps and repeats in `at`
